@@ -129,6 +129,9 @@ async function seedData() {
     const aggEntries = Object.values(dailyByCategory);
     console.log(`[SEED-DATA] ${aggEntries.length} agrégations route/jour à insérer`);
 
+    // Ensure source column exists (self-contained migration)
+    await client.query(`ALTER TABLE tonnage_history ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'manual'`);
+
     // Clean previous imported tonnage_history before reinserting
     await client.query(`DELETE FROM tonnage_history WHERE source = 'import'`);
 
