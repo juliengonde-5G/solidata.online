@@ -90,11 +90,19 @@ async function seedData() {
     let stockSkipped = 0;
 
     for (const r of records) {
-      // Insert into stock_movements as 'entree' type
       const dateStr = formatDate(r.date);
       if (!dateStr) continue;
 
-      // Check duplicate by external reference
+      // Aggregate for tonnage_history (always, regardless of stock duplicates)
+      if (r.origine === 'Collecte de CAV') {
+        const key = `${r.categorie}|${dateStr}`;
+        if (!dailyByCategory[key]) {
+          dailyByCategory[key] = { categorie: r.categorie, date: dateStr, total_kg: 0 };
+        }
+        dailyByCategory[key].total_kg += r.poids_net;
+      }
+
+      // Insert into stock_movements (skip duplicates)
       const exists = await client.query(
         `SELECT id FROM stock_movements WHERE code_barre = $1`,
         [r.external_id]
@@ -113,15 +121,6 @@ async function seedData() {
         [dateStr, r.poids_net, r.origine, categorieCollecte, r.poids_brut, r.tare, r.external_id]
       );
       stockInserted++;
-
-      // Aggregate for tonnage_history (only CAV collections)
-      if (r.origine === 'Collecte de CAV') {
-        const key = `${r.categorie}|${dateStr}`;
-        if (!dailyByCategory[key]) {
-          dailyByCategory[key] = { categorie: r.categorie, date: dateStr, total_kg: 0 };
-        }
-        dailyByCategory[key].total_kg += r.poids_net;
-      }
     }
 
     console.log(`[SEED-DATA] Stock: ${stockInserted} insérés, ${stockSkipped} doublons ignorés`);
