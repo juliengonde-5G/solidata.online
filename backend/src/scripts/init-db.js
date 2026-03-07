@@ -268,8 +268,8 @@ async function initDatabase() {
         name VARCHAR(255) NOT NULL,
         address VARCHAR(500),
         commune VARCHAR(100),
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
         geom GEOMETRY(Point, 4326),
         nb_containers INTEGER DEFAULT 1,
         qr_code_data VARCHAR(255) UNIQUE,
@@ -404,6 +404,7 @@ async function initDatabase() {
         id SERIAL PRIMARY KEY,
         date DATE NOT NULL,
         cav_id INTEGER REFERENCES cav(id),
+        route_name VARCHAR(100),
         weight_kg DOUBLE PRECISION NOT NULL,
         source VARCHAR(20) DEFAULT 'manual' CHECK (source IN ('manual', 'import', 'mobile')),
         created_at TIMESTAMP DEFAULT NOW()
@@ -949,6 +950,17 @@ async function initDatabase() {
       `);
       console.log('[INIT-DB] Paramètres par défaut créés');
     }
+
+    // ══════════════════════════════════════════
+    // Migrations for existing databases
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE cav ALTER COLUMN latitude DROP NOT NULL;
+      ALTER TABLE cav ALTER COLUMN longitude DROP NOT NULL;
+    `);
+    await client.query(`
+      ALTER TABLE tonnage_history ADD COLUMN IF NOT EXISTS route_name VARCHAR(100);
+    `);
 
     await client.query('COMMIT');
     console.log('\n[INIT-DB] ══════════════════════════════════════');

@@ -31,28 +31,9 @@ function formatDate(d) {
   return d.toISOString().split('T')[0];
 }
 
-// Map route/category names from tonnages to CAV names
-// Some names in tonnages are abbreviated tour names, not exact CAV names
-// We'll try to match by finding a CAV whose name contains the tour keyword
-async function buildCavLookup(client) {
-  const result = await client.query('SELECT id, name FROM cav');
-  return result.rows;
-}
-
-function findCavForCategory(category, cavList) {
-  if (!category) return null;
-  const cat = category.toLowerCase().trim();
-
-  // Direct keyword matching from tour names to CAV
-  for (const cav of cavList) {
-    const cavName = cav.name.toLowerCase();
-    // Check if the category appears in the CAV name or vice versa
-    if (cavName.includes(cat) || cat.includes(cavName.split(' - ')[0]?.toLowerCase())) {
-      return cav.id;
-    }
-  }
-  return null;
-}
+// Note: tonnage categories are ROUTE names (e.g., "Barentin 1", "Rive Gauche Est 2"),
+// not individual CAV names. Each route passes through multiple CAV points.
+// We store route_name directly in tonnage_history.
 
 async function seedData() {
   const filePath = process.argv[2] || DEFAULT_FILE;
@@ -103,10 +84,7 @@ async function seedData() {
   try {
     await client.query('BEGIN');
 
-    const cavList = await buildCavLookup(client);
-    console.log(`[SEED-DATA] ${cavList.length} CAV en base`);
-
-    // Group records by category+date for tonnage_history
+    // Group records by route+date for tonnage_history
     const dailyByCategory = {};
     let stockInserted = 0;
     let stockSkipped = 0;
@@ -148,29 +126,21 @@ async function seedData() {
 
     console.log(`[SEED-DATA] Stock: ${stockInserted} insérés, ${stockSkipped} doublons ignorés`);
 
-    // Insert aggregated tonnage_history per CAV per day
+    // Insert aggregated tonnage_history per route per day
     let tonnageInserted = 0;
-    let tonnageNoMatch = 0;
 
     for (const entry of Object.values(dailyByCategory)) {
-      const cavId = findCavForCategory(entry.categorie, cavList);
-      if (!cavId) {
-        tonnageNoMatch++;
-        continue;
-      }
-
-      // Upsert: if same cav+date exists, add weight
       await client.query(
-        `INSERT INTO tonnage_history (date, cav_id, weight_kg, source)
+        `INSERT INTO tonnage_history (date, route_name, weight_kg, source)
          VALUES ($1, $2, $3, 'import')
          ON CONFLICT DO NOTHING`,
-        [entry.date, cavId, entry.total_kg]
+        [entry.date, entry.categorie, entry.total_kg]
       );
       tonnageInserted++;
     }
 
     await client.query('COMMIT');
-    console.log(`[SEED-DATA] Tonnages: ${tonnageInserted} insérés, ${tonnageNoMatch} sans correspondance CAV`);
+    console.log(`[SEED-DATA] Tonnages: ${tonnageInserted} entrées par route/jour`);
     console.log(`[SEED-DATA] Import terminé`);
   } catch (err) {
     await client.query('ROLLBACK');
