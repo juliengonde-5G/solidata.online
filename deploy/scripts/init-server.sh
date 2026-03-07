@@ -13,6 +13,8 @@ SERVER_IP="51.159.144.100"
 EMAIL="admin@solidata.online"
 APP_DIR="/opt/solidata"
 DEPLOY_USER="solidata"
+REPO_URL="https://github.com/juliengonde-5G/solidata.online.git"
+BRANCH="claude/solidata-erp-app-KYMZZ"
 
 echo "============================================"
 echo "  SOLIDATA — Initialisation serveur"
@@ -141,10 +143,31 @@ if ! id "${DEPLOY_USER}" &>/dev/null; then
     echo "Utilisateur ${DEPLOY_USER} créé et ajouté au groupe docker"
 fi
 
-# --- 6. Structure répertoires ---
-echo "[6/9] Création structure..."
-mkdir -p ${APP_DIR}
+# --- 6. Clone du dépôt + structure ---
+echo "[6/9] Clone du dépôt et création structure..."
 mkdir -p /opt/solidata-backups
+
+if [ -d "${APP_DIR}/.git" ]; then
+    echo "  Dépôt déjà présent, mise à jour..."
+    cd ${APP_DIR}
+    git fetch origin
+    git checkout ${BRANCH}
+    git pull origin ${BRANCH}
+elif [ -d "${APP_DIR}" ]; then
+    echo "  Répertoire existant mais pas un dépôt Git, nettoyage..."
+    rm -rf ${APP_DIR}
+    git clone ${REPO_URL} ${APP_DIR}
+    cd ${APP_DIR}
+    git checkout ${BRANCH}
+else
+    git clone ${REPO_URL} ${APP_DIR}
+    cd ${APP_DIR}
+    git checkout ${BRANCH}
+fi
+
+echo "  Branche active : $(git branch --show-current)"
+mkdir -p ${APP_DIR}/logs
+
 chown -R ${DEPLOY_USER}:${DEPLOY_USER} ${APP_DIR}
 chown -R ${DEPLOY_USER}:${DEPLOY_USER} /opt/solidata-backups
 
@@ -191,14 +214,15 @@ echo "  Serveur purgé et initialisé avec succès !"
 echo "  IP: ${SERVER_IP}"
 echo "============================================"
 echo ""
+echo "Dépôt cloné dans : ${APP_DIR}"
+echo "Branche : ${BRANCH}"
+echo ""
 echo "Prochaines étapes :"
-echo "  1. Cloner le dépôt dans ${APP_DIR} :"
-echo "     git clone <REPO_URL> ${APP_DIR}"
-echo "  2. Configurer les secrets :"
+echo "  1. Configurer les secrets :"
 echo "     cd ${APP_DIR}"
 echo "     cp .env.production .env"
 echo "     nano .env"
-echo "  3. Lancer le premier déploiement :"
+echo "  2. Lancer le premier déploiement :"
 echo "     bash deploy/scripts/deploy.sh first"
 echo ""
 echo "DNS requis (Scaleway console) :"

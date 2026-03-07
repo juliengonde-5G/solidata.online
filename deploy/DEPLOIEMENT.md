@@ -22,15 +22,18 @@ A    m.solidata.online     → 51.159.144.100
 # Se connecter en SSH
 ssh root@51.159.144.100
 
-# Télécharger et exécuter le script d'init
-git clone https://github.com/juliengonde-5G/solidata.online.git /opt/solidata
-cd /opt/solidata
-sudo bash deploy/scripts/init-server.sh
+# Télécharger le script d'init (une seule commande)
+curl -sL https://raw.githubusercontent.com/juliengonde-5G/solidata.online/claude/solidata-erp-app-KYMZZ/deploy/scripts/init-server.sh | sudo bash
+
+# OU manuellement :
+git clone https://github.com/juliengonde-5G/solidata.online.git /tmp/solidata-init
+sudo bash /tmp/solidata-init/deploy/scripts/init-server.sh
 ```
 
-Ce script effectue :
+Ce script effectue automatiquement :
 1. **Purge complète** : arrêt/suppression de tous les conteneurs Docker, images, volumes, réseaux, anciennes installations (Nginx, PostgreSQL, Node.js standalone), certificats SSL, crontabs
-2. **Installation propre** : Docker, UFW (pare-feu), Fail2ban, Swap si nécessaire
+2. **Installation propre** : Docker, UFW (pare-feu), Fail2ban, Swap
+3. **Clone du dépôt** dans `/opt/solidata` + checkout de la bonne branche
 
 ## Étape 2 — Configuration
 
