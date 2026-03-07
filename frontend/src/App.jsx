@@ -24,6 +24,7 @@ import Users from './pages/Users';
 import Settings from './pages/Settings';
 import Referentiels from './pages/Referentiels';
 import AdminPredictive from './pages/AdminPredictive';
+import InsertionParcours from './pages/InsertionParcours';
 import PCMTest from './pages/PCMTest';
 
 function ProtectedRoute({ children, roles }) {
@@ -51,6 +52,7 @@ function App() {
           <Route path="/employees" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Employees /></ProtectedRoute>} />
           <Route path="/work-hours" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><WorkHours /></ProtectedRoute>} />
           <Route path="/skills" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Skills /></ProtectedRoute>} />
+          <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><InsertionParcours /></ProtectedRoute>} />
 
           {/* Collecte */}
           <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />

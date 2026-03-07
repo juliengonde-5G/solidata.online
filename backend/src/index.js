@@ -54,6 +54,7 @@ app.use('/api/produits-finis', require('./routes/produits-finis'));
 app.use('/api/expeditions', require('./routes/expeditions'));
 app.use('/api/refashion', require('./routes/refashion'));
 app.use('/api/referentiels', require('./routes/referentiels'));
+app.use('/api/insertion', require('./routes/insertion'));
 app.use('/api/notifications', require('./routes/notifications'));
 
 // Health check
