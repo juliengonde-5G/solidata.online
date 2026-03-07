@@ -132,7 +132,6 @@ export default function Settings() {
         </div>
 
         {/* Template Form */}
-        {/* Template Form */}
         {showTemplateForm && (
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
             <form onSubmit={createTemplate} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
