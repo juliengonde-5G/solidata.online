@@ -870,11 +870,11 @@ async function initDatabase() {
     const positionsExist = await client.query("SELECT id FROM positions LIMIT 1");
     if (positionsExist.rows.length === 0) {
       await client.query(`
-        INSERT INTO positions (title, name, required_skills, team_type) VALUES
-          ('Opérateur de tri', 'Opérateur de tri', ARRAY['tri_textile', 'controle_qualite'], 'tri'),
-          ('Opérateur Logistique', 'Opérateur Logistique', ARRAY['manutention', 'logistique'], 'logistique'),
-          ('Chauffeur', 'Chauffeur', ARRAY['permis_b', 'collecte'], 'collecte'),
-          ('Suiveur', 'Suiveur', ARRAY['collecte', 'manutention'], 'collecte');
+        INSERT INTO positions (title, required_skills, team_type) VALUES
+          ('Opérateur de tri', ARRAY['tri_textile', 'controle_qualite'], 'tri'),
+          ('Opérateur Logistique', ARRAY['manutention', 'logistique'], 'logistique'),
+          ('Chauffeur', ARRAY['permis_b', 'collecte'], 'collecte'),
+          ('Suiveur', ARRAY['collecte', 'manutention'], 'collecte');
       `);
       console.log('[INIT-DB] 4 postes créés');
     }
@@ -1044,10 +1044,14 @@ async function initDatabase() {
       ALTER TABLE positions ADD COLUMN IF NOT EXISTS slots_filled INTEGER DEFAULT 0;
       ALTER TABLE positions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
     `);
-    // Copy name to title if title is null
-    await client.query(`
-      UPDATE positions SET title = name WHERE title IS NULL AND name IS NOT NULL;
+    // Copy name to title if legacy 'name' column exists
+    const hasNameCol = await client.query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'positions' AND column_name = 'name' LIMIT 1;
     `);
+    if (hasNameCol.rows.length > 0) {
+      await client.query(`UPDATE positions SET title = name WHERE title IS NULL AND name IS NOT NULL;`);
+    }
 
     console.log('[INIT-DB] Migration statuts Kanban ✓');
 
