@@ -125,6 +125,19 @@ async function initDatabase() {
         UNIQUE(candidate_id, skill_name)
       );
     `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS skill_keywords (
+        id SERIAL PRIMARY KEY,
+        skill_name VARCHAR(100) NOT NULL,
+        keyword VARCHAR(255) NOT NULL,
+        synonyms TEXT[] DEFAULT '{}',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(skill_name, keyword)
+      );
+    `);
     console.log('[INIT-DB] Module 2 (Recrutement) ✓');
 
     // ══════════════════════════════════════════

@@ -86,10 +86,8 @@ export default function Layout({ children }) {
       <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-white border-r border-gray-200 flex flex-col transition-all duration-300 flex-shrink-0`}>
         {/* Logo */}
         <div className="p-4 border-b border-gray-100 flex items-center gap-3">
-          <div className="w-8 h-8 bg-solidata-green rounded-lg flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-sm">S</span>
-          </div>
-          {sidebarOpen && <span className="font-bold text-solidata-dark">SOLIDATA</span>}
+          <img src="/logo.png" alt="Solidata" className="w-8 h-8 rounded-lg flex-shrink-0 object-contain" />
+          {sidebarOpen && <img src="/logo-text.png" alt="Solidata" className="h-6 object-contain" />}
         </div>
 
         {/* Menu */}
