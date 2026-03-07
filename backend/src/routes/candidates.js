@@ -493,10 +493,10 @@ router.get('/kanban', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 
     const kanban = {
       received: [],
-      to_contact: [],
-      not_retained: [],
-      summoned: [],
-      recruited: [],
+      preselected: [],
+      interview: [],
+      test: [],
+      hired: [],
     };
 
     result.rows.forEach(c => {
@@ -539,6 +539,97 @@ router.post('/', authorize('ADMIN', 'RH'), async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[CANDIDATES] Erreur création :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/candidates/stats — KPIs recrutement
+router.get('/stats', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const counts = await pool.query(
+      `SELECT status, COUNT(*)::int as count FROM candidates GROUP BY status`
+    );
+    const total = await pool.query('SELECT COUNT(*)::int as count FROM candidates');
+    const thisMonth = await pool.query(
+      `SELECT COUNT(*)::int as count FROM candidates WHERE created_at >= date_trunc('month', NOW())`
+    );
+    const withPCM = await pool.query(
+      `SELECT COUNT(DISTINCT candidate_id)::int as count FROM pcm_reports`
+    );
+
+    const byStatus = {};
+    counts.rows.forEach(r => { byStatus[r.status] = r.count; });
+
+    res.json({
+      total: total.rows[0].count,
+      thisMonth: thisMonth.rows[0].count,
+      withPCM: withPCM.rows[0].count,
+      byStatus,
+    });
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur stats :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// POSITIONS (Postes) — declared before /:id routes
+// ══════════════════════════════════════════
+
+router.get('/positions/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT p.*, (SELECT COUNT(*)::int FROM candidates c WHERE c.position_id = p.id AND c.status = 'hired') as filled
+       FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[POSITIONS] Erreur liste :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.post('/positions', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { title, type, month, slots_open, team_type, required_skills } = req.body;
+    const result = await pool.query(
+      `INSERT INTO positions (title, type, month, slots_open, team_type, required_skills)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [title, type, month, slots_open || 1, team_type, required_skills || []]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[POSITIONS] Erreur création :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.put('/positions/:id', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { title, type, month, slots_open, team_type, required_skills } = req.body;
+    const result = await pool.query(
+      `UPDATE positions SET title = COALESCE($1, title), type = COALESCE($2, type),
+       month = COALESCE($3, month), slots_open = COALESCE($4, slots_open),
+       team_type = COALESCE($5, team_type), required_skills = COALESCE($6, required_skills)
+       WHERE id = $7 RETURNING *`,
+      [title, type, month, slots_open, team_type, required_skills, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Poste non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[POSITIONS] Erreur modification :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.delete('/positions/:id', authorize('ADMIN'), async (req, res) => {
+  try {
+    await pool.query('UPDATE candidates SET position_id = NULL WHERE position_id = $1', [req.params.id]);
+    const result = await pool.query('DELETE FROM positions WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Poste non trouvé' });
+    res.json({ message: 'Poste supprimé' });
+  } catch (err) {
+    console.error('[POSITIONS] Erreur suppression :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -628,7 +719,7 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
       'has_permis_b', 'has_caces', 'appointment_date', 'appointment_location',
       'sms_response', 'interviewer_name', 'interview_comment',
       'practical_test_done', 'practical_test_result', 'practical_test_comment',
-      'assigned_team_id',
+      'assigned_team_id', 'position_id', 'comment',
     ];
 
     for (const field of allowedFields) {
@@ -662,7 +753,7 @@ router.put('/:id/status', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, comment } = req.body;
-    const validStatuses = ['received', 'to_contact', 'not_retained', 'summoned', 'recruited'];
+    const validStatuses = ['received', 'preselected', 'interview', 'test', 'hired'];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Statut invalide' });

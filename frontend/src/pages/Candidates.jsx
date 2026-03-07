@@ -1,347 +1,509 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
+const STATUSES = ['received', 'preselected', 'interview', 'test', 'hired'];
+
 const STATUS_LABELS = {
   received: 'Reçus',
-  to_contact: 'À contacter',
-  not_retained: 'Non retenus',
-  summoned: 'Convoqués',
-  recruited: 'Recrutés',
+  preselected: 'Présélectionnés',
+  interview: 'Entretien',
+  test: 'Test',
+  hired: 'Recrutés',
 };
 
 const STATUS_COLORS = {
-  received: 'bg-blue-100 border-blue-300',
-  to_contact: 'bg-yellow-100 border-yellow-300',
-  not_retained: 'bg-red-100 border-red-300',
-  summoned: 'bg-purple-100 border-purple-300',
-  recruited: 'bg-green-100 border-green-300',
-};
-
-const STATUS_DROP_COLORS = {
-  received: 'bg-blue-200 border-blue-400',
-  to_contact: 'bg-yellow-200 border-yellow-400',
-  not_retained: 'bg-red-200 border-red-400',
-  summoned: 'bg-purple-200 border-purple-400',
-  recruited: 'bg-green-200 border-green-400',
+  received:    { bg: 'bg-blue-50',   border: 'border-blue-200',   drop: 'bg-blue-100 border-blue-400',     badge: 'bg-blue-500' },
+  preselected: { bg: 'bg-yellow-50', border: 'border-yellow-200', drop: 'bg-yellow-100 border-yellow-400', badge: 'bg-yellow-500' },
+  interview:   { bg: 'bg-purple-50', border: 'border-purple-200', drop: 'bg-purple-100 border-purple-400', badge: 'bg-purple-500' },
+  test:        { bg: 'bg-orange-50', border: 'border-orange-200', drop: 'bg-orange-100 border-orange-400', badge: 'bg-orange-500' },
+  hired:       { bg: 'bg-green-50',  border: 'border-green-200',  drop: 'bg-green-100 border-green-400',   badge: 'bg-green-500' },
 };
 
 export default function Candidates() {
   const [kanban, setKanban] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState(null);
+  const [positions, setPositions] = useState([]);
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({});
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', phone: '', gender: '' });
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showPositionModal, setShowPositionModal] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [skills, setSkills] = useState([]);
+  const [pcmProfile, setPcmProfile] = useState(null);
+  const [detailTab, setDetailTab] = useState('info');
   const [draggedId, setDraggedId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
+  const [cvDragActive, setCvDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', phone: '', position_id: '' });
+  const [posForm, setPosForm] = useState({ title: '', type: '', month: '', slots_open: 1 });
+  const fileInputRef = useRef(null);
 
-  useEffect(() => { loadKanban(); }, []);
-
-  const loadKanban = async () => {
+  const loadAll = useCallback(async () => {
     try {
-      const res = await api.get('/candidates/kanban');
-      setKanban(res.data);
+      const [k, s, p] = await Promise.all([
+        api.get('/candidates/kanban'),
+        api.get('/candidates/stats').catch(() => ({ data: null })),
+        api.get('/candidates/positions/list').catch(() => ({ data: [] })),
+      ]);
+      setKanban(k.data);
+      setStats(s.data);
+      setPositions(p.data || []);
     } catch (err) { console.error(err); }
     setLoading(false);
+  }, []);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  const loadDetails = async (c) => {
+    setSelected(c);
+    setDetailTab('info');
+    setEditing(false);
+    setPcmProfile(null);
+    try {
+      const [h, sk] = await Promise.all([
+        api.get(`/candidates/${c.id}/history`),
+        api.get(`/candidates/${c.id}/skills`),
+      ]);
+      setHistory(h.data);
+      setSkills(sk.data.filter(s => s.status !== 'not_mentioned'));
+    } catch (err) { console.error(err); }
+    try {
+      const p = await api.get(`/pcm/profiles/${c.id}`);
+      setPcmProfile(p.data);
+    } catch { setPcmProfile(null); }
   };
 
   const moveCandidate = async (id, newStatus) => {
     try {
       await api.put(`/candidates/${id}/status`, { status: newStatus });
-      loadKanban();
-      if (selected?.id === id) setSelected({ ...selected, status: newStatus });
+      loadAll();
+      if (selected?.id === id) {
+        setSelected(prev => ({ ...prev, status: newStatus }));
+        const h = await api.get(`/candidates/${id}/history`);
+        setHistory(h.data);
+      }
     } catch (err) { console.error(err); }
   };
 
   const createCandidate = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/candidates', form);
-      setShowForm(false);
-      setForm({ first_name: '', last_name: '', email: '', phone: '', gender: '' });
-      loadKanban();
+      await api.post('/candidates', { ...form, position_id: form.position_id || null });
+      setShowAddModal(false);
+      setForm({ first_name: '', last_name: '', email: '', phone: '', position_id: '' });
+      loadAll();
     } catch (err) { console.error(err); }
   };
 
-  const handleCVUpload = async (e) => {
-    const file = e.target.files[0];
+  const handleCVUpload = async (file) => {
     if (!file) return;
-    const formData = new FormData();
-    formData.append('cv', file);
+    setUploading(true);
+    const fd = new FormData();
+    fd.append('cv', file);
     try {
-      const res = await api.post('/candidates/upload-cv-new', formData);
-      loadKanban();
-      alert(`Candidat créé : ${res.data.candidate.first_name || 'N/A'} ${res.data.candidate.last_name || 'N/A'}`);
+      const res = await api.post('/candidates/upload-cv-new', fd);
+      loadAll();
+      loadDetails(res.data.candidate);
+    } catch (err) { console.error(err); }
+    setUploading(false);
+  };
+
+  const deleteCandidate = async (id) => {
+    if (!window.confirm('Supprimer ce candidat ?')) return;
+    try {
+      await api.delete(`/candidates/${id}`);
+      setSelected(null);
+      loadAll();
     } catch (err) { console.error(err); }
   };
 
-  const openEdit = (candidate) => {
+  const startPCMTest = async (candidateId) => {
+    try {
+      const res = await api.post('/pcm/sessions', { candidate_id: candidateId, mode: 'autonomous' });
+      const link = `${window.location.origin}/pcm-test/${res.data.access_token}`;
+      await navigator.clipboard.writeText(link);
+      alert(`Lien du test PCM copié :\n${link}`);
+    } catch (err) { console.error(err); alert('Erreur création test PCM'); }
+  };
+
+  const openEdit = (c) => {
     setEditForm({
-      first_name: candidate.first_name || '',
-      last_name: candidate.last_name || '',
-      email: candidate.email || '',
-      phone: candidate.phone || '',
-      gender: candidate.gender || '',
-      has_permis_b: candidate.has_permis_b || false,
-      has_caces: candidate.has_caces || false,
-      interviewer_name: candidate.interviewer_name || '',
-      interview_comment: candidate.interview_comment || '',
-      appointment_date: candidate.appointment_date ? candidate.appointment_date.split('T')[0] : '',
-      appointment_location: candidate.appointment_location || '',
-      practical_test_done: candidate.practical_test_done || false,
-      practical_test_result: candidate.practical_test_result || '',
-      practical_test_comment: candidate.practical_test_comment || '',
+      first_name: c.first_name || '', last_name: c.last_name || '',
+      email: c.email || '', phone: c.phone || '',
+      has_permis_b: c.has_permis_b || false, has_caces: c.has_caces || false,
+      position_id: c.position_id || '', comment: c.comment || '',
+      interviewer_name: c.interviewer_name || '', interview_comment: c.interview_comment || '',
+      appointment_date: c.appointment_date ? c.appointment_date.split('T')[0] : '',
+      appointment_location: c.appointment_location || '',
+      practical_test_done: c.practical_test_done || false,
+      practical_test_result: c.practical_test_result || '',
+      practical_test_comment: c.practical_test_comment || '',
     });
     setEditing(true);
   };
 
   const saveEdit = async () => {
     try {
-      await api.put(`/candidates/${selected.id}`, editForm);
+      const res = await api.put(`/candidates/${selected.id}`, { ...editForm, position_id: editForm.position_id || null });
       setEditing(false);
-      const updated = { ...selected, ...editForm };
-      setSelected(updated);
-      loadKanban();
+      setSelected(res.data);
+      loadAll();
     } catch (err) { console.error(err); }
   };
 
-  // Drag & drop handlers
-  const onDragStart = (e, candidateId) => {
-    setDraggedId(candidateId);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', candidateId);
-  };
-
-  const onDragEnd = () => {
-    setDraggedId(null);
-    setDragOver(null);
-  };
-
-  const onDragOverColumn = (e, status) => {
+  const createPosition = async (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOver(status);
+    try {
+      await api.post('/candidates/positions', posForm);
+      setPosForm({ title: '', type: '', month: '', slots_open: 1 });
+      setShowPositionModal(false);
+      loadAll();
+    } catch (err) { console.error(err); }
   };
 
-  const onDragLeaveColumn = (e, status) => {
-    if (e.currentTarget.contains(e.relatedTarget)) return;
-    if (dragOver === status) setDragOver(null);
-  };
+  // Drag & drop kanban
+  const onDragStart = (e, id) => { setDraggedId(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); };
+  const onDragEnd = () => { setDraggedId(null); setDragOver(null); };
+  const onDragOverCol = (e, s) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(s); };
+  const onDragLeaveCol = (e, s) => { if (e.currentTarget.contains(e.relatedTarget)) return; if (dragOver === s) setDragOver(null); };
+  const onDropCol = (e, s) => { e.preventDefault(); setDragOver(null); const id = parseInt(e.dataTransfer.getData('text/plain')); if (id) moveCandidate(id, s); setDraggedId(null); };
 
-  const onDropColumn = (e, status) => {
-    e.preventDefault();
-    setDragOver(null);
-    const id = parseInt(e.dataTransfer.getData('text/plain'));
-    if (id && !isNaN(id)) {
-      moveCandidate(id, status);
-    }
-    setDraggedId(null);
-  };
-
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-solidata-green" /></div></Layout>;
 
   return (
     <Layout>
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
+      <div className="p-4 lg:p-6 h-full flex flex-col">
+        {/* Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-4 gap-3">
           <div>
             <h1 className="text-2xl font-bold text-solidata-dark">Recrutement</h1>
-            <p className="text-gray-500">Gestion des candidatures — Vue Kanban (glissez les cartes entre colonnes)</p>
+            <p className="text-gray-500 text-sm">Kanban candidatures — glissez les cartes ou les CV</p>
           </div>
-          <div className="flex gap-2">
-            <label className="bg-white border border-solidata-green text-solidata-green px-4 py-2 rounded-lg cursor-pointer hover:bg-solidata-green/5 text-sm font-medium">
-              Importer CV
-              <input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={handleCVUpload} />
-            </label>
-            <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
-              + Nouveau candidat
-            </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {stats && (
+              <div className="flex gap-2 mr-2">
+                <Pill label="Total" value={stats.total} color="gray" />
+                <Pill label="Ce mois" value={stats.thisMonth} color="blue" />
+                <Pill label="PCM" value={stats.withPCM} color="purple" />
+                <Pill label="Recrutés" value={stats.byStatus?.hired || 0} color="green" />
+              </div>
+            )}
+            <button onClick={() => setShowPositionModal(true)} className="text-sm border border-gray-300 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-50">Postes ({positions.length})</button>
+            <button onClick={() => setShowAddModal(true)} className="text-sm bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark font-medium">+ Candidat</button>
           </div>
         </div>
 
-        {/* Kanban Board with drag & drop */}
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {Object.entries(STATUS_LABELS).map(([status, label]) => (
-            <div
-              key={status}
-              className={`flex-shrink-0 w-72 rounded-xl border-2 p-3 transition-colors ${
-                dragOver === status ? STATUS_DROP_COLORS[status] : STATUS_COLORS[status]
-              }`}
-              onDragOver={(e) => onDragOverColumn(e, status)}
-              onDragLeave={(e) => onDragLeaveColumn(e, status)}
-              onDrop={(e) => onDropColumn(e, status)}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-sm">{label}</h3>
-                <span className="bg-white rounded-full px-2 py-0.5 text-xs font-bold">
-                  {kanban?.[status]?.length || 0}
-                </span>
-              </div>
-              <div className="space-y-2 max-h-[65vh] overflow-y-auto">
-                {kanban?.[status]?.map(c => (
-                  <div
-                    key={c.id}
-                    draggable
-                    onDragStart={(e) => onDragStart(e, c.id)}
-                    onDragEnd={onDragEnd}
-                    onClick={() => setSelected(c)}
-                    className={`bg-white rounded-lg p-3 shadow-sm cursor-grab hover:shadow-md transition border active:cursor-grabbing ${
-                      draggedId === c.id ? 'opacity-40' : ''
-                    }`}
-                  >
-                    <p className="font-medium text-sm text-solidata-dark">
-                      {c.first_name || '?'} {c.last_name || '?'}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">{c.email || 'Pas d\'email'}</p>
-                    {c.phone && <p className="text-xs text-gray-400">{c.phone}</p>}
-                    <div className="flex gap-1 mt-2">
-                      {c.has_permis_b && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Permis B</span>}
-                      {c.has_caces && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">CACES</span>}
-                    </div>
+        {/* CV Drop Zone */}
+        <div
+          className={`mb-4 border-2 border-dashed rounded-xl p-4 text-center transition-all cursor-pointer ${cvDragActive ? 'border-solidata-green bg-solidata-green/10' : 'border-gray-300 bg-gray-50 hover:border-solidata-green/50'}`}
+          onDragOver={(e) => { e.preventDefault(); setCvDragActive(true); }}
+          onDragLeave={() => setCvDragActive(false)}
+          onDrop={(e) => { e.preventDefault(); setCvDragActive(false); handleCVUpload(e.dataTransfer.files[0]); }}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" className="hidden" onChange={(e) => handleCVUpload(e.target.files[0])} />
+          {uploading
+            ? <div className="flex items-center justify-center gap-2 text-solidata-green"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-solidata-green" /><span className="text-sm font-medium">Analyse du CV en cours...</span></div>
+            : <p className="text-sm text-gray-500"><span className="font-medium text-solidata-green">Glissez un CV ici</span> ou cliquez pour importer (PDF, Word, Image)</p>
+          }
+        </div>
+
+        {/* Kanban */}
+        <div className="flex gap-3 overflow-x-auto flex-1 pb-2">
+          {STATUSES.map(status => {
+            const col = STATUS_COLORS[status];
+            const items = kanban?.[status] || [];
+            return (
+              <div key={status}
+                className={`flex-shrink-0 w-64 lg:w-72 rounded-xl border-2 p-3 transition-all flex flex-col ${dragOver === status ? col.drop : `${col.bg} ${col.border}`}`}
+                onDragOver={(e) => onDragOverCol(e, status)} onDragLeave={(e) => onDragLeaveCol(e, status)} onDrop={(e) => onDropCol(e, status)}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${col.badge}`} />
+                    <h3 className="font-semibold text-sm">{STATUS_LABELS[status]}</h3>
                   </div>
-                ))}
+                  <span className="bg-white/80 rounded-full px-2 py-0.5 text-xs font-bold text-gray-600 shadow-sm">{items.length}</span>
+                </div>
+                <div className="space-y-2 flex-1 overflow-y-auto max-h-[60vh]">
+                  {items.map(c => (
+                    <div key={c.id} draggable onDragStart={(e) => onDragStart(e, c.id)} onDragEnd={onDragEnd} onClick={() => loadDetails(c)}
+                      className={`bg-white rounded-lg p-3 shadow-sm cursor-grab hover:shadow-md transition border active:cursor-grabbing ${draggedId === c.id ? 'opacity-30 scale-95' : ''}`}>
+                      <p className="font-medium text-sm text-solidata-dark truncate">{c.first_name || '?'} {c.last_name || '?'}</p>
+                      {c.email && <p className="text-xs text-gray-500 mt-0.5 truncate">{c.email}</p>}
+                      {c.phone && <p className="text-xs text-gray-400">{c.phone}</p>}
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {c.has_permis_b && <Tag text="Permis B" c="blue" />}
+                        {c.has_caces && <Tag text="CACES" c="purple" />}
+                        {c.cv_file_path && <Tag text="CV" c="green" />}
+                      </div>
+                    </div>
+                  ))}
+                  {items.length === 0 && <div className="text-center py-8 text-gray-400 text-xs">Aucun candidat</div>}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* Detail Panel with edit */}
+        {/* Detail Panel */}
         {selected && (
           <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={() => { setSelected(null); setEditing(false); }}>
-            <div className="bg-white w-[420px] h-full overflow-y-auto shadow-xl p-6" onClick={e => e.stopPropagation()}>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold">Fiche candidat</h2>
-                <div className="flex gap-2">
-                  {!editing && (
-                    <button onClick={() => openEdit(selected)} className="text-sm bg-solidata-green text-white px-3 py-1 rounded-lg hover:bg-solidata-green-dark">
-                      Modifier
-                    </button>
-                  )}
-                  <button onClick={() => { setSelected(null); setEditing(false); }} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            <div className="bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b px-5 py-3 flex items-center justify-between z-10">
+                <div>
+                  <h2 className="font-bold text-lg">{selected.first_name || '?'} {selected.last_name || '?'}</h2>
+                  <span className={`inline-block text-xs text-white px-2 py-0.5 rounded mt-1 ${STATUS_COLORS[selected.status]?.badge}`}>{STATUS_LABELS[selected.status]}</span>
+                </div>
+                <div className="flex gap-1">
+                  {!editing && <button onClick={() => openEdit(selected)} className="text-xs bg-solidata-green text-white px-3 py-1.5 rounded-lg">Modifier</button>}
+                  <button onClick={() => deleteCandidate(selected.id)} className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg">Suppr.</button>
+                  <button onClick={() => { setSelected(null); setEditing(false); }} className="text-gray-400 hover:text-gray-600 text-xl ml-2">&times;</button>
                 </div>
               </div>
-
-              {editing ? (
-                <div className="space-y-3 text-sm">
-                  <EditField label="Prénom" value={editForm.first_name} onChange={v => setEditForm({...editForm, first_name: v})} />
-                  <EditField label="Nom" value={editForm.last_name} onChange={v => setEditForm({...editForm, last_name: v})} />
-                  <EditField label="Email" value={editForm.email} onChange={v => setEditForm({...editForm, email: v})} type="email" />
-                  <EditField label="Téléphone" value={editForm.phone} onChange={v => setEditForm({...editForm, phone: v})} />
-                  <div>
-                    <span className="text-gray-500 text-xs">Genre</span>
-                    <select value={editForm.gender} onChange={e => setEditForm({...editForm, gender: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
-                      <option value="">—</option>
-                      <option value="homme">Homme</option>
-                      <option value="femme">Femme</option>
-                      <option value="autre">Autre</option>
-                    </select>
-                  </div>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={editForm.has_permis_b} onChange={e => setEditForm({...editForm, has_permis_b: e.target.checked})} />
-                      Permis B
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={editForm.has_caces} onChange={e => setEditForm({...editForm, has_caces: e.target.checked})} />
-                      CACES
-                    </label>
-                  </div>
-
-                  <hr className="my-2" />
-                  <p className="text-xs font-semibold text-gray-600 uppercase">Entretien</p>
-                  <EditField label="Intervieweur" value={editForm.interviewer_name} onChange={v => setEditForm({...editForm, interviewer_name: v})} />
-                  <div>
-                    <span className="text-gray-500 text-xs">Commentaire entretien</span>
-                    <textarea value={editForm.interview_comment} onChange={e => setEditForm({...editForm, interview_comment: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={3} />
-                  </div>
-                  <EditField label="Date RDV" value={editForm.appointment_date} onChange={v => setEditForm({...editForm, appointment_date: v})} type="date" />
-                  <EditField label="Lieu RDV" value={editForm.appointment_location} onChange={v => setEditForm({...editForm, appointment_location: v})} />
-
-                  <hr className="my-2" />
-                  <p className="text-xs font-semibold text-gray-600 uppercase">Test pratique</p>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={editForm.practical_test_done} onChange={e => setEditForm({...editForm, practical_test_done: e.target.checked})} />
-                    Test effectué
-                  </label>
-                  <EditField label="Résultat" value={editForm.practical_test_result} onChange={v => setEditForm({...editForm, practical_test_result: v})} />
-                  <div>
-                    <span className="text-gray-500 text-xs">Commentaire test</span>
-                    <textarea value={editForm.practical_test_comment} onChange={e => setEditForm({...editForm, practical_test_comment: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} />
-                  </div>
-
-                  <div className="flex gap-2 mt-4">
-                    <button onClick={() => setEditing(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                    <button onClick={saveEdit} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm hover:bg-solidata-green-dark">Enregistrer</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3 text-sm">
-                  <Field label="Prénom" value={selected.first_name} />
-                  <Field label="Nom" value={selected.last_name} />
-                  <Field label="Email" value={selected.email} />
-                  <Field label="Téléphone" value={selected.phone} />
-                  <Field label="Genre" value={selected.gender} />
-                  <Field label="Statut" value={STATUS_LABELS[selected.status]} />
-                  <Field label="Permis B" value={selected.has_permis_b ? 'Oui' : 'Non'} />
-                  <Field label="CACES" value={selected.has_caces ? 'Oui' : 'Non'} />
-                  {selected.interviewer_name && <Field label="Intervieweur" value={selected.interviewer_name} />}
-                  {selected.interview_comment && <Field label="Commentaire" value={selected.interview_comment} />}
-                  {selected.appointment_date && <Field label="Date RDV" value={new Date(selected.appointment_date).toLocaleDateString('fr-FR')} />}
-                  {selected.appointment_location && <Field label="Lieu RDV" value={selected.appointment_location} />}
-                  {selected.practical_test_done && <Field label="Test effectué" value="Oui" />}
-                  {selected.practical_test_result && <Field label="Résultat test" value={selected.practical_test_result} />}
-                  {selected.practical_test_comment && <Field label="Commentaire test" value={selected.practical_test_comment} />}
-                </div>
-              )}
+              <div className="flex border-b px-5">
+                {['info', 'history', 'pcm'].map(t => (
+                  <button key={t} onClick={() => setDetailTab(t)}
+                    className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${detailTab === t ? 'border-solidata-green text-solidata-green' : 'border-transparent text-gray-500'}`}>
+                    {{ info: 'Fiche', history: 'Historique', pcm: 'PCM' }[t]}
+                  </button>
+                ))}
+              </div>
+              <div className="p-5">
+                {detailTab === 'info' && (editing
+                  ? <EditForm ef={editForm} set={setEditForm} save={saveEdit} cancel={() => setEditing(false)} positions={positions} />
+                  : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} />
+                )}
+                {detailTab === 'history' && <HistoryView history={history} />}
+                {detailTab === 'pcm' && <PCMView profile={pcmProfile} onStart={() => startPCMTest(selected.id)} />}
+              </div>
             </div>
           </div>
         )}
 
-        {/* New Candidate Form Modal */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createCandidate} className="bg-white rounded-xl p-6 w-96 shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau candidat</h2>
-              <div className="space-y-3">
-                <input placeholder="Prénom" value={form.first_name} onChange={e => setForm({...form, first_name: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Nom" value={form.last_name} onChange={e => setForm({...form, last_name: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Téléphone" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <select value={form.gender} onChange={e => setForm({...form, gender: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="">Genre</option>
-                  <option value="homme">Homme</option>
-                  <option value="femme">Femme</option>
-                  <option value="autre">Autre</option>
-                </select>
+        {/* Add Modal */}
+        {showAddModal && (
+          <Modal title="Nouveau candidat" onClose={() => setShowAddModal(false)}>
+            <form onSubmit={createCandidate} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({...form, first_name: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" required />
+                <input placeholder="Nom *" value={form.last_name} onChange={e => setForm({...form, last_name: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" required />
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Créer</button>
+              <input placeholder="Email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" type="email" />
+              <input placeholder="Téléphone" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              {positions.length > 0 && (
+                <select value={form.position_id} onChange={e => setForm({...form, position_id: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm">
+                  <option value="">Poste (optionnel)</option>
+                  {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                </select>
+              )}
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Créer</button>
               </div>
             </form>
-          </div>
+          </Modal>
+        )}
+
+        {/* Positions Modal */}
+        {showPositionModal && (
+          <Modal title="Gestion des postes" onClose={() => setShowPositionModal(false)} wide>
+            <div className="space-y-4">
+              {positions.map(p => (
+                <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3 text-sm">
+                  <div><span className="font-medium">{p.title}</span>{p.type && <span className="text-gray-400 ml-2">({p.type})</span>}{p.month && <span className="text-gray-400 ml-2">- {p.month}</span>}</div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-500">{p.filled || 0}/{p.slots_open || 1}</span>
+                    <button onClick={async () => { await api.delete(`/candidates/positions/${p.id}`); loadAll(); }} className="text-red-400 hover:text-red-600 text-xs">Suppr.</button>
+                  </div>
+                </div>
+              ))}
+              <form onSubmit={createPosition} className="border-t pt-4 space-y-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase">Ajouter un poste</p>
+                <input placeholder="Intitulé *" value={posForm.title} onChange={e => setPosForm({...posForm, title: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <div className="grid grid-cols-3 gap-2">
+                  <input placeholder="Type" value={posForm.type} onChange={e => setPosForm({...posForm, type: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" />
+                  <input placeholder="Mois" value={posForm.month} onChange={e => setPosForm({...posForm, month: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" />
+                  <input placeholder="Places" value={posForm.slots_open} onChange={e => setPosForm({...posForm, slots_open: parseInt(e.target.value) || 1})} className="border rounded-lg px-3 py-2 text-sm" type="number" />
+                </div>
+                <button type="submit" className="w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Ajouter</button>
+              </form>
+            </div>
+          </Modal>
         )}
       </div>
     </Layout>
   );
 }
 
-function Field({ label, value }) {
+// ══════════════════════════════════════════
+// Sub-components
+// ══════════════════════════════════════════
+
+function Tag({ text, c }) {
+  const m = { blue: 'bg-blue-50 text-blue-600', purple: 'bg-purple-50 text-purple-600', green: 'bg-green-50 text-green-600', gray: 'bg-gray-100 text-gray-600', orange: 'bg-orange-50 text-orange-600' };
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${m[c] || m.gray}`}>{text}</span>;
+}
+
+function Pill({ label, value, color }) {
+  const m = { gray: 'bg-gray-100 text-gray-700', blue: 'bg-blue-100 text-blue-700', purple: 'bg-purple-100 text-purple-700', green: 'bg-green-100 text-green-700' };
+  return <div className={`px-3 py-1 rounded-full text-xs font-medium ${m[color]}`}>{label}: <strong>{value}</strong></div>;
+}
+
+function InfoView({ s, skills, positions, onMove }) {
+  const pos = positions.find(p => p.id === s.position_id);
   return (
-    <div>
-      <span className="text-gray-500 text-xs">{label}</span>
-      <p className="font-medium">{value || '—'}</p>
+    <div className="space-y-3 text-sm">
+      <div className="grid grid-cols-2 gap-3">
+        <Field l="Prénom" v={s.first_name} /><Field l="Nom" v={s.last_name} />
+        <Field l="Email" v={s.email} /><Field l="Téléphone" v={s.phone} />
+        <Field l="Poste" v={pos?.title} />
+      </div>
+      <div className="pt-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Déplacer vers</p>
+        <div className="flex flex-wrap gap-1">
+          {STATUSES.filter(st => st !== s.status).map(st => (
+            <button key={st} onClick={() => onMove(st)} className={`text-xs px-2.5 py-1 rounded-full text-white font-medium ${STATUS_COLORS[st].badge}`}>{STATUS_LABELS[st]}</button>
+          ))}
+        </div>
+      </div>
+      {skills.length > 0 && (
+        <div className="pt-2"><p className="text-xs font-semibold text-gray-500 uppercase mb-2">Compétences</p>
+          <div className="flex flex-wrap gap-1">{skills.map(sk => <Tag key={sk.skill_name} text={sk.skill_name.replace(/_/g, ' ')} c={sk.status === 'confirmed' ? 'green' : 'orange'} />)}</div>
+        </div>
+      )}
+      {s.cv_file_path && <a href={s.cv_file_path} target="_blank" rel="noopener noreferrer" className="text-solidata-green hover:underline text-sm font-medium block pt-2">Voir le CV</a>}
+      {(s.interviewer_name || s.appointment_date) && (
+        <div className="pt-2 border-t">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Entretien</p>
+          {s.interviewer_name && <Field l="Intervieweur" v={s.interviewer_name} />}
+          {s.interview_comment && <Field l="Commentaire" v={s.interview_comment} />}
+          {s.appointment_date && <Field l="Date RDV" v={new Date(s.appointment_date).toLocaleDateString('fr-FR')} />}
+          {s.appointment_location && <Field l="Lieu" v={s.appointment_location} />}
+        </div>
+      )}
+      {s.practical_test_done && (
+        <div className="pt-2 border-t">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Test pratique</p>
+          <Field l="Résultat" v={s.practical_test_result} />
+          {s.practical_test_comment && <Field l="Commentaire" v={s.practical_test_comment} />}
+        </div>
+      )}
+      {s.comment && <div className="pt-2 border-t"><Field l="Commentaire" v={s.comment} /></div>}
     </div>
   );
 }
 
-function EditField({ label, value, onChange, type = 'text' }) {
+function HistoryView({ history }) {
+  if (!history.length) return <p className="text-sm text-gray-400">Aucun mouvement</p>;
   return (
-    <div>
-      <span className="text-gray-500 text-xs">{label}</span>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+    <div className="space-y-3">
+      {history.map(h => (
+        <div key={h.id} className="flex gap-3 items-start">
+          <div className="w-2 h-2 rounded-full bg-solidata-green mt-1.5 flex-shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium">{h.from_status ? `${STATUS_LABELS[h.from_status] || h.from_status} → ` : ''}{STATUS_LABELS[h.to_status] || h.to_status}</p>
+            {h.comment && <p className="text-gray-500 text-xs">{h.comment}</p>}
+            <p className="text-gray-400 text-xs mt-0.5">{new Date(h.created_at).toLocaleString('fr-FR')}{h.changed_by_name && ` — ${h.changed_by_name} ${h.changed_by_lastname || ''}`}</p>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
+
+function PCMView({ profile, onStart }) {
+  const PCM_C = { analyseur: 'bg-blue-100 text-blue-700', perseverant: 'bg-green-100 text-green-700', empathique: 'bg-pink-100 text-pink-700', imagineur: 'bg-indigo-100 text-indigo-700', energiseur: 'bg-orange-100 text-orange-700', promoteur: 'bg-red-100 text-red-700' };
+  if (!profile) return (
+    <div className="text-center py-8">
+      <p className="text-gray-500 text-sm mb-4">Aucun profil PCM</p>
+      <button onClick={onStart} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">Lancer un test PCM</button>
+      <p className="text-xs text-gray-400 mt-2">Le lien sera copié dans le presse-papier</p>
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Base</p><p className={`inline-block mt-1 px-2 py-0.5 rounded text-sm font-bold ${PCM_C[profile.base_type] || 'bg-gray-100'}`}>{profile.base_type}</p></div>
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Phase</p><p className={`inline-block mt-1 px-2 py-0.5 rounded text-sm font-bold ${PCM_C[profile.phase_type] || 'bg-gray-100'}`}>{profile.phase_type}</p></div>
+      </div>
+      {profile.risk_alert && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 font-medium">Alerte RPS</div>}
+      {profile.immeuble && (
+        <div><p className="text-xs font-semibold text-gray-500 uppercase mb-2">Immeuble PCM</p>
+          <div className="space-y-1">{profile.immeuble.map((f, i) => (
+            <div key={i} className={`rounded px-3 py-1.5 text-sm font-medium ${PCM_C[f.type] || 'bg-gray-100'}`} style={{ opacity: 1 - i * 0.12 }}>{f.type} — {f.score}%</div>
+          ))}</div>
+        </div>
+      )}
+      <button onClick={onStart} className="w-full border border-purple-300 text-purple-600 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium">Relancer un test</button>
+    </div>
+  );
+}
+
+function EditForm({ ef, set, save, cancel, positions }) {
+  const u = (k, v) => set(prev => ({ ...prev, [k]: v }));
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="grid grid-cols-2 gap-3">
+        <EF l="Prénom" v={ef.first_name} o={v => u('first_name', v)} />
+        <EF l="Nom" v={ef.last_name} o={v => u('last_name', v)} />
+      </div>
+      <EF l="Email" v={ef.email} o={v => u('email', v)} t="email" />
+      <EF l="Téléphone" v={ef.phone} o={v => u('phone', v)} />
+      {positions.length > 0 && (
+        <div><span className="text-gray-500 text-xs">Poste</span>
+          <select value={ef.position_id} onChange={e => u('position_id', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="">— Aucun —</option>
+            {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="flex gap-4">
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={ef.has_permis_b} onChange={e => u('has_permis_b', e.target.checked)} /> Permis B</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={ef.has_caces} onChange={e => u('has_caces', e.target.checked)} /> CACES</label>
+      </div>
+      <hr />
+      <p className="text-xs font-semibold text-gray-600 uppercase">Entretien</p>
+      <EF l="Intervieweur" v={ef.interviewer_name} o={v => u('interviewer_name', v)} />
+      <div><span className="text-gray-500 text-xs">Commentaire entretien</span><textarea value={ef.interview_comment} onChange={e => u('interview_comment', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} /></div>
+      <EF l="Date RDV" v={ef.appointment_date} o={v => u('appointment_date', v)} t="date" />
+      <EF l="Lieu RDV" v={ef.appointment_location} o={v => u('appointment_location', v)} />
+      <hr />
+      <p className="text-xs font-semibold text-gray-600 uppercase">Test pratique</p>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={ef.practical_test_done} onChange={e => u('practical_test_done', e.target.checked)} /> Test effectué</label>
+      <div><span className="text-gray-500 text-xs">Résultat</span>
+        <select value={ef.practical_test_result} onChange={e => u('practical_test_result', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="">—</option><option value="conforme">Conforme</option><option value="faible">Faible</option><option value="recale">Recalé</option>
+        </select>
+      </div>
+      <div><span className="text-gray-500 text-xs">Commentaire test</span><textarea value={ef.practical_test_comment} onChange={e => u('practical_test_comment', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} /></div>
+      <hr />
+      <div><span className="text-gray-500 text-xs">Commentaire général</span><textarea value={ef.comment} onChange={e => u('comment', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} /></div>
+      <div className="flex gap-2 mt-4">
+        <button onClick={cancel} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+        <button onClick={save} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Enregistrer</button>
+      </div>
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children, wide }) {
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className={`bg-white rounded-xl p-6 shadow-xl ${wide ? 'max-w-xl' : 'max-w-md'} w-full max-h-[80vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold">{title}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Field({ l, v }) { return <div><span className="text-gray-500 text-xs">{l}</span><p className="font-medium">{v || '—'}</p></div>; }
+function EF({ l, v, o, t = 'text' }) { return <div><span className="text-gray-500 text-xs">{l}</span><input type={t} value={v} onChange={e => o(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" /></div>; }

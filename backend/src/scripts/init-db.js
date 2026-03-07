@@ -86,7 +86,8 @@ async function initDatabase() {
         cv_file_path VARCHAR(500),
         source_email VARCHAR(255),
         status VARCHAR(30) NOT NULL DEFAULT 'received'
-          CHECK (status IN ('received', 'to_contact', 'not_retained', 'summoned', 'recruited')),
+          CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired')),
+        position_id INTEGER,
         appointment_date TIMESTAMP,
         appointment_location VARCHAR(255),
         sms_response VARCHAR(20),
@@ -188,7 +189,7 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS teams (
         id SERIAL PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
-        type VARCHAR(30) CHECK (type IN ('collecte', 'tri', 'magasin', 'administration')),
+        type VARCHAR(30) CHECK (type IN ('tri', 'collecte', 'logistique', 'btq_st_sever', 'btq_lhopital', 'administration')),
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT NOW()
       );
@@ -218,13 +219,46 @@ async function initDatabase() {
       );
     `);
 
+    // Contrats employés
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS employee_contracts (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        contract_type VARCHAR(30) NOT NULL CHECK (contract_type IN ('CDI', 'CDD', 'interim', 'stage', 'apprentissage')),
+        duration_months INTEGER,
+        start_date DATE NOT NULL,
+        end_date DATE,
+        origin VARCHAR(30) NOT NULL DEFAULT 'embauche' CHECK (origin IN ('embauche', 'renouvellement')),
+        weekly_hours DOUBLE PRECISION NOT NULL DEFAULT 35 CHECK (weekly_hours IN (26, 35)),
+        team_id INTEGER REFERENCES teams(id),
+        position_id INTEGER REFERENCES positions(id),
+        is_current BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // Jours d'indisponibilité hebdomadaire
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS employee_availability (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        day_off VARCHAR(10) NOT NULL CHECK (day_off IN ('lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche')),
+        UNIQUE(employee_id, day_off)
+      );
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS positions (
         id SERIAL PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        type VARCHAR(50),
+        month VARCHAR(20),
+        slots_open INTEGER DEFAULT 1,
+        slots_filled INTEGER DEFAULT 0,
         required_skills TEXT[],
         team_type VARCHAR(30),
-        is_active BOOLEAN DEFAULT true
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
       );
     `);
 
@@ -809,33 +843,39 @@ async function initDatabase() {
       console.log('[INIT-DB] Utilisateur admin créé (admin / admin123)');
     }
 
+    // Migration: update teams constraint + data
+    await client.query(`
+      ALTER TABLE teams DROP CONSTRAINT IF EXISTS teams_type_check;
+      ALTER TABLE teams ADD CONSTRAINT teams_type_check
+        CHECK (type IN ('tri', 'collecte', 'logistique', 'btq_st_sever', 'btq_lhopital', 'administration'));
+    `);
+
     // Équipes par défaut
     const teamsExist = await client.query("SELECT id FROM teams LIMIT 1");
     if (teamsExist.rows.length === 0) {
       await client.query(`
         INSERT INTO teams (name, type) VALUES
-          ('Collecte Matin', 'collecte'),
-          ('Collecte Après-midi', 'collecte'),
-          ('Tri Qualité', 'tri'),
-          ('Magasin', 'magasin'),
+          ('Tri', 'tri'),
+          ('Collecte', 'collecte'),
+          ('Logistique', 'logistique'),
+          ('Btq St Sever', 'btq_st_sever'),
+          ('Btq L''Hopital', 'btq_lhopital'),
           ('Administration', 'administration');
       `);
-      console.log('[INIT-DB] 5 équipes créées');
+      console.log('[INIT-DB] 6 équipes créées');
     }
 
     // Postes par défaut
     const positionsExist = await client.query("SELECT id FROM positions LIMIT 1");
     if (positionsExist.rows.length === 0) {
       await client.query(`
-        INSERT INTO positions (name, required_skills, team_type) VALUES
-          ('Chauffeur', ARRAY['permis_b', 'collecte'], 'collecte'),
-          ('Collecteur', ARRAY['manutention', 'collecte'], 'collecte'),
-          ('Cariste', ARRAY['caces', 'manutention'], 'collecte'),
-          ('Trieur', ARRAY['tri_textile', 'controle_qualite'], 'tri'),
-          ('Vendeur Magasin', ARRAY['vente'], 'magasin'),
-          ('Responsable Magasin', ARRAY['vente', 'gestion_equipe'], 'magasin');
+        INSERT INTO positions (title, name, required_skills, team_type) VALUES
+          ('Opérateur de tri', 'Opérateur de tri', ARRAY['tri_textile', 'controle_qualite'], 'tri'),
+          ('Opérateur Logistique', 'Opérateur Logistique', ARRAY['manutention', 'logistique'], 'logistique'),
+          ('Chauffeur', 'Chauffeur', ARRAY['permis_b', 'collecte'], 'collecte'),
+          ('Suiveur', 'Suiveur', ARRAY['collecte', 'manutention'], 'collecte');
       `);
-      console.log('[INIT-DB] 6 postes créés');
+      console.log('[INIT-DB] 4 postes créés');
     }
 
     // Types de conteneurs
@@ -966,6 +1006,50 @@ async function initDatabase() {
     `);
 
     await client.query('COMMIT');
+    // ══════════════════════════════════════════
+    // MIGRATION : Kanban statuses v2
+    // ══════════════════════════════════════════
+    console.log('[INIT-DB] Migration statuts Kanban...');
+
+    // Add position_id column if missing
+    await client.query(`
+      ALTER TABLE candidates ADD COLUMN IF NOT EXISTS position_id INTEGER;
+    `);
+    await client.query(`
+      ALTER TABLE candidates ADD COLUMN IF NOT EXISTS comment TEXT;
+    `);
+
+    // Migrate old statuses to new ones
+    await client.query(`
+      UPDATE candidates SET status = 'preselected' WHERE status = 'to_contact';
+      UPDATE candidates SET status = 'interview' WHERE status = 'summoned';
+      UPDATE candidates SET status = 'hired' WHERE status = 'recruited';
+      UPDATE candidates SET status = 'received' WHERE status = 'not_retained';
+    `);
+
+    // Update CHECK constraint to accept new statuses
+    await client.query(`
+      ALTER TABLE candidates DROP CONSTRAINT IF EXISTS candidates_status_check;
+      ALTER TABLE candidates ADD CONSTRAINT candidates_status_check
+        CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired'));
+    `);
+
+    // Migrate positions table: add new columns if missing
+    await client.query(`
+      ALTER TABLE positions ADD COLUMN IF NOT EXISTS title VARCHAR(200);
+      ALTER TABLE positions ADD COLUMN IF NOT EXISTS type VARCHAR(50);
+      ALTER TABLE positions ADD COLUMN IF NOT EXISTS month VARCHAR(20);
+      ALTER TABLE positions ADD COLUMN IF NOT EXISTS slots_open INTEGER DEFAULT 1;
+      ALTER TABLE positions ADD COLUMN IF NOT EXISTS slots_filled INTEGER DEFAULT 0;
+      ALTER TABLE positions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+    `);
+    // Copy name to title if title is null
+    await client.query(`
+      UPDATE positions SET title = name WHERE title IS NULL AND name IS NOT NULL;
+    `);
+
+    console.log('[INIT-DB] Migration statuts Kanban ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

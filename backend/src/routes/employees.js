@@ -350,4 +350,98 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// CONTRATS
+// ══════════════════════════════════════════
+
+router.get('/:id/contracts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT ec.*, t.name as team_name, p.title as position_title
+       FROM employee_contracts ec
+       LEFT JOIN teams t ON ec.team_id = t.id
+       LEFT JOIN positions p ON ec.position_id = p.id
+       WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur contrats :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.post('/:id/contracts', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { contract_type, duration_months, start_date, end_date, weekly_hours, team_id, position_id } = req.body;
+    const empId = req.params.id;
+
+    // Déterminer l'origine : embauche si c'est le premier contrat
+    const existing = await pool.query('SELECT id FROM employee_contracts WHERE employee_id = $1', [empId]);
+    const origin = existing.rows.length === 0 ? 'embauche' : 'renouvellement';
+
+    // Désactiver les contrats précédents
+    await pool.query('UPDATE employee_contracts SET is_current = false WHERE employee_id = $1', [empId]);
+
+    const result = await pool.query(
+      `INSERT INTO employee_contracts (employee_id, contract_type, duration_months, start_date, end_date, origin, weekly_hours, team_id, position_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [empId, contract_type, duration_months || null, start_date, end_date || null, origin, weekly_hours || 35, team_id || null, position_id || null]
+    );
+
+    // Mettre à jour le collaborateur avec les infos du contrat courant
+    await pool.query(
+      `UPDATE employees SET team_id = COALESCE($1, team_id), contract_type = $2, weekly_hours = $3, updated_at = NOW() WHERE id = $4`,
+      [team_id, contract_type, weekly_hours || 35, empId]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur ajout contrat :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.delete('/:id/contracts/:contractId', authorize('ADMIN'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM employee_contracts WHERE id = $1 AND employee_id = $2', [req.params.contractId, req.params.id]);
+    res.json({ message: 'Contrat supprimé' });
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur suppression contrat :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// INDISPONIBILITÉS HEBDOMADAIRES
+// ══════════════════════════════════════════
+
+router.get('/:id/availability', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query('SELECT day_off FROM employee_availability WHERE employee_id = $1', [req.params.id]);
+    res.json(result.rows.map(r => r.day_off));
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur disponibilité :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.put('/:id/availability', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { days_off } = req.body; // array of day names
+    const empId = req.params.id;
+
+    // Reset and re-insert
+    await pool.query('DELETE FROM employee_availability WHERE employee_id = $1', [empId]);
+    for (const day of (days_off || [])) {
+      await pool.query('INSERT INTO employee_availability (employee_id, day_off) VALUES ($1, $2) ON CONFLICT DO NOTHING', [empId, day]);
+    }
+
+    res.json({ days_off });
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur mise à jour disponibilité :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;
