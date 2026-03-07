@@ -43,17 +43,18 @@ app.use('/api/employees', require('./routes/employees'));
 app.use('/api/cav', require('./routes/cav'));
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/tours', require('./routes/tours'));
-// app.use('/api/stock', require('./routes/stock'));
-// app.use('/api/production', require('./routes/production'));
-// app.use('/api/billing', require('./routes/billing'));
-// app.use('/api/reporting', require('./routes/reporting'));
-// app.use('/api/exports', require('./routes/exports'));
-// app.use('/api/tri', require('./routes/tri'));
-// app.use('/api/produits-finis', require('./routes/produits-finis'));
-// app.use('/api/expeditions', require('./routes/expeditions'));
-// app.use('/api/refashion', require('./routes/refashion'));
-// app.use('/api/referentiels', require('./routes/referentiels'));
-// app.use('/api/notifications', require('./routes/notifications'));
+// Lot 4 : Tri + Stock + Production + Facturation + Reporting + Refashion
+app.use('/api/stock', require('./routes/stock'));
+app.use('/api/production', require('./routes/production'));
+app.use('/api/billing', require('./routes/billing'));
+app.use('/api/reporting', require('./routes/reporting'));
+app.use('/api/exports', require('./routes/exports'));
+app.use('/api/tri', require('./routes/tri'));
+app.use('/api/produits-finis', require('./routes/produits-finis'));
+app.use('/api/expeditions', require('./routes/expeditions'));
+app.use('/api/refashion', require('./routes/refashion'));
+app.use('/api/referentiels', require('./routes/referentiels'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -79,12 +80,12 @@ app.get('/api/health', async (req, res) => {
         cav: true,
         vehicles: true,
         tours: true,
-        stock: false,
-        production: false,
-        billing: false,
-        reporting: false,
-        tri: false,
-        refashion: false,
+        stock: true,
+        production: true,
+        billing: true,
+        reporting: true,
+        tri: true,
+        refashion: true,
       },
     });
   } catch (err) {
