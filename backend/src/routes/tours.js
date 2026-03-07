@@ -102,18 +102,35 @@ function calculateTotalDistance(route, startLat, startLng) {
 // MOTEUR DE PRÉDICTION DE REMPLISSAGE (IA)
 // ══════════════════════════════════════════════════════════════
 
-// Facteurs saisonniers mensuels (jan→déc)
-const SEASONAL_FACTORS = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
+// Facteurs saisonniers mensuels (jan→déc) — modifiables via admin
+let SEASONAL_FACTORS = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
 
 // Facteurs jour de la semaine (lun→dim) — les gens trient plus le weekend
-const DAY_OF_WEEK_FACTORS = [1.0, 1.0, 1.0, 1.0, 1.05, 1.15, 1.1];
+let DAY_OF_WEEK_FACTORS = [1.0, 1.0, 1.0, 1.0, 1.05, 1.15, 1.1];
 
 // Jours fériés français (approximation)
-const FRENCH_HOLIDAYS_2026 = [
+let FRENCH_HOLIDAYS_2026 = [
   '2026-01-01', '2026-04-06', '2026-05-01', '2026-05-08',
   '2026-05-14', '2026-05-25', '2026-07-14', '2026-08-15',
   '2026-11-01', '2026-11-11', '2026-12-25',
 ];
+
+// Paramètres de scoring — modifiables via admin
+let SCORING_CONFIG = {
+  fillThresholds: { critical: 100, high: 80, medium: 60, low: 40 },
+  fillScores: { critical: 50, high: 35, medium: 20, low: 10, minimal: 2 },
+  daysSinceWeight: 1.5,
+  containerBonus: 3,
+  vehicleFillTarget: 0.95,
+  avgSpeed: 30,          // km/h vitesse moyenne
+  timePerCav: 10,        // min par CAV
+  historyDays: 180,      // jours d'historique analysés
+  weeklyCollectionCycle: 7, // hypothèse collecte hebdomadaire
+  densityThreshold: 3,   // nb conteneurs pour bonus densité
+  densityBonus: 1.1,
+  holidayBonus: 1.1,
+  maxFillCap: 120,
+};
 
 function isHoliday(dateStr) {
   return FRENCH_HOLIDAYS_2026.includes(dateStr);
@@ -370,6 +387,57 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('[TOURS] Erreur liste :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// ADMIN — Variables du moteur prédictif
+// ══════════════════════════════════════════
+
+// GET /api/tours/predictive-config — Lire les variables du moteur
+router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
+  try {
+    res.json({
+      seasonalFactors: SEASONAL_FACTORS,
+      dayOfWeekFactors: DAY_OF_WEEK_FACTORS,
+      holidays: FRENCH_HOLIDAYS_2026,
+      scoring: SCORING_CONFIG,
+      centreTri: { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur config prédictive :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/tours/predictive-config — Mettre à jour les variables
+router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { seasonalFactors, dayOfWeekFactors, holidays, scoring } = req.body;
+
+    if (seasonalFactors && Array.isArray(seasonalFactors) && seasonalFactors.length === 12) {
+      SEASONAL_FACTORS = seasonalFactors.map(Number);
+    }
+    if (dayOfWeekFactors && Array.isArray(dayOfWeekFactors) && dayOfWeekFactors.length === 7) {
+      DAY_OF_WEEK_FACTORS = dayOfWeekFactors.map(Number);
+    }
+    if (holidays && Array.isArray(holidays)) {
+      FRENCH_HOLIDAYS_2026 = holidays;
+    }
+    if (scoring && typeof scoring === 'object') {
+      SCORING_CONFIG = { ...SCORING_CONFIG, ...scoring };
+    }
+
+    res.json({
+      message: 'Configuration mise à jour',
+      seasonalFactors: SEASONAL_FACTORS,
+      dayOfWeekFactors: DAY_OF_WEEK_FACTORS,
+      holidays: FRENCH_HOLIDAYS_2026,
+      scoring: SCORING_CONFIG,
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur update config :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

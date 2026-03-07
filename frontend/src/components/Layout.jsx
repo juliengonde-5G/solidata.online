@@ -77,7 +77,6 @@ const menuSections = [
       { path: '/reporting-rh', label: 'RH', icon: IconChartPeople, roles: ['ADMIN', 'RH'] },
       { path: '/reporting-production', label: 'Production', icon: IconChartBar, roles: ['ADMIN', 'MANAGER'] },
       { path: '/refashion', label: 'Refashion', icon: IconRecycle, roles: ['ADMIN', 'MANAGER'] },
-      { path: '/billing', label: 'Facturation', icon: IconMoney, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {
@@ -91,6 +90,7 @@ const menuSections = [
       { path: '/vehicles', label: 'Véhicules', icon: IconVehicle, roles: ['ADMIN'] },
       { path: '/settings', label: 'Configuration', icon: IconGear, roles: ['ADMIN'] },
       { path: '/referentiels', label: 'Référentiels', icon: IconList, roles: ['ADMIN'] },
+      { path: '/admin-predictive', label: 'Moteur prédictif', icon: IconBrain, roles: ['ADMIN'] },
     ],
   },
 ];
@@ -127,12 +127,11 @@ export default function Layout({ children }) {
         bg-white border-r border-gray-200 flex flex-col transition-all duration-300 h-full overflow-hidden
       `}>
         {/* Logo */}
-        <div className="p-4 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
-          <img src="/logo.png" alt="Solidata" className="w-9 h-9 rounded-lg flex-shrink-0 object-contain" />
-          {sidebarOpen && (
-            <div className="flex-1 min-w-0">
-              <img src="/logo-text.png" alt="Solidata" className="h-6 object-contain" />
-            </div>
+        <div className="p-4 border-b border-gray-100 flex items-center justify-center flex-shrink-0">
+          {sidebarOpen ? (
+            <img src="/logo-text.png" alt="Solidata" className="h-8 object-contain" />
+          ) : (
+            <img src="/logo.png" alt="Solidata" className="w-9 h-9 rounded-lg object-contain" />
           )}
         </div>
 
