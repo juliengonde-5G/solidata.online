@@ -99,17 +99,30 @@ export default function Candidates() {
     } catch (err) { console.error(err); }
   };
 
+  const [uploadMsg, setUploadMsg] = useState(null);
+
   const handleCVUpload = async (file) => {
     if (!file) return;
+    setUploadMsg(null);
     setUploading(true);
     const fd = new FormData();
     fd.append('cv', file);
     try {
-      const res = await api.post('/candidates/upload-cv-new', fd);
+      const res = await api.post('/candidates/upload-cv-new', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000,
+      });
       loadAll();
       loadDetails(res.data.candidate);
-    } catch (err) { console.error(err); }
+      const name = [res.data.candidate?.first_name, res.data.candidate?.last_name].filter(Boolean).join(' ') || 'Nouveau candidat';
+      setUploadMsg({ type: 'success', text: `CV analysé — ${name} ajouté` });
+    } catch (err) {
+      console.error('[CV Upload]', err);
+      const msg = err.response?.data?.error || err.message || 'Erreur inconnue';
+      setUploadMsg({ type: 'error', text: `Erreur upload CV : ${msg}` });
+    }
     setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const deleteCandidate = async (id) => {
@@ -211,6 +224,14 @@ export default function Candidates() {
             : <p className="text-sm text-gray-500"><span className="font-medium text-solidata-green">Glissez un CV ici</span> ou cliquez pour importer (PDF, Word, Image)</p>
           }
         </div>
+
+        {/* Upload feedback */}
+        {uploadMsg && (
+          <div className={`mb-3 px-4 py-2 rounded-lg text-sm flex items-center justify-between ${uploadMsg.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+            <span>{uploadMsg.text}</span>
+            <button onClick={() => setUploadMsg(null)} className="ml-3 text-lg leading-none opacity-60 hover:opacity-100">&times;</button>
+          </div>
+        )}
 
         {/* Kanban */}
         <div className="flex gap-3 overflow-x-auto flex-1 pb-2">
