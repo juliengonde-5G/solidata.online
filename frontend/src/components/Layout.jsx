@@ -13,7 +13,7 @@ const menuSections = [
     title: 'Recrutement',
     items: [
       { path: '/candidates', label: 'Candidats', icon: '👥', roles: ['ADMIN', 'RH', 'MANAGER'] },
-      { path: '/personality-matrix', label: 'Matrice PCM', icon: '🧠', roles: ['ADMIN', 'RH'] },
+      { path: '/pcm', label: 'Matrice PCM', icon: '🧠', roles: ['ADMIN', 'RH'] },
     ],
   },
   {
@@ -27,7 +27,6 @@ const menuSections = [
   {
     title: 'Tournées Collecte',
     items: [
-      { path: '/collection-planning', label: 'Planification', icon: '📅', roles: ['ADMIN', 'MANAGER'] },
       { path: '/tours', label: 'Tournées', icon: '🚛', roles: ['ADMIN', 'MANAGER'] },
       { path: '/vehicles', label: 'Véhicules', icon: '🚗', roles: ['ADMIN', 'MANAGER'] },
       { path: '/cav-map', label: 'Carte CAV', icon: '🗺️', roles: ['ADMIN', 'MANAGER'] },

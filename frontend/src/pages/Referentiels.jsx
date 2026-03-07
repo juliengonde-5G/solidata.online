@@ -1,0 +1,225 @@
+import { useState, useEffect } from 'react';
+import Layout from '../components/Layout';
+import api from '../services/api';
+
+export default function Referentiels() {
+  const [view, setView] = useState('associations');
+  const [associations, setAssociations] = useState([]);
+  const [exutoires, setExutoires] = useState([]);
+  const [catalogue, setCatalogue] = useState([]);
+  const [conteneurs, setConteneurs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({});
+
+  useEffect(() => { loadAll(); }, []);
+
+  const loadAll = async () => {
+    try {
+      const [aRes, eRes, cRes, tRes] = await Promise.all([
+        api.get('/referentiels/associations'),
+        api.get('/referentiels/exutoires'),
+        api.get('/referentiels/catalogue'),
+        api.get('/referentiels/conteneurs'),
+      ]);
+      setAssociations(aRes.data);
+      setExutoires(eRes.data);
+      setCatalogue(cRes.data);
+      setConteneurs(tRes.data);
+    } catch (err) { console.error(err); }
+    setLoading(false);
+  };
+
+  const createItem = async (e) => {
+    e.preventDefault();
+    try {
+      if (view === 'associations') await api.post('/referentiels/associations', form);
+      else if (view === 'exutoires') await api.post('/referentiels/exutoires', form);
+      else if (view === 'catalogue') await api.post('/referentiels/catalogue', form);
+      setShowForm(false);
+      setForm({});
+      loadAll();
+    } catch (err) { console.error(err); }
+  };
+
+  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+
+  const tabs = [
+    { key: 'associations', label: 'Associations', count: associations.length },
+    { key: 'exutoires', label: 'Exutoires', count: exutoires.length },
+    { key: 'catalogue', label: 'Catalogue Produits', count: catalogue.length },
+    { key: 'conteneurs', label: 'Types Conteneurs', count: conteneurs.length },
+  ];
+
+  return (
+    <Layout>
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-solidata-dark">Référentiels</h1>
+            <p className="text-gray-500">Données de référence</p>
+          </div>
+          {view !== 'conteneurs' && (
+            <button onClick={() => { setForm({}); setShowForm(true); }} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+              + Ajouter
+            </button>
+          )}
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6">
+          {tabs.map(t => (
+            <button key={t.key} onClick={() => setView(t.key)} className={`px-3 py-1.5 rounded-lg text-sm ${view === t.key ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>
+              {t.label} ({t.count})
+            </button>
+          ))}
+        </div>
+
+        {/* Associations */}
+        {view === 'associations' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Nom</th>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Type</th>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Commune</th>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Contact</th>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {associations.map(a => (
+                  <tr key={a.id} className="border-t hover:bg-gray-50">
+                    <td className="p-3 text-sm font-medium">{a.nom}</td>
+                    <td className="p-3 text-sm text-gray-500">{a.type || '—'}</td>
+                    <td className="p-3 text-sm">{a.commune || '—'}</td>
+                    <td className="p-3 text-sm text-gray-500">{a.contact_nom || '—'} {a.contact_tel ? `(${a.contact_tel})` : ''}</td>
+                    <td className="p-3">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${a.is_active !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {a.is_active !== false ? 'Actif' : 'Inactif'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Exutoires */}
+        {view === 'exutoires' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Nom</th>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Type</th>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Adresse</th>
+                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Contact</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exutoires.map(e => (
+                  <tr key={e.id} className="border-t hover:bg-gray-50">
+                    <td className="p-3 text-sm font-medium">{e.nom}</td>
+                    <td className="p-3 text-sm text-gray-500">{e.type || '—'}</td>
+                    <td className="p-3 text-sm">{e.adresse || '—'}</td>
+                    <td className="p-3 text-sm text-gray-500">{e.contact_nom || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Catalogue */}
+        {view === 'catalogue' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {catalogue.map(p => (
+              <div key={p.id} className="bg-white rounded-lg shadow-sm border p-4">
+                <h3 className="font-medium text-sm">{p.nom}</h3>
+                <div className="mt-2 space-y-1 text-xs text-gray-500">
+                  <p>Catégorie éco-org : {p.categorie_eco_org || '—'}</p>
+                  <p>Genre : {p.genre || '—'}</p>
+                  <p>Saison : {p.saison || '—'}</p>
+                  <p>Gamme : {p.gamme || '—'}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Conteneurs */}
+        {view === 'conteneurs' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {conteneurs.map(c => (
+              <div key={c.id} className="bg-white rounded-xl shadow-sm border p-5">
+                <h3 className="font-bold">{c.nom}</h3>
+                <div className="mt-2 space-y-1 text-sm text-gray-600">
+                  <p>Capacité : {c.capacite_litres || '—'} L</p>
+                  <p>Poids max : {c.poids_max_kg || '—'} kg</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Form */}
+        {showForm && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <form onSubmit={createItem} className="bg-white rounded-xl p-6 w-[400px] shadow-xl">
+              <h2 className="text-lg font-bold mb-4">
+                {view === 'associations' ? 'Nouvelle association' : view === 'exutoires' ? 'Nouvel exutoire' : 'Nouveau produit'}
+              </h2>
+              <div className="space-y-3">
+                <input placeholder="Nom *" value={form.nom || ''} onChange={e => setForm({ ...form, nom: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <input placeholder="Type" value={form.type || ''} onChange={e => setForm({ ...form, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                {view === 'associations' && (
+                  <>
+                    <input placeholder="Adresse" value={form.adresse || ''} onChange={e => setForm({ ...form, adresse: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input placeholder="Commune" value={form.commune || ''} onChange={e => setForm({ ...form, commune: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input placeholder="Nom contact" value={form.contact_nom || ''} onChange={e => setForm({ ...form, contact_nom: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input placeholder="Tél contact" value={form.contact_tel || ''} onChange={e => setForm({ ...form, contact_tel: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </>
+                )}
+                {view === 'exutoires' && (
+                  <>
+                    <input placeholder="Adresse" value={form.adresse || ''} onChange={e => setForm({ ...form, adresse: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input placeholder="Nom contact" value={form.contact_nom || ''} onChange={e => setForm({ ...form, contact_nom: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input placeholder="Email contact" value={form.contact_email || ''} onChange={e => setForm({ ...form, contact_email: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input placeholder="Tél contact" value={form.contact_tel || ''} onChange={e => setForm({ ...form, contact_tel: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </>
+                )}
+                {view === 'catalogue' && (
+                  <>
+                    <input placeholder="Catégorie éco-org" value={form.categorie_eco_org || ''} onChange={e => setForm({ ...form, categorie_eco_org: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <select value={form.genre || ''} onChange={e => setForm({ ...form, genre: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                      <option value="">Genre</option>
+                      <option value="homme">Homme</option>
+                      <option value="femme">Femme</option>
+                      <option value="enfant">Enfant</option>
+                      <option value="mixte">Mixte</option>
+                    </select>
+                    <select value={form.saison || ''} onChange={e => setForm({ ...form, saison: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                      <option value="">Saison</option>
+                      <option value="Été">Été</option>
+                      <option value="Hiver">Hiver</option>
+                      <option value="Mi-saison">Mi-saison</option>
+                      <option value="Sans Saison">Sans Saison</option>
+                    </select>
+                    <input placeholder="Gamme" value={form.gamme || ''} onChange={e => setForm({ ...form, gamme: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </>
+                )}
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Créer</button>
+              </div>
+            </form>
+          </div>
+        )}
+      </div>
+    </Layout>
+  );
+}
