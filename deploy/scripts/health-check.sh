@@ -2,14 +2,14 @@
 # ============================================================
 # SOLIDATA — Vérification santé des services
 # Usage: bash health-check.sh
-# Cron : */5 * * * * /opt/solidata/deploy/scripts/health-check.sh
+# Cron : */5 * * * * /opt/solidata.online/deploy/scripts/health-check.sh
 # ============================================================
 
 DOMAIN="solidata.online"
-LOG_FILE="/opt/solidata/logs/health-check.log"
-COMPOSE_FILE="/opt/solidata/docker-compose.prod.yml"
+LOG_FILE="/opt/solidata.online/logs/health-check.log"
+COMPOSE_FILE="/opt/solidata.online/docker-compose.prod.yml"
 
-mkdir -p /opt/solidata/logs
+mkdir -p /opt/solidata.online/logs
 
 check_service() {
     local name=$1

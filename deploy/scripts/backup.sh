@@ -2,13 +2,13 @@
 # ============================================================
 # SOLIDATA — Sauvegarde base de données + uploads
 # Usage: bash backup.sh [daily|manual]
-# Cron recommandé : 0 2 * * * /opt/solidata/deploy/scripts/backup.sh daily
+# Cron recommandé : 0 2 * * * /opt/solidata.online/deploy/scripts/backup.sh daily
 # ============================================================
 
 set -euo pipefail
 
-APP_DIR="/opt/solidata"
-BACKUP_DIR="/opt/solidata-backups"
+APP_DIR="/opt/solidata.online"
+BACKUP_DIR="/opt/solidata.online-backups"
 DATE=$(date +%Y%m%d_%H%M%S)
 TYPE="${1:-manual}"
 RETENTION_DAYS=30

@@ -11,7 +11,7 @@ set -euo pipefail
 DOMAIN="solidata.online"
 SERVER_IP="51.159.144.100"
 EMAIL="admin@solidata.online"
-APP_DIR="/opt/solidata"
+APP_DIR="/opt/solidata.online"
 DEPLOY_USER="solidata"
 REPO_URL="https://github.com/juliengonde-5G/solidata.online.git"
 BRANCH="claude/solidata-erp-app-KYMZZ"
@@ -47,8 +47,8 @@ fi
 
 # --- Suppression des anciennes installations applicatives ---
 echo "  Nettoyage des répertoires applicatifs..."
-rm -rf /opt/solidata 2>/dev/null || true
-rm -rf /opt/solidata-backups 2>/dev/null || true
+rm -rf /opt/solidata.online 2>/dev/null || true
+rm -rf /opt/solidata.online-backups 2>/dev/null || true
 rm -rf /var/www/* 2>/dev/null || true
 rm -rf /tmp/solidata* 2>/dev/null || true
 
@@ -146,7 +146,7 @@ fi
 # --- 6. Clone du dépôt + structure ---
 echo "[6/9] Clone du dépôt et création structure..."
 cd /
-mkdir -p /opt/solidata-backups
+mkdir -p /opt/solidata.online-backups
 
 if [ -d "${APP_DIR}/.git" ]; then
     echo "  Dépôt déjà présent, mise à jour..."
@@ -170,7 +170,7 @@ echo "  Branche active : $(git branch --show-current)"
 mkdir -p ${APP_DIR}/logs
 
 chown -R ${DEPLOY_USER}:${DEPLOY_USER} ${APP_DIR}
-chown -R ${DEPLOY_USER}:${DEPLOY_USER} /opt/solidata-backups
+chown -R ${DEPLOY_USER}:${DEPLOY_USER} /opt/solidata.online-backups
 
 # --- 7. Swap (si < 2Go RAM) ---
 echo "[7/9] Vérification swap..."
@@ -188,7 +188,7 @@ fi
 # --- 8. Logrotate ---
 echo "[8/9] Configuration logrotate..."
 cat > /etc/logrotate.d/solidata <<'LOGROTATE'
-/opt/solidata/logs/*.log {
+/opt/solidata.online/logs/*.log {
     daily
     missingok
     rotate 14

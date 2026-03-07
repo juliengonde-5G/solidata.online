@@ -12,7 +12,7 @@ if [ -z "${DUMP_FILE}" ]; then
     echo "Usage: $0 <fichier_dump.dump.gz>"
     echo ""
     echo "Sauvegardes disponibles :"
-    ls -lh /opt/solidata-backups/db_*.dump.gz 2>/dev/null || echo "  Aucune sauvegarde trouvée"
+    ls -lh /opt/solidata.online-backups/db_*.dump.gz 2>/dev/null || echo "  Aucune sauvegarde trouvée"
     exit 1
 fi
 
