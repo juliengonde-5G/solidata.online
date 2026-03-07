@@ -1,0 +1,175 @@
+require('dotenv').config();
+const express = require('express');
+const http = require('http');
+const cors = require('cors');
+const path = require('path');
+const { Server } = require('socket.io');
+const pool = require('./config/database');
+
+const app = express();
+const server = http.createServer(app);
+
+// Socket.io
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+});
+
+// Middleware globaux
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Fichiers statiques
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
+
+// Rendre io accessible aux routes
+app.set('io', io);
+
+// ══════════════════════════════════════════
+// ROUTES API
+// ══════════════════════════════════════════
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/users', require('./routes/users'));
+app.use('/api/settings', require('./routes/settings'));
+
+// Les routes suivantes seront ajoutées par lots
+// app.use('/api/candidates', require('./routes/candidates'));
+// app.use('/api/pcm', require('./routes/pcm'));
+// app.use('/api/teams', require('./routes/teams'));
+// app.use('/api/employees', require('./routes/employees'));
+// app.use('/api/cav', require('./routes/cav'));
+// app.use('/api/vehicles', require('./routes/vehicles'));
+// app.use('/api/tours', require('./routes/tours'));
+// app.use('/api/stock', require('./routes/stock'));
+// app.use('/api/production', require('./routes/production'));
+// app.use('/api/billing', require('./routes/billing'));
+// app.use('/api/reporting', require('./routes/reporting'));
+// app.use('/api/exports', require('./routes/exports'));
+// app.use('/api/tri', require('./routes/tri'));
+// app.use('/api/produits-finis', require('./routes/produits-finis'));
+// app.use('/api/expeditions', require('./routes/expeditions'));
+// app.use('/api/refashion', require('./routes/refashion'));
+// app.use('/api/referentiels', require('./routes/referentiels'));
+// app.use('/api/notifications', require('./routes/notifications'));
+
+// Health check
+app.get('/api/health', async (req, res) => {
+  try {
+    const dbResult = await pool.query('SELECT NOW() as time, version() as version');
+    const postgis = await pool.query("SELECT PostGIS_Version() as postgis_version");
+    res.json({
+      status: 'ok',
+      timestamp: dbResult.rows[0].time,
+      database: {
+        connected: true,
+        version: dbResult.rows[0].version,
+        postgis: postgis.rows[0].postgis_version,
+      },
+      modules: {
+        auth: true,
+        users: true,
+        settings: true,
+        candidates: false,
+        pcm: false,
+        teams: false,
+        employees: false,
+        cav: false,
+        vehicles: false,
+        tours: false,
+        stock: false,
+        production: false,
+        billing: false,
+        reporting: false,
+        tri: false,
+        refashion: false,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════
+// SOCKET.IO - GPS & Tournées temps réel
+// ══════════════════════════════════════════
+io.on('connection', (socket) => {
+  console.log(`[SOCKET] Client connecté : ${socket.id}`);
+
+  // Le chauffeur rejoint la room de sa tournée
+  socket.on('join-tour', (tourId) => {
+    socket.join(`tour-${tourId}`);
+    console.log(`[SOCKET] ${socket.id} rejoint tour-${tourId}`);
+  });
+
+  // Position GPS du chauffeur
+  socket.on('gps-update', async (data) => {
+    const { tourId, vehicleId, latitude, longitude, speed } = data;
+    try {
+      await pool.query(
+        'INSERT INTO gps_positions (tour_id, vehicle_id, latitude, longitude, speed) VALUES ($1, $2, $3, $4, $5)',
+        [tourId, vehicleId, latitude, longitude, speed]
+      );
+      // Broadcast aux managers qui suivent cette tournée
+      io.to(`tour-${tourId}`).emit('vehicle-position', {
+        tourId, vehicleId, latitude, longitude, speed, timestamp: new Date(),
+      });
+    } catch (err) {
+      console.error('[SOCKET] Erreur GPS :', err);
+    }
+  });
+
+  // Mise à jour statut CAV collecté
+  socket.on('cav-collected', (data) => {
+    io.to(`tour-${data.tourId}`).emit('cav-status-update', data);
+  });
+
+  // Mise à jour statut tournée
+  socket.on('tour-status', (data) => {
+    io.to(`tour-${data.tourId}`).emit('tour-status-update', data);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[SOCKET] Client déconnecté : ${socket.id}`);
+  });
+});
+
+// ══════════════════════════════════════════
+// INITIALISATION BASE DE DONNÉES AU DÉMARRAGE
+// ══════════════════════════════════════════
+async function initOnStartup() {
+  try {
+    // Vérifier la connexion
+    await pool.query('SELECT 1');
+    console.log('[DB] Connexion PostgreSQL établie');
+
+    // Vérifier si les tables existent
+    const tables = await pool.query(
+      "SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'public'"
+    );
+    if (parseInt(tables.rows[0].count) < 5) {
+      console.log('[DB] Tables manquantes, lancement init-db...');
+      require('./scripts/init-db');
+    } else {
+      console.log(`[DB] ${tables.rows[0].count} tables trouvées`);
+    }
+  } catch (err) {
+    console.error('[DB] Erreur connexion :', err.message);
+    console.log('[DB] Nouvelle tentative dans 5s...');
+    setTimeout(initOnStartup, 5000);
+    return;
+  }
+}
+
+// Démarrage serveur
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, async () => {
+  console.log(`\n══════════════════════════════════════════`);
+  console.log(`  SOLIDATA ERP - API Backend`);
+  console.log(`  Port : ${PORT}`);
+  console.log(`  Env  : ${process.env.NODE_ENV || 'development'}`);
+  console.log(`══════════════════════════════════════════\n`);
+  await initOnStartup();
+});
+
+module.exports = { app, server, io };

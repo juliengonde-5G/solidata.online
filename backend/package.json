@@ -1,0 +1,37 @@
+{
+  "name": "solidata-backend",
+  "version": "1.0.0",
+  "description": "SOLIDATA ERP - Backend API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "init-db": "node src/scripts/init-db.js",
+    "migrate-v2": "node src/scripts/migrate-v2.js",
+    "seed-cav": "node src/scripts/seed-cav.js",
+    "seed-data": "node src/scripts/seed-data.js",
+    "seed-production": "node src/scripts/seed-production.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "multer": "^1.4.5-lts.1",
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.15.0",
+    "pdf-parse": "^2.4.5",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1",
+    "xlsx": "^0.18.5",
+    "xml2js": "^0.6.2",
+    "express-validator": "^7.2.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "crypto-js": "^4.2.0",
+    "@tensorflow/tfjs-node": "^4.21.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
