@@ -543,6 +543,61 @@ router.post('/', authorize('ADMIN', 'RH'), async (req, res) => {
   }
 });
 
+// POST /api/candidates/upload-cv-new — Upload CV → créer nouveau candidat
+// IMPORTANT: must be declared BEFORE /:id routes to avoid Express matching "upload-cv-new" as :id
+router.post('/upload-cv-new', authorize('ADMIN', 'RH'), upload.single('cv'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier CV requis' });
+
+    const filePath = `/uploads/cv/${req.file.filename}`;
+    const rawText = await parseCVFile(req.file.path);
+    const skillPatterns = await getSkillPatterns();
+    const extracted = await extractFromCV(rawText, skillPatterns);
+
+    const result = await pool.query(
+      `INSERT INTO candidates (first_name, last_name, email, phone, cv_file_path, cv_raw_text,
+       has_permis_b, has_caces, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received') RETURNING *`,
+      [
+        extracted.firstName, extracted.lastName, extracted.email, extracted.phone,
+        filePath, rawText,
+        extracted.skills.permis_b === 'detected',
+        extracted.skills.caces === 'detected',
+      ]
+    );
+
+    const candidateId = result.rows[0].id;
+
+    // Historique
+    await pool.query(
+      'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
+      [candidateId, 'received', 'Candidature créée depuis upload CV', req.user.id]
+    );
+
+    // Compétences
+    for (const [skill, status] of Object.entries(extracted.skills)) {
+      await pool.query(
+        'INSERT INTO candidate_skills (candidate_id, skill_name, status, updated_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+        [candidateId, skill, status, req.user.id]
+      );
+    }
+
+    res.status(201).json({
+      candidate: result.rows[0],
+      extracted: {
+        email: extracted.email,
+        phone: extracted.phone,
+        firstName: extracted.firstName,
+        lastName: extracted.lastName,
+        skills: extracted.skills,
+      },
+    });
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur upload-cv-new :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/candidates/:id
 router.get('/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
@@ -690,60 +745,6 @@ router.post('/:id/upload-cv', authorize('ADMIN', 'RH'), upload.single('cv'), asy
     });
   } catch (err) {
     console.error('[CANDIDATES] Erreur upload CV :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// POST /api/candidates/upload-cv-new — Upload CV → créer nouveau candidat
-router.post('/upload-cv-new', authorize('ADMIN', 'RH'), upload.single('cv'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'Fichier CV requis' });
-
-    const filePath = `/uploads/cv/${req.file.filename}`;
-    const rawText = await parseCVFile(req.file.path);
-    const skillPatterns = await getSkillPatterns();
-    const extracted = await extractFromCV(rawText, skillPatterns);
-
-    const result = await pool.query(
-      `INSERT INTO candidates (first_name, last_name, email, phone, cv_file_path, cv_raw_text,
-       has_permis_b, has_caces, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received') RETURNING *`,
-      [
-        extracted.firstName, extracted.lastName, extracted.email, extracted.phone,
-        filePath, rawText,
-        extracted.skills.permis_b === 'detected',
-        extracted.skills.caces === 'detected',
-      ]
-    );
-
-    const candidateId = result.rows[0].id;
-
-    // Historique
-    await pool.query(
-      'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
-      [candidateId, 'received', 'Candidature créée depuis upload CV', req.user.id]
-    );
-
-    // Compétences
-    for (const [skill, status] of Object.entries(extracted.skills)) {
-      await pool.query(
-        'INSERT INTO candidate_skills (candidate_id, skill_name, status, updated_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-        [candidateId, skill, status, req.user.id]
-      );
-    }
-
-    res.status(201).json({
-      candidate: result.rows[0],
-      extracted: {
-        email: extracted.email,
-        phone: extracted.phone,
-        firstName: extracted.firstName,
-        lastName: extracted.lastName,
-        skills: extracted.skills,
-      },
-    });
-  } catch (err) {
-    console.error('[CANDIDATES] Erreur upload-cv-new :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
