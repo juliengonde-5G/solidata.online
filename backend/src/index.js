@@ -33,11 +33,13 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/settings', require('./routes/settings'));
 
-// Les routes suivantes seront ajoutées par lots
-// app.use('/api/candidates', require('./routes/candidates'));
-// app.use('/api/pcm', require('./routes/pcm'));
-// app.use('/api/teams', require('./routes/teams'));
-// app.use('/api/employees', require('./routes/employees'));
+// Lot 2 : Recrutement + PCM + Équipes
+app.use('/api/candidates', require('./routes/candidates'));
+app.use('/api/pcm', require('./routes/pcm'));
+app.use('/api/teams', require('./routes/teams'));
+app.use('/api/employees', require('./routes/employees'));
+
+// Lot 3+ : Routes à activer
 // app.use('/api/cav', require('./routes/cav'));
 // app.use('/api/vehicles', require('./routes/vehicles'));
 // app.use('/api/tours', require('./routes/tours'));
@@ -70,10 +72,10 @@ app.get('/api/health', async (req, res) => {
         auth: true,
         users: true,
         settings: true,
-        candidates: false,
-        pcm: false,
-        teams: false,
-        employees: false,
+        candidates: true,
+        pcm: true,
+        teams: true,
+        employees: true,
         cav: false,
         vehicles: false,
         tours: false,
