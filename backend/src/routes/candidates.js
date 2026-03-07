@@ -31,13 +31,15 @@ const upload = multer({
 // ══════════════════════════════════════════
 // MOTEUR D'ANALYSE CV
 // ══════════════════════════════════════════
+
+// Hardcoded default patterns (fallback si la table skill_keywords est vide ou absente)
 const SKILLS_PATTERNS = {
   'permis_b': /permis\s*b|permis\s*de\s*conduire|cat[ée]gorie\s*b/i,
   'permis_c': /permis\s*c|poids\s*lourds?/i,
   'caces': /caces|cariste|chariot\s*[ée]l[ée]vateur/i,
   'tri_textile': /tri\s*(de\s*)?textiles?|tri\s*v[êe]tements?|triage/i,
   'controle_qualite': /contr[ôo]le\s*(de\s*)?qualit[ée]|qualit[ée]|inspection/i,
-  'gestion_equipe': /gestion\s*(d['']?)?[ée]quipe|management|encadrement|chef\s*d['']?[ée]quipe/i,
+  'gestion_equipe': /gestion\s*(d[''\u2019]?)?[ée]quipe|management|encadrement|chef\s*d[''\u2019]?[ée]quipe/i,
   'sst': /sst|secouriste|premiers?\s*secours|sauveteur/i,
   'habilitation_electrique': /habilitation\s*[ée]lectrique|[ée]lectricit[ée]/i,
   'logistique': /logistique|supply\s*chain|approvisionnement|magasinier/i,
@@ -49,7 +51,272 @@ const SKILLS_PATTERNS = {
   'informatique': /informatique|ordinateur|excel|word|logiciel/i,
 };
 
-function extractFromCV(rawText) {
+// Cache pour les patterns DB (invalidé toutes les 5 min)
+let _dbPatternsCache = null;
+let _dbPatternsCacheTime = 0;
+const DB_PATTERNS_CACHE_TTL = 5 * 60 * 1000;
+
+/**
+ * Charge les skill keywords depuis la table skill_keywords et les fusionne
+ * avec les patterns hardcodés. Les entrées DB sont prioritaires.
+ */
+async function getSkillPatterns() {
+  const now = Date.now();
+  if (_dbPatternsCache && (now - _dbPatternsCacheTime) < DB_PATTERNS_CACHE_TTL) {
+    return _dbPatternsCache;
+  }
+
+  // Commencer avec les patterns hardcodés
+  const merged = { ...SKILLS_PATTERNS };
+
+  try {
+    const result = await pool.query(
+      'SELECT skill_name, keyword, synonyms FROM skill_keywords WHERE is_active = true'
+    );
+
+    if (result.rows.length > 0) {
+      // Regrouper par skill_name
+      const dbSkills = {};
+      for (const row of result.rows) {
+        if (!dbSkills[row.skill_name]) {
+          dbSkills[row.skill_name] = [];
+        }
+        // Ajouter le keyword principal
+        dbSkills[row.skill_name].push(escapeRegex(row.keyword));
+        // Ajouter les synonymes
+        if (row.synonyms && row.synonyms.length > 0) {
+          for (const syn of row.synonyms) {
+            if (syn.trim()) dbSkills[row.skill_name].push(escapeRegex(syn.trim()));
+          }
+        }
+      }
+
+      // Construire les regex et fusionner (DB overrides hardcoded pour le meme skill_name)
+      for (const [skillName, terms] of Object.entries(dbSkills)) {
+        merged[skillName] = new RegExp(terms.join('|'), 'i');
+      }
+    }
+  } catch (err) {
+    // Table n'existe pas encore ou erreur DB : on utilise les patterns hardcodés
+    console.warn('[CV] skill_keywords table non disponible, utilisation des patterns par défaut :', err.message);
+  }
+
+  _dbPatternsCache = merged;
+  _dbPatternsCacheTime = now;
+  return merged;
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Invalider le cache des patterns (appelé après CRUD sur skill_keywords)
+ */
+function invalidateSkillPatternsCache() {
+  _dbPatternsCache = null;
+  _dbPatternsCacheTime = 0;
+}
+
+// ══════════════════════════════════════════
+// OCR via Tesseract.js
+// ══════════════════════════════════════════
+let _tesseractWorker = null;
+
+async function getOCRWorker() {
+  if (_tesseractWorker) return _tesseractWorker;
+  const Tesseract = require('tesseract.js');
+  _tesseractWorker = await Tesseract.createWorker('fra+eng');
+  return _tesseractWorker;
+}
+
+async function runOCR(filePath) {
+  try {
+    const worker = await getOCRWorker();
+    const { data: { text } } = await worker.recognize(filePath);
+    return text || '';
+  } catch (err) {
+    console.error('[CV] Erreur OCR Tesseract :', err.message);
+    return '';
+  }
+}
+
+// Seuil minimum de texte extrait d'un PDF avant de basculer en OCR (scanned PDF)
+const MIN_PDF_TEXT_LENGTH = 50;
+
+/**
+ * Parser le texte du CV (PDF avec fallback OCR, images via OCR)
+ */
+async function parseCVFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+
+  if (ext === '.pdf') {
+    try {
+      const pdfParse = require('pdf-parse');
+      const buffer = fs.readFileSync(filePath);
+      const data = await pdfParse(buffer);
+      const text = (data.text || '').trim();
+
+      // Si le PDF contient suffisamment de texte, on l'utilise
+      if (text.length >= MIN_PDF_TEXT_LENGTH) {
+        return text;
+      }
+
+      // Sinon c'est probablement un PDF scanné : fallback OCR
+      console.log('[CV] PDF avec peu de texte (%d chars), tentative OCR...', text.length);
+      return await runOCR(filePath);
+    } catch (err) {
+      console.error('[CV] Erreur parsing PDF :', err.message);
+      // En dernier recours, tenter l'OCR
+      return await runOCR(filePath);
+    }
+  }
+
+  // Images : OCR direct
+  if (['.png', '.jpg', '.jpeg'].includes(ext)) {
+    console.log('[CV] Fichier image détecté, lancement OCR...');
+    return await runOCR(filePath);
+  }
+
+  return '';
+}
+
+// ══════════════════════════════════════════
+// EXTRACTION NOM / PRÉNOM AMÉLIORÉE
+// ══════════════════════════════════════════
+
+/**
+ * Détecte si un mot est entièrement en majuscules (nom de famille typique dans les CV français)
+ * Gère les caractères accentués : À-Ö, Ø-Þ
+ */
+function isUpperCase(word) {
+  return word.length >= 2 && word === word.toUpperCase() && /^[A-ZÀ-ÖØ-Þ\-']+$/u.test(word);
+}
+
+/**
+ * Détecte si un mot est capitalisé (Prénom typique)
+ */
+function isCapitalized(word) {
+  return word.length >= 2 && /^[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+$/u.test(word);
+}
+
+function extractName(rawText) {
+  if (!rawText) return { firstName: null, lastName: null };
+
+  // Travailler sur les 500 premiers caractères pour la recherche de nom
+  const header = rawText.substring(0, 500);
+
+  let firstName = null;
+  let lastName = null;
+
+  // Stratégie 1 : Labels explicites "Nom :" / "Prénom :" / "Name:" / "Surname:"
+  const labelPatterns = [
+    // "Prénom : Jean" et "Nom : DUPONT"
+    { first: /(?:pr[ée]nom|first\s*name|given\s*name)\s*[:]\s*([A-ZÀ-ÖØ-Þa-zà-öø-ÿ\-']+)/i,
+      last:  /(?:nom(?:\s*de\s*famille)?|last\s*name|surname|family\s*name)\s*[:]\s*([A-ZÀ-ÖØ-Þa-zà-öø-ÿ\-']+)/i },
+    // "Nom, Prénom : DUPONT, Jean"
+    { combined: /(?:nom\s*[,&]\s*pr[ée]nom|nom\s+et\s+pr[ée]nom)\s*[:]\s*([A-ZÀ-ÖØ-Þa-zà-öø-ÿ\-']+)\s*[,\s]\s*([A-ZÀ-ÖØ-Þa-zà-öø-ÿ\-']+)/i,
+      order: 'last_first' },
+    // "Prénom Nom : Jean DUPONT"
+    { combined: /(?:pr[ée]nom\s*[,&]\s*nom|pr[ée]nom\s+et\s+nom)\s*[:]\s*([A-ZÀ-ÖØ-Þa-zà-öø-ÿ\-']+)\s*[,\s]\s*([A-ZÀ-ÖØ-Þa-zà-öø-ÿ\-']+)/i,
+      order: 'first_last' },
+  ];
+
+  for (const lp of labelPatterns) {
+    if (lp.combined) {
+      const m = header.match(lp.combined);
+      if (m) {
+        if (lp.order === 'last_first') {
+          lastName = m[1];
+          firstName = m[2];
+        } else {
+          firstName = m[1];
+          lastName = m[2];
+        }
+        return { firstName, lastName };
+      }
+    } else {
+      const firstMatch = header.match(lp.first);
+      const lastMatch = header.match(lp.last);
+      if (firstMatch) firstName = firstMatch[1];
+      if (lastMatch) lastName = lastMatch[1];
+      if (firstName && lastName) return { firstName, lastName };
+    }
+  }
+
+  // Réinitialiser si seul l'un des deux a été trouvé via labels
+  if (!firstName || !lastName) {
+    firstName = null;
+    lastName = null;
+  }
+
+  // Stratégie 2 : "Prénom NOM" ou "NOM Prénom" dans les premières lignes
+  const lines = header.split(/\n|\r\n?/).map(l => l.trim()).filter(l => l.length > 0);
+
+  for (const line of lines.slice(0, 10)) {
+    // Ignorer les lignes qui ressemblent à des adresses, emails, téléphones
+    if (/@/.test(line) || /^\+?\d/.test(line) || /rue|avenue|boulevard|cedex/i.test(line)) continue;
+
+    const words = line.split(/\s+/).filter(w => w.length >= 2 && /^[A-ZÀ-ÖØ-Þa-zà-öø-ÿ\-']+$/u.test(w));
+
+    if (words.length === 2) {
+      const [w1, w2] = words;
+
+      // "Prénom NOM" : capitalized + UPPERCASE
+      if (isCapitalized(w1) && isUpperCase(w2)) {
+        return { firstName: w1, lastName: w2 };
+      }
+      // "NOM Prénom" : UPPERCASE + capitalized
+      if (isUpperCase(w1) && isCapitalized(w2)) {
+        return { firstName: w2, lastName: w1 };
+      }
+    }
+
+    if (words.length === 3) {
+      const [w1, w2, w3] = words;
+
+      // "Prénom NOM NOM" (nom composé)
+      if (isCapitalized(w1) && isUpperCase(w2) && isUpperCase(w3)) {
+        return { firstName: w1, lastName: w2 + ' ' + w3 };
+      }
+      // "NOM Prénom Prénom" (prénom composé)
+      if (isUpperCase(w1) && isCapitalized(w2) && isCapitalized(w3)) {
+        return { firstName: w2 + ' ' + w3, lastName: w1 };
+      }
+      // "NOM NOM Prénom" (nom composé)
+      if (isUpperCase(w1) && isUpperCase(w2) && isCapitalized(w3)) {
+        return { firstName: w3, lastName: w1 + ' ' + w2 };
+      }
+      // "Prénom Prénom NOM"
+      if (isCapitalized(w1) && isCapitalized(w2) && isUpperCase(w3)) {
+        return { firstName: w1 + ' ' + w2, lastName: w3 };
+      }
+    }
+  }
+
+  // Stratégie 3 : Fallback - ancien regex adapté (cherche en début de texte)
+  const text = rawText.replace(/\s+/g, ' ');
+  const nameMatch = text.match(/^[^a-z]*?([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+)\s+([A-ZÀ-ÖØ-Þ]{2,})/m);
+  if (nameMatch) {
+    firstName = nameMatch[1];
+    lastName = nameMatch[2];
+    return { firstName, lastName };
+  }
+
+  // Stratégie 4 : Deux mots capitalisés côte-à-côte dans le header (dernier recours)
+  const twoCapMatch = header.match(/\b([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]{1,})\s+([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]{1,})\b/);
+  if (twoCapMatch) {
+    firstName = twoCapMatch[1];
+    lastName = twoCapMatch[2];
+  }
+
+  return { firstName, lastName };
+}
+
+/**
+ * Extraction complète des données du CV
+ */
+async function extractFromCV(rawText, skillPatterns) {
   if (!rawText) return { skills: {}, email: null, phone: null, firstName: null, lastName: null };
 
   const text = rawText.replace(/\s+/g, ' ');
@@ -62,42 +329,129 @@ function extractFromCV(rawText) {
   const phoneMatch = text.match(/(?:0|\+33\s?)[1-9](?:[\s.-]?\d{2}){4}/);
   const phone = phoneMatch ? phoneMatch[0].replace(/[\s.-]/g, '') : null;
 
-  // Nom/Prénom (cherche les mots en majuscules en début de texte)
-  let firstName = null, lastName = null;
-  const nameMatch = text.match(/^[^a-z]*?([A-ZÀ-Ú][a-zà-ú]+)\s+([A-ZÀ-Ú]{2,})/m);
-  if (nameMatch) {
-    firstName = nameMatch[1];
-    lastName = nameMatch[2];
-  }
+  // Nom/Prénom (extraction améliorée)
+  const { firstName, lastName } = extractName(rawText);
+
+  // Charger les patterns (hardcodés + DB)
+  const patterns = skillPatterns || await getSkillPatterns();
 
   // Compétences détectées
   const skills = {};
-  for (const [skill, pattern] of Object.entries(SKILLS_PATTERNS)) {
+  for (const [skill, pattern] of Object.entries(patterns)) {
     skills[skill] = pattern.test(text) ? 'detected' : 'not_mentioned';
   }
 
   return { skills, email, phone, firstName, lastName };
 }
 
-// Fonction pour parser le texte du CV (PDF)
-async function parseCVFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === '.pdf') {
-    try {
-      const pdfParse = require('pdf-parse');
-      const buffer = fs.readFileSync(filePath);
-      const data = await pdfParse(buffer);
-      return data.text;
-    } catch (err) {
-      console.error('[CV] Erreur parsing PDF :', err.message);
-      return '';
-    }
-  }
-  return '';
-}
-
 // Middleware auth pour toutes les routes
 router.use(authenticate);
+
+// ══════════════════════════════════════════
+// CRUD Skill Keywords (ADMIN only)
+// ══════════════════════════════════════════
+
+// GET /api/candidates/keywords — Liste tous les keywords
+router.get('/keywords', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM skill_keywords ORDER BY skill_name, keyword'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur liste keywords :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/candidates/keywords — Créer un keyword
+router.post('/keywords', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { skill_name, keyword, synonyms } = req.body;
+
+    if (!skill_name || !keyword) {
+      return res.status(400).json({ error: 'skill_name et keyword sont requis' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO skill_keywords (skill_name, keyword, synonyms)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [skill_name, keyword, synonyms || []]
+    );
+
+    invalidateSkillPatternsCache();
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Ce keyword existe déjà pour cette compétence' });
+    }
+    console.error('[CANDIDATES] Erreur création keyword :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/candidates/keywords/:id — Modifier un keyword
+router.put('/keywords/:id', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { skill_name, keyword, synonyms, is_active } = req.body;
+
+    const setClauses = [];
+    const values = [];
+    let i = 1;
+
+    if (skill_name !== undefined) { setClauses.push(`skill_name = $${i}`); values.push(skill_name); i++; }
+    if (keyword !== undefined) { setClauses.push(`keyword = $${i}`); values.push(keyword); i++; }
+    if (synonyms !== undefined) { setClauses.push(`synonyms = $${i}`); values.push(synonyms); i++; }
+    if (is_active !== undefined) { setClauses.push(`is_active = $${i}`); values.push(is_active); i++; }
+
+    if (setClauses.length === 0) {
+      return res.status(400).json({ error: 'Aucun champ à modifier' });
+    }
+
+    setClauses.push(`updated_at = NOW()`);
+    values.push(id);
+
+    const result = await pool.query(
+      `UPDATE skill_keywords SET ${setClauses.join(', ')} WHERE id = $${i} RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Keyword non trouvé' });
+    }
+
+    invalidateSkillPatternsCache();
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur modification keyword :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/candidates/keywords/:id — Supprimer un keyword
+router.delete('/keywords/:id', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM skill_keywords WHERE id = $1 RETURNING id',
+      [req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Keyword non trouvé' });
+    }
+
+    invalidateSkillPatternsCache();
+    res.json({ message: 'Keyword supprimé' });
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur suppression keyword :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// ROUTES CANDIDATES
+// ══════════════════════════════════════════
 
 // GET /api/candidates — Liste avec filtres
 router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
@@ -173,8 +527,9 @@ router.post('/', authorize('ADMIN', 'RH'), async (req, res) => {
       [result.rows[0].id, 'received', 'Candidature créée', req.user.id]
     );
 
-    // Compétences initiales
-    for (const skill of Object.keys(SKILLS_PATTERNS)) {
+    // Compétences initiales (hardcodés + DB)
+    const patterns = await getSkillPatterns();
+    for (const skill of Object.keys(patterns)) {
       await pool.query(
         'INSERT INTO candidate_skills (candidate_id, skill_name, status, updated_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
         [result.rows[0].id, skill, 'not_mentioned', req.user.id]
@@ -288,9 +643,10 @@ router.post('/:id/upload-cv', authorize('ADMIN', 'RH'), upload.single('cv'), asy
     const { id } = req.params;
     const filePath = `/uploads/cv/${req.file.filename}`;
 
-    // Parser le CV
+    // Parser le CV (avec OCR si nécessaire)
     const rawText = await parseCVFile(req.file.path);
-    const extracted = extractFromCV(rawText);
+    const skillPatterns = await getSkillPatterns();
+    const extracted = await extractFromCV(rawText, skillPatterns);
 
     // Mettre à jour le candidat
     const updates = { cv_file_path: filePath, cv_raw_text: rawText };
@@ -345,7 +701,8 @@ router.post('/upload-cv-new', authorize('ADMIN', 'RH'), upload.single('cv'), asy
 
     const filePath = `/uploads/cv/${req.file.filename}`;
     const rawText = await parseCVFile(req.file.path);
-    const extracted = extractFromCV(rawText);
+    const skillPatterns = await getSkillPatterns();
+    const extracted = await extractFromCV(rawText, skillPatterns);
 
     const result = await pool.query(
       `INSERT INTO candidates (first_name, last_name, email, phone, cv_file_path, cv_raw_text,

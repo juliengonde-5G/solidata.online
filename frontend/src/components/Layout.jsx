@@ -46,7 +46,9 @@ const menuSections = [
   {
     title: 'Reporting',
     items: [
-      { path: '/reporting', label: 'Dashboard', icon: '📈', roles: ['ADMIN', 'MANAGER', 'AUTORITE'] },
+      { path: '/reporting-collecte', label: 'Reporting Collecte', icon: '🚛', roles: ['ADMIN', 'MANAGER'] },
+      { path: '/reporting-rh', label: 'Reporting RH', icon: '👥', roles: ['ADMIN', 'RH'] },
+      { path: '/reporting-production', label: 'Reporting Production', icon: '⚙️', roles: ['ADMIN', 'MANAGER'] },
       { path: '/refashion', label: 'Refashion', icon: '♻️', roles: ['ADMIN', 'MANAGER'] },
       { path: '/billing', label: 'Facturation', icon: '💰', roles: ['ADMIN', 'MANAGER'] },
     ],

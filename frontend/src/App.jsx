@@ -16,7 +16,9 @@ import ChaineTri from './pages/ChaineTri';
 import Stock from './pages/Stock';
 import ProduitsFinis from './pages/ProduitsFinis';
 import Expeditions from './pages/Expeditions';
-import Reporting from './pages/Reporting';
+import ReportingCollecte from './pages/ReportingCollecte';
+import ReportingRH from './pages/ReportingRH';
+import ReportingProduction from './pages/ReportingProduction';
 import Refashion from './pages/Refashion';
 import Billing from './pages/Billing';
 import Users from './pages/Users';
@@ -64,7 +66,10 @@ function App() {
           <Route path="/expeditions" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Expeditions /></ProtectedRoute>} />
 
           {/* Reporting */}
-          <Route path="/reporting" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE']}><Reporting /></ProtectedRoute>} />
+          <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingCollecte /></ProtectedRoute>} />
+          <Route path="/reporting-rh" element={<ProtectedRoute roles={['ADMIN', 'RH']}><ReportingRH /></ProtectedRoute>} />
+          <Route path="/reporting-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingProduction /></ProtectedRoute>} />
+          <Route path="/reporting" element={<Navigate to="/reporting-collecte" />} />
           <Route path="/refashion" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Refashion /></ProtectedRoute>} />
           <Route path="/billing" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Billing /></ProtectedRoute>} />
 

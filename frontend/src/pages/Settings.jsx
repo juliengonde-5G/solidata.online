@@ -5,6 +5,7 @@ import api from '../services/api';
 export default function Settings() {
   const [settings, setSettings] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editSetting, setEditSetting] = useState(null);
   const [showTemplateForm, setShowTemplateForm] = useState(false);
@@ -14,12 +15,14 @@ export default function Settings() {
 
   const loadData = async () => {
     try {
-      const [setRes, tmplRes] = await Promise.all([
+      const [setRes, tmplRes, healthRes] = await Promise.all([
         api.get('/settings'),
         api.get('/settings/templates'),
+        api.get('/health').catch(() => ({ data: null })),
       ]);
       setSettings(setRes.data);
       setTemplates(tmplRes.data);
+      setHealth(healthRes.data);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -51,6 +54,22 @@ export default function Settings() {
           <h1 className="text-2xl font-bold text-solidata-dark">Paramètres</h1>
           <p className="text-gray-500">Configuration de l'application</p>
         </div>
+
+        {/* État du système */}
+        {health && (
+          <div className="bg-white rounded-xl shadow-sm border p-6 mb-8">
+            <h2 className="font-semibold text-solidata-dark mb-4">État du système</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatusItem label="API" active={health.status === 'ok'} />
+              <StatusItem label="Base de données" active={health.database?.connected} />
+              <StatusItem label="PostGIS" active={!!health.database?.postgis} />
+              <StatusItem label="Auth" active={health.modules?.auth} />
+            </div>
+            <p className="text-xs text-gray-400 mt-4">
+              PostgreSQL {health.database?.version?.split(' ').slice(0, 2).join(' ')} • PostGIS {health.database?.postgis}
+            </p>
+          </div>
+        )}
 
         {/* Settings */}
         <div className="bg-white rounded-xl shadow-sm border mb-8">
@@ -113,6 +132,7 @@ export default function Settings() {
         </div>
 
         {/* Template Form */}
+        {/* Template Form */}
         {showTemplateForm && (
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
             <form onSubmit={createTemplate} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
@@ -136,5 +156,17 @@ export default function Settings() {
         )}
       </div>
     </Layout>
+  );
+}
+
+function StatusItem({ label, active }) {
+  return (
+    <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-3">
+      <span className={`w-2.5 h-2.5 rounded-full ${active ? 'bg-green-500' : 'bg-red-400'}`} />
+      <span className="text-sm text-gray-700">{label}</span>
+      <span className={`ml-auto text-xs font-medium ${active ? 'text-green-600' : 'text-red-500'}`}>
+        {active ? 'OK' : 'KO'}
+      </span>
+    </div>
   );
 }

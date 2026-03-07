@@ -1,15 +1,8 @@
-import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
-import api from '../services/api';
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [health, setHealth] = useState(null);
-
-  useEffect(() => {
-    api.get('/health').then(res => setHealth(res.data)).catch(() => {});
-  }, []);
 
   return (
     <Layout>
@@ -29,25 +22,9 @@ export default function Dashboard() {
           <KpiCard title="Candidats actifs" value="—" unit="" color="yellow" icon="👥" />
         </div>
 
-        {/* Status système */}
-        {health && (
-          <div className="bg-white rounded-xl shadow-sm border p-6">
-            <h2 className="text-lg font-semibold text-solidata-dark mb-4">État du système</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatusItem label="API" active={health.status === 'ok'} />
-              <StatusItem label="Base de données" active={health.database?.connected} />
-              <StatusItem label="PostGIS" active={!!health.database?.postgis} />
-              <StatusItem label="Auth" active={health.modules?.auth} />
-            </div>
-            <p className="text-xs text-gray-400 mt-4">
-              PostgreSQL {health.database?.version?.split(' ').slice(0, 2).join(' ')} • PostGIS {health.database?.postgis}
-            </p>
-          </div>
-        )}
-
-        {/* Modules à venir */}
-        <div className="mt-8 bg-solidata-green/5 border border-solidata-green/20 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-solidata-dark mb-3">Modules en cours de déploiement</h2>
+        {/* Modules actifs */}
+        <div className="bg-solidata-green/5 border border-solidata-green/20 rounded-xl p-6">
+          <h2 className="text-lg font-semibold text-solidata-dark mb-3">Modules actifs</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {['Recrutement & PCM', 'Équipes & Planning', 'Collecte & Tournées IA', 'Production & Tri',
               'Stock & Expéditions', 'Facturation', 'Reporting', 'Refashion'].map(mod => (
@@ -83,11 +60,3 @@ function KpiCard({ title, value, unit, color, icon }) {
   );
 }
 
-function StatusItem({ label, active }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className={`w-2.5 h-2.5 rounded-full ${active ? 'bg-solidata-green' : 'bg-red-400'}`} />
-      <span className="text-sm text-gray-600">{label}</span>
-    </div>
-  );
-}
