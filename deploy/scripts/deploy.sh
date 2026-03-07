@@ -71,7 +71,7 @@ case "${ACTION}" in
 
     # Étape 2: Obtenir certificat SSL
     log "Étape 2/4 — Obtention certificat Let's Encrypt..."
-    docker compose -f ${COMPOSE_FILE} run --rm certbot certonly \
+    docker compose -f ${COMPOSE_FILE} run --rm --entrypoint certbot certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
         --email ${EMAIL} \
