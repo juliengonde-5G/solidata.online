@@ -11,16 +11,16 @@
 Créer 3 enregistrements DNS A pointant vers l'IP du serveur :
 
 ```
-A    solidata.online      → <IP_SERVEUR>
-A    www.solidata.online   → <IP_SERVEUR>
-A    m.solidata.online     → <IP_SERVEUR>
+A    solidata.online      → 51.159.144.100
+A    www.solidata.online   → 51.159.144.100
+A    m.solidata.online     → 51.159.144.100
 ```
 
 ## Étape 1 — Initialisation serveur
 
 ```bash
 # Se connecter en SSH
-ssh root@<IP_SERVEUR>
+ssh root@51.159.144.100
 
 # Télécharger et exécuter le script d'init
 git clone https://github.com/juliengonde-5G/solidata.online.git /opt/solidata
@@ -28,7 +28,9 @@ cd /opt/solidata
 sudo bash deploy/scripts/init-server.sh
 ```
 
-Ce script installe : Docker, UFW (pare-feu), Fail2ban, Swap si nécessaire.
+Ce script effectue :
+1. **Purge complète** : arrêt/suppression de tous les conteneurs Docker, images, volumes, réseaux, anciennes installations (Nginx, PostgreSQL, Node.js standalone), certificats SSL, crontabs
+2. **Installation propre** : Docker, UFW (pare-feu), Fail2ban, Swap si nécessaire
 
 ## Étape 2 — Configuration
 

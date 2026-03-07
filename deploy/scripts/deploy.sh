@@ -11,6 +11,7 @@ set -euo pipefail
 
 APP_DIR="/opt/solidata"
 DOMAIN="solidata.online"
+SERVER_IP="51.159.144.100"
 EMAIL="admin@solidata.online"
 COMPOSE_FILE="docker-compose.prod.yml"
 BACKUP_DIR="/opt/solidata-backups"
