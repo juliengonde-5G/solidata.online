@@ -49,6 +49,9 @@ services:
       CENTRE_TRI_LNG: 1.0993
     volumes:
       - uploads:/app/uploads
+      - ./tournee.xlsx:/data/tournee.xlsx:ro
+      - ./tonnages.xlsx:/data/tonnages.xlsx:ro
+      - ./KPI_Production 2026.xlsx:/data/KPI_Production 2026.xlsx:ro
     networks:
       - internal
     deploy:

@@ -5,9 +5,16 @@
  */
 const XLSX = require('xlsx');
 const path = require('path');
+const fs = require('fs');
 const pool = require('../config/database');
 
-const DEFAULT_FILE = path.join(__dirname, '..', '..', '..', 'tournee.xlsx');
+const FILENAME = 'tournee.xlsx';
+const SEARCH_PATHS = [
+  path.join(__dirname, '..', '..', '..', FILENAME),  // repo root (local dev)
+  path.join('/data', FILENAME),                        // Docker volume mount
+  path.join('/app', FILENAME),                         // Docker app root
+];
+const DEFAULT_FILE = SEARCH_PATHS.find(p => fs.existsSync(p)) || SEARCH_PATHS[0];
 
 async function seedCAV() {
   const filePath = process.argv[2] || DEFAULT_FILE;

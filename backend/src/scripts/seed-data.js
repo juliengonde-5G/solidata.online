@@ -8,9 +8,16 @@
  */
 const XLSX = require('xlsx');
 const path = require('path');
+const fs = require('fs');
 const pool = require('../config/database');
 
-const DEFAULT_FILE = path.join(__dirname, '..', '..', '..', 'tonnages.xlsx');
+const FILENAME = 'tonnages.xlsx';
+const SEARCH_PATHS = [
+  path.join(__dirname, '..', '..', '..', FILENAME),
+  path.join('/data', FILENAME),
+  path.join('/app', FILENAME),
+];
+const DEFAULT_FILE = SEARCH_PATHS.find(p => fs.existsSync(p)) || SEARCH_PATHS[0];
 
 // Convert Excel serial date to JS Date
 function excelDateToJS(serial) {
