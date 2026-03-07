@@ -219,6 +219,22 @@ async function initDatabase() {
       );
     `);
 
+    // Positions (doit être créé AVANT employee_contracts et schedule qui le référencent)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS positions (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(200) NOT NULL,
+        type VARCHAR(50),
+        month VARCHAR(20),
+        slots_open INTEGER DEFAULT 1,
+        slots_filled INTEGER DEFAULT 0,
+        required_skills TEXT[],
+        team_type VARCHAR(30),
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     // Contrats employés
     await client.query(`
       CREATE TABLE IF NOT EXISTS employee_contracts (
@@ -244,21 +260,6 @@ async function initDatabase() {
         employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
         day_off VARCHAR(10) NOT NULL CHECK (day_off IN ('lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche')),
         UNIQUE(employee_id, day_off)
-      );
-    `);
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS positions (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(200) NOT NULL,
-        type VARCHAR(50),
-        month VARCHAR(20),
-        slots_open INTEGER DEFAULT 1,
-        slots_filled INTEGER DEFAULT 0,
-        required_skills TEXT[],
-        team_type VARCHAR(30),
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT NOW()
       );
     `);
 
