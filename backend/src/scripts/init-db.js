@@ -961,6 +961,9 @@ async function initDatabase() {
     await client.query(`
       ALTER TABLE tonnage_history ADD COLUMN IF NOT EXISTS route_name VARCHAR(100);
     `);
+    await client.query(`
+      ALTER TABLE tonnage_history ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'manual';
+    `);
 
     await client.query('COMMIT');
     console.log('\n[INIT-DB] ══════════════════════════════════════');
