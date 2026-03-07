@@ -126,13 +126,17 @@ async function seedData() {
     console.log(`[SEED-DATA] Stock: ${stockInserted} insérés, ${stockSkipped} doublons ignorés`);
 
     // Insert aggregated tonnage_history per route per day
-    let tonnageInserted = 0;
+    const aggEntries = Object.values(dailyByCategory);
+    console.log(`[SEED-DATA] ${aggEntries.length} agrégations route/jour à insérer`);
 
-    for (const entry of Object.values(dailyByCategory)) {
+    // Clean previous imported tonnage_history before reinserting
+    await client.query(`DELETE FROM tonnage_history WHERE source = 'import'`);
+
+    let tonnageInserted = 0;
+    for (const entry of aggEntries) {
       await client.query(
         `INSERT INTO tonnage_history (date, route_name, weight_kg, source)
-         VALUES ($1, $2, $3, 'import')
-         ON CONFLICT DO NOTHING`,
+         VALUES ($1, $2, $3, 'import')`,
         [entry.date, entry.categorie, entry.total_kg]
       );
       tonnageInserted++;
