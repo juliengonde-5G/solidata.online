@@ -145,6 +145,7 @@ fi
 
 # --- 6. Clone du dépôt + structure ---
 echo "[6/9] Clone du dépôt et création structure..."
+cd /
 mkdir -p /opt/solidata-backups
 
 if [ -d "${APP_DIR}/.git" ]; then
