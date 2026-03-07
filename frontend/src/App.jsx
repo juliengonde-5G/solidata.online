@@ -22,6 +22,7 @@ import Billing from './pages/Billing';
 import Users from './pages/Users';
 import Settings from './pages/Settings';
 import Referentiels from './pages/Referentiels';
+import PCMTest from './pages/PCMTest';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -37,6 +38,7 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/pcm-test/:token" element={<PCMTest />} />
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
 
           {/* Recrutement */}
