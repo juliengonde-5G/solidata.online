@@ -7,16 +7,54 @@ router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
 // ══════ DPAV Trimestriel ══════
 
-// GET /api/refashion/dpav
+// GET /api/refashion/dpav — Synthèse DPAV pour un trimestre
 router.get('/dpav', async (req, res) => {
   try {
-    const { annee } = req.query;
-    let query = 'SELECT * FROM refashion_dpav';
-    const params = [];
-    if (annee) { params.push(annee); query += ' WHERE annee = $1'; }
-    query += ' ORDER BY annee DESC, trimestre DESC';
-    const result = await pool.query(query, params);
-    res.json(result.rows);
+    const year = req.query.year || req.query.annee || new Date().getFullYear();
+    const quarter = req.query.quarter || req.query.trimestre || Math.ceil((new Date().getMonth() + 1) / 3);
+
+    const dpavRes = await pool.query(
+      'SELECT * FROM refashion_dpav WHERE annee = $1 AND trimestre = $2',
+      [year, quarter]
+    );
+
+    const communesRes = await pool.query(
+      'SELECT COUNT(DISTINCT commune)::int as nb FROM refashion_communes WHERE annee = $1 AND trimestre = $2',
+      [year, quarter]
+    );
+
+    const dpav = dpavRes.rows[0] || {};
+    const reemploi = dpav.ventes_reemploi_t || 0;
+    const recyclage = dpav.ventes_recyclage_t || 0;
+    const csr = dpav.csr_t || 0;
+    const energie = dpav.energie_t || 0;
+    const entree = dpav.achats_t || 0;
+
+    const taux = { reemploi: 80, recyclage: 295, csr: 210, energie: 20, entree: 193 };
+
+    const details = [
+      { categorie: 'Réemploi', tonnage: reemploi, taux: taux.reemploi, subvention: reemploi * taux.reemploi },
+      { categorie: 'Recyclage', tonnage: recyclage, taux: taux.recyclage, subvention: recyclage * taux.recyclage },
+      { categorie: 'CSR', tonnage: csr, taux: taux.csr, subvention: csr * taux.csr },
+      { categorie: 'Énergie', tonnage: energie, taux: taux.energie, subvention: energie * taux.energie },
+      { categorie: 'Entrée', tonnage: entree, taux: taux.entree, subvention: entree * taux.entree },
+    ];
+
+    const total_t = reemploi + recyclage + csr + energie + entree;
+    const total_subvention = details.reduce((s, d) => s + d.subvention, 0);
+
+    res.json({
+      reemploi_t: reemploi,
+      recyclage_t: recyclage,
+      csr_t: csr,
+      energie_t: energie,
+      entree_t: entree,
+      total_t,
+      total_subvention,
+      nb_communes: communesRes.rows[0]?.nb || 0,
+      details,
+      raw: dpav,
+    });
   } catch (err) {
     console.error('[REFASHION] Erreur DPAV :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -53,17 +91,28 @@ router.post('/dpav', async (req, res) => {
 // GET /api/refashion/communes
 router.get('/communes', async (req, res) => {
   try {
-    const { annee, trimestre } = req.query;
-    let query = 'SELECT * FROM refashion_communes WHERE 1=1';
-    const params = [];
-    if (annee) { params.push(annee); query += ` AND annee = $${params.length}`; }
-    if (trimestre) { params.push(trimestre); query += ` AND trimestre = $${params.length}`; }
-    query += ' ORDER BY commune';
-    const result = await pool.query(query, params);
+    // Retourner les communes distinctes avec nb de CAV associés
+    const result = await pool.query(`
+      SELECT DISTINCT ON (rc.commune)
+        rc.id, rc.commune as nom, rc.code_postal as code_insee,
+        rc.poids_kg,
+        (SELECT COUNT(*)::int FROM cav WHERE commune ILIKE rc.commune) as nb_cav,
+        true as has_convention
+      FROM refashion_communes rc
+      ORDER BY rc.commune, rc.annee DESC, rc.trimestre DESC
+    `);
     res.json(result.rows);
   } catch (err) {
-    console.error('[REFASHION] Erreur communes :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    // Si la table cav n'existe pas, fallback simple
+    try {
+      const result = await pool.query(
+        'SELECT DISTINCT commune as nom, code_postal as code_insee FROM refashion_communes ORDER BY commune'
+      );
+      res.json(result.rows.map(r => ({ ...r, nb_cav: 0, has_convention: true })));
+    } catch {
+      console.error('[REFASHION] Erreur communes :', err);
+      res.status(500).json({ error: 'Erreur serveur' });
+    }
   }
 });
 
@@ -90,13 +139,16 @@ router.post('/communes', async (req, res) => {
 // GET /api/refashion/subventions
 router.get('/subventions', async (req, res) => {
   try {
-    const { annee } = req.query;
-    let query = 'SELECT * FROM refashion_subventions';
-    const params = [];
-    if (annee) { params.push(annee); query += ' WHERE annee = $1'; }
-    query += ' ORDER BY annee DESC, trimestre DESC';
-    const result = await pool.query(query, params);
-    res.json(result.rows);
+    const result = await pool.query(
+      'SELECT *, annee as year, trimestre as quarter, montant_total as montant FROM refashion_subventions ORDER BY annee DESC, trimestre DESC'
+    );
+    // Add status field if missing
+    const rows = result.rows.map(r => ({
+      ...r,
+      status: r.status || (r.montant_total > 0 ? 'pending' : 'draft'),
+      date_versement: r.date_versement || null,
+    }));
+    res.json(rows);
   } catch (err) {
     console.error('[REFASHION] Erreur subventions :', err);
     res.status(500).json({ error: 'Erreur serveur' });
