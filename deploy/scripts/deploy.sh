@@ -42,12 +42,14 @@ case "${ACTION}" in
   first)
     log "=== PREMIER DÉPLOIEMENT SOLIDATA ==="
 
-    # Étape 1: Démarrer avec config HTTP uniquement
+    # Étape 1: Démarrer avec config HTTP uniquement (pour certbot)
     log "Étape 1/4 — Démarrage en HTTP (sans SSL)..."
-    cp deploy/nginx/conf.d/solidata-initial.conf deploy/nginx/conf.d/solidata.conf.bak
-    # Utiliser la config initiale sans SSL
-    mv deploy/nginx/conf.d/solidata.conf deploy/nginx/conf.d/solidata-ssl.conf
+    # Sauvegarder la config SSL pour après certbot
+    cp deploy/nginx/conf.d/solidata.conf deploy/nginx/conf.d/solidata-ssl.conf.disabled
+    # Remplacer par la config HTTP-only
     cp deploy/nginx/conf.d/solidata-initial.conf deploy/nginx/conf.d/solidata.conf
+    # Désactiver solidata-initial.conf pour éviter les doublons
+    mv deploy/nginx/conf.d/solidata-initial.conf deploy/nginx/conf.d/solidata-initial.conf.disabled
 
     docker compose -f ${COMPOSE_FILE} build --no-cache
     docker compose -f ${COMPOSE_FILE} up -d
@@ -76,7 +78,7 @@ case "${ACTION}" in
 
     # Étape 3: Basculer vers config SSL
     log "Étape 3/4 — Activation SSL..."
-    mv deploy/nginx/conf.d/solidata-ssl.conf deploy/nginx/conf.d/solidata.conf
+    mv deploy/nginx/conf.d/solidata-ssl.conf.disabled deploy/nginx/conf.d/solidata.conf
 
     # Étape 4: Redémarrer nginx avec SSL
     log "Étape 4/4 — Redémarrage avec SSL..."
