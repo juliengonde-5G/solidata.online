@@ -39,10 +39,10 @@ app.use('/api/pcm', require('./routes/pcm'));
 app.use('/api/teams', require('./routes/teams'));
 app.use('/api/employees', require('./routes/employees'));
 
-// Lot 3+ : Routes à activer
-// app.use('/api/cav', require('./routes/cav'));
-// app.use('/api/vehicles', require('./routes/vehicles'));
-// app.use('/api/tours', require('./routes/tours'));
+// Lot 3 : Collecte + Tournées IA + GPS
+app.use('/api/cav', require('./routes/cav'));
+app.use('/api/vehicles', require('./routes/vehicles'));
+app.use('/api/tours', require('./routes/tours'));
 // app.use('/api/stock', require('./routes/stock'));
 // app.use('/api/production', require('./routes/production'));
 // app.use('/api/billing', require('./routes/billing'));
@@ -76,9 +76,9 @@ app.get('/api/health', async (req, res) => {
         pcm: true,
         teams: true,
         employees: true,
-        cav: false,
-        vehicles: false,
-        tours: false,
+        cav: true,
+        vehicles: true,
+        tours: true,
         stock: false,
         production: false,
         billing: false,
