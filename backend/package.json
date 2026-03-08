@@ -11,7 +11,8 @@
     "seed-cav": "node src/scripts/seed-cav.js",
     "seed-data": "node src/scripts/seed-data.js",
     "seed-production": "node src/scripts/seed-production.js",
-    "seed-historique": "node src/scripts/seed-historique.js"
+    "seed-historique": "node src/scripts/seed-historique.js",
+    "import-excel": "node src/scripts/import-excel.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

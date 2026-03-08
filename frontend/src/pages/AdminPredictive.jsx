@@ -315,9 +315,10 @@ export default function AdminPredictive() {
             <ParamInput label="Seuil densité (nb conteneurs)" value={config.scoring.densityThreshold} onChange={v => updateScoring('densityThreshold', v)} />
             <ParamInput label="Bonus densité (multiplicateur)" value={config.scoring.densityBonus} onChange={v => updateScoring('densityBonus', v)} />
             <ParamInput label="Bonus jour férié (multiplicateur)" value={config.scoring.holidayBonus} onChange={v => updateScoring('holidayBonus', v)} />
-            <ParamInput label="Bonus vacances scolaires" value={config.scoring.schoolVacationBonus} onChange={v => updateScoring('schoolVacationBonus', v)} />
-            <ParamInput label="Bonus semaine pré-vacances" value={config.scoring.preVacationBonus} onChange={v => updateScoring('preVacationBonus', v)} />
-            <ParamInput label="Bonus semaine post-vacances" value={config.scoring.postVacationBonus} onChange={v => updateScoring('postVacationBonus', v)} />
+            <ParamInput label="Facteur vacances scolaires (hors été)" value={config.scoring.schoolVacationFactor || config.scoring.schoolVacationBonus} onChange={v => updateScoring('schoolVacationFactor', v)} />
+            <ParamInput label="Facteur vacances d'été" value={config.scoring.summerVacationFactor} onChange={v => updateScoring('summerVacationFactor', v)} />
+            <ParamInput label="Facteur semaine pré-vacances" value={config.scoring.preVacationBonus} onChange={v => updateScoring('preVacationBonus', v)} />
+            <ParamInput label="Facteur semaine post-vacances" value={config.scoring.postVacationBonus} onChange={v => updateScoring('postVacationBonus', v)} />
             <ParamInput label="Cap remplissage max (%)" value={config.scoring.maxFillCap} onChange={v => updateScoring('maxFillCap', v)} />
           </div>
         </Section>
@@ -406,12 +407,14 @@ export default function AdminPredictive() {
             + Ajouter une période
           </button>
           <div className="mt-4 bg-purple-50 rounded-lg p-3 text-xs text-purple-700">
-            <p><strong>Effet sur la prédiction :</strong></p>
+            <p><strong>Effet sur la prédiction (calibré sur données réelles 2025-2026) :</strong></p>
             <ul className="mt-1 space-y-1 list-disc list-inside">
-              <li>Semaine avant le début : x{config.scoring.preVacationBonus || 1.1} (préparatifs, tri avant départ)</li>
-              <li>Pendant les vacances : x{config.scoring.schoolVacationBonus || 1.15} (présence accrue, tri domestique)</li>
-              <li>Semaine après la fin : x{config.scoring.postVacationBonus || 1.1} (retour, vidage post-vacances)</li>
+              <li>Semaine avant le début : x{config.scoring.preVacationBonus || 1.05} (léger surcroît de tri)</li>
+              <li>Pendant les vacances (hors été) : x{config.scoring.schoolVacationFactor || config.scoring.schoolVacationBonus || 0.90} (baisse ~10%, routes moins fréquentes)</li>
+              <li>Pendant les vacances d'été : x{config.scoring.summerVacationFactor || 1.0} (neutre, déjà capté par facteurs saisonniers juil/août)</li>
+              <li>Semaine après la fin : x{config.scoring.postVacationBonus || 1.05} (retour, vidage post-vacances)</li>
             </ul>
+            <p className="mt-2 text-purple-500">Source : analyse de 14 mois de données de collecte (1 468 t, 196 CAV)</p>
           </div>
         </Section>
 

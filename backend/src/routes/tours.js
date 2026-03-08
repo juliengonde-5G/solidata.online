@@ -197,11 +197,14 @@ function calculateTotalDistance(route, startLat, startLng) {
 // MOTEUR DE PRÉDICTION DE REMPLISSAGE (IA)
 // ══════════════════════════════════════════════════════════════
 
-// Facteurs saisonniers mensuels (jan→déc) — modifiables via admin
-let SEASONAL_FACTORS = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
+// Facteurs saisonniers mensuels (jan→déc) — calibrés sur données réelles 2025-2026
+// Pic en août (1.27), creux en décembre (0.75). Juin proche de la moyenne (0.99).
+let SEASONAL_FACTORS = [0.88, 0.82, 0.94, 1.05, 1.12, 0.99, 1.19, 1.27, 1.13, 1.02, 0.84, 0.75];
 
-// Facteurs jour de la semaine (lun→dim) — les gens trient plus le weekend
-let DAY_OF_WEEK_FACTORS = [1.0, 1.0, 1.0, 1.0, 1.05, 1.15, 1.1];
+// Facteurs jour de la semaine (lun→dim) — calibrés sur données réelles
+// Lundi le plus lourd (accumulation weekend), jeudi bas (~50%), pas de collecte sam/dim
+// Note : sam/dim = facteur d'accumulation dans les conteneurs (pas de collecte)
+let DAY_OF_WEEK_FACTORS = [1.25, 1.09, 1.05, 0.49, 1.11, 1.15, 1.1];
 
 // Jours fériés français (approximation)
 // Jours fériés français — source : service-public.gouv.fr
@@ -268,9 +271,13 @@ let SCORING_CONFIG = {
   maxFillCap: 120,
   weekendSunnyBonus: 1.15,  // beau temps le weekend → plus de tri
   localEventBonus: 1.2,     // brocante/vide-grenier à proximité
-  schoolVacationBonus: 1.15,   // pendant les vacances scolaires
-  preVacationBonus: 1.1,      // semaine précédant les vacances
-  postVacationBonus: 1.1,     // semaine suivant les vacances
+  // Vacances scolaires — calibrés sur données réelles 2025-2026
+  // Hors été : baisse ~10% (routes moins fréquentes, moins de dépôts)
+  // Été : déjà capté par les facteurs saisonniers juil/août
+  schoolVacationFactor: 0.90,    // pendant les vacances (hors été)
+  summerVacationFactor: 1.0,     // été (neutre, déjà dans facteurs saisonniers)
+  preVacationBonus: 1.05,        // semaine avant (léger surcroît de tri)
+  postVacationBonus: 1.05,       // semaine après (retour, vidage)
 };
 
 function isHoliday(dateStr) {
@@ -351,14 +358,18 @@ async function predictFillRate(cavId, targetDate) {
   if (isHoliday(dateStr)) rawFill *= SCORING_CONFIG.holidayBonus || 1.1;
 
   // Facteur vacances scolaires : semaine avant, pendant, semaine après
+  // Données réelles : vacances hors été = baisse ~10%, été = neutre (déjà dans saisonnier)
   const vacationStatus = getSchoolVacationStatus(dateStr);
   let vacationFactor = 1;
   if (vacationStatus.status === 'during') {
-    vacationFactor = SCORING_CONFIG.schoolVacationBonus || 1.15;
+    const isSummer = vacationStatus.name && /été/i.test(vacationStatus.name);
+    vacationFactor = isSummer
+      ? (SCORING_CONFIG.summerVacationFactor || 1.0)
+      : (SCORING_CONFIG.schoolVacationFactor || 0.90);
   } else if (vacationStatus.status === 'pre') {
-    vacationFactor = SCORING_CONFIG.preVacationBonus || 1.1;
+    vacationFactor = SCORING_CONFIG.preVacationBonus || 1.05;
   } else if (vacationStatus.status === 'post') {
-    vacationFactor = SCORING_CONFIG.postVacationBonus || 1.1;
+    vacationFactor = SCORING_CONFIG.postVacationBonus || 1.05;
   }
   rawFill *= vacationFactor;
 
@@ -583,7 +594,7 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
   // Vacances scolaires
   if (vacationStatus && vacationStatus.status) {
     const labels = { pre: 'Semaine pré-vacances', during: 'Pendant les vacances', post: 'Semaine post-vacances' };
-    const bonusValues = { pre: SCORING_CONFIG.preVacationBonus, during: SCORING_CONFIG.schoolVacationBonus, post: SCORING_CONFIG.postVacationBonus };
+    const bonusValues = { pre: SCORING_CONFIG.preVacationBonus, during: SCORING_CONFIG.schoolVacationFactor || SCORING_CONFIG.schoolVacationBonus, post: SCORING_CONFIG.postVacationBonus };
     lines.push(`\n🎒 ${labels[vacationStatus.status]} (${vacationStatus.name}) — facteur x${bonusValues[vacationStatus.status]}`);
   }
 
@@ -767,7 +778,7 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
       vacationStatus: vacationStatus.status ? {
         status: vacationStatus.status,
         name: vacationStatus.name,
-        bonus: vacationStatus.status === 'during' ? SCORING_CONFIG.schoolVacationBonus
+        bonus: vacationStatus.status === 'during' ? (SCORING_CONFIG.schoolVacationFactor || SCORING_CONFIG.schoolVacationBonus)
           : vacationStatus.status === 'pre' ? SCORING_CONFIG.preVacationBonus
           : SCORING_CONFIG.postVacationBonus,
       } : null,
