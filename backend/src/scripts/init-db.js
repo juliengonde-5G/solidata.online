@@ -1084,7 +1084,7 @@ async function initDatabase() {
       UPDATE candidates SET status = 'preselected' WHERE status = 'to_contact';
       UPDATE candidates SET status = 'interview' WHERE status = 'summoned';
       UPDATE candidates SET status = 'hired' WHERE status = 'recruited';
-      UPDATE candidates SET status = 'received' WHERE status NOT IN ('received', 'preselected', 'interview', 'test', 'hired');
+      UPDATE candidates SET status = 'received' WHERE status IS NULL OR status NOT IN ('received', 'preselected', 'interview', 'test', 'hired');
     `);
 
     // Update CHECK constraint — drop ALL check constraints on status column, then re-add
