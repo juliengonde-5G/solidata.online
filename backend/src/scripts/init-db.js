@@ -1079,15 +1079,7 @@ async function initDatabase() {
       ALTER TABLE candidates ADD COLUMN IF NOT EXISTS comment TEXT;
     `);
 
-    // Migrate old statuses to new ones
-    await client.query(`
-      UPDATE candidates SET status = 'preselected' WHERE status = 'to_contact';
-      UPDATE candidates SET status = 'interview' WHERE status = 'summoned';
-      UPDATE candidates SET status = 'hired' WHERE status = 'recruited';
-      UPDATE candidates SET status = 'received' WHERE status IS NULL OR status NOT IN ('received', 'preselected', 'interview', 'test', 'hired');
-    `);
-
-    // Update CHECK constraint — drop ALL check constraints on status column, then re-add
+    // Drop ALL check constraints on status column FIRST (before updating values)
     const candidateChecks = await client.query(`
       SELECT con.conname FROM pg_constraint con
       JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
@@ -1096,6 +1088,16 @@ async function initDatabase() {
     for (const row of candidateChecks.rows) {
       await client.query(`ALTER TABLE candidates DROP CONSTRAINT IF EXISTS "${row.conname}"`);
     }
+
+    // Now migrate old statuses to new ones (constraint is gone, so new values are accepted)
+    await client.query(`
+      UPDATE candidates SET status = 'preselected' WHERE status = 'to_contact';
+      UPDATE candidates SET status = 'interview' WHERE status = 'summoned';
+      UPDATE candidates SET status = 'hired' WHERE status = 'recruited';
+      UPDATE candidates SET status = 'received' WHERE status IS NULL OR status NOT IN ('received', 'preselected', 'interview', 'test', 'hired');
+    `);
+
+    // Re-add the constraint with the new allowed values
     await client.query(`
       ALTER TABLE candidates ADD CONSTRAINT candidates_status_check
         CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired'));
