@@ -100,7 +100,7 @@
 
   /* Champ formulaire */
   .input-mobile {
-    @apply w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-base transition-colors focus:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20;
+    @apply w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-base transition-colors focus:border-solidata-green focus:outline-none focus:ring-2 focus:ring-solidata-green/20;
     min-height: var(--space-touch);
   }
 
