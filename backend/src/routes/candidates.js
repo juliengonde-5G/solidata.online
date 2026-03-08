@@ -154,24 +154,28 @@ async function parseCVFile(filePath) {
 
     if (ext === '.pdf') {
       try {
-        const pdfParse = require('pdf-parse');
+        let pdfParse = require('pdf-parse');
+        if (typeof pdfParse !== 'function') pdfParse = pdfParse.default || pdfParse.pdf;
         const buffer = fs.readFileSync(filePath);
         const data = await pdfParse(buffer);
         const text = (data.text || '').trim();
 
         if (text.length >= MIN_PDF_TEXT_LENGTH) return text;
-
-        console.log('[CV] PDF avec peu de texte (%d chars), tentative OCR...', text.length);
-        return await runOCR(filePath);
+        return '';
       } catch (err) {
         console.error('[CV] Erreur parsing PDF :', err.message);
-        return await runOCR(filePath);
+        return '';
       }
     }
 
     if (['.png', '.jpg', '.jpeg'].includes(ext)) {
-      console.log('[CV] Fichier image détecté, lancement OCR...');
-      return await runOCR(filePath);
+      try {
+        console.log('[CV] Fichier image détecté, lancement OCR...');
+        return await runOCR(filePath);
+      } catch (err) {
+        console.error('[CV] Erreur OCR :', err.message);
+        return '';
+      }
     }
 
     return '';
@@ -578,10 +582,21 @@ router.get('/stats', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 
 router.get('/positions/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT p.*, (SELECT COUNT(*)::int FROM candidates c WHERE c.position_id = p.id AND c.status = 'hired') as filled
-       FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`
-    );
+    let result;
+    try {
+      result = await pool.query(
+        `SELECT p.*, (SELECT COUNT(*)::int FROM candidates c WHERE c.position_id = p.id AND c.status = 'hired') as filled
+         FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`
+      );
+    } catch (colErr) {
+      if (colErr.code === '42703' && colErr.message && colErr.message.includes('position_id')) {
+        result = await pool.query(
+          `SELECT p.*, 0 as filled FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`
+        );
+      } else {
+        throw colErr;
+      }
+    }
     res.json(result.rows);
   } catch (err) {
     console.error('[POSITIONS] Erreur liste :', err);
