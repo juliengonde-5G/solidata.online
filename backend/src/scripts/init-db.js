@@ -895,9 +895,16 @@ async function initDatabase() {
       console.log('[INIT-DB] Utilisateur admin créé (admin / admin123)');
     }
 
-    // Migration: update teams constraint + data
+    // Migration: update teams constraint + data — drop ALL check constraints on type column
+    const teamChecks = await client.query(`
+      SELECT con.conname FROM pg_constraint con
+      JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
+      WHERE con.conrelid = 'teams'::regclass AND con.contype = 'c' AND att.attname = 'type'
+    `);
+    for (const row of teamChecks.rows) {
+      await client.query(`ALTER TABLE teams DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+    }
     await client.query(`
-      ALTER TABLE teams DROP CONSTRAINT IF EXISTS teams_type_check;
       UPDATE teams SET type = 'logistique' WHERE type IS NOT NULL AND type NOT IN ('tri', 'collecte', 'logistique', 'btq_st_sever', 'btq_lhopital', 'administration');
       ALTER TABLE teams ADD CONSTRAINT teams_type_check
         CHECK (type IN ('tri', 'collecte', 'logistique', 'btq_st_sever', 'btq_lhopital', 'administration'));
@@ -1080,9 +1087,16 @@ async function initDatabase() {
       UPDATE candidates SET status = 'received' WHERE status NOT IN ('received', 'preselected', 'interview', 'test', 'hired');
     `);
 
-    // Update CHECK constraint to accept new statuses
+    // Update CHECK constraint — drop ALL check constraints on status column, then re-add
+    const candidateChecks = await client.query(`
+      SELECT con.conname FROM pg_constraint con
+      JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
+      WHERE con.conrelid = 'candidates'::regclass AND con.contype = 'c' AND att.attname = 'status'
+    `);
+    for (const row of candidateChecks.rows) {
+      await client.query(`ALTER TABLE candidates DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+    }
     await client.query(`
-      ALTER TABLE candidates DROP CONSTRAINT IF EXISTS candidates_status_check;
       ALTER TABLE candidates ADD CONSTRAINT candidates_status_check
         CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired'));
     `);
