@@ -32,6 +32,7 @@ const PCM_TYPES = {
     },
     environnement: 'Bureau organisé, tâches structurées, délais clairs',
     correspondanceTP: 'Consciencieux (Big Five), ISTJ/INTJ (MBTI)',
+    comportementAvecAutres: 'Privilégie la clarté et le respect des règles ; à l\'aise quand les rôles et les attentes sont explicites.',
   },
   perseverant: {
     nom: 'Persévérant',
@@ -53,6 +54,7 @@ const PCM_TYPES = {
     },
     environnement: 'Mission porteuse de sens, espace pour s\'exprimer',
     correspondanceTP: 'Agréabilité faible + Consciencieux (Big Five), INFJ/ENFJ (MBTI)',
+    comportementAvecAutres: 'Recherche la cohérence des valeurs et la confiance ; s\'investit quand le sens et l\'intégrité sont reconnus.',
   },
   empathique: {
     nom: 'Empathique',
@@ -74,6 +76,7 @@ const PCM_TYPES = {
     },
     environnement: 'Cadre chaleureux, relations harmonieuses, feedback positif',
     correspondanceTP: 'Agréabilité haute (Big Five), ISFJ/ESFJ (MBTI)',
+    comportementAvecAutres: 'Crée du lien et de la bienveillance ; a besoin de reconnaissance personnelle et d\'un climat apaisé.',
   },
   imagineur: {
     nom: 'Imagineur',
@@ -95,6 +98,7 @@ const PCM_TYPES = {
     },
     environnement: 'Calme, peu de sollicitations, instructions claires',
     correspondanceTP: 'Introversion haute (Big Five), INTP/INFP (MBTI)',
+    comportementAvecAutres: 'Préfère les échanges calmes et structurés ; besoin de temps de réflexion et de peu de pression sociale.',
   },
   energiseur: {
     nom: 'Énergiseur',
@@ -116,6 +120,7 @@ const PCM_TYPES = {
     },
     environnement: 'Dynamique, varié, interactions fréquentes, challenges',
     correspondanceTP: 'Extraversion + Ouverture hautes (Big Five), ENFP/ESTP (MBTI)',
+    comportementAvecAutres: 'Apporte de l\'énergie et du ludique ; a besoin de stimulation et de reconnaissance dans l\'échange.',
   },
   promoteur: {
     nom: 'Promoteur',
@@ -137,6 +142,7 @@ const PCM_TYPES = {
     },
     environnement: 'Action, résultats rapides, autonomie, variété',
     correspondanceTP: 'Extraversion + Ouverture (Big Five), ESTP/ENTJ (MBTI)',
+    comportementAvecAutres: 'Direct et orienté action ; valorise l\'autonomie, les défis et l\'efficacité dans les relations.',
   },
 };
 
@@ -530,11 +536,12 @@ function calculatePCMProfile(answers) {
     normalizedScores[type] = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
   }
 
-  // Construire l'immeuble PCM (ordre des étages)
+  // Construire l'immeuble PCM : uniquement les types avec un score > 0 (pas de 0% dans le graphique)
   const immeuble = Object.entries(scores)
+    .filter(([, raw]) => raw > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([type], index) => ({
-      etage: 6 - index,
+      etage: index + 1,
       type,
       nom: PCM_TYPES[type].nom,
       score: normalizedScores[type],
@@ -548,18 +555,32 @@ function calculatePCMProfile(answers) {
   const phaseData = PCM_TYPES[phaseType];
   const riskAlert = stressAnswers.length >= 2 && stressAnswers.every(a => a.answer_value === phaseType);
 
+  const baseData = PCM_TYPES[baseType];
+  const phaseDataPcm = PCM_TYPES[phaseType];
+
+  // Comportements principaux pour le rapport (avec les autres, sous stress, avec le manager)
+  const comportementsPrincipaux = {
+    avecAutres: baseData.comportementAvecAutres || `Canal privilégié : ${baseData.canal}. Points forts : ${baseData.pointsForts.join(', ')}.`,
+    sousStress: phaseDataPcm.stressNiveaux.map(s => `Niveau ${s.niveau} : ${s.comportement}`).join(' — '),
+    avecManager: {
+      do: baseData.guideManager?.do ?? [],
+      dont: baseData.guideManager?.dont ?? [],
+    },
+  };
+
   // Rapport complet
   const report = {
     base: {
       type: baseType,
-      ...PCM_TYPES[baseType],
+      ...baseData,
     },
     phase: {
       type: phaseType,
-      ...PCM_TYPES[phaseType],
+      ...phaseDataPcm,
     },
     scores: normalizedScores,
     immeuble,
+    comportementsPrincipaux,
     riskAlert,
     rpsIndicators: riskAlert ? [
       `Profil de phase ${PCM_TYPES[phaseType].nom} avec indices de stress élevé`,
@@ -567,9 +588,9 @@ function calculatePCMProfile(answers) {
       `Masques de stress observables : ${phaseData.masqueStress.join(', ')}`,
     ] : [],
     communicationTips: [
-      `Canal privilégié : ${PCM_TYPES[baseType].canal}`,
-      `Besoin psychologique : ${PCM_TYPES[baseType].besoinPsychologique}`,
-      `Points forts : ${PCM_TYPES[baseType].pointsForts.join(', ')}`,
+      `Canal privilégié : ${baseData.canal}`,
+      `Besoin psychologique : ${baseData.besoinPsychologique}`,
+      `Points forts : ${baseData.pointsForts.join(', ')}`,
     ],
   };
 

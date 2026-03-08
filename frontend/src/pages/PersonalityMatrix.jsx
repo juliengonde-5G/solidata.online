@@ -128,6 +128,7 @@ export default function PersonalityMatrix() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <h3 className="font-semibold mb-3">Immeuble PCM</h3>
+                  <p className="text-xs text-gray-500 mb-2">Classement des types par score (uniquement les types avec un score ; cohérent avec la Base et la Phase).</p>
                   <div className="space-y-1">
                     {selectedProfile.report.immeuble?.map(etage => (
                       <div key={etage.type} className="flex items-center gap-2">
@@ -158,6 +159,48 @@ export default function PersonalityMatrix() {
                 </div>
               </div>
             </div>
+
+            {/* Comportements principaux selon le profil */}
+            {selectedProfile.report.comportementsPrincipaux && (
+              <div className="bg-white rounded-xl shadow-sm border p-6">
+                <h3 className="font-semibold text-solidata-dark mb-4">Comportements principaux</h3>
+                <div className="grid grid-cols-1 md:grid-cols-1 gap-4 space-y-3">
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Avec les autres</h4>
+                    <p className="text-sm text-gray-700">{selectedProfile.report.comportementsPrincipaux.avecAutres}</p>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Sous stress</h4>
+                    <p className="text-sm text-gray-700">{selectedProfile.report.comportementsPrincipaux.sousStress}</p>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Avec le manager</h4>
+                    <div className="flex flex-wrap gap-4">
+                      {selectedProfile.report.comportementsPrincipaux.avecManager?.do?.length > 0 && (
+                        <div className="flex-1 min-w-[200px]">
+                          <p className="text-xs text-green-600 font-medium mb-1">À privilégier</p>
+                          <ul className="text-sm text-gray-700 list-disc list-inside space-y-0.5">
+                            {selectedProfile.report.comportementsPrincipaux.avecManager.do.map((tip, i) => (
+                              <li key={i}>{tip}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {selectedProfile.report.comportementsPrincipaux.avecManager?.dont?.length > 0 && (
+                        <div className="flex-1 min-w-[200px]">
+                          <p className="text-xs text-red-600 font-medium mb-1">À éviter</p>
+                          <ul className="text-sm text-gray-700 list-disc list-inside space-y-0.5">
+                            {selectedProfile.report.comportementsPrincipaux.avecManager.dont.map((tip, i) => (
+                              <li key={i}>{tip}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Guide Manager */}
             {selectedProfile.report.base?.guideManager && (

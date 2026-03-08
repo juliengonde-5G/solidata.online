@@ -113,6 +113,12 @@ crontab deploy/crontab.txt
 bash push.sh "Description des changements"
 # ou sous Windows : push.bat "Description des changements"
 
+# Sur le serveur : vérifier la sync (optionnel)
+bash deploy/scripts/check-sync.sh
+
+# Sur le serveur : import historique production (KPI_Production 2026.xlsx)
+docker compose -f docker-compose.prod.yml exec backend npm run seed-production
+
 # Sur le serveur : mise à jour
 bash deploy/scripts/deploy.sh update
 

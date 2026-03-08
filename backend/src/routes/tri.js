@@ -134,6 +134,17 @@ router.post('/sorties', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
+// GET /api/tri/categories (alias)
+router.get('/categories', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM categories_sortantes ORDER BY famille, nom');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TRI] Erreur catégories :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/tri/categories-sortantes
 router.get('/categories-sortantes', async (req, res) => {
   try {
