@@ -28,6 +28,7 @@ export default function Employees() {
   const [showContractForm, setShowContractForm] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(false);
   const [editForm, setEditForm] = useState({});
+  const [editError, setEditError] = useState('');
   const [saving, setSaving] = useState(false);
   const [contractForm, setContractForm] = useState({
     contract_type: 'CDI', duration_months: '', start_date: '', end_date: '',
@@ -118,19 +119,26 @@ export default function Employees() {
   const updateEmployee = async (e) => {
     e.preventDefault();
     if (!selected) return;
+    setEditError('');
+    const firstName = (editForm.first_name || '').trim();
+    const lastName = (editForm.last_name || '').trim();
+    if (!firstName || !lastName) {
+      setEditError('Le prénom et le nom sont obligatoires.');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
-        first_name: editForm.first_name,
-        last_name: editForm.last_name,
-        email: editForm.email || null,
-        phone: editForm.phone || null,
-        team_id: editForm.team_id || null,
-        position: editForm.position || null,
+        first_name: firstName,
+        last_name: lastName,
+        email: (editForm.email || '').trim() || null,
+        phone: (editForm.phone || '').trim() || null,
+        team_id: editForm.team_id ? Number(editForm.team_id) : null,
+        position: (editForm.position || '').trim() || null,
         contract_type: editForm.contract_type || null,
         contract_start: editForm.contract_start || null,
         contract_end: editForm.contract_end || null,
-        weekly_hours: editForm.weekly_hours != null ? Number(editForm.weekly_hours) : 35,
+        weekly_hours: editForm.weekly_hours != null && editForm.weekly_hours !== '' ? Number(editForm.weekly_hours) : 35,
         is_active: editForm.is_active,
       };
       const res = await api.put(`/employees/${selected.id}`, payload);
@@ -139,7 +147,8 @@ export default function Employees() {
       loadData();
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.error || 'Erreur lors de l\'enregistrement');
+      const msg = err.response?.data?.error || err.message || 'Erreur lors de l\'enregistrement';
+      setEditError(msg);
     } finally {
       setSaving(false);
     }
@@ -287,20 +296,31 @@ export default function Employees() {
                           <label className="text-xs text-gray-500 block mb-1">Photo</label>
                           <input type="file" accept="image/*" onChange={e => e.target.files[0] && handlePhotoUpload(selected.id, e.target.files[0])} className="text-xs" />
                         </div>
-                        <button type="button" onClick={() => setEditingEmployee(true)} className="mt-4 w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90">
+                        <p className="text-xs text-gray-400 mt-2">En mode modification, le prénom et le nom sont obligatoires pour enregistrer.</p>
+                        <button type="button" onClick={() => { setEditingEmployee(true); setEditError(''); }} className="mt-2 w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90">
                           Modifier
                         </button>
                       </>
                     ) : (
                       <form onSubmit={updateEmployee} className="space-y-3">
+                        <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
+                          Les champs marqués <span className="text-red-500 font-semibold">*</span> sont obligatoires.
+                        </p>
+                        {editError && (
+                          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-sm flex items-center gap-2">
+                            <span className="flex-shrink-0">⚠</span>
+                            <span>{editError}</span>
+                            <button type="button" onClick={() => setEditError('')} className="ml-auto text-red-500 hover:text-red-700" aria-label="Fermer">×</button>
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="text-gray-500 text-xs">Prénom *</label>
-                            <input value={editForm.first_name} onChange={e => setEditForm({ ...editForm, first_name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required />
+                            <label className="text-gray-500 text-xs">Prénom <span className="text-red-500">*</span></label>
+                            <input value={editForm.first_name} onChange={e => { setEditForm({ ...editForm, first_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" required />
                           </div>
                           <div>
-                            <label className="text-gray-500 text-xs">Nom *</label>
-                            <input value={editForm.last_name} onChange={e => setEditForm({ ...editForm, last_name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required />
+                            <label className="text-gray-500 text-xs">Nom <span className="text-red-500">*</span></label>
+                            <input value={editForm.last_name} onChange={e => { setEditForm({ ...editForm, last_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" required />
                           </div>
                         </div>
                         <div>
