@@ -154,12 +154,20 @@ async function parseCVFile(filePath) {
 
     if (ext === '.pdf') {
       try {
-        let pdfParse = require('pdf-parse');
-        if (typeof pdfParse !== 'function') pdfParse = pdfParse.default || pdfParse.pdf;
         const buffer = fs.readFileSync(filePath);
-        const data = await pdfParse(buffer);
-        const text = (data.text || '').trim();
-
+        const mod = require('pdf-parse');
+        let text = '';
+        if (mod.PDFParse) {
+          const parser = new mod.PDFParse({ data: buffer });
+          const result = await parser.getText();
+          text = (result && result.text ? result.text : '').trim();
+        } else {
+          const fn = typeof mod === 'function' ? mod : (mod && (mod.default || mod.pdf));
+          if (typeof fn === 'function') {
+            const data = await fn(buffer);
+            text = (data && data.text ? data.text : '').trim();
+          }
+        }
         if (text.length >= MIN_PDF_TEXT_LENGTH) return text;
         return '';
       } catch (err) {
@@ -582,21 +590,22 @@ router.get('/stats', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 
 router.get('/positions/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
+    const queries = [
+      `SELECT p.*, (SELECT COUNT(*)::int FROM candidates c WHERE c.position_id = p.id AND c.status = 'hired') as filled
+       FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`,
+      `SELECT p.*, 0 as filled FROM positions p WHERE p.is_active = true ORDER BY p.id DESC`,
+      `SELECT p.*, 0 as filled FROM positions p ORDER BY p.id DESC`,
+    ];
     let result;
-    try {
-      result = await pool.query(
-        `SELECT p.*, (SELECT COUNT(*)::int FROM candidates c WHERE c.position_id = p.id AND c.status = 'hired') as filled
-         FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`
-      );
-    } catch (colErr) {
-      if (colErr.code === '42703' && colErr.message && colErr.message.includes('position_id')) {
-        result = await pool.query(
-          `SELECT p.*, 0 as filled FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`
-        );
-      } else {
-        throw colErr;
+    for (const sql of queries) {
+      try {
+        result = await pool.query(sql);
+        break;
+      } catch (colErr) {
+        if (colErr.code !== '42703') throw colErr;
       }
     }
+    if (!result) throw new Error('positions list failed');
     res.json(result.rows);
   } catch (err) {
     console.error('[POSITIONS] Erreur liste :', err);
