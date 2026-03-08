@@ -164,27 +164,27 @@ export default function PCMTest() {
               <h2 className="text-xl sm:text-2xl font-bold text-gray-800">
                 Bonjour {session?.first_name || session?.candidate_name || 'candidat'} !
               </h2>
-              <p className="text-gray-500 mt-1 text-sm">Bienvenue sur le test de personnalite PCM</p>
+              <p className="text-gray-500 mt-1 text-sm">Quelques questions pour mieux vous connaitre</p>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-4 sm:p-5 mb-6 space-y-3 text-sm text-gray-600">
-              <h3 className="font-semibold text-gray-800 text-base">Instructions</h3>
+              <h3 className="font-semibold text-gray-800 text-base">Comment faire ?</h3>
               <ul className="space-y-2">
                 <li className="flex gap-2">
                   <span className="font-bold mt-0.5" style={{ color: BRAND_GREEN }}>1.</span>
-                  <span>Le test comporte <strong>{totalQuestions} questions</strong>. Pour chaque question, choisissez la reponse qui vous correspond le mieux.</span>
+                  <span><strong>{totalQuestions} questions</strong>. Choisissez la reponse (ou l’image) qui vous ressemble le plus.</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="font-bold mt-0.5" style={{ color: BRAND_GREEN }}>2.</span>
-                  <span>Il n'y a pas de bonnes ou mauvaises reponses. Repondez spontanement, sans trop reflechir.</span>
+                  <span>Pas de bonne ou mauvaise reponse. Repondez comme vous sentez.</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="font-bold mt-0.5" style={{ color: BRAND_GREEN }}>3.</span>
-                  <span>Le test prend environ <strong>5 a 10 minutes</strong>.</span>
+                  <span>Environ <strong>5 à 10 minutes</strong>.</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="font-bold mt-0.5" style={{ color: BRAND_GREEN }}>4.</span>
-                  <span>Vos reponses sont <strong>confidentielles</strong> et utilisees uniquement dans le cadre du recrutement.</span>
+                  <span>Vos reponses restent <strong>confidentielles</strong>.</span>
                 </li>
               </ul>
             </div>
@@ -295,38 +295,44 @@ export default function PCMTest() {
               <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold text-white mb-3" style={{ backgroundColor: BRAND_GREEN }}>
                 Q{currentQ + 1}
               </span>
-              <h2 className="text-base sm:text-lg font-semibold text-gray-800 leading-relaxed">
-                {q.text}
+              <h2 className="text-lg sm:text-xl font-semibold text-gray-800 leading-relaxed">
+                {q.text_simple || q.text}
               </h2>
             </div>
 
-            <div className="space-y-2.5">
+            <div className="space-y-3">
               {options.map((opt, idx) => {
                 const isSelected = currentAnswer === opt.value;
+                const label = opt.label_simple || opt.label;
                 return (
                   <button
                     key={idx}
                     onClick={() => handleAnswer(questionKey, opt.value)}
-                    className={`w-full text-left p-3.5 sm:p-4 rounded-xl border-2 transition-all text-sm sm:text-base ${
+                    className={`w-full text-left p-4 sm:p-5 rounded-xl border-2 transition-all flex items-center gap-4 min-h-[56px] ${
                       isSelected
                         ? 'border-green-400 bg-green-50 shadow-sm'
                         : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
                     }`}
-                    style={isSelected ? { borderColor: BRAND_GREEN, backgroundColor: BRAND_GREEN + '08' } : {}}
+                    style={isSelected ? { borderColor: BRAND_GREEN, backgroundColor: BRAND_GREEN + '12' } : {}}
                   >
-                    <div className="flex items-start gap-3">
+                    {opt.icon && (
+                      <span className="text-2xl sm:text-3xl flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-gray-100">
+                        {opt.icon}
+                      </span>
+                    )}
+                    <div className="flex-1 flex items-center gap-3">
                       <div
-                        className={`w-5 h-5 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all ${
+                        className={`w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all ${
                           isSelected ? 'border-green-500' : 'border-gray-300'
                         }`}
                         style={isSelected ? { borderColor: BRAND_GREEN } : {}}
                       >
                         {isSelected && (
-                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BRAND_GREEN }} />
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: BRAND_GREEN }} />
                         )}
                       </div>
-                      <span className={isSelected ? 'font-medium text-gray-800' : 'text-gray-600'}>
-                        {opt.label || opt.text}
+                      <span className={`text-base sm:text-lg ${isSelected ? 'font-semibold text-gray-800' : 'text-gray-700'}`}>
+                        {label}
                       </span>
                     </div>
                   </button>
