@@ -61,16 +61,16 @@ router.get('/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 router.post('/', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { user_id, first_name, last_name, phone, email, team_id, position,
-      contract_type, contract_start, contract_end, has_permis_b, has_caces, weekly_hours, skills } = req.body;
+      contract_type, contract_start, contract_end, has_permis_b, has_caces, weekly_hours, skills, candidate_id } = req.body;
 
     if (!first_name || !last_name) return res.status(400).json({ error: 'Nom et prénom requis' });
 
     const result = await pool.query(
       `INSERT INTO employees (user_id, first_name, last_name, phone, email, team_id, position,
-       contract_type, contract_start, contract_end, has_permis_b, has_caces, weekly_hours, skills)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+       contract_type, contract_start, contract_end, has_permis_b, has_caces, weekly_hours, skills, candidate_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
       [user_id, first_name, last_name, phone, email, team_id, position,
-       contract_type, contract_start, contract_end, has_permis_b || false, has_caces || false, weekly_hours || 35, skills || []]
+       contract_type, contract_start, contract_end, has_permis_b || false, has_caces || false, weekly_hours || 35, skills || [], candidate_id || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -87,7 +87,7 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
     const fields = req.body;
     const allowed = ['first_name', 'last_name', 'phone', 'email', 'team_id', 'position',
       'contract_type', 'contract_start', 'contract_end', 'has_permis_b', 'has_caces',
-      'weekly_hours', 'skills', 'is_active', 'user_id'];
+      'weekly_hours', 'skills', 'is_active', 'user_id', 'candidate_id'];
 
     const setClauses = [];
     const values = [];

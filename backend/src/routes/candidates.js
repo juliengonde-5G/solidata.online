@@ -945,6 +945,64 @@ router.get('/:id/history', authorize('ADMIN', 'RH'), async (req, res) => {
   }
 });
 
+// POST /api/candidates/:id/convert-to-employee — Convertir candidat en employé
+router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { team_id, position, contract_type, contract_start, weekly_hours } = req.body;
+
+    // Vérifier que le candidat existe et est au statut 'hired'
+    const candidate = await pool.query('SELECT * FROM candidates WHERE id = $1', [id]);
+    if (candidate.rows.length === 0) return res.status(404).json({ error: 'Candidat non trouvé' });
+    if (candidate.rows[0].status !== 'hired') {
+      return res.status(400).json({ error: 'Le candidat doit être au statut "hired" pour être converti' });
+    }
+
+    // Vérifier qu'il n'est pas déjà converti
+    const existing = await pool.query('SELECT id FROM employees WHERE candidate_id = $1', [id]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'Ce candidat a déjà été converti en employé', employee_id: existing.rows[0].id });
+    }
+
+    const c = candidate.rows[0];
+
+    // Récupérer les compétences confirmées du candidat
+    const skillsResult = await pool.query(
+      "SELECT skill_name FROM candidate_skills WHERE candidate_id = $1 AND status IN ('confirmed', 'detected')",
+      [id]
+    );
+    const skills = skillsResult.rows.map(r => r.skill_name);
+
+    // Créer l'employé avec les données du candidat
+    const employee = await pool.query(
+      `INSERT INTO employees (candidate_id, first_name, last_name, phone, email,
+       team_id, position, contract_type, contract_start, has_permis_b, has_caces,
+       weekly_hours, skills)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [id, c.first_name, c.last_name, c.phone, c.email,
+       team_id || null, position || null, contract_type || 'CDD',
+       contract_start || new Date().toISOString().split('T')[0],
+       c.has_permis_b || false, c.has_caces || false,
+       weekly_hours || 35, skills]
+    );
+
+    // Logger dans l'historique du candidat
+    await pool.query(
+      'INSERT INTO candidate_history (candidate_id, from_status, to_status, comment, changed_by) VALUES ($1, $2, $3, $4, $5)',
+      [id, 'hired', 'converted', `Converti en employé #${employee.rows[0].id}`, req.user.id]
+    );
+
+    res.status(201).json({
+      message: 'Candidat converti en employé avec succès',
+      employee: employee.rows[0],
+      skills_transferred: skills.length,
+    });
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur conversion :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // DELETE /api/candidates/:id
 router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   try {

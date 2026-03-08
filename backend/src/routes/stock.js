@@ -115,4 +115,35 @@ router.post('/matieres', async (req, res) => {
   }
 });
 
+// GET /api/stock/reconciliation — Vérifier la cohérence entre tournées et stock
+router.get('/reconciliation', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        t.id as tour_id, t.date, t.total_weight_kg as tour_weight,
+        sm.poids_kg as stock_weight, sm.id as stock_movement_id,
+        CASE
+          WHEN sm.id IS NULL THEN 'manquant'
+          WHEN ABS(t.total_weight_kg - sm.poids_kg) > 1 THEN 'ecart'
+          ELSE 'ok'
+        END as status
+      FROM tours t
+      LEFT JOIN stock_movements sm ON sm.tour_id = t.id AND sm.type = 'entree'
+      WHERE t.status = 'completed' AND t.total_weight_kg > 0
+      ORDER BY t.date DESC
+      LIMIT 100
+    `);
+    const summary = {
+      total: result.rows.length,
+      ok: result.rows.filter(r => r.status === 'ok').length,
+      manquant: result.rows.filter(r => r.status === 'manquant').length,
+      ecart: result.rows.filter(r => r.status === 'ecart').length,
+    };
+    res.json({ summary, details: result.rows });
+  } catch (err) {
+    console.error('[STOCK] Erreur réconciliation :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

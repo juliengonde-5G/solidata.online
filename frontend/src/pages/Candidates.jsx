@@ -79,6 +79,20 @@ export default function Candidates() {
     } catch { setPcmProfile(null); }
   };
 
+  const handleConvertToEmployee = async (candidate) => {
+    if (!window.confirm(`Convertir ${candidate.first_name} ${candidate.last_name} en employé ?`)) return;
+    try {
+      const res = await api.post(`/candidates/${candidate.id}/convert-to-employee`, {
+        contract_type: 'CDD',
+        contract_start: new Date().toISOString().split('T')[0],
+      });
+      alert(`Employé créé avec succès (#${res.data.employee.id})`);
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur lors de la conversion');
+    }
+  };
+
   const moveCandidate = async (id, newStatus) => {
     try {
       await api.put(`/candidates/${id}/status`, { status: newStatus });
@@ -305,7 +319,7 @@ export default function Candidates() {
               <div className="p-5">
                 {detailTab === 'info' && (editing
                   ? <EditForm ef={editForm} set={setEditForm} save={saveEdit} cancel={() => setEditing(false)} positions={positions} />
-                  : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} />
+                  : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} onConvert={handleConvertToEmployee} />
                 )}
                 {detailTab === 'history' && <HistoryView history={history} />}
                 {detailTab === 'pcm' && <PCMView profile={pcmProfile} onStart={() => startPCMTest(selected.id)} onOpenInApp={() => openPCMTestInApp(selected.id)} />}
@@ -383,7 +397,7 @@ function Pill({ label, value, color }) {
   return <div className={`px-3 py-1 rounded-full text-xs font-medium ${m[color]}`}>{label}: <strong>{value}</strong></div>;
 }
 
-function InfoView({ s, skills, positions, onMove }) {
+function InfoView({ s, skills, positions, onMove, onConvert }) {
   const pos = positions.find(p => p.id === s.position_id);
   return (
     <div className="space-y-3 text-sm">
@@ -400,6 +414,13 @@ function InfoView({ s, skills, positions, onMove }) {
           ))}
         </div>
       </div>
+      {s.status === 'hired' && !s.employee_id && (
+        <div className="pt-3">
+          <button onClick={() => onConvert && onConvert(s)} className="w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90 flex items-center justify-center gap-2">
+            <span>Créer un employé</span>
+          </button>
+        </div>
+      )}
       {skills.length > 0 && (
         <div className="pt-2"><p className="text-xs font-semibold text-gray-500 uppercase mb-2">Compétences</p>
           <div className="flex flex-wrap gap-1">{skills.map(sk => <Tag key={sk.skill_name} text={sk.skill_name.replace(/_/g, ' ')} c={sk.status === 'confirmed' ? 'green' : 'orange'} />)}</div>

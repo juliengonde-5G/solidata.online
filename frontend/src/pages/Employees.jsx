@@ -29,6 +29,7 @@ export default function Employees() {
   const [editingEmployee, setEditingEmployee] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [editError, setEditError] = useState('');
+  const [pcmProfile, setPcmProfile] = useState(null);
   const [saving, setSaving] = useState(false);
   const firstInputRef = useRef(null);
   const [contractForm, setContractForm] = useState({
@@ -80,10 +81,15 @@ export default function Employees() {
       ]);
       setContracts(cRes.data);
       setDaysOff(aRes.data);
+      // Charger le profil PCM si candidat lié
+      if (emp.candidate_id) {
+        api.get(`/candidates/${emp.candidate_id}/pcm`).then(r => setPcmProfile(r.data)).catch(() => setPcmProfile(null));
+      }
     } catch (err) {
       console.error(err);
       setContracts([]);
       setDaysOff([]);
+      setPcmProfile(null);
     }
   };
 
@@ -266,6 +272,7 @@ export default function Employees() {
                   { key: 'info', label: 'Informations' },
                   { key: 'contracts', label: 'Contrats' },
                   { key: 'availability', label: 'Disponibilités' },
+                  { key: 'pcm', label: 'Profil PCM' },
                 ].map(t => (
                   <button key={t.key} onClick={() => setDetailTab(t.key)}
                     className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
@@ -475,6 +482,39 @@ export default function Employees() {
                 )}
 
                 {/* Availability tab */}
+                {detailTab === 'pcm' && (
+                  <div className="space-y-3 text-sm">
+                    {!selected.candidate_id ? (
+                      <p className="text-gray-500 italic">Cet employé n'est pas lié à un candidat. Pas de profil PCM disponible.</p>
+                    ) : !pcmProfile ? (
+                      <p className="text-gray-500 italic">Aucun profil PCM enregistré pour ce candidat.</p>
+                    ) : (
+                      <>
+                        <div className="bg-purple-50 rounded-lg p-3">
+                          <p className="font-semibold text-purple-800 mb-1">Type dominant</p>
+                          <p className="text-lg font-bold text-purple-900">{pcmProfile.dominant_type || '—'}</p>
+                        </div>
+                        {pcmProfile.scores && (
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Scores PCM</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {Object.entries(pcmProfile.scores).map(([type, score]) => (
+                                <div key={type} className="flex items-center justify-between bg-gray-50 rounded px-3 py-1.5">
+                                  <span className="text-sm capitalize">{type}</span>
+                                  <span className="font-bold">{score}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {pcmProfile.report_url && (
+                          <a href={pcmProfile.report_url} target="_blank" rel="noopener noreferrer" className="text-solidata-green hover:underline text-sm font-medium block pt-2">Voir le rapport complet</a>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {detailTab === 'availability' && (
                   <div className="space-y-4">
                     <p className="text-sm text-gray-500">Jours d'indisponibilité hebdomadaire :</p>

@@ -975,6 +975,163 @@ router.delete('/events/:id', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// ══════ REPORTING & ALERTES ══════
+
+// GET /api/tours/reporting/kpis — KPIs globaux des tournées
+router.get('/reporting/kpis', async (req, res) => {
+  try {
+    const { date_from, date_to } = req.query;
+    const from = date_from || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const to = date_to || new Date().toISOString().split('T')[0];
+
+    const kpis = await pool.query(`
+      SELECT
+        COUNT(*) as total_tours,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as tours_completees,
+        COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as tours_annulees,
+        COALESCE(SUM(CASE WHEN status = 'completed' THEN total_weight_kg ELSE 0 END), 0) as poids_total_kg,
+        COALESCE(AVG(CASE WHEN status = 'completed' THEN total_weight_kg END), 0) as poids_moyen_kg,
+        COALESCE(AVG(CASE WHEN status = 'completed' THEN EXTRACT(EPOCH FROM (completed_at - started_at)) / 3600 END), 0) as duree_moyenne_h
+      FROM tours
+      WHERE date BETWEEN $1 AND $2
+    `, [from, to]);
+
+    const cavStats = await pool.query(`
+      SELECT
+        COUNT(*) as total_cav_planifies,
+        COUNT(CASE WHEN tc.status = 'collected' THEN 1 END) as cav_collectes,
+        COUNT(CASE WHEN tc.status = 'skipped' THEN 1 END) as cav_ignores
+      FROM tour_cav tc
+      JOIN tours t ON tc.tour_id = t.id
+      WHERE t.date BETWEEN $1 AND $2
+    `, [from, to]);
+
+    const driverKpis = await pool.query(`
+      SELECT
+        u.id, u.first_name, u.last_name,
+        COUNT(t.id) as nb_tours,
+        COALESCE(SUM(t.total_weight_kg), 0) as total_kg,
+        COALESCE(AVG(t.total_weight_kg), 0) as avg_kg_par_tour,
+        COUNT(CASE WHEN t.status = 'completed' THEN 1 END) as tours_completees
+      FROM tours t
+      JOIN users u ON t.driver_id = u.id
+      WHERE t.date BETWEEN $1 AND $2
+      GROUP BY u.id, u.first_name, u.last_name
+      ORDER BY total_kg DESC
+    `, [from, to]);
+
+    res.json({
+      period: { from, to },
+      global: kpis.rows[0],
+      cav: cavStats.rows[0],
+      drivers: driverKpis.rows,
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur KPIs :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/reporting/anomalies — Détection d'anomalies
+router.get('/reporting/anomalies', async (req, res) => {
+  try {
+    const anomalies = [];
+
+    // Tours complétées sans poids
+    const noWeight = await pool.query(`
+      SELECT id, date, driver_id FROM tours
+      WHERE status = 'completed' AND (total_weight_kg IS NULL OR total_weight_kg = 0)
+      AND date >= NOW() - INTERVAL '30 days'
+      ORDER BY date DESC LIMIT 20
+    `);
+    for (const t of noWeight.rows) {
+      anomalies.push({ type: 'tour_sans_poids', severity: 'warning', tour_id: t.id, date: t.date,
+        message: `Tournée #${t.id} complétée sans poids enregistré` });
+    }
+
+    // CAVs planifiés mais non collectés
+    const skippedCavs = await pool.query(`
+      SELECT tc.tour_id, tc.cav_id, c.nom as cav_nom, t.date
+      FROM tour_cav tc
+      JOIN tours t ON tc.tour_id = t.id
+      JOIN cav c ON tc.cav_id = c.id
+      WHERE t.status = 'completed' AND tc.status != 'collected'
+      AND t.date >= NOW() - INTERVAL '7 days'
+      ORDER BY t.date DESC LIMIT 30
+    `);
+    for (const s of skippedCavs.rows) {
+      anomalies.push({ type: 'cav_non_collecte', severity: 'info', tour_id: s.tour_id,
+        cav_id: s.cav_id, cav_nom: s.cav_nom, date: s.date,
+        message: `CAV "${s.cav_nom}" non collecté lors de la tournée #${s.tour_id}` });
+    }
+
+    // Poids aberrants (> 2x la moyenne)
+    const avgWeight = await pool.query(`
+      SELECT AVG(total_weight_kg) as avg, STDDEV(total_weight_kg) as stddev
+      FROM tours WHERE status = 'completed' AND total_weight_kg > 0
+    `);
+    if (avgWeight.rows[0].avg) {
+      const threshold = parseFloat(avgWeight.rows[0].avg) + 2 * parseFloat(avgWeight.rows[0].stddev || 0);
+      const outliers = await pool.query(`
+        SELECT id, date, total_weight_kg FROM tours
+        WHERE status = 'completed' AND total_weight_kg > $1
+        AND date >= NOW() - INTERVAL '30 days'
+        ORDER BY total_weight_kg DESC LIMIT 10
+      `, [threshold]);
+      for (const o of outliers.rows) {
+        anomalies.push({ type: 'poids_aberrant', severity: 'warning', tour_id: o.id,
+          date: o.date, weight: o.total_weight_kg,
+          message: `Poids anormalement élevé: ${o.total_weight_kg}kg (moyenne: ${Math.round(avgWeight.rows[0].avg)}kg)` });
+      }
+    }
+
+    // Tours sans mouvement de stock associé
+    const noStock = await pool.query(`
+      SELECT t.id, t.date, t.total_weight_kg FROM tours t
+      LEFT JOIN stock_movements sm ON sm.tour_id = t.id
+      WHERE t.status = 'completed' AND t.total_weight_kg > 0
+      AND sm.id IS NULL AND t.date >= NOW() - INTERVAL '30 days'
+      ORDER BY t.date DESC LIMIT 20
+    `);
+    for (const n of noStock.rows) {
+      anomalies.push({ type: 'stock_manquant', severity: 'error', tour_id: n.id,
+        date: n.date, weight: n.total_weight_kg,
+        message: `Tournée #${n.id} (${n.total_weight_kg}kg) sans entrée de stock` });
+    }
+
+    res.json(anomalies);
+  } catch (err) {
+    console.error('[TOURS] Erreur anomalies :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/reporting/cav-analytics — Analytiques par CAV
+router.get('/reporting/cav-analytics', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        c.id, c.nom, c.commune, c.type,
+        COUNT(tc.id) as nb_collectes,
+        COALESCE(SUM(th.weight_kg), 0) as total_kg,
+        COALESCE(AVG(th.weight_kg), 0) as avg_kg,
+        MAX(t.date) as derniere_collecte,
+        COALESCE(AVG(tc.fill_level), 0) as avg_fill_level
+      FROM cav c
+      LEFT JOIN tour_cav tc ON tc.cav_id = c.id AND tc.status = 'collected'
+      LEFT JOIN tours t ON tc.tour_id = t.id AND t.status = 'completed'
+      LEFT JOIN tonnage_history th ON th.cav_id = c.id
+      WHERE c.is_active = true
+      GROUP BY c.id, c.nom, c.commune, c.type
+      ORDER BY total_kg DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TOURS] Erreur analytics CAV :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/tours/:id — Détail avec CAV et pesées
 router.get('/:id', async (req, res) => {
   try {
@@ -1164,6 +1321,14 @@ router.put('/:id/status', async (req, res) => {
             [tour.date, tc.cav_id, weightPerCav]
           );
         }
+
+        // Création automatique du mouvement de stock (entrée matière première)
+        await pool.query(
+          `INSERT INTO stock_movements (type, date, poids_kg, tour_id, vehicle_id, origine, notes, created_by)
+           VALUES ('entree', $1, $2, $3, $4, 'collecte', $5, $6)`,
+          [tour.date, tour.total_weight_kg, parseInt(req.params.id), tour.vehicle_id,
+           `Auto: tournée #${req.params.id} (${cavs.rows.length} CAV collectés)`, req.user.id]
+        );
       }
 
       // Apprentissage continu : enregistrer prédit vs observé (fill_level 0-5)

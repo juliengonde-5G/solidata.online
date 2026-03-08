@@ -199,6 +199,7 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS employees (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        candidate_id INTEGER UNIQUE REFERENCES candidates(id) ON DELETE SET NULL,
         first_name VARCHAR(100) NOT NULL,
         last_name VARCHAR(100) NOT NULL,
         phone VARCHAR(20),
@@ -921,6 +922,121 @@ async function initDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_historique_mensuel_annee ON historique_mensuel(annee, mois);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_historique_mensuel_section ON historique_mensuel(section);`);
     console.log('[INIT-DB] Table historique_mensuel ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATIONS (ajout colonnes sans casser l'existant)
+    // ══════════════════════════════════════════
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN candidate_id INTEGER UNIQUE REFERENCES candidates(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Tables pour exécution tri et colisages
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS batch_tracking (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(50) NOT NULL UNIQUE,
+        stock_movement_id INTEGER REFERENCES stock_movements(id),
+        chaine_id INTEGER REFERENCES chaines_tri(id),
+        poids_initial_kg DOUBLE PRECISION NOT NULL,
+        poids_restant_kg DOUBLE PRECISION,
+        status VARCHAR(20) DEFAULT 'en_attente' CHECK (status IN ('en_attente', 'en_cours', 'termine', 'annule')),
+        date_debut TIMESTAMP,
+        date_fin TIMESTAMP,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS operation_executions (
+        id SERIAL PRIMARY KEY,
+        batch_id INTEGER REFERENCES batch_tracking(id) NOT NULL,
+        operation_id INTEGER REFERENCES operations_tri(id) NOT NULL,
+        status VARCHAR(20) DEFAULT 'en_attente' CHECK (status IN ('en_attente', 'en_cours', 'termine')),
+        poids_entree_kg DOUBLE PRECISION,
+        poids_sortie_total_kg DOUBLE PRECISION,
+        perte_kg DOUBLE PRECISION DEFAULT 0,
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        completed_by INTEGER REFERENCES users(id),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS operation_outputs (
+        id SERIAL PRIMARY KEY,
+        execution_id INTEGER REFERENCES operation_executions(id) NOT NULL,
+        sortie_id INTEGER REFERENCES sorties_operation(id) NOT NULL,
+        poids_kg DOUBLE PRECISION NOT NULL,
+        categorie_sortante_id INTEGER REFERENCES categories_sortantes(id),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS colisages (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(50) NOT NULL UNIQUE,
+        categorie_sortante_id INTEGER REFERENCES categories_sortantes(id),
+        type_conteneur_id INTEGER REFERENCES types_conteneurs(id),
+        poids_kg DOUBLE PRECISION DEFAULT 0,
+        nb_articles INTEGER DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'ouvert' CHECK (status IN ('ouvert', 'scelle', 'expedie', 'livre')),
+        exutoire_id INTEGER REFERENCES exutoires(id),
+        expedition_id INTEGER REFERENCES expeditions(id),
+        scelle_at TIMESTAMP,
+        scelle_by INTEGER REFERENCES users(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS colisage_items (
+        id SERIAL PRIMARY KEY,
+        colisage_id INTEGER REFERENCES colisages(id) NOT NULL,
+        output_id INTEGER REFERENCES operation_outputs(id),
+        produit_fini_id INTEGER REFERENCES produits_finis(id),
+        poids_kg DOUBLE PRECISION,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS colisage_history (
+        id SERIAL PRIMARY KEY,
+        colisage_id INTEGER REFERENCES colisages(id) NOT NULL,
+        from_status VARCHAR(20),
+        to_status VARCHAR(20) NOT NULL,
+        comment TEXT,
+        changed_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // Status field for expeditions
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE expeditions ADD COLUMN status VARCHAR(20) DEFAULT 'preparee' CHECK (status IN ('preparee', 'chargee', 'expediee', 'livree'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Status field for produits_finis
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN status VARCHAR(20) DEFAULT 'en_stock' CHECK (status IN ('en_stock', 'colise', 'expedie', 'vendu'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages) ✓');
 
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)
