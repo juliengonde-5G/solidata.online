@@ -204,21 +204,51 @@ let SEASONAL_FACTORS = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95,
 let DAY_OF_WEEK_FACTORS = [1.0, 1.0, 1.0, 1.0, 1.05, 1.15, 1.1];
 
 // Jours fériés français (approximation)
+// Jours fériés français — source : service-public.gouv.fr
 let FRENCH_HOLIDAYS_2026 = [
-  '2026-01-01', '2026-04-06', '2026-05-01', '2026-05-08',
-  '2026-05-14', '2026-05-25', '2026-07-14', '2026-08-15',
-  '2026-11-01', '2026-11-11', '2026-12-25',
+  // 2025 (fin d'année)
+  '2025-11-01', '2025-11-11', '2025-12-25',
+  // 2026
+  '2026-01-01', // Jour de l'An
+  '2026-04-06', // Lundi de Pâques
+  '2026-05-01', // Fête du Travail
+  '2026-05-08', // Victoire 1945
+  '2026-05-14', // Ascension
+  '2026-05-15', // Pont de l'Ascension (pas classe)
+  '2026-05-25', // Lundi de Pentecôte
+  '2026-07-14', // Fête nationale
+  '2026-08-15', // Assomption
+  '2026-11-01', // Toussaint
+  '2026-11-11', // Armistice
+  '2026-12-25', // Noël
+  // 2027
+  '2027-01-01', // Jour de l'An
+  '2027-03-29', // Lundi de Pâques
+  '2027-05-01', // Fête du Travail
+  '2027-05-06', // Ascension
+  '2027-05-07', // Pont de l'Ascension (pas classe)
+  '2027-05-08', // Victoire 1945
+  '2027-05-17', // Lundi de Pentecôte
+  '2027-07-14', // Fête nationale
+  '2027-08-15', // Assomption
 ];
 
-// Vacances scolaires (zone B - Normandie) avec semaine avant/après
-// Format : { name, start, end } — dates modifiables via admin
+// Vacances scolaires zone B (Normandie) — source : education.gouv.fr
+// Dates officielles arrêté du 22/10/2025
 let SCHOOL_VACATIONS = [
-  { name: 'Vacances de Noël', start: '2025-12-20', end: '2026-01-05' },
-  { name: 'Vacances d\'hiver', start: '2026-02-14', end: '2026-03-02' },
-  { name: 'Vacances de printemps', start: '2026-04-11', end: '2026-04-27' },
-  { name: 'Vacances d\'été', start: '2026-07-04', end: '2026-09-01' },
-  { name: 'Vacances de la Toussaint', start: '2026-10-17', end: '2026-11-02' },
-  { name: 'Vacances de Noël', start: '2026-12-19', end: '2027-01-05' },
+  // Année scolaire 2025-2026
+  { name: 'Toussaint 2025', start: '2025-10-18', end: '2025-11-03' },
+  { name: 'Noël 2025', start: '2025-12-20', end: '2026-01-05' },
+  { name: 'Hiver 2026', start: '2026-02-14', end: '2026-03-02' },
+  { name: 'Printemps 2026', start: '2026-04-11', end: '2026-04-27' },
+  { name: 'Pont Ascension 2026', start: '2026-05-13', end: '2026-05-18' },
+  { name: 'Été 2026', start: '2026-07-04', end: '2026-09-01' },
+  // Année scolaire 2026-2027
+  { name: 'Toussaint 2026', start: '2026-10-17', end: '2026-11-02' },
+  { name: 'Noël 2026', start: '2026-12-19', end: '2027-01-04' },
+  { name: 'Hiver 2027', start: '2027-02-20', end: '2027-03-08' },
+  { name: 'Printemps 2027', start: '2027-04-17', end: '2027-05-03' },
+  { name: 'Été 2027', start: '2027-07-03', end: '2027-09-01' },
 ];
 
 // Paramètres de scoring — modifiables via admin
