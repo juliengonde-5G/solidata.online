@@ -206,9 +206,9 @@ router.get('/:id/history', async (req, res) => {
     const days = parseInt(period) || 90;
     const result = await pool.query(
       `SELECT * FROM tonnage_history WHERE cav_id = $1
-       AND date >= NOW() - INTERVAL '${days} days'
+       AND date >= NOW() - make_interval(days => $2)
        ORDER BY date DESC`,
-      [req.params.id]
+      [req.params.id, days]
     );
     res.json(result.rows);
   } catch (err) {

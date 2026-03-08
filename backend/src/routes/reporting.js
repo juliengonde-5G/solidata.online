@@ -8,25 +8,31 @@ router.use(authenticate, authorize('ADMIN', 'MANAGER', 'AUTORITE'));
 // GET /api/reporting/dashboard — KPIs globaux
 router.get('/dashboard', async (req, res) => {
   try {
-    const period = req.query.period || 30;
+    const period = parseInt(req.query.period) || 30;
+    if (period < 1 || period > 3650) {
+      return res.status(400).json({ error: 'Période invalide (1-3650 jours)' });
+    }
 
     // Tonnage collecté
-    const collecte = await pool.query(`
-      SELECT COALESCE(SUM(total_weight_kg), 0) as tonnage_collecte
-      FROM tours WHERE status = 'completed' AND date >= NOW() - INTERVAL '${period} days'
-    `);
+    const collecte = await pool.query(
+      `SELECT COALESCE(SUM(total_weight_kg), 0) as tonnage_collecte
+       FROM tours WHERE status = 'completed' AND date >= NOW() - make_interval(days => $1)`,
+      [period]
+    );
 
     // Tonnage trié (production)
-    const tri = await pool.query(`
-      SELECT COALESCE(SUM(total_jour_t), 0) as tonnage_trie
-      FROM production_daily WHERE date >= NOW() - INTERVAL '${period} days'
-    `);
+    const tri = await pool.query(
+      `SELECT COALESCE(SUM(total_jour_t), 0) as tonnage_trie
+       FROM production_daily WHERE date >= NOW() - make_interval(days => $1)`,
+      [period]
+    );
 
     // Nombre de tournées
-    const tours = await pool.query(`
-      SELECT COUNT(*) as nb_tours, COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed
-      FROM tours WHERE date >= NOW() - INTERVAL '${period} days'
-    `);
+    const tours = await pool.query(
+      `SELECT COUNT(*) as nb_tours, COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed
+       FROM tours WHERE date >= NOW() - make_interval(days => $1)`,
+      [period]
+    );
 
     // CAV stats
     const cavStats = await pool.query(`
@@ -49,12 +55,13 @@ router.get('/dashboard', async (req, res) => {
     const co2 = parseFloat(collecte.rows[0].tonnage_collecte) * 3.6;
 
     // Facturation
-    const billing = await pool.query(`
-      SELECT COALESCE(SUM(total_ttc), 0) as total_ttc,
+    const billing = await pool.query(
+      `SELECT COALESCE(SUM(total_ttc), 0) as total_ttc,
        COUNT(CASE WHEN status = 'paid' THEN 1 END) as nb_payees,
        COUNT(CASE WHEN status = 'overdue' THEN 1 END) as nb_impayees
-      FROM invoices WHERE date >= NOW() - INTERVAL '${period} days'
-    `);
+       FROM invoices WHERE date >= NOW() - make_interval(days => $1)`,
+      [period]
+    );
 
     res.json({
       period: parseInt(period),
@@ -94,7 +101,7 @@ router.get('/collecte', async (req, res) => {
     const params = [];
     if (date_from) { params.push(date_from); query += ` AND date >= $${params.length}`; }
     if (date_to) { params.push(date_to); query += ` AND date <= $${params.length}`; }
-    query += ` GROUP BY ${grouping} ORDER BY periode`;
+    query += ` GROUP BY ${grouping === "TO_CHAR(date, 'YYYY-MM')" ? "TO_CHAR(date, 'YYYY-MM')" : 'date'} ORDER BY periode`;
 
     const result = await pool.query(query, params);
     res.json(result.rows);

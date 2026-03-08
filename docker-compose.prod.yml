@@ -53,6 +53,8 @@ services:
       - ./tonnages.xlsx:/data/tonnages.xlsx:ro
       - ./KPI_Production 2026.xlsx:/data/KPI_Production 2026.xlsx:ro
       - ./Carte des PAV au 28-02-2026.kml:/data/Carte des PAV au 28-02-2026.kml:ro
+      - "./Dashboard 2025.xlsm:/data/Dashboard 2025.xlsm:ro"
+      - "./Dashboard 2026.xlsm:/data/Dashboard 2026.xlsm:ro"
     networks:
       - internal
     deploy:

@@ -34,8 +34,8 @@ router.get('/summary', async (req, res) => {
     const { period } = req.query; // 30, 90, 365
     const days = parseInt(period) || 30;
 
-    const result = await pool.query(`
-      SELECT
+    const result = await pool.query(
+      `SELECT
         COALESCE(m.categorie, 'Non classé') as categorie,
         SUM(CASE WHEN sm.type = 'entree' THEN sm.poids_kg ELSE 0 END) as total_entrees_kg,
         SUM(CASE WHEN sm.type = 'sortie' THEN sm.poids_kg ELSE 0 END) as total_sorties_kg,
@@ -43,10 +43,11 @@ router.get('/summary', async (req, res) => {
         COUNT(*) as nb_mouvements
       FROM stock_movements sm
       LEFT JOIN matieres m ON sm.matiere_id = m.id
-      WHERE sm.date >= NOW() - INTERVAL '${days} days'
+      WHERE sm.date >= NOW() - make_interval(days => $1)
       GROUP BY m.categorie
-      ORDER BY solde_kg DESC
-    `);
+      ORDER BY solde_kg DESC`,
+      [days]
+    );
 
     const totals = await pool.query(`
       SELECT
