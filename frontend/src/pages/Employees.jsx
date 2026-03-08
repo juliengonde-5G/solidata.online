@@ -26,6 +26,9 @@ export default function Employees() {
   const [contracts, setContracts] = useState([]);
   const [daysOff, setDaysOff] = useState([]);
   const [showContractForm, setShowContractForm] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
   const [contractForm, setContractForm] = useState({
     contract_type: 'CDI', duration_months: '', start_date: '', end_date: '',
     weekly_hours: 35, team_id: '', position_id: '',
@@ -54,6 +57,20 @@ export default function Employees() {
     setSelected(emp);
     setDetailTab('info');
     setShowContractForm(false);
+    setEditingEmployee(false);
+    setEditForm({
+      first_name: emp.first_name || '',
+      last_name: emp.last_name || '',
+      email: emp.email || '',
+      phone: emp.phone || '',
+      team_id: emp.team_id || '',
+      position: emp.position || '',
+      contract_type: emp.contract_type || 'CDI',
+      contract_start: emp.contract_start ? emp.contract_start.slice(0, 10) : '',
+      contract_end: emp.contract_end ? emp.contract_end.slice(0, 10) : '',
+      weekly_hours: emp.weekly_hours ?? 35,
+      is_active: emp.is_active !== false,
+    });
     try {
       const [cRes, aRes] = await Promise.all([
         api.get(`/employees/${emp.id}/contracts`),
@@ -96,6 +113,36 @@ export default function Employees() {
     try {
       await api.put(`/employees/${selected.id}/availability`, { days_off: newDays });
     } catch (err) { console.error(err); }
+  };
+
+  const updateEmployee = async (e) => {
+    e.preventDefault();
+    if (!selected) return;
+    setSaving(true);
+    try {
+      const payload = {
+        first_name: editForm.first_name,
+        last_name: editForm.last_name,
+        email: editForm.email || null,
+        phone: editForm.phone || null,
+        team_id: editForm.team_id || null,
+        position: editForm.position || null,
+        contract_type: editForm.contract_type || null,
+        contract_start: editForm.contract_start || null,
+        contract_end: editForm.contract_end || null,
+        weekly_hours: editForm.weekly_hours != null ? Number(editForm.weekly_hours) : 35,
+        is_active: editForm.is_active,
+      };
+      const res = await api.put(`/employees/${selected.id}`, payload);
+      setSelected({ ...selected, ...res.data, team_name: teams.find(t => t.id === res.data.team_id)?.name });
+      setEditingEmployee(false);
+      loadData();
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || 'Erreur lors de l\'enregistrement');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handlePhotoUpload = async (employeeId, file) => {
@@ -221,21 +268,94 @@ export default function Employees() {
                 {/* Info tab */}
                 {detailTab === 'info' && (
                   <div className="space-y-3 text-sm">
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Prénom" value={selected.first_name} />
-                      <Field label="Nom" value={selected.last_name} />
-                      <Field label="Email" value={selected.email} />
-                      <Field label="Téléphone" value={selected.phone} />
-                      <Field label="Équipe" value={selected.team_name} />
-                      <Field label="Contrat" value={CONTRACT_LABELS[selected.contract_type] || selected.contract_type} />
-                      <Field label="Heures/sem" value={selected.weekly_hours ? `${selected.weekly_hours}h` : null} />
-                      <Field label="Matricule" value={selected.matricule} />
-                    </div>
-                    {selected.hire_date && <Field label="Date d'embauche" value={new Date(selected.hire_date).toLocaleDateString('fr-FR')} />}
-                    <div className="mt-4">
-                      <label className="text-xs text-gray-500 block mb-1">Photo</label>
-                      <input type="file" accept="image/*" onChange={e => e.target.files[0] && handlePhotoUpload(selected.id, e.target.files[0])} className="text-xs" />
-                    </div>
+                    {!editingEmployee ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field label="Prénom" value={selected.first_name} />
+                          <Field label="Nom" value={selected.last_name} />
+                          <Field label="Email" value={selected.email} />
+                          <Field label="Téléphone" value={selected.phone} />
+                          <Field label="Équipe" value={selected.team_name} />
+                          <Field label="Contrat" value={CONTRACT_LABELS[selected.contract_type] || selected.contract_type} />
+                          <Field label="Heures/sem" value={selected.weekly_hours ? `${selected.weekly_hours}h` : null} />
+                          <Field label="Matricule" value={selected.matricule} />
+                        </div>
+                        {(selected.contract_start || selected.hire_date) && (
+                          <Field label="Date d'embauche" value={new Date(selected.contract_start || selected.hire_date).toLocaleDateString('fr-FR')} />
+                        )}
+                        <div className="mt-4">
+                          <label className="text-xs text-gray-500 block mb-1">Photo</label>
+                          <input type="file" accept="image/*" onChange={e => e.target.files[0] && handlePhotoUpload(selected.id, e.target.files[0])} className="text-xs" />
+                        </div>
+                        <button type="button" onClick={() => setEditingEmployee(true)} className="mt-4 w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90">
+                          Modifier
+                        </button>
+                      </>
+                    ) : (
+                      <form onSubmit={updateEmployee} className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-gray-500 text-xs">Prénom *</label>
+                            <input value={editForm.first_name} onChange={e => setEditForm({ ...editForm, first_name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required />
+                          </div>
+                          <div>
+                            <label className="text-gray-500 text-xs">Nom *</label>
+                            <input value={editForm.last_name} onChange={e => setEditForm({ ...editForm, last_name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-gray-500 text-xs">Email</label>
+                          <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                        </div>
+                        <div>
+                          <label className="text-gray-500 text-xs">Téléphone</label>
+                          <input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                        </div>
+                        <div>
+                          <label className="text-gray-500 text-xs">Équipe</label>
+                          <select value={editForm.team_id} onChange={e => setEditForm({ ...editForm, team_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                            <option value="">—</option>
+                            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-gray-500 text-xs">Poste</label>
+                          <input value={editForm.position} onChange={e => setEditForm({ ...editForm, position: e.target.value })} placeholder="Ex: Chauffeur" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-gray-500 text-xs">Type de contrat</label>
+                            <select value={editForm.contract_type} onChange={e => setEditForm({ ...editForm, contract_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                              {Object.entries(CONTRACT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-gray-500 text-xs">Heures/sem</label>
+                            <input type="number" min="0" step="0.5" value={editForm.weekly_hours} onChange={e => setEditForm({ ...editForm, weekly_hours: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-gray-500 text-xs">Début contrat</label>
+                            <input type="date" value={editForm.contract_start} onChange={e => setEditForm({ ...editForm, contract_start: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          </div>
+                          <div>
+                            <label className="text-gray-500 text-xs">Fin contrat</label>
+                            <input type="date" value={editForm.contract_end} onChange={e => setEditForm({ ...editForm, contract_end: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input type="checkbox" id="emp-active" checked={editForm.is_active} onChange={e => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" />
+                          <label htmlFor="emp-active" className="text-sm">Actif</label>
+                        </div>
+                        <div className="flex gap-2 mt-4">
+                          <button type="button" onClick={() => setEditingEmployee(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                          <button type="submit" disabled={saving} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90 disabled:opacity-50">
+                            {saving ? 'Enregistrement…' : 'Enregistrer'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
                   </div>
                 )}
 
