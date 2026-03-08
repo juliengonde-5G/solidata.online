@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
@@ -30,6 +30,7 @@ export default function Employees() {
   const [editForm, setEditForm] = useState({});
   const [editError, setEditError] = useState('');
   const [saving, setSaving] = useState(false);
+  const firstInputRef = useRef(null);
   const [contractForm, setContractForm] = useState({
     contract_type: 'CDI', duration_months: '', start_date: '', end_date: '',
     weekly_hours: 35, team_id: '', position_id: '',
@@ -118,12 +119,14 @@ export default function Employees() {
 
   const updateEmployee = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!selected) return;
     setEditError('');
     const firstName = (editForm.first_name || '').trim();
     const lastName = (editForm.last_name || '').trim();
     if (!firstName || !lastName) {
       setEditError('Le prénom et le nom sont obligatoires.');
+      firstInputRef.current?.focus();
       return;
     }
     setSaving(true);
@@ -302,10 +305,10 @@ export default function Employees() {
                         </button>
                       </>
                     ) : (
-                      <form onSubmit={updateEmployee} className="space-y-3">
-                        <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
-                          Les champs marqués <span className="text-red-500 font-semibold">*</span> sont obligatoires.
-                        </p>
+                      <form id="employee-edit-form" onSubmit={updateEmployee} noValidate className="space-y-3">
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-sm text-amber-800">
+                          <strong>Champs obligatoires :</strong> Prénom et Nom (marqués <span className="text-red-600 font-semibold">*</span>). Les autres champs sont facultatifs.
+                        </div>
                         {editError && (
                           <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-sm flex items-center gap-2">
                             <span className="flex-shrink-0">⚠</span>
@@ -315,12 +318,12 @@ export default function Employees() {
                         )}
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="text-gray-500 text-xs">Prénom <span className="text-red-500">*</span></label>
-                            <input value={editForm.first_name} onChange={e => { setEditForm({ ...editForm, first_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" required />
+                            <label className="text-gray-700 text-xs font-medium">Prénom <span className="text-red-500" aria-hidden="true">*</span></label>
+                            <input ref={firstInputRef} value={editForm.first_name} onChange={e => { setEditForm({ ...editForm, first_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" aria-required="true" />
                           </div>
                           <div>
-                            <label className="text-gray-500 text-xs">Nom <span className="text-red-500">*</span></label>
-                            <input value={editForm.last_name} onChange={e => { setEditForm({ ...editForm, last_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" required />
+                            <label className="text-gray-700 text-xs font-medium">Nom <span className="text-red-500" aria-hidden="true">*</span></label>
+                            <input value={editForm.last_name} onChange={e => { setEditForm({ ...editForm, last_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" aria-required="true" />
                           </div>
                         </div>
                         <div>
@@ -370,7 +373,7 @@ export default function Employees() {
                         </div>
                         <div className="flex gap-2 mt-4">
                           <button type="button" onClick={() => setEditingEmployee(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                          <button type="submit" disabled={saving} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90 disabled:opacity-50">
+                          <button type="submit" form="employee-edit-form" disabled={saving} onClick={e => e.stopPropagation()} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90 disabled:opacity-50 disabled:cursor-not-allowed">
                             {saving ? 'Enregistrement…' : 'Enregistrer'}
                           </button>
                         </div>
