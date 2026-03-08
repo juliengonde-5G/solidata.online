@@ -1,0 +1,26 @@
+# ============================================================
+# SOLIDATA — Service systemd
+# Installer : sudo cp deploy/solidata.service /etc/systemd/system/
+#             sudo systemctl daemon-reload
+#             sudo systemctl enable solidata
+# ============================================================
+
+[Unit]
+Description=SOLIDATA ERP Application
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=solidata
+Group=docker
+WorkingDirectory=/opt/solidata.online
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+ExecReload=/usr/bin/docker compose -f docker-compose.prod.yml restart
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

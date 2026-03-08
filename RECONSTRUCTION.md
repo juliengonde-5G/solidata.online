@@ -1,7 +1,8 @@
 # SOLIDATA ERP - Pack Technique de Reconstruction
 
-> Document genere le 2026-03-07. Ce fichier contient TOUTE l'information technique
-> et logique necessaire pour reconstruire l'application SOLIDATA ERP depuis zero.
+> **Référentiel principal du projet :** [DOCUMENTATION_TECHNIQUE.md](./DOCUMENTATION_TECHNIQUE.md) — document de référence officiel (architecture, stack, déploiement, API).
+>
+> Ce fichier (RECONSTRUCTION.md) est un **pack de reconstruction** généré le 2026-03-07 : il détaille le schéma BDD, les routes et la logique métier pour reconstruire l’application depuis zéro. À utiliser en complément de la documentation technique.
 
 ---
 

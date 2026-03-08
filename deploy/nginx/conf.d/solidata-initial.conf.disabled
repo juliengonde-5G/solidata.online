@@ -1,0 +1,51 @@
+# === Configuration initiale SANS SSL (pour obtenir le certificat) ===
+# Utiliser ce fichier AVANT d'avoir le certificat Let's Encrypt
+# Renommer en solidata.conf, puis lancer certbot, puis remettre le vrai solidata.conf
+
+upstream frontend_app {
+    server frontend:80;
+}
+upstream mobile_app {
+    server mobile:80;
+}
+upstream backend_api {
+    server backend:3001;
+}
+
+server {
+    listen 80;
+    server_name solidata.online www.solidata.online m.solidata.online;
+
+    # Certbot challenge
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Temporaire : servir sans SSL pour le premier déploiement
+    location / {
+        proxy_pass http://frontend_app;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /api/ {
+        proxy_pass http://backend_api;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 300s;
+    }
+
+    location /socket.io/ {
+        proxy_pass http://backend_api;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /uploads/ {
+        proxy_pass http://backend_api;
+    }
+}
