@@ -132,17 +132,124 @@ export default function CollectionProposals() {
 
         {!loading && view === 'daily' && daily && (
           <div className="space-y-6">
-            <div className="bg-white rounded-xl border p-4 flex flex-wrap items-center gap-4">
-              <span className="text-sm text-gray-500">Contexte du jour</span>
-              <span className="text-sm">Météo : <strong>{(daily.context?.weatherFactor ?? 1).toFixed(2)}</strong></span>
-              <span className="text-sm">Trafic : <strong>{(daily.context?.trafficFactor ?? 1).toFixed(2)}</strong></span>
-              <span className="text-sm">Durée : <strong>{(daily.context?.durationFactor ?? 1).toFixed(2)}</strong></span>
-              <button
-                onClick={() => setContextEdit({ date, weather_factor: daily.context?.weatherFactor ?? 1, traffic_factor: daily.context?.trafficFactor ?? 1, duration_factor: daily.context?.durationFactor ?? 1, notes: '' })}
-                className="text-solidata-green text-sm font-medium hover:underline"
-              >
-                Modifier le contexte
-              </button>
+            {/* Panneau de référence : météo + calendrier */}
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 border-b">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-700">Références du calcul prédictif</h3>
+                  <button
+                    onClick={() => setContextEdit({ date, weather_factor: daily.context?.weatherFactor ?? 1, traffic_factor: daily.context?.trafficFactor ?? 1, duration_factor: daily.context?.durationFactor ?? 1, notes: '' })}
+                    className="text-solidata-green text-xs font-medium hover:underline"
+                  >
+                    Modifier le contexte
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Météo */}
+                  <div className="bg-white rounded-lg p-3 border">
+                    <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-2">Météo du jour</p>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-xs text-gray-400 block">Conditions</span>
+                        <span className="font-medium">{daily.context?.weatherLabel || 'Non disponible'}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-gray-400 block">Temp. max</span>
+                        <span className="font-medium">{daily.context?.tempMax != null ? `${daily.context.tempMax}°C` : '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-gray-400 block">Précipitations</span>
+                        <span className="font-medium">{daily.context?.precipMm != null ? `${daily.context.precipMm} mm` : '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-gray-400 block">Facteur météo</span>
+                        <span className={`font-mono font-bold ${(daily.context?.weatherFactor ?? 1) < 1 ? 'text-orange-600' : (daily.context?.weatherFactor ?? 1) > 1 ? 'text-green-600' : 'text-gray-700'}`}>
+                          x{(daily.context?.weatherFactor ?? 1).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-2 text-xs text-gray-500">
+                      <span>Trafic : <strong>x{(daily.context?.trafficFactor ?? 1).toFixed(2)}</strong></span>
+                      <span>Durée : <strong>x{(daily.context?.durationFactor ?? 1).toFixed(2)}</strong></span>
+                    </div>
+                    {daily.context?.notes && (
+                      <p className="mt-2 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">{daily.context.notes}</p>
+                    )}
+                  </div>
+
+                  {/* Calendrier congés */}
+                  <div className="bg-white rounded-lg p-3 border">
+                    <p className="text-xs font-semibold text-purple-600 uppercase tracking-wide mb-2">Calendrier des congés</p>
+
+                    {/* Statut vacances du jour */}
+                    {daily.vacationStatus ? (
+                      <div className={`rounded-lg px-3 py-2 mb-2 text-sm ${
+                        daily.vacationStatus.status === 'during' ? 'bg-purple-100 text-purple-800' :
+                        daily.vacationStatus.status === 'pre' ? 'bg-amber-50 text-amber-800' :
+                        'bg-blue-50 text-blue-800'
+                      }`}>
+                        <span className="font-medium">
+                          {daily.vacationStatus.status === 'during' ? 'En vacances' :
+                           daily.vacationStatus.status === 'pre' ? 'Semaine pré-vacances' :
+                           'Semaine post-vacances'}
+                        </span>
+                        <span className="ml-1">— {daily.vacationStatus.name}</span>
+                        <span className="ml-2 font-mono text-xs">(x{daily.vacationStatus.bonus})</span>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400 mb-2">Hors période de vacances scolaires</p>
+                    )}
+
+                    {/* Jour férié */}
+                    {daily.holiday && (
+                      <div className="bg-red-50 text-red-700 rounded-lg px-3 py-2 mb-2 text-sm">
+                        <span className="font-medium">Jour férié</span>
+                        <span className="ml-2 font-mono text-xs">(x{daily.holiday.bonus})</span>
+                      </div>
+                    )}
+
+                    {/* Facteurs appliqués */}
+                    {daily.referenceCalendar && (
+                      <div className="flex gap-3 text-xs text-gray-500 mb-2">
+                        <span>Saisonnier : <strong>x{daily.referenceCalendar.seasonalFactor}</strong></span>
+                        <span>Jour semaine : <strong>x{daily.referenceCalendar.dayOfWeekFactor}</strong></span>
+                      </div>
+                    )}
+
+                    {/* Prochaines vacances */}
+                    {daily.referenceCalendar?.upcomingVacations?.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-400 mb-1">Prochaines vacances :</p>
+                        <div className="space-y-1">
+                          {daily.referenceCalendar.upcomingVacations.map((v, i) => (
+                            <div key={i} className="text-xs flex justify-between bg-gray-50 rounded px-2 py-1">
+                              <span className="font-medium">{v.name}</span>
+                              <span className="text-gray-400">
+                                {new Date(v.start + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} — {new Date(v.end + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Jours fériés proches */}
+                    {daily.referenceCalendar?.nearbyHolidays?.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-400 mb-1">Jours fériés proches :</p>
+                        <div className="flex flex-wrap gap-1">
+                          {daily.referenceCalendar.nearbyHolidays.map((h, i) => (
+                            <span key={i} className="inline-block bg-red-50 text-red-600 text-xs px-2 py-0.5 rounded">
+                              {new Date(h + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="grid gap-4">
@@ -177,19 +284,54 @@ export default function CollectionProposals() {
         {!loading && view === 'weekly' && weekly && (
           <div className="space-y-4">
             <p className="text-sm text-gray-500">Semaine du {new Date(weekly.weekStart + 'T12:00:00').toLocaleDateString('fr-FR')} au {new Date(weekly.weekEnd + 'T12:00:00').toLocaleDateString('fr-FR')}</p>
+
+            {/* Vacances de la semaine */}
+            {weekly.upcomingVacations?.length > 0 && (
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-center gap-3">
+                <span className="text-purple-600 font-medium text-sm">Vacances scolaires :</span>
+                {weekly.upcomingVacations.map((v, i) => (
+                  <span key={i} className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-lg">
+                    {v.name} ({new Date(v.start + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} — {new Date(v.end + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })})
+                  </span>
+                ))}
+              </div>
+            )}
+
             <div className="grid gap-3">
               {weekly.days?.map(day => (
                 <div key={day.date} className="bg-white rounded-xl border p-4 flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-4">
-                    <span className="font-medium capitalize">{day.dayName}</span>
+                    <span className="font-medium capitalize w-24">{day.dayName}</span>
                     <span className="text-sm text-gray-500">{day.date}</span>
                     {day.suggestedTour && (
                       <span className="text-sm">
-                        {day.suggestedTour.cavCount} CAV · {day.suggestedTour.stats?.totalDistance ?? 0} km · Météo {day.context?.weatherFactor?.toFixed(2)}
+                        {day.suggestedTour.cavCount} CAV · {day.suggestedTour.stats?.totalDistance ?? 0} km
+                      </span>
+                    )}
+                    {/* Météo inline */}
+                    {day.context?.weatherLabel && (
+                      <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
+                        {day.context.weatherLabel}
+                        {day.context.tempMax != null && ` ${day.context.tempMax}°C`}
+                        {' '}x{day.context.weatherFactor?.toFixed(2)}
                       </span>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center">
+                    {/* Badges vacances / férié */}
+                    {day.vacationStatus && (
+                      <span className={`text-xs px-2 py-1 rounded ${
+                        day.vacationStatus.status === 'during' ? 'bg-purple-100 text-purple-700' :
+                        day.vacationStatus.status === 'pre' ? 'bg-amber-50 text-amber-700' :
+                        'bg-blue-50 text-blue-700'
+                      }`}>
+                        {day.vacationStatus.status === 'during' ? 'Vacances' :
+                         day.vacationStatus.status === 'pre' ? 'Pré-vacances' : 'Post-vacances'}
+                      </span>
+                    )}
+                    {day.holiday && (
+                      <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded">Férié</span>
+                    )}
                     {day.existingTours?.length > 0 && (
                       <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{day.existingTours.length} tournée(s)</span>
                     )}

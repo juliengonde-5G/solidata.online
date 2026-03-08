@@ -738,9 +738,46 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
     }
 
     const context = await getContextForDate(date);
+    const vacationStatus = getSchoolVacationStatus(date);
+    const holiday = isHoliday(date);
+
+    // Prochaines vacances scolaires (pour affichage calendrier)
+    const upcomingVacations = SCHOOL_VACATIONS.filter(v => v.end >= date).slice(0, 3);
+
+    // Jours fériés proches (±30 jours)
+    const d = new Date(date + 'T00:00:00');
+    const nearbyHolidays = FRENCH_HOLIDAYS_2026.filter(h => {
+      const hd = new Date(h + 'T00:00:00');
+      const diff = Math.abs(hd - d) / 86400000;
+      return diff <= 30;
+    });
+
     res.json({
       date,
-      context: { weatherFactor: context.weatherFactor, trafficFactor: context.trafficFactor, durationFactor: context.durationFactor },
+      context: {
+        weatherFactor: context.weatherFactor,
+        weatherLabel: context.weatherLabel,
+        weatherCode: context.weatherCode,
+        tempMax: context.tempMax,
+        precipMm: context.precipMm,
+        trafficFactor: context.trafficFactor,
+        durationFactor: context.durationFactor,
+        notes: context.notes,
+      },
+      vacationStatus: vacationStatus.status ? {
+        status: vacationStatus.status,
+        name: vacationStatus.name,
+        bonus: vacationStatus.status === 'during' ? SCORING_CONFIG.schoolVacationBonus
+          : vacationStatus.status === 'pre' ? SCORING_CONFIG.preVacationBonus
+          : SCORING_CONFIG.postVacationBonus,
+      } : null,
+      holiday: holiday ? { date, bonus: SCORING_CONFIG.holidayBonus } : null,
+      referenceCalendar: {
+        upcomingVacations,
+        nearbyHolidays,
+        seasonalFactor: SEASONAL_FACTORS[d.getMonth()],
+        dayOfWeekFactor: DAY_OF_WEEK_FACTORS[d.getDay() === 0 ? 6 : d.getDay() - 1],
+      },
       availableVehicles: availableVehicles.length,
       drivers: driversResult.rows,
       proposals,
@@ -792,17 +829,29 @@ router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) 
       }
 
       const context = await getContextForDate(dateStr);
+      const vacStatus = getSchoolVacationStatus(dateStr);
+      const hol = isHoliday(dateStr);
       weekly.push({
         date: dateStr,
         dayName: new Date(dateStr + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long' }),
         existingTours: existingTours.rows,
         availableVehicles: available.length,
         suggestedTour: bestProposal,
-        context: { weatherFactor: context.weatherFactor, durationFactor: context.durationFactor },
+        context: {
+          weatherFactor: context.weatherFactor,
+          weatherLabel: context.weatherLabel,
+          tempMax: context.tempMax,
+          precipMm: context.precipMm,
+          durationFactor: context.durationFactor,
+        },
+        vacationStatus: vacStatus.status ? { status: vacStatus.status, name: vacStatus.name } : null,
+        holiday: hol,
       });
     }
 
-    res.json({ weekStart: days[0], weekEnd: days[6], days: weekly });
+    // Vacances couvrant la semaine
+    const upcomingVacations = SCHOOL_VACATIONS.filter(v => v.end >= days[0] && v.start <= days[6]);
+    res.json({ weekStart: days[0], weekEnd: days[6], days: weekly, upcomingVacations });
   } catch (err) {
     console.error('[TOURS] Erreur propositions hebdo :', err);
     res.status(500).json({ error: 'Erreur serveur' });
