@@ -154,6 +154,27 @@ bash deploy/scripts/deploy.sh update
 
 Causes fréquentes : conteneur frontend/backend en crash (erreur au build, fichier manquant), base de données non prête, ou mémoire insuffisante (OOM).
 
+## Dépannage — Les modifications ne remontent pas
+
+Si après `deploy.sh update` les changements (frontend, backend, mobile) n’apparaissent pas sur le site :
+
+1. **Vérifier que le serveur a bien le dernier code**  
+   Sur le serveur : `cd /opt/solidata.online && git status && git log -1 --oneline`  
+   Puis si besoin : `git pull origin main`.
+
+2. **Rebuild sans cache**  
+   Le script `deploy.sh update` reconstruit désormais les images avec `--no-cache` pour forcer l’utilisation du code à jour. Si vous utilisez une ancienne version du script, lancer à la main :
+   ```bash
+   cd /opt/solidata.online
+   git pull origin main
+   docker compose -f docker-compose.prod.yml build --no-cache
+   docker compose -f docker-compose.prod.yml up -d
+   ```
+   Sans `--no-cache`, Docker réutilise d’anciennes couches et peut servir une ancienne version du frontend.
+
+3. **En cas d’échec du build**  
+   Relancer uniquement après un `git pull origin main` réussi, pour être sûr que le correctif (ex. Tailwind mobile) est bien présent sur le serveur.
+
 ## Architecture production
 
 ```

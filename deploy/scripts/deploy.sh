@@ -129,9 +129,9 @@ case "${ACTION}" in
     log "Récupération du code..."
     git pull origin main
 
-    # Rebuild et redémarrage
-    log "Reconstruction des images..."
-    docker compose -f ${COMPOSE_FILE} build
+    # Rebuild sans cache pour prendre en compte le nouveau code (évite que le frontend reste en cache)
+    log "Reconstruction des images (sans cache)..."
+    docker compose -f ${COMPOSE_FILE} build --no-cache
 
     log "Redémarrage des services..."
     docker compose -f ${COMPOSE_FILE} up -d
