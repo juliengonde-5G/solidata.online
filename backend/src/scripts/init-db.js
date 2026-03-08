@@ -898,6 +898,7 @@ async function initDatabase() {
     // Migration: update teams constraint + data
     await client.query(`
       ALTER TABLE teams DROP CONSTRAINT IF EXISTS teams_type_check;
+      UPDATE teams SET type = 'logistique' WHERE type IS NOT NULL AND type NOT IN ('tri', 'collecte', 'logistique', 'btq_st_sever', 'btq_lhopital', 'administration');
       ALTER TABLE teams ADD CONSTRAINT teams_type_check
         CHECK (type IN ('tri', 'collecte', 'logistique', 'btq_st_sever', 'btq_lhopital', 'administration'));
     `);
