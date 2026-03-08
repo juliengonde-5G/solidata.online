@@ -315,6 +315,9 @@ export default function AdminPredictive() {
             <ParamInput label="Seuil densité (nb conteneurs)" value={config.scoring.densityThreshold} onChange={v => updateScoring('densityThreshold', v)} />
             <ParamInput label="Bonus densité (multiplicateur)" value={config.scoring.densityBonus} onChange={v => updateScoring('densityBonus', v)} />
             <ParamInput label="Bonus jour férié (multiplicateur)" value={config.scoring.holidayBonus} onChange={v => updateScoring('holidayBonus', v)} />
+            <ParamInput label="Bonus vacances scolaires" value={config.scoring.schoolVacationBonus} onChange={v => updateScoring('schoolVacationBonus', v)} />
+            <ParamInput label="Bonus semaine pré-vacances" value={config.scoring.preVacationBonus} onChange={v => updateScoring('preVacationBonus', v)} />
+            <ParamInput label="Bonus semaine post-vacances" value={config.scoring.postVacationBonus} onChange={v => updateScoring('postVacationBonus', v)} />
             <ParamInput label="Cap remplissage max (%)" value={config.scoring.maxFillCap} onChange={v => updateScoring('maxFillCap', v)} />
           </div>
         </Section>
@@ -342,12 +345,82 @@ export default function AdminPredictive() {
           </div>
         </Section>
 
+        {/* Vacances scolaires */}
+        <Section title="Vacances scolaires" desc="Périodes de vacances avec bonus automatique : semaine avant, pendant, et semaine après">
+          <div className="space-y-2 mb-4">
+            {(config.schoolVacations || []).map((vac, idx) => (
+              <div key={idx} className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-lg px-4 py-2">
+                <input
+                  type="text"
+                  value={vac.name}
+                  onChange={e => {
+                    const arr = [...config.schoolVacations];
+                    arr[idx] = { ...arr[idx], name: e.target.value };
+                    setConfig({ ...config, schoolVacations: arr });
+                  }}
+                  className="border rounded px-2 py-1 text-sm flex-1 min-w-0"
+                  placeholder="Nom"
+                />
+                <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <span>Du</span>
+                  <input
+                    type="date"
+                    value={vac.start}
+                    onChange={e => {
+                      const arr = [...config.schoolVacations];
+                      arr[idx] = { ...arr[idx], start: e.target.value };
+                      setConfig({ ...config, schoolVacations: arr });
+                    }}
+                    className="border rounded px-2 py-1 text-sm"
+                  />
+                  <span>au</span>
+                  <input
+                    type="date"
+                    value={vac.end}
+                    onChange={e => {
+                      const arr = [...config.schoolVacations];
+                      arr[idx] = { ...arr[idx], end: e.target.value };
+                      setConfig({ ...config, schoolVacations: arr });
+                    }}
+                    className="border rounded px-2 py-1 text-sm"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    const arr = [...config.schoolVacations];
+                    arr.splice(idx, 1);
+                    setConfig({ ...config, schoolVacations: arr });
+                  }}
+                  className="text-purple-400 hover:text-red-500 text-lg"
+                >&times;</button>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => setConfig({
+              ...config,
+              schoolVacations: [...(config.schoolVacations || []), { name: '', start: '', end: '' }],
+            })}
+            className="px-4 py-2 bg-purple-500 text-white rounded-lg text-sm hover:bg-purple-600"
+          >
+            + Ajouter une période
+          </button>
+          <div className="mt-4 bg-purple-50 rounded-lg p-3 text-xs text-purple-700">
+            <p><strong>Effet sur la prédiction :</strong></p>
+            <ul className="mt-1 space-y-1 list-disc list-inside">
+              <li>Semaine avant le début : x{config.scoring.preVacationBonus || 1.1} (préparatifs, tri avant départ)</li>
+              <li>Pendant les vacances : x{config.scoring.schoolVacationBonus || 1.15} (présence accrue, tri domestique)</li>
+              <li>Semaine après la fin : x{config.scoring.postVacationBonus || 1.1} (retour, vidage post-vacances)</li>
+            </ul>
+          </div>
+        </Section>
+
         {/* Explication algorithme */}
         <Section title="Fonctionnement de l'algorithme" desc="">
           <div className="text-sm text-gray-600 space-y-3">
             <div className="flex gap-3">
               <span className="flex-shrink-0 w-7 h-7 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">1</span>
-              <p><strong>Prédiction de remplissage</strong> — Pour chaque CAV, l'historique des 180 derniers jours est analysé. Le remplissage est estimé en fonction du poids moyen, du nombre de jours depuis la dernière collecte, et des facteurs saisonniers/jour de semaine/jours fériés.</p>
+              <p><strong>Prédiction de remplissage</strong> — Pour chaque CAV, l'historique des 180 derniers jours est analysé. Le remplissage est estimé en fonction du poids moyen, du nombre de jours depuis la dernière collecte, et des facteurs saisonniers/jour de semaine/jours fériés/vacances scolaires (semaine avant, pendant, semaine après).</p>
             </div>
             <div className="flex gap-3">
               <span className="flex-shrink-0 w-7 h-7 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">2</span>

@@ -210,6 +210,17 @@ let FRENCH_HOLIDAYS_2026 = [
   '2026-11-01', '2026-11-11', '2026-12-25',
 ];
 
+// Vacances scolaires (zone B - Normandie) avec semaine avant/après
+// Format : { name, start, end } — dates modifiables via admin
+let SCHOOL_VACATIONS = [
+  { name: 'Vacances de Noël', start: '2025-12-20', end: '2026-01-05' },
+  { name: 'Vacances d\'hiver', start: '2026-02-14', end: '2026-03-02' },
+  { name: 'Vacances de printemps', start: '2026-04-11', end: '2026-04-27' },
+  { name: 'Vacances d\'été', start: '2026-07-04', end: '2026-09-01' },
+  { name: 'Vacances de la Toussaint', start: '2026-10-17', end: '2026-11-02' },
+  { name: 'Vacances de Noël', start: '2026-12-19', end: '2027-01-05' },
+];
+
 // Paramètres de scoring — modifiables via admin
 let SCORING_CONFIG = {
   fillThresholds: { critical: 100, high: 80, medium: 60, low: 40 },
@@ -227,10 +238,37 @@ let SCORING_CONFIG = {
   maxFillCap: 120,
   weekendSunnyBonus: 1.15,  // beau temps le weekend → plus de tri
   localEventBonus: 1.2,     // brocante/vide-grenier à proximité
+  schoolVacationBonus: 1.15,   // pendant les vacances scolaires
+  preVacationBonus: 1.1,      // semaine précédant les vacances
+  postVacationBonus: 1.1,     // semaine suivant les vacances
 };
 
 function isHoliday(dateStr) {
   return FRENCH_HOLIDAYS_2026.includes(dateStr);
+}
+
+// Détection vacances scolaires : pendant, semaine avant, semaine après
+function getSchoolVacationStatus(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const msPerDay = 86400000;
+
+  for (const vac of SCHOOL_VACATIONS) {
+    const start = new Date(vac.start + 'T00:00:00');
+    const end = new Date(vac.end + 'T00:00:00');
+    const preStart = new Date(start.getTime() - 7 * msPerDay);
+    const postEnd = new Date(end.getTime() + 7 * msPerDay);
+
+    if (d >= start && d <= end) {
+      return { status: 'during', name: vac.name };
+    }
+    if (d >= preStart && d < start) {
+      return { status: 'pre', name: vac.name };
+    }
+    if (d > end && d <= postEnd) {
+      return { status: 'post', name: vac.name };
+    }
+  }
+  return { status: null, name: null };
 }
 
 async function predictFillRate(cavId, targetDate) {
@@ -279,8 +317,20 @@ async function predictFillRate(cavId, targetDate) {
   rawFill *= SEASONAL_FACTORS[monthIndex];
   rawFill *= DAY_OF_WEEK_FACTORS[dayOfWeek];
 
-  // Facteur vacances : +10% pendant les semaines de fêtes
-  if (isHoliday(dateStr)) rawFill *= 1.1;
+  // Facteur jours fériés : +10% pendant les jours fériés
+  if (isHoliday(dateStr)) rawFill *= SCORING_CONFIG.holidayBonus || 1.1;
+
+  // Facteur vacances scolaires : semaine avant, pendant, semaine après
+  const vacationStatus = getSchoolVacationStatus(dateStr);
+  let vacationFactor = 1;
+  if (vacationStatus.status === 'during') {
+    vacationFactor = SCORING_CONFIG.schoolVacationBonus || 1.15;
+  } else if (vacationStatus.status === 'pre') {
+    vacationFactor = SCORING_CONFIG.preVacationBonus || 1.1;
+  } else if (vacationStatus.status === 'post') {
+    vacationFactor = SCORING_CONFIG.postVacationBonus || 1.1;
+  }
+  rawFill *= vacationFactor;
 
   // Tendance sur les 30 derniers jours vs les 90 jours
   const recent30 = history.filter(h => {
@@ -356,6 +406,9 @@ async function predictFillRate(cavId, targetDate) {
       tempMax: context.tempMax,
       weekendSunny: isWeekend && context.tempMax >= 18 && context.weatherFactor >= 1,
       eventBonus: eventBonus > 1 ? eventBonus : null,
+      vacationStatus: vacationStatus.status,
+      vacationName: vacationStatus.name,
+      vacationFactor: vacationFactor > 1 ? vacationFactor : null,
     },
     factors: {
       seasonal: SEASONAL_FACTORS[monthIndex],
@@ -445,7 +498,8 @@ async function generateIntelligentTour(vehicleId, date) {
   const localEvents = await getLocalEventsForDate(dateStr);
 
   // 10. Générer l'explication IA
-  const explanation = generateAIExplanation(optimizedRoute, totalDistance, estimatedDuration, estimatedWeight, urgentCount, vehicle, context, localEvents);
+  const vacationStatus = getSchoolVacationStatus(dateStr);
+  const explanation = generateAIExplanation(optimizedRoute, totalDistance, estimatedDuration, estimatedWeight, urgentCount, vehicle, context, localEvents, vacationStatus);
 
   return {
     vehicle,
@@ -476,7 +530,7 @@ async function generateIntelligentTour(vehicleId, date) {
   };
 }
 
-function generateAIExplanation(route, distance, duration, weight, urgentCount, vehicle, context, localEvents) {
+function generateAIExplanation(route, distance, duration, weight, urgentCount, vehicle, context, localEvents, vacationStatus) {
   const lines = [];
   lines.push(`📊 Tournée intelligente générée pour ${vehicle.name || vehicle.registration}`);
   lines.push(`\n🚛 ${route.length} points de collecte sélectionnés parmi les CAV actifs`);
@@ -496,6 +550,13 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
     lines.push(weatherLine);
   }
 
+  // Vacances scolaires
+  if (vacationStatus && vacationStatus.status) {
+    const labels = { pre: 'Semaine pré-vacances', during: 'Pendant les vacances', post: 'Semaine post-vacances' };
+    const bonusValues = { pre: SCORING_CONFIG.preVacationBonus, during: SCORING_CONFIG.schoolVacationBonus, post: SCORING_CONFIG.postVacationBonus };
+    lines.push(`\n🎒 ${labels[vacationStatus.status]} (${vacationStatus.name}) — facteur x${bonusValues[vacationStatus.status]}`);
+  }
+
   // Événements locaux
   if (localEvents && localEvents.length > 0) {
     lines.push(`\n📍 ${localEvents.length} événement(s) local(aux) actif(s) :`);
@@ -504,7 +565,7 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
     });
   }
 
-  lines.push(`\n🔬 Méthode : Prédiction de remplissage (historique 180j + saisonnalité + météo + événements locaux + tendance) + TSP 2-opt`);
+  lines.push(`\n🔬 Méthode : Prédiction de remplissage (historique 180j + saisonnalité + météo + vacances scolaires + événements locaux + tendance) + TSP 2-opt`);
 
   const topCavs = route.slice(0, 3);
   if (topCavs.length > 0) {
@@ -513,6 +574,7 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
       let detail = `  ${i + 1}. ${cav.name} — remplissage estimé ${cav.prediction.fill}% (confiance ${Math.round(cav.prediction.confidence * 100)}%)`;
       if (cav.prediction.contextUsed?.weekendSunny) detail += ' ☀️';
       if (cav.prediction.contextUsed?.eventBonus) detail += ` 📍x${cav.prediction.contextUsed.eventBonus}`;
+      if (cav.prediction.contextUsed?.vacationStatus) detail += ` 🎒`;
       lines.push(detail);
     });
   }
@@ -568,6 +630,7 @@ router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
       seasonalFactors: SEASONAL_FACTORS,
       dayOfWeekFactors: DAY_OF_WEEK_FACTORS,
       holidays: FRENCH_HOLIDAYS_2026,
+      schoolVacations: SCHOOL_VACATIONS,
       scoring: SCORING_CONFIG,
       centreTri: { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
     });
@@ -580,7 +643,7 @@ router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
 // PUT /api/tours/predictive-config — Mettre à jour les variables
 router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
   try {
-    const { seasonalFactors, dayOfWeekFactors, holidays, scoring } = req.body;
+    const { seasonalFactors, dayOfWeekFactors, holidays, schoolVacations, scoring } = req.body;
 
     if (seasonalFactors && Array.isArray(seasonalFactors) && seasonalFactors.length === 12) {
       SEASONAL_FACTORS = seasonalFactors.map(Number);
@@ -591,6 +654,9 @@ router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
     if (holidays && Array.isArray(holidays)) {
       FRENCH_HOLIDAYS_2026 = holidays;
     }
+    if (schoolVacations && Array.isArray(schoolVacations)) {
+      SCHOOL_VACATIONS = schoolVacations.filter(v => v.name && v.start && v.end);
+    }
     if (scoring && typeof scoring === 'object') {
       SCORING_CONFIG = { ...SCORING_CONFIG, ...scoring };
     }
@@ -600,6 +666,7 @@ router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
       seasonalFactors: SEASONAL_FACTORS,
       dayOfWeekFactors: DAY_OF_WEEK_FACTORS,
       holidays: FRENCH_HOLIDAYS_2026,
+      schoolVacations: SCHOOL_VACATIONS,
       scoring: SCORING_CONFIG,
     });
   } catch (err) {
