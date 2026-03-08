@@ -861,6 +861,25 @@ async function initDatabase() {
     console.log('[INIT-DB] Tables contexte & apprentissage collecte ✓');
 
     // ══════════════════════════════════════════
+    // MODULE : Historique (Dashboard Excel)
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS historique_mensuel (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        mois INTEGER NOT NULL CHECK (mois BETWEEN 1 AND 12),
+        section VARCHAR(50) NOT NULL,
+        categorie VARCHAR(255) NOT NULL,
+        valeur DOUBLE PRECISION NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(annee, mois, section, categorie)
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_historique_mensuel_annee ON historique_mensuel(annee, mois);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_historique_mensuel_section ON historique_mensuel(section);`);
+    console.log('[INIT-DB] Table historique_mensuel ✓');
+
+    // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)
     // ══════════════════════════════════════════
 

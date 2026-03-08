@@ -10,7 +10,8 @@
     "migrate-v2": "node src/scripts/migrate-v2.js",
     "seed-cav": "node src/scripts/seed-cav.js",
     "seed-data": "node src/scripts/seed-data.js",
-    "seed-production": "node src/scripts/seed-production.js"
+    "seed-production": "node src/scripts/seed-production.js",
+    "seed-historique": "node src/scripts/seed-historique.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
