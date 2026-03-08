@@ -2,6 +2,16 @@ import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
+const TARIF_TYPES = [
+  { key: 'soutien_tri', label: 'Soutien au tri', unit: '€/t entrée tri', parTrimestre: true },
+  { key: 'vak', label: 'VAK (sortie VAK)', unit: '€/t sortie' },
+  { key: 'boutique', label: 'Boutiques', unit: '€/t sortie' },
+  { key: 'extra', label: 'Extra', unit: '€/t sortie' },
+  { key: 'original', label: 'Original', unit: '€/t sortie', parClient: true },
+  { key: 'effilochage', label: 'Effilochage', unit: '€/t sortie', parClient: true },
+  { key: 'csr', label: 'CSR', unit: '€/t sortie (coût fixe annuel)' },
+];
+
 export default function Settings() {
   const [settings, setSettings] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -11,20 +21,37 @@ export default function Settings() {
   const [showTemplateForm, setShowTemplateForm] = useState(false);
   const [templateForm, setTemplateForm] = useState({ name: '', type: 'email', subject: '', body: '', variables: '' });
 
+  // Tarifs
+  const [tarifs, setTarifs] = useState([]);
+  const [exutoires, setExutoires] = useState([]);
+  const [tarifAnnee, setTarifAnnee] = useState(new Date().getFullYear());
+  const [editTarif, setEditTarif] = useState(null);
+  const [tarifForm, setTarifForm] = useState({ type: '', exutoire_id: '', prix_tonne: '', trimestre: '' });
+
   useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadTarifs(); }, [tarifAnnee]);
 
   const loadData = async () => {
     try {
-      const [setRes, tmplRes, healthRes] = await Promise.all([
+      const [setRes, tmplRes, healthRes, exuRes] = await Promise.all([
         api.get('/settings'),
         api.get('/settings/templates'),
         api.get('/health').catch(() => ({ data: null })),
+        api.get('/referentiels/exutoires').catch(() => ({ data: [] })),
       ]);
       setSettings(setRes.data);
       setTemplates(tmplRes.data);
       setHealth(healthRes.data);
+      setExutoires(exuRes.data.filter(e => e.is_active !== false));
     } catch (err) { console.error(err); }
     setLoading(false);
+  };
+
+  const loadTarifs = async () => {
+    try {
+      const res = await api.get(`/settings/tarifs?annee=${tarifAnnee}`);
+      setTarifs(res.data);
+    } catch (err) { console.error(err); }
   };
 
   const updateSetting = async (key, value) => {
@@ -45,7 +72,43 @@ export default function Settings() {
     } catch (err) { console.error(err); }
   };
 
+  const saveTarif = async (e) => {
+    e.preventDefault();
+    try {
+      await api.put('/settings/tarifs', {
+        annee: tarifAnnee,
+        type: tarifForm.type,
+        exutoire_id: tarifForm.exutoire_id || null,
+        prix_tonne: parseFloat(tarifForm.prix_tonne),
+        trimestre: tarifForm.trimestre ? parseInt(tarifForm.trimestre) : null,
+      });
+      setEditTarif(null);
+      setTarifForm({ type: '', exutoire_id: '', prix_tonne: '', trimestre: '' });
+      loadTarifs();
+    } catch (err) { console.error(err); }
+  };
+
+  const deleteTarif = async (id) => {
+    if (!confirm('Supprimer ce tarif ?')) return;
+    try {
+      await api.delete(`/settings/tarifs/${id}`);
+      loadTarifs();
+    } catch (err) { console.error(err); }
+  };
+
+  const openTarifEdit = (type) => {
+    setEditTarif(type);
+    setTarifForm({ type, exutoire_id: '', prix_tonne: '', trimestre: '' });
+  };
+
   if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+
+  // Group tarifs by type
+  const tarifsByType = {};
+  tarifs.forEach(t => {
+    if (!tarifsByType[t.type]) tarifsByType[t.type] = [];
+    tarifsByType[t.type].push(t);
+  });
 
   return (
     <Layout>
@@ -101,6 +164,100 @@ export default function Settings() {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* ══════════ GRILLE TARIFAIRE ══════════ */}
+        <div className="bg-white rounded-xl shadow-sm border mb-8">
+          <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold">Grille tarifaire</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Prix à la tonne sortie — tarifs par année</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setTarifAnnee(a => a - 1)} className="px-2 py-1 border rounded text-sm hover:bg-gray-100">&laquo;</button>
+              <span className="font-mono font-bold text-lg min-w-[60px] text-center">{tarifAnnee}</span>
+              <button onClick={() => setTarifAnnee(a => a + 1)} className="px-2 py-1 border rounded text-sm hover:bg-gray-100">&raquo;</button>
+            </div>
+          </div>
+
+          <div className="divide-y">
+            {TARIF_TYPES.map(tt => {
+              const rows = tarifsByType[tt.key] || [];
+              return (
+                <div key={tt.key} className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="font-medium text-sm">{tt.label}</span>
+                      <span className="text-xs text-gray-400 ml-2">{tt.unit}</span>
+                      {tt.parClient && <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] rounded">par client</span>}
+                      {tt.parTrimestre && <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] rounded">par trimestre</span>}
+                    </div>
+                    <button onClick={() => openTarifEdit(tt.key)} className="text-solidata-green text-xs font-medium hover:underline">+ Ajouter</button>
+                  </div>
+
+                  {rows.length > 0 ? (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-gray-400">
+                          {tt.parTrimestre && <th className="text-left font-normal pb-1">Trimestre</th>}
+                          {tt.parClient && <th className="text-left font-normal pb-1">Client</th>}
+                          <th className="text-right font-normal pb-1">Prix (€/t)</th>
+                          <th className="text-right font-normal pb-1 w-16"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map(r => (
+                          <tr key={r.id} className="border-t border-gray-100">
+                            {tt.parTrimestre && <td className="py-1.5">T{r.trimestre}</td>}
+                            {tt.parClient && <td className="py-1.5">{r.exutoire_nom || '—'}</td>}
+                            <td className="py-1.5 text-right font-mono">{parseFloat(r.prix_tonne).toFixed(2)}</td>
+                            <td className="py-1.5 text-right">
+                              <button onClick={() => deleteTarif(r.id)} className="text-red-400 hover:text-red-600 text-xs">Suppr.</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="text-xs text-gray-300 italic">Aucun tarif défini pour {tarifAnnee}</p>
+                  )}
+
+                  {/* Inline form */}
+                  {editTarif === tt.key && (
+                    <form onSubmit={saveTarif} className="mt-3 flex items-end gap-2 bg-gray-50 rounded-lg p-3">
+                      {tt.parTrimestre && (
+                        <div className="flex-1">
+                          <label className="text-[10px] text-gray-500 block mb-0.5">Trimestre</label>
+                          <select value={tarifForm.trimestre} onChange={e => setTarifForm({ ...tarifForm, trimestre: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required>
+                            <option value="">—</option>
+                            <option value="1">T1</option>
+                            <option value="2">T2</option>
+                            <option value="3">T3</option>
+                            <option value="4">T4</option>
+                          </select>
+                        </div>
+                      )}
+                      {tt.parClient && (
+                        <div className="flex-1">
+                          <label className="text-[10px] text-gray-500 block mb-0.5">Client (exutoire)</label>
+                          <select value={tarifForm.exutoire_id} onChange={e => setTarifForm({ ...tarifForm, exutoire_id: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required>
+                            <option value="">Choisir…</option>
+                            {exutoires.map(ex => <option key={ex.id} value={ex.id}>{ex.nom}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">Prix €/tonne</label>
+                        <input type="number" step="0.01" min="0" value={tarifForm.prix_tonne} onChange={e => setTarifForm({ ...tarifForm, prix_tonne: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required placeholder="0.00" />
+                      </div>
+                      <button type="submit" className="bg-solidata-green text-white rounded px-3 py-1.5 text-sm">OK</button>
+                      <button type="button" onClick={() => setEditTarif(null)} className="text-gray-400 text-sm px-2 py-1.5">Annuler</button>
+                    </form>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 

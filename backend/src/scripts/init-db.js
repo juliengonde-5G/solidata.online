@@ -735,6 +735,26 @@ async function initDatabase() {
     console.log('[INIT-DB] Module V2 (Référentiels & Tri) ✓');
 
     // ══════════════════════════════════════════
+    // MODULE : Grille tarifaire
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS grille_tarifaire (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        exutoire_id INTEGER REFERENCES exutoires(id),
+        prix_tonne DOUBLE PRECISION NOT NULL,
+        trimestre INTEGER CHECK (trimestre BETWEEN 1 AND 4),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS grille_tarifaire_uniq
+      ON grille_tarifaire (annee, type, COALESCE(exutoire_id, 0), COALESCE(trimestre, 0));
+    `);
+    console.log('[INIT-DB] Module Grille tarifaire ✓');
+
+    // ══════════════════════════════════════════
     // MODULE V2 : Refashion
     // ══════════════════════════════════════════
     await client.query(`
@@ -969,9 +989,12 @@ async function initDatabase() {
           ('Déstockage', 'destockage'),
           ('VAK Export', 'vak'),
           ('VAK Afrique', 'vak'),
-          ('VAK Moyen-Orient', 'vak');
+          ('VAK Moyen-Orient', 'vak'),
+          ('Extra 1er Choix', 'extra'),
+          ('Extra 2ème Choix', 'extra')
+        ON CONFLICT (nom) DO NOTHING;
       `);
-      console.log('[INIT-DB] 17 catégories sortantes créées');
+      console.log('[INIT-DB] Catégories sortantes créées');
     }
 
     // Chaînes de tri (2 chaînes)
@@ -1122,6 +1145,34 @@ async function initDatabase() {
     }
 
     console.log('[INIT-DB] Migration statuts Kanban ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATION : Grille tarifaire + catégories Extra
+    // ══════════════════════════════════════════
+    await client.query(`
+      INSERT INTO categories_sortantes (nom, famille) VALUES
+        ('Extra 1er Choix', 'extra'),
+        ('Extra 2ème Choix', 'extra')
+      ON CONFLICT (nom) DO NOTHING;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS grille_tarifaire (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        exutoire_id INTEGER REFERENCES exutoires(id),
+        prix_tonne DOUBLE PRECISION NOT NULL,
+        trimestre INTEGER CHECK (trimestre BETWEEN 1 AND 4),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS grille_tarifaire_uniq
+      ON grille_tarifaire (annee, type, COALESCE(exutoire_id, 0), COALESCE(trimestre, 0));
+    `);
+
+    console.log('[INIT-DB] Migration grille tarifaire ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');

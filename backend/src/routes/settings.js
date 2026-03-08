@@ -98,4 +98,78 @@ router.put('/templates/:id', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// Grille tarifaire
+// ══════════════════════════════════════════
+
+// GET /api/settings/tarifs?annee=2026
+router.get('/tarifs', async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    const result = await pool.query(
+      `SELECT g.*, e.nom AS exutoire_nom
+       FROM grille_tarifaire g
+       LEFT JOIN exutoires e ON e.id = g.exutoire_id
+       WHERE g.annee = $1
+       ORDER BY g.type, e.nom, g.trimestre`,
+      [annee]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[SETTINGS] Erreur tarifs :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/settings/tarifs — upsert a tariff line
+router.put('/tarifs', async (req, res) => {
+  try {
+    const { annee, type, exutoire_id, prix_tonne, trimestre } = req.body;
+    if (!annee || !type || prix_tonne == null) {
+      return res.status(400).json({ error: 'Champs requis : annee, type, prix_tonne' });
+    }
+    const exId = exutoire_id || null;
+    const tri = trimestre ? parseInt(trimestre) : null;
+
+    // Check if row exists (matching the COALESCE unique index)
+    const existing = await pool.query(
+      `SELECT id FROM grille_tarifaire
+       WHERE annee = $1 AND type = $2
+         AND COALESCE(exutoire_id, 0) = $3
+         AND COALESCE(trimestre, 0) = $4`,
+      [annee, type, exId || 0, tri || 0]
+    );
+
+    let result;
+    if (existing.rows.length > 0) {
+      result = await pool.query(
+        `UPDATE grille_tarifaire SET prix_tonne = $1, updated_at = NOW()
+         WHERE id = $2 RETURNING *`,
+        [prix_tonne, existing.rows[0].id]
+      );
+    } else {
+      result = await pool.query(
+        `INSERT INTO grille_tarifaire (annee, type, exutoire_id, prix_tonne, trimestre, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
+        [annee, type, exId, prix_tonne, tri]
+      );
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[SETTINGS] Erreur upsert tarif :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/settings/tarifs/:id
+router.delete('/tarifs/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM grille_tarifaire WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[SETTINGS] Erreur suppression tarif :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;
