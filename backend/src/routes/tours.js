@@ -37,26 +37,83 @@ async function getContextForDate(dateStr) {
       trafficFactor: parseFloat(row.traffic_factor) || 1,
       durationFactor: parseFloat(row.duration_factor) || 1,
       weatherCode: row.weather_code,
+      weatherLabel: row.weather_label || null,
+      tempMax: row.temp_max != null ? parseFloat(row.temp_max) : null,
+      precipMm: row.precip_mm != null ? parseFloat(row.precip_mm) : null,
       notes: row.notes,
     };
   }
-  // Optionnel : appeler Open-Meteo (gratuit, sans clé) pour la météo du jour
+  // Appeler Open-Meteo (gratuit, sans clé) pour la météo du jour
   try {
     const lat = CENTRE_TRI_LAT;
     const lng = CENTRE_TRI_LNG;
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weather_code&timezone=Europe/Paris&start=${dateStr}&end=${dateStr}`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weather_code,temperature_2m_max,precipitation_sum&timezone=Europe/Paris&start_date=${dateStr}&end_date=${dateStr}`;
     const response = await globalThis.fetch(url);
     const data = await response.json();
     const code = data.daily?.weather_code?.[0];
+    const tempMax = data.daily?.temperature_2m_max?.[0] ?? null;
+    const precipMm = data.daily?.precipitation_sum?.[0] ?? null;
     // Facteur météo : pluie/neige = légère baisse remplissage ou durée plus longue
     let weatherFactor = 1;
     if (code >= 61 && code <= 67) weatherFactor = 0.95;  // pluie
     if (code >= 80 && code <= 82) weatherFactor = 0.92;  // averse
     if (code >= 71 && code <= 77) weatherFactor = 0.9;   // neige
-    return { weatherFactor, trafficFactor: 1, durationFactor: 1, weatherCode: String(code), notes: null };
+    // Beau temps = les gens sortent davantage, trient plus → bonus remplissage
+    if (code <= 3 && tempMax != null && tempMax >= 18) weatherFactor = 1.08;
+    const weatherLabel = wmoCodeToLabel(code);
+
+    // Persister en cache
+    try {
+      await pool.query(
+        `INSERT INTO collection_context (date, weather_factor, weather_code, weather_label, temp_max, precip_mm, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (date) DO UPDATE SET
+           weather_factor = EXCLUDED.weather_factor, weather_code = EXCLUDED.weather_code,
+           weather_label = EXCLUDED.weather_label, temp_max = EXCLUDED.temp_max,
+           precip_mm = EXCLUDED.precip_mm, updated_at = NOW()`,
+        [dateStr, weatherFactor, String(code), weatherLabel, tempMax, precipMm]
+      );
+    } catch (_) { /* ignore cache write errors */ }
+
+    return { weatherFactor, trafficFactor: 1, durationFactor: 1, weatherCode: String(code), weatherLabel, tempMax, precipMm, notes: null };
   } catch (e) {
-    return { weatherFactor: 1, trafficFactor: 1, durationFactor: 1, weatherCode: null, notes: null };
+    return { weatherFactor: 1, trafficFactor: 1, durationFactor: 1, weatherCode: null, weatherLabel: null, tempMax: null, precipMm: null, notes: null };
   }
+}
+
+function wmoCodeToLabel(code) {
+  if (code == null) return null;
+  if (code <= 1) return 'Dégagé';
+  if (code <= 3) return 'Nuageux';
+  if (code <= 48) return 'Brouillard';
+  if (code <= 57) return 'Bruine';
+  if (code <= 67) return 'Pluie';
+  if (code <= 77) return 'Neige';
+  if (code <= 82) return 'Averses';
+  if (code <= 86) return 'Neige';
+  if (code >= 95) return 'Orage';
+  return 'Inconnu';
+}
+
+// Vérifier les événements locaux à proximité d'un CAV pour une date
+async function getLocalEventsForDate(dateStr) {
+  try {
+    const res = await pool.query(
+      `SELECT * FROM evenements_locaux
+       WHERE date_debut <= $1 AND date_fin >= $1 AND is_active = true
+       ORDER BY rayon_km DESC`,
+      [dateStr]
+    );
+    return res.rows;
+  } catch (e) {
+    return [];
+  }
+}
+
+function isEventNearCav(event, cav) {
+  if (!event.latitude || !event.longitude || !cav.latitude || !cav.longitude) return false;
+  const dist = haversineDistance(event.latitude, event.longitude, cav.latitude, cav.longitude);
+  return dist <= (event.rayon_km || 2);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -168,6 +225,8 @@ let SCORING_CONFIG = {
   densityBonus: 1.1,
   holidayBonus: 1.1,
   maxFillCap: 120,
+  weekendSunnyBonus: 1.15,  // beau temps le weekend → plus de tri
+  localEventBonus: 1.2,     // brocante/vide-grenier à proximité
 };
 
 function isHoliday(dateStr) {
@@ -248,6 +307,22 @@ async function predictFillRate(cavId, targetDate) {
   const context = await getContextForDate(dateStr);
   rawFill *= context.weatherFactor;
 
+  // Beau temps le weekend = plus de dépôts (gens font du rangement/tri)
+  const isWeekend = (dayOfWeek >= 5); // 5=sam, 6=dim
+  if (isWeekend && context.tempMax != null && context.tempMax >= 18 && context.weatherFactor >= 1) {
+    rawFill *= SCORING_CONFIG.weekendSunnyBonus || 1.15;
+  }
+
+  // Événements locaux à proximité (brocante, vide-grenier → excédent de collecte)
+  const localEvents = await getLocalEventsForDate(dateStr);
+  let eventBonus = 1;
+  for (const evt of localEvents) {
+    if (isEventNearCav(evt, cav)) {
+      eventBonus = Math.max(eventBonus, parseFloat(evt.bonus_factor) || (SCORING_CONFIG.localEventBonus || 1.2));
+    }
+  }
+  rawFill *= eventBonus;
+
   // Apprentissage continu : correction à partir des écarts prédit/observé
   const feedbackResult = await pool.query(
     `SELECT predicted_fill_rate, observed_fill_level FROM collection_learning_feedback
@@ -275,7 +350,13 @@ async function predictFillRate(cavId, targetDate) {
     fill: Math.round(fill),
     confidence: Math.round(confidence * 100) / 100,
     method: 'predictive',
-    contextUsed: { weatherFactor: context.weatherFactor },
+    contextUsed: {
+      weatherFactor: context.weatherFactor,
+      weatherLabel: context.weatherLabel,
+      tempMax: context.tempMax,
+      weekendSunny: isWeekend && context.tempMax >= 18 && context.weatherFactor >= 1,
+      eventBonus: eventBonus > 1 ? eventBonus : null,
+    },
     factors: {
       seasonal: SEASONAL_FACTORS[monthIndex],
       dayOfWeek: DAY_OF_WEEK_FACTORS[dayOfWeek],
@@ -360,8 +441,11 @@ async function generateIntelligentTour(vehicleId, date) {
   const baseDurationMin = Math.round((totalDistance / SCORING_CONFIG.avgSpeed) * 60 + selectedCavs.length * SCORING_CONFIG.timePerCav);
   const estimatedDuration = Math.round(baseDurationMin * context.durationFactor * context.trafficFactor);
 
-  // 9. Générer l'explication IA
-  const explanation = generateAIExplanation(optimizedRoute, totalDistance, estimatedDuration, estimatedWeight, urgentCount, vehicle);
+  // 9. Récupérer événements locaux actifs pour l'explication
+  const localEvents = await getLocalEventsForDate(dateStr);
+
+  // 10. Générer l'explication IA
+  const explanation = generateAIExplanation(optimizedRoute, totalDistance, estimatedDuration, estimatedWeight, urgentCount, vehicle, context, localEvents);
 
   return {
     vehicle,
@@ -392,7 +476,7 @@ async function generateIntelligentTour(vehicleId, date) {
   };
 }
 
-function generateAIExplanation(route, distance, duration, weight, urgentCount, vehicle) {
+function generateAIExplanation(route, distance, duration, weight, urgentCount, vehicle, context, localEvents) {
   const lines = [];
   lines.push(`📊 Tournée intelligente générée pour ${vehicle.name || vehicle.registration}`);
   lines.push(`\n🚛 ${route.length} points de collecte sélectionnés parmi les CAV actifs`);
@@ -404,13 +488,32 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
     lines.push(`\n⚠️ ${urgentCount} CAV urgents (remplissage ≥80%)`);
   }
 
-  lines.push(`\n🔬 Méthode : Prédiction de remplissage (historique 180j + saisonnalité + tendance) + TSP 2-opt`);
+  // Météo
+  if (context && context.weatherLabel) {
+    let weatherLine = `\n🌤️ Météo : ${context.weatherLabel}`;
+    if (context.tempMax != null) weatherLine += ` (${context.tempMax}°C)`;
+    weatherLine += ` — facteur x${context.weatherFactor}`;
+    lines.push(weatherLine);
+  }
+
+  // Événements locaux
+  if (localEvents && localEvents.length > 0) {
+    lines.push(`\n📍 ${localEvents.length} événement(s) local(aux) actif(s) :`);
+    localEvents.forEach(evt => {
+      lines.push(`  • ${evt.nom} (${evt.commune || 'N/A'}) — rayon ${evt.rayon_km} km, bonus x${evt.bonus_factor}`);
+    });
+  }
+
+  lines.push(`\n🔬 Méthode : Prédiction de remplissage (historique 180j + saisonnalité + météo + événements locaux + tendance) + TSP 2-opt`);
 
   const topCavs = route.slice(0, 3);
   if (topCavs.length > 0) {
     lines.push(`\n🏆 Priorités :`);
     topCavs.forEach((cav, i) => {
-      lines.push(`  ${i + 1}. ${cav.name} — remplissage estimé ${cav.prediction.fill}% (confiance ${Math.round(cav.prediction.confidence * 100)}%)`);
+      let detail = `  ${i + 1}. ${cav.name} — remplissage estimé ${cav.prediction.fill}% (confiance ${Math.round(cav.prediction.confidence * 100)}%)`;
+      if (cav.prediction.contextUsed?.weekendSunny) detail += ' ☀️';
+      if (cav.prediction.contextUsed?.eventBonus) detail += ` 📍x${cav.prediction.contextUsed.eventBonus}`;
+      lines.push(detail);
     });
   }
 
@@ -641,6 +744,76 @@ router.put('/context', authorize('ADMIN'), async (req, res) => {
     res.json({ message: 'Contexte enregistré', context });
   } catch (err) {
     console.error('[TOURS] Erreur contexte :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// ÉVÉNEMENTS LOCAUX (brocantes, vide-greniers, etc.)
+// ══════════════════════════════════════════
+
+// GET /api/tours/events — Liste des événements locaux
+router.get('/events', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM evenements_locaux ORDER BY date_debut DESC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TOURS] Erreur événements :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/events — Créer un événement local
+router.post('/events', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { nom, type, date_debut, date_fin, latitude, longitude, adresse, commune, rayon_km, bonus_factor, notes } = req.body;
+    if (!nom || !date_debut || !date_fin) {
+      return res.status(400).json({ error: 'nom, date_debut, date_fin requis' });
+    }
+    const result = await pool.query(
+      `INSERT INTO evenements_locaux (nom, type, date_debut, date_fin, latitude, longitude, adresse, commune, rayon_km, bonus_factor, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [nom, type || 'brocante', date_debut, date_fin, latitude || null, longitude || null, adresse || null, commune || null, rayon_km || 2, bonus_factor || 1.2, notes || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[TOURS] Erreur création événement :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/tours/events/:id — Modifier un événement
+router.put('/events/:id', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { nom, type, date_debut, date_fin, latitude, longitude, adresse, commune, rayon_km, bonus_factor, notes, is_active } = req.body;
+    const result = await pool.query(
+      `UPDATE evenements_locaux SET
+       nom = COALESCE($1, nom), type = COALESCE($2, type),
+       date_debut = COALESCE($3, date_debut), date_fin = COALESCE($4, date_fin),
+       latitude = COALESCE($5, latitude), longitude = COALESCE($6, longitude),
+       adresse = COALESCE($7, adresse), commune = COALESCE($8, commune),
+       rayon_km = COALESCE($9, rayon_km), bonus_factor = COALESCE($10, bonus_factor),
+       notes = COALESCE($11, notes), is_active = COALESCE($12, is_active)
+       WHERE id = $13 RETURNING *`,
+      [nom, type, date_debut, date_fin, latitude, longitude, adresse, commune, rayon_km, bonus_factor, notes, is_active, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Événement non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[TOURS] Erreur modification événement :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/tours/events/:id — Supprimer un événement
+router.delete('/events/:id', authorize('ADMIN'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM evenements_locaux WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[TOURS] Erreur suppression événement :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

@@ -4,6 +4,14 @@ import api from '../services/api';
 
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+const EVENT_TYPES = [
+  { value: 'brocante', label: 'Brocante' },
+  { value: 'vide_grenier', label: 'Vide-grenier' },
+  { value: 'marche', label: 'Marché' },
+  { value: 'foire', label: 'Foire' },
+  { value: 'festival', label: 'Festival' },
+  { value: 'autre', label: 'Autre' },
+];
 
 export default function AdminPredictive() {
   const [config, setConfig] = useState(null);
@@ -12,7 +20,20 @@ export default function AdminPredictive() {
   const [saved, setSaved] = useState(false);
   const [newHoliday, setNewHoliday] = useState('');
 
-  useEffect(() => { loadConfig(); }, []);
+  // Événements locaux
+  const [events, setEvents] = useState([]);
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [eventForm, setEventForm] = useState({
+    nom: '', type: 'brocante', date_debut: '', date_fin: '',
+    latitude: '', longitude: '', adresse: '', commune: '',
+    rayon_km: '2', bonus_factor: '1.2', notes: '',
+  });
+
+  // Météo preview
+  const [weatherPreview, setWeatherPreview] = useState(null);
+  const [weatherDate, setWeatherDate] = useState(new Date().toISOString().split('T')[0]);
+
+  useEffect(() => { loadConfig(); loadEvents(); }, []);
 
   const loadConfig = async () => {
     try {
@@ -20,6 +41,20 @@ export default function AdminPredictive() {
       setConfig(res.data);
     } catch (err) { console.error(err); }
     setLoading(false);
+  };
+
+  const loadEvents = async () => {
+    try {
+      const res = await api.get('/tours/events');
+      setEvents(res.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const loadWeatherPreview = async () => {
+    try {
+      const res = await api.get(`/tours/context/${weatherDate}`);
+      setWeatherPreview(res.data);
+    } catch (err) { console.error(err); }
   };
 
   const save = async () => {
@@ -65,8 +100,41 @@ export default function AdminPredictive() {
     }
   };
 
+  const createEvent = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post('/tours/events', {
+        ...eventForm,
+        latitude: eventForm.latitude ? parseFloat(eventForm.latitude) : null,
+        longitude: eventForm.longitude ? parseFloat(eventForm.longitude) : null,
+        rayon_km: parseFloat(eventForm.rayon_km) || 2,
+        bonus_factor: parseFloat(eventForm.bonus_factor) || 1.2,
+      });
+      setShowEventForm(false);
+      setEventForm({
+        nom: '', type: 'brocante', date_debut: '', date_fin: '',
+        latitude: '', longitude: '', adresse: '', commune: '',
+        rayon_km: '2', bonus_factor: '1.2', notes: '',
+      });
+      loadEvents();
+    } catch (err) { console.error(err); }
+  };
+
+  const deleteEvent = async (id) => {
+    if (!confirm('Supprimer cet événement ?')) return;
+    try {
+      await api.delete(`/tours/events/${id}`);
+      loadEvents();
+    } catch (err) { console.error(err); }
+  };
+
   if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
   if (!config) return <Layout><div className="p-6 text-red-500">Erreur de chargement</div></Layout>;
+
+  // Séparer événements à venir et passés
+  const today = new Date().toISOString().split('T')[0];
+  const upcomingEvents = events.filter(e => e.date_fin >= today);
+  const pastEvents = events.filter(e => e.date_fin < today);
 
   return (
     <Layout>
@@ -98,6 +166,99 @@ export default function AdminPredictive() {
             </div>
           </div>
           <p className="text-xs text-gray-400 mt-2">Modifiable via les variables d'environnement CENTRE_TRI_LAT / CENTRE_TRI_LNG</p>
+        </Section>
+
+        {/* ══════════ MÉTÉO ══════════ */}
+        <Section title="Conditions météo" desc="La météo influence automatiquement les prédictions de remplissage (Open-Meteo)">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+            <ParamInput label="Bonus beau temps + weekend" value={config.scoring.weekendSunnyBonus} onChange={v => updateScoring('weekendSunnyBonus', v)} />
+            <ParamInput label="Bonus événement local" value={config.scoring.localEventBonus} onChange={v => updateScoring('localEventBonus', v)} />
+          </div>
+
+          <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-800">
+            <p className="font-medium mb-2">Facteurs météo automatiques :</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              <div className="bg-white rounded p-2 text-center">
+                <span className="block text-lg">☀️</span>
+                <span className="font-medium">Dégagé + chaud</span>
+                <span className="block text-blue-600">x1.08</span>
+              </div>
+              <div className="bg-white rounded p-2 text-center">
+                <span className="block text-lg">🌧️</span>
+                <span className="font-medium">Pluie</span>
+                <span className="block text-blue-600">x0.95</span>
+              </div>
+              <div className="bg-white rounded p-2 text-center">
+                <span className="block text-lg">🌦️</span>
+                <span className="font-medium">Averses</span>
+                <span className="block text-blue-600">x0.92</span>
+              </div>
+              <div className="bg-white rounded p-2 text-center">
+                <span className="block text-lg">❄️</span>
+                <span className="font-medium">Neige</span>
+                <span className="block text-blue-600">x0.90</span>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-blue-600">
+              Beau temps le weekend (sam/dim, {'>'}18°C) : <strong>x{config.scoring.weekendSunnyBonus || 1.15}</strong> — les gens trient et déposent davantage.
+            </p>
+          </div>
+
+          {/* Preview météo */}
+          <div className="mt-4 border-t pt-4">
+            <p className="text-xs font-medium text-gray-500 mb-2">Aperçu météo pour une date</p>
+            <div className="flex gap-2 items-end">
+              <input type="date" value={weatherDate} onChange={e => setWeatherDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+              <button onClick={loadWeatherPreview} className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600">Voir</button>
+            </div>
+            {weatherPreview && (
+              <div className="mt-3 bg-gray-50 rounded-lg p-3 text-sm grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div><span className="text-xs text-gray-400 block">Météo</span><span className="font-medium">{weatherPreview.weatherLabel || '—'}</span></div>
+                <div><span className="text-xs text-gray-400 block">Code WMO</span><span className="font-mono">{weatherPreview.weatherCode || '—'}</span></div>
+                <div><span className="text-xs text-gray-400 block">Temp. max</span><span className="font-medium">{weatherPreview.tempMax != null ? `${weatherPreview.tempMax}°C` : '—'}</span></div>
+                <div><span className="text-xs text-gray-400 block">Précipitations</span><span className="font-medium">{weatherPreview.precipMm != null ? `${weatherPreview.precipMm} mm` : '—'}</span></div>
+                <div><span className="text-xs text-gray-400 block">Facteur</span><span className="font-mono font-bold">{weatherPreview.weatherFactor}</span></div>
+              </div>
+            )}
+          </div>
+        </Section>
+
+        {/* ══════════ ÉVÉNEMENTS LOCAUX ══════════ */}
+        <Section title="Événements locaux" desc="Brocantes, vide-greniers et événements générant un excédent de collecte à proximité des CAV">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-gray-500">
+              Un événement à proximité d'un CAV augmente la prédiction de remplissage (x{config.scoring.localEventBonus || 1.2} par défaut).
+            </p>
+            <button onClick={() => setShowEventForm(true)} className="text-solidata-green text-sm font-medium hover:underline">+ Nouvel événement</button>
+          </div>
+
+          {upcomingEvents.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">A venir / En cours</p>
+              <div className="space-y-2">
+                {upcomingEvents.map(evt => (
+                  <EventRow key={evt.id} evt={evt} onDelete={deleteEvent} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {pastEvents.length > 0 && (
+            <details className="text-sm">
+              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 mb-2">
+                {pastEvents.length} événement(s) passé(s)
+              </summary>
+              <div className="space-y-2">
+                {pastEvents.map(evt => (
+                  <EventRow key={evt.id} evt={evt} onDelete={deleteEvent} past />
+                ))}
+              </div>
+            </details>
+          )}
+
+          {events.length === 0 && (
+            <p className="text-xs text-gray-300 italic">Aucun événement enregistré</p>
+          )}
         </Section>
 
         {/* Facteurs saisonniers */}
@@ -190,20 +351,101 @@ export default function AdminPredictive() {
             </div>
             <div className="flex gap-3">
               <span className="flex-shrink-0 w-7 h-7 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">2</span>
-              <p><strong>Scoring de priorité</strong> — Chaque CAV reçoit un score basé sur son remplissage prédit, le nombre de jours depuis la dernière collecte, le nombre de conteneurs, et la confiance de la prédiction.</p>
+              <p><strong>Météo & contexte</strong> — La météo est récupérée automatiquement (Open-Meteo). Beau temps le weekend = plus de dépôts (+{Math.round((config.scoring.weekendSunnyBonus - 1) * 100)}%). Pluie/neige = moins de dépôts. Les événements locaux (brocantes, vide-greniers) à proximité d'un CAV augmentent aussi la prédiction.</p>
             </div>
             <div className="flex gap-3">
               <span className="flex-shrink-0 w-7 h-7 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">3</span>
-              <p><strong>Sélection des CAV</strong> — Les CAV sont triés par score décroissant, puis sélectionnés jusqu'à remplir le véhicule à {Math.round(config.scoring.vehicleFillTarget * 100)}% de sa capacité.</p>
+              <p><strong>Scoring de priorité</strong> — Chaque CAV reçoit un score basé sur son remplissage prédit, le nombre de jours depuis la dernière collecte, le nombre de conteneurs, et la confiance de la prédiction.</p>
             </div>
             <div className="flex gap-3">
               <span className="flex-shrink-0 w-7 h-7 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">4</span>
+              <p><strong>Sélection des CAV</strong> — Les CAV sont triés par score décroissant, puis sélectionnés jusqu'à remplir le véhicule à {Math.round(config.scoring.vehicleFillTarget * 100)}% de sa capacité.</p>
+            </div>
+            <div className="flex gap-3">
+              <span className="flex-shrink-0 w-7 h-7 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">5</span>
               <p><strong>Optimisation TSP + 2-opt</strong> — L'algorithme du plus proche voisin (Nearest Neighbor) construit un itinéraire initial, puis l'amélioration 2-opt inverse des segments de route pour réduire la distance totale.</p>
             </div>
           </div>
         </Section>
+
+        {/* Modal événement */}
+        {showEventForm && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <form onSubmit={createEvent} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto">
+              <h2 className="text-lg font-bold mb-4">Nouvel événement local</h2>
+              <div className="space-y-3">
+                <input placeholder="Nom de l'événement *" value={eventForm.nom} onChange={e => setEventForm({ ...eventForm, nom: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <select value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                  {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-0.5">Date début *</label>
+                    <input type="date" value={eventForm.date_debut} onChange={e => setEventForm({ ...eventForm, date_debut: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-0.5">Date fin *</label>
+                    <input type="date" value={eventForm.date_fin} onChange={e => setEventForm({ ...eventForm, date_fin: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                  </div>
+                </div>
+                <input placeholder="Adresse" value={eventForm.adresse} onChange={e => setEventForm({ ...eventForm, adresse: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input placeholder="Commune" value={eventForm.commune} onChange={e => setEventForm({ ...eventForm, commune: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input type="number" step="0.0001" placeholder="Latitude" value={eventForm.latitude} onChange={e => setEventForm({ ...eventForm, latitude: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  <input type="number" step="0.0001" placeholder="Longitude" value={eventForm.longitude} onChange={e => setEventForm({ ...eventForm, longitude: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-0.5">Rayon d'impact (km)</label>
+                    <input type="number" step="0.5" min="0.5" value={eventForm.rayon_km} onChange={e => setEventForm({ ...eventForm, rayon_km: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-0.5">Bonus remplissage (x)</label>
+                    <input type="number" step="0.05" min="1" value={eventForm.bonus_factor} onChange={e => setEventForm({ ...eventForm, bonus_factor: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                <textarea placeholder="Notes (optionnel)" value={eventForm.notes} onChange={e => setEventForm({ ...eventForm, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows="2" />
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Créer</button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     </Layout>
+  );
+}
+
+function EventRow({ evt, onDelete, past }) {
+  const typeLabel = EVENT_TYPES.find(t => t.value === evt.type)?.label || evt.type;
+  const dateDebut = new Date(evt.date_debut + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  const dateFin = new Date(evt.date_fin + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  return (
+    <div className={`flex items-center justify-between p-3 rounded-lg border ${past ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-white border-gray-200'}`}>
+      <div className="flex items-center gap-3">
+        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+          evt.type === 'brocante' ? 'bg-purple-100 text-purple-700' :
+          evt.type === 'vide_grenier' ? 'bg-orange-100 text-orange-700' :
+          evt.type === 'marche' ? 'bg-green-100 text-green-700' :
+          'bg-gray-100 text-gray-700'
+        }`}>{typeLabel}</span>
+        <div>
+          <p className="text-sm font-medium">{evt.nom}</p>
+          <p className="text-xs text-gray-400">
+            {dateDebut} — {dateFin}
+            {evt.commune && ` • ${evt.commune}`}
+            {evt.rayon_km && ` • rayon ${evt.rayon_km} km`}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded">x{parseFloat(evt.bonus_factor).toFixed(2)}</span>
+        <button onClick={() => onDelete(evt.id)} className="text-red-400 hover:text-red-600 text-xs">Suppr.</button>
+      </div>
+    </div>
   );
 }
 

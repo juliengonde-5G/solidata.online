@@ -854,6 +854,9 @@ async function initDatabase() {
         id SERIAL PRIMARY KEY,
         date DATE NOT NULL UNIQUE,
         weather_code VARCHAR(20),
+        weather_label VARCHAR(50),
+        temp_max DOUBLE PRECISION,
+        precip_mm DOUBLE PRECISION,
         weather_factor DOUBLE PRECISION DEFAULT 1.0,
         traffic_factor DOUBLE PRECISION DEFAULT 1.0,
         duration_factor DOUBLE PRECISION DEFAULT 1.0,
@@ -862,6 +865,26 @@ async function initDatabase() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS evenements_locaux (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(255) NOT NULL,
+        type VARCHAR(50) NOT NULL DEFAULT 'brocante',
+        date_debut DATE NOT NULL,
+        date_fin DATE NOT NULL,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        adresse TEXT,
+        commune VARCHAR(100),
+        rayon_km DOUBLE PRECISION DEFAULT 2,
+        bonus_factor DOUBLE PRECISION DEFAULT 1.2,
+        notes TEXT,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     await client.query(`
       DO $$ BEGIN
         ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION;
@@ -1173,6 +1196,36 @@ async function initDatabase() {
     `);
 
     console.log('[INIT-DB] Migration grille tarifaire ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATION : Météo étendue + événements locaux
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE collection_context ADD COLUMN IF NOT EXISTS weather_label VARCHAR(50);
+      ALTER TABLE collection_context ADD COLUMN IF NOT EXISTS temp_max DOUBLE PRECISION;
+      ALTER TABLE collection_context ADD COLUMN IF NOT EXISTS precip_mm DOUBLE PRECISION;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS evenements_locaux (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(255) NOT NULL,
+        type VARCHAR(50) NOT NULL DEFAULT 'brocante',
+        date_debut DATE NOT NULL,
+        date_fin DATE NOT NULL,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        adresse TEXT,
+        commune VARCHAR(100),
+        rayon_km DOUBLE PRECISION DEFAULT 2,
+        bonus_factor DOUBLE PRECISION DEFAULT 1.2,
+        notes TEXT,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    console.log('[INIT-DB] Migration météo + événements locaux ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
