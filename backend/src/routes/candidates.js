@@ -145,40 +145,40 @@ async function runOCR(filePath) {
 const MIN_PDF_TEXT_LENGTH = 50;
 
 /**
- * Parser le texte du CV (PDF avec fallback OCR, images via OCR)
+ * Parser le texte du CV (PDF avec fallback OCR, images via OCR).
+ * Ne lance jamais : retourne '' en cas d'erreur pour éviter 502.
  */
 async function parseCVFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
+  try {
+    const ext = path.extname(filePath).toLowerCase();
 
-  if (ext === '.pdf') {
-    try {
-      const pdfParse = require('pdf-parse');
-      const buffer = fs.readFileSync(filePath);
-      const data = await pdfParse(buffer);
-      const text = (data.text || '').trim();
+    if (ext === '.pdf') {
+      try {
+        const pdfParse = require('pdf-parse');
+        const buffer = fs.readFileSync(filePath);
+        const data = await pdfParse(buffer);
+        const text = (data.text || '').trim();
 
-      // Si le PDF contient suffisamment de texte, on l'utilise
-      if (text.length >= MIN_PDF_TEXT_LENGTH) {
-        return text;
+        if (text.length >= MIN_PDF_TEXT_LENGTH) return text;
+
+        console.log('[CV] PDF avec peu de texte (%d chars), tentative OCR...', text.length);
+        return await runOCR(filePath);
+      } catch (err) {
+        console.error('[CV] Erreur parsing PDF :', err.message);
+        return await runOCR(filePath);
       }
+    }
 
-      // Sinon c'est probablement un PDF scanné : fallback OCR
-      console.log('[CV] PDF avec peu de texte (%d chars), tentative OCR...', text.length);
-      return await runOCR(filePath);
-    } catch (err) {
-      console.error('[CV] Erreur parsing PDF :', err.message);
-      // En dernier recours, tenter l'OCR
+    if (['.png', '.jpg', '.jpeg'].includes(ext)) {
+      console.log('[CV] Fichier image détecté, lancement OCR...');
       return await runOCR(filePath);
     }
-  }
 
-  // Images : OCR direct
-  if (['.png', '.jpg', '.jpeg'].includes(ext)) {
-    console.log('[CV] Fichier image détecté, lancement OCR...');
-    return await runOCR(filePath);
+    return '';
+  } catch (err) {
+    console.error('[CV] parseCVFile erreur :', err.message);
+    return '';
   }
-
-  return '';
 }
 
 // ══════════════════════════════════════════
@@ -636,7 +636,16 @@ router.delete('/positions/:id', authorize('ADMIN'), async (req, res) => {
 
 // POST /api/candidates/upload-cv-new — Upload CV → créer nouveau candidat
 // IMPORTANT: must be declared BEFORE /:id routes to avoid Express matching "upload-cv-new" as :id
-router.post('/upload-cv-new', authorize('ADMIN', 'RH'), upload.single('cv'), async (req, res) => {
+router.post('/upload-cv-new', authorize('ADMIN', 'RH'), (req, res, next) => {
+  upload.single('cv')(req, res, (err) => {
+    if (err) {
+      console.error('[CANDIDATES] Multer upload-cv-new :', err.message);
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Fichier trop volumineux (max 10 Mo)' });
+      return res.status(400).json({ error: err.message || 'Erreur upload fichier' });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Fichier CV requis' });
 

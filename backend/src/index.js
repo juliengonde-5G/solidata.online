@@ -19,8 +19,15 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Fichiers statiques
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+// Créer dossiers uploads (évite 502 si multer ne peut pas créer)
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+['', 'cv', 'photos', 'incidents', 'qrcodes'].forEach((sub) => {
+  const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
+  try {
+    require('fs').mkdirSync(dir, { recursive: true });
+  } catch (_) {}
+});
+app.use('/uploads', express.static(uploadsDir));
 app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 
 // Rendre io accessible aux routes

@@ -109,7 +109,6 @@ export default function Candidates() {
     fd.append('cv', file);
     try {
       const res = await api.post('/candidates/upload-cv-new', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 120000,
       });
       loadAll();
