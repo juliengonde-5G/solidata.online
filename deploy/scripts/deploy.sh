@@ -44,22 +44,19 @@ case "${ACTION}" in
 
     CONF_DIR="deploy/nginx/conf.d"
 
-    # Étape 0: Purge complète Docker pour libérer l'espace disque
+    # ── Étape 0: Purge Docker ──
     log "Étape 0/7 — Purge Docker complète..."
     docker compose -f ${COMPOSE_FILE} down --remove-orphans 2>/dev/null || true
     docker stop $(docker ps -aq) 2>/dev/null || true
     docker rm -f $(docker ps -aq) 2>/dev/null || true
     docker rmi -f $(docker images -aq) 2>/dev/null || true
-    # Supprimer les volumes sauf pgdata (base de données)
     for vol in $(docker volume ls -q 2>/dev/null); do
         if [ "$vol" != "solidata-pgdata" ]; then
             docker volume rm -f "$vol" 2>/dev/null || true
         fi
     done
-    # Purge builder cache et réseaux orphelins (sans --volumes pour préserver pgdata)
     docker builder prune -af 2>/dev/null || true
     docker network prune -f 2>/dev/null || true
-    # Nettoyage supplémentaire : logs Docker, cache apt, tmp, vieux journaux
     truncate -s 0 /var/lib/docker/containers/*/*-json.log 2>/dev/null || true
     apt-get clean 2>/dev/null || true
     rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
@@ -67,21 +64,60 @@ case "${ACTION}" in
     log "Espace disque après purge :"
     df -h /
 
-    # Vérifier qu'il reste assez d'espace (minimum 1.5 Go)
+    # Vérifier qu'il reste assez d'espace
     AVAIL_KB=$(df / | tail -1 | awk '{print $4}')
     if [ "$AVAIL_KB" -lt 1500000 ]; then
         warn "Seulement $(( AVAIL_KB / 1024 )) Mo disponibles. Le build risque d'échouer."
-        warn "Libérez de l'espace avant de continuer."
+        warn "Lancez d'abord : sudo bash deploy/scripts/init-server.sh"
     fi
 
-    # Étape 1: Démarrer avec config HTTP uniquement (pour certbot)
-    log "Étape 1/7 — Démarrage en HTTP (sans SSL)..."
+    # ── Étape 1: Vérifications pré-déploiement ──
+    log "Étape 1/7 — Vérifications pré-déploiement..."
 
-    # Temporairement remplacer la config SSL par la config HTTP-only
-    cp "${CONF_DIR}/solidata.conf" "${CONF_DIR}/solidata.conf.ssl-backup"
+    # Vérifier qu'aucun nginx host ne tourne (conflit de port)
+    if systemctl is-active nginx &>/dev/null; then
+        warn "Un Nginx HOST est actif ! Il bloque le port 80. Arrêt..."
+        systemctl stop nginx
+        systemctl disable nginx
+    fi
+    # Vérifier qu'aucun processus ne bloque le port 80
+    if ss -tlnp | grep -q ':80 '; then
+        warn "Port 80 déjà utilisé par :"
+        ss -tlnp | grep ':80 '
+        warn "Tentative de libération..."
+        fuser -k 80/tcp 2>/dev/null || true
+        sleep 2
+    fi
+    # Vérifier qu'aucun processus ne bloque le port 443
+    if ss -tlnp | grep -q ':443 '; then
+        warn "Port 443 déjà utilisé, libération..."
+        fuser -k 443/tcp 2>/dev/null || true
+        sleep 2
+    fi
+    # Vérifier UFW
+    if command -v ufw &>/dev/null; then
+        if ufw status | grep -q "Status: active"; then
+            if ! ufw status | grep -q "80/tcp.*ALLOW"; then
+                warn "UFW actif mais port 80 non autorisé ! Ajout..."
+                ufw allow 80/tcp
+                ufw allow 443/tcp
+            fi
+            log "UFW: port 80 et 443 ouverts"
+        fi
+    fi
+
+    # ── Config HTTP-only pour certbot ──
+    # Sauvegarder la config SSL UNIQUEMENT si ce n'est pas déjà une sauvegarde HTTP
+    # (évite d'écraser le backup SSL en cas de re-run)
+    if [ ! -f "${CONF_DIR}/solidata.conf.ssl-backup" ]; then
+        cp "${CONF_DIR}/solidata.conf" "${CONF_DIR}/solidata.conf.ssl-backup"
+    fi
     cp "${CONF_DIR}/solidata-initial.conf.disabled" "${CONF_DIR}/solidata.conf"
 
-    # Build séquentiel pour limiter l'usage disque sur petit serveur
+    # ── Étape 2: Build + Démarrage (SANS certbot) ──
+    log "Étape 2/7 — Build et démarrage en HTTP..."
+
+    # Build séquentiel pour économiser le disque
     log "  Build du backend..."
     docker compose -f ${COMPOSE_FILE} build backend
     log "  Build du frontend..."
@@ -91,50 +127,71 @@ case "${ACTION}" in
     docker compose -f ${COMPOSE_FILE} build mobile
     docker image prune -f 2>/dev/null || true
 
-    log "  Démarrage des services..."
-    docker compose -f ${COMPOSE_FILE} up -d
+    # Démarrer SANS le service certbot (évite le conflit avec certbot certonly)
+    log "  Démarrage des services (sans certbot)..."
+    docker compose -f ${COMPOSE_FILE} up -d db backend frontend mobile nginx
 
-    # Attendre que nginx réponde vraiment sur le port 80
+    # Attendre que nginx réponde sur le port 80
     log "Attente que nginx soit prêt sur le port 80..."
     RETRIES=0
     MAX_RETRIES=60
     while [ $RETRIES -lt $MAX_RETRIES ]; do
-        if curl -s -o /dev/null -w "%{http_code}" http://localhost 2>/dev/null | grep -qE "200|301|302|404"; then
-            log "Nginx répond sur le port 80 !"
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost 2>/dev/null || echo "000")
+        if echo "$HTTP_CODE" | grep -qE "^(200|301|302|404|502)$"; then
+            log "Nginx répond sur le port 80 (HTTP $HTTP_CODE) !"
             break
         fi
-        # Tous les 10 essais, afficher l'état des containers pour diagnostiquer
         if [ $(( RETRIES % 10 )) -eq 0 ] && [ $RETRIES -gt 0 ]; then
-            warn "Nginx ne répond toujours pas, diagnostic..."
+            warn "Nginx ne répond pas (HTTP $HTTP_CODE), diagnostic..."
             docker compose -f ${COMPOSE_FILE} ps
-            docker compose -f ${COMPOSE_FILE} logs --tail=5 nginx 2>/dev/null || true
+            docker compose -f ${COMPOSE_FILE} logs --tail=10 nginx 2>/dev/null || true
         fi
         RETRIES=$((RETRIES + 1))
-        echo "  Tentative ${RETRIES}/${MAX_RETRIES}..."
+        echo "  Tentative ${RETRIES}/${MAX_RETRIES} (HTTP ${HTTP_CODE})..."
         sleep 5
     done
 
     if [ $RETRIES -eq $MAX_RETRIES ]; then
-        warn "Nginx ne répond pas. Affichage des logs complets :"
+        warn "Nginx ne répond pas. Logs de tous les services :"
+        docker compose -f ${COMPOSE_FILE} ps
         docker compose -f ${COMPOSE_FILE} logs --tail=50 nginx
         docker compose -f ${COMPOSE_FILE} logs --tail=20 backend
         docker compose -f ${COMPOSE_FILE} logs --tail=20 frontend
-        error "Nginx ne répond pas après ${MAX_RETRIES} tentatives. Corrigez les erreurs ci-dessus."
+        docker compose -f ${COMPOSE_FILE} logs --tail=20 mobile
+        # Vérifier si le port est bien ouvert
+        warn "État des ports :"
+        ss -tlnp | grep -E ':80|:443' || echo "  Aucun service sur 80/443 !"
+        error "Nginx ne répond pas après ${MAX_RETRIES} tentatives."
     fi
 
-    # Vérifier que le challenge path est accessible
+    # ── Vérifier le challenge ACME ──
     log "Vérification accès ACME challenge..."
-    docker compose -f ${COMPOSE_FILE} exec -T nginx sh -c 'mkdir -p /var/www/certbot/.well-known/acme-challenge && echo "test" > /var/www/certbot/.well-known/acme-challenge/test'
-    if curl -s http://localhost/.well-known/acme-challenge/test | grep -q "test"; then
-        log "ACME challenge accessible !"
+    docker compose -f ${COMPOSE_FILE} exec -T nginx sh -c \
+        'mkdir -p /var/www/certbot/.well-known/acme-challenge && echo "acme-test-ok" > /var/www/certbot/.well-known/acme-challenge/test-solidata'
+    ACME_TEST=$(curl -s http://localhost/.well-known/acme-challenge/test-solidata 2>/dev/null || echo "FAIL")
+    if echo "$ACME_TEST" | grep -q "acme-test-ok"; then
+        log "ACME challenge accessible en local !"
     else
-        warn "ACME challenge non accessible, vérification des logs nginx..."
+        warn "ACME challenge NON accessible en local. Réponse: ${ACME_TEST}"
+        warn "Logs nginx :"
         docker compose -f ${COMPOSE_FILE} logs --tail=20 nginx
     fi
 
-    # Étape 2: Obtenir certificat SSL
-    log "Étape 2/7 — Obtention certificat Let's Encrypt..."
-    docker compose -f ${COMPOSE_FILE} run --rm --entrypoint certbot certbot certonly \
+    # Vérifier l'accès externe (depuis l'IP publique)
+    log "Vérification accès externe sur ${SERVER_IP}:80..."
+    EXT_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "http://${SERVER_IP}/.well-known/acme-challenge/test-solidata" 2>/dev/null || echo "000")
+    if [ "$EXT_CODE" = "000" ]; then
+        warn "⚠️  Port 80 NON ACCESSIBLE depuis l'IP publique ${SERVER_IP} !"
+        warn "Vérifiez le Security Group Scaleway : port 80 TCP doit être ouvert en INBOUND."
+        warn "Console Scaleway > Instances > Security Groups > Ajouter règle : TCP 80 ACCEPT"
+    else
+        log "Port 80 accessible depuis l'IP publique (HTTP $EXT_CODE)"
+    fi
+
+    # ── Étape 3: Obtenir certificat SSL ──
+    log "Étape 3/7 — Obtention certificat Let's Encrypt..."
+    docker compose -f ${COMPOSE_FILE} run --rm --entrypoint "" certbot \
+        certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
         --email ${EMAIL} \
@@ -144,19 +201,24 @@ case "${ACTION}" in
         -d www.${DOMAIN} \
         -d m.${DOMAIN}
 
-    # Étape 3: Restaurer la config SSL
-    log "Étape 3/7 — Activation SSL..."
-    cp "${CONF_DIR}/solidata.conf.ssl-backup" "${CONF_DIR}/solidata.conf"
-    rm -f "${CONF_DIR}/solidata.conf.ssl-backup"
+    # ── Étape 4: Restaurer config SSL + redémarrer nginx ──
+    log "Étape 4/7 — Activation SSL..."
+    if [ -f "${CONF_DIR}/solidata.conf.ssl-backup" ]; then
+        cp "${CONF_DIR}/solidata.conf.ssl-backup" "${CONF_DIR}/solidata.conf"
+        rm -f "${CONF_DIR}/solidata.conf.ssl-backup"
+    else
+        warn "Backup SSL introuvable, la config actuelle est conservée."
+    fi
 
-    # Étape 4: Redémarrer nginx avec SSL
-    log "Étape 4/7 — Redémarrage avec SSL..."
+    log "Redémarrage nginx avec SSL..."
     docker compose -f ${COMPOSE_FILE} restart nginx
-
-    # Attendre que nginx redémarre avec SSL
     sleep 10
 
-    # Étape 5: Initialisation base de données
+    # Maintenant démarrer aussi le service certbot (renouvellement automatique)
+    log "Démarrage du service certbot (renouvellement auto)..."
+    docker compose -f ${COMPOSE_FILE} up -d certbot
+
+    # ── Étape 5: Initialisation base de données ──
     log "Étape 5/7 — Initialisation base de données..."
     sleep 5
     if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/init-db.js 2>/dev/null; then
@@ -170,11 +232,11 @@ case "${ACTION}" in
         fi
     fi
 
-    # Étape 6: Nettoyage post-déploiement
+    # ── Étape 6: Nettoyage ──
     log "Étape 6/7 — Nettoyage images intermédiaires..."
     docker image prune -f
 
-    # Étape 7: Statut final
+    # ── Étape 7: Statut final ──
     log "Étape 7/7 — Vérification..."
     docker compose -f ${COMPOSE_FILE} ps
     log "Espace disque final :"
