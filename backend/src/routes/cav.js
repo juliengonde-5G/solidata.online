@@ -72,6 +72,124 @@ router.get('/map', async (req, res) => {
   }
 });
 
+// GET /api/cav/fill-rate — Taux de remplissage en temps réel avec prévision
+router.get('/fill-rate', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT c.id, c.name, c.address, c.commune, c.latitude, c.longitude,
+        c.nb_containers, c.status, c.tournee, c.jours_collecte, c.freq_passage,
+        c.avg_fill_rate, c.route_count,
+        (SELECT MAX(th.date) FROM tonnage_history th WHERE th.cav_id = c.id) as last_collection,
+        (SELECT AVG(th.weight_kg) FROM tonnage_history th WHERE th.cav_id = c.id
+         AND th.date >= NOW() - INTERVAL '90 days') as avg_weight_90d,
+        (SELECT COUNT(*) FROM tonnage_history th WHERE th.cav_id = c.id
+         AND th.date >= NOW() - INTERVAL '90 days') as nb_collectes_90d,
+        (SELECT AVG(th2.date - th1.date)
+         FROM (SELECT date, ROW_NUMBER() OVER (ORDER BY date DESC) as rn FROM tonnage_history WHERE cav_id = c.id AND date >= NOW() - INTERVAL '180 days') th1
+         JOIN (SELECT date, ROW_NUMBER() OVER (ORDER BY date DESC) as rn FROM tonnage_history WHERE cav_id = c.id AND date >= NOW() - INTERVAL '180 days') th2
+         ON th2.rn = th1.rn - 1
+        ) as avg_days_between_collections
+      FROM cav c
+      WHERE c.status = 'active' AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+      ORDER BY c.name
+    `);
+
+    const now = new Date();
+    const monthIndex = now.getMonth();
+    const seasonalFactors = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
+
+    const JOURS_MAP = { 'lundi': 1, 'mardi': 2, 'mercredi': 3, 'jeudi': 4, 'vendredi': 5, 'samedi': 6, 'dimanche': 0 };
+
+    const cavData = result.rows.map(cav => {
+      const lastCollection = cav.last_collection ? new Date(cav.last_collection) : null;
+      const daysSinceCollection = lastCollection
+        ? Math.floor((now - lastCollection) / 86400000)
+        : 30;
+
+      const avgWeight = parseFloat(cav.avg_weight_90d) || 50;
+      const avgDaysBetween = parseFloat(cav.avg_days_between_collections) || 14;
+      const capacityKg = (cav.nb_containers || 1) * 150; // ~150kg par conteneur
+
+      // Taux de remplissage estimé basé sur accumulation journalière
+      const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
+      const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactors[monthIndex];
+      const fillRate = Math.min(120, (accumulatedKg / capacityKg) * 100);
+
+      // Prévision : quand sera-t-il plein (80%)
+      const targetKg = capacityKg * 0.8;
+      const remainingKg = Math.max(0, targetKg - accumulatedKg);
+      const daysToFull = dailyAccumulation > 0 ? Math.ceil(remainingKg / (dailyAccumulation * seasonalFactors[monthIndex])) : null;
+      const predictedFullDate = daysToFull != null && daysToFull > 0
+        ? new Date(now.getTime() + daysToFull * 86400000).toISOString().split('T')[0]
+        : null;
+
+      // Prochain passage estimé
+      let nextPassage = null;
+      if (cav.jours_collecte) {
+        const jours = cav.jours_collecte.toLowerCase().split(/[,\/\s]+/).map(j => j.trim());
+        const todayDay = now.getDay();
+        let minDaysAhead = 8;
+        for (const jour of jours) {
+          const targetDay = JOURS_MAP[jour];
+          if (targetDay !== undefined) {
+            let diff = targetDay - todayDay;
+            if (diff <= 0) diff += 7;
+            if (diff < minDaysAhead) minDaysAhead = diff;
+          }
+        }
+        if (minDaysAhead <= 7) {
+          nextPassage = new Date(now.getTime() + minDaysAhead * 86400000).toISOString().split('T')[0];
+        }
+      }
+      // Fallback: utiliser la fréquence moyenne
+      if (!nextPassage && lastCollection && avgDaysBetween > 0) {
+        const nextDate = new Date(lastCollection.getTime() + avgDaysBetween * 86400000);
+        if (nextDate > now) {
+          nextPassage = nextDate.toISOString().split('T')[0];
+        } else {
+          // Déjà en retard
+          nextPassage = 'en retard';
+        }
+      }
+
+      return {
+        id: cav.id,
+        name: cav.name,
+        address: cav.address,
+        commune: cav.commune,
+        latitude: cav.latitude,
+        longitude: cav.longitude,
+        nb_containers: cav.nb_containers,
+        tournee: cav.tournee,
+        jours_collecte: cav.jours_collecte,
+        fill_rate: Math.round(fillRate),
+        days_since_collection: daysSinceCollection,
+        last_collection: cav.last_collection,
+        daily_accumulation_kg: Math.round(dailyAccumulation * 10) / 10,
+        predicted_full_date: predictedFullDate,
+        days_to_full: daysToFull != null ? Math.max(0, daysToFull) : null,
+        next_passage: nextPassage,
+        nb_collectes_90d: parseInt(cav.nb_collectes_90d) || 0,
+        avg_weight_90d: Math.round(avgWeight * 10) / 10,
+      };
+    });
+
+    // Stats globales
+    const totalCav = cavData.length;
+    const critical = cavData.filter(c => c.fill_rate >= 80).length;
+    const warning = cavData.filter(c => c.fill_rate >= 40 && c.fill_rate < 80).length;
+    const ok = cavData.filter(c => c.fill_rate < 40).length;
+
+    res.json({
+      stats: { total: totalCav, critical, warning, ok },
+      cavs: cavData,
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur fill-rate :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/cav/communes — Liste des communes distinctes
 router.get('/communes', async (req, res) => {
   try {

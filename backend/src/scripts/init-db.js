@@ -1410,6 +1410,23 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Migration météo + événements locaux ✓');
 
+    // ══════════════════════════════════════════
+    // MIGRATION : UNIQUE index on cav.name + import Excel support
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cav_name_unique ON cav (name);
+    `);
+    await client.query(`
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS tournee VARCHAR(100);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS jours_collecte VARCHAR(100);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS freq_passage INTEGER DEFAULT 0;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS last_collection_date DATE;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS next_collection_date DATE;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS estimated_fill_rate DOUBLE PRECISION DEFAULT 0;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS daily_fill_rate DOUBLE PRECISION DEFAULT 0;
+    `);
+    console.log('[INIT-DB] Migration CAV (unique name + fill rate columns) ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
@@ -93,6 +95,39 @@ export default function ReportingMetropole() {
             {/* Carte des CAV */}
             <div className="bg-white rounded-xl border p-5">
               <h3 className="font-semibold mb-4">Carte des Conteneurs d'Apport Volontaire</h3>
+
+              {/* Carte Leaflet */}
+              <div className="rounded-lg overflow-hidden border mb-4" style={{ height: '400px' }}>
+                <MapContainer center={[49.4231, 1.0993]} zoom={11} style={{ height: '100%', width: '100%' }}>
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  {cavList.filter(c => c.latitude && c.longitude).map(c => (
+                    <CircleMarker
+                      key={c.id}
+                      center={[c.latitude, c.longitude]}
+                      radius={8}
+                      pathOptions={{
+                        color: c.status === 'active' ? '#22C55E' : '#EF4444',
+                        fillColor: c.status === 'active' ? '#22C55E' : '#EF4444',
+                        fillOpacity: 0.6,
+                      }}
+                      eventHandlers={{ click: () => openCavDetail(c) }}
+                    >
+                      <Popup>
+                        <div className="text-xs">
+                          <p className="font-bold">{c.name}</p>
+                          <p>{c.commune}</p>
+                          <p>Collectes (12m) : {c.nb_collectes_12m || 0}</p>
+                          <p>Total : {((parseFloat(c.total_kg_12m) || 0) / 1000).toFixed(2)} t</p>
+                        </div>
+                      </Popup>
+                    </CircleMarker>
+                  ))}
+                </MapContainer>
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {/* Liste des CAV */}
                 <div className="lg:col-span-1 max-h-96 overflow-y-auto space-y-1">

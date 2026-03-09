@@ -94,8 +94,8 @@ async function importCAV() {
       // Upsert CAV par nom
       try {
         await pool.query(`
-          INSERT INTO cav (name, address, commune, latitude, longitude, nb_containers, status, geom)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, ST_SetSRID(ST_MakePoint($5, $4), 4326))
+          INSERT INTO cav (name, address, commune, latitude, longitude, nb_containers, status, geom, tournee, jours_collecte, freq_passage)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, ST_SetSRID(ST_MakePoint($5, $4), 4326), $8, $9, $10)
           ON CONFLICT (name) DO UPDATE SET
             address = COALESCE(EXCLUDED.address, cav.address),
             commune = COALESCE(EXCLUDED.commune, cav.commune),
@@ -103,8 +103,11 @@ async function importCAV() {
             longitude = EXCLUDED.longitude,
             nb_containers = GREATEST(EXCLUDED.nb_containers, cav.nb_containers),
             geom = ST_SetSRID(ST_MakePoint(EXCLUDED.longitude, EXCLUDED.latitude), 4326),
+            tournee = COALESCE(EXCLUDED.tournee, cav.tournee),
+            jours_collecte = COALESCE(EXCLUDED.jours_collecte, cav.jours_collecte),
+            freq_passage = GREATEST(EXCLUDED.freq_passage, cav.freq_passage),
             updated_at = NOW()
-        `, [name, fullAddress, ville, lat, lng, nbCav || 1, nbCav > 0 ? 'active' : 'unavailable']);
+        `, [name, fullAddress, ville, lat, lng, nbCav || 1, nbCav > 0 ? 'active' : 'unavailable', tournee, joursCollecte, freqPassage]);
         imported++;
       } catch (err) {
         // name might not be unique, try with commune prefix

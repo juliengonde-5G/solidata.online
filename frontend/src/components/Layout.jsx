@@ -51,6 +51,7 @@ const menuSections = [
       { path: '/tours', label: 'Tournées', icon: IconTruck, roles: ['ADMIN', 'MANAGER'] },
       { path: '/collection-proposals', label: 'Propositions (IA)', icon: IconSparkles, roles: ['ADMIN', 'MANAGER'] },
       { path: '/cav-map', label: 'Carte CAV', icon: IconMap, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/fill-rate', label: 'Remplissage CAV', icon: IconChart, roles: ['ADMIN', 'MANAGER'] },
       { path: '/live-vehicles', label: 'Suivi GPS', icon: IconGPS, roles: ['ADMIN', 'MANAGER'] },
     ],
   },

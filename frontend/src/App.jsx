@@ -30,6 +30,7 @@ import PCMTest from './pages/PCMTest';
 import RGPD from './pages/RGPD';
 import AdminDB from './pages/AdminDB';
 import ReportingMetropole from './pages/ReportingMetropole';
+import FillRateMap from './pages/FillRateMap';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -62,6 +63,7 @@ function App() {
           <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />
           <Route path="/collection-proposals" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CollectionProposals /></ProtectedRoute>} />
           <Route path="/cav-map" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CAVMap /></ProtectedRoute>} />
+          <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FillRateMap /></ProtectedRoute>} />
           <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Vehicles /></ProtectedRoute>} />
           <Route path="/live-vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
 
