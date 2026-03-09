@@ -225,10 +225,11 @@ async function importAnnuel(client, wb, year) {
 }
 
 // ─── Main ───
-async function main() {
+async function seedHistorique(externalPool) {
+  const db = externalPool || pool;
   console.log('[SEED-HISTORIQUE] Démarrage import données historiques...');
 
-  const client = await pool.connect();
+  const client = await db.connect();
   try {
     await client.query('BEGIN');
 
@@ -267,11 +268,17 @@ async function main() {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[SEED-HISTORIQUE] Erreur:', err.message);
-    process.exit(1);
+    if (!externalPool) process.exit(1);
+    throw err;
   } finally {
     client.release();
-    await pool.end();
+    if (!externalPool) await pool.end();
   }
 }
 
-main();
+// Appel direct (CLI) ou export (module)
+if (require.main === module) {
+  seedHistorique();
+}
+
+module.exports = { seedHistorique };

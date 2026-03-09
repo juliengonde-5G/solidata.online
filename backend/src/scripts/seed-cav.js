@@ -134,7 +134,9 @@ function parseExcel(filePath) {
   return cavs;
 }
 
-async function seedCAV() {
+async function seedCAV(externalPool) {
+  const db = externalPool || pool;
+
   // Load KML (primary source with GPS)
   const kmlPath = findFile('Carte des PAV au 28-02-2026.kml');
   const xlsPath = findFile('tournee.xlsx');
@@ -172,11 +174,11 @@ async function seedCAV() {
   }
 
   if (cavs.length === 0) {
-    console.error('[SEED-CAV] Aucun fichier source trouvé (KML ou Excel)');
-    process.exit(1);
+    console.log('[SEED-CAV] Aucun fichier source trouvé (KML ou Excel), skip');
+    return;
   }
 
-  const client = await pool.connect();
+  const client = await db.connect();
   try {
     await client.query('BEGIN');
 
@@ -246,11 +248,17 @@ async function seedCAV() {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[SEED-CAV] Erreur:', err.message);
-    process.exit(1);
+    if (!externalPool) process.exit(1);
+    throw err;
   } finally {
     client.release();
-    await pool.end();
+    if (!externalPool) await pool.end();
   }
 }
 
-seedCAV();
+// Appel direct (CLI) ou export (module)
+if (require.main === module) {
+  seedCAV();
+}
+
+module.exports = { seedCAV };

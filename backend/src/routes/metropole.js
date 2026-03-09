@@ -54,8 +54,8 @@ router.get('/dashboard', async (req, res) => {
       FROM cav
     `);
 
-    // Historique mensuel (12 derniers mois)
-    const historique = await pool.query(`
+    // Historique mensuel (12 derniers mois) — d'abord depuis tours, sinon depuis historique_mensuel
+    let historique = await pool.query(`
       SELECT
         DATE_TRUNC('month', t.date) as mois,
         COALESCE(SUM(t.total_weight_kg), 0) as total_kg,
@@ -67,6 +67,27 @@ router.get('/dashboard', async (req, res) => {
       GROUP BY DATE_TRUNC('month', t.date)
       ORDER BY mois
     `, [dateFrom, dateTo]);
+
+    // Si pas de données tours, charger depuis historique_mensuel (données importées Excel)
+    if (historique.rows.length === 0) {
+      try {
+        const histImported = await pool.query(`
+          SELECT
+            make_date(annee, mois, 1) as mois,
+            SUM(valeur) as total_kg,
+            0 as nb_tours
+          FROM historique_mensuel
+          WHERE section IN ('sous_totaux_tonnages', 'tonnages')
+          AND annee * 100 + mois >= ($1::int * 100 + $2::int - 11)
+          AND annee * 100 + mois <= $1::int * 100 + $2::int
+          GROUP BY annee, mois
+          ORDER BY annee, mois
+        `, [y, m]);
+        if (histImported.rows.length > 0) {
+          historique = histImported;
+        }
+      } catch (_) {}
+    }
 
     res.json({
       period: { year: y, month: m },

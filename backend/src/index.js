@@ -188,6 +188,34 @@ async function initOnStartup() {
     } else {
       console.log(`[DB] ${tables.rows[0].count} tables trouvées`);
     }
+
+    // Seed CAV si la table est vide
+    try {
+      const cavCount = await pool.query('SELECT COUNT(*) FROM cav');
+      if (parseInt(cavCount.rows[0].count) === 0) {
+        console.log('[DB] Table CAV vide, lancement du seed...');
+        const { seedCAV } = require('./scripts/seed-cav');
+        await seedCAV(pool);
+      } else {
+        console.log(`[DB] ${cavCount.rows[0].count} CAV déjà en base`);
+      }
+    } catch (err) {
+      console.error('[DB] Erreur seed CAV :', err.message);
+    }
+
+    // Seed historique si la table est vide
+    try {
+      const histCount = await pool.query('SELECT COUNT(*) FROM historique_mensuel');
+      if (parseInt(histCount.rows[0].count) === 0) {
+        console.log('[DB] Table historique_mensuel vide, lancement du seed...');
+        const { seedHistorique } = require('./scripts/seed-historique');
+        await seedHistorique(pool);
+      } else {
+        console.log(`[DB] ${histCount.rows[0].count} entrées historiques déjà en base`);
+      }
+    } catch (err) {
+      console.error('[DB] Erreur seed historique :', err.message);
+    }
   } catch (err) {
     console.error('[DB] Erreur connexion :', err.message);
     console.log('[DB] Nouvelle tentative dans 5s...');
