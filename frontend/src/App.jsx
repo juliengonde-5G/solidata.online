@@ -29,6 +29,7 @@ import InsertionParcours from './pages/InsertionParcours';
 import PCMTest from './pages/PCMTest';
 import RGPD from './pages/RGPD';
 import AdminDB from './pages/AdminDB';
+import AdminCAV from './pages/AdminCAV';
 import ReportingMetropole from './pages/ReportingMetropole';
 import FillRateMap from './pages/FillRateMap';
 
@@ -89,6 +90,7 @@ function App() {
           <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />
           <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN']}><RGPD /></ProtectedRoute>} />
           <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
+          <Route path="/admin-cav" element={<ProtectedRoute roles={['ADMIN']}><AdminCAV /></ProtectedRoute>} />
 
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

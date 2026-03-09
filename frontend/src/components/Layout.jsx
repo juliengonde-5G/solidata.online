@@ -96,6 +96,7 @@ const menuSections = [
       { path: '/referentiels', label: 'Référentiels', icon: IconList, roles: ['ADMIN'] },
       { path: '/admin-predictive', label: 'Moteur prédictif', icon: IconBrain, roles: ['ADMIN'] },
       { path: '/rgpd', label: 'RGPD', icon: IconLock, roles: ['ADMIN'] },
+      { path: '/admin-cav', label: 'Gestion CAV', icon: IconMap, roles: ['ADMIN'] },
       { path: '/admin-db', label: 'Base de données', icon: IconGear, roles: ['ADMIN'] },
     ],
   },
