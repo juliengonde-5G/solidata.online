@@ -114,12 +114,21 @@ case "${ACTION}" in
     fi
     cp "${CONF_DIR}/solidata-initial.conf.disabled" "${CONF_DIR}/solidata.conf"
 
-    # ── Étape 2: Build + Démarrage (SANS certbot) ──
-    log "Étape 2/7 — Build et démarrage en HTTP..."
+    # ── Étape 2: Pull images + Build (SANS certbot) ──
+    log "Étape 2/7 — Pull images, build et démarrage en HTTP..."
+
+    # Pré-tirer les images légères AVANT de builder (évite de manquer d'espace)
+    log "  Pull des images de base..."
+    docker pull nginx:alpine
+    docker pull postgis/postgis:15-3.4
+    log "  Espace après pull des images de base :"
+    df -h /
 
     # Build séquentiel pour économiser le disque
+    # Nettoyer les couches intermédiaires entre chaque build
     log "  Build du backend..."
     docker compose -f ${COMPOSE_FILE} build backend
+    docker image prune -f 2>/dev/null || true
     log "  Build du frontend..."
     docker compose -f ${COMPOSE_FILE} build frontend
     docker image prune -f 2>/dev/null || true
@@ -127,9 +136,36 @@ case "${ACTION}" in
     docker compose -f ${COMPOSE_FILE} build mobile
     docker image prune -f 2>/dev/null || true
 
+    log "  Espace après build :"
+    df -h /
+    AVAIL_KB=$(df / | tail -1 | awk '{print $4}')
+    if [ "$AVAIL_KB" -lt 200000 ]; then
+        error "Plus que $(( AVAIL_KB / 1024 )) Mo libre ! Disque trop petit pour continuer. Utilisez un serveur avec plus de stockage."
+    fi
+
     # Démarrer SANS le service certbot (évite le conflit avec certbot certonly)
     log "  Démarrage des services (sans certbot)..."
     docker compose -f ${COMPOSE_FILE} up -d db backend frontend mobile nginx
+
+    # Vérifier immédiatement que le conteneur nginx est créé et tourne
+    sleep 5
+    NGINX_STATUS=$(docker inspect -f '{{.State.Status}}' solidata-proxy 2>/dev/null || echo "not_found")
+    if [ "$NGINX_STATUS" = "not_found" ]; then
+        error "Le conteneur solidata-proxy n'a pas été créé ! Vérifiez 'docker compose -f ${COMPOSE_FILE} ps -a' et le disque : df -h /"
+    elif [ "$NGINX_STATUS" != "running" ]; then
+        warn "Conteneur nginx en état : ${NGINX_STATUS}"
+        warn "Logs du conteneur nginx :"
+        docker logs solidata-proxy --tail=30 2>&1 || true
+        warn "Vérification du disque :"
+        df -h /
+        if [ "$NGINX_STATUS" = "exited" ] || [ "$NGINX_STATUS" = "dead" ]; then
+            warn "Nginx a crashé. Tentative de redémarrage..."
+            docker start solidata-proxy 2>/dev/null || true
+            sleep 5
+        fi
+    else
+        log "Conteneur nginx est running."
+    fi
 
     # Attendre que nginx réponde sur le port 80
     log "Attente que nginx soit prêt sur le port 80..."
