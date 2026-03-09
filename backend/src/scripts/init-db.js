@@ -322,21 +322,7 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_cav_geom ON cav USING GIST(geom);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_cav_status ON cav(status);');
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS cav_qr_scans (
-        id SERIAL PRIMARY KEY,
-        cav_id INTEGER REFERENCES cav(id) ON DELETE CASCADE,
-        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
-        scanned_by INTEGER REFERENCES users(id),
-        scan_type VARCHAR(30) DEFAULT 'collection' CHECK (scan_type IN ('collection', 'inspection', 'maintenance', 'inventory')),
-        latitude DOUBLE PRECISION,
-        longitude DOUBLE PRECISION,
-        notes TEXT,
-        scanned_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_qr_scans_cav ON cav_qr_scans(cav_id);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_qr_scans_date ON cav_qr_scans(scanned_at DESC);');
+    // Note: cav_qr_scans est créée plus bas, après la table tours (dépendance FK)
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS vehicles (
@@ -391,6 +377,23 @@ async function initDatabase() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    // cav_qr_scans : créée ici car dépend de tours(id)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_qr_scans (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER REFERENCES cav(id) ON DELETE CASCADE,
+        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+        scanned_by INTEGER REFERENCES users(id),
+        scan_type VARCHAR(30) DEFAULT 'collection' CHECK (scan_type IN ('collection', 'inspection', 'maintenance', 'inventory')),
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        notes TEXT,
+        scanned_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_qr_scans_cav ON cav_qr_scans(cav_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_qr_scans_date ON cav_qr_scans(scanned_at DESC);');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS tour_cav (
