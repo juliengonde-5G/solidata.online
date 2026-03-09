@@ -755,10 +755,14 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
       'assigned_team_id', 'position_id', 'comment',
     ];
 
+    // Champs qui doivent être NULL au lieu de '' pour PostgreSQL (date, FK)
+    const nullableFields = ['appointment_date', 'position_id', 'assigned_team_id'];
+
     for (const field of allowedFields) {
       if (fields[field] !== undefined) {
         setClauses.push(`${field} = $${i}`);
-        values.push(fields[field]);
+        const val = nullableFields.includes(field) && fields[field] === '' ? null : fields[field];
+        values.push(val);
         i++;
       }
     }

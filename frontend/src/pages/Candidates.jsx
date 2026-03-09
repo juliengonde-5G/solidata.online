@@ -183,11 +183,17 @@ export default function Candidates() {
 
   const saveEdit = async () => {
     try {
-      const res = await api.put(`/candidates/${selected.id}`, { ...editForm, position_id: editForm.position_id || null });
+      const payload = { ...editForm, position_id: editForm.position_id || null };
+      // Convertir les chaînes vides en null pour les champs date
+      if (payload.appointment_date === '') payload.appointment_date = null;
+      const res = await api.put(`/candidates/${selected.id}`, payload);
       setEditing(false);
       setSelected(res.data);
       loadAll();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || 'Erreur lors de la sauvegarde');
+    }
   };
 
   const createPosition = async (e) => {

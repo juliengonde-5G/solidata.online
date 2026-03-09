@@ -50,11 +50,15 @@ export default function Tours() {
   const generateTour = async () => {
     setGenerating(true);
     try {
-      const res = await api.post('/tours', { ...wizForm });
+      const mode = wizForm.mode || 'intelligent';
+      const res = await api.post(`/tours/${mode}`, { ...wizForm });
       setGeneratedTour(res.data);
       setWizardStep(4);
       loadTours();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || 'Erreur lors de la génération de la tournée');
+    }
     setGenerating(false);
   };
 
