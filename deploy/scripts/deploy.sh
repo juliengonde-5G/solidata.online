@@ -233,6 +233,7 @@ case "${ACTION}" in
         --email ${EMAIL} \
         --agree-tos \
         --no-eff-email \
+        --force-renewal \
         -d ${DOMAIN} \
         -d www.${DOMAIN} \
         -d m.${DOMAIN}
