@@ -46,18 +46,33 @@ case "${ACTION}" in
 
     # Étape 0: Purge complète Docker pour libérer l'espace disque
     log "Étape 0/7 — Purge Docker complète..."
-    docker compose -f ${COMPOSE_FILE} down 2>/dev/null || true
+    docker compose -f ${COMPOSE_FILE} down --remove-orphans 2>/dev/null || true
     docker stop $(docker ps -aq) 2>/dev/null || true
     docker rm -f $(docker ps -aq) 2>/dev/null || true
     docker rmi -f $(docker images -aq) 2>/dev/null || true
-    docker volume rm -f $(docker volume ls -q | grep -v solidata-pgdata) 2>/dev/null || true
-    docker system prune -af --volumes 2>/dev/null || true
-    # Nettoyage supplémentaire : logs Docker, cache apt, tmp
+    # Supprimer les volumes sauf pgdata (base de données)
+    for vol in $(docker volume ls -q 2>/dev/null); do
+        if [ "$vol" != "solidata-pgdata" ]; then
+            docker volume rm -f "$vol" 2>/dev/null || true
+        fi
+    done
+    # Purge builder cache et réseaux orphelins (sans --volumes pour préserver pgdata)
+    docker builder prune -af 2>/dev/null || true
+    docker network prune -f 2>/dev/null || true
+    # Nettoyage supplémentaire : logs Docker, cache apt, tmp, vieux journaux
     truncate -s 0 /var/lib/docker/containers/*/*-json.log 2>/dev/null || true
     apt-get clean 2>/dev/null || true
     rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+    journalctl --vacuum-size=50M 2>/dev/null || true
     log "Espace disque après purge :"
     df -h /
+
+    # Vérifier qu'il reste assez d'espace (minimum 1.5 Go)
+    AVAIL_KB=$(df / | tail -1 | awk '{print $4}')
+    if [ "$AVAIL_KB" -lt 1500000 ]; then
+        warn "Seulement $(( AVAIL_KB / 1024 )) Mo disponibles. Le build risque d'échouer."
+        warn "Libérez de l'espace avant de continuer."
+    fi
 
     # Étape 1: Démarrer avec config HTTP uniquement (pour certbot)
     log "Étape 1/7 — Démarrage en HTTP (sans SSL)..."
@@ -66,7 +81,17 @@ case "${ACTION}" in
     cp "${CONF_DIR}/solidata.conf" "${CONF_DIR}/solidata.conf.ssl-backup"
     cp "${CONF_DIR}/solidata-initial.conf.disabled" "${CONF_DIR}/solidata.conf"
 
-    docker compose -f ${COMPOSE_FILE} build --no-cache
+    # Build séquentiel pour limiter l'usage disque sur petit serveur
+    log "  Build du backend..."
+    docker compose -f ${COMPOSE_FILE} build backend
+    log "  Build du frontend..."
+    docker compose -f ${COMPOSE_FILE} build frontend
+    docker image prune -f 2>/dev/null || true
+    log "  Build du mobile..."
+    docker compose -f ${COMPOSE_FILE} build mobile
+    docker image prune -f 2>/dev/null || true
+
+    log "  Démarrage des services..."
     docker compose -f ${COMPOSE_FILE} up -d
 
     # Attendre que nginx réponde vraiment sur le port 80
@@ -78,13 +103,23 @@ case "${ACTION}" in
             log "Nginx répond sur le port 80 !"
             break
         fi
+        # Tous les 10 essais, afficher l'état des containers pour diagnostiquer
+        if [ $(( RETRIES % 10 )) -eq 0 ] && [ $RETRIES -gt 0 ]; then
+            warn "Nginx ne répond toujours pas, diagnostic..."
+            docker compose -f ${COMPOSE_FILE} ps
+            docker compose -f ${COMPOSE_FILE} logs --tail=5 nginx 2>/dev/null || true
+        fi
         RETRIES=$((RETRIES + 1))
         echo "  Tentative ${RETRIES}/${MAX_RETRIES}..."
         sleep 5
     done
 
     if [ $RETRIES -eq $MAX_RETRIES ]; then
-        error "Nginx ne répond pas après ${MAX_RETRIES} tentatives. Vérifiez les logs : docker compose -f ${COMPOSE_FILE} logs nginx"
+        warn "Nginx ne répond pas. Affichage des logs complets :"
+        docker compose -f ${COMPOSE_FILE} logs --tail=50 nginx
+        docker compose -f ${COMPOSE_FILE} logs --tail=20 backend
+        docker compose -f ${COMPOSE_FILE} logs --tail=20 frontend
+        error "Nginx ne répond pas après ${MAX_RETRIES} tentatives. Corrigez les erreurs ci-dessus."
     fi
 
     # Vérifier que le challenge path est accessible

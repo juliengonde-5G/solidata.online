@@ -414,33 +414,101 @@ async function predictFillRate(cavId, targetDate) {
   }
   rawFill *= eventBonus;
 
-  // Apprentissage continu : correction à partir des écarts prédit/observé
+  // ── Apprentissage continu V2 : correction par CAV + par période ──
+  // 1. Correction spécifique à ce CAV (feedback récent, pondéré par récence)
   const feedbackResult = await pool.query(
-    `SELECT predicted_fill_rate, observed_fill_level FROM collection_learning_feedback
-     WHERE cav_id = $1 ORDER BY created_at DESC LIMIT 30`,
+    `SELECT predicted_fill_rate, observed_fill_level, created_at FROM collection_learning_feedback
+     WHERE cav_id = $1 ORDER BY created_at DESC LIMIT 60`,
     [cavId]
   );
-  if (feedbackResult.rows.length >= 5) {
+
+  let cavCorrection = 1;
+  if (feedbackResult.rows.length >= 3) {
+    let weightedSum = 0, weightTotal = 0;
+    for (let i = 0; i < feedbackResult.rows.length; i++) {
+      const row = feedbackResult.rows[i];
+      const observedPct = (row.observed_fill_level ?? 0) * 20;
+      const pred = parseFloat(row.predicted_fill_rate) || 50;
+      if (pred > 0) {
+        // Pondération exponentielle : les feedbacks récents comptent plus
+        const weight = Math.exp(-i * 0.05); // decay factor
+        weightedSum += (observedPct / pred) * weight;
+        weightTotal += weight;
+      }
+    }
+    cavCorrection = weightTotal > 0 ? weightedSum / weightTotal : 1;
+    cavCorrection = Math.max(0.5, Math.min(1.5, cavCorrection));
+  }
+
+  // 2. Correction saisonnière par période (même mois des données passées)
+  const periodFeedback = await pool.query(
+    `SELECT predicted_fill_rate, observed_fill_level FROM collection_learning_feedback
+     WHERE cav_id = $1 AND EXTRACT(MONTH FROM created_at) = $2
+     ORDER BY created_at DESC LIMIT 20`,
+    [cavId, monthIndex + 1]
+  );
+
+  let periodCorrection = 1;
+  if (periodFeedback.rows.length >= 3) {
     let sumRatio = 0, count = 0;
-    for (const row of feedbackResult.rows) {
+    for (const row of periodFeedback.rows) {
       const observedPct = (row.observed_fill_level ?? 0) * 20;
       const pred = parseFloat(row.predicted_fill_rate) || 50;
       if (pred > 0) { sumRatio += observedPct / pred; count++; }
     }
-    const correction = count > 0 ? sumRatio / count : 1;
-    if (correction >= 0.5 && correction <= 1.5) rawFill *= correction;
+    periodCorrection = count > 0 ? sumRatio / count : 1;
+    periodCorrection = Math.max(0.7, Math.min(1.3, periodCorrection));
   }
+
+  // 3. Correction de zone : CAV proches géographiquement ont des patterns similaires
+  let zoneCorrection = 1;
+  if (cav.latitude && cav.longitude) {
+    const zoneFeedback = await pool.query(
+      `SELECT clf.predicted_fill_rate, clf.observed_fill_level
+       FROM collection_learning_feedback clf
+       JOIN cav c ON clf.cav_id = c.id
+       WHERE clf.cav_id != $1
+         AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+         AND ABS(c.latitude - $2) < 0.05 AND ABS(c.longitude - $3) < 0.1
+         AND clf.created_at >= NOW() - INTERVAL '30 days'
+       ORDER BY clf.created_at DESC LIMIT 30`,
+      [cavId, parseFloat(cav.latitude), parseFloat(cav.longitude)]
+    );
+    if (zoneFeedback.rows.length >= 5) {
+      let sumRatio = 0, count = 0;
+      for (const row of zoneFeedback.rows) {
+        const observedPct = (row.observed_fill_level ?? 0) * 20;
+        const pred = parseFloat(row.predicted_fill_rate) || 50;
+        if (pred > 0) { sumRatio += observedPct / pred; count++; }
+      }
+      zoneCorrection = count > 0 ? sumRatio / count : 1;
+      zoneCorrection = Math.max(0.8, Math.min(1.2, zoneCorrection));
+    }
+  }
+
+  // Combiner les corrections (CAV individuel pèse 60%, période 25%, zone 15%)
+  const combinedCorrection = cavCorrection * 0.6 + periodCorrection * 0.25 + zoneCorrection * 0.15;
+  rawFill *= combinedCorrection;
 
   // Cap à 120%
   const fill = Math.min(120, Math.max(0, rawFill));
 
-  // Confiance basée sur la quantité de données
-  const confidence = Math.min(0.95, 0.3 + (history.length * 0.05));
+  // ── Confiance bayésienne V2 ──
+  // Base sur : quantité de données, cohérence du feedback, fraîcheur des données
+  const dataScore = Math.min(1, history.length / 30); // 0-1, saturé à 30 entrées
+  const feedbackCount = feedbackResult.rows.length;
+  const feedbackScore = Math.min(1, feedbackCount / 15); // 0-1, saturé à 15 feedbacks
+  // Cohérence : si cavCorrection est proche de 1, le modèle est bien calibré
+  const coherenceScore = 1 - Math.min(1, Math.abs(cavCorrection - 1) * 2);
+  // Fraîcheur : bonus si dernière collecte < 14 jours
+  const freshnessScore = daysSince <= 14 ? 1 : Math.max(0.3, 1 - (daysSince - 14) / 30);
+
+  const confidence = Math.min(0.95, 0.1 + dataScore * 0.35 + feedbackScore * 0.25 + coherenceScore * 0.2 + freshnessScore * 0.15);
 
   return {
     fill: Math.round(fill),
     confidence: Math.round(confidence * 100) / 100,
-    method: 'predictive',
+    method: 'predictive_v2',
     contextUsed: {
       weatherFactor: context.weatherFactor,
       weatherLabel: context.weatherLabel,
@@ -449,7 +517,7 @@ async function predictFillRate(cavId, targetDate) {
       eventBonus: eventBonus > 1 ? eventBonus : null,
       vacationStatus: vacationStatus.status,
       vacationName: vacationStatus.name,
-      vacationFactor: vacationFactor > 1 ? vacationFactor : null,
+      vacationFactor: vacationFactor !== 1 ? vacationFactor : null,
     },
     factors: {
       seasonal: SEASONAL_FACTORS[monthIndex],
@@ -457,6 +525,19 @@ async function predictFillRate(cavId, targetDate) {
       daysSinceCollection: daysSince,
       avgWeight: Math.round(avgWeight * 10) / 10,
       dailyAccumulation: Math.round(dailyAccumulation * 10) / 10,
+    },
+    learning: {
+      cavCorrection: Math.round(cavCorrection * 1000) / 1000,
+      periodCorrection: Math.round(periodCorrection * 1000) / 1000,
+      zoneCorrection: Math.round(zoneCorrection * 1000) / 1000,
+      combinedCorrection: Math.round(combinedCorrection * 1000) / 1000,
+      feedbackSamples: feedbackResult.rows.length,
+      confidenceBreakdown: {
+        data: Math.round(dataScore * 100) / 100,
+        feedback: Math.round(feedbackScore * 100) / 100,
+        coherence: Math.round(coherenceScore * 100) / 100,
+        freshness: Math.round(freshnessScore * 100) / 100,
+      },
     },
   };
 }
@@ -1546,6 +1627,294 @@ router.post('/routes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[TOURS] Erreur création route :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// MOTEUR PRÉDICTIF V2 — ENDPOINTS AVANCÉS
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/tours/predictive/accuracy — Précision du moteur prédictif
+// Mesure la qualité des prédictions sur les N derniers jours
+router.get('/predictive/accuracy', authorize('ADMIN'), async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+
+    // Précision globale : écart moyen prédit vs observé
+    const global = await pool.query(`
+      SELECT
+        COUNT(*) as total_samples,
+        AVG(ABS(predicted_fill_rate - (observed_fill_level * 20))) as mae,
+        SQRT(AVG(POWER(predicted_fill_rate - (observed_fill_level * 20), 2))) as rmse,
+        AVG(predicted_fill_rate) as avg_predicted,
+        AVG(observed_fill_level * 20) as avg_observed,
+        CORR(predicted_fill_rate, observed_fill_level * 20) as correlation
+      FROM collection_learning_feedback
+      WHERE created_at >= NOW() - INTERVAL '1 day' * $1
+        AND observed_fill_level IS NOT NULL
+    `, [days]);
+
+    // Précision par CAV (top 10 meilleurs et pires)
+    const perCav = await pool.query(`
+      SELECT
+        clf.cav_id,
+        c.name as cav_name,
+        c.commune,
+        COUNT(*) as samples,
+        AVG(ABS(clf.predicted_fill_rate - (clf.observed_fill_level * 20))) as mae,
+        SQRT(AVG(POWER(clf.predicted_fill_rate - (clf.observed_fill_level * 20), 2))) as rmse,
+        AVG(clf.predicted_fill_rate - (clf.observed_fill_level * 20)) as bias
+      FROM collection_learning_feedback clf
+      JOIN cav c ON clf.cav_id = c.id
+      WHERE clf.created_at >= NOW() - INTERVAL '1 day' * $1
+        AND clf.observed_fill_level IS NOT NULL
+      GROUP BY clf.cav_id, c.name, c.commune
+      HAVING COUNT(*) >= 3
+      ORDER BY mae ASC
+    `, [days]);
+
+    // Évolution de la précision dans le temps (par semaine)
+    const trend = await pool.query(`
+      SELECT
+        DATE_TRUNC('week', created_at) as week,
+        COUNT(*) as samples,
+        AVG(ABS(predicted_fill_rate - (observed_fill_level * 20))) as mae,
+        SQRT(AVG(POWER(predicted_fill_rate - (observed_fill_level * 20), 2))) as rmse
+      FROM collection_learning_feedback
+      WHERE created_at >= NOW() - INTERVAL '1 day' * $1
+        AND observed_fill_level IS NOT NULL
+      GROUP BY DATE_TRUNC('week', created_at)
+      ORDER BY week ASC
+    `, [days]);
+
+    // Distribution des erreurs (pour histogramme)
+    const errorDist = await pool.query(`
+      SELECT
+        CASE
+          WHEN ABS(predicted_fill_rate - (observed_fill_level * 20)) < 5 THEN 'excellent (<5%)'
+          WHEN ABS(predicted_fill_rate - (observed_fill_level * 20)) < 10 THEN 'bon (5-10%)'
+          WHEN ABS(predicted_fill_rate - (observed_fill_level * 20)) < 20 THEN 'moyen (10-20%)'
+          WHEN ABS(predicted_fill_rate - (observed_fill_level * 20)) < 30 THEN 'faible (20-30%)'
+          ELSE 'mauvais (>30%)'
+        END as category,
+        COUNT(*) as count
+      FROM collection_learning_feedback
+      WHERE created_at >= NOW() - INTERVAL '1 day' * $1
+        AND observed_fill_level IS NOT NULL
+      GROUP BY category
+      ORDER BY count DESC
+    `, [days]);
+
+    const stats = global.rows[0];
+    res.json({
+      period: { days, from: new Date(Date.now() - days * 86400000).toISOString().split('T')[0] },
+      global: {
+        totalSamples: parseInt(stats.total_samples),
+        mae: stats.mae ? Math.round(parseFloat(stats.mae) * 10) / 10 : null,
+        rmse: stats.rmse ? Math.round(parseFloat(stats.rmse) * 10) / 10 : null,
+        avgPredicted: stats.avg_predicted ? Math.round(parseFloat(stats.avg_predicted)) : null,
+        avgObserved: stats.avg_observed ? Math.round(parseFloat(stats.avg_observed)) : null,
+        correlation: stats.correlation ? Math.round(parseFloat(stats.correlation) * 100) / 100 : null,
+        modelVersion: 'predictive_v2',
+      },
+      perCav: perCav.rows.map(r => ({
+        cavId: r.cav_id,
+        cavName: r.cav_name,
+        commune: r.commune,
+        samples: parseInt(r.samples),
+        mae: Math.round(parseFloat(r.mae) * 10) / 10,
+        rmse: Math.round(parseFloat(r.rmse) * 10) / 10,
+        bias: Math.round(parseFloat(r.bias) * 10) / 10,
+      })),
+      weeklyTrend: trend.rows.map(r => ({
+        week: r.week,
+        samples: parseInt(r.samples),
+        mae: Math.round(parseFloat(r.mae) * 10) / 10,
+        rmse: Math.round(parseFloat(r.rmse) * 10) / 10,
+      })),
+      errorDistribution: errorDist.rows.map(r => ({
+        category: r.category,
+        count: parseInt(r.count),
+      })),
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur accuracy :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/predictive/export-training — Export des données d'entraînement ML
+// Format prêt pour XGBoost/scikit-learn : une ligne par (CAV, date) avec tous les features
+router.get('/predictive/export-training', authorize('ADMIN'), async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 365;
+    const format = req.query.format || 'json'; // json ou csv
+
+    const result = await pool.query(`
+      SELECT
+        th.cav_id,
+        c.name as cav_name,
+        c.commune,
+        c.latitude,
+        c.longitude,
+        c.nb_containers,
+        th.date,
+        th.weight_kg,
+        EXTRACT(MONTH FROM th.date) as month,
+        EXTRACT(DOW FROM th.date) as day_of_week,
+        EXTRACT(DOY FROM th.date) as day_of_year,
+        cc.weather_code,
+        cc.weather_factor,
+        cc.temp_max,
+        cc.precip_mm,
+        cc.traffic_factor,
+        cc.duration_factor,
+        clf.predicted_fill_rate,
+        clf.observed_fill_level,
+        (SELECT MAX(th2.date) FROM tonnage_history th2
+         WHERE th2.cav_id = th.cav_id AND th2.date < th.date) as prev_collection_date,
+        (SELECT th2.weight_kg FROM tonnage_history th2
+         WHERE th2.cav_id = th.cav_id AND th2.date < th.date
+         ORDER BY th2.date DESC LIMIT 1) as prev_weight_kg,
+        (SELECT AVG(th2.weight_kg) FROM tonnage_history th2
+         WHERE th2.cav_id = th.cav_id
+         AND th2.date BETWEEN th.date - INTERVAL '30 days' AND th.date - INTERVAL '1 day') as avg_weight_30d,
+        (SELECT COUNT(*) FROM tonnage_history th2
+         WHERE th2.cav_id = th.cav_id
+         AND th2.date BETWEEN th.date - INTERVAL '30 days' AND th.date) as collections_30d
+      FROM tonnage_history th
+      JOIN cav c ON th.cav_id = c.id
+      LEFT JOIN collection_context cc ON cc.date = th.date
+      LEFT JOIN collection_learning_feedback clf ON clf.cav_id = th.cav_id
+        AND DATE(clf.created_at) = th.date
+      WHERE th.date >= NOW() - INTERVAL '1 day' * $1
+      ORDER BY th.date DESC, th.cav_id
+    `, [days]);
+
+    // Enrichir avec les features calculés
+    const rows = result.rows.map(r => {
+      const prevDate = r.prev_collection_date;
+      const daysSince = prevDate ? Math.floor((new Date(r.date) - new Date(prevDate)) / 86400000) : null;
+      const monthIdx = parseInt(r.month) - 1;
+      const dow = parseInt(r.day_of_week);
+      const dowIdx = dow === 0 ? 6 : dow - 1;
+
+      return {
+        cav_id: r.cav_id,
+        cav_name: r.cav_name,
+        commune: r.commune,
+        latitude: r.latitude ? parseFloat(r.latitude) : null,
+        longitude: r.longitude ? parseFloat(r.longitude) : null,
+        nb_containers: r.nb_containers,
+        date: r.date,
+        weight_kg: parseFloat(r.weight_kg),
+        month: parseInt(r.month),
+        day_of_week: dowIdx,
+        day_of_year: parseInt(r.day_of_year),
+        seasonal_factor: SEASONAL_FACTORS[monthIdx],
+        dow_factor: DAY_OF_WEEK_FACTORS[dowIdx],
+        is_holiday: isHoliday(r.date.toISOString ? r.date.toISOString().split('T')[0] : r.date) ? 1 : 0,
+        vacation_status: getSchoolVacationStatus(r.date.toISOString ? r.date.toISOString().split('T')[0] : r.date).status || 'none',
+        weather_code: r.weather_code,
+        weather_factor: r.weather_factor ? parseFloat(r.weather_factor) : null,
+        temp_max: r.temp_max ? parseFloat(r.temp_max) : null,
+        precip_mm: r.precip_mm ? parseFloat(r.precip_mm) : null,
+        days_since_prev: daysSince,
+        prev_weight_kg: r.prev_weight_kg ? parseFloat(r.prev_weight_kg) : null,
+        avg_weight_30d: r.avg_weight_30d ? parseFloat(r.avg_weight_30d) : null,
+        collections_30d: parseInt(r.collections_30d) || 0,
+        predicted_fill: r.predicted_fill_rate ? parseFloat(r.predicted_fill_rate) : null,
+        observed_fill: r.observed_fill_level != null ? parseInt(r.observed_fill_level) * 20 : null,
+      };
+    });
+
+    if (format === 'csv') {
+      if (rows.length === 0) return res.status(200).send('');
+      const headers = Object.keys(rows[0]);
+      const csv = [headers.join(',')].concat(
+        rows.map(r => headers.map(h => r[h] ?? '').join(','))
+      ).join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=solidata_training_data.csv');
+      return res.send(csv);
+    }
+
+    res.json({
+      exportDate: new Date().toISOString(),
+      period: { days },
+      totalRows: rows.length,
+      features: rows.length > 0 ? Object.keys(rows[0]) : [],
+      data: rows,
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur export training :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/predictive/cav-correlations — Corrélations entre CAV
+// Identifie les CAV qui ont des patterns similaires (pour prédiction croisée)
+router.get('/predictive/cav-correlations', authorize('ADMIN'), async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 90;
+
+    // Trouver les paires de CAV avec des collectes aux mêmes dates
+    const result = await pool.query(`
+      WITH cav_timeseries AS (
+        SELECT cav_id, date, weight_kg
+        FROM tonnage_history
+        WHERE date >= NOW() - INTERVAL '1 day' * $1
+      )
+      SELECT
+        a.cav_id as cav_a,
+        b.cav_id as cav_b,
+        COUNT(*) as common_dates,
+        CORR(a.weight_kg, b.weight_kg) as correlation,
+        AVG(a.weight_kg) as avg_a,
+        AVG(b.weight_kg) as avg_b
+      FROM cav_timeseries a
+      JOIN cav_timeseries b ON a.date = b.date AND a.cav_id < b.cav_id
+      GROUP BY a.cav_id, b.cav_id
+      HAVING COUNT(*) >= 5 AND CORR(a.weight_kg, b.weight_kg) IS NOT NULL
+      ORDER BY ABS(CORR(a.weight_kg, b.weight_kg)) DESC
+      LIMIT 50
+    `, [days]);
+
+    // Enrichir avec les noms
+    const cavIds = new Set();
+    result.rows.forEach(r => { cavIds.add(r.cav_a); cavIds.add(r.cav_b); });
+    const cavNames = {};
+    if (cavIds.size > 0) {
+      const names = await pool.query(
+        'SELECT id, name, commune FROM cav WHERE id = ANY($1)',
+        [Array.from(cavIds)]
+      );
+      names.rows.forEach(r => { cavNames[r.id] = { name: r.name, commune: r.commune }; });
+    }
+
+    const correlations = result.rows.map(r => ({
+      cavA: { id: r.cav_a, ...cavNames[r.cav_a] },
+      cavB: { id: r.cav_b, ...cavNames[r.cav_b] },
+      commonDates: parseInt(r.common_dates),
+      correlation: Math.round(parseFloat(r.correlation) * 100) / 100,
+      avgWeightA: Math.round(parseFloat(r.avg_a) * 10) / 10,
+      avgWeightB: Math.round(parseFloat(r.avg_b) * 10) / 10,
+    }));
+
+    // Séparer corrélations positives (similaires) et négatives (inverses)
+    const positive = correlations.filter(c => c.correlation > 0.5);
+    const negative = correlations.filter(c => c.correlation < -0.3);
+
+    res.json({
+      period: { days },
+      totalPairs: correlations.length,
+      strongPositive: positive,
+      strongNegative: negative,
+      all: correlations,
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur corrélations :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
