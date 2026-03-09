@@ -80,6 +80,9 @@ app.use('/api/referentiels', require('./routes/referentiels'));
 app.use('/api/insertion', require('./routes/insertion'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/historique', require('./routes/historique'));
+app.use('/api/metropole', require('./routes/metropole'));
+app.use('/api/rgpd', require('./routes/rgpd'));
+app.use('/api/admin-db', require('./routes/admin-db'));
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -111,6 +114,9 @@ app.get('/api/health', async (req, res) => {
         reporting: true,
         tri: true,
         refashion: true,
+        metropole: true,
+        rgpd: true,
+        adminDb: true,
       },
     });
   } catch (err) {

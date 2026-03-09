@@ -79,6 +79,7 @@ const menuSections = [
       { path: '/reporting-rh', label: 'RH', icon: IconChartPeople, roles: ['ADMIN', 'RH'] },
       { path: '/reporting-production', label: 'Production', icon: IconChartBar, roles: ['ADMIN', 'MANAGER'] },
       { path: '/refashion', label: 'Refashion', icon: IconRecycle, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/reporting-metropole', label: 'Métropole Rouen', icon: IconChart, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {
@@ -93,6 +94,8 @@ const menuSections = [
       { path: '/settings', label: 'Configuration', icon: IconGear, roles: ['ADMIN'] },
       { path: '/referentiels', label: 'Référentiels', icon: IconList, roles: ['ADMIN'] },
       { path: '/admin-predictive', label: 'Moteur prédictif', icon: IconBrain, roles: ['ADMIN'] },
+      { path: '/rgpd', label: 'RGPD', icon: IconLock, roles: ['ADMIN'] },
+      { path: '/admin-db', label: 'Base de données', icon: IconGear, roles: ['ADMIN'] },
     ],
   },
 ];

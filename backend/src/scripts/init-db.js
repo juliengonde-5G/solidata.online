@@ -323,6 +323,22 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_cav_status ON cav(status);');
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_qr_scans (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER REFERENCES cav(id) ON DELETE CASCADE,
+        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+        scanned_by INTEGER REFERENCES users(id),
+        scan_type VARCHAR(30) DEFAULT 'collection' CHECK (scan_type IN ('collection', 'inspection', 'maintenance', 'inventory')),
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        notes TEXT,
+        scanned_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_qr_scans_cav ON cav_qr_scans(cav_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_qr_scans_date ON cav_qr_scans(scanned_at DESC);');
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS vehicles (
         id SERIAL PRIMARY KEY,
         registration VARCHAR(20) UNIQUE NOT NULL,
@@ -922,6 +938,57 @@ async function initDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_historique_mensuel_annee ON historique_mensuel(annee, mois);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_historique_mensuel_section ON historique_mensuel(section);`);
     console.log('[INIT-DB] Table historique_mensuel ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE RGPD : Conformité
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rgpd_registre (
+        id SERIAL PRIMARY KEY,
+        nom_traitement VARCHAR(255) NOT NULL,
+        finalite TEXT NOT NULL,
+        base_legale VARCHAR(100) NOT NULL,
+        categories_personnes TEXT,
+        categories_donnees TEXT,
+        destinataires TEXT,
+        duree_conservation VARCHAR(100),
+        mesures_securite TEXT,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rgpd_consents (
+        id SERIAL PRIMARY KEY,
+        entity_type VARCHAR(50) NOT NULL,
+        entity_id INTEGER NOT NULL,
+        consent_type VARCHAR(100) NOT NULL,
+        granted BOOLEAN DEFAULT true,
+        comment TEXT,
+        recorded_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(entity_type, entity_id, consent_type)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rgpd_audit_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        action VARCHAR(50) NOT NULL,
+        entity_type VARCHAR(50),
+        entity_id INTEGER,
+        details JSONB,
+        ip_address VARCHAR(50),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rgpd_audit_created ON rgpd_audit_log(created_at DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rgpd_audit_action ON rgpd_audit_log(action);');
+    console.log('[INIT-DB] Module RGPD ✓');
 
     // ══════════════════════════════════════════
     // MIGRATIONS (ajout colonnes sans casser l'existant)

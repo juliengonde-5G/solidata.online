@@ -85,6 +85,121 @@ router.get('/communes', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// QR CODE — Scan & Identification
+// ══════════════════════════════════════════
+
+// POST /api/cav/scan-qr — Scanner un QR code de CAV (depuis mobile)
+router.post('/scan-qr', async (req, res) => {
+  try {
+    const { qr_data, tour_id, scan_type, latitude, longitude, notes } = req.body;
+    if (!qr_data) return res.status(400).json({ error: 'Données QR requises' });
+
+    // Trouver le CAV par son QR code
+    const cav = await pool.query('SELECT * FROM cav WHERE qr_code_data = $1', [qr_data]);
+    if (cav.rows.length === 0) {
+      return res.status(404).json({ error: 'QR code non reconnu. Ce CAV n\'est pas enregistré.' });
+    }
+
+    const cavData = cav.rows[0];
+
+    // Enregistrer le scan
+    await pool.query(
+      `INSERT INTO cav_qr_scans (cav_id, tour_id, scanned_by, scan_type, latitude, longitude, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [cavData.id, tour_id || null, req.user.id, scan_type || 'collection', latitude, longitude, notes]
+    );
+
+    // Si en tournée, marquer le QR comme scanné
+    if (tour_id) {
+      await pool.query(
+        'UPDATE tour_cav SET qr_scanned = true WHERE tour_id = $1 AND cav_id = $2',
+        [tour_id, cavData.id]
+      );
+    }
+
+    res.json({
+      cav: {
+        id: cavData.id,
+        name: cavData.name,
+        address: cavData.address,
+        commune: cavData.commune,
+        status: cavData.status,
+        nb_containers: cavData.nb_containers,
+      },
+      scan_recorded: true,
+      message: `CAV "${cavData.name}" identifié`,
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur scan QR :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/cav/:id/scans — Historique des scans QR d'un CAV
+router.get('/:id/scans', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT s.*, u.first_name, u.last_name, t.date as tour_date
+       FROM cav_qr_scans s
+       LEFT JOIN users u ON s.scanned_by = u.id
+       LEFT JOIN tours t ON s.tour_id = t.id
+       WHERE s.cav_id = $1
+       ORDER BY s.scanned_at DESC LIMIT 100`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[CAV] Erreur historique scans :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/cav/:id/qr-code — Télécharger le QR code d'un CAV
+router.get('/:id/qr-code', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT qr_code_image_path, name FROM cav WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+    if (!result.rows[0].qr_code_image_path) return res.status(404).json({ error: 'QR code non généré' });
+
+    const filePath = path.join(__dirname, '..', '..', result.rows[0].qr_code_image_path);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Fichier QR introuvable' });
+
+    res.download(filePath, `QR_CAV_${result.rows[0].name.replace(/\s+/g, '_')}.png`);
+  } catch (err) {
+    console.error('[CAV] Erreur téléchargement QR :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/cav/batch-generate-qr — Générer les QR codes manquants
+router.post('/batch-generate-qr', authorize('ADMIN'), async (req, res) => {
+  try {
+    const cavs = await pool.query('SELECT id, name FROM cav WHERE qr_code_data IS NULL OR qr_code_data = \'\'');
+
+    const qrDir = path.join(__dirname, '..', '..', 'uploads', 'qrcodes');
+    if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
+
+    let generated = 0;
+    for (const c of cavs.rows) {
+      const qrData = `SOLIDATA-CAV-${c.id}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+      const qrFilename = `qr_${qrData}.png`;
+      const qrPath = path.join(qrDir, qrFilename);
+      await QRCode.toFile(qrPath, qrData, { width: 300, margin: 2, color: { dark: '#1A202C', light: '#FFFFFF' } });
+      await pool.query(
+        'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2 WHERE id = $3',
+        [qrData, `/uploads/qrcodes/${qrFilename}`, c.id]
+      );
+      generated++;
+    }
+
+    res.json({ message: `${generated} QR codes générés`, generated });
+  } catch (err) {
+    console.error('[CAV] Erreur batch QR :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/cav/:id
 router.get('/:id', async (req, res) => {
   try {

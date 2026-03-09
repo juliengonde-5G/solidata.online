@@ -27,6 +27,9 @@ import AdminPredictive from './pages/AdminPredictive';
 import CollectionProposals from './pages/CollectionProposals';
 import InsertionParcours from './pages/InsertionParcours';
 import PCMTest from './pages/PCMTest';
+import RGPD from './pages/RGPD';
+import AdminDB from './pages/AdminDB';
+import ReportingMetropole from './pages/ReportingMetropole';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -75,12 +78,15 @@ function App() {
           <Route path="/reporting-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingProduction /></ProtectedRoute>} />
           <Route path="/reporting" element={<Navigate to="/reporting-collecte" />} />
           <Route path="/refashion" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Refashion /></ProtectedRoute>} />
+          <Route path="/reporting-metropole" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingMetropole /></ProtectedRoute>} />
 
           {/* Administration */}
           <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['ADMIN']}><Settings /></ProtectedRoute>} />
           <Route path="/referentiels" element={<ProtectedRoute roles={['ADMIN']}><Referentiels /></ProtectedRoute>} />
           <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />
+          <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN']}><RGPD /></ProtectedRoute>} />
+          <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
 
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
