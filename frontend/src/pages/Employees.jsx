@@ -30,6 +30,7 @@ export default function Employees() {
   const [editForm, setEditForm] = useState({});
   const [editError, setEditError] = useState('');
   const [pcmProfile, setPcmProfile] = useState(null);
+  const [candidateData, setCandidateData] = useState(null);
   const [saving, setSaving] = useState(false);
   const firstInputRef = useRef(null);
   const [contractForm, setContractForm] = useState({
@@ -81,9 +82,13 @@ export default function Employees() {
       ]);
       setContracts(cRes.data);
       setDaysOff(aRes.data);
-      // Charger le profil PCM si candidat lié
+      // Charger le profil PCM et les données candidat si lié
       if (emp.candidate_id) {
-        api.get(`/candidates/${emp.candidate_id}/pcm`).then(r => setPcmProfile(r.data)).catch(() => setPcmProfile(null));
+        api.get(`/pcm/profiles/${emp.candidate_id}`).then(r => setPcmProfile(r.data)).catch(() => setPcmProfile(null));
+        api.get(`/candidates/${emp.candidate_id}`).then(r => setCandidateData(r.data)).catch(() => setCandidateData(null));
+      } else {
+        setPcmProfile(null);
+        setCandidateData(null);
       }
     } catch (err) {
       console.error(err);
@@ -313,6 +318,15 @@ export default function Employees() {
                         {(selected.contract_start || selected.hire_date) && (
                           <Field label="Date d'embauche" value={new Date(selected.contract_start || selected.hire_date).toLocaleDateString('fr-FR')} />
                         )}
+                        {candidateData?.cv_file_path && (
+                          <div className="mt-3">
+                            <label className="text-xs text-gray-500 block mb-1">CV du candidat</label>
+                            <a href={`/api/candidates/${selected.candidate_id}/download-cv`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-solidata-green hover:underline font-medium">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                              Telecharger le CV
+                            </a>
+                          </div>
+                        )}
                         <div className="mt-4">
                           <label className="text-xs text-gray-500 block mb-1">Photo</label>
                           <input type="file" accept="image/*" onChange={e => e.target.files[0] && handlePhotoUpload(selected.id, e.target.files[0])} className="text-xs" />
@@ -502,14 +516,20 @@ export default function Employees() {
                     ) : (
                       <>
                         <div className="bg-purple-50 rounded-lg p-3">
-                          <p className="font-semibold text-purple-800 mb-1">Type dominant</p>
-                          <p className="text-lg font-bold text-purple-900">{pcmProfile.dominant_type || '—'}</p>
+                          <p className="font-semibold text-purple-800 mb-1">Type de base</p>
+                          <p className="text-lg font-bold text-purple-900 capitalize">{pcmProfile.baseType || pcmProfile.base_type || '—'}</p>
                         </div>
-                        {pcmProfile.scores && (
+                        {pcmProfile.phaseType && (
+                          <div className="bg-blue-50 rounded-lg p-3">
+                            <p className="font-semibold text-blue-800 mb-1">Phase actuelle</p>
+                            <p className="text-lg font-bold text-blue-900 capitalize">{pcmProfile.phaseType || pcmProfile.phase_type}</p>
+                          </div>
+                        )}
+                        {pcmProfile.report?.scores && (
                           <div>
                             <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Scores PCM</p>
                             <div className="grid grid-cols-2 gap-2">
-                              {Object.entries(pcmProfile.scores).map(([type, score]) => (
+                              {Object.entries(pcmProfile.report.scores).map(([type, score]) => (
                                 <div key={type} className="flex items-center justify-between bg-gray-50 rounded px-3 py-1.5">
                                   <span className="text-sm capitalize">{type}</span>
                                   <span className="font-bold">{score}%</span>
@@ -518,8 +538,10 @@ export default function Employees() {
                             </div>
                           </div>
                         )}
-                        {pcmProfile.report_url && (
-                          <a href={pcmProfile.report_url} target="_blank" rel="noopener noreferrer" className="text-solidata-green hover:underline text-sm font-medium block pt-2">Voir le rapport complet</a>
+                        {pcmProfile.riskAlert && (
+                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                            <p className="font-semibold text-orange-800 text-xs">Alerte RPS detectee — un suivi est recommande</p>
+                          </div>
                         )}
                       </>
                     )}

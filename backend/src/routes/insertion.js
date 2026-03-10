@@ -1061,13 +1061,14 @@ router.get('/', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT e.id, e.first_name, e.last_name, e.is_active,
-        t.name as team_name, e.position,
-        (SELECT COUNT(*)::int FROM employee_contracts WHERE employee_id = e.id) as nb_contracts,
+        t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end,
+        COALESCE((SELECT COUNT(*)::int FROM employee_contracts WHERE employee_id = e.id), 0) as nb_contracts,
         (SELECT ec.contract_type FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as current_contract_type,
         (SELECT ec.end_date FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as contract_end_date,
-        (SELECT COUNT(*)::int FROM pcm_reports pr JOIN candidates c ON pr.candidate_id = c.id
-         WHERE LOWER(c.first_name) = LOWER(e.first_name) AND LOWER(c.last_name) = LOWER(e.last_name)) as has_pcm,
-        (SELECT COUNT(*)::int FROM insertion_diagnostics id WHERE id.employee_id = e.id) as has_diagnostic
+        CASE WHEN e.candidate_id IS NOT NULL THEN
+          COALESCE((SELECT COUNT(*)::int FROM pcm_reports pr WHERE pr.candidate_id = e.candidate_id), 0)
+        ELSE 0 END as has_pcm,
+        COALESCE((SELECT COUNT(*)::int FROM insertion_diagnostics id WHERE id.employee_id = e.id), 0) as has_diagnostic
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       WHERE e.is_active = true
