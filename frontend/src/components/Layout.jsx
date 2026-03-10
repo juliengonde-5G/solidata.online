@@ -174,7 +174,7 @@ export default function Layout({ children }) {
                     }`}
                     title={item.label}
                   >
-                    <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? '' : 'text-gray-400'}`} />
+                    <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? '' : sidebarOpen ? 'text-gray-400' : section.color}`} />
                     {sidebarOpen && <span className="truncate">{item.label}</span>}
                   </button>
                 );

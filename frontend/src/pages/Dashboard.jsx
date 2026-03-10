@@ -201,18 +201,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Modules actifs */}
-        <div className="card-modern p-6 border border-solidata-green/10">
-          <h2 className="text-lg font-semibold text-solidata-dark mb-4">Modules actifs</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {['Recrutement & PCM', 'Équipes & Planning', 'Collecte & Tournées IA', 'Production & Tri',
-              'Stock & Expéditions', 'Facturation', 'Reporting', 'Refashion'].map(mod => (
-              <div key={mod} className="rounded-xl p-4 text-sm font-medium text-gray-600 bg-gray-50/80 hover:bg-solidata-green/5 border border-transparent hover:border-solidata-green/20 transition-colors">
-                {mod}
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </Layout>
   );
