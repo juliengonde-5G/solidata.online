@@ -305,9 +305,27 @@ function AnalysisPanel({ analysis }) {
             <DataBadge label="Diagnostic" available={analysis.has_diagnostic} />
           </div>
         </div>
+        {/* Sources de donnees */}
+        {analysis.data_sources && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {Object.entries(analysis.data_sources).map(([key, src]) => (
+              <div key={key} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border ${
+                src.available
+                  ? 'bg-green-50 border-green-200 text-green-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-400'
+              }`}>
+                <span>{src.available ? '\u2713' : '\u2717'}</span>
+                <span className="font-medium">{src.label}</span>
+                {src.available && src.detail && (
+                  <span className="text-[10px] opacity-70">({src.detail})</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {analysis.confiance < 0.5 && (
           <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-            Confiance : {Math.round(analysis.confiance * 100)}%. Compl\u00e9tez le questionnaire CIP et le diagnostic des freins pour am\u00e9liorer la pr\u00e9cision.
+            Confiance : {Math.round(analysis.confiance * 100)}%. Completez le questionnaire CIP et le diagnostic des freins pour ameliorer la precision.
           </div>
         )}
       </div>
@@ -339,6 +357,11 @@ function AnalysisPanel({ analysis }) {
           <p className="text-xs text-gray-500 mt-2">Communication : {analysis.fiche_synthese.communication}</p>
           {analysis.fiche_synthese.motivation.length > 0 && (
             <p className="text-xs text-gray-500">Motivation : {analysis.fiche_synthese.motivation.join(', ')}</p>
+          )}
+          {analysis.fiche_synthese.sources?.length > 0 && (
+            <p className="text-[10px] text-gray-400 mt-2 pt-2 border-t border-gray-100">
+              Sources : {analysis.fiche_synthese.sources.join(' + ')}
+            </p>
           )}
         </Section>
       )}

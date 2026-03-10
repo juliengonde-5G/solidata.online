@@ -453,7 +453,7 @@ function analyzeInsertion(employee, contracts, candidate, pcmReport, teamMembers
   // ═══════════════════════════════════════
   // 6) RECOMMANDATIONS CIP
   // ═══════════════════════════════════════
-  const recommandationsCIP = buildRecommandationsCIP(dominantPCM, diagnostic);
+  const recommandationsCIP = buildRecommandationsCIP(dominantPCM, diagnostic, candidate);
 
   // ═══════════════════════════════════════
   // DIAGNOSTIC FREINS SOCIAUX
@@ -463,10 +463,20 @@ function analyzeInsertion(employee, contracts, candidate, pcmReport, teamMembers
   // Score de confiance
   let dataPoints = 0;
   if (pcm || pcmFromQuestionnaire) dataPoints += 3;
-  if (candidate?.cv_raw_text) dataPoints += 1;
-  if (candidate?.interview_comment) dataPoints += 1;
+  if (candidate?.cv_raw_text) dataPoints += 2;
+  if (candidate?.interview_comment) dataPoints += 2;
+  if (candidate?.practical_test_result) dataPoints += 1;
   if (diagnostic) dataPoints += 2;
   if (teamMembers.length > 0) dataPoints += 1;
+
+  // Sources de donnees utilisees pour l'analyse
+  const data_sources = {
+    pcm: { available: !!(pcm || pcmFromQuestionnaire), label: 'Profil PCM', detail: pcm ? `Type ${pcmKnowledge?.nom || 'detecte'}` : pcmFromQuestionnaire ? 'Questionnaire CIP' : null },
+    cv: { available: !!candidate?.cv_raw_text, label: 'CV', detail: candidate?.cv_raw_text ? `${extractSkillsFromCV(candidate.cv_raw_text).length} competences detectees` : null },
+    interview: { available: !!(candidate?.interview_comment), label: 'Entretien', detail: candidate?.interviewer_name ? `Par ${candidate.interviewer_name}` : candidate?.interview_comment ? 'Commentaire disponible' : null },
+    test_pratique: { available: !!(candidate?.practical_test_result), label: 'Test pratique', detail: candidate?.practical_test_result ? `Resultat : ${candidate.practical_test_result}` : null },
+    diagnostic: { available: !!diagnostic, label: 'Diagnostic CIP', detail: diagnostic ? `${freinsSociaux?.nb_freins_majeurs || 0} frein(s) majeur(s)` : null },
+  };
 
   return {
     fiche_synthese: ficheSynthese,
@@ -476,14 +486,15 @@ function analyzeInsertion(employee, contracts, candidate, pcmReport, teamMembers
     parcours_dev: parcoursDev,
     recommandations_cip: recommandationsCIP,
     freins_sociaux: freinsSociaux,
-    // Rétrocompatibilité
+    data_sources,
+    // Retrocompatibilite
     profil_synthese: ficheSynthese.resume,
     adequation_poste: pistesMetiers.length > 0 ? { score: pistesMetiers[0].score, niveau: pistesMetiers[0].score >= 75 ? 'Bonne' : 'Acceptable', commentaire: pistesMetiers[0].pourquoi } : null,
     parcours_insertion: parcoursDev,
     recommandations: recommandationsCIP.points_vigilance || [],
     plan_action: freinsSociaux?.plan_actions || [],
     risques: [],
-    confiance: Math.min(1, dataPoints / 6),
+    confiance: Math.min(1, dataPoints / 11),
     score_global: null,
   };
 }
@@ -498,9 +509,7 @@ function getDominantPCM(pcmFromQuestionnaire) {
 }
 
 function buildFicheSynthese(employee, pcm, candidate, diagnostic, currentContract) {
-  const parts = [];
-
-  // Résumé en 5 lignes max
+  // Resume en 5 lignes max
   let resume = `${employee.first_name} ${employee.last_name}`;
   if (employee.position) resume += `, ${employee.position}`;
   if (currentContract) resume += ` (${currentContract.contract_type})`;
@@ -509,14 +518,47 @@ function buildFicheSynthese(employee, pcm, candidate, diagnostic, currentContrac
   if (pcm) {
     resume += ` Profil de type ${pcm.nom} : ${pcm.forces.slice(0, 3).join(', ')}.`;
   }
+  if (candidate?.interview_comment) {
+    const interviewSnippet = candidate.interview_comment.substring(0, 120).trim();
+    resume += ` Entretien : ${interviewSnippet}${candidate.interview_comment.length > 120 ? '...' : ''}.`;
+  }
   if (diagnostic?.parcours_anterieur) {
     resume += ` Parcours : ${diagnostic.parcours_anterieur.substring(0, 150)}.`;
   }
 
-  const forces = pcm ? pcm.forces : [];
-  const vigilance = pcm ? pcm.faiblesses_stress : [];
-  const communication = pcm ? `Privilégier le canal ${pcm.canal}` : 'Non évalué';
-  const motivation = pcm ? pcm.facteurs_motivation : [];
+  const forces = pcm ? [...pcm.forces] : [];
+  const vigilance = pcm ? [...pcm.faiblesses_stress] : [];
+  const communication = pcm ? `Privilegier le canal ${pcm.canal}` : 'Non evalue';
+  const motivation = pcm ? [...pcm.facteurs_motivation] : [];
+
+  // Enrichir avec les donnees CV
+  if (candidate?.cv_raw_text) {
+    const cvSkills = extractSkillsFromCV(candidate.cv_raw_text);
+    if (cvSkills.length > 0) {
+      forces.push(...cvSkills.slice(0, 3).map(s => `${s} (CV)`));
+    }
+  }
+
+  // Enrichir avec les donnees d'entretien
+  if (candidate?.practical_test_result === 'conforme') {
+    forces.push('Test pratique conforme');
+  } else if (candidate?.practical_test_result === 'faible') {
+    vigilance.push('Test pratique faible');
+  }
+
+  // Enrichir avec le diagnostic
+  if (diagnostic?.obs_points_forts) {
+    const points = diagnostic.obs_points_forts.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+    forces.push(...points.slice(0, 2).map(p => `${p} (obs.)`));
+  }
+
+  // Sources de donnees utilisees
+  const sources = [];
+  if (pcm) sources.push('PCM');
+  if (candidate?.cv_raw_text) sources.push('CV');
+  if (candidate?.interview_comment) sources.push('Entretien');
+  if (candidate?.practical_test_result) sources.push('Test pratique');
+  if (diagnostic) sources.push('Diagnostic CIP');
 
   return {
     resume,
@@ -524,6 +566,7 @@ function buildFicheSynthese(employee, pcm, candidate, diagnostic, currentContrac
     vigilance,
     communication,
     motivation,
+    sources,
   };
 }
 
@@ -558,10 +601,39 @@ function buildCompetences(employee, candidate, diagnostic, pcm) {
   if (employee.has_permis_b) techniques.push({ competence: 'Permis B', source: 'Certification' });
   if (employee.has_caces) techniques.push({ competence: 'CACES', source: 'Certification' });
 
+  // Depuis l'entretien candidat
+  if (candidate?.interview_comment) {
+    const interviewSkills = extractSkillsFromText(candidate.interview_comment);
+    transversales.push(...interviewSkills.map(s => ({ competence: s, source: 'Entretien' })));
+  }
+
+  // Depuis le test pratique
+  if (candidate?.practical_test_comment) {
+    const testSkills = extractSkillsFromText(candidate.practical_test_comment);
+    transversales.push(...testSkills.map(s => ({ competence: s, source: 'Test pratique' })));
+  }
+  if (candidate?.practical_test_result === 'conforme') {
+    savoirEtre.push({ competence: 'Test pratique reussi', source: 'Evaluation' });
+  } else if (candidate?.practical_test_result === 'faible') {
+    aConsolider.push({ competence: 'Test pratique a renforcer', source: 'Evaluation' });
+  }
+
   // Depuis les observations CIP
   if (diagnostic?.obs_points_forts) {
     const points = diagnostic.obs_points_forts.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
     transversales.push(...points.map(p => ({ competence: p, source: 'Observation CIP' })));
+  }
+
+  // Depuis le comportement en equipe (diagnostic)
+  if (diagnostic?.obs_comportement_equipe) {
+    const comportement = diagnostic.obs_comportement_equipe.trim();
+    if (comportement) savoirEtre.push({ competence: comportement.substring(0, 60), source: 'Observation CIP' });
+  }
+
+  // Depuis l'autonomie/ponctualite (diagnostic)
+  if (diagnostic?.obs_autonomie_ponctualite) {
+    const autonomie = diagnostic.obs_autonomie_ponctualite.trim();
+    if (autonomie) savoirEtre.push({ competence: autonomie.substring(0, 60), source: 'Observation CIP' });
   }
 
   // Depuis le PCM
@@ -569,18 +641,35 @@ function buildCompetences(employee, candidate, diagnostic, pcm) {
     savoirEtre.push(...pcm.forces.map(f => ({ competence: f, source: 'Profil PCM' })));
   }
 
-  // Difficultés = à consolider
+  // Difficultes = a consolider
   if (diagnostic?.obs_difficultes) {
     const diffs = diagnostic.obs_difficultes.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
     aConsolider.push(...diffs.map(d => ({ competence: d, source: 'Observation CIP' })));
   }
 
-  // Axes de développement PCM
+  // Axes de developpement PCM
   if (pcm) {
     aConsolider.push(...pcm.axes_developpement.map(a => ({ competence: a, source: 'Profil PCM' })));
   }
 
   return { techniques, transversales, savoir_etre: savoirEtre, a_consolider: aConsolider };
+}
+
+function extractSkillsFromText(text) {
+  if (!text) return [];
+  const qualityPatterns = [
+    /ponctuel/gi, /motiv[eé]/gi, /rigoureu[xs]/gi, /autonome/gi,
+    /organis[eé]/gi, /dynamique/gi, /s[eé]rieu[xs]/gi, /assidu/gi,
+    /volontaire/gi, /polyvalent/gi, /minutieu[xs]/gi, /soigneu[xs]/gi,
+    /rapide/gi, /efficace/gi, /communication/gi, /travail.d.equipe/gi,
+    /adaptab/gi, /fiable/gi, /respectueu[xs]/gi, /courageuse?/gi,
+  ];
+  const found = new Set();
+  for (const pattern of qualityPatterns) {
+    const match = text.match(pattern);
+    if (match) found.add(match[0].charAt(0).toUpperCase() + match[0].slice(1).toLowerCase());
+  }
+  return [...found].slice(0, 5);
 }
 
 function buildPistesMetiers(employee, pcm, diagnostic, candidate) {
@@ -599,6 +688,31 @@ function buildPistesMetiers(employee, pcm, diagnostic, candidate) {
     } else if (pcm) {
       pourquoi = `Le profil ${pcm.nom} peut exercer ce métier avec un accompagnement adapté.`;
       score += 10;
+    }
+
+    // Score base sur les competences CV
+    if (candidate?.cv_raw_text) {
+      const cvSkills = extractSkillsFromCV(candidate.cv_raw_text);
+      if (data.qualites_requises.some(q => cvSkills.some(s => s.toLowerCase().includes(q.toLowerCase().split(' ')[0])))) {
+        score += 10;
+        pourquoi += ' Competences CV en lien avec ce metier.';
+      }
+    }
+
+    // Score base sur l'entretien
+    if (candidate?.interview_comment) {
+      const interview = candidate.interview_comment.toLowerCase();
+      if (data.qualites_requises.some(q => interview.includes(q.toLowerCase().split(' ')[0]))) {
+        score += 10;
+        pourquoi += ' Elements positifs releves en entretien.';
+      }
+    }
+
+    // Score base sur le test pratique
+    if (candidate?.practical_test_result === 'conforme') {
+      score += 5;
+    } else if (candidate?.practical_test_result === 'recale') {
+      score -= 10;
     }
 
     // Score basé sur les préférences exprimées
@@ -738,7 +852,7 @@ function buildParcoursDev(employee, contracts, pcm, diagnostic, pistesMetiers) {
   return parcours;
 }
 
-function buildRecommandationsCIP(pcm, diagnostic) {
+function buildRecommandationsCIP(pcm, diagnostic, candidate) {
   const points_vigilance = [];
   const conditions_reussite = [];
   const outils = [];
@@ -746,7 +860,7 @@ function buildRecommandationsCIP(pcm, diagnostic) {
   if (pcm) {
     points_vigilance.push({
       titre: 'Communication',
-      detail: `Privilégier le canal ${pcm.canal}. ${pcm.conseils_manager[0]}`,
+      detail: `Privilegier le canal ${pcm.canal}. ${pcm.conseils_manager[0]}`,
     });
     points_vigilance.push({
       titre: 'Gestion du stress',
@@ -754,24 +868,49 @@ function buildRecommandationsCIP(pcm, diagnostic) {
     });
 
     conditions_reussite.push(`Besoin principal : ${pcm.besoin}`);
-    conditions_reussite.push(`Environnement idéal : ${pcm.environnement_ideal}`);
+    conditions_reussite.push(`Environnement ideal : ${pcm.environnement_ideal}`);
     pcm.conseils_manager.forEach(c => conditions_reussite.push(c));
   }
 
-  // Outils à mobiliser
+  // Points issus de l'entretien
+  if (candidate?.interview_comment) {
+    points_vigilance.push({
+      titre: 'Entretien',
+      detail: candidate.interview_comment.substring(0, 200),
+    });
+  }
+
+  // Points issus du test pratique
+  if (candidate?.practical_test_result === 'faible' && candidate?.practical_test_comment) {
+    points_vigilance.push({
+      titre: 'Test pratique',
+      detail: `Resultat faible : ${candidate.practical_test_comment.substring(0, 150)}`,
+    });
+    conditions_reussite.push('Prevoir un accompagnement renforce sur les gestes techniques');
+  }
+
+  // Points issus du CV
+  if (candidate?.cv_raw_text) {
+    const cvSkills = extractSkillsFromCV(candidate.cv_raw_text);
+    if (cvSkills.length > 0) {
+      conditions_reussite.push(`Valoriser les competences identifiees dans le CV : ${cvSkills.slice(0, 4).join(', ')}`);
+    }
+  }
+
+  // Outils a mobiliser
   outils.push('Photolangage d\'environnements de travail (Explorama)');
   outils.push('Cartes de gestes professionnels');
-  outils.push('Grille de repérage de compétences en situation');
+  outils.push('Grille de reperage de competences en situation');
 
   if (diagnostic?.frein_linguistique >= 3) {
     outils.push('Supports visuels et pictogrammes');
-    outils.push('Consignes orales avec démonstration');
-    conditions_reussite.push('Adapter les supports écrits au niveau linguistique');
+    outils.push('Consignes orales avec demonstration');
+    conditions_reussite.push('Adapter les supports ecrits au niveau linguistique');
   }
 
   if (diagnostic?.frein_numerique >= 3) {
-    outils.push('Ateliers d\'initiation numérique');
-    conditions_reussite.push('Accompagner les démarches en ligne');
+    outils.push('Ateliers d\'initiation numerique');
+    conditions_reussite.push('Accompagner les demarches en ligne');
   }
 
   return { points_vigilance, conditions_reussite, outils };
