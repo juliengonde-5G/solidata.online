@@ -172,4 +172,84 @@ router.delete('/tarifs/:id', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// OBJECTIFS PÉRIODIQUES
+// ══════════════════════════════════════════
+
+// Créer la table si elle n'existe pas
+pool.query(`
+  CREATE TABLE IF NOT EXISTS periodic_objectives (
+    id SERIAL PRIMARY KEY,
+    domaine VARCHAR(50) NOT NULL,
+    indicateur VARCHAR(100) NOT NULL,
+    unite VARCHAR(30) DEFAULT '',
+    periode VARCHAR(20) NOT NULL CHECK (periode IN ('mensuel', 'trimestriel', 'annuel')),
+    annee INTEGER NOT NULL,
+    mois INTEGER,
+    trimestre INTEGER,
+    valeur_cible DOUBLE PRECISION NOT NULL,
+    commentaire TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+  )
+`).catch(() => {});
+
+router.get('/objectives', async (req, res) => {
+  try {
+    const { annee } = req.query;
+    const year = annee || new Date().getFullYear();
+    const result = await pool.query(
+      'SELECT * FROM periodic_objectives WHERE annee = $1 ORDER BY domaine, indicateur, mois NULLS LAST, trimestre NULLS LAST',
+      [year]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[SETTINGS] Erreur objectifs GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.post('/objectives', async (req, res) => {
+  try {
+    const { domaine, indicateur, unite, periode, annee, mois, trimestre, valeur_cible, commentaire } = req.body;
+    if (!domaine || !indicateur || !periode || !annee || valeur_cible == null) {
+      return res.status(400).json({ error: 'Champs obligatoires : domaine, indicateur, periode, annee, valeur_cible' });
+    }
+    const result = await pool.query(
+      `INSERT INTO periodic_objectives (domaine, indicateur, unite, periode, annee, mois, trimestre, valeur_cible, commentaire)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [domaine, indicateur, unite || '', periode, annee, mois || null, trimestre || null, valeur_cible, commentaire || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[SETTINGS] Erreur objectif POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.put('/objectives/:id', async (req, res) => {
+  try {
+    const { valeur_cible, commentaire } = req.body;
+    const result = await pool.query(
+      'UPDATE periodic_objectives SET valeur_cible = COALESCE($1, valeur_cible), commentaire = COALESCE($2, commentaire), updated_at = NOW() WHERE id = $3 RETURNING *',
+      [valeur_cible, commentaire, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Objectif non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[SETTINGS] Erreur objectif PUT :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.delete('/objectives/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM periodic_objectives WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[SETTINGS] Erreur objectif DELETE :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

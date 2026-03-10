@@ -28,8 +28,15 @@ export default function Settings() {
   const [editTarif, setEditTarif] = useState(null);
   const [tarifForm, setTarifForm] = useState({ type: '', exutoire_id: '', prix_tonne: '', trimestre: '' });
 
+  // Objectifs périodiques
+  const [objectives, setObjectives] = useState([]);
+  const [objAnnee, setObjAnnee] = useState(new Date().getFullYear());
+  const [showObjForm, setShowObjForm] = useState(false);
+  const [objForm, setObjForm] = useState({ domaine: 'collecte', indicateur: '', unite: '', periode: 'mensuel', mois: '', trimestre: '', valeur_cible: '', commentaire: '' });
+
   useEffect(() => { loadData(); }, []);
   useEffect(() => { loadTarifs(); }, [tarifAnnee]);
+  useEffect(() => { loadObjectives(); }, [objAnnee]);
 
   const loadData = async () => {
     try {
@@ -99,6 +106,32 @@ export default function Settings() {
   const openTarifEdit = (type) => {
     setEditTarif(type);
     setTarifForm({ type, exutoire_id: '', prix_tonne: '', trimestre: '' });
+  };
+
+  // Objectifs
+  const loadObjectives = async () => {
+    try {
+      const res = await api.get(`/settings/objectives?annee=${objAnnee}`);
+      setObjectives(res.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const createObjective = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post('/settings/objectives', { ...objForm, annee: objAnnee, valeur_cible: parseFloat(objForm.valeur_cible), mois: objForm.mois ? parseInt(objForm.mois) : null, trimestre: objForm.trimestre ? parseInt(objForm.trimestre) : null });
+      setShowObjForm(false);
+      setObjForm({ domaine: 'collecte', indicateur: '', unite: '', periode: 'mensuel', mois: '', trimestre: '', valeur_cible: '', commentaire: '' });
+      loadObjectives();
+    } catch (err) { console.error(err); }
+  };
+
+  const deleteObjective = async (id) => {
+    if (!confirm('Supprimer cet objectif ?')) return;
+    try {
+      await api.delete(`/settings/objectives/${id}`);
+      loadObjectives();
+    } catch (err) { console.error(err); }
   };
 
   if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
@@ -289,6 +322,98 @@ export default function Settings() {
         </div>
 
         {/* Template Form */}
+        {/* Objectifs périodiques */}
+        <div className="bg-white rounded-xl shadow-sm border mb-8">
+          <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold">Objectifs periodiques</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Definir les cibles par domaine et par periode</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setObjAnnee(objAnnee - 1)} className="text-gray-400 hover:text-gray-600 px-1">&lt;</button>
+              <span className="font-bold text-sm">{objAnnee}</span>
+              <button onClick={() => setObjAnnee(objAnnee + 1)} className="text-gray-400 hover:text-gray-600 px-1">&gt;</button>
+              <button onClick={() => setShowObjForm(true)} className="ml-3 bg-solidata-green text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-solidata-green/90">+ Objectif</button>
+            </div>
+          </div>
+          {objectives.length === 0 ? (
+            <p className="p-6 text-center text-gray-400 text-sm">Aucun objectif defini pour {objAnnee}</p>
+          ) : (
+            <div className="divide-y">
+              {['collecte', 'production', 'tri', 'rh', 'commercial', 'logistique'].map(dom => {
+                const items = objectives.filter(o => o.domaine === dom);
+                if (items.length === 0) return null;
+                return (
+                  <div key={dom} className="p-4">
+                    <p className="text-xs font-bold uppercase text-gray-400 mb-2">{dom}</p>
+                    <div className="space-y-1.5">
+                      {items.map(obj => (
+                        <div key={obj.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                          <div className="flex-1">
+                            <span className="text-sm font-medium">{obj.indicateur}</span>
+                            <span className="text-xs text-gray-400 ml-2">
+                              {obj.periode === 'mensuel' && obj.mois ? `Mois ${obj.mois}` : obj.periode === 'trimestriel' && obj.trimestre ? `T${obj.trimestre}` : obj.periode}
+                            </span>
+                          </div>
+                          <span className="font-bold text-sm text-solidata-green mr-3">{obj.valeur_cible} {obj.unite}</span>
+                          <button onClick={() => deleteObjective(obj.id)} className="text-red-400 hover:text-red-600 text-xs">Suppr.</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Objectif Form Modal */}
+        {showObjForm && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <form onSubmit={createObjective} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
+              <h2 className="text-lg font-bold mb-4">Nouvel objectif — {objAnnee}</h2>
+              <div className="space-y-3">
+                <select value={objForm.domaine} onChange={e => setObjForm({ ...objForm, domaine: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
+                  <option value="collecte">Collecte</option>
+                  <option value="production">Production</option>
+                  <option value="tri">Tri</option>
+                  <option value="rh">RH</option>
+                  <option value="commercial">Commercial</option>
+                  <option value="logistique">Logistique</option>
+                </select>
+                <input placeholder="Indicateur (ex: Tonnage collecte) *" value={objForm.indicateur} onChange={e => setObjForm({ ...objForm, indicateur: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <input placeholder="Unite (ex: tonnes, %, EUR)" value={objForm.unite} onChange={e => setObjForm({ ...objForm, unite: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <select value={objForm.periode} onChange={e => setObjForm({ ...objForm, periode: e.target.value, mois: '', trimestre: '' })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                  <option value="mensuel">Mensuel</option>
+                  <option value="trimestriel">Trimestriel</option>
+                  <option value="annuel">Annuel</option>
+                </select>
+                {objForm.periode === 'mensuel' && (
+                  <select value={objForm.mois} onChange={e => setObjForm({ ...objForm, mois: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                    <option value="">Tous les mois</option>
+                    {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'][m-1]}</option>)}
+                  </select>
+                )}
+                {objForm.periode === 'trimestriel' && (
+                  <select value={objForm.trimestre} onChange={e => setObjForm({ ...objForm, trimestre: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                    <option value="">Tous les trimestres</option>
+                    <option value="1">T1</option>
+                    <option value="2">T2</option>
+                    <option value="3">T3</option>
+                    <option value="4">T4</option>
+                  </select>
+                )}
+                <input type="number" step="0.01" placeholder="Valeur cible *" value={objForm.valeur_cible} onChange={e => setObjForm({ ...objForm, valeur_cible: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <input placeholder="Commentaire" value={objForm.commentaire} onChange={e => setObjForm({ ...objForm, commentaire: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Creer</button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {showTemplateForm && (
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
             <form onSubmit={createTemplate} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
