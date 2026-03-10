@@ -187,6 +187,15 @@ async function initOnStartup() {
       await initDatabase();
     } else {
       console.log(`[DB] ${tables.rows[0].count} tables trouvées`);
+      // Toujours appliquer les migrations de colonnes (idempotent)
+      try {
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_distance_km DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_duration_min INTEGER; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN nb_cav INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN ai_explanation TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        console.log('[DB] Migrations de colonnes vérifiées ✓');
+      } catch (e) { console.warn('[DB] Migration warning:', e.message); }
     }
 
     // Seed CAV si la table est vide
