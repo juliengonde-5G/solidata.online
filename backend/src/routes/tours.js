@@ -710,16 +710,57 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
 
 router.use(authenticate);
 
+// GET /api/tours/my — Tournées du chauffeur connecté (mobile)
+router.get('/my', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    // Trouver l'employee lié à cet utilisateur
+    const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
+    if (empResult.rows.length === 0) {
+      return res.json([]);
+    }
+    const employeeId = empResult.rows[0].id;
+
+    const { status, date } = req.query;
+    let query = `
+      SELECT t.*, v.registration, v.name as vehicle_name,
+       CONCAT(e.first_name, ' ', e.last_name) as driver_name,
+       COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id)) as nb_cav,
+       (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count
+      FROM tours t
+      LEFT JOIN vehicles v ON t.vehicle_id = v.id
+      LEFT JOIN employees e ON t.driver_employee_id = e.id
+      WHERE t.driver_employee_id = $1
+    `;
+    const params = [employeeId];
+
+    if (status) { params.push(status); query += ` AND t.status = $${params.length}`; }
+    if (date) { params.push(date); query += ` AND t.date = $${params.length}`; }
+
+    // Par défaut, montrer les tournées du jour et futures planifiées
+    if (!status && !date) {
+      query += ` AND (t.date >= CURRENT_DATE OR t.status = 'in_progress')`;
+    }
+
+    query += ' ORDER BY t.date ASC, t.created_at DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TOURS] Erreur /my :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/tours — Liste des tournées
 router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { date, status, vehicle_id } = req.query;
     let query = `
-      SELECT t.*, v.registration as vehicle_registration, v.name as vehicle_name,
-       e.first_name as driver_first_name, e.last_name as driver_last_name,
+      SELECT t.*, v.registration, v.name as vehicle_name,
+       CONCAT(e.first_name, ' ', e.last_name) as driver_name,
        sr.name as route_name,
-       (SELECT COUNT(*) FROM tour_cav tc WHERE tc.tour_id = t.id) as cav_count,
-       (SELECT COUNT(*) FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count
+       COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id)) as nb_cav,
+       (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count
       FROM tours t
       LEFT JOIN vehicles v ON t.vehicle_id = v.id
       LEFT JOIN employees e ON t.driver_employee_id = e.id
@@ -1272,11 +1313,12 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     const result = await generateIntelligentTour(vehicle_id, date);
 
-    // Créer la tournée en BDD
+    // Créer la tournée en BDD (avec distance, durée, nb_cav)
     const tourResult = await pool.query(
-      `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status, ai_explanation)
-       VALUES ($1, $2, $3, 'intelligent', 'planned', $4) RETURNING *`,
-      [date, vehicle_id, driver_employee_id, result.explanation]
+      `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status, ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
+       VALUES ($1, $2, $3, 'intelligent', 'planned', $4, $5, $6, $7) RETURNING *`,
+      [date, vehicle_id, driver_employee_id, result.explanation,
+       result.stats.totalDistance, result.stats.estimatedDuration, result.stats.totalCavs]
     );
     const tourId = tourResult.rows[0].id;
 
@@ -1290,6 +1332,7 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     res.status(201).json({
       tour: tourResult.rows[0],
+      cavs: result.cavList,
       ...result,
     });
   } catch (err) {

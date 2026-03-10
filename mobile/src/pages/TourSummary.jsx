@@ -36,6 +36,9 @@ export default function TourSummary() {
   const cavs = tour?.cavs || [];
   const collected = cavs.filter(c => c.status === 'collected').length;
   const co2Saved = ((tour?.total_weight_kg || 0) * 3.6).toFixed(0);
+  const kmStart = tour?.checklist?.km_start || 0;
+  const kmEnd = tour?.checklist?.km_end || 0;
+  const distanceParcourue = kmEnd > kmStart ? kmEnd - kmStart : null;
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-surface-2)]">
@@ -54,8 +57,8 @@ export default function TourSummary() {
           <div className="grid grid-cols-2 gap-px bg-gray-100">
             <StatCard label="CAV collectés" value={`${collected}/${cavs.length}`} icon="📍" />
             <StatCard label="Poids net" value={`${tour?.total_weight_kg || 0} kg`} icon="⚖️" />
-            <StatCard label="Distance" value={`${tour?.estimated_distance_km ?? '—'} km`} icon="📏" />
-            <StatCard label="Durée" value={tour?.estimated_duration_min ? `${tour.estimated_duration_min} min` : '—'} icon="⏱️" />
+            <StatCard label="Distance" value={distanceParcourue ? `${distanceParcourue} km` : `${tour?.estimated_distance_km ?? '—'} km`} icon="📏" />
+            <StatCard label="Durée" value={tour?.completed_at && tour?.started_at ? `${Math.round((new Date(tour.completed_at) - new Date(tour.started_at)) / 60000)} min` : (tour?.estimated_duration_min ? `${tour.estimated_duration_min} min` : '—')} icon="⏱️" />
           </div>
         </div>
 

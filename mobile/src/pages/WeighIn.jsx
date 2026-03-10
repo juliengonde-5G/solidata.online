@@ -9,6 +9,7 @@ export default function WeighIn() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
+  const isIntermediate = localStorage.getItem('intermediate_return') === 'true';
 
   const netWeight = Math.max(0, (parseFloat(grossWeight) || 0) - (parseFloat(tareWeight) || 0));
 
@@ -18,14 +19,20 @@ export default function WeighIn() {
       await api.post(`/tours/${tourId}/weigh`, {
         weight_kg: netWeight,
       });
-      await api.put(`/tours/${tourId}/status`, { status: 'completed' });
-      navigate('/tour-summary');
+      if (isIntermediate) {
+        // Retour intermédiaire : enregistrer la pesée puis reprendre la collecte
+        localStorage.removeItem('intermediate_return');
+        navigate('/tour-map');
+      } else {
+        await api.put(`/tours/${tourId}/status`, { status: 'completed' });
+        navigate('/tour-summary');
+      }
     } catch (err) { console.error(err); }
     setLoading(false);
   };
 
   return (
-    <MobileShell title="Pesée du véhicule" subtitle="Enregistrez les données de pesée" onBack={() => navigate('/return-centre')}>
+    <MobileShell title={isIntermediate ? "Pesée intermédiaire" : "Pesée du véhicule"} subtitle={isIntermediate ? "Déchargement partiel — pesez puis reprenez la collecte" : "Enregistrez les données de pesée"} onBack={() => { if (isIntermediate) { localStorage.removeItem('intermediate_return'); navigate('/tour-map'); } else { navigate('/return-centre'); } }}>
       <div className="mb-4">
         <TourStepBar currentPath="/weigh-in" />
       </div>
@@ -65,7 +72,7 @@ export default function WeighIn() {
           disabled={!grossWeight || !tareWeight || loading}
           className="btn-primary-mobile py-4 text-base disabled:opacity-50"
         >
-          {loading ? 'Finalisation...' : 'Valider la pesée'}
+          {loading ? 'Enregistrement...' : isIntermediate ? 'Enregistrer et reprendre' : 'Valider la pesée'}
         </button>
       </div>
     </MobileShell>

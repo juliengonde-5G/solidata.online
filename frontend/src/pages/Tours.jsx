@@ -110,8 +110,8 @@ export default function Tours() {
               {tours.map(t => (
                 <tr key={t.id} className="border-t hover:bg-gray-50">
                   <td className="p-3 text-sm font-medium">{new Date(t.date).toLocaleDateString('fr-FR')}</td>
-                  <td className="p-3 text-sm">{t.registration || '—'}</td>
-                  <td className="p-3 text-sm">{t.driver_name || '—'}</td>
+                  <td className="p-3 text-sm">{t.registration || t.vehicle_registration || '—'}</td>
+                  <td className="p-3 text-sm">{t.driver_name || [t.driver_first_name, t.driver_last_name].filter(Boolean).join(' ') || '—'}</td>
                   <td className="p-3">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${t.mode === 'intelligent' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`}>
                       {MODE_LABELS[t.mode] || t.mode}
@@ -235,9 +235,9 @@ export default function Tours() {
                     <h3 className="font-semibold text-green-700 mb-2">Tournée générée avec succès</h3>
                     <div className="text-sm space-y-1">
                       <p><span className="text-gray-500">ID :</span> #{generatedTour.tour?.id || generatedTour.id}</p>
-                      <p><span className="text-gray-500">CAV planifiés :</span> {generatedTour.tour?.nb_cav || generatedTour.nb_cav || '—'}</p>
-                      <p><span className="text-gray-500">Distance estimée :</span> {generatedTour.tour?.estimated_distance_km || '—'} km</p>
-                      <p><span className="text-gray-500">Durée estimée :</span> {generatedTour.tour?.estimated_duration_min || '—'} min</p>
+                      <p><span className="text-gray-500">CAV planifiés :</span> {generatedTour.stats?.totalCavs || generatedTour.tour?.nb_cav || '—'}</p>
+                      <p><span className="text-gray-500">Distance estimée :</span> {generatedTour.stats?.totalDistance || generatedTour.tour?.estimated_distance_km || '—'} km</p>
+                      <p><span className="text-gray-500">Durée estimée :</span> {generatedTour.stats?.estimatedDuration || generatedTour.tour?.estimated_duration_min || '—'} min</p>
                     </div>
                   </div>
                   {generatedTour.explanation && (
@@ -246,15 +246,15 @@ export default function Tours() {
                       <p className="text-xs text-purple-900">{generatedTour.explanation}</p>
                     </div>
                   )}
-                  {generatedTour.cavs && (
+                  {(generatedTour.cavs || generatedTour.cavList) && (
                     <div>
                       <h4 className="font-semibold text-sm mb-2">Points de collecte</h4>
                       <div className="space-y-1 max-h-48 overflow-y-auto">
-                        {generatedTour.cavs.map((c, i) => (
+                        {(generatedTour.cavs || generatedTour.cavList).map((c, i) => (
                           <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 rounded p-2">
-                            <span className="w-5 h-5 rounded-full bg-solidata-green text-white flex items-center justify-center text-[10px] font-bold">{i + 1}</span>
-                            <span className="flex-1">{c.nom || c.name}</span>
-                            <span className="text-gray-400">{c.estimated_fill_rate ? `${Math.round(c.estimated_fill_rate)}%` : ''}</span>
+                            <span className="w-5 h-5 rounded-full bg-solidata-green text-white flex items-center justify-center text-[10px] font-bold">{c.position || i + 1}</span>
+                            <span className="flex-1">{c.name || c.nom || c.cav_name}</span>
+                            <span className="text-gray-400">{c.predicted_fill ? `${Math.round(c.predicted_fill)}%` : ''}</span>
                           </div>
                         ))}
                       </div>

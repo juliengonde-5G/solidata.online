@@ -20,7 +20,7 @@ export default function VehicleSelect() {
     try {
       const [vRes, tRes] = await Promise.all([
         api.get('/vehicles?available=true'),
-        api.get('/tours?status=planned'),
+        api.get('/tours/my'),
       ]);
       setVehicles(vRes.data);
       setTours(tRes.data);

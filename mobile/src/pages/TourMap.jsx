@@ -87,6 +87,12 @@ export default function TourMap() {
     }
   };
 
+  const intermediateReturn = async () => {
+    // Retour intermédiaire : pesée partielle puis reprise de la collecte
+    localStorage.setItem('intermediate_return', 'true');
+    navigate('/weigh-in');
+  };
+
   const currentCAV = cavs[currentCavIndex];
   const center = myPosition || (currentCAV ? [currentCAV.latitude, currentCAV.longitude] : [49.4231, 1.0993]);
 
@@ -97,13 +103,22 @@ export default function TourMap() {
           <h1 className="font-bold text-lg">Tournée #{tourId}</h1>
           <p className="text-white/80 text-sm">{currentCavIndex}/{cavs.length} CAV collectés</p>
         </div>
-        <button
-          type="button"
-          onClick={() => navigate('/return-centre')}
-          className="touch-target flex items-center justify-center rounded-xl bg-white/20 hover:bg-white/30 text-sm font-medium px-4"
-        >
-          Retour centre
-        </button>
+        <div className="flex gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={intermediateReturn}
+            className="touch-target flex items-center justify-center rounded-xl bg-amber-500/80 hover:bg-amber-500 text-xs font-medium px-3"
+          >
+            Pesée
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/return-centre')}
+            className="touch-target flex items-center justify-center rounded-xl bg-white/20 hover:bg-white/30 text-sm font-medium px-3"
+          >
+            Fin
+          </button>
+        </div>
       </header>
       <div className="h-2 bg-white/20 flex-shrink-0">
         <div className="h-full bg-white rounded-r-full transition-all duration-300" style={{ width: `${cavs.length > 0 ? (currentCavIndex / cavs.length) * 100 : 0}%` }} />

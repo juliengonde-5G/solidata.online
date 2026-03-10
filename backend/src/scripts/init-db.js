@@ -372,6 +372,9 @@ async function initDatabase() {
         started_at TIMESTAMP,
         completed_at TIMESTAMP,
         total_weight_kg DOUBLE PRECISION DEFAULT 0,
+        estimated_distance_km DOUBLE PRECISION,
+        estimated_duration_min INTEGER,
+        nb_cav INTEGER DEFAULT 0,
         ai_explanation TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
@@ -908,6 +911,22 @@ async function initDatabase() {
     await client.query(`
       DO $$ BEGIN
         ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    // Ajouter les colonnes distance/durée/nb_cav à tours si manquantes
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tours ADD COLUMN estimated_distance_km DOUBLE PRECISION;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tours ADD COLUMN estimated_duration_min INTEGER;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tours ADD COLUMN nb_cav INTEGER DEFAULT 0;
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
     await client.query(`
