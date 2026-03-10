@@ -83,6 +83,7 @@ app.use('/api/historique', require('./routes/historique'));
 app.use('/api/metropole', require('./routes/metropole'));
 app.use('/api/rgpd', require('./routes/rgpd'));
 app.use('/api/admin-db', require('./routes/admin-db'));
+app.use('/api/news', require('./routes/newsfeed'));
 
 // Health check
 app.get('/api/health', async (req, res) => {

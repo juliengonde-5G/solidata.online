@@ -7,6 +7,65 @@ const CryptoJS = require('crypto-js');
 router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
 
 // ══════════════════════════════════════════════════════════════
+// AUTO-MIGRATION — S'assurer que la table insertion_diagnostics existe avec toutes les colonnes
+// ══════════════════════════════════════════════════════════════
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS insertion_diagnostics (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        created_by INTEGER REFERENCES users(id),
+        updated_by INTEGER REFERENCES users(id),
+        parcours_anterieur TEXT,
+        contraintes_sante TEXT, contraintes_mobilite TEXT, contraintes_familiales TEXT, autres_contraintes TEXT,
+        frein_mobilite INTEGER DEFAULT 1, frein_mobilite_detail TEXT,
+        frein_sante INTEGER DEFAULT 1, frein_sante_detail TEXT,
+        frein_finances INTEGER DEFAULT 1, frein_finances_detail TEXT,
+        frein_famille INTEGER DEFAULT 1, frein_famille_detail TEXT,
+        frein_linguistique INTEGER DEFAULT 1, frein_linguistique_detail TEXT,
+        frein_administratif INTEGER DEFAULT 1, frein_administratif_detail TEXT,
+        frein_numerique INTEGER DEFAULT 1, frein_numerique_detail TEXT,
+        -- Sous-questions freins (approfondissement)
+        frein_mobilite_causes TEXT, frein_sante_causes TEXT, frein_finances_causes TEXT,
+        frein_famille_causes TEXT, frein_linguistique_causes TEXT, frein_administratif_causes TEXT,
+        frein_numerique_causes TEXT,
+        pcm_q_travail_ideal TEXT, pcm_q_reaction_stress TEXT, pcm_q_relation_equipe TEXT,
+        pcm_q_motivation TEXT, pcm_q_apprentissage TEXT, pcm_q_communication TEXT,
+        obs_taches_realisees TEXT, obs_points_forts TEXT, obs_difficultes TEXT,
+        obs_comportement_equipe TEXT, obs_autonomie_ponctualite TEXT,
+        pref_aime_faire TEXT, pref_ne_veut_plus TEXT, pref_environnement_prefere TEXT,
+        pref_environnement_eviter TEXT, pref_objectifs TEXT,
+        explorama_interets TEXT, explorama_rejets TEXT,
+        explorama_gestes_positifs TEXT, explorama_gestes_negatifs TEXT,
+        explorama_environnements TEXT, explorama_rythme TEXT,
+        cip_hypotheses_metiers TEXT, cip_questions TEXT,
+        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id)
+      )
+    `);
+    // Ajouter les colonnes manquantes si la table existait deja
+    const addCol = async (col, type) => {
+      try { await pool.query(`ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch {}
+    };
+    await addCol('frein_mobilite_causes', 'TEXT');
+    await addCol('frein_sante_causes', 'TEXT');
+    await addCol('frein_finances_causes', 'TEXT');
+    await addCol('frein_famille_causes', 'TEXT');
+    await addCol('frein_linguistique_causes', 'TEXT');
+    await addCol('frein_administratif_causes', 'TEXT');
+    await addCol('frein_numerique_causes', 'TEXT');
+    await addCol('explorama_gestes_positifs', 'TEXT');
+    await addCol('explorama_gestes_negatifs', 'TEXT');
+    await addCol('explorama_environnements', 'TEXT');
+    await addCol('explorama_rythme', 'TEXT');
+    console.log('[INSERTION] Table insertion_diagnostics OK');
+  } catch (err) {
+    console.error('[INSERTION] Migration insertion_diagnostics :', err.message);
+  }
+})();
+
+// ══════════════════════════════════════════════════════════════
 // BASE DE CONNAISSANCES — PCM / Postes / Métiers
 // ══════════════════════════════════════════════════════════════
 
@@ -724,15 +783,49 @@ function buildPistesMetiers(employee, pcm, diagnostic, candidate) {
       }
     }
 
-    // Score basé sur les intérêts Explorama
+    // Score base sur les interets Explorama (enrichi)
     if (diagnostic?.explorama_interets) {
       const interets = diagnostic.explorama_interets.toLowerCase();
       if (data.famille.toLowerCase().split(/[\s/]+/).some(f => interets.includes(f))) {
         score += 10;
+        pourquoi += ' Interets Explorama en lien.';
       }
     }
 
-    // Vérifier les contraintes vs freins
+    // Score base sur les gestes professionnels Explorama
+    if (diagnostic?.explorama_gestes_positifs) {
+      const gestes = diagnostic.explorama_gestes_positifs.toLowerCase();
+      if (data.qualites_requises.some(q => gestes.includes(q.toLowerCase().split(' ')[0]))) {
+        score += 10;
+        pourquoi += ' Gestes apprecies en lien avec ce metier.';
+      }
+    }
+    if (diagnostic?.explorama_gestes_negatifs) {
+      const gestesNeg = diagnostic.explorama_gestes_negatifs.toLowerCase();
+      if (data.qualites_requises.some(q => gestesNeg.includes(q.toLowerCase().split(' ')[0]))) {
+        score -= 10;
+        vigilancePoints.push('Gestes rejetes en Explorama proches des requis');
+      }
+    }
+
+    // Score base sur l'environnement Explorama
+    if (diagnostic?.explorama_environnements) {
+      const env = diagnostic.explorama_environnements.toLowerCase();
+      if (data.contraintes.some(c => env.includes(c.toLowerCase().split(' ')[0]))) {
+        score += 5;
+      }
+    }
+
+    // Rejets Explorama vs famille metier
+    if (diagnostic?.explorama_rejets) {
+      const rejets = diagnostic.explorama_rejets.toLowerCase();
+      if (data.famille.toLowerCase().split(/[\s/]+/).some(f => rejets.includes(f))) {
+        score -= 15;
+        vigilancePoints.push('Univers rejete en Explorama');
+      }
+    }
+
+    // Verifier les contraintes vs freins
     if (data.contraintes.some(c => c.toLowerCase().includes('physique') || c.toLowerCase().includes('charges'))) {
       if (diagnostic?.frein_sante >= 4) {
         score -= 25;
@@ -923,6 +1016,7 @@ function buildFreinsSociaux(diagnostic) {
   for (const key of FREIN_FIELDS) {
     const niveau = diagnostic[`frein_${key}`] || 1;
     const detail = diagnostic[`frein_${key}_detail`] || '';
+    const causes = (diagnostic[`frein_${key}_causes`] || '').split(',').filter(Boolean);
     const def = FREINS_DEFINITIONS[key];
 
     freins.push({
@@ -932,6 +1026,7 @@ function buildFreinsSociaux(diagnostic) {
       niveau,
       niveau_label: def.niveaux[niveau],
       detail,
+      causes,
       actions: niveau >= 3 ? def.actions_levee.slice(0, Math.min(3, niveau - 1)) : [],
     });
   }
@@ -996,23 +1091,24 @@ router.get('/diagnostic/:employeeId', async (req, res) => {
   }
 });
 
-// PUT /api/insertion/diagnostic/:employeeId — Sauvegarder/mettre à jour le diagnostic
+// PUT /api/insertion/diagnostic/:employeeId — Sauvegarder/mettre a jour le diagnostic
 router.put('/diagnostic/:employeeId', async (req, res) => {
   try {
     const empId = parseInt(req.params.employeeId, 10);
+    if (isNaN(empId)) return res.status(400).json({ error: 'ID employe invalide' });
     const d = req.body;
 
     const result = await pool.query(`
       INSERT INTO insertion_diagnostics (
         employee_id, created_by, updated_by,
         parcours_anterieur, contraintes_sante, contraintes_mobilite, contraintes_familiales, autres_contraintes,
-        frein_mobilite, frein_mobilite_detail,
-        frein_sante, frein_sante_detail,
-        frein_finances, frein_finances_detail,
-        frein_famille, frein_famille_detail,
-        frein_linguistique, frein_linguistique_detail,
-        frein_administratif, frein_administratif_detail,
-        frein_numerique, frein_numerique_detail,
+        frein_mobilite, frein_mobilite_detail, frein_mobilite_causes,
+        frein_sante, frein_sante_detail, frein_sante_causes,
+        frein_finances, frein_finances_detail, frein_finances_causes,
+        frein_famille, frein_famille_detail, frein_famille_causes,
+        frein_linguistique, frein_linguistique_detail, frein_linguistique_causes,
+        frein_administratif, frein_administratif_detail, frein_administratif_causes,
+        frein_numerique, frein_numerique_detail, frein_numerique_causes,
         pcm_q_travail_ideal, pcm_q_reaction_stress, pcm_q_relation_equipe,
         pcm_q_motivation, pcm_q_apprentissage, pcm_q_communication,
         obs_taches_realisees, obs_points_forts, obs_difficultes,
@@ -1020,50 +1116,55 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
         pref_aime_faire, pref_ne_veut_plus, pref_environnement_prefere,
         pref_environnement_eviter, pref_objectifs,
         explorama_interets, explorama_rejets,
+        explorama_gestes_positifs, explorama_gestes_negatifs,
+        explorama_environnements, explorama_rythme,
         cip_hypotheses_metiers, cip_questions
       ) VALUES (
         $1, $2, $2,
         $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-        $22, $23, $24, $25, $26, $27,
-        $28, $29, $30, $31, $32,
-        $33, $34, $35, $36, $37,
-        $38, $39, $40, $41
+        $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
+        $29, $30, $31, $32, $33, $34,
+        $35, $36, $37, $38, $39,
+        $40, $41, $42, $43, $44,
+        $45, $46, $47, $48, $49, $50,
+        $51, $52
       )
       ON CONFLICT (employee_id) DO UPDATE SET
         updated_by = $2, updated_at = NOW(),
         parcours_anterieur = $3, contraintes_sante = $4, contraintes_mobilite = $5,
         contraintes_familiales = $6, autres_contraintes = $7,
-        frein_mobilite = $8, frein_mobilite_detail = $9,
-        frein_sante = $10, frein_sante_detail = $11,
-        frein_finances = $12, frein_finances_detail = $13,
-        frein_famille = $14, frein_famille_detail = $15,
-        frein_linguistique = $16, frein_linguistique_detail = $17,
-        frein_administratif = $18, frein_administratif_detail = $19,
-        frein_numerique = $20, frein_numerique_detail = $21,
-        pcm_q_travail_ideal = $22, pcm_q_reaction_stress = $23,
-        pcm_q_relation_equipe = $24, pcm_q_motivation = $25,
-        pcm_q_apprentissage = $26, pcm_q_communication = $27,
-        obs_taches_realisees = $28, obs_points_forts = $29, obs_difficultes = $30,
-        obs_comportement_equipe = $31, obs_autonomie_ponctualite = $32,
-        pref_aime_faire = $33, pref_ne_veut_plus = $34,
-        pref_environnement_prefere = $35, pref_environnement_eviter = $36,
-        pref_objectifs = $37,
-        explorama_interets = $38, explorama_rejets = $39,
-        cip_hypotheses_metiers = $40, cip_questions = $41
+        frein_mobilite = $8, frein_mobilite_detail = $9, frein_mobilite_causes = $10,
+        frein_sante = $11, frein_sante_detail = $12, frein_sante_causes = $13,
+        frein_finances = $14, frein_finances_detail = $15, frein_finances_causes = $16,
+        frein_famille = $17, frein_famille_detail = $18, frein_famille_causes = $19,
+        frein_linguistique = $20, frein_linguistique_detail = $21, frein_linguistique_causes = $22,
+        frein_administratif = $23, frein_administratif_detail = $24, frein_administratif_causes = $25,
+        frein_numerique = $26, frein_numerique_detail = $27, frein_numerique_causes = $28,
+        pcm_q_travail_ideal = $29, pcm_q_reaction_stress = $30,
+        pcm_q_relation_equipe = $31, pcm_q_motivation = $32,
+        pcm_q_apprentissage = $33, pcm_q_communication = $34,
+        obs_taches_realisees = $35, obs_points_forts = $36, obs_difficultes = $37,
+        obs_comportement_equipe = $38, obs_autonomie_ponctualite = $39,
+        pref_aime_faire = $40, pref_ne_veut_plus = $41,
+        pref_environnement_prefere = $42, pref_environnement_eviter = $43,
+        pref_objectifs = $44,
+        explorama_interets = $45, explorama_rejets = $46,
+        explorama_gestes_positifs = $47, explorama_gestes_negatifs = $48,
+        explorama_environnements = $49, explorama_rythme = $50,
+        cip_hypotheses_metiers = $51, cip_questions = $52
       RETURNING *
     `, [
       empId, req.user.id,
       d.parcours_anterieur || null, d.contraintes_sante || null,
       d.contraintes_mobilite || null, d.contraintes_familiales || null,
       d.autres_contraintes || null,
-      d.frein_mobilite || 1, d.frein_mobilite_detail || null,
-      d.frein_sante || 1, d.frein_sante_detail || null,
-      d.frein_finances || 1, d.frein_finances_detail || null,
-      d.frein_famille || 1, d.frein_famille_detail || null,
-      d.frein_linguistique || 1, d.frein_linguistique_detail || null,
-      d.frein_administratif || 1, d.frein_administratif_detail || null,
-      d.frein_numerique || 1, d.frein_numerique_detail || null,
+      d.frein_mobilite || 1, d.frein_mobilite_detail || null, d.frein_mobilite_causes || null,
+      d.frein_sante || 1, d.frein_sante_detail || null, d.frein_sante_causes || null,
+      d.frein_finances || 1, d.frein_finances_detail || null, d.frein_finances_causes || null,
+      d.frein_famille || 1, d.frein_famille_detail || null, d.frein_famille_causes || null,
+      d.frein_linguistique || 1, d.frein_linguistique_detail || null, d.frein_linguistique_causes || null,
+      d.frein_administratif || 1, d.frein_administratif_detail || null, d.frein_administratif_causes || null,
+      d.frein_numerique || 1, d.frein_numerique_detail || null, d.frein_numerique_causes || null,
       d.pcm_q_travail_ideal || null, d.pcm_q_reaction_stress || null,
       d.pcm_q_relation_equipe || null, d.pcm_q_motivation || null,
       d.pcm_q_apprentissage || null, d.pcm_q_communication || null,
@@ -1074,13 +1175,15 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
       d.pref_environnement_prefere || null, d.pref_environnement_eviter || null,
       d.pref_objectifs || null,
       d.explorama_interets || null, d.explorama_rejets || null,
+      d.explorama_gestes_positifs || null, d.explorama_gestes_negatifs || null,
+      d.explorama_environnements || null, d.explorama_rythme || null,
       d.cip_hypotheses_metiers || null, d.cip_questions || null,
     ]);
 
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('[INSERTION] Erreur diagnostic PUT :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('[INSERTION] Erreur diagnostic PUT :', err.message, err.detail || '');
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
   }
 });
 

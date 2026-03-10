@@ -32,6 +32,7 @@ import AdminDB from './pages/AdminDB';
 import AdminCAV from './pages/AdminCAV';
 import ReportingMetropole from './pages/ReportingMetropole';
 import FillRateMap from './pages/FillRateMap';
+import NewsFeed from './pages/NewsFeed';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -91,6 +92,7 @@ function App() {
           <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN']}><RGPD /></ProtectedRoute>} />
           <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
           <Route path="/admin-cav" element={<ProtectedRoute roles={['ADMIN']}><AdminCAV /></ProtectedRoute>} />
+          <Route path="/news" element={<ProtectedRoute><NewsFeed /></ProtectedRoute>} />
 
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

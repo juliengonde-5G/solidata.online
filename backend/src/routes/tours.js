@@ -713,53 +713,109 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
 
 router.use(authenticate);
 
-// GET /api/tours/my — Tournées du jour disponibles (mobile)
-// Le chauffeur voit les véhicules avec tournée planned du jour pas encore démarrée (in_progress)
-// + ses propres tournées en cours
+// GET /api/tours/my — Vehicules et tournees du jour (mobile)
+// Retourne les tournees planned/in_progress + les vehicules disponibles sans tournee
 router.get('/my', async (req, res) => {
   try {
     const userId = req.user.id;
     const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
     const employeeId = empResult.rows.length > 0 ? empResult.rows[0].id : null;
 
-    const result = await pool.query(`
+    // 1. Tournees existantes du jour
+    const toursResult = await pool.query(`
       SELECT t.*, v.registration, v.name as vehicle_name,
        CONCAT(e.first_name, ' ', e.last_name) as driver_name,
        COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id)) as nb_cav,
-       (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count
+       (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count,
+       false as is_free_vehicle
       FROM tours t
       LEFT JOIN vehicles v ON t.vehicle_id = v.id
       LEFT JOIN employees e ON t.driver_employee_id = e.id
       WHERE
-        -- Toutes les tournées planned du jour (qu'un chauffeur soit pré-assigné ou non)
-        -- Exclure celles déjà in_progress (prises par un autre)
         (t.date = CURRENT_DATE AND t.status = 'planned')
-        -- OU tournées déjà en cours pour ce chauffeur
         OR (t.driver_employee_id = $1 AND t.status = 'in_progress')
       ORDER BY t.status = 'in_progress' DESC, t.date ASC, t.created_at DESC
     `, [employeeId]);
 
-    res.json(result.rows);
+    // 2. Vehicules disponibles sans tournee du jour
+    const vehicleIdsInTours = toursResult.rows
+      .filter(t => t.vehicle_id)
+      .map(t => t.vehicle_id);
+
+    let freeVehicles = [];
+    try {
+      const vRes = await pool.query(`
+        SELECT v.id as vehicle_id, v.registration, v.name as vehicle_name, v.type as vehicle_type,
+          NULL as id, 'planned' as status, CURRENT_DATE as date,
+          NULL as driver_employee_id, NULL as driver_name,
+          0 as nb_cav, 0 as collected_count, true as is_free_vehicle
+        FROM vehicles v
+        WHERE v.is_active = true
+          ${vehicleIdsInTours.length > 0 ? `AND v.id NOT IN (${vehicleIdsInTours.join(',')})` : ''}
+        ORDER BY v.name, v.registration
+      `);
+      freeVehicles = vRes.rows;
+    } catch { /* vehicles table might not have is_active */ }
+
+    res.json([...toursResult.rows, ...freeVehicles]);
   } catch (err) {
     console.error('[TOURS] Erreur /my :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// PUT /api/tours/:id/claim — Le chauffeur prend un véhicule/tournée
-// Le claim assigne le chauffeur connecté et passe la tournée en in_progress
-// Seule une tournée "planned" peut être claimée → atomique
+// POST /api/tours/claim-vehicle — Le chauffeur prend un vehicule libre (sans tournee)
+// Cree une tournee a la volee pour ce vehicule
+router.post('/claim-vehicle', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { vehicle_id } = req.body;
+    if (!vehicle_id) return res.status(400).json({ error: 'vehicle_id requis' });
+
+    const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
+    if (empResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Aucune fiche employe liee a votre compte' });
+    }
+    const employeeId = empResult.rows[0].id;
+
+    // Verifier que le vehicule n'est pas deja en tournee
+    const existing = await pool.query(
+      `SELECT id FROM tours WHERE vehicle_id = $1 AND date = CURRENT_DATE AND status IN ('planned', 'in_progress')`,
+      [vehicle_id]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'Ce vehicule est deja en tournee aujourd\'hui' });
+    }
+
+    // Creer une tournee a la volee
+    const result = await pool.query(
+      `INSERT INTO tours (vehicle_id, driver_employee_id, date, status, created_at, updated_at)
+       VALUES ($1, $2, CURRENT_DATE, 'in_progress', NOW(), NOW())
+       RETURNING *`,
+      [vehicle_id, employeeId]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[TOURS] Erreur claim-vehicle :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/tours/:id/claim — Le chauffeur prend une tournee planifiee
+// Le claim assigne le chauffeur connecte et passe la tournee en in_progress
+// Seule une tournee planned peut etre claimee -> atomique
 router.put('/:id/claim', async (req, res) => {
   try {
     const userId = req.user.id;
     const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
     if (empResult.rows.length === 0) {
-      return res.status(400).json({ error: 'Aucune fiche employé liée à votre compte' });
+      return res.status(400).json({ error: 'Aucune fiche employe liee a votre compte' });
     }
     const employeeId = empResult.rows[0].id;
 
     // Assigner le chauffeur et passer en in_progress atomiquement
-    // Seule une tournée planned peut être claimée (empêche double claim)
+    // Seule une tournee planned peut etre claimee (empeche double claim)
     const result = await pool.query(
       `UPDATE tours SET driver_employee_id = $1, status = 'in_progress', updated_at = NOW()
        WHERE id = $2 AND status = 'planned'

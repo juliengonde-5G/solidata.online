@@ -33,29 +33,101 @@ const FREIN_ICONS = {
 };
 
 const PCM_QUESTIONS = [
-  { key: 'pcm_q_travail_ideal', label: 'Le travail id\u00e9al', question: 'D\u00e9crivez votre journ\u00e9e de travail id\u00e9ale. Qu\'est-ce qui vous rend content au travail ?' },
-  { key: 'pcm_q_reaction_stress', label: 'Face au stress', question: 'Quand \u00e7a ne va pas au travail, que faites-vous ? Comment r\u00e9agissez-vous ?' },
-  { key: 'pcm_q_relation_equipe', label: 'En \u00e9quipe', question: 'Pr\u00e9f\u00e9rez-vous travailler seul(e) ou en \u00e9quipe ? Pourquoi ?' },
+  { key: 'pcm_q_travail_ideal', label: 'Le travail ideal', question: 'Decrivez votre journee de travail ideale. Qu\'est-ce qui vous rend content au travail ?' },
+  { key: 'pcm_q_reaction_stress', label: 'Face au stress', question: 'Quand ca ne va pas au travail, que faites-vous ? Comment reagissez-vous ?' },
+  { key: 'pcm_q_relation_equipe', label: 'En equipe', question: 'Preferez-vous travailler seul(e) ou en equipe ? Pourquoi ?' },
   { key: 'pcm_q_motivation', label: 'Motivation', question: 'Qu\'est-ce qui vous donne envie de venir travailler le matin ?' },
-  { key: 'pcm_q_apprentissage', label: 'Apprentissage', question: 'Comment apprenez-vous le mieux ? (en regardant, en \u00e9coutant, en faisant ?)' },
-  { key: 'pcm_q_communication', label: 'Communication', question: 'Qu\'est-ce qui est important pour vous dans la fa\u00e7on dont on vous parle au travail ?' },
+  { key: 'pcm_q_apprentissage', label: 'Apprentissage', question: 'Comment apprenez-vous le mieux ? (en regardant, en ecoutant, en faisant ?)' },
+  { key: 'pcm_q_communication', label: 'Communication', question: 'Qu\'est-ce qui est important pour vous dans la facon dont on vous parle au travail ?' },
 ];
 
 const FREINS_CONFIG = [
-  { key: 'mobilite', label: 'Mobilit\u00e9', question: 'Comment venez-vous au travail ?' },
-  { key: 'sante', label: 'Sant\u00e9', question: 'Comment vous sentez-vous physiquement pour travailler ?' },
-  { key: 'finances', label: 'Finances', question: 'Arrivez-vous \u00e0 couvrir vos d\u00e9penses courantes ?' },
-  { key: 'famille', label: 'Famille', question: 'Avez-vous des contraintes familiales pour vos horaires ?' },
-  { key: 'linguistique', label: 'Langue', question: 'Comprenez-vous bien le fran\u00e7ais au travail ?' },
-  { key: 'administratif', label: 'Administratif', question: 'Vos papiers et d\u00e9marches sont-ils \u00e0 jour ?' },
-  { key: 'numerique', label: 'Num\u00e9rique', question: 'Utilisez-vous un t\u00e9l\u00e9phone ou un ordinateur facilement ?' },
+  {
+    key: 'mobilite', label: 'Mobilite', question: 'Comment venez-vous au travail ?',
+    causes: [
+      { id: 'eloignement', label: 'Eloignement geographique (> 30 min)' },
+      { id: 'pas_vehicule', label: 'Absence de vehicule personnel' },
+      { id: 'pas_permis', label: 'Pas de permis de conduire' },
+      { id: 'peur_conduite', label: 'Peur de la conduite / apprehension' },
+      { id: 'transports_limites', label: 'Transports en commun limites ou inexistants' },
+      { id: 'cout_transport', label: 'Cout du transport trop eleve' },
+      { id: 'horaires_incompatibles', label: 'Horaires incompatibles avec les transports' },
+    ],
+  },
+  {
+    key: 'sante', label: 'Sante', question: 'Comment vous sentez-vous physiquement pour travailler ?',
+    causes: [
+      { id: 'douleurs_physiques', label: 'Douleurs physiques (dos, articulations...)' },
+      { id: 'maladie_chronique', label: 'Maladie chronique ou traitement lourd' },
+      { id: 'troubles_psy', label: 'Troubles psychologiques (anxiete, depression...)' },
+      { id: 'addictions', label: 'Addictions (tabac, alcool, substances)' },
+      { id: 'fatigue_chronique', label: 'Fatigue chronique / troubles du sommeil' },
+      { id: 'handicap', label: 'Situation de handicap (RQTH ou en cours)' },
+      { id: 'pas_suivi_medical', label: 'Pas de suivi medical regulier' },
+    ],
+  },
+  {
+    key: 'finances', label: 'Finances', question: 'Arrivez-vous a couvrir vos depenses courantes ?',
+    causes: [
+      { id: 'endettement', label: 'Endettement ou credits en cours' },
+      { id: 'loyer_impaye', label: 'Loyer impaye ou menace d\'expulsion' },
+      { id: 'pas_compte_bancaire', label: 'Pas de compte bancaire ou interdit bancaire' },
+      { id: 'droits_non_ouverts', label: 'Droits sociaux non ouverts (RSA, APL, prime activite)' },
+      { id: 'charges_elevees', label: 'Charges fixes trop elevees' },
+      { id: 'precarite_alimentaire', label: 'Difficultes alimentaires / recours epicerie sociale' },
+    ],
+  },
+  {
+    key: 'famille', label: 'Famille', question: 'Avez-vous des contraintes familiales pour vos horaires ?',
+    causes: [
+      { id: 'parent_isole', label: 'Parent isole (seul avec enfant(s))' },
+      { id: 'garde_enfants', label: 'Pas de solution de garde d\'enfants' },
+      { id: 'proche_dependant', label: 'Proche dependant a charge (parent age, handicape)' },
+      { id: 'conflit_familial', label: 'Conflit familial ou violence domestique' },
+      { id: 'horaires_contraints', label: 'Horaires contraints par la vie familiale' },
+      { id: 'isolement_social', label: 'Isolement social (pas de reseau familial ou amical)' },
+    ],
+  },
+  {
+    key: 'linguistique', label: 'Langue', question: 'Comprenez-vous bien le francais au travail ?',
+    causes: [
+      { id: 'oral_difficile', label: 'Difficulte a comprendre le francais oral' },
+      { id: 'ecrit_difficile', label: 'Difficulte a lire et ecrire en francais' },
+      { id: 'analphabete', label: 'Analphabetisme ou illettrisme' },
+      { id: 'pas_formation_fle', label: 'Pas de formation FLE en cours' },
+      { id: 'consignes_securite', label: 'Difficulte a comprendre les consignes de securite' },
+      { id: 'honte', label: 'Honte ou peur de parler (frein psychologique)' },
+    ],
+  },
+  {
+    key: 'administratif', label: 'Administratif', question: 'Vos papiers et demarches sont-ils a jour ?',
+    causes: [
+      { id: 'titre_sejour', label: 'Titre de sejour en cours de renouvellement' },
+      { id: 'sans_papiers', label: 'Situation irreguliere ou en attente de regularisation' },
+      { id: 'demarches_complexes', label: 'Demarches administratives complexes en cours' },
+      { id: 'pas_couverture_sante', label: 'Pas de couverture sante (mutuelle, CMU)' },
+      { id: 'probleme_pole_emploi', label: 'Probleme avec Pole Emploi / France Travail' },
+      { id: 'casier_judiciaire', label: 'Casier judiciaire (frein a l\'embauche)' },
+    ],
+  },
+  {
+    key: 'numerique', label: 'Numerique', question: 'Utilisez-vous un telephone ou un ordinateur facilement ?',
+    causes: [
+      { id: 'pas_smartphone', label: 'Pas de smartphone ou telephone basique' },
+      { id: 'pas_internet', label: 'Pas d\'acces internet a domicile' },
+      { id: 'pas_email', label: 'Pas d\'adresse email ou ne sait pas l\'utiliser' },
+      { id: 'pas_demarches_ligne', label: 'Incapable de faire des demarches en ligne' },
+      { id: 'peur_technologie', label: 'Peur ou rejet de la technologie' },
+      { id: 'pas_formation', label: 'Jamais eu de formation numerique' },
+    ],
+  },
 ];
 
 const FREIN_LEVELS = [
-  { value: 1, label: 'Pas de difficult\u00e9', emoji: '\u{1F7E2}' },
-  { value: 2, label: 'L\u00e9g\u00e8re difficult\u00e9', emoji: '\u{1F7E1}' },
-  { value: 3, label: 'Difficult\u00e9 mod\u00e9r\u00e9e', emoji: '\u{1F7E0}' },
-  { value: 4, label: 'Difficult\u00e9 importante', emoji: '\u{1F534}' },
+  { value: 1, label: 'Pas de difficulte', emoji: '\u{1F7E2}' },
+  { value: 2, label: 'Legere difficulte', emoji: '\u{1F7E1}' },
+  { value: 3, label: 'Difficulte moderee', emoji: '\u{1F7E0}' },
+  { value: 4, label: 'Difficulte importante', emoji: '\u{1F534}' },
   { value: 5, label: 'Bloquant', emoji: '\u26D4' },
 ];
 
@@ -105,13 +177,13 @@ export default function InsertionParcours() {
   const createEmptyDiagnostic = () => ({
     parcours_anterieur: '', contraintes_sante: '', contraintes_mobilite: '',
     contraintes_familiales: '', autres_contraintes: '',
-    frein_mobilite: 1, frein_mobilite_detail: '',
-    frein_sante: 1, frein_sante_detail: '',
-    frein_finances: 1, frein_finances_detail: '',
-    frein_famille: 1, frein_famille_detail: '',
-    frein_linguistique: 1, frein_linguistique_detail: '',
-    frein_administratif: 1, frein_administratif_detail: '',
-    frein_numerique: 1, frein_numerique_detail: '',
+    frein_mobilite: 1, frein_mobilite_detail: '', frein_mobilite_causes: '',
+    frein_sante: 1, frein_sante_detail: '', frein_sante_causes: '',
+    frein_finances: 1, frein_finances_detail: '', frein_finances_causes: '',
+    frein_famille: 1, frein_famille_detail: '', frein_famille_causes: '',
+    frein_linguistique: 1, frein_linguistique_detail: '', frein_linguistique_causes: '',
+    frein_administratif: 1, frein_administratif_detail: '', frein_administratif_causes: '',
+    frein_numerique: 1, frein_numerique_detail: '', frein_numerique_causes: '',
     pcm_q_travail_ideal: '', pcm_q_reaction_stress: '', pcm_q_relation_equipe: '',
     pcm_q_motivation: '', pcm_q_apprentissage: '', pcm_q_communication: '',
     obs_taches_realisees: '', obs_points_forts: '', obs_difficultes: '',
@@ -119,6 +191,8 @@ export default function InsertionParcours() {
     pref_aime_faire: '', pref_ne_veut_plus: '', pref_environnement_prefere: '',
     pref_environnement_eviter: '', pref_objectifs: '',
     explorama_interets: '', explorama_rejets: '',
+    explorama_gestes_positifs: '', explorama_gestes_negatifs: '',
+    explorama_environnements: '', explorama_rythme: '',
     cip_hypotheses_metiers: '', cip_questions: '',
   });
 
@@ -176,7 +250,7 @@ export default function InsertionParcours() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-gray-800">{emp.first_name} {emp.last_name}</p>
-                        <p className="text-xs text-gray-400">{emp.team_name || 'Sans \u00e9quipe'} \u2014 {emp.position || 'Poste non d\u00e9fini'}</p>
+                        <p className="text-xs text-gray-400">{emp.team_name || 'Sans equipe'}  - {emp.position || 'Poste non defini'}</p>
                       </div>
                       <div className="flex items-center gap-1.5">
                         {emp.has_diagnostic && (
@@ -187,7 +261,7 @@ export default function InsertionParcours() {
                         )}
                         {emp.urgency && (
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${URGENCY_COLORS[emp.urgency]}`}>
-                            {emp.urgency === 'critique' ? 'FIN' : 'BIENT\u00d4T'}
+                            {emp.urgency === 'critique' ? 'FIN' : 'BIENTOT'}
                           </span>
                         )}
                       </div>
@@ -211,9 +285,9 @@ export default function InsertionParcours() {
                     <path strokeLinecap="round" strokeWidth={1.5} d="M9 21h6" />
                   </svg>
                 </div>
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">Outil CIP \u2014 Parcours d'insertion</h3>
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">Outil CIP  - Parcours d'insertion</h3>
                 <p className="text-gray-400 text-sm max-w-md mx-auto">
-                  S\u00e9lectionnez un collaborateur pour acc\u00e9der \u00e0 son diagnostic, son questionnaire d'entretien,
+                  Selectionnez un collaborateur pour acceder a son diagnostic, son questionnaire d'entretien,
                   et l'analyse IA de son parcours d'insertion.
                 </p>
               </div>
@@ -294,8 +368,8 @@ function AnalysisPanel({ analysis }) {
               {analysis.employee.first_name} {analysis.employee.last_name}
             </h2>
             <p className="text-sm text-gray-500">
-              {analysis.employee.team_name || 'Sans \u00e9quipe'} \u2014 {analysis.employee.position || 'Poste non d\u00e9fini'}
-              {analysis.nb_contracts > 0 && ` \u2014 ${analysis.nb_contracts} contrat${analysis.nb_contracts > 1 ? 's' : ''}`}
+              {analysis.employee.team_name || 'Sans equipe'}  - {analysis.employee.position || 'Poste non defini'}
+              {analysis.nb_contracts > 0 && `  - ${analysis.nb_contracts} contrat${analysis.nb_contracts > 1 ? 's' : ''}`}
             </p>
           </div>
           <div className="flex gap-2">
@@ -314,7 +388,7 @@ function AnalysisPanel({ analysis }) {
                   ? 'bg-green-50 border-green-200 text-green-700'
                   : 'bg-gray-50 border-gray-200 text-gray-400'
               }`}>
-                <span>{src.available ? '\u2713' : '\u2717'}</span>
+                <span>{src.available ? 'V' : 'X'}</span>
                 <span className="font-medium">{src.label}</span>
                 {src.available && src.detail && (
                   <span className="text-[10px] opacity-70">({src.detail})</span>
@@ -330,9 +404,9 @@ function AnalysisPanel({ analysis }) {
         )}
       </div>
 
-      {/* 1. Fiche synth\u00e8se */}
+      {/* 1. Fiche synthese */}
       {analysis.fiche_synthese && (
-        <Section title="1. Fiche synth\u00e8se profil" color="violet">
+        <Section title="1. Fiche synthese profil" color="violet">
           <p className="text-sm text-gray-600 mb-3">{analysis.fiche_synthese.resume}</p>
           {analysis.fiche_synthese.forces.length > 0 && (
             <div className="mb-2">
@@ -368,16 +442,16 @@ function AnalysisPanel({ analysis }) {
 
       {/* 2. Profil PCM */}
       {analysis.profil_pcm && (
-        <Section title="2. Profil PCM simplifi\u00e9 (hypoth\u00e8se)" color="violet">
+        <Section title="2. Profil PCM simplifie (hypothese)" color="violet">
           <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded mb-3">
-            Ceci n'est pas un diagnostic psychologique mais une hypoth\u00e8se de fonctionnement pr\u00e9f\u00e9rentiel, \u00e0 v\u00e9rifier avec la personne.
+            Ceci n'est pas un diagnostic psychologique mais une hypothese de fonctionnement preferentiel, a verifier avec la personne.
           </p>
           <div className="grid grid-cols-2 gap-2">
             {Object.entries(analysis.profil_pcm).map(([type, data]) => (
               <div key={type} className="flex items-center gap-2 p-2 bg-gray-50 rounded">
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                   data.niveau === 'FORT' ? 'bg-violet-100 text-violet-700' :
-                  data.niveau === 'MOD\u00c9R\u00c9' ? 'bg-blue-100 text-blue-600' :
+                  data.niveau === 'MODERE' ? 'bg-blue-100 text-blue-600' :
                   'bg-gray-100 text-gray-400'
                 }`}>{data.niveau}</span>
                 <div>
@@ -390,19 +464,19 @@ function AnalysisPanel({ analysis }) {
         </Section>
       )}
 
-      {/* 3. Cartographie des comp\u00e9tences */}
+      {/* 3. Cartographie des competences */}
       {analysis.competences && (
-        <Section title="3. Cartographie des comp\u00e9tences" color="blue">
-          <CompetenceList title="Comp\u00e9tences techniques" items={analysis.competences.techniques} color="blue" />
-          <CompetenceList title="Comp\u00e9tences transversales" items={analysis.competences.transversales} color="teal" />
-          <CompetenceList title="Savoir-\u00eatre professionnels" items={analysis.competences.savoir_etre} color="green" />
-          <CompetenceList title="\u00c0 consolider / d\u00e9velopper" items={analysis.competences.a_consolider} color="amber" />
+        <Section title="3. Cartographie des competences" color="blue">
+          <CompetenceList title="Competences techniques" items={analysis.competences.techniques} color="blue" />
+          <CompetenceList title="Competences transversales" items={analysis.competences.transversales} color="teal" />
+          <CompetenceList title="Savoir-etre professionnels" items={analysis.competences.savoir_etre} color="green" />
+          <CompetenceList title="A consolider / developper" items={analysis.competences.a_consolider} color="amber" />
         </Section>
       )}
 
-      {/* 4. Pistes de m\u00e9tiers */}
+      {/* 4. Pistes de metiers */}
       {analysis.pistes_metiers?.length > 0 && (
-        <Section title="4. Pistes de m\u00e9tiers" color="emerald">
+        <Section title="4. Pistes de metiers" color="emerald">
           <div className="space-y-3">
             {analysis.pistes_metiers.map((m, i) => (
               <div key={i} className="p-3 bg-gray-50 rounded-lg border">
@@ -421,14 +495,14 @@ function AnalysisPanel({ analysis }) {
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-gray-400 mt-1">\u00c9volution : {m.evolution}</p>
+                <p className="text-[10px] text-gray-400 mt-1">Evolution : {m.evolution}</p>
               </div>
             ))}
           </div>
         </Section>
       )}
 
-      {/* Diagnostic freins (r\u00e9sum\u00e9) */}
+      {/* Diagnostic freins (resume) */}
       {analysis.freins_sociaux && (
         <Section title="Diagnostic des freins sociaux" color="red">
           <div className="grid grid-cols-7 gap-2 mb-3">
@@ -444,7 +518,7 @@ function AnalysisPanel({ analysis }) {
           </div>
           {analysis.freins_sociaux.nb_freins_majeurs > 0 && (
             <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-              {analysis.freins_sociaux.nb_freins_majeurs} frein(s) majeur(s) d\u00e9tect\u00e9(s). Voir le plan d'actions prioritaires ci-dessous.
+              {analysis.freins_sociaux.nb_freins_majeurs} frein(s) majeur(s) detecte(s). Voir le plan d'actions prioritaires ci-dessous.
             </div>
           )}
           {analysis.freins_sociaux.plan_actions.length > 0 && (
@@ -467,9 +541,9 @@ function AnalysisPanel({ analysis }) {
         </Section>
       )}
 
-      {/* 5. Parcours de d\u00e9veloppement */}
+      {/* 5. Parcours de developpement */}
       {analysis.parcours_dev?.length > 0 && (
-        <Section title="5. Parcours de d\u00e9veloppement des comp\u00e9tences" color="emerald">
+        <Section title="5. Parcours de developpement des competences" color="emerald">
           <div className="relative">
             {analysis.parcours_dev.map((phase, idx) => (
               <div key={idx} className="flex gap-4 mb-6 last:mb-0">
@@ -495,7 +569,7 @@ function AnalysisPanel({ analysis }) {
                   <ul className="mt-2 space-y-1">
                     {phase.actions.map((a, j) => (
                       <li key={j} className="text-xs text-gray-600 flex items-start gap-2">
-                        <span className="text-gray-300 mt-0.5">\u2022</span>
+                        <span className="text-gray-300 mt-0.5">-</span>
                         <span>{a}</span>
                       </li>
                     ))}
@@ -504,7 +578,7 @@ function AnalysisPanel({ analysis }) {
                     <div className="mt-2 p-2 bg-gray-50 rounded">
                       <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Indicateurs de progression</p>
                       {phase.indicateurs.map((ind, k) => (
-                        <p key={k} className="text-[10px] text-gray-500">\u2713 {ind}</p>
+                        <p key={k} className="text-[10px] text-gray-500">V {ind}</p>
                       ))}
                     </div>
                   )}
@@ -533,11 +607,11 @@ function AnalysisPanel({ analysis }) {
           )}
           {analysis.recommandations_cip.conditions_reussite?.length > 0 && (
             <div className="mb-4">
-              <p className="text-xs font-bold text-gray-500 uppercase mb-2">Conditions de r\u00e9ussite</p>
+              <p className="text-xs font-bold text-gray-500 uppercase mb-2">Conditions de reussite</p>
               <ul className="space-y-1">
                 {analysis.recommandations_cip.conditions_reussite.map((c, i) => (
                   <li key={i} className="text-xs text-gray-600 flex items-start gap-2">
-                    <span className="text-emerald-400 mt-0.5">\u2713</span>
+                    <span className="text-emerald-400 mt-0.5">V</span>
                     <span>{c}</span>
                   </li>
                 ))}
@@ -546,7 +620,7 @@ function AnalysisPanel({ analysis }) {
           )}
           {analysis.recommandations_cip.outils?.length > 0 && (
             <div>
-              <p className="text-xs font-bold text-gray-500 uppercase mb-2">Outils \u00e0 mobiliser</p>
+              <p className="text-xs font-bold text-gray-500 uppercase mb-2">Outils a mobiliser</p>
               <div className="flex flex-wrap gap-1">
                 {analysis.recommandations_cip.outils.map((o, i) => (
                   <span key={i} className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded text-xs">{o}</span>
@@ -569,33 +643,33 @@ function QuestionnairePanel({ diagnostic, onChange, onSave, saving, employee }) 
     <div className="space-y-4">
       <div className="bg-white rounded-xl shadow-sm border p-5">
         <h2 className="text-lg font-bold text-solidata-dark mb-1">
-          Questionnaire d'entretien \u2014 {employee.first_name} {employee.last_name}
+          Questionnaire d'entretien  - {employee.first_name} {employee.last_name}
         </h2>
         <p className="text-xs text-gray-400">
-          Ce questionnaire est administr\u00e9 en entretien par le CIP. Privil\u00e9gier les questions ouvertes \u00e0 l'oral, noter les r\u00e9ponses cl\u00e9s.
+          Ce questionnaire est administre en entretien par le CIP. Privilegier les questions ouvertes a l'oral, noter les reponses cles.
         </p>
       </div>
 
-      {/* Identit\u00e9 & contexte */}
-      <Section title="Identit\u00e9 & Contexte social" color="violet">
-        <TextArea label="Parcours ant\u00e9rieur (emplois, formations, p\u00e9riodes d'inactivit\u00e9)"
+      {/* Identite & contexte */}
+      <Section title="Identite & Contexte social" color="violet">
+        <TextArea label="Parcours anterieur (emplois, formations, periodes d'inactivite)"
           value={diagnostic.parcours_anterieur} onChange={v => onChange('parcours_anterieur', v)}
-          placeholder="Ex : A travaill\u00e9 dans la restauration pendant 3 ans, puis sans emploi 1 an..."
+          placeholder="Ex : A travaille dans la restauration pendant 3 ans, puis sans emploi 1 an..."
         />
-        <TextArea label="Contraintes de sant\u00e9" value={diagnostic.contraintes_sante}
-          onChange={v => onChange('contraintes_sante', v)} placeholder="Ex : Mal de dos, port de charges limit\u00e9..." />
-        <TextArea label="Contraintes de mobilit\u00e9" value={diagnostic.contraintes_mobilite}
-          onChange={v => onChange('contraintes_mobilite', v)} placeholder="Ex : Pas de permis, d\u00e9pend du bus..." />
+        <TextArea label="Contraintes de sante" value={diagnostic.contraintes_sante}
+          onChange={v => onChange('contraintes_sante', v)} placeholder="Ex : Mal de dos, port de charges limite..." />
+        <TextArea label="Contraintes de mobilite" value={diagnostic.contraintes_mobilite}
+          onChange={v => onChange('contraintes_mobilite', v)} placeholder="Ex : Pas de permis, depend du bus..." />
         <TextArea label="Contraintes familiales" value={diagnostic.contraintes_familiales}
-          onChange={v => onChange('contraintes_familiales', v)} placeholder="Ex : Parent isol\u00e9, enfants en bas \u00e2ge..." />
+          onChange={v => onChange('contraintes_familiales', v)} placeholder="Ex : Parent isole, enfants en bas age..." />
         <TextArea label="Autres contraintes" value={diagnostic.autres_contraintes}
           onChange={v => onChange('autres_contraintes', v)} placeholder="Autres informations pertinentes..." />
       </Section>
 
-      {/* PCM Simplifi\u00e9 */}
-      <Section title="Questionnaire PCM simplifi\u00e9" color="violet">
+      {/* PCM Simplifie */}
+      <Section title="Questionnaire PCM simplifie" color="violet">
         <p className="text-xs text-gray-400 mb-3">
-          Questions ouvertes \u00e0 poser \u00e0 l'oral. Notez les r\u00e9ponses cl\u00e9s, m\u00eame en quelques mots.
+          Questions ouvertes a poser a l'oral. Notez les reponses cles, meme en quelques mots.
         </p>
         {PCM_QUESTIONS.map(q => (
           <TextArea
@@ -603,7 +677,7 @@ function QuestionnairePanel({ diagnostic, onChange, onSave, saving, employee }) 
             label={q.question}
             value={diagnostic[q.key]}
             onChange={v => onChange(q.key, v)}
-            placeholder="R\u00e9ponse du collaborateur..."
+            placeholder="Reponse du collaborateur..."
             small
           />
         ))}
@@ -612,48 +686,59 @@ function QuestionnairePanel({ diagnostic, onChange, onSave, saving, employee }) 
       {/* Observations */}
       <Section title="Observations CIP en situation de travail" color="blue">
         <p className="text-xs text-gray-400 mb-3">
-          \u00c0 compl\u00e9ter avec le manager. Bas\u00e9 sur l'observation directe en poste.
+          A completer avec le manager. Base sur l'observation directe en poste.
         </p>
-        <TextArea label="T\u00e2ches r\u00e9alis\u00e9es / postes occup\u00e9s" value={diagnostic.obs_taches_realisees}
-          onChange={v => onChange('obs_taches_realisees', v)} placeholder="Ex : Tri textile, pr\u00e9paration de lots..." />
-        <TextArea label="Points forts observ\u00e9s" value={diagnostic.obs_points_forts}
+        <TextArea label="Taches realisees / postes occupes" value={diagnostic.obs_taches_realisees}
+          onChange={v => onChange('obs_taches_realisees', v)} placeholder="Ex : Tri textile, preparation de lots..." />
+        <TextArea label="Points forts observes" value={diagnostic.obs_points_forts}
           onChange={v => onChange('obs_points_forts', v)} placeholder="Ex : Ponctuel, soigneux, bon contact..." />
-        <TextArea label="Difficult\u00e9s observ\u00e9es" value={diagnostic.obs_difficultes}
-          onChange={v => onChange('obs_difficultes', v)} placeholder="Ex : Difficult\u00e9 \u00e0 maintenir le rythme..." />
-        <TextArea label="Comportement en \u00e9quipe" value={diagnostic.obs_comportement_equipe}
-          onChange={v => onChange('obs_comportement_equipe', v)} placeholder="Ex : S'int\u00e8gre bien, un peu r\u00e9serv\u00e9..." />
-        <TextArea label="Autonomie, ponctualit\u00e9, assiduit\u00e9" value={diagnostic.obs_autonomie_ponctualite}
-          onChange={v => onChange('obs_autonomie_ponctualite', v)} placeholder="Ex : Toujours \u00e0 l'heure, a besoin de rappels..." />
+        <TextArea label="Difficultes observees" value={diagnostic.obs_difficultes}
+          onChange={v => onChange('obs_difficultes', v)} placeholder="Ex : Difficulte a maintenir le rythme..." />
+        <TextArea label="Comportement en equipe" value={diagnostic.obs_comportement_equipe}
+          onChange={v => onChange('obs_comportement_equipe', v)} placeholder="Ex : S'integre bien, un peu reserve..." />
+        <TextArea label="Autonomie, ponctualite, assiduite" value={diagnostic.obs_autonomie_ponctualite}
+          onChange={v => onChange('obs_autonomie_ponctualite', v)} placeholder="Ex : Toujours a l'heure, a besoin de rappels..." />
       </Section>
 
-      {/* Pr\u00e9f\u00e9rences */}
-      <Section title="Pr\u00e9f\u00e9rences & Motivations" color="emerald">
+      {/* Preferences */}
+      <Section title="Preferences & Motivations" color="emerald">
         <TextArea label="Ce que la personne dit aimer faire" value={diagnostic.pref_aime_faire}
-          onChange={v => onChange('pref_aime_faire', v)} placeholder="Ex : Travailler avec les mains, \u00eatre dehors..." />
+          onChange={v => onChange('pref_aime_faire', v)} placeholder="Ex : Travailler avec les mains, etre dehors..." />
         <TextArea label="Ce qu'elle ne veut plus faire" value={diagnostic.pref_ne_veut_plus}
-          onChange={v => onChange('pref_ne_veut_plus', v)} placeholder="Ex : Rester assise toute la journ\u00e9e..." />
-        <TextArea label="Environnements de travail pr\u00e9f\u00e9r\u00e9s" value={diagnostic.pref_environnement_prefere}
+          onChange={v => onChange('pref_ne_veut_plus', v)} placeholder="Ex : Rester assise toute la journee..." />
+        <TextArea label="Environnements de travail preferes" value={diagnostic.pref_environnement_prefere}
           onChange={v => onChange('pref_environnement_prefere', v)} placeholder="Ex : Collectif, en mouvement..." />
-        <TextArea label="Environnements \u00e0 \u00e9viter" value={diagnostic.pref_environnement_eviter}
-          onChange={v => onChange('pref_environnement_eviter', v)} placeholder="Ex : Bureau, contact t\u00e9l\u00e9phonique..." />
-        <TextArea label="Objectifs exprim\u00e9s (m\u00eame flous)" value={diagnostic.pref_objectifs}
+        <TextArea label="Environnements a eviter" value={diagnostic.pref_environnement_eviter}
+          onChange={v => onChange('pref_environnement_eviter', v)} placeholder="Ex : Bureau, contact telephonique..." />
+        <TextArea label="Objectifs exprimes (meme flous)" value={diagnostic.pref_objectifs}
           onChange={v => onChange('pref_objectifs', v)} placeholder="Ex : Trouver un CDI, passer le permis..." />
       </Section>
 
       {/* Explorama */}
-      <Section title="Ressenti face aux outils d'exploration" color="teal">
-        <TextArea label="Univers ou gestes qui ont suscit\u00e9 de l'int\u00e9r\u00eat" value={diagnostic.explorama_interets}
-          onChange={v => onChange('explorama_interets', v)} placeholder="Ex : Photos d'atelier couture, gestes manuels..." />
-        <TextArea label="Univers ou gestes rejet\u00e9s" value={diagnostic.explorama_rejets}
-          onChange={v => onChange('explorama_rejets', v)} placeholder="Ex : Bureau, ordinateur, t\u00e9l\u00e9phone..." />
+      <Section title="Explorama - Exploration des interets professionnels" color="teal">
+        <p className="text-xs text-gray-400 mb-3">
+          Outil base sur des photos et des mises en situation. Notez les reactions spontanees.
+        </p>
+        <TextArea label="Univers ou photos qui ont suscite de l'interet" value={diagnostic.explorama_interets}
+          onChange={v => onChange('explorama_interets', v)} placeholder="Ex : Photos d'atelier couture, entrepot logistique, cuisine..." />
+        <TextArea label="Univers ou photos rejetes" value={diagnostic.explorama_rejets}
+          onChange={v => onChange('explorama_rejets', v)} placeholder="Ex : Bureau, ordinateur, telephone, travail isole..." />
+        <TextArea label="Gestes professionnels apprecies (ce que la personne aime faire avec ses mains/son corps)" value={diagnostic.explorama_gestes_positifs}
+          onChange={v => onChange('explorama_gestes_positifs', v)} placeholder="Ex : Trier, plier, porter, conduire, nettoyer, coudre, ranger..." />
+        <TextArea label="Gestes professionnels rejetes (ce que la personne n'aime pas faire)" value={diagnostic.explorama_gestes_negatifs}
+          onChange={v => onChange('explorama_gestes_negatifs', v)} placeholder="Ex : Ecrire, taper a l'ordinateur, rester assis, parler au telephone..." />
+        <TextArea label="Environnements de travail preferes" value={diagnostic.explorama_environnements}
+          onChange={v => onChange('explorama_environnements', v)} placeholder="Ex : Exterieur, atelier, entrepot, en equipe, calme, en mouvement..." />
+        <TextArea label="Rythme de travail prefere" value={diagnostic.explorama_rythme}
+          onChange={v => onChange('explorama_rythme', v)} placeholder="Ex : Regulier, varie, rapide, tranquille, avec pauses frequentes..." small />
       </Section>
 
       {/* Orientation CIP */}
-      <Section title="Orientation souhait\u00e9e par le CIP" color="indigo">
-        <TextArea label="Hypoth\u00e8ses de m\u00e9tiers du CIP" value={diagnostic.cip_hypotheses_metiers}
-          onChange={v => onChange('cip_hypotheses_metiers', v)} placeholder="Ex : Op\u00e9rateur logistique, agent d'entretien..." />
-        <TextArea label="Questions ou h\u00e9sitations du CIP" value={diagnostic.cip_questions}
-          onChange={v => onChange('cip_questions', v)} placeholder="Ex : H\u00e9site entre logistique et vente..." />
+      <Section title="Orientation souhaitee par le CIP" color="indigo">
+        <TextArea label="Hypotheses de metiers du CIP" value={diagnostic.cip_hypotheses_metiers}
+          onChange={v => onChange('cip_hypotheses_metiers', v)} placeholder="Ex : Operateur logistique, agent d'entretien..." />
+        <TextArea label="Questions ou hesitations du CIP" value={diagnostic.cip_questions}
+          onChange={v => onChange('cip_questions', v)} placeholder="Ex : Hesite entre logistique et vente..." />
       </Section>
 
       <div className="flex justify-end">
@@ -676,8 +761,8 @@ function FreinsPanel({ diagnostic, onChange, onSave, saving, analysis, diagTab, 
       <div className="bg-white rounded-xl shadow-sm border p-5">
         <h2 className="text-lg font-bold text-solidata-dark mb-1">Diagnostic des freins sociaux</h2>
         <p className="text-xs text-gray-400">
-          \u00c9valuez chaque frein de 1 (pas de difficult\u00e9) \u00e0 5 (bloquant).
-          Les questions sont simples et non intrusives, adapt\u00e9es aux comp\u00e9tences linguistiques faibles.
+          Evaluez chaque frein de 1 (pas de difficulte) a 5 (bloquant).
+          Les questions sont simples et non intrusives, adaptees aux competences linguistiques faibles.
         </p>
       </div>
 
@@ -688,13 +773,13 @@ function FreinsPanel({ diagnostic, onChange, onSave, saving, analysis, diagTab, 
           className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition ${
             diagTab === 'freins' ? 'bg-white shadow text-red-600' : 'text-gray-500'
           }`}
-        >\u00c9valuation des freins</button>
+        >Evaluation des freins</button>
         <button
           onClick={() => setDiagTab('resultats')}
           className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition ${
             diagTab === 'resultats' ? 'bg-white shadow text-red-600' : 'text-gray-500'
           }`}
-        >R\u00e9sultats & priorit\u00e9s</button>
+        >Resultats & priorites</button>
       </div>
 
       {diagTab === 'freins' && (
@@ -727,12 +812,41 @@ function FreinsPanel({ diagnostic, onChange, onSave, saving, analysis, diagTab, 
                 ))}
               </div>
 
-              {/* D\u00e9tail si niveau >= 3 */}
+              {/* Causes profondes si niveau >= 2 */}
+              {diagnostic[`frein_${frein.key}`] >= 2 && frein.causes && (
+                <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <p className="text-xs font-semibold text-gray-600 mb-2">Causes identifiees :</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {frein.causes.map(cause => {
+                      const currentCauses = (diagnostic[`frein_${frein.key}_causes`] || '').split(',').filter(Boolean);
+                      const isChecked = currentCauses.includes(cause.id);
+                      return (
+                        <label key={cause.id} className={`flex items-start gap-2 p-1.5 rounded cursor-pointer text-xs ${isChecked ? 'bg-amber-50 text-amber-800' : 'text-gray-600 hover:bg-gray-100'}`}>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              const updated = isChecked
+                                ? currentCauses.filter(c => c !== cause.id)
+                                : [...currentCauses, cause.id];
+                              onChange(`frein_${frein.key}_causes`, updated.join(','));
+                            }}
+                            className="mt-0.5 rounded border-gray-300"
+                          />
+                          <span>{cause.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Detail si niveau >= 3 */}
               {diagnostic[`frein_${frein.key}`] >= 3 && (
                 <textarea
                   value={diagnostic[`frein_${frein.key}_detail`] || ''}
                   onChange={e => onChange(`frein_${frein.key}_detail`, e.target.value)}
-                  placeholder="Pr\u00e9cisez la situation (facultatif)..."
+                  placeholder="Precisez la situation (facultatif)..."
                   className="w-full mt-2 p-2 border rounded-lg text-sm resize-none"
                   rows={2}
                 />
@@ -751,8 +865,8 @@ function FreinsPanel({ diagnostic, onChange, onSave, saving, analysis, diagTab, 
 
       {diagTab === 'resultats' && analysis?.freins_sociaux && (
         <div className="space-y-4">
-          {/* Vue radar simplifi\u00e9e */}
-          <Section title="Synth\u00e8se des freins" color="red">
+          {/* Vue radar simplifiee */}
+          <Section title="Synthese des freins" color="red">
             <div className="space-y-2">
               {analysis.freins_sociaux.freins.map(f => (
                 <div key={f.type} className="flex items-center gap-3">
@@ -794,18 +908,18 @@ function FreinsPanel({ diagnostic, onChange, onSave, saving, analysis, diagTab, 
             </Section>
           )}
 
-          {/* D\u00e9tail par frein avec actions de lev\u00e9e */}
+          {/* Detail par frein avec actions de levee */}
           {analysis.freins_sociaux.freins.filter(f => f.niveau >= 3).map(f => (
-            <Section key={f.type} title={`Frein ${f.label} \u2014 Niveau ${f.niveau}/5`} color="red">
+            <Section key={f.type} title={`Frein ${f.label}  - Niveau ${f.niveau}/5`} color="red">
               <p className="text-sm text-gray-600 mb-2">{f.niveau_label}</p>
               {f.detail && <p className="text-xs text-gray-500 italic mb-2">"{f.detail}"</p>}
               {f.actions.length > 0 && (
                 <div>
-                  <p className="text-xs font-bold text-gray-500 uppercase mb-1">Actions \u00e0 mettre en place</p>
+                  <p className="text-xs font-bold text-gray-500 uppercase mb-1">Actions a mettre en place</p>
                   <ul className="space-y-1">
                     {f.actions.map((a, i) => (
                       <li key={i} className="text-xs text-gray-600 flex items-start gap-2">
-                        <span className="text-red-400 mt-0.5">\u2192</span>
+                        <span className="text-red-400 mt-0.5">></span>
                         <span>{a}</span>
                       </li>
                     ))}
@@ -817,7 +931,7 @@ function FreinsPanel({ diagnostic, onChange, onSave, saving, analysis, diagTab, 
 
           {analysis.freins_sociaux.freins.every(f => f.niveau < 3) && (
             <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
-              <p className="text-lg font-semibold text-green-700">Aucun frein majeur d\u00e9tect\u00e9</p>
+              <p className="text-lg font-semibold text-green-700">Aucun frein majeur detecte</p>
               <p className="text-sm text-green-600 mt-1">La situation sociale est favorable au parcours d'insertion.</p>
             </div>
           )}
@@ -826,7 +940,7 @@ function FreinsPanel({ diagnostic, onChange, onSave, saving, analysis, diagTab, 
 
       {diagTab === 'resultats' && !analysis?.freins_sociaux && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
-          <p className="text-sm text-amber-700">Compl\u00e9tez et sauvegardez le diagnostic des freins pour voir les r\u00e9sultats.</p>
+          <p className="text-sm text-amber-700">Completez et sauvegardez le diagnostic des freins pour voir les resultats.</p>
         </div>
       )}
     </div>
@@ -842,7 +956,7 @@ function DataBadge({ label, available }) {
     <span className={`px-2 py-1 rounded-full text-[10px] font-medium ${
       available ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'
     }`}>
-      {available ? '\u2713' : '\u2717'} {label}
+      {available ? 'V' : 'X'} {label}
     </span>
   );
 }

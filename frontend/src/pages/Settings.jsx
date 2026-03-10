@@ -28,13 +28,19 @@ export default function Settings() {
   const [editTarif, setEditTarif] = useState(null);
   const [tarifForm, setTarifForm] = useState({ type: '', exutoire_id: '', prix_tonne: '', trimestre: '' });
 
-  // Objectifs périodiques
+  // Objectifs periodiques
   const [objectives, setObjectives] = useState([]);
   const [objAnnee, setObjAnnee] = useState(new Date().getFullYear());
   const [showObjForm, setShowObjForm] = useState(false);
   const [objForm, setObjForm] = useState({ domaine: 'collecte', indicateur: '', unite: '', periode: 'mensuel', mois: '', trimestre: '', valeur_cible: '', commentaire: '' });
 
-  useEffect(() => { loadData(); }, []);
+  // Declencheurs automatiques
+  const [triggers, setTriggers] = useState([]);
+  const [triggerEvents, setTriggerEvents] = useState([]);
+  const [showTriggerForm, setShowTriggerForm] = useState(false);
+  const [triggerForm, setTriggerForm] = useState({ name: '', event: '', template_id: '', delay_minutes: 0 });
+
+  useEffect(() => { loadData(); loadTriggers(); }, []);
   useEffect(() => { loadTarifs(); }, [tarifAnnee]);
   useEffect(() => { loadObjectives(); }, [objAnnee]);
 
@@ -131,6 +137,40 @@ export default function Settings() {
     try {
       await api.delete(`/settings/objectives/${id}`);
       loadObjectives();
+    } catch (err) { console.error(err); }
+  };
+
+  // Declencheurs automatiques
+  const loadTriggers = async () => {
+    try {
+      const res = await api.get('/settings/triggers');
+      setTriggers(res.data.triggers || []);
+      setTriggerEvents(res.data.events || []);
+    } catch (err) { console.error(err); }
+  };
+
+  const createTrigger = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post('/settings/triggers', { ...triggerForm, template_id: parseInt(triggerForm.template_id), delay_minutes: parseInt(triggerForm.delay_minutes) || 0 });
+      setShowTriggerForm(false);
+      setTriggerForm({ name: '', event: '', template_id: '', delay_minutes: 0 });
+      loadTriggers();
+    } catch (err) { console.error(err); }
+  };
+
+  const toggleTrigger = async (id, currentActive) => {
+    try {
+      await api.put(`/settings/triggers/${id}`, { is_active: !currentActive });
+      loadTriggers();
+    } catch (err) { console.error(err); }
+  };
+
+  const deleteTrigger = async (id) => {
+    if (!confirm('Supprimer ce declencheur ?')) return;
+    try {
+      await api.delete(`/settings/triggers/${id}`);
+      loadTriggers();
     } catch (err) { console.error(err); }
   };
 
@@ -321,8 +361,103 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Template Form */}
-        {/* Objectifs périodiques */}
+        {/* Template Form Modal */}
+        {showTemplateForm && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <form onSubmit={createTemplate} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
+              <h2 className="text-lg font-bold mb-4">Nouveau modele de message</h2>
+              <div className="space-y-3">
+                <input placeholder="Nom du template *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                  <option value="email">Email</option>
+                  <option value="sms">SMS</option>
+                </select>
+                {templateForm.type === 'email' && (
+                  <input placeholder="Objet de l'email" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                )}
+                <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows={4} required />
+                <p className="text-[10px] text-gray-400">Variables : {'{prenom}'}, {'{nom}'}, {'{date}'}, {'{heure}'}, {'{lieu}'}, {'{poste}'}, {'{equipe}'}</p>
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button type="button" onClick={() => setShowTemplateForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
+                <button type="submit" className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm font-medium">Creer</button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Declencheurs automatiques */}
+        <div className="bg-white rounded-xl shadow-sm border">
+          <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold">Declencheurs automatiques</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Definir quand envoyer automatiquement un email ou SMS</p>
+            </div>
+            <button onClick={() => setShowTriggerForm(true)} className="bg-solidata-green text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-solidata-green/90">+ Declencheur</button>
+          </div>
+          <div className="divide-y">
+            {triggers.length === 0 ? (
+              <p className="p-6 text-center text-gray-400 text-sm">Aucun declencheur configure</p>
+            ) : triggers.map(t => (
+              <div key={t.id} className="p-4 flex items-center gap-3">
+                <button
+                  onClick={() => toggleTrigger(t.id, t.is_active)}
+                  className={`w-10 h-5 rounded-full transition flex-shrink-0 ${t.is_active ? 'bg-green-500' : 'bg-gray-300'}`}
+                >
+                  <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${t.is_active ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800">{t.name}</p>
+                  <p className="text-xs text-gray-400">
+                    Evenement : {triggerEvents.find(e => e.value === t.event)?.label || t.event}
+                    {t.delay_minutes > 0 && ` (delai : ${t.delay_minutes} min)`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${t.template_type === 'email' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                    {(t.template_type || '').toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-500 truncate max-w-[120px]">{t.template_name}</span>
+                  <button onClick={() => deleteTrigger(t.id)} className="text-red-400 hover:text-red-600 text-xs ml-2">Suppr.</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Trigger Form Modal */}
+        {showTriggerForm && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <form onSubmit={createTrigger} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
+              <h2 className="text-lg font-bold mb-4">Nouveau declencheur</h2>
+              <div className="space-y-3">
+                <input placeholder="Nom (ex: Rappel entretien J-1) *" value={triggerForm.name} onChange={e => setTriggerForm({ ...triggerForm, name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <select value={triggerForm.event} onChange={e => setTriggerForm({ ...triggerForm, event: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
+                  <option value="">-- Evenement declencheur --</option>
+                  {triggerEvents.map(ev => (
+                    <option key={ev.value} value={ev.value}>{ev.label}</option>
+                  ))}
+                </select>
+                <select value={triggerForm.template_id} onChange={e => setTriggerForm({ ...triggerForm, template_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
+                  <option value="">-- Template a utiliser --</option>
+                  {templates.filter(t => t.is_active).map(t => (
+                    <option key={t.id} value={t.id}>[{t.type.toUpperCase()}] {t.name}</option>
+                  ))}
+                </select>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Delai avant envoi (minutes)</label>
+                  <input type="number" min="0" value={triggerForm.delay_minutes} onChange={e => setTriggerForm({ ...triggerForm, delay_minutes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="0 = immediat" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button type="button" onClick={() => setShowTriggerForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
+                <button type="submit" className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm font-medium">Creer</button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Objectifs periodiques */}
         <div className="bg-white rounded-xl shadow-sm border mb-8">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <div>
