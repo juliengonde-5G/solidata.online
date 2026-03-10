@@ -554,6 +554,7 @@ async function generateIntelligentTour(vehicleId, date) {
   // 2. Récupérer tous les CAV actifs
   const cavResult = await pool.query("SELECT * FROM cav WHERE status = 'active' ORDER BY name");
   const allCavs = cavResult.rows;
+  if (allCavs.length === 0) throw new Error('Aucun CAV actif trouvé. Ajoutez des CAV avant de créer une tournée.');
 
   // 3. Prédire le remplissage pour chaque CAV
   const cavWithPredictions = [];
@@ -604,6 +605,8 @@ async function generateIntelligentTour(vehicleId, date) {
     }
     if (estimatedWeight >= maxCapacity) break;
   }
+
+  if (selectedCavs.length === 0) throw new Error('Aucun CAV sélectionné — vérifiez la capacité du véhicule et les données de remplissage.');
 
   // 7. Optimiser la route (TSP + 2-opt)
   let optimizedRoute = nearestNeighborTSP(selectedCavs, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
@@ -1311,13 +1314,17 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       return res.status(400).json({ error: 'vehicle_id et date requis' });
     }
 
-    const result = await generateIntelligentTour(vehicle_id, date);
+    const vid = parseInt(vehicle_id, 10);
+    const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
+    if (isNaN(vid)) return res.status(400).json({ error: 'vehicle_id invalide' });
+
+    const result = await generateIntelligentTour(vid, date);
 
     // Créer la tournée en BDD (avec distance, durée, nb_cav)
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status, ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
        VALUES ($1, $2, $3, 'intelligent', 'planned', $4, $5, $6, $7) RETURNING *`,
-      [date, vehicle_id, driver_employee_id, result.explanation,
+      [date, vid, did, result.explanation,
        result.stats.totalDistance, result.stats.estimatedDuration, result.stats.totalCavs]
     );
     const tourId = tourResult.rows[0].id;
@@ -1336,8 +1343,8 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       ...result,
     });
   } catch (err) {
-    console.error('[TOURS] Erreur tournée intelligente :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('[TOURS] Erreur tournée intelligente :', err.message, err.stack);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
   }
 });
 
@@ -1349,10 +1356,14 @@ router.post('/standard', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       return res.status(400).json({ error: 'vehicle_id, date et standard_route_id requis' });
     }
 
+    const vid = parseInt(vehicle_id, 10);
+    const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
+    const srid = parseInt(standard_route_id, 10);
+
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status)
        VALUES ($1, $2, $3, $4, 'standard', 'planned') RETURNING *`,
-      [date, vehicle_id, driver_employee_id, standard_route_id]
+      [date, vid, did, srid]
     );
     const tourId = tourResult.rows[0].id;
 
@@ -1370,8 +1381,8 @@ router.post('/standard', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     res.status(201).json(tourResult.rows[0]);
   } catch (err) {
-    console.error('[TOURS] Erreur tournée standard :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('[TOURS] Erreur tournée standard :', err.message, err.stack);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
   }
 });
 
@@ -1383,10 +1394,13 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       return res.status(400).json({ error: 'vehicle_id, date et cav_ids requis' });
     }
 
+    const vid = parseInt(vehicle_id, 10);
+    const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
+
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status)
        VALUES ($1, $2, $3, 'manual', 'planned') RETURNING *`,
-      [date, vehicle_id, driver_employee_id]
+      [date, vid, did]
     );
     const tourId = tourResult.rows[0].id;
 
@@ -1399,8 +1413,8 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     res.status(201).json(tourResult.rows[0]);
   } catch (err) {
-    console.error('[TOURS] Erreur tournée manuelle :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('[TOURS] Erreur tournée manuelle :', err.message, err.stack);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
   }
 });
 
