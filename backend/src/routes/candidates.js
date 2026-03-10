@@ -755,8 +755,8 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
       'assigned_team_id', 'position_id', 'comment',
     ];
 
-    // Champs qui doivent être NULL au lieu de '' pour PostgreSQL (date, FK)
-    const nullableFields = ['appointment_date', 'position_id', 'assigned_team_id'];
+    // Champs qui doivent être NULL au lieu de '' pour PostgreSQL (date, FK, CHECK constraints)
+    const nullableFields = ['appointment_date', 'position_id', 'assigned_team_id', 'practical_test_result', 'sms_response', 'gender'];
 
     for (const field of allowedFields) {
       if (fields[field] !== undefined) {
@@ -969,6 +969,11 @@ router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, re
     }
 
     const c = candidate.rows[0];
+
+    // Vérifier que le candidat a un nom/prénom
+    if (!c.first_name || !c.last_name) {
+      return res.status(400).json({ error: 'Le candidat doit avoir un prénom et un nom avant d\'être converti. Complétez sa fiche.' });
+    }
 
     // Récupérer les compétences confirmées du candidat
     const skillsResult = await pool.query(

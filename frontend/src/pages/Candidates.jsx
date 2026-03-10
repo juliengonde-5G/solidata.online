@@ -184,8 +184,9 @@ export default function Candidates() {
   const saveEdit = async () => {
     try {
       const payload = { ...editForm, position_id: editForm.position_id || null };
-      // Convertir les chaînes vides en null pour les champs date
+      // Convertir les chaînes vides en null pour les champs date et CHECK constraints
       if (payload.appointment_date === '') payload.appointment_date = null;
+      if (!payload.practical_test_result) payload.practical_test_result = null;
       const res = await api.put(`/candidates/${selected.id}`, payload);
       setEditing(false);
       setSelected(res.data);
