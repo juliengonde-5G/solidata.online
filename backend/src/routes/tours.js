@@ -719,10 +719,7 @@ router.get('/my', async (req, res) => {
     const userId = req.user.id;
     // Trouver l'employee lié à cet utilisateur
     const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
-    if (empResult.rows.length === 0) {
-      return res.json([]);
-    }
-    const employeeId = empResult.rows[0].id;
+    const employeeId = empResult.rows.length > 0 ? empResult.rows[0].id : null;
 
     const { status, date } = req.query;
     let query = `
@@ -733,14 +730,17 @@ router.get('/my', async (req, res) => {
       FROM tours t
       LEFT JOIN vehicles v ON t.vehicle_id = v.id
       LEFT JOIN employees e ON t.driver_employee_id = e.id
-      WHERE t.driver_employee_id = $1
+      WHERE (
+        t.driver_employee_id = $1
+        OR (t.driver_employee_id IS NULL AND t.status IN ('planned', 'in_progress'))
+      )
     `;
     const params = [employeeId];
 
     if (status) { params.push(status); query += ` AND t.status = $${params.length}`; }
     if (date) { params.push(date); query += ` AND t.date = $${params.length}`; }
 
-    // Par défaut, montrer les tournées du jour et futures planifiées
+    // Par défaut, montrer les tournées du jour et futures planifiées + en cours
     if (!status && !date) {
       query += ` AND (t.date >= CURRENT_DATE OR t.status = 'in_progress')`;
     }
@@ -1432,6 +1432,15 @@ router.put('/:id/status', async (req, res) => {
 
     if (status === 'in_progress') updates.push('started_at = NOW()');
     if (status === 'completed') updates.push('completed_at = NOW()');
+
+    // Auto-assigner le chauffeur connecté si pas encore assigné
+    if (status === 'in_progress' && req.user) {
+      const empRes = await pool.query('SELECT id FROM employees WHERE user_id = $1', [req.user.id]);
+      if (empRes.rows.length > 0) {
+        params.push(empRes.rows[0].id);
+        updates.push(`driver_employee_id = COALESCE(driver_employee_id, $${params.length})`);
+      }
+    }
 
     params.push(req.params.id);
     const result = await pool.query(
