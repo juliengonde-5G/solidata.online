@@ -5,41 +5,44 @@ import api from '../services/api';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
 
 export default function VehicleSelect() {
-  const [vehicles, setVehicles] = useState([]);
   const [tours, setTours] = useState([]);
   const [selectedTour, setSelectedTour] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [claiming, setClaiming] = useState(false);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     try {
-      const [vRes, tRes] = await Promise.all([
-        api.get('/vehicles?available=true'),
-        api.get('/tours/my'),
-      ]);
-      setVehicles(vRes.data);
-      setTours(tRes.data);
+      const res = await api.get('/tours/my');
+      setTours(res.data);
+      // Si une tournée est déjà in_progress pour ce chauffeur, reprendre directement
+      const inProgress = res.data.find(t => t.status === 'in_progress');
+      if (inProgress) {
+        localStorage.setItem('current_tour_id', inProgress.id);
+        navigate('/tour-map');
+        return;
+      }
     } catch (err) { console.error(err); }
     setLoading(false);
   };
 
   const startTour = async () => {
-    if (!selectedTour) return;
+    if (!selectedTour || claiming) return;
+    setClaiming(true);
     try {
-      // Réclamer la tournée (auto-assign le chauffeur connecté)
       await api.put(`/tours/${selectedTour.id}/claim`);
       localStorage.setItem('current_tour_id', selectedTour.id);
       navigate('/checklist');
     } catch (err) {
-      const msg = err.response?.data?.error || 'Erreur lors de la prise de tournée';
+      const msg = err.response?.data?.error || 'Erreur lors de la prise du véhicule';
       alert(msg);
-      loadData(); // Recharger la liste au cas où la tournée a été prise par un autre
+      setSelectedTour(null);
+      loadData();
     }
+    setClaiming(false);
   };
 
   const dateLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -61,7 +64,7 @@ export default function VehicleSelect() {
         <TourStepBar currentPath="/vehicle-select" />
       </div>
 
-      <h2 className="font-semibold text-gray-800 text-lg mb-4">Choisir une tournée</h2>
+      <h2 className="font-semibold text-gray-800 text-lg mb-4">Choisir votre véhicule</h2>
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
@@ -71,10 +74,10 @@ export default function VehicleSelect() {
       ) : tours.length === 0 ? (
         <div className="card-mobile p-8 text-center">
           <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4 text-3xl">
-            📋
+            🚛
           </div>
-          <p className="font-medium text-gray-700">Aucune tournée planifiée</p>
-          <p className="text-sm text-gray-500 mt-1">Contactez votre responsable pour obtenir une affectation.</p>
+          <p className="font-medium text-gray-700">Aucun véhicule disponible</p>
+          <p className="text-sm text-gray-500 mt-1">Aucune tournée n'est planifiée pour aujourd'hui.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -89,15 +92,18 @@ export default function VehicleSelect() {
                   : 'hover:shadow-[var(--shadow-card-hover)]'
               }`}
             >
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-gray-900">Tournée #{tour.id}</span>
-                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
-                  {tour.mode === 'intelligent' ? 'IA' : tour.mode}
-                </span>
-              </div>
-              <div className="text-sm text-gray-500 space-y-1">
-                <p className="flex items-center gap-2">🚛 {tour.vehicle_registration || tour.registration || 'Véhicule non assigné'}</p>
-                <p className="flex items-center gap-2">📍 {tour.cav_count ?? tour.nb_cav ?? 0} points de collecte</p>
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-2xl flex-shrink-0">
+                  🚛
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-gray-900 text-lg">{tour.registration || 'Véhicule'}</p>
+                  {tour.vehicle_name && <p className="text-sm text-gray-600">{tour.vehicle_name}</p>}
+                  <p className="text-sm text-gray-500 mt-1">
+                    {tour.nb_cav || 0} points de collecte
+                    {tour.mode === 'intelligent' && <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">IA</span>}
+                  </p>
+                </div>
               </div>
             </button>
           ))}
@@ -109,9 +115,10 @@ export default function VehicleSelect() {
           <button
             type="button"
             onClick={startTour}
-            className="btn-primary-mobile py-4 text-lg"
+            disabled={claiming}
+            className="btn-primary-mobile py-4 text-lg disabled:opacity-50"
           >
-            Démarrer la tournée
+            {claiming ? 'Prise en charge...' : `Prendre ${selectedTour.registration || 'ce véhicule'}`}
           </button>
         </div>
       )}

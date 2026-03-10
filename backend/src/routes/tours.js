@@ -713,17 +713,16 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
 
 router.use(authenticate);
 
-// GET /api/tours/my — Tournées disponibles pour le chauffeur connecté (mobile)
-// Retourne : tournées assignées à ce chauffeur + tournées du jour non assignées (disponibles)
+// GET /api/tours/my — Tournées du jour disponibles (mobile)
+// Retourne les tournées planned du jour dont le véhicule n'a pas encore été pris,
+// + les tournées déjà en cours pour ce chauffeur
 router.get('/my', async (req, res) => {
   try {
     const userId = req.user.id;
     const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
     const employeeId = empResult.rows.length > 0 ? empResult.rows[0].id : null;
 
-    const { status, date } = req.query;
-    // Montrer les tournées disponibles : assignées à moi OU non assignées (planned du jour)
-    let query = `
+    const result = await pool.query(`
       SELECT t.*, v.registration, v.name as vehicle_name,
        CONCAT(e.first_name, ' ', e.last_name) as driver_name,
        COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id)) as nb_cav,
@@ -731,22 +730,14 @@ router.get('/my', async (req, res) => {
       FROM tours t
       LEFT JOIN vehicles v ON t.vehicle_id = v.id
       LEFT JOIN employees e ON t.driver_employee_id = e.id
-      WHERE (
-        t.driver_employee_id = $1
-        OR (t.driver_employee_id IS NULL AND t.date = CURRENT_DATE AND t.status = 'planned')
-      )
-    `;
-    const params = [employeeId];
+      WHERE
+        -- Tournées planned du jour pas encore prises
+        (t.date = CURRENT_DATE AND t.status = 'planned' AND t.driver_employee_id IS NULL)
+        -- OU tournées déjà prises par ce chauffeur (en cours ou planned)
+        OR (t.driver_employee_id = $1 AND t.status IN ('planned', 'in_progress'))
+      ORDER BY t.status = 'in_progress' DESC, t.date ASC, t.created_at DESC
+    `, [employeeId]);
 
-    if (status) { params.push(status); query += ` AND t.status = $${params.length}`; }
-    if (date) { params.push(date); query += ` AND t.date = $${params.length}`; }
-
-    if (!status && !date) {
-      query += ` AND (t.date >= CURRENT_DATE OR t.status = 'in_progress')`;
-    }
-
-    query += ' ORDER BY t.date ASC, t.created_at DESC';
-    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error('[TOURS] Erreur /my :', err);
@@ -754,7 +745,7 @@ router.get('/my', async (req, res) => {
   }
 });
 
-// PUT /api/tours/:id/claim — Le chauffeur prend une tournée disponible
+// PUT /api/tours/:id/claim — Le chauffeur prend un véhicule/tournée
 router.put('/:id/claim', async (req, res) => {
   try {
     const userId = req.user.id;
@@ -773,7 +764,7 @@ router.put('/:id/claim', async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(409).json({ error: 'Cette tournée a déjà été prise par un autre chauffeur' });
+      return res.status(409).json({ error: 'Ce véhicule a déjà été pris par un autre chauffeur' });
     }
 
     res.json(result.rows[0]);
