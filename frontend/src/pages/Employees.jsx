@@ -96,7 +96,18 @@ export default function Employees() {
   const createEmployee = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/employees', form);
+      const selectedPosition = positions.find(p => String(p.id) === String(form.position_id));
+      const payload = {
+        first_name: form.first_name,
+        last_name: form.last_name,
+        email: form.email || null,
+        phone: form.phone || null,
+        team_id: form.team_id ? Number(form.team_id) : null,
+        position: selectedPosition ? (selectedPosition.title || selectedPosition.name) : null,
+        contract_type: form.contract_type || 'CDI',
+        contract_start: form.hire_date || null,
+      };
+      await api.post('/employees', payload);
       setShowForm(false);
       setForm({ first_name: '', last_name: '', email: '', phone: '', position_id: '', team_id: '', contract_type: 'CDI', hire_date: '' });
       loadData();

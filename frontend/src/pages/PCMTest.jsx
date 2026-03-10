@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const BRAND_GREEN = '#2D8C4E';
@@ -25,6 +25,10 @@ const TYPE_DESCRIPTIONS = {
 
 export default function PCMTest() {
   const { token } = useParams();
+  const navigate = useNavigate();
+
+  // Détecte si l'utilisateur vient de l'application (a un token JWT)
+  const isFromApp = useMemo(() => !!localStorage.getItem('token'), []);
 
   const [session, setSession] = useState(null);
   const [questions, setQuestions] = useState([]);
@@ -59,6 +63,10 @@ export default function PCMTest() {
 
   const handleAnswer = (questionId, value) => {
     setAnswers(prev => ({ ...prev, [questionId]: value }));
+    // Auto-advance après un court délai visuel
+    setTimeout(() => {
+      setCurrentQ(prev => prev < totalQuestions - 1 ? prev + 1 : prev);
+    }, 350);
   };
 
   const goNext = () => {
@@ -144,7 +152,18 @@ export default function PCMTest() {
               </svg>
             </div>
             <h2 className="text-lg font-bold text-gray-800 mb-2">Test deja complete</h2>
-            <p className="text-gray-500 text-sm">Vous avez deja soumis vos reponses pour ce test. Merci pour votre participation !</p>
+            <p className="text-gray-500 text-sm mb-4">Vous avez deja soumis vos reponses pour ce test. Merci pour votre participation !</p>
+            {isFromApp ? (
+              <button onClick={() => navigate('/pcm')} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-medium text-sm hover:opacity-90" style={{ backgroundColor: BRAND_GREEN }}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                Retour à l'application
+              </button>
+            ) : (
+              <a href="https://solidarite-textile.fr" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-medium text-sm hover:opacity-90" style={{ backgroundColor: BRAND_GREEN }}>
+                Visiter Solidarité Textile
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+              </a>
+            )}
           </div>
         </div>
       </div>
@@ -218,7 +237,7 @@ export default function PCMTest() {
   }
 
   if (phase === 'done') {
-    const baseType = result?.profile?.base_type || result?.base_type;
+    const baseType = result?.profile?.baseType || result?.profile?.base_type || result?.baseType || result?.base_type;
     const label = TYPE_LABELS[baseType] || baseType || 'Votre profil';
     const description = TYPE_DESCRIPTIONS[baseType] || '';
 
@@ -244,9 +263,31 @@ export default function PCMTest() {
               )}
             </div>
 
-            <p className="text-xs text-gray-400">
-              L'equipe Solidata reviendra vers vous prochainement. Vous pouvez fermer cette page.
+            <p className="text-xs text-gray-400 mb-4">
+              L'equipe Solidata reviendra vers vous prochainement.
             </p>
+
+            {isFromApp ? (
+              <button
+                onClick={() => navigate('/pcm')}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-medium text-sm transition-all hover:opacity-90"
+                style={{ backgroundColor: BRAND_GREEN }}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                Retour à l'application
+              </button>
+            ) : (
+              <a
+                href="https://solidarite-textile.fr"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-medium text-sm transition-all hover:opacity-90"
+                style={{ backgroundColor: BRAND_GREEN }}
+              >
+                Visiter Solidarité Textile
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+              </a>
+            )}
           </div>
         </div>
       </div>

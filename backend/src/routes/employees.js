@@ -69,8 +69,10 @@ router.post('/', authorize('ADMIN', 'RH'), async (req, res) => {
       `INSERT INTO employees (user_id, first_name, last_name, phone, email, team_id, position,
        contract_type, contract_start, contract_end, has_permis_b, has_caces, weekly_hours, skills, candidate_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
-      [user_id, first_name, last_name, phone, email, team_id, position,
-       contract_type, contract_start, contract_end, has_permis_b || false, has_caces || false, weekly_hours || 35, skills || [], candidate_id || null]
+      [user_id || null, first_name, last_name, phone || null, email || null,
+       team_id ? Number(team_id) : null, position || null,
+       contract_type || null, contract_start || null, contract_end || null,
+       has_permis_b || false, has_caces || false, weekly_hours || 35, skills || [], candidate_id || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -88,6 +90,17 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
     const allowed = ['first_name', 'last_name', 'phone', 'email', 'team_id', 'position',
       'contract_type', 'contract_start', 'contract_end', 'has_permis_b', 'has_caces',
       'weekly_hours', 'skills', 'is_active', 'user_id', 'candidate_id'];
+
+    // Nettoyer les types : strings vides → null pour les champs numériques/date/boolean
+    const intFields = ['team_id', 'user_id', 'candidate_id'];
+    const dateFields = ['contract_start', 'contract_end'];
+    for (const f of intFields) {
+      if (fields[f] !== undefined && !fields[f] && fields[f] !== 0) fields[f] = null;
+      else if (fields[f]) fields[f] = Number(fields[f]);
+    }
+    for (const f of dateFields) {
+      if (fields[f] !== undefined && !fields[f]) fields[f] = null;
+    }
 
     const setClauses = [];
     const values = [];
