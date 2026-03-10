@@ -713,15 +713,16 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
 
 router.use(authenticate);
 
-// GET /api/tours/my — Tournées du chauffeur connecté (mobile)
+// GET /api/tours/my — Tournées disponibles pour le chauffeur connecté (mobile)
+// Retourne : tournées assignées à ce chauffeur + tournées du jour non assignées (disponibles)
 router.get('/my', async (req, res) => {
   try {
     const userId = req.user.id;
-    // Trouver l'employee lié à cet utilisateur
     const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
     const employeeId = empResult.rows.length > 0 ? empResult.rows[0].id : null;
 
     const { status, date } = req.query;
+    // Montrer les tournées disponibles : assignées à moi OU non assignées (planned du jour)
     let query = `
       SELECT t.*, v.registration, v.name as vehicle_name,
        CONCAT(e.first_name, ' ', e.last_name) as driver_name,
@@ -732,7 +733,7 @@ router.get('/my', async (req, res) => {
       LEFT JOIN employees e ON t.driver_employee_id = e.id
       WHERE (
         t.driver_employee_id = $1
-        OR (t.driver_employee_id IS NULL AND t.status IN ('planned', 'in_progress'))
+        OR (t.driver_employee_id IS NULL AND t.date = CURRENT_DATE AND t.status = 'planned')
       )
     `;
     const params = [employeeId];
@@ -740,7 +741,6 @@ router.get('/my', async (req, res) => {
     if (status) { params.push(status); query += ` AND t.status = $${params.length}`; }
     if (date) { params.push(date); query += ` AND t.date = $${params.length}`; }
 
-    // Par défaut, montrer les tournées du jour et futures planifiées + en cours
     if (!status && !date) {
       query += ` AND (t.date >= CURRENT_DATE OR t.status = 'in_progress')`;
     }
@@ -750,6 +750,35 @@ router.get('/my', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('[TOURS] Erreur /my :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/tours/:id/claim — Le chauffeur prend une tournée disponible
+router.put('/:id/claim', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
+    if (empResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Aucune fiche employé liée à votre compte' });
+    }
+    const employeeId = empResult.rows[0].id;
+
+    // Assigner seulement si pas encore prise par un autre chauffeur
+    const result = await pool.query(
+      `UPDATE tours SET driver_employee_id = $1, updated_at = NOW()
+       WHERE id = $2 AND (driver_employee_id IS NULL OR driver_employee_id = $1)
+       RETURNING *`,
+      [employeeId, req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(409).json({ error: 'Cette tournée a déjà été prise par un autre chauffeur' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[TOURS] Erreur claim :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

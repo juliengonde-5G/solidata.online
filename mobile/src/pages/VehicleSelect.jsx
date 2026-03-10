@@ -28,10 +28,17 @@ export default function VehicleSelect() {
     setLoading(false);
   };
 
-  const startTour = () => {
-    if (selectedTour) {
+  const startTour = async () => {
+    if (!selectedTour) return;
+    try {
+      // Réclamer la tournée (auto-assign le chauffeur connecté)
+      await api.put(`/tours/${selectedTour.id}/claim`);
       localStorage.setItem('current_tour_id', selectedTour.id);
       navigate('/checklist');
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Erreur lors de la prise de tournée';
+      alert(msg);
+      loadData(); // Recharger la liste au cas où la tournée a été prise par un autre
     }
   };
 
