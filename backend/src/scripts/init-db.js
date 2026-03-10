@@ -1449,6 +1449,76 @@ async function initDatabase() {
     `);
     console.log('[INIT-DB] Migration CAV (unique name + fill rate columns) ✓');
 
+    // ══════════════════════════════════════════
+    // MODULE : Parcours d'insertion — Diagnostics CIP
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_diagnostics (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        created_by INTEGER REFERENCES users(id),
+        updated_by INTEGER REFERENCES users(id),
+
+        -- IDENTITÉ & CONTEXTE SOCIAL
+        parcours_anterieur TEXT,
+        contraintes_sante TEXT,
+        contraintes_mobilite TEXT,
+        contraintes_familiales TEXT,
+        autres_contraintes TEXT,
+
+        -- DIAGNOSTIC FREINS SOCIAUX (1-5 : 1=pas de frein, 5=frein majeur)
+        frein_mobilite INTEGER DEFAULT 1 CHECK (frein_mobilite BETWEEN 1 AND 5),
+        frein_mobilite_detail TEXT,
+        frein_sante INTEGER DEFAULT 1 CHECK (frein_sante BETWEEN 1 AND 5),
+        frein_sante_detail TEXT,
+        frein_finances INTEGER DEFAULT 1 CHECK (frein_finances BETWEEN 1 AND 5),
+        frein_finances_detail TEXT,
+        frein_famille INTEGER DEFAULT 1 CHECK (frein_famille BETWEEN 1 AND 5),
+        frein_famille_detail TEXT,
+        frein_linguistique INTEGER DEFAULT 1 CHECK (frein_linguistique BETWEEN 1 AND 5),
+        frein_linguistique_detail TEXT,
+        frein_administratif INTEGER DEFAULT 1 CHECK (frein_administratif BETWEEN 1 AND 5),
+        frein_administratif_detail TEXT,
+        frein_numerique INTEGER DEFAULT 1 CHECK (frein_numerique BETWEEN 1 AND 5),
+        frein_numerique_detail TEXT,
+
+        -- QUESTIONNAIRE PCM SIMPLIFIÉ (réponses brutes)
+        pcm_q_travail_ideal TEXT,
+        pcm_q_reaction_stress TEXT,
+        pcm_q_relation_equipe TEXT,
+        pcm_q_motivation TEXT,
+        pcm_q_apprentissage TEXT,
+        pcm_q_communication TEXT,
+
+        -- OBSERVATIONS CIP EN SITUATION DE TRAVAIL
+        obs_taches_realisees TEXT,
+        obs_points_forts TEXT,
+        obs_difficultes TEXT,
+        obs_comportement_equipe TEXT,
+        obs_autonomie_ponctualite TEXT,
+
+        -- PRÉFÉRENCES & MOTIVATIONS
+        pref_aime_faire TEXT,
+        pref_ne_veut_plus TEXT,
+        pref_environnement_prefere TEXT,
+        pref_environnement_eviter TEXT,
+        pref_objectifs TEXT,
+
+        -- EXPLORAMA / OUTILS D'EXPLORATION
+        explorama_interets TEXT,
+        explorama_rejets TEXT,
+
+        -- ORIENTATION CIP
+        cip_hypotheses_metiers TEXT,
+        cip_questions TEXT,
+
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id)
+      );
+    `);
+    console.log('[INIT-DB] Module Insertion Diagnostics ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

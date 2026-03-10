@@ -714,8 +714,8 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
 router.use(authenticate);
 
 // GET /api/tours/my — Tournées du jour disponibles (mobile)
-// Retourne les tournées planned du jour dont le véhicule n'a pas encore été pris,
-// + les tournées déjà en cours pour ce chauffeur
+// Le chauffeur voit les véhicules avec tournée planned du jour pas encore démarrée (in_progress)
+// + ses propres tournées en cours
 router.get('/my', async (req, res) => {
   try {
     const userId = req.user.id;
@@ -731,10 +731,11 @@ router.get('/my', async (req, res) => {
       LEFT JOIN vehicles v ON t.vehicle_id = v.id
       LEFT JOIN employees e ON t.driver_employee_id = e.id
       WHERE
-        -- Tournées planned du jour pas encore prises
-        (t.date = CURRENT_DATE AND t.status = 'planned' AND t.driver_employee_id IS NULL)
-        -- OU tournées déjà prises par ce chauffeur (en cours ou planned)
-        OR (t.driver_employee_id = $1 AND t.status IN ('planned', 'in_progress'))
+        -- Toutes les tournées planned du jour (qu'un chauffeur soit pré-assigné ou non)
+        -- Exclure celles déjà in_progress (prises par un autre)
+        (t.date = CURRENT_DATE AND t.status = 'planned')
+        -- OU tournées déjà en cours pour ce chauffeur
+        OR (t.driver_employee_id = $1 AND t.status = 'in_progress')
       ORDER BY t.status = 'in_progress' DESC, t.date ASC, t.created_at DESC
     `, [employeeId]);
 
@@ -746,6 +747,8 @@ router.get('/my', async (req, res) => {
 });
 
 // PUT /api/tours/:id/claim — Le chauffeur prend un véhicule/tournée
+// Le claim assigne le chauffeur connecté et passe la tournée en in_progress
+// Seule une tournée "planned" peut être claimée → atomique
 router.put('/:id/claim', async (req, res) => {
   try {
     const userId = req.user.id;
@@ -755,10 +758,11 @@ router.put('/:id/claim', async (req, res) => {
     }
     const employeeId = empResult.rows[0].id;
 
-    // Assigner seulement si pas encore prise par un autre chauffeur
+    // Assigner le chauffeur et passer en in_progress atomiquement
+    // Seule une tournée planned peut être claimée (empêche double claim)
     const result = await pool.query(
-      `UPDATE tours SET driver_employee_id = $1, updated_at = NOW()
-       WHERE id = $2 AND (driver_employee_id IS NULL OR driver_employee_id = $1)
+      `UPDATE tours SET driver_employee_id = $1, status = 'in_progress', updated_at = NOW()
+       WHERE id = $2 AND status = 'planned'
        RETURNING *`,
       [employeeId, req.params.id]
     );

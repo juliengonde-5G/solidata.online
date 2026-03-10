@@ -7,21 +7,20 @@ const CryptoJS = require('crypto-js');
 router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
 
 // ══════════════════════════════════════════════════════════════
-// BASE DE CONNAISSANCES — Adéquation PCM / Postes / Équipe
+// BASE DE CONNAISSANCES — PCM / Postes / Métiers
 // ══════════════════════════════════════════════════════════════
 
 const PCM_KNOWLEDGE = {
   analyseur: {
     nom: 'Analyseur',
+    niveau_label: 'Logique, organisé, méthodique',
     forces: ['Logique', 'Organisé', 'Responsable', 'Méthodique'],
     faiblesses_stress: ['Sur-détaille', 'Ne délègue pas', 'Sur-contrôle'],
     besoin: 'Reconnaissance du travail bien fait',
     canal: 'Interrogatif / Informatif',
-    postes_ideaux: ['Opérateur de tri', 'Suiveur'],
-    postes_compatibles: ['Opérateur Logistique'],
-    postes_difficiles: ['Chauffeur'],
+    facteurs_motivation: ['Structure claire', 'Feedback sur la qualité', 'Comprendre le pourquoi'],
     environnement_ideal: 'Structuré, avec des procédures claires et un feedback régulier sur la qualité',
-    risques_insertion: 'Peut se sentir submergé si les consignes sont floues. Besoin de comprendre le "pourquoi" des tâches.',
+    risques_insertion: 'Peut se sentir submergé si les consignes sont floues.',
     conseils_manager: [
       'Donner des instructions précises et documentées',
       'Reconnaître la qualité et la rigueur de son travail',
@@ -34,18 +33,18 @@ const PCM_KNOWLEDGE = {
       'Travailler la flexibilité face aux imprévus',
     ],
     compatibilites: { empathique: 'haute', perseverant: 'haute', imagineur: 'moyenne', energiseur: 'basse', promoteur: 'moyenne' },
+    mots_cles_detection: ['logique', 'organisation', 'méthode', 'précis', 'structuré', 'plan', 'règle', 'procédure', 'données', 'analyse'],
   },
   perseverant: {
     nom: 'Persévérant',
+    niveau_label: 'Engagé, consciencieux, observateur',
     forces: ['Engagé', 'Observateur', 'Consciencieux', 'Dévoué'],
     faiblesses_stress: ['Impose ses convictions', 'Méfiance', 'Rigidité'],
-    besoin: 'Reconnaissance des opinions et engagement',
+    besoin: 'Reconnaissance des opinions et de l\'engagement',
     canal: 'Interrogatif / Informatif',
-    postes_ideaux: ['Suiveur', 'Opérateur de tri'],
-    postes_compatibles: ['Chauffeur'],
-    postes_difficiles: ['Opérateur Logistique'],
+    facteurs_motivation: ['Sens du travail', 'Valeurs respectées', 'Engagement reconnu'],
     environnement_ideal: 'Où ses valeurs sont respectées et son engagement reconnu',
-    risques_insertion: 'Peut entrer en conflit si ses valeurs sont heurtées. Besoin de sens dans le travail.',
+    risques_insertion: 'Peut entrer en conflit si ses valeurs sont heurtées.',
     conseils_manager: [
       'Lui demander son avis et respecter ses opinions',
       'Valoriser son engagement et sa fiabilité',
@@ -58,18 +57,18 @@ const PCM_KNOWLEDGE = {
       'Travailler l\'ouverture au changement',
     ],
     compatibilites: { analyseur: 'haute', empathique: 'moyenne', imagineur: 'moyenne', energiseur: 'basse', promoteur: 'basse' },
+    mots_cles_detection: ['conviction', 'valeur', 'opinion', 'engagement', 'respect', 'sens', 'utile', 'devoir', 'croyance', 'fidèle'],
   },
   empathique: {
     nom: 'Empathique',
+    niveau_label: 'Chaleureux, sensible, attentionné',
     forces: ['Chaleureux', 'Sensible', 'Compatissant', 'Attentionné'],
     faiblesses_stress: ['Sur-adaptation', 'Se sacrifie', 'Fait des erreurs par vouloir plaire'],
     besoin: 'Reconnaissance de la personne, ambiance chaleureuse',
     canal: 'Nourricier',
-    postes_ideaux: ['Opérateur de tri', 'Opérateur Logistique'],
-    postes_compatibles: ['Suiveur'],
-    postes_difficiles: ['Chauffeur'],
+    facteurs_motivation: ['Ambiance chaleureuse', 'Relations harmonieuses', 'Se sentir apprécié'],
     environnement_ideal: 'Équipe soudée, ambiance bienveillante, contact humain',
-    risques_insertion: 'Peut se sur-adapter et ne pas exprimer ses difficultés. Risque d\'épuisement.',
+    risques_insertion: 'Peut se sur-adapter et ne pas exprimer ses difficultés.',
     conseils_manager: [
       'Créer un climat chaleureux et accueillant',
       'Lui dire régulièrement qu\'on l\'apprécie en tant que personne',
@@ -82,18 +81,18 @@ const PCM_KNOWLEDGE = {
       'Ne pas confondre efficacité et sacrifice personnel',
     ],
     compatibilites: { analyseur: 'haute', perseverant: 'moyenne', imagineur: 'haute', energiseur: 'moyenne', promoteur: 'basse' },
+    mots_cles_detection: ['ambiance', 'équipe', 'relation', 'chaleur', 'écoute', 'harmonie', 'aide', 'plaire', 'gentil', 'sensible'],
   },
   imagineur: {
     nom: 'Imagineur',
+    niveau_label: 'Calme, réfléchi, introspectif',
     forces: ['Imaginatif', 'Réfléchi', 'Calme', 'Introspectif'],
     faiblesses_stress: ['Retrait', 'Passivité', 'Attend les consignes'],
     besoin: 'Solitude, temps calme pour réfléchir',
     canal: 'Directif',
-    postes_ideaux: ['Opérateur de tri'],
-    postes_compatibles: ['Opérateur Logistique'],
-    postes_difficiles: ['Chauffeur', 'Suiveur'],
+    facteurs_motivation: ['Calme', 'Routine apaisante', 'Pas de pression sociale'],
     environnement_ideal: 'Poste individuel, tâches bien définies, rythme régulier',
-    risques_insertion: 'Peut se replier et ne rien demander. Besoin de consignes claires et directes.',
+    risques_insertion: 'Peut se replier et ne rien demander.',
     conseils_manager: [
       'Donner des consignes claires et directes (pas de sous-entendus)',
       'Respecter son besoin de calme et ne pas le forcer à socialiser',
@@ -106,16 +105,16 @@ const PCM_KNOWLEDGE = {
       'S\'intégrer progressivement dans les moments collectifs',
     ],
     compatibilites: { empathique: 'haute', analyseur: 'moyenne', perseverant: 'moyenne', energiseur: 'basse', promoteur: 'basse' },
+    mots_cles_detection: ['calme', 'seul', 'réfléchir', 'tranquille', 'imagination', 'intérieur', 'rêver', 'paisible', 'silence', 'retrait'],
   },
   energiseur: {
     nom: 'Énergiseur',
+    niveau_label: 'Créatif, spontané, dynamique',
     forces: ['Créatif', 'Spontané', 'Ludique', 'Dynamique'],
     faiblesses_stress: ['Blâme les autres', 'Provoque', 'Rejette la faute'],
     besoin: 'Contact ludique, stimulation, variété',
     canal: 'Ludique / Émotif',
-    postes_ideaux: ['Chauffeur', 'Opérateur Logistique'],
-    postes_compatibles: ['Opérateur de tri'],
-    postes_difficiles: ['Suiveur'],
+    facteurs_motivation: ['Variété', 'Bonne humeur', 'Stimulation', 'Mouvement'],
     environnement_ideal: 'Varié, dynamique, avec de l\'interaction et de la bonne humeur',
     risques_insertion: 'S\'ennuie vite dans la routine. Peut provoquer si non stimulé.',
     conseils_manager: [
@@ -130,18 +129,18 @@ const PCM_KNOWLEDGE = {
       'Canaliser l\'énergie de façon constructive',
     ],
     compatibilites: { promoteur: 'haute', empathique: 'moyenne', analyseur: 'basse', perseverant: 'basse', imagineur: 'basse' },
+    mots_cles_detection: ['amusement', 'humour', 'variété', 'bouger', 'créatif', 'spontané', 'dynamique', 'énergie', 'stimulation', 'rire'],
   },
   promoteur: {
     nom: 'Promoteur',
+    niveau_label: 'Adaptable, débrouillard, orienté résultats',
     forces: ['Adaptable', 'Charmeur', 'Débrouillard', 'Efficace'],
     faiblesses_stress: ['Manipulation', 'Prise de risques', 'Exploite les faiblesses'],
     besoin: 'Excitation, défis, résultats rapides',
     canal: 'Directif',
-    postes_ideaux: ['Chauffeur', 'Opérateur Logistique'],
-    postes_compatibles: ['Suiveur'],
-    postes_difficiles: ['Opérateur de tri'],
+    facteurs_motivation: ['Défis concrets', 'Autonomie', 'Résultats visibles'],
     environnement_ideal: 'Autonome, orienté résultats, avec des défis concrets',
-    risques_insertion: 'Peut manipuler ou prendre des raccourcis. Besoin de cadre ferme mais respectueux.',
+    risques_insertion: 'Peut manipuler ou prendre des raccourcis.',
     conseils_manager: [
       'Fixer des objectifs clairs avec des résultats mesurables',
       'Offrir de l\'autonomie dans un cadre défini',
@@ -154,12 +153,14 @@ const PCM_KNOWLEDGE = {
       'Construire des relations basées sur la confiance mutuelle',
     ],
     compatibilites: { energiseur: 'haute', analyseur: 'moyenne', perseverant: 'basse', empathique: 'basse', imagineur: 'basse' },
+    mots_cles_detection: ['résultat', 'défi', 'action', 'efficace', 'autonome', 'concret', 'rapide', 'challenge', 'gagner', 'décider'],
   },
 };
 
-// Adéquation poste → profil PCM idéal
-const POSTE_PROFILS = {
+// Métiers cibles pour Solidarité Textile
+const METIERS_CIBLES = {
   'Opérateur de tri': {
+    famille: 'Textile / Recyclage',
     description: 'Tri des textiles par catégorie, travail en chaîne, attention au détail',
     profils_ideaux: ['analyseur', 'empathique', 'imagineur'],
     qualites_requises: ['Attention au détail', 'Rigueur', 'Régularité', 'Patience'],
@@ -167,372 +168,649 @@ const POSTE_PROFILS = {
     potentiel_evolution: 'Chef d\'équipe tri, Formateur, Référent qualité',
   },
   'Opérateur Logistique': {
+    famille: 'Logistique',
     description: 'Gestion des flux entrants/sortants, manutention, organisation du stock',
     profils_ideaux: ['energiseur', 'promoteur', 'empathique'],
     qualites_requises: ['Organisation', 'Dynamisme', 'Force physique', 'Esprit d\'équipe'],
     contraintes: ['Port de charges', 'Travail physique', 'Gestion du stress'],
     potentiel_evolution: 'Responsable logistique, Chauffeur, Chef de quai',
   },
-  'Chauffeur': {
+  'Chauffeur / Collecteur': {
+    famille: 'Logistique / Collecte',
     description: 'Collecte des textiles en tournée, conduite de véhicule, relation avec les partenaires',
     profils_ideaux: ['promoteur', 'energiseur', 'perseverant'],
-    qualites_requises: ['Autonomie', 'Sens de l\'orientation', 'Permis B obligatoire', 'Ponctualité'],
+    qualites_requises: ['Autonomie', 'Sens de l\'orientation', 'Permis B', 'Ponctualité'],
     contraintes: ['Conduite longue durée', 'Autonomie totale', 'Horaires variables'],
     potentiel_evolution: 'Chauffeur PL, Responsable collecte, Coordinateur terrain',
   },
-  'Suiveur': {
-    description: 'Suivi administratif et qualité, reporting, interface entre équipes',
+  'Vendeur en boutique solidaire': {
+    famille: 'Vente / Seconde main',
+    description: 'Accueil clients, vente, mise en rayon, caisse',
+    profils_ideaux: ['empathique', 'energiseur'],
+    qualites_requises: ['Relationnel', 'Présentation', 'Patience', 'Écoute'],
+    contraintes: ['Contact public', 'Station debout', 'Gestion de caisse'],
+    potentiel_evolution: 'Responsable de boutique, Gestionnaire de stock, Merchandiser',
+  },
+  'Couturier / Retoucheur': {
+    famille: 'Textile / Revalorisation',
+    description: 'Retouche, réparation et transformation de vêtements',
+    profils_ideaux: ['analyseur', 'imagineur'],
+    qualites_requises: ['Minutie', 'Créativité', 'Patience', 'Habileté manuelle'],
+    contraintes: ['Travail de précision', 'Position assise prolongée'],
+    potentiel_evolution: 'Couturier confirmé, Créateur upcycling, Formateur couture',
+  },
+  'Agent d\'entretien / Services': {
+    famille: 'Services de proximité',
+    description: 'Nettoyage, entretien des locaux, gestion du matériel',
+    profils_ideaux: ['perseverant', 'imagineur', 'empathique'],
+    qualites_requises: ['Autonomie', 'Rigueur', 'Discrétion', 'Sens du détail'],
+    contraintes: ['Travail physique', 'Horaires décalés possibles'],
+    potentiel_evolution: 'Chef d\'équipe entretien, Agent polyvalent, Responsable hygiène',
+  },
+  'Préparateur de commandes': {
+    famille: 'Logistique',
+    description: 'Préparation, emballage et expédition de commandes',
     profils_ideaux: ['analyseur', 'perseverant'],
-    qualites_requises: ['Rigueur', 'Communication', 'Organisation', 'Suivi'],
-    contraintes: ['Travail sur écran', 'Multitâche', 'Gestion de données'],
-    potentiel_evolution: 'Responsable qualité, Coordinateur, Assistant de direction',
+    qualites_requises: ['Organisation', 'Rapidité', 'Précision', 'Résistance physique'],
+    contraintes: ['Port de charges', 'Cadence soutenue', 'Travail en entrepôt'],
+    potentiel_evolution: 'Chef de quai, Responsable préparation, Gestionnaire de stock',
+  },
+  'Agent administratif': {
+    famille: 'Administration',
+    description: 'Saisie, classement, accueil téléphonique, gestion de dossiers',
+    profils_ideaux: ['analyseur', 'perseverant', 'empathique'],
+    qualites_requises: ['Rigueur', 'Maîtrise informatique', 'Organisation', 'Communication'],
+    contraintes: ['Travail sur écran', 'Maîtrise de l\'écrit', 'Multitâche'],
+    potentiel_evolution: 'Secrétaire, Assistant de gestion, Gestionnaire RH',
   },
 };
 
 // ══════════════════════════════════════════════════════════════
-// MOTEUR D'ANALYSE — Parcours d'insertion
+// FREINS SOCIAUX — Grille de diagnostic et priorités
 // ══════════════════════════════════════════════════════════════
 
-function analyzeInsertion(employee, contracts, availability, candidate, pcmReport, teamMembers, position) {
-  const analysis = {
-    profil_synthese: null,
-    adequation_poste: null,
-    adequation_equipe: null,
-    parcours_insertion: null,
-    risques: [],
-    recommandations: [],
-    plan_action: [],
-    score_global: 0,
-    confiance: 0,
-  };
+const FREINS_DEFINITIONS = {
+  mobilite: {
+    label: 'Mobilité',
+    icon: 'car',
+    question_simple: 'Comment venez-vous au travail ?',
+    niveaux: {
+      1: 'Pas de difficulté, transport autonome',
+      2: 'Léger, transports en commun accessibles',
+      3: 'Modéré, dépendance à un tiers ou transports limités',
+      4: 'Important, zone mal desservie ou pas de permis nécessaire',
+      5: 'Bloquant, aucun moyen de déplacement fiable',
+    },
+    actions_levee: [
+      'Aide au passage du permis B (financement via plan d\'insertion)',
+      'Information sur les transports en commun et itinéraires',
+      'Mise en relation avec des solutions de covoiturage',
+      'Aide à l\'achat / location de vélo ou trottinette',
+      'Rapprochement du lieu de travail si possible',
+    ],
+  },
+  sante: {
+    label: 'Santé',
+    icon: 'heart',
+    question_simple: 'Comment vous sentez-vous physiquement pour travailler ?',
+    niveaux: {
+      1: 'Bonne santé, pas de limitation',
+      2: 'Léger, petits soucis gérables',
+      3: 'Modéré, suivi médical en cours',
+      4: 'Important, limitations physiques ou psychologiques',
+      5: 'Bloquant, incapacité partielle ou arrêts fréquents',
+    },
+    actions_levee: [
+      'Orientation vers le médecin du travail',
+      'Aménagement du poste (ergonomie, rythme)',
+      'Mise en relation avec un accompagnement psychologique',
+      'Dossier RQTH si adapté',
+      'Réduction ou adaptation des horaires',
+    ],
+  },
+  finances: {
+    label: 'Finances',
+    icon: 'wallet',
+    question_simple: 'Arrivez-vous à couvrir vos dépenses courantes ?',
+    niveaux: {
+      1: 'Situation stable',
+      2: 'Léger, fin de mois un peu juste',
+      3: 'Modéré, difficultés ponctuelles',
+      4: 'Important, endettement ou impayés',
+      5: 'Bloquant, situation de précarité aiguë',
+    },
+    actions_levee: [
+      'Orientation vers l\'assistant(e) social(e)',
+      'Aide aux démarches d\'accès aux droits (CAF, APL, prime d\'activité)',
+      'Accompagnement à la gestion budgétaire',
+      'Aide d\'urgence (épicerie sociale, aide alimentaire)',
+      'Signalement au référent RSA si applicable',
+    ],
+  },
+  famille: {
+    label: 'Famille',
+    icon: 'family',
+    question_simple: 'Avez-vous des contraintes familiales pour vos horaires ?',
+    niveaux: {
+      1: 'Pas de contrainte',
+      2: 'Léger, organisation familiale stable',
+      3: 'Modéré, garde d\'enfants à organiser',
+      4: 'Important, parent isolé ou personne à charge',
+      5: 'Bloquant, situation familiale empêchant la disponibilité',
+    },
+    actions_levee: [
+      'Aménagement des horaires (compatible crèche / école)',
+      'Aide à la recherche de mode de garde',
+      'Orientation vers des dispositifs d\'aide aux parents isolés',
+      'Adaptation du contrat (temps partiel choisi)',
+      'Mise en relation avec les services sociaux',
+    ],
+  },
+  linguistique: {
+    label: 'Langue',
+    icon: 'language',
+    question_simple: 'Comprenez-vous bien le français au travail ?',
+    niveaux: {
+      1: 'Maîtrise courante',
+      2: 'Bon niveau oral, écrit fragile',
+      3: 'Compréhension correcte, expression limitée',
+      4: 'Difficultés importantes à l\'oral et à l\'écrit',
+      5: 'Barrière linguistique forte, nécessite un interprète',
+    },
+    actions_levee: [
+      'Orientation vers des cours de FLE (Français Langue Étrangère)',
+      'Supports visuels et pictogrammes sur le poste',
+      'Binômage avec un collègue parlant la même langue',
+      'Ateliers sociolinguistiques (ASL)',
+      'Adaptation des consignes (oral, démonstration)',
+    ],
+  },
+  administratif: {
+    label: 'Administratif',
+    icon: 'file',
+    question_simple: 'Vos papiers et démarches sont-ils à jour ?',
+    niveaux: {
+      1: 'Tout est en règle',
+      2: 'Léger, quelques démarches en cours',
+      3: 'Modéré, aide nécessaire pour certaines démarches',
+      4: 'Important, situation administrative complexe',
+      5: 'Bloquant, titre de séjour en cours / problème majeur',
+    },
+    actions_levee: [
+      'Orientation vers le référent socio-professionnel',
+      'Aide aux démarches administratives (CPAM, CAF, Pôle Emploi)',
+      'Accompagnement pour le renouvellement de titre de séjour',
+      'Aide à la constitution de dossiers',
+      'Mise en relation avec un écrivain public ou association d\'aide',
+    ],
+  },
+  numerique: {
+    label: 'Numérique',
+    icon: 'computer',
+    question_simple: 'Utilisez-vous un téléphone ou un ordinateur facilement ?',
+    niveaux: {
+      1: 'À l\'aise avec le numérique',
+      2: 'Basique, sait utiliser un téléphone et les messages',
+      3: 'Modéré, besoin d\'aide pour certaines tâches',
+      4: 'Important, très peu à l\'aise',
+      5: 'Bloquant, pas d\'accès ou pas de compétences numériques',
+    },
+    actions_levee: [
+      'Ateliers d\'initiation numérique',
+      'Aide à la création d\'adresse email et espace France Connect',
+      'Accompagnement individuel pour les démarches en ligne',
+      'Prêt ou aide à l\'acquisition d\'un smartphone',
+      'Fiche réflexe avec les manipulations de base',
+    ],
+  },
+};
 
+// ══════════════════════════════════════════════════════════════
+// MOTEUR D'ANALYSE — Profil PCM simplifié depuis questionnaire
+// ══════════════════════════════════════════════════════════════
+
+function detectPCMFromQuestionnaire(diagnostic) {
+  const scores = {};
+  Object.keys(PCM_KNOWLEDGE).forEach(k => { scores[k] = 0; });
+
+  // Combiner toutes les réponses textuelles
+  const responses = [
+    diagnostic.pcm_q_travail_ideal,
+    diagnostic.pcm_q_reaction_stress,
+    diagnostic.pcm_q_relation_equipe,
+    diagnostic.pcm_q_motivation,
+    diagnostic.pcm_q_apprentissage,
+    diagnostic.pcm_q_communication,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (!responses) return null;
+
+  // Score par mots-clés
+  for (const [type, data] of Object.entries(PCM_KNOWLEDGE)) {
+    for (const mot of data.mots_cles_detection) {
+      const regex = new RegExp(mot, 'gi');
+      const matches = responses.match(regex);
+      if (matches) scores[type] += matches.length;
+    }
+  }
+
+  // Normaliser en FAIBLE / MODÉRÉ / FORT
+  const maxScore = Math.max(...Object.values(scores), 1);
+  const result = {};
+  for (const [type, score] of Object.entries(scores)) {
+    const ratio = score / maxScore;
+    result[type] = {
+      score,
+      niveau: ratio >= 0.6 ? 'FORT' : ratio >= 0.3 ? 'MODÉRÉ' : 'FAIBLE',
+      label: PCM_KNOWLEDGE[type].nom,
+      description: PCM_KNOWLEDGE[type].niveau_label,
+    };
+  }
+
+  return result;
+}
+
+// ══════════════════════════════════════════════════════════════
+// MOTEUR — Analyse complète d'insertion
+// ══════════════════════════════════════════════════════════════
+
+function analyzeInsertion(employee, contracts, candidate, pcmReport, teamMembers, position, diagnostic) {
   const pcm = pcmReport ? JSON.parse(pcmReport) : null;
   const baseType = pcm?.base?.type?.toLowerCase();
-  const phaseType = pcm?.phase?.type?.toLowerCase();
   const pcmKnowledge = baseType ? PCM_KNOWLEDGE[baseType] : null;
   const currentContract = contracts.find(c => c.is_current) || contracts[0];
   const positionName = position?.title || employee.position || 'Non défini';
-  const posteProfil = Object.entries(POSTE_PROFILS).find(([k]) =>
-    positionName.toLowerCase().includes(k.toLowerCase())
-  )?.[1];
 
+  // Détecter PCM depuis questionnaire si pas de rapport officiel
+  const pcmFromQuestionnaire = diagnostic ? detectPCMFromQuestionnaire(diagnostic) : null;
+  const dominantPCM = pcmKnowledge || getDominantPCM(pcmFromQuestionnaire);
+
+  // ═══════════════════════════════════════
+  // 1) FICHE SYNTHÈSE PROFIL
+  // ═══════════════════════════════════════
+  const ficheSynthese = buildFicheSynthese(employee, dominantPCM, candidate, diagnostic, currentContract);
+
+  // ═══════════════════════════════════════
+  // 2) PROFIL PCM SIMPLIFIÉ
+  // ═══════════════════════════════════════
+  const profilPCM = pcmFromQuestionnaire || buildPCMFromReport(pcm);
+
+  // ═══════════════════════════════════════
+  // 3) CARTOGRAPHIE DES COMPÉTENCES
+  // ═══════════════════════════════════════
+  const competences = buildCompetences(employee, candidate, diagnostic, dominantPCM);
+
+  // ═══════════════════════════════════════
+  // 4) PISTES DE MÉTIERS
+  // ═══════════════════════════════════════
+  const pistesMetiers = buildPistesMetiers(employee, dominantPCM, diagnostic, candidate);
+
+  // ═══════════════════════════════════════
+  // 5) PARCOURS DE DÉVELOPPEMENT
+  // ═══════════════════════════════════════
+  const parcoursDev = buildParcoursDev(employee, contracts, dominantPCM, diagnostic, pistesMetiers);
+
+  // ═══════════════════════════════════════
+  // 6) RECOMMANDATIONS CIP
+  // ═══════════════════════════════════════
+  const recommandationsCIP = buildRecommandationsCIP(dominantPCM, diagnostic);
+
+  // ═══════════════════════════════════════
+  // DIAGNOSTIC FREINS SOCIAUX
+  // ═══════════════════════════════════════
+  const freinsSociaux = diagnostic ? buildFreinsSociaux(diagnostic) : null;
+
+  // Score de confiance
   let dataPoints = 0;
-  let totalScore = 0;
+  if (pcm || pcmFromQuestionnaire) dataPoints += 3;
+  if (candidate?.cv_raw_text) dataPoints += 1;
+  if (candidate?.interview_comment) dataPoints += 1;
+  if (diagnostic) dataPoints += 2;
+  if (teamMembers.length > 0) dataPoints += 1;
 
-  // ── 1. SYNTHÈSE DU PROFIL ──
-  const profilParts = [];
+  return {
+    fiche_synthese: ficheSynthese,
+    profil_pcm: profilPCM,
+    competences,
+    pistes_metiers: pistesMetiers,
+    parcours_dev: parcoursDev,
+    recommandations_cip: recommandationsCIP,
+    freins_sociaux: freinsSociaux,
+    // Rétrocompatibilité
+    profil_synthese: ficheSynthese.resume,
+    adequation_poste: pistesMetiers.length > 0 ? { score: pistesMetiers[0].score, niveau: pistesMetiers[0].score >= 75 ? 'Bonne' : 'Acceptable', commentaire: pistesMetiers[0].pourquoi } : null,
+    parcours_insertion: parcoursDev,
+    recommandations: recommandationsCIP.points_vigilance || [],
+    plan_action: freinsSociaux?.plan_actions || [],
+    risques: [],
+    confiance: Math.min(1, dataPoints / 6),
+    score_global: null,
+  };
+}
 
-  if (pcmKnowledge) {
-    profilParts.push(`**Type de base : ${pcmKnowledge.nom}** — ${pcmKnowledge.forces.join(', ')}.`);
-    if (phaseType && phaseType !== baseType) {
-      const phaseK = PCM_KNOWLEDGE[phaseType];
-      profilParts.push(`Phase actuelle : ${phaseK?.nom || phaseType} — motivation actuelle orientée vers : ${phaseK?.besoin || 'non identifié'}.`);
-    }
-    profilParts.push(`Canal de communication privilégié : ${pcmKnowledge.canal}.`);
-    profilParts.push(`Besoin psychologique principal : ${pcmKnowledge.besoin}.`);
-    dataPoints += 3;
+function getDominantPCM(pcmFromQuestionnaire) {
+  if (!pcmFromQuestionnaire) return null;
+  let maxType = null, maxScore = 0;
+  for (const [type, data] of Object.entries(pcmFromQuestionnaire)) {
+    if (data.score > maxScore) { maxScore = data.score; maxType = type; }
+  }
+  return maxType ? PCM_KNOWLEDGE[maxType] : null;
+}
+
+function buildFicheSynthese(employee, pcm, candidate, diagnostic, currentContract) {
+  const parts = [];
+
+  // Résumé en 5 lignes max
+  let resume = `${employee.first_name} ${employee.last_name}`;
+  if (employee.position) resume += `, ${employee.position}`;
+  if (currentContract) resume += ` (${currentContract.contract_type})`;
+  resume += '.';
+
+  if (pcm) {
+    resume += ` Profil de type ${pcm.nom} : ${pcm.forces.slice(0, 3).join(', ')}.`;
+  }
+  if (diagnostic?.parcours_anterieur) {
+    resume += ` Parcours : ${diagnostic.parcours_anterieur.substring(0, 150)}.`;
   }
 
+  const forces = pcm ? pcm.forces : [];
+  const vigilance = pcm ? pcm.faiblesses_stress : [];
+  const communication = pcm ? `Privilégier le canal ${pcm.canal}` : 'Non évalué';
+  const motivation = pcm ? pcm.facteurs_motivation : [];
+
+  return {
+    resume,
+    forces,
+    vigilance,
+    communication,
+    motivation,
+  };
+}
+
+function buildPCMFromReport(pcm) {
+  if (!pcm) return null;
+  const baseType = pcm.base?.type?.toLowerCase();
+  const result = {};
+  for (const [type, data] of Object.entries(PCM_KNOWLEDGE)) {
+    result[type] = {
+      score: 0,
+      niveau: type === baseType ? 'FORT' : 'FAIBLE',
+      label: data.nom,
+      description: data.niveau_label,
+    };
+  }
+  return result;
+}
+
+function buildCompetences(employee, candidate, diagnostic, pcm) {
+  const techniques = [];
+  const transversales = [];
+  const savoirEtre = [];
+  const aConsolider = [];
+
+  // Depuis le CV
   if (candidate?.cv_raw_text) {
     const skills = extractSkillsFromCV(candidate.cv_raw_text);
-    if (skills.length > 0) {
-      profilParts.push(`Compétences identifiées dans le CV : ${skills.join(', ')}.`);
-    }
-    dataPoints += 1;
+    techniques.push(...skills.map(s => ({ competence: s, source: 'CV' })));
   }
 
-  if (candidate?.interview_comment) {
-    profilParts.push(`Notes d'entretien : ${candidate.interview_comment}`);
-    dataPoints += 1;
+  // Depuis les certifications
+  if (employee.has_permis_b) techniques.push({ competence: 'Permis B', source: 'Certification' });
+  if (employee.has_caces) techniques.push({ competence: 'CACES', source: 'Certification' });
+
+  // Depuis les observations CIP
+  if (diagnostic?.obs_points_forts) {
+    const points = diagnostic.obs_points_forts.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+    transversales.push(...points.map(p => ({ competence: p, source: 'Observation CIP' })));
   }
 
-  if (employee.has_permis_b) profilParts.push('Titulaire du Permis B.');
-  if (employee.has_caces) profilParts.push('Titulaire du CACES.');
-
-  analysis.profil_synthese = profilParts.length > 0
-    ? profilParts.join('\n\n')
-    : 'Données insuffisantes pour établir un profil complet. Nous recommandons de réaliser un test PCM et un entretien approfondi.';
-
-  // ── 2. ADÉQUATION POSTE ──
-  if (pcmKnowledge && posteProfil) {
-    const isIdeal = posteProfil.profils_ideaux.includes(baseType);
-    let posteScore = isIdeal ? 85 : 50;
-
-    // Vérifier les qualités requises vs forces PCM
-    const matchingQualities = posteProfil.qualites_requises.filter(q =>
-      pcmKnowledge.forces.some(f => f.toLowerCase().includes(q.toLowerCase()) || q.toLowerCase().includes(f.toLowerCase()))
-    );
-    posteScore += matchingQualities.length * 5;
-
-    // Vérifier si le poste est dans les "difficiles"
-    if (pcmKnowledge.postes_difficiles.some(p => positionName.toLowerCase().includes(p.toLowerCase()))) {
-      posteScore -= 20;
-      analysis.risques.push({
-        niveau: 'attention',
-        titre: 'Adéquation poste limitée',
-        detail: `Le profil ${pcmKnowledge.nom} n'est pas naturellement à l'aise dans ce type de poste. Un accompagnement renforcé est recommandé.`,
-      });
-    }
-
-    // Permis B pour chauffeur
-    if (positionName.toLowerCase().includes('chauffeur') && !employee.has_permis_b) {
-      posteScore -= 30;
-      analysis.risques.push({
-        niveau: 'critique',
-        titre: 'Permis B manquant',
-        detail: 'Le poste de chauffeur nécessite le Permis B. Planifier le passage du permis en priorité.',
-      });
-    }
-
-    posteScore = Math.min(100, Math.max(0, posteScore));
-    totalScore += posteScore;
-    dataPoints += 2;
-
-    analysis.adequation_poste = {
-      score: posteScore,
-      niveau: posteScore >= 75 ? 'Bonne' : posteScore >= 50 ? 'Acceptable' : 'Faible',
-      poste: positionName,
-      description: posteProfil.description,
-      qualites_matchees: matchingQualities,
-      qualites_requises: posteProfil.qualites_requises,
-      contraintes: posteProfil.contraintes,
-      evolution: posteProfil.potentiel_evolution,
-      commentaire: isIdeal
-        ? `Le profil ${pcmKnowledge.nom} est particulièrement adapté à ce poste. Ses forces naturelles (${pcmKnowledge.forces.join(', ')}) correspondent aux exigences du poste.`
-        : `Le profil ${pcmKnowledge.nom} peut occuper ce poste avec un accompagnement adapté. Attention particulière aux contraintes : ${posteProfil.contraintes.join(', ')}.`,
-    };
-  } else {
-    analysis.adequation_poste = {
-      score: null,
-      niveau: 'Non évaluable',
-      commentaire: !pcmKnowledge
-        ? 'Test PCM non réalisé. L\'évaluation de l\'adéquation poste/personne nécessite le profil de personnalité.'
-        : 'Poste non référencé dans la base de connaissances.',
-    };
+  // Depuis le PCM
+  if (pcm) {
+    savoirEtre.push(...pcm.forces.map(f => ({ competence: f, source: 'Profil PCM' })));
   }
 
-  // ── 3. ADÉQUATION ÉQUIPE ──
-  if (pcmKnowledge && teamMembers.length > 0) {
-    const teamPcmTypes = teamMembers
-      .filter(m => m.pcm_base_type && m.id !== employee.id)
-      .map(m => m.pcm_base_type.toLowerCase());
+  // Difficultés = à consolider
+  if (diagnostic?.obs_difficultes) {
+    const diffs = diagnostic.obs_difficultes.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+    aConsolider.push(...diffs.map(d => ({ competence: d, source: 'Observation CIP' })));
+  }
 
-    if (teamPcmTypes.length > 0) {
-      let compatScore = 0;
-      let nbRelations = 0;
+  // Axes de développement PCM
+  if (pcm) {
+    aConsolider.push(...pcm.axes_developpement.map(a => ({ competence: a, source: 'Profil PCM' })));
+  }
 
-      for (const memberType of teamPcmTypes) {
-        const compat = pcmKnowledge.compatibilites[memberType];
-        if (compat === 'haute') compatScore += 3;
-        else if (compat === 'moyenne') compatScore += 2;
-        else if (compat === 'basse') compatScore += 1;
-        nbRelations++;
+  return { techniques, transversales, savoir_etre: savoirEtre, a_consolider: aConsolider };
+}
+
+function buildPistesMetiers(employee, pcm, diagnostic, candidate) {
+  const pistes = [];
+  const dominantType = pcm ? Object.entries(PCM_KNOWLEDGE).find(([, v]) => v === pcm)?.[0] : null;
+
+  for (const [metier, data] of Object.entries(METIERS_CIBLES)) {
+    let score = 40;
+    let pourquoi = '';
+    const vigilancePoints = [];
+
+    // Score basé sur le profil PCM
+    if (dominantType && data.profils_ideaux.includes(dominantType)) {
+      score += 35;
+      pourquoi = `Le profil ${pcm.nom} est naturellement adapté à ce métier (${data.description}).`;
+    } else if (pcm) {
+      pourquoi = `Le profil ${pcm.nom} peut exercer ce métier avec un accompagnement adapté.`;
+      score += 10;
+    }
+
+    // Score basé sur les préférences exprimées
+    if (diagnostic?.pref_aime_faire) {
+      const aime = diagnostic.pref_aime_faire.toLowerCase();
+      if (data.qualites_requises.some(q => aime.includes(q.toLowerCase()))) {
+        score += 15;
+        pourquoi += ' Correspond aux préférences exprimées.';
       }
-
-      const avgCompat = nbRelations > 0 ? (compatScore / nbRelations / 3) * 100 : 50;
-      totalScore += avgCompat;
-      dataPoints += 1;
-
-      const incompatibles = teamPcmTypes.filter(t => pcmKnowledge.compatibilites[t] === 'basse');
-      if (incompatibles.length > 0) {
-        const uniqueIncompat = [...new Set(incompatibles)].map(t => PCM_KNOWLEDGE[t]?.nom || t);
-        analysis.risques.push({
-          niveau: 'attention',
-          titre: 'Tensions potentielles en équipe',
-          detail: `Compatibilité limitée avec les profils ${uniqueIncompat.join(', ')} présents dans l'équipe. Prévoir un accompagnement pour faciliter la communication.`,
-        });
-      }
-
-      analysis.adequation_equipe = {
-        score: Math.round(avgCompat),
-        niveau: avgCompat >= 70 ? 'Bonne' : avgCompat >= 45 ? 'Acceptable' : 'Difficile',
-        nb_collegues_analyses: teamPcmTypes.length,
-        commentaire: avgCompat >= 70
-          ? `Bonne intégration potentielle dans l'équipe. Le profil ${pcmKnowledge.nom} est complémentaire avec les profils présents.`
-          : avgCompat >= 45
-          ? `Intégration possible avec un accompagnement. Certaines personnalités de l'équipe nécessiteront une communication adaptée.`
-          : `Intégration délicate. Le profil ${pcmKnowledge.nom} peut rencontrer des frictions avec plusieurs membres de l'équipe. Un suivi rapproché est indispensable.`,
-      };
-    } else {
-      analysis.adequation_equipe = {
-        score: null,
-        niveau: 'Non évaluable',
-        commentaire: 'Les profils PCM des membres de l\'équipe ne sont pas disponibles.',
-      };
     }
+
+    // Score basé sur les intérêts Explorama
+    if (diagnostic?.explorama_interets) {
+      const interets = diagnostic.explorama_interets.toLowerCase();
+      if (data.famille.toLowerCase().split(/[\s/]+/).some(f => interets.includes(f))) {
+        score += 10;
+      }
+    }
+
+    // Vérifier les contraintes vs freins
+    if (data.contraintes.some(c => c.toLowerCase().includes('physique') || c.toLowerCase().includes('charges'))) {
+      if (diagnostic?.frein_sante >= 4) {
+        score -= 25;
+        vigilancePoints.push('Contraintes physiques vs limitations de santé');
+      }
+    }
+    if (data.contraintes.some(c => c.toLowerCase().includes('écran') || c.toLowerCase().includes('écrit'))) {
+      if (diagnostic?.frein_linguistique >= 4) {
+        score -= 20;
+        vigilancePoints.push('Maîtrise de l\'écrit requise');
+      }
+    }
+    if (data.qualites_requises.some(q => q.toLowerCase().includes('permis'))) {
+      if (!employee.has_permis_b) {
+        score -= 15;
+        vigilancePoints.push('Permis B requis, non obtenu');
+      }
+    }
+
+    // Ce que la personne ne veut plus
+    if (diagnostic?.pref_ne_veut_plus) {
+      const refuse = diagnostic.pref_ne_veut_plus.toLowerCase();
+      if (data.contraintes.some(c => refuse.includes(c.toLowerCase().split(' ')[0]))) {
+        score -= 20;
+        vigilancePoints.push('Proche de ce que la personne ne souhaite plus faire');
+      }
+    }
+
+    score = Math.min(100, Math.max(0, score));
+
+    pistes.push({
+      metier,
+      famille: data.famille,
+      description: data.description,
+      score,
+      pourquoi: pourquoi || `Métier accessible dans le contexte de Solidarité Textile.`,
+      vigilance: vigilancePoints,
+      qualites_requises: data.qualites_requises,
+      evolution: data.potentiel_evolution,
+    });
   }
 
-  // ── 4. PARCOURS D'INSERTION ──
+  // Trier par score décroissant, garder les 5 premiers
+  return pistes.sort((a, b) => b.score - a.score).slice(0, 5);
+}
+
+function buildParcoursDev(employee, contracts, pcm, diagnostic, pistesMetiers) {
   const parcours = [];
-  const contractCount = contracts.length;
+  const currentPosition = employee.position || 'Non défini';
+  const topMetier = pistesMetiers.length > 0 ? pistesMetiers[0] : null;
   const totalMonths = contracts.reduce((s, c) => s + (c.duration_months || 0), 0);
-  const isFirstContract = contractCount <= 1;
 
-  // Phase actuelle
-  if (isFirstContract && currentContract) {
-    const startDate = new Date(currentContract.start_date);
-    const now = new Date();
-    const monthsIn = Math.round((now - startDate) / (30.44 * 86400000));
+  // Parcours A : Consolidation dans le métier actuel
+  parcours.push({
+    phase: `Parcours A : Consolidation — ${currentPosition}`,
+    statut: 'en_cours',
+    description: `Renforcer les compétences sur le poste actuel. Objectif : autonomie complète en ${Math.max(3, 6 - totalMonths)} mois.`,
+    actions: [
+      'Observation en situation avec grille de compétences',
+      pcm ? `Communication adaptée au canal ${pcm.canal}` : 'Identifier le style de communication optimal',
+      'Missions progressives avec montée en responsabilité',
+      'Bilan intermédiaire à mi-parcours avec le CIP',
+      'Feedback régulier du manager sur les progrès',
+    ],
+    duree: `${Math.max(3, 6 - totalMonths)} mois`,
+    indicateurs: [
+      'Autonomie sur les tâches principales',
+      'Qualité du travail (taux d\'erreur)',
+      'Ponctualité et assiduité',
+      'Capacité à expliquer une tâche à un pair',
+    ],
+  });
 
-    if (monthsIn <= 1) {
-      parcours.push({
-        phase: 'Intégration',
-        statut: 'en_cours',
-        description: 'Période d\'accueil et de découverte. Accompagnement rapproché nécessaire.',
-        actions: [
-          'Désigner un tuteur/parrain dans l\'équipe',
-          'Présenter les règles de vie collective et le fonctionnement',
-          pcmKnowledge ? `Adapter la communication au canal ${pcmKnowledge.canal}` : 'Identifier le style de communication',
-          'Fixer des objectifs simples et atteignables la 1ère semaine',
-        ],
-      });
-    } else if (monthsIn <= 3) {
-      parcours.push({
-        phase: 'Montée en compétences',
-        statut: 'en_cours',
-        description: 'Apprentissage du métier et renforcement de l\'autonomie.',
-        actions: [
-          'Évaluer les progrès techniques',
-          'Identifier les besoins de formation complémentaire',
-          pcmKnowledge ? `Nourrir le besoin : ${pcmKnowledge.besoin}` : 'Observer et identifier les besoins de motivation',
-          'Commencer à travailler le projet professionnel',
-        ],
-      });
-    } else {
-      parcours.push({
-        phase: 'Consolidation',
-        statut: 'en_cours',
-        description: 'Consolidation des acquis et préparation de la suite.',
-        actions: [
-          'Bilan de compétences informel',
-          'Travailler le CV et les techniques d\'entretien',
-          'Explorer les pistes de sortie positive (formation qualifiante, CDI externe)',
-          'Mettre en avant les réussites dans le parcours',
-        ],
-      });
-    }
-  } else if (contractCount > 1) {
+  // Parcours B : Évolution vers un métier proche
+  if (topMetier && topMetier.metier !== currentPosition) {
     parcours.push({
-      phase: 'Renouvellement',
-      statut: 'en_cours',
-      description: `${contractCount}ème contrat (${totalMonths} mois cumulés). Focus sur l'autonomie et la projection vers l'emploi pérenne.`,
+      phase: `Parcours B : Évolution — ${topMetier.metier}`,
+      statut: 'a_planifier',
+      description: `Transition progressive vers ${topMetier.metier} (${topMetier.famille}). ${topMetier.pourquoi}`,
       actions: [
-        'Faire le bilan du parcours global',
-        'Définir un objectif de sortie à 6 mois',
-        'Intensifier les ateliers de recherche d\'emploi',
-        'Valider les compétences acquises (attestation, certification)',
+        `Mise en situation ponctuelle sur le poste de ${topMetier.metier}`,
+        'Atelier Explorama : identification des gestes professionnels appréciés',
+        `Formation aux compétences requises : ${topMetier.qualites_requises.slice(0, 3).join(', ')}`,
+        'Entretien CIP : validation de l\'intérêt et de la motivation',
+        'Stage interne de 2 semaines sur le nouveau poste',
+      ],
+      duree: '4 à 6 mois',
+      indicateurs: [
+        'Intérêt maintenu après la mise en situation',
+        'Acquisition des gestes de base',
+        'Avis favorable du responsable du poste cible',
       ],
     });
   }
 
-  // Phases futures recommandées
+  // Parcours C : Reconversion / sortie positive
   parcours.push({
-    phase: 'Formation & Qualification',
-    statut: 'a_planifier',
-    description: 'Développer les compétences transférables pour l\'employabilité future.',
-    actions: pcmKnowledge
-      ? pcmKnowledge.axes_developpement.concat([
-          `Formation : ${posteProfil?.potentiel_evolution || 'compétences métier'}`,
-        ])
-      : ['Identifier les axes de développement personnels', 'Planifier des formations adaptées'],
-  });
-
-  parcours.push({
-    phase: 'Sortie positive',
+    phase: 'Parcours C : Sortie positive vers l\'emploi',
     statut: 'objectif',
-    description: 'Accès à un emploi pérenne ou une formation qualifiante.',
+    description: 'Préparation à la sortie du dispositif d\'insertion vers un emploi pérenne ou une formation qualifiante.',
     actions: [
-      'Accompagnement à la rédaction du CV',
-      'Préparation aux entretiens d\'embauche',
-      'Mise en relation avec des employeurs partenaires',
+      'Accompagnement CV et lettre de motivation',
+      'Préparation aux entretiens d\'embauche (simulation)',
+      'Recherche d\'emploi accompagnée (offres, candidatures)',
+      topMetier ? `Cibler les employeurs du secteur ${topMetier.famille}` : 'Explorer les secteurs porteurs du territoire',
+      'Mobiliser le réseau de partenaires employeurs de Solidarité Textile',
       'Suivi post-insertion pendant 6 mois',
+    ],
+    duree: '3 à 6 mois',
+    indicateurs: [
+      'Nombre de candidatures envoyées',
+      'Nombre d\'entretiens obtenus',
+      'Obtention d\'un emploi ou d\'une formation',
     ],
   });
 
-  analysis.parcours_insertion = parcours;
+  return parcours;
+}
 
-  // ── 5. RECOMMANDATIONS MANAGÉRIALES ──
-  if (pcmKnowledge) {
-    analysis.recommandations = [
-      {
-        titre: 'Communication',
-        detail: `Privilégier le canal ${pcmKnowledge.canal}. ${pcmKnowledge.conseils_manager[0]}`,
-      },
-      {
-        titre: 'Motivation',
-        detail: `Nourrir le besoin principal : ${pcmKnowledge.besoin}. ${pcmKnowledge.conseils_manager[1]}`,
-      },
-      {
-        titre: 'Environnement',
-        detail: `Environnement idéal : ${pcmKnowledge.environnement_ideal}`,
-      },
-      {
-        titre: 'Vigilance stress',
-        detail: `En situation de stress, ${pcmKnowledge.nom} peut : ${pcmKnowledge.faiblesses_stress.join(', ')}. ${pcmKnowledge.conseils_manager[2]}`,
-      },
-    ];
+function buildRecommandationsCIP(pcm, diagnostic) {
+  const points_vigilance = [];
+  const conditions_reussite = [];
+  const outils = [];
+
+  if (pcm) {
+    points_vigilance.push({
+      titre: 'Communication',
+      detail: `Privilégier le canal ${pcm.canal}. ${pcm.conseils_manager[0]}`,
+    });
+    points_vigilance.push({
+      titre: 'Gestion du stress',
+      detail: `Sous stress : ${pcm.faiblesses_stress.join(', ')}. ${pcm.conseils_manager[2] || ''}`,
+    });
+
+    conditions_reussite.push(`Besoin principal : ${pcm.besoin}`);
+    conditions_reussite.push(`Environnement idéal : ${pcm.environnement_ideal}`);
+    pcm.conseils_manager.forEach(c => conditions_reussite.push(c));
   }
 
-  // ── 6. PLAN D'ACTION ──
-  const actions = [];
+  // Outils à mobiliser
+  outils.push('Photolangage d\'environnements de travail (Explorama)');
+  outils.push('Cartes de gestes professionnels');
+  outils.push('Grille de repérage de compétences en situation');
 
-  if (!pcm) {
-    actions.push({
-      priorite: 'haute',
-      action: 'Réaliser le test PCM',
-      detail: 'Le profil de personnalité est essentiel pour personnaliser l\'accompagnement.',
-      echeance: 'Semaine 1',
+  if (diagnostic?.frein_linguistique >= 3) {
+    outils.push('Supports visuels et pictogrammes');
+    outils.push('Consignes orales avec démonstration');
+    conditions_reussite.push('Adapter les supports écrits au niveau linguistique');
+  }
+
+  if (diagnostic?.frein_numerique >= 3) {
+    outils.push('Ateliers d\'initiation numérique');
+    conditions_reussite.push('Accompagner les démarches en ligne');
+  }
+
+  return { points_vigilance, conditions_reussite, outils };
+}
+
+function buildFreinsSociaux(diagnostic) {
+  const freins = [];
+  const FREIN_FIELDS = ['mobilite', 'sante', 'finances', 'famille', 'linguistique', 'administratif', 'numerique'];
+
+  for (const key of FREIN_FIELDS) {
+    const niveau = diagnostic[`frein_${key}`] || 1;
+    const detail = diagnostic[`frein_${key}_detail`] || '';
+    const def = FREINS_DEFINITIONS[key];
+
+    freins.push({
+      type: key,
+      label: def.label,
+      icon: def.icon,
+      niveau,
+      niveau_label: def.niveaux[niveau],
+      detail,
+      actions: niveau >= 3 ? def.actions_levee.slice(0, Math.min(3, niveau - 1)) : [],
     });
   }
 
-  if (isFirstContract) {
-    actions.push({
-      priorite: 'haute',
-      action: 'Entretien de suivi à 1 mois',
-      detail: 'Évaluer l\'intégration, identifier les difficultés, ajuster l\'accompagnement.',
-      echeance: '1 mois',
-    });
-  }
+  // Trier par niveau décroissant
+  freins.sort((a, b) => b.niveau - a.niveau);
 
-  if (pcmKnowledge) {
-    actions.push({
-      priorite: 'moyenne',
-      action: `Former le manager au canal ${pcmKnowledge.canal}`,
-      detail: `Adapter la communication pour maximiser la collaboration avec ce profil ${pcmKnowledge.nom}.`,
-      echeance: '2 semaines',
-    });
-  }
+  // Plan d'actions prioritaires
+  const plan_actions = freins
+    .filter(f => f.niveau >= 3)
+    .map(f => ({
+      priorite: f.niveau >= 4 ? 'haute' : 'moyenne',
+      action: `Lever le frein ${f.label}`,
+      detail: f.actions[0] || `Accompagnement ${f.label.toLowerCase()} à mettre en place`,
+      echeance: f.niveau >= 4 ? '2 semaines' : '1 mois',
+    }));
 
-  if (currentContract?.contract_type === 'CDD') {
-    const endDate = currentContract.end_date ? new Date(currentContract.end_date) : null;
-    const now = new Date();
-    if (endDate) {
-      const daysLeft = Math.round((endDate - now) / 86400000);
-      if (daysLeft <= 60) {
-        actions.push({
-          priorite: 'haute',
-          action: 'Préparer la suite du parcours',
-          detail: `Le contrat se termine dans ${daysLeft} jours. Décider : renouvellement, CDI insertion, ou sortie accompagnée.`,
-          echeance: `${daysLeft} jours`,
-        });
-      }
-    }
-  }
-
-  actions.push({
-    priorite: 'normale',
-    action: 'Bilan de compétences trimestriel',
-    detail: 'Évaluer les progrès, ajuster le plan de formation, nourrir la dynamique d\'insertion.',
-    echeance: 'Trimestriel',
-  });
-
-  analysis.plan_action = actions;
-
-  // ── 7. SCORE GLOBAL ──
-  analysis.confiance = Math.min(1, dataPoints / 6);
-  analysis.score_global = dataPoints > 0 ? Math.round(totalScore / Math.max(1, Math.floor(dataPoints / 2))) : null;
-
-  return analysis;
+  return { freins, plan_actions, nb_freins_majeurs: freins.filter(f => f.niveau >= 4).length };
 }
 
 function extractSkillsFromCV(cvText) {
@@ -544,7 +822,7 @@ function extractSkillsFromCV(cvText) {
     /word/gi, /excel/gi, /anglais/gi, /espagnol/gi, /arabe/gi,
     /management/gi, /encadrement/gi, /vente/gi, /commerce/gi,
     /cuisine/gi, /ménage/gi, /nettoyage/gi, /bâtiment/gi,
-    /électricité/gi, /plomberie/gi, /peinture/gi, /soudure/gi,
+    /couture/gi, /retouche/gi, /repassage/gi, /soudure/gi,
   ];
   const found = new Set();
   for (const pattern of skillPatterns) {
@@ -559,6 +837,113 @@ function extractSkillsFromCV(cvText) {
 // ══════════════════════════════════════════════════════════════
 
 const PCM_KEY = process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
+
+// GET /api/insertion/freins-definitions — Référentiel des freins (pour le frontend)
+router.get('/freins-definitions', (req, res) => {
+  res.json(FREINS_DEFINITIONS);
+});
+
+// GET /api/insertion/diagnostic/:employeeId — Récupérer le diagnostic CIP
+router.get('/diagnostic/:employeeId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM insertion_diagnostics WHERE employee_id = $1',
+      [req.params.employeeId]
+    );
+    res.json(result.rows[0] || null);
+  } catch (err) {
+    console.error('[INSERTION] Erreur diagnostic GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/diagnostic/:employeeId — Sauvegarder/mettre à jour le diagnostic
+router.put('/diagnostic/:employeeId', async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const d = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO insertion_diagnostics (
+        employee_id, created_by, updated_by,
+        parcours_anterieur, contraintes_sante, contraintes_mobilite, contraintes_familiales, autres_contraintes,
+        frein_mobilite, frein_mobilite_detail,
+        frein_sante, frein_sante_detail,
+        frein_finances, frein_finances_detail,
+        frein_famille, frein_famille_detail,
+        frein_linguistique, frein_linguistique_detail,
+        frein_administratif, frein_administratif_detail,
+        frein_numerique, frein_numerique_detail,
+        pcm_q_travail_ideal, pcm_q_reaction_stress, pcm_q_relation_equipe,
+        pcm_q_motivation, pcm_q_apprentissage, pcm_q_communication,
+        obs_taches_realisees, obs_points_forts, obs_difficultes,
+        obs_comportement_equipe, obs_autonomie_ponctualite,
+        pref_aime_faire, pref_ne_veut_plus, pref_environnement_prefere,
+        pref_environnement_eviter, pref_objectifs,
+        explorama_interets, explorama_rejets,
+        cip_hypotheses_metiers, cip_questions
+      ) VALUES (
+        $1, $2, $2,
+        $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+        $22, $23, $24, $25, $26, $27,
+        $28, $29, $30, $31, $32,
+        $33, $34, $35, $36, $37,
+        $38, $39, $40, $41
+      )
+      ON CONFLICT (employee_id) DO UPDATE SET
+        updated_by = $2, updated_at = NOW(),
+        parcours_anterieur = $3, contraintes_sante = $4, contraintes_mobilite = $5,
+        contraintes_familiales = $6, autres_contraintes = $7,
+        frein_mobilite = $8, frein_mobilite_detail = $9,
+        frein_sante = $10, frein_sante_detail = $11,
+        frein_finances = $12, frein_finances_detail = $13,
+        frein_famille = $14, frein_famille_detail = $15,
+        frein_linguistique = $16, frein_linguistique_detail = $17,
+        frein_administratif = $18, frein_administratif_detail = $19,
+        frein_numerique = $20, frein_numerique_detail = $21,
+        pcm_q_travail_ideal = $22, pcm_q_reaction_stress = $23,
+        pcm_q_relation_equipe = $24, pcm_q_motivation = $25,
+        pcm_q_apprentissage = $26, pcm_q_communication = $27,
+        obs_taches_realisees = $28, obs_points_forts = $29, obs_difficultes = $30,
+        obs_comportement_equipe = $31, obs_autonomie_ponctualite = $32,
+        pref_aime_faire = $33, pref_ne_veut_plus = $34,
+        pref_environnement_prefere = $35, pref_environnement_eviter = $36,
+        pref_objectifs = $37,
+        explorama_interets = $38, explorama_rejets = $39,
+        cip_hypotheses_metiers = $40, cip_questions = $41
+      RETURNING *
+    `, [
+      empId, req.user.id,
+      d.parcours_anterieur || null, d.contraintes_sante || null,
+      d.contraintes_mobilite || null, d.contraintes_familiales || null,
+      d.autres_contraintes || null,
+      d.frein_mobilite || 1, d.frein_mobilite_detail || null,
+      d.frein_sante || 1, d.frein_sante_detail || null,
+      d.frein_finances || 1, d.frein_finances_detail || null,
+      d.frein_famille || 1, d.frein_famille_detail || null,
+      d.frein_linguistique || 1, d.frein_linguistique_detail || null,
+      d.frein_administratif || 1, d.frein_administratif_detail || null,
+      d.frein_numerique || 1, d.frein_numerique_detail || null,
+      d.pcm_q_travail_ideal || null, d.pcm_q_reaction_stress || null,
+      d.pcm_q_relation_equipe || null, d.pcm_q_motivation || null,
+      d.pcm_q_apprentissage || null, d.pcm_q_communication || null,
+      d.obs_taches_realisees || null, d.obs_points_forts || null,
+      d.obs_difficultes || null, d.obs_comportement_equipe || null,
+      d.obs_autonomie_ponctualite || null,
+      d.pref_aime_faire || null, d.pref_ne_veut_plus || null,
+      d.pref_environnement_prefere || null, d.pref_environnement_eviter || null,
+      d.pref_objectifs || null,
+      d.explorama_interets || null, d.explorama_rejets || null,
+      d.cip_hypotheses_metiers || null, d.cip_questions || null,
+    ]);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[INSERTION] Erreur diagnostic PUT :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 // GET /api/insertion/:employeeId — Analyse complète
 router.get('/:employeeId', async (req, res) => {
@@ -582,23 +967,23 @@ router.get('/:employeeId', async (req, res) => {
       [empId]
     );
 
-    // 3. Disponibilité
-    const availRes = await pool.query(
-      'SELECT day_off FROM employee_availability WHERE employee_id = $1',
-      [empId]
-    );
-
-    // 4. Chercher le candidat correspondant (par nom)
+    // 3. Candidat (par nom ou candidate_id)
     let candidate = null;
     try {
-      const candRes = await pool.query(
-        'SELECT * FROM candidates WHERE LOWER(first_name) = LOWER($1) AND LOWER(last_name) = LOWER($2) ORDER BY created_at DESC LIMIT 1',
-        [employee.first_name, employee.last_name]
-      );
-      candidate = candRes.rows[0] || null;
+      if (employee.candidate_id) {
+        const candRes = await pool.query('SELECT * FROM candidates WHERE id = $1', [employee.candidate_id]);
+        candidate = candRes.rows[0] || null;
+      }
+      if (!candidate) {
+        const candRes = await pool.query(
+          'SELECT * FROM candidates WHERE LOWER(first_name) = LOWER($1) AND LOWER(last_name) = LOWER($2) ORDER BY created_at DESC LIMIT 1',
+          [employee.first_name, employee.last_name]
+        );
+        candidate = candRes.rows[0] || null;
+      }
     } catch { /* table might not exist */ }
 
-    // 5. Rapport PCM (via le candidat)
+    // 4. Rapport PCM
     let pcmReport = null;
     if (candidate) {
       try {
@@ -613,34 +998,19 @@ router.get('/:employeeId', async (req, res) => {
       } catch { /* pcm might not exist */ }
     }
 
-    // 6. Membres de l'équipe (pour analyse dynamique)
+    // 5. Membres de l'équipe
     let teamMembers = [];
     if (employee.team_id) {
       try {
-        const teamRes = await pool.query(`
-          SELECT e.id, e.first_name, e.last_name,
-            (SELECT pr.encrypted_report FROM pcm_reports pr
-             JOIN candidates c ON pr.candidate_id = c.id
-             WHERE LOWER(c.first_name) = LOWER(e.first_name) AND LOWER(c.last_name) = LOWER(e.last_name)
-             ORDER BY pr.created_at DESC LIMIT 1) as pcm_encrypted
-          FROM employees e WHERE e.team_id = $1 AND e.is_active = true
-        `, [employee.team_id]);
-
-        teamMembers = teamRes.rows.map(m => {
-          let pcm_base_type = null;
-          if (m.pcm_encrypted) {
-            try {
-              const bytes = CryptoJS.AES.decrypt(m.pcm_encrypted, PCM_KEY);
-              const data = JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
-              pcm_base_type = data.base?.type || null;
-            } catch { /* ignore */ }
-          }
-          return { id: m.id, first_name: m.first_name, last_name: m.last_name, pcm_base_type };
-        });
+        const teamRes = await pool.query(
+          'SELECT id, first_name, last_name FROM employees WHERE team_id = $1 AND is_active = true AND id != $2',
+          [employee.team_id, empId]
+        );
+        teamMembers = teamRes.rows;
       } catch { /* ignore */ }
     }
 
-    // 7. Position
+    // 6. Position
     let position = null;
     const currentContract = contractsRes.rows.find(c => c.is_current);
     if (currentContract?.position_id) {
@@ -650,15 +1020,17 @@ router.get('/:employeeId', async (req, res) => {
       } catch { /* ignore */ }
     }
 
-    // 8. Analyse
+    // 7. Diagnostic CIP
+    let diagnostic = null;
+    try {
+      const diagRes = await pool.query('SELECT * FROM insertion_diagnostics WHERE employee_id = $1', [empId]);
+      diagnostic = diagRes.rows[0] || null;
+    } catch { /* table might not exist yet */ }
+
+    // 8. Analyse complète
     const analysis = analyzeInsertion(
-      employee,
-      contractsRes.rows,
-      availRes.rows.map(r => r.day_off),
-      candidate,
-      pcmReport,
-      teamMembers,
-      position
+      employee, contractsRes.rows, candidate, pcmReport,
+      teamMembers, position, diagnostic
     );
 
     res.json({
@@ -674,6 +1046,7 @@ router.get('/:employeeId', async (req, res) => {
       has_candidate_data: !!candidate,
       has_cv: !!candidate?.cv_raw_text,
       has_interview: !!candidate?.interview_comment,
+      has_diagnostic: !!diagnostic,
       nb_contracts: contractsRes.rows.length,
       ...analysis,
     });
@@ -693,14 +1066,14 @@ router.get('/', async (req, res) => {
         (SELECT ec.contract_type FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as current_contract_type,
         (SELECT ec.end_date FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as contract_end_date,
         (SELECT COUNT(*)::int FROM pcm_reports pr JOIN candidates c ON pr.candidate_id = c.id
-         WHERE LOWER(c.first_name) = LOWER(e.first_name) AND LOWER(c.last_name) = LOWER(e.last_name)) as has_pcm
+         WHERE LOWER(c.first_name) = LOWER(e.first_name) AND LOWER(c.last_name) = LOWER(e.last_name)) as has_pcm,
+        (SELECT COUNT(*)::int FROM insertion_diagnostics id WHERE id.employee_id = e.id) as has_diagnostic
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       WHERE e.is_active = true
       ORDER BY e.last_name, e.first_name
     `);
 
-    // Flag les urgences (fin de contrat proche)
     const now = new Date();
     const employees = result.rows.map(e => {
       let urgency = null;
@@ -709,7 +1082,7 @@ router.get('/', async (req, res) => {
         if (days <= 30) urgency = 'critique';
         else if (days <= 60) urgency = 'attention';
       }
-      return { ...e, urgency, has_pcm: e.has_pcm > 0 };
+      return { ...e, urgency, has_pcm: e.has_pcm > 0, has_diagnostic: e.has_diagnostic > 0 };
     });
 
     res.json(employees);
