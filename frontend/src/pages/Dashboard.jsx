@@ -49,7 +49,7 @@ export default function Dashboard() {
 
   const collecteKg = historique ? getCollecteForYear(selectedYear) : 0;
   const trieKg = historique ? getTrieForYear(selectedYear) : 0;
-  const co2 = Math.round(collecteKg * 3.6);
+  const co2 = Math.round(collecteKg * 1.493);
   const nbProduits = historique ? getProduitsForYear(selectedYear) : 0;
 
   // Inventaire actuel
@@ -192,7 +192,7 @@ export default function Dashboard() {
                   <tr className="border-t">
                     <td className="px-4 py-3 font-medium">CO₂ évité (kg)</td>
                     {historique.annees_disponibles.map(y => (
-                      <td key={y} className="px-4 py-3 text-right font-semibold text-teal-600">{Math.round(getCollecteForYear(y) * 3.6).toLocaleString('fr-FR')}</td>
+                      <td key={y} className="px-4 py-3 text-right font-semibold text-teal-600">{Math.round(getCollecteForYear(y) * 1.493).toLocaleString('fr-FR')}</td>
                     ))}
                   </tr>
                 </tbody>

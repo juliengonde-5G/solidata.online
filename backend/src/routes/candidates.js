@@ -509,6 +509,7 @@ router.get('/kanban', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
       interview: [],
       test: [],
       hired: [],
+      rejected: [],
     };
 
     result.rows.forEach(c => {
@@ -790,7 +791,7 @@ router.put('/:id/status', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, comment } = req.body;
-    const validStatuses = ['received', 'preselected', 'interview', 'test', 'hired'];
+    const validStatuses = ['received', 'preselected', 'interview', 'test', 'hired', 'rejected'];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Statut invalide' });

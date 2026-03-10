@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
 router.use(authenticate);
+router.use(authorize('ADMIN', 'MANAGER', 'RH', 'AUTORITE'));
 
 // ══════════════════════════════════════════
 // DASHBOARD COLLECTIVITÉ — Métropole de Rouen

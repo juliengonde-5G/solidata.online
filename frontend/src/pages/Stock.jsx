@@ -18,10 +18,10 @@ export default function Stock() {
     try {
       const [sumRes, movRes, catRes] = await Promise.all([
         api.get('/stock/summary'),
-        api.get('/stock/movements'),
+        api.get('/stock?limit=100'),
         api.get('/tri/categories'),
       ]);
-      setSummary(sumRes.data);
+      setSummary(sumRes.data?.byCategory || sumRes.data || []);
       setMovements(movRes.data);
       setCategories(catRes.data);
     } catch (err) { console.error(err); }
@@ -31,7 +31,14 @@ export default function Stock() {
   const createMovement = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/stock/movements', form);
+      await api.post('/stock', {
+        type: form.type,
+        date: new Date().toISOString().split('T')[0],
+        poids_kg: parseFloat(form.quantity_kg),
+        matiere_id: form.categorie_sortante_id || null,
+        destination: form.source || null,
+        notes: form.notes || null,
+      });
       setShowForm(false);
       loadData();
     } catch (err) { console.error(err); }
@@ -39,7 +46,7 @@ export default function Stock() {
 
   if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
 
-  const totalStock = summary.reduce((acc, s) => acc + (parseFloat(s.stock_kg) || 0), 0);
+  const totalStock = summary.reduce((acc, s) => acc + (parseFloat(s.solde_kg || s.stock_kg) || 0), 0);
 
   return (
     <Layout>
@@ -59,9 +66,9 @@ export default function Stock() {
           {summary.map(s => (
             <div key={s.categorie_id || s.categorie} className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500 truncate">{s.categorie_nom || s.categorie}</p>
-              <p className="text-xl font-bold text-solidata-dark">{parseFloat(s.stock_kg || 0).toFixed(0)} <span className="text-xs font-normal text-gray-400">kg</span></p>
+              <p className="text-xl font-bold text-solidata-dark">{parseFloat(s.solde_kg || s.stock_kg || 0).toFixed(0)} <span className="text-xs font-normal text-gray-400">kg</span></p>
               <div className="mt-1 h-1.5 bg-gray-100 rounded-full">
-                <div className="h-1.5 bg-solidata-green rounded-full" style={{ width: `${Math.min((parseFloat(s.stock_kg) / Math.max(totalStock, 1)) * 100 * 4, 100)}%` }}></div>
+                <div className="h-1.5 bg-solidata-green rounded-full" style={{ width: `${Math.min((parseFloat(s.solde_kg || s.stock_kg) / Math.max(totalStock, 1)) * 100 * 4, 100)}%` }}></div>
               </div>
             </div>
           ))}
@@ -86,15 +93,15 @@ export default function Stock() {
             <tbody>
               {movements.map(m => (
                 <tr key={m.id} className="border-t hover:bg-gray-50">
-                  <td className="p-3 text-sm">{new Date(m.created_at).toLocaleDateString('fr-FR')}</td>
-                  <td className="p-3 text-sm">{m.categorie_nom || '—'}</td>
+                  <td className="p-3 text-sm">{new Date(m.date || m.created_at).toLocaleDateString('fr-FR')}</td>
+                  <td className="p-3 text-sm">{m.matiere_categorie || m.categorie_nom || '—'}</td>
                   <td className="p-3">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${m.type === 'entree' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {m.type === 'entree' ? 'Entrée' : 'Sortie'}
                     </span>
                   </td>
-                  <td className="p-3 text-sm font-medium">{m.quantity_kg}</td>
-                  <td className="p-3 text-sm text-gray-500">{m.source || '—'}</td>
+                  <td className="p-3 text-sm font-medium">{m.poids_kg || m.quantity_kg}</td>
+                  <td className="p-3 text-sm text-gray-500">{m.origine || m.destination || '—'}</td>
                   <td className="p-3 text-sm text-gray-400 max-w-[200px] truncate">{m.notes || '—'}</td>
                 </tr>
               ))}

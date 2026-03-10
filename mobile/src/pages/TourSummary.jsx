@@ -35,7 +35,7 @@ export default function TourSummary() {
 
   const cavs = tour?.cavs || [];
   const collected = cavs.filter(c => c.status === 'collected').length;
-  const co2Saved = ((tour?.total_weight_kg || 0) * 3.6).toFixed(0);
+  const co2Saved = ((tour?.total_weight_kg || 0) * 1.493).toFixed(0);
   const kmStart = tour?.checklist?.km_start || 0;
   const kmEnd = tour?.checklist?.km_end || 0;
   const distanceParcourue = kmEnd > kmStart ? kmEnd - kmStart : null;

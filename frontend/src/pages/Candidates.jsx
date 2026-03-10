@@ -3,14 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
-const STATUSES = ['received', 'preselected', 'interview', 'test', 'hired'];
+const STATUSES = ['received', 'preselected', 'interview', 'test', 'hired', 'rejected'];
 
 const STATUS_LABELS = {
-  received: 'Reçus',
-  preselected: 'Présélectionnés',
+  received: 'Recus',
+  preselected: 'Preselectionnes',
   interview: 'Entretien',
   test: 'Test',
-  hired: 'Recrutés',
+  hired: 'Recrutes',
+  rejected: 'Refuses',
 };
 
 const STATUS_COLORS = {
@@ -19,6 +20,7 @@ const STATUS_COLORS = {
   interview:   { bg: 'bg-purple-50', border: 'border-purple-200', drop: 'bg-purple-100 border-purple-400', badge: 'bg-purple-500' },
   test:        { bg: 'bg-orange-50', border: 'border-orange-200', drop: 'bg-orange-100 border-orange-400', badge: 'bg-orange-500' },
   hired:       { bg: 'bg-green-50',  border: 'border-green-200',  drop: 'bg-green-100 border-green-400',   badge: 'bg-green-500' },
+  rejected:    { bg: 'bg-red-50',    border: 'border-red-200',    drop: 'bg-red-100 border-red-400',       badge: 'bg-red-500' },
 };
 
 export default function Candidates() {

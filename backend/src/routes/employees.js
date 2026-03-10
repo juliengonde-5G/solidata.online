@@ -89,11 +89,12 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
     const fields = req.body;
     const allowed = ['first_name', 'last_name', 'phone', 'email', 'team_id', 'position',
       'contract_type', 'contract_start', 'contract_end', 'has_permis_b', 'has_caces',
-      'weekly_hours', 'skills', 'is_active', 'user_id', 'candidate_id'];
+      'weekly_hours', 'skills', 'is_active', 'user_id', 'candidate_id',
+      'insertion_status', 'insertion_start_date', 'insertion_end_date', 'prescripteur', 'visite_medicale_date'];
 
     // Nettoyer les types : strings vides → null pour les champs numériques/date/boolean
     const intFields = ['team_id', 'user_id', 'candidate_id'];
-    const dateFields = ['contract_start', 'contract_end'];
+    const dateFields = ['contract_start', 'contract_end', 'insertion_start_date', 'insertion_end_date', 'visite_medicale_date'];
     for (const f of intFields) {
       if (fields[f] !== undefined && !fields[f] && fields[f] !== 0) fields[f] = null;
       else if (fields[f]) fields[f] = Number(fields[f]);

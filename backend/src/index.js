@@ -213,6 +213,12 @@ async function initOnStartup() {
       console.error('[DB] Erreur seed CAV :', err.message);
     }
 
+    // Cleanup expired refresh tokens
+    try {
+      const cleaned = await pool.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
+      if (cleaned.rowCount > 0) console.log(`[DB] ${cleaned.rowCount} refresh tokens expires purges`);
+    } catch (err) { /* table may not exist yet */ }
+
     // Seed historique si la table est vide
     try {
       const histCount = await pool.query('SELECT COUNT(*) FROM historique_mensuel');
@@ -242,6 +248,9 @@ server.listen(PORT, async () => {
   console.log(`  Port : ${PORT}`);
   console.log(`  Env  : ${process.env.NODE_ENV || 'development'}`);
   console.log(`══════════════════════════════════════════\n`);
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change-this-in-production') {
+    console.warn('[SECURITE] ATTENTION : JWT_SECRET non configure ! Definissez JWT_SECRET dans .env');
+  }
   await initOnStartup();
 });
 

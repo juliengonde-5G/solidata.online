@@ -1450,6 +1450,65 @@ async function initDatabase() {
     console.log('[INIT-DB] Migration CAV (unique name + fill rate columns) ✓');
 
     // ══════════════════════════════════════════
+    // MIGRATION : FKs manquantes + indexes performance
+    // ══════════════════════════════════════════
+    // FK users.team_id -> teams(id)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE users ADD CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    // FK candidates.assigned_team_id -> teams(id)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE candidates ADD CONSTRAINT fk_candidates_team FOREIGN KEY (assigned_team_id) REFERENCES teams(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    // FK candidates.position_id -> positions(id)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE candidates ADD CONSTRAINT fk_candidates_position FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    // Index on tonnage_history.cav_id for performance
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tonnage_history_cav ON tonnage_history(cav_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tonnage_history_date ON tonnage_history(date DESC);');
+    // Index on stock_movements
+    await client.query('CREATE INDEX IF NOT EXISTS idx_stock_movements_date ON stock_movements(date DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_stock_movements_type ON stock_movements(type);');
+    // Index on tours
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tours_date ON tours(date);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tours_status ON tours(status);');
+    // Candidate rejected status migration
+    const candidateChecks2 = await client.query(`
+      SELECT con.conname FROM pg_constraint con
+      JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
+      WHERE con.conrelid = 'candidates'::regclass AND con.contype = 'c' AND att.attname = 'status'
+    `);
+    for (const row of candidateChecks2.rows) {
+      await client.query(`ALTER TABLE candidates DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+    }
+    await client.query(`
+      UPDATE candidates SET status = 'received' WHERE status IS NULL OR status NOT IN ('received', 'preselected', 'interview', 'test', 'hired', 'rejected');
+    `);
+    await client.query(`
+      ALTER TABLE candidates ADD CONSTRAINT candidates_status_check
+        CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired', 'rejected'));
+    `);
+    // Employee insertion tracking columns
+    await client.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_status VARCHAR(30) DEFAULT 'none'
+        CHECK (insertion_status IN ('none', 'en_parcours', 'termine', 'abandon'));
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_start_date DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_end_date DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS prescripteur VARCHAR(100);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
+    `);
+    // Purge expired refresh tokens (cleanup)
+    await client.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
+    console.log('[INIT-DB] Migration FKs + indexes + statuts ✓');
+
+    // ══════════════════════════════════════════
     // MODULE : Parcours d'insertion — Diagnostics CIP
     // ══════════════════════════════════════════
     await client.query(`
@@ -1507,6 +1566,19 @@ async function initDatabase() {
         -- EXPLORAMA / OUTILS D'EXPLORATION
         explorama_interets TEXT,
         explorama_rejets TEXT,
+        explorama_gestes_positifs TEXT,
+        explorama_gestes_negatifs TEXT,
+        explorama_environnements TEXT,
+        explorama_rythme TEXT,
+
+        -- CAUSES DETAILLEES DES FREINS
+        frein_mobilite_causes TEXT,
+        frein_sante_causes TEXT,
+        frein_finances_causes TEXT,
+        frein_famille_causes TEXT,
+        frein_linguistique_causes TEXT,
+        frein_administratif_causes TEXT,
+        frein_numerique_causes TEXT,
 
         -- ORIENTATION CIP
         cip_hypotheses_metiers TEXT,
@@ -1518,6 +1590,60 @@ async function initDatabase() {
       );
     `);
     console.log('[INIT-DB] Module Insertion Diagnostics ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Fil d'actualite
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS news_articles (
+        id SERIAL PRIMARY KEY,
+        category VARCHAR(30) NOT NULL CHECK (category IN ('metier', 'local')),
+        title VARCHAR(255) NOT NULL,
+        summary TEXT,
+        content TEXT,
+        source_url VARCHAR(500),
+        source_name VARCHAR(100),
+        tags TEXT[],
+        is_pinned BOOLEAN DEFAULT false,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('[INIT-DB] Module News Articles ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Notification triggers
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notification_triggers (
+        id SERIAL PRIMARY KEY,
+        event VARCHAR(100) NOT NULL,
+        template_id INTEGER REFERENCES message_templates(id) ON DELETE CASCADE,
+        is_active BOOLEAN DEFAULT true,
+        delay_hours INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('[INIT-DB] Module Notification Triggers ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Objectifs periodiques
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS periodic_objectives (
+        id SERIAL PRIMARY KEY,
+        section VARCHAR(50) NOT NULL,
+        label VARCHAR(255) NOT NULL,
+        target_value DOUBLE PRECISION NOT NULL,
+        period VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (period IN ('daily', 'weekly', 'monthly', 'quarterly', 'yearly')),
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('[INIT-DB] Module Periodic Objectives ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
