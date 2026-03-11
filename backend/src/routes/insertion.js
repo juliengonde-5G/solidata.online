@@ -1688,10 +1688,13 @@ router.get('/:employeeId', async (req, res) => {
     const employee = empRes.rows[0];
 
     // 2. Contrats
-    const contractsRes = await pool.query(
-      'SELECT ec.*, t.name as team_name, p.title as position_title FROM employee_contracts ec LEFT JOIN teams t ON ec.team_id = t.id LEFT JOIN positions p ON ec.position_id = p.id WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC',
-      [empId]
-    );
+    let contractsRes = { rows: [] };
+    try {
+      contractsRes = await pool.query(
+        'SELECT ec.*, t.name as team_name, p.title as position_title FROM employee_contracts ec LEFT JOIN teams t ON ec.team_id = t.id LEFT JOIN positions p ON ec.position_id = p.id WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC',
+        [empId]
+      );
+    } catch { /* table might not exist */ }
 
     // 3. Candidat (par nom ou candidate_id)
     let candidate = null;
@@ -1811,16 +1814,41 @@ router.get('/:employeeId', async (req, res) => {
 // GET /api/insertion — Vue d'ensemble de tous les employés actifs
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT e.id, e.first_name, e.last_name, e.is_active,
-        t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end,
+    // Detecter quelles tables existent pour adapter la requete
+    const tablesCheck = await pool.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name IN ('employee_contracts', 'pcm_reports', 'insertion_diagnostics')
+    `);
+    const existingTables = new Set(tablesCheck.rows.map(r => r.table_name));
+
+    let subqueries = '';
+    if (existingTables.has('employee_contracts')) {
+      subqueries += `,
         COALESCE((SELECT COUNT(*)::int FROM employee_contracts WHERE employee_id = e.id), 0) as nb_contracts,
         (SELECT ec.contract_type FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as current_contract_type,
-        (SELECT ec.end_date FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as contract_end_date,
+        (SELECT ec.end_date FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as contract_end_date`;
+    } else {
+      subqueries += `, 0 as nb_contracts, e.contract_type as current_contract_type, e.contract_end as contract_end_date`;
+    }
+    if (existingTables.has('pcm_reports')) {
+      subqueries += `,
         CASE WHEN e.candidate_id IS NOT NULL THEN
           COALESCE((SELECT COUNT(*)::int FROM pcm_reports pr WHERE pr.candidate_id = e.candidate_id), 0)
-        ELSE 0 END as has_pcm,
-        COALESCE((SELECT COUNT(*)::int FROM insertion_diagnostics id WHERE id.employee_id = e.id), 0) as has_diagnostic
+        ELSE 0 END as has_pcm`;
+    } else {
+      subqueries += `, 0 as has_pcm`;
+    }
+    if (existingTables.has('insertion_diagnostics')) {
+      subqueries += `,
+        COALESCE((SELECT COUNT(*)::int FROM insertion_diagnostics diag WHERE diag.employee_id = e.id), 0) as has_diagnostic`;
+    } else {
+      subqueries += `, 0 as has_diagnostic`;
+    }
+
+    const result = await pool.query(`
+      SELECT e.id, e.first_name, e.last_name, e.is_active,
+        t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end
+        ${subqueries}
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       WHERE e.is_active = true
