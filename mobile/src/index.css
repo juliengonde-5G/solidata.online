@@ -5,36 +5,33 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════════════════════
-   SOLIDATA MOBILE — Design system & safe area
+   SOLIDATA MOBILE — Charte bleu pétrole, usage terrain
+   Gros boutons, libellés courts, faible littératie FR, usage possible en déplacement
    ═══════════════════════════════════════════════════════════════ */
 :root {
-  /* Couleurs */
-  --color-primary: #8BC540;
-  --color-primary-dark: #6FA030;
-  --color-primary-light: #A8D96A;
+  --color-primary: #0D9488;
+  --color-primary-dark: #0F766E;
+  --color-primary-light: #14B8A6;
   --color-surface: #FFFFFF;
-  --color-surface-2: #F8FAF5;
-  --color-text: #1A202C;
+  --color-surface-2: #FAFAF9;
+  --color-text: #0F172A;
   --color-text-muted: #64748B;
   --color-border: #E2E8F0;
-  --color-success: #22C55E;
+  --color-success: #0D9488;
   --color-warning: #F59E0B;
-  --color-error: #EF4444;
+  --color-error: #DC2626;
 
-  /* Espacements (touch-friendly) */
-  --space-touch: 44px;
+  /* Zones tactiles ≥ 44px (accessibilité / gants) */
+  --space-touch: 48px;
   --radius-sm: 12px;
   --radius-md: 16px;
   --radius-lg: 20px;
   --radius-xl: 24px;
-  --radius-2xl: 28px;
 
-  /* Ombres */
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --shadow-button: 0 4px 14px rgba(139, 197, 64, 0.35);
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  --shadow-card-hover: 0 4px 12px -2px rgb(0 0 0 / 0.08);
+  --shadow-button: 0 2px 8px rgba(13, 148, 136, 0.25);
 
-  /* Safe area (notch / barre d’état) */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
@@ -59,7 +56,6 @@
     min-height: 100dvh;
   }
 
-  /* Zones cliquables minimum 44px pour accessibilité */
   .touch-target {
     min-height: var(--space-touch);
     min-width: var(--space-touch);
@@ -67,20 +63,19 @@
 }
 
 @layer components {
-  /* Carte moderne */
   .card-mobile {
-    @apply bg-white rounded-2xl p-4 transition-shadow;
+    @apply bg-white transition-shadow;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-card);
-    border-radius: var(--radius-xl);
   }
   .card-mobile:active {
     box-shadow: var(--shadow-card-hover);
   }
 
-  /* Bouton principal */
   .btn-primary-mobile {
-    @apply w-full font-semibold rounded-2xl transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100;
+    @apply w-full font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100;
     min-height: var(--space-touch);
+    border-radius: var(--radius-md);
     background-color: var(--color-primary);
     color: white;
     box-shadow: var(--shadow-button);
@@ -89,22 +84,24 @@
     filter: brightness(1.05);
   }
 
-  /* Bouton secondaire */
   .btn-secondary-mobile {
-    @apply w-full font-medium rounded-2xl border-2 transition-all active:scale-[0.98];
+    @apply w-full font-medium border-2 transition-all active:scale-[0.98];
     min-height: var(--space-touch);
+    border-radius: var(--radius-md);
     border-color: var(--color-primary);
     color: var(--color-primary);
     background: transparent;
   }
 
-  /* Champ formulaire */
   .input-mobile {
-    @apply w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-base transition-colors focus:border-solidata-green focus:outline-none focus:ring-2 focus:ring-solidata-green/20;
+    @apply w-full border-2 border-slate-200 px-4 py-3 text-base transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20;
     min-height: var(--space-touch);
+    border-radius: var(--radius-sm);
+  }
+  .input-mobile:focus {
+    border-color: var(--color-primary);
   }
 
-  /* Header d’écran */
   .screen-header {
     @apply flex flex-col gap-1 px-4 pt-4 pb-4;
     background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);

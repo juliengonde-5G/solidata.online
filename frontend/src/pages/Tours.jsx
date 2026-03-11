@@ -86,7 +86,7 @@ export default function Tours() {
             <h1 className="text-2xl font-bold text-solidata-dark">Tournées de collecte</h1>
             <p className="text-gray-500">Planification et suivi des tournées</p>
           </div>
-          <button onClick={openWizard} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+          <button onClick={openWizard} className="btn-primary text-sm font-medium">
             + Nouvelle tournée
           </button>
         </div>

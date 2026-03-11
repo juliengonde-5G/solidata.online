@@ -106,6 +106,76 @@ crontab deploy/crontab.txt
 - Mot de passe : `admin123`
 - **CHANGER IMMÉDIATEMENT après connexion**
 
+## Scripts de déploiement et de tests
+
+### Déploiement sur le site de prod
+
+**Sur le serveur (Linux)** — après connexion SSH :
+
+```bash
+cd /opt/solidata.online
+
+# Mise à jour seule (backup + git pull + rebuild + redémarrage)
+bash deploy/scripts/deploy.sh update
+
+# Mise à jour + vérifications (health-check + test API /api/health)
+bash deploy/scripts/deploy-and-test.sh
+```
+
+**Depuis Windows (PowerShell)** — déploiement à distance puis tests :
+
+```powershell
+# Déploiement SSH + tests smoke (prérequis : Node.js et SSH configurés)
+.\scripts\deploy-prod.ps1
+
+# Option : sans lancer les tests après
+.\scripts\deploy-prod.ps1 -SkipTests
+
+# Serveur personnalisé (ou variables d'environnement SOLIDATA_SSH_USER, SOLIDATA_SSH_HOST)
+.\scripts\deploy-prod.ps1 -SshUser root -SshHost 51.159.144.100
+```
+
+### Lancement des tests (smoke API)
+
+À exécuter **depuis votre PC** (Node.js requis) pour vérifier l’API en production ou recette :
+
+**Windows (invite de commandes) :**
+
+```batch
+REM Production (défaut)
+scripts\run-tests.bat
+
+REM Recette
+scripts\run-tests.bat recette
+
+REM URL personnalisée
+scripts\run-tests.bat https://recette.solidata.online
+
+REM Avec login (pour tester les routes protégées)
+set API_USER=admin
+set API_PASSWORD=votre_mot_de_passe
+scripts\run-tests.bat
+```
+
+**Windows (PowerShell) :**
+
+```powershell
+.\scripts\run-tests.ps1
+.\scripts\run-tests.ps1 -Env recette
+.\scripts\run-tests.ps1 -BaseUrl "https://solidata.online" -ApiUser admin -ApiPassword "xxx"
+```
+
+**Ligne de commande (tous OS) :**
+
+```bash
+BASE_URL=https://solidata.online node scripts/tests/api-smoke.js
+BASE_URL=https://solidata.online API_USER=admin API_PASSWORD=xxx node scripts/tests/api-smoke.js
+```
+
+Les tests vérifient : health check, login (si identifiants fournis), puis les endpoints protégés (me, historique/kpi, candidates/kanban, tours, vehicles, employees). Voir `docs/PLAN_TESTS_DEPLOIEMENT.md` pour le plan complet.
+
+---
+
 ## Opérations courantes
 
 ```bash

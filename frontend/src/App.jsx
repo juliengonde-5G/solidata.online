@@ -36,7 +36,7 @@ import NewsFeed from './pages/NewsFeed';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-solidata-green"></div></div>;
+  if (loading) return <div className="flex items-center justify-center h-screen bg-[var(--color-bg)]"><div className="animate-spin rounded-full h-12 w-12 border-2 border-primary border-t-transparent"></div></div>;
   if (!user) return <Navigate to="/login" />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/" />;
   return children;

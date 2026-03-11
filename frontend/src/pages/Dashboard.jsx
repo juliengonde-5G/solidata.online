@@ -60,18 +60,18 @@ export default function Dashboard() {
   return (
     <Layout>
       <div>
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-solidata-dark tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
               Bonjour, {user?.first_name || user?.username} !
             </h1>
-            <p className="text-gray-500 mt-1">Tableau de bord SOLIDATA ERP</p>
+            <p className="text-slate-500 mt-1 text-sm">Tableau de bord — Collecte, tri & insertion</p>
           </div>
           {historique?.annees_disponibles?.length > 0 && (
             <select
               value={selectedYear}
               onChange={e => setSelectedYear(parseInt(e.target.value))}
-              className="border rounded-lg px-3 py-2 text-sm font-medium"
+              className="input-modern w-full sm:w-auto min-w-[120px]"
             >
               {historique.annees_disponibles.map(y => (
                 <option key={y} value={y}>{y}</option>
@@ -80,68 +80,68 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+        {/* Tuiles KPI — design system */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
           <KpiCard
             title={`Tonnage collecté ${selectedYear}`}
-            value={loading ? '...' : `${(collecteKg / 1000).toFixed(1)}`}
+            value={loading ? '—' : `${(collecteKg / 1000).toFixed(1)}`}
             unit="tonnes"
-            color="green"
-            icon="🚛"
+            icon={IconTruck}
+            accent="primary"
           />
           <KpiCard
             title={`Tonnage trié ${selectedYear}`}
-            value={loading ? '...' : `${(trieKg / 1000).toFixed(1)}`}
+            value={loading ? '—' : `${(trieKg / 1000).toFixed(1)}`}
             unit="tonnes"
-            color="blue"
-            icon="⚙️"
+            icon={IconSort}
+            accent="slate"
           />
           <KpiCard
             title={`CO₂ évité ${selectedYear}`}
-            value={loading ? '...' : `${(co2 / 1000).toFixed(1)}`}
+            value={loading ? '—' : `${(co2 / 1000).toFixed(1)}`}
             unit="tonnes"
-            color="teal"
-            icon="🌱"
+            icon={IconSparkles}
+            accent="primary"
           />
           <KpiCard
             title={`Produits fabriqués ${selectedYear}`}
-            value={loading ? '...' : nbProduits.toLocaleString('fr-FR')}
+            value={loading ? '—' : nbProduits.toLocaleString('fr-FR')}
             unit="articles"
-            color="yellow"
-            icon="📦"
+            icon={IconBox}
+            accent="amber"
           />
         </div>
 
         {/* Inventaire Produits Finis */}
         {inventaire.length > 0 && (
-          <div className="card-modern p-6 border border-solidata-green/10 mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-solidata-dark">Inventaire Produits Finis</h2>
-              <div className="flex gap-4 text-sm">
-                <span className="text-gray-500">En stock : <span className="font-bold text-solidata-dark">{totalEnStock.toLocaleString('fr-FR')}</span></span>
-                <span className="text-gray-500">Poids total : <span className="font-bold text-solidata-dark">{(totalPoids / 1000).toFixed(1)} t</span></span>
+          <div className="card-modern p-6 mb-8">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+              <h2 className="text-lg font-semibold text-slate-800">Inventaire Produits Finis</h2>
+              <div className="flex gap-6 text-sm">
+                <span className="text-slate-500">En stock : <span className="font-semibold text-slate-800">{totalEnStock.toLocaleString('fr-FR')}</span></span>
+                <span className="text-slate-500">Poids total : <span className="font-semibold text-slate-800">{(totalPoids / 1000).toFixed(1)} t</span></span>
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
               {inventaire.map(inv => (
-                <div key={inv.gamme || 'NC'} className="rounded-xl p-4 bg-gray-50/80 border border-gray-100">
-                  <div className="text-sm font-semibold text-solidata-dark mb-2">{inv.gamme || 'Non classé'}</div>
-                  <div className="space-y-1 text-xs">
+                <div key={inv.gamme || 'NC'} className="rounded-card p-4 bg-slate-50/80 border border-slate-100 hover:border-slate-200 transition-colors">
+                  <div className="text-sm font-semibold text-slate-800 mb-2">{inv.gamme || 'Non classé'}</div>
+                  <div className="space-y-1.5 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Total</span>
-                      <span className="font-medium">{parseInt(inv.nb_produits).toLocaleString('fr-FR')}</span>
+                      <span className="text-slate-500">Total</span>
+                      <span className="font-medium text-slate-700">{parseInt(inv.nb_produits).toLocaleString('fr-FR')}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">En stock</span>
-                      <span className="font-medium text-solidata-green">{parseInt(inv.nb_en_stock).toLocaleString('fr-FR')}</span>
+                      <span className="text-slate-500">En stock</span>
+                      <span className="font-medium text-primary">{parseInt(inv.nb_en_stock).toLocaleString('fr-FR')}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Sortis</span>
-                      <span className="font-medium text-blue-600">{parseInt(inv.nb_sortis).toLocaleString('fr-FR')}</span>
+                      <span className="text-slate-500">Sortis</span>
+                      <span className="font-medium text-slate-700">{parseInt(inv.nb_sortis).toLocaleString('fr-FR')}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Poids</span>
-                      <span className="font-medium">{parseFloat(inv.poids_total_kg).toFixed(0)} kg</span>
+                      <span className="text-slate-500">Poids</span>
+                      <span className="font-medium text-slate-700">{parseFloat(inv.poids_total_kg).toFixed(0)} kg</span>
                     </div>
                   </div>
                 </div>
@@ -152,47 +152,47 @@ export default function Dashboard() {
 
         {/* Comparaison annuelle */}
         {historique?.annees_disponibles?.length > 1 && (
-          <div className="card-modern p-6 border border-solidata-green/10 mb-8">
-            <h2 className="text-lg font-semibold text-solidata-dark mb-4">Comparaison annuelle</h2>
-            <div className="overflow-x-auto">
+          <div className="card-modern p-6 mb-8">
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">Comparaison annuelle</h2>
+            <div className="overflow-x-auto -mx-1">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Indicateur</th>
+                  <tr className="bg-slate-50">
+                    <th className="text-left px-4 py-3 font-medium text-slate-600 rounded-l-lg">Indicateur</th>
                     {historique.annees_disponibles.map(y => (
-                      <th key={y} className="text-right px-4 py-3 font-medium text-gray-600">{y}</th>
+                      <th key={y} className="text-right px-4 py-3 font-medium text-slate-600">{y}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="border-t">
-                    <td className="px-4 py-3 font-medium">Collecte CAV (kg)</td>
+                  <tr className="border-t border-slate-100">
+                    <td className="px-4 py-3 font-medium text-slate-700">Collecte CAV (kg)</td>
                     {historique.annees_disponibles.map(y => (
-                      <td key={y} className="px-4 py-3 text-right font-semibold">{getCollecteForYear(y).toLocaleString('fr-FR')}</td>
+                      <td key={y} className="px-4 py-3 text-right font-semibold text-slate-800">{getCollecteForYear(y).toLocaleString('fr-FR')}</td>
                     ))}
                   </tr>
-                  <tr className="border-t">
-                    <td className="px-4 py-3 font-medium">Tonnage trié (kg)</td>
+                  <tr className="border-t border-slate-100">
+                    <td className="px-4 py-3 font-medium text-slate-700">Tonnage trié (kg)</td>
                     {historique.annees_disponibles.map(y => (
-                      <td key={y} className="px-4 py-3 text-right font-semibold">{getTrieForYear(y).toLocaleString('fr-FR')}</td>
+                      <td key={y} className="px-4 py-3 text-right font-semibold text-slate-800">{getTrieForYear(y).toLocaleString('fr-FR')}</td>
                     ))}
                   </tr>
-                  <tr className="border-t">
-                    <td className="px-4 py-3 font-medium">Produits fabriqués</td>
+                  <tr className="border-t border-slate-100">
+                    <td className="px-4 py-3 font-medium text-slate-700">Produits fabriqués</td>
                     {historique.annees_disponibles.map(y => (
-                      <td key={y} className="px-4 py-3 text-right font-semibold">{getProduitsForYear(y).toLocaleString('fr-FR')}</td>
+                      <td key={y} className="px-4 py-3 text-right font-semibold text-slate-800">{getProduitsForYear(y).toLocaleString('fr-FR')}</td>
                     ))}
                   </tr>
-                  <tr className="border-t">
-                    <td className="px-4 py-3 font-medium">Produits sortis</td>
+                  <tr className="border-t border-slate-100">
+                    <td className="px-4 py-3 font-medium text-slate-700">Produits sortis</td>
                     {historique.annees_disponibles.map(y => (
-                      <td key={y} className="px-4 py-3 text-right font-semibold">{getSortiesForYear(y).toLocaleString('fr-FR')}</td>
+                      <td key={y} className="px-4 py-3 text-right font-semibold text-slate-800">{getSortiesForYear(y).toLocaleString('fr-FR')}</td>
                     ))}
                   </tr>
-                  <tr className="border-t">
-                    <td className="px-4 py-3 font-medium">CO₂ évité (kg)</td>
+                  <tr className="border-t border-slate-100">
+                    <td className="px-4 py-3 font-medium text-slate-700">CO₂ évité (kg)</td>
                     {historique.annees_disponibles.map(y => (
-                      <td key={y} className="px-4 py-3 text-right font-semibold text-teal-600">{Math.round(getCollecteForYear(y) * 1.493).toLocaleString('fr-FR')}</td>
+                      <td key={y} className="px-4 py-3 text-right font-semibold text-primary">{Math.round(getCollecteForYear(y) * 1.493).toLocaleString('fr-FR')}</td>
                     ))}
                   </tr>
                 </tbody>
@@ -206,22 +206,36 @@ export default function Dashboard() {
   );
 }
 
-function KpiCard({ title, value, unit, color, icon }) {
-  const colors = {
-    green: 'bg-solidata-green/10 text-solidata-green',
-    blue: 'bg-blue-50 text-blue-600',
-    teal: 'bg-teal-50 text-teal-600',
-    yellow: 'bg-solidata-yellow/10 text-solidata-yellow',
+function IconTruck({ className }) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10m10 0H3m10 0a2 2 0 104 0m-4 0a2 2 0 114 0m6-6h-2a1 1 0 00-1 1v5m3 0h-3m3 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>;
+}
+function IconSort({ className }) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 4h16M4 8h12M4 12h8M4 16h4m4-4l4 4m0 0l4-4m-4 4V4" /></svg>;
+}
+function IconSparkles({ className }) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>;
+}
+function IconBox({ className }) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>;
+}
+
+function KpiCard({ title, value, unit, icon: Icon, accent }) {
+  const accentStyles = {
+    primary: 'bg-primary-surface text-primary',
+    slate: 'bg-slate-100 text-slate-600',
+    amber: 'bg-amber-50 text-amber-700',
   };
   return (
-    <div className="card-modern p-5 border border-gray-100">
+    <div className="card-modern p-5 group hover:shadow-card-hover transition-shadow">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-medium text-gray-500">{title}</span>
-        <span className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg ${colors[color]}`}>{icon}</span>
+        <span className="tile-label">{title}</span>
+        <span className={`w-10 h-10 rounded-card flex items-center justify-center ${accentStyles[accent] || accentStyles.slate}`}>
+          <Icon className="w-5 h-5" />
+        </span>
       </div>
-      <div className="flex items-baseline gap-1">
-        <span className="text-2xl font-bold text-solidata-dark">{value}</span>
-        <span className="text-sm text-gray-400">{unit}</span>
+      <div className="flex items-baseline gap-1.5">
+        <span className="tile-value">{value}</span>
+        <span className="text-sm text-slate-400">{unit}</span>
       </div>
     </div>
   );

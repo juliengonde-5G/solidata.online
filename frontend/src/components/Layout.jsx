@@ -3,27 +3,21 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 // ══════════════════════════════════════════
-// MENU CONFIG — Couleurs par section + icônes SVG
+// MENU CONFIG — Charte bleu pétrole, icônes plates
 // ══════════════════════════════════════════
+const activeClass = 'bg-primary-surface text-primary-dark border-l-4 border-primary font-semibold';
+const hoverClass = 'hover:bg-slate-50';
 
 const menuSections = [
   {
     title: 'Accueil',
-    color: 'text-emerald-600',
-    bgActive: 'bg-emerald-50 text-emerald-700 border-emerald-500',
-    bgHover: 'hover:bg-emerald-50/50',
-    dot: 'bg-emerald-500',
     items: [
       { path: '/', label: 'Tableau de bord', icon: IconDashboard, roles: null },
-      { path: '/news', label: 'Fil d\'actualite', icon: IconNews, roles: null },
+      { path: '/news', label: 'Fil d\'actualité', icon: IconNews, roles: null },
     ],
   },
   {
     title: 'Recrutement',
-    color: 'text-blue-600',
-    bgActive: 'bg-blue-50 text-blue-700 border-blue-500',
-    bgHover: 'hover:bg-blue-50/50',
-    dot: 'bg-blue-500',
     items: [
       { path: '/candidates', label: 'Candidats', icon: IconCandidates, roles: ['ADMIN', 'RH', 'MANAGER'] },
       { path: '/pcm', label: 'Matrice PCM', icon: IconBrain, roles: ['ADMIN', 'RH'] },
@@ -31,10 +25,6 @@ const menuSections = [
   },
   {
     title: 'Gestion Équipe',
-    color: 'text-violet-600',
-    bgActive: 'bg-violet-50 text-violet-700 border-violet-500',
-    bgHover: 'hover:bg-violet-50/50',
-    dot: 'bg-violet-500',
     items: [
       { path: '/employees', label: 'Collaborateurs', icon: IconTeam, roles: ['ADMIN', 'RH', 'MANAGER'] },
       { path: '/work-hours', label: 'Heures de travail', icon: IconClock, roles: ['ADMIN', 'RH'] },
@@ -44,10 +34,6 @@ const menuSections = [
   },
   {
     title: 'Collecte',
-    color: 'text-amber-600',
-    bgActive: 'bg-amber-50 text-amber-700 border-amber-500',
-    bgHover: 'hover:bg-amber-50/50',
-    dot: 'bg-amber-500',
     items: [
       { path: '/tours', label: 'Tournées', icon: IconTruck, roles: ['ADMIN', 'MANAGER'] },
       { path: '/collection-proposals', label: 'Propositions (IA)', icon: IconSparkles, roles: ['ADMIN', 'MANAGER'] },
@@ -58,10 +44,6 @@ const menuSections = [
   },
   {
     title: 'Tri & Production',
-    color: 'text-teal-600',
-    bgActive: 'bg-teal-50 text-teal-700 border-teal-500',
-    bgHover: 'hover:bg-teal-50/50',
-    dot: 'bg-teal-500',
     items: [
       { path: '/production', label: 'Production', icon: IconFactory, roles: ['ADMIN', 'MANAGER'] },
       { path: '/chaine-tri', label: 'Chaînes de tri', icon: IconSort, roles: ['ADMIN', 'MANAGER'] },
@@ -72,10 +54,6 @@ const menuSections = [
   },
   {
     title: 'Reporting',
-    color: 'text-rose-600',
-    bgActive: 'bg-rose-50 text-rose-700 border-rose-500',
-    bgHover: 'hover:bg-rose-50/50',
-    dot: 'bg-rose-500',
     items: [
       { path: '/reporting-collecte', label: 'Collecte', icon: IconChart, roles: ['ADMIN', 'MANAGER'] },
       { path: '/reporting-rh', label: 'RH', icon: IconChartPeople, roles: ['ADMIN', 'RH'] },
@@ -86,10 +64,6 @@ const menuSections = [
   },
   {
     title: 'Administration',
-    color: 'text-gray-500',
-    bgActive: 'bg-gray-100 text-gray-700 border-gray-500',
-    bgHover: 'hover:bg-gray-50',
-    dot: 'bg-gray-400',
     items: [
       { path: '/users', label: 'Utilisateurs', icon: IconLock, roles: ['ADMIN'] },
       { path: '/vehicles', label: 'Véhicules', icon: IconVehicle, roles: ['ADMIN'] },
@@ -122,41 +96,35 @@ export default function Layout({ children }) {
   })).filter(section => section.items.length > 0);
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Mobile overlay */}
+    <div className="flex h-screen bg-[var(--color-bg)]">
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/20 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-0 bg-black/20 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar — design system bleu pétrole */}
       <aside className={`
-        ${sidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full lg:w-16 lg:translate-x-0'}
+        ${sidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full lg:w-[4.5rem] lg:translate-x-0'}
         fixed lg:relative z-50 lg:z-auto
-        bg-white border-r border-gray-200 flex flex-col transition-all duration-300 h-full overflow-hidden
+        bg-white border-r border-slate-200/80 flex flex-col transition-all duration-300 h-full overflow-hidden shadow-sidebar
       `}>
-        {/* Logo */}
-        <div className="p-4 border-b border-gray-100 flex items-center justify-center flex-shrink-0">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-center flex-shrink-0 min-h-[60px]">
           {sidebarOpen ? (
             <img src="/logo-text.png" alt="Solidata" className="h-8 object-contain" />
           ) : (
-            <img src="/logo.png" alt="Solidata" className="w-9 h-9 rounded-lg object-contain" />
+            <img src="/logo.png" alt="Solidata" className="w-9 h-9 rounded-card object-contain" />
           )}
         </div>
 
-        {/* Menu */}
-        <nav className="flex-1 overflow-y-auto py-2 px-2">
+        <nav className="flex-1 overflow-y-auto py-3 px-2">
           {filteredSections.map(section => (
-            <div key={section.title} className="mb-1">
+            <div key={section.title} className="mb-2">
               {sidebarOpen && (
                 <button
                   onClick={() => toggleSection(section.title)}
-                  className={`w-full px-2 py-2 text-[11px] font-bold uppercase tracking-wider flex items-center justify-between rounded-lg transition ${section.color} hover:opacity-80`}
+                  className="w-full px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider flex items-center justify-between rounded-lg text-slate-500 hover:text-primary hover:bg-primary-surface/50 transition"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${section.dot}`} />
-                    {section.title}
-                  </div>
-                  <svg className={`w-3 h-3 transition-transform ${expandedSections.includes(section.title) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <span>{section.title}</span>
+                  <svg className={`w-3.5 h-3.5 transition-transform ${expandedSections.includes(section.title) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
@@ -168,14 +136,12 @@ export default function Layout({ children }) {
                   <button
                     key={item.path}
                     onClick={() => { navigate(item.path); if (window.innerWidth < 1024) setSidebarOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg mb-0.5 transition-all ${
-                      isActive
-                        ? `${section.bgActive} font-semibold border-l-3`
-                        : `text-gray-600 ${section.bgHover}`
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg mb-0.5 transition-all border-l-[3px] border-transparent ${
+                      isActive ? activeClass : `text-slate-600 ${hoverClass}`
                     }`}
                     title={item.label}
                   >
-                    <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? '' : sidebarOpen ? 'text-gray-400' : section.color}`} />
+                    <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-primary' : 'text-slate-400'}`} />
                     {sidebarOpen && <span className="truncate">{item.label}</span>}
                   </button>
                 );
@@ -184,55 +150,53 @@ export default function Layout({ children }) {
           ))}
         </nav>
 
-        {/* User footer */}
-        <div className="border-t border-gray-100 p-3 flex-shrink-0">
+        <div className="border-t border-slate-100 p-3 flex-shrink-0 bg-slate-50/50">
           {sidebarOpen ? (
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-gradient-to-br from-solidata-green to-emerald-600 rounded-full flex items-center justify-center shadow-sm">
-                <span className="text-white text-xs font-bold">
+              <div className="w-9 h-9 bg-primary rounded-full flex items-center justify-center shadow-sm">
+                <span className="text-white text-xs font-semibold">
                   {user?.first_name?.[0]}{user?.last_name?.[0]}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-700 truncate">
+                <p className="text-sm font-semibold text-slate-800 truncate">
                   {user?.first_name} {user?.last_name}
                 </p>
-                <p className="text-[11px] text-gray-400 font-medium">{user?.role}</p>
+                <p className="text-[11px] text-slate-500 font-medium">{user?.role}</p>
               </div>
-              <button onClick={logout} className="text-gray-400 hover:text-red-500 transition p-1 rounded-lg hover:bg-red-50" title="Déconnexion">
+              <button onClick={logout} className="text-slate-400 hover:text-red-600 transition p-1.5 rounded-lg hover:bg-red-50" title="Déconnexion">
                 <IconLogout className="w-5 h-5" />
               </button>
             </div>
           ) : (
-            <button onClick={logout} className="w-full flex justify-center text-gray-400 hover:text-red-500 p-1" title="Déconnexion">
+            <button onClick={logout} className="w-full flex justify-center text-slate-400 hover:text-red-600 p-1.5 rounded-lg" title="Déconnexion">
               <IconLogout className="w-5 h-5" />
             </button>
           )}
         </div>
       </aside>
 
-      {/* Mobile toggle */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="fixed top-3 left-3 z-50 lg:hidden bg-white shadow-md rounded-xl p-2.5 border"
+        className="fixed top-3 left-3 z-50 lg:hidden bg-white shadow-card rounded-xl p-2.5 border border-slate-200"
+        aria-label={sidebarOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
       >
-        <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sidebarOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"} />
         </svg>
       </button>
 
-      {/* Desktop collapse button */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="hidden lg:flex fixed z-50 bg-white shadow-md rounded-full p-1.5 border transition-all"
-        style={{ top: '50%', left: sidebarOpen ? '252px' : '52px', transform: 'translateY(-50%)' }}
+        className="hidden lg:flex fixed z-50 bg-white shadow-card rounded-full p-2 border border-slate-200 transition-all hover:shadow-card-hover"
+        style={{ top: '50%', left: sidebarOpen ? '252px' : '54px', transform: 'translateY(-50%)' }}
+        aria-label={sidebarOpen ? 'Réduire le menu' : 'Agrandir le menu'}
       >
-        <svg className={`w-4 h-4 text-gray-400 transition-transform ${sidebarOpen ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={`w-4 h-4 text-slate-500 transition-transform ${sidebarOpen ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
       </button>
 
-      {/* Main content */}
       <main className="flex-1 overflow-y-auto lg:ml-0 min-h-0">
         <div className="p-4 sm:p-6 lg:p-6 max-w-[1600px] mx-auto">
           {children}

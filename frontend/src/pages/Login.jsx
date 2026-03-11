@@ -25,60 +25,63 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-solidata-green/10 to-solidata-green/30 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-solidata-green rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-white text-3xl font-bold">S</span>
-          </div>
-          <h1 className="text-2xl font-bold text-solidata-dark">SOLIDATA ERP</h1>
-          <p className="text-gray-500 mt-1">Solidarité Textiles - Normandie</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
+    <div className="min-h-screen flex items-center justify-center p-4 bg-[var(--color-bg)]">
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-primary/10 pointer-events-none" aria-hidden="true" />
+      <div className="relative w-full max-w-md">
+        <div className="card-modern p-8 sm:p-10 shadow-elevated">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary/20">
+              <span className="text-white text-2xl font-bold">S</span>
             </div>
-          )}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Identifiant</label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-solidata-green focus:border-transparent outline-none transition"
-              placeholder="Nom d'utilisateur"
-              required
-              autoFocus
-            />
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">SOLIDATA</h1>
+            <p className="text-slate-500 mt-1 text-sm">Collecte, tri & insertion — Métropole Rouen</p>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-solidata-green focus:border-transparent outline-none transition"
-              placeholder="••••••••"
-              required
-            />
-          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="bg-red-50 border border-red-100 text-red-700 px-4 py-3 rounded-button text-sm" role="alert">
+                {error}
+              </div>
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-solidata-green hover:bg-solidata-green-dark text-white font-semibold py-2.5 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Connexion...' : 'Se connecter'}
-          </button>
-        </form>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Identifiant</label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="input-modern"
+                placeholder="Nom d'utilisateur"
+                required
+                autoFocus
+              />
+            </div>
 
-        <p className="text-xs text-gray-400 text-center mt-6">
-          SOLIDATA ERP v1.0 — Collecte, Tri & Valorisation Textile
-        </p>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Mot de passe</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="input-modern"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-primary w-full py-3 rounded-button font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Connexion...' : 'Se connecter'}
+            </button>
+          </form>
+
+          <p className="text-xs text-slate-400 text-center mt-6">
+            SOLIDATA ERP — Solidarité Textiles Normandie
+          </p>
+        </div>
       </div>
     </div>
   );

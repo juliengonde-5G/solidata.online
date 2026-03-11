@@ -5,20 +5,29 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════════════════════
-   SOLIDATA Web — Design system
+   SOLIDATA — Design system (bleu pétrole, Material 3–like)
+   Charte : moderne, épurée, responsive, ERP
    ═══════════════════════════════════════════════════════════════ */
 :root {
-  --color-primary: #8BC540;
-  --color-primary-dark: #6FA030;
-  --color-primary-light: #A8D96A;
+  --color-primary: #0D9488;
+  --color-primary-dark: #0F766E;
+  --color-primary-light: #14B8A6;
+  --color-primary-muted: #CCFBF1;
+  --color-primary-surface: #F0FDFA;
   --color-surface: #FFFFFF;
-  --color-bg: #F8FAF5;
-  --color-text: #1A202C;
+  --color-bg: #FAFAF9;
+  --color-bg-subtle: #F1F5F9;
+  --color-text: #0F172A;
   --color-text-muted: #64748B;
-  --radius-card: 16px;
-  --radius-button: 12px;
-  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
-  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --color-border: #E2E8F0;
+  --color-border-light: #F1F5F9;
+  --radius-card: 12px;
+  --radius-card-lg: 16px;
+  --radius-button: 10px;
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  --shadow-card-hover: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --sidebar-width: 16rem;
+  --sidebar-width-collapsed: 4.5rem;
 }
 
 @layer base {
@@ -31,24 +40,67 @@
 }
 
 @layer components {
+  /* Cartes type Material 3 / Notion */
   .card-modern {
     background: var(--color-surface);
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-card);
-    transition: box-shadow 0.2s ease;
+    border: 1px solid var(--color-border-light);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
   }
   .card-modern:hover {
     box-shadow: var(--shadow-card-hover);
+    border-color: var(--color-border);
+  }
+
+  /* Tuile KPI dashboard */
+  .tile-kpi {
+    @apply card-modern p-5;
+  }
+  .tile-kpi .tile-value {
+    @apply text-2xl font-bold text-slate-800 tracking-tight;
+  }
+  .tile-kpi .tile-label {
+    @apply text-sm font-medium text-slate-500;
+  }
+
+  /* Bouton primaire */
+  .btn-primary {
+    @apply inline-flex items-center justify-center font-medium rounded-button px-4 py-2.5 transition-all;
+    background-color: var(--color-primary);
+    color: white;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--color-primary-dark);
+    box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  /* Input cohérent */
+  .input-modern {
+    @apply w-full px-3 py-2.5 rounded-input border text-sm transition-colors;
+    border-color: var(--color-border);
+    background: var(--color-surface);
+  }
+  .input-modern:focus {
+    @apply outline-none ring-2;
+    border-color: var(--color-primary);
+    ring-color: rgba(13, 148, 136, 0.2);
+  }
+  .input-modern::placeholder {
+    color: var(--color-text-muted);
   }
 }
 
-/* Scrollbar personnalisée */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: var(--color-bg-subtle);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb {
@@ -59,7 +111,7 @@
   background: var(--color-primary-dark);
 }
 
-/* Contenu principal : padding responsive (éviter chevauchement menu mobile) */
+/* Contenu principal responsive (éviter chevauchement menu mobile) */
 @media (max-width: 1023px) {
   main.flex-1 {
     padding-top: 56px;

@@ -37,11 +37,11 @@ export function MobileShell({ title, subtitle, onBack, rightAction, children, cl
  * Indicateur d’étapes pour le flux tournée (Véhicule → Checklist → Carte → … → Résumé).
  */
 const TOUR_STEPS = [
-  { path: '/vehicle-select', label: 'Tournée' },
-  { path: '/checklist', label: 'Checklist' },
+  { path: '/vehicle-select', label: 'Véhicule' },
+  { path: '/checklist', label: 'Check' },
   { path: '/tour-map', label: 'Carte' },
   { path: '/qr-scanner', label: 'Scan' },
-  { path: '/fill-level', label: 'Remplissage' },
+  { path: '/fill-level', label: 'Remplir' },
   { path: '/return-centre', label: 'Retour' },
   { path: '/weigh-in', label: 'Pesée' },
   { path: '/tour-summary', label: 'Résumé' },
@@ -50,19 +50,23 @@ const TOUR_STEPS = [
 export function TourStepBar({ currentPath }) {
   const currentIndex = TOUR_STEPS.findIndex(s => s.path === currentPath);
   const progress = currentIndex >= 0 ? ((currentIndex + 1) / TOUR_STEPS.length) * 100 : 0;
+  const nextStep = currentIndex >= 0 && currentIndex < TOUR_STEPS.length - 1 ? TOUR_STEPS[currentIndex + 1] : null;
 
   return (
-    <div className="px-4 py-2 bg-white/10 rounded-xl">
-      <div className="flex justify-between text-xs text-white/80 mb-1.5">
-        <span>Étape {Math.min(currentIndex + 1, TOUR_STEPS.length)} / {TOUR_STEPS.length}</span>
-        <span>{TOUR_STEPS[currentIndex]?.label || '—'}</span>
+    <div className="px-4 py-3 bg-white/10 rounded-xl">
+      <div className="flex justify-between items-center text-xs text-white/90 mb-1.5">
+        <span>{Math.min(currentIndex + 1, TOUR_STEPS.length)} / {TOUR_STEPS.length}</span>
+        <span className="font-medium">{TOUR_STEPS[currentIndex]?.label || '—'}</span>
       </div>
-      <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
+      <div className="h-2 bg-white/20 rounded-full overflow-hidden">
         <div
           className="h-full bg-white rounded-full transition-all duration-400"
           style={{ width: `${progress}%` }}
         />
       </div>
+      {nextStep && (
+        <p className="text-white/80 text-xs mt-1.5">Suivant : {nextStep.label}</p>
+      )}
     </div>
   );
 }
