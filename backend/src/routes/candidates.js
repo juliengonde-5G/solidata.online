@@ -145,40 +145,52 @@ async function runOCR(filePath) {
 const MIN_PDF_TEXT_LENGTH = 50;
 
 /**
- * Parser le texte du CV (PDF avec fallback OCR, images via OCR)
+ * Parser le texte du CV (PDF avec fallback OCR, images via OCR).
+ * Ne lance jamais : retourne '' en cas d'erreur pour éviter 502.
  */
 async function parseCVFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
+  try {
+    const ext = path.extname(filePath).toLowerCase();
 
-  if (ext === '.pdf') {
-    try {
-      const pdfParse = require('pdf-parse');
-      const buffer = fs.readFileSync(filePath);
-      const data = await pdfParse(buffer);
-      const text = (data.text || '').trim();
-
-      // Si le PDF contient suffisamment de texte, on l'utilise
-      if (text.length >= MIN_PDF_TEXT_LENGTH) {
-        return text;
+    if (ext === '.pdf') {
+      try {
+        const buffer = fs.readFileSync(filePath);
+        const mod = require('pdf-parse');
+        let text = '';
+        if (mod.PDFParse) {
+          const parser = new mod.PDFParse({ data: buffer });
+          const result = await parser.getText();
+          text = (result && result.text ? result.text : '').trim();
+        } else {
+          const fn = typeof mod === 'function' ? mod : (mod && (mod.default || mod.pdf));
+          if (typeof fn === 'function') {
+            const data = await fn(buffer);
+            text = (data && data.text ? data.text : '').trim();
+          }
+        }
+        if (text.length >= MIN_PDF_TEXT_LENGTH) return text;
+        return '';
+      } catch (err) {
+        console.error('[CV] Erreur parsing PDF :', err.message);
+        return '';
       }
-
-      // Sinon c'est probablement un PDF scanné : fallback OCR
-      console.log('[CV] PDF avec peu de texte (%d chars), tentative OCR...', text.length);
-      return await runOCR(filePath);
-    } catch (err) {
-      console.error('[CV] Erreur parsing PDF :', err.message);
-      // En dernier recours, tenter l'OCR
-      return await runOCR(filePath);
     }
-  }
 
-  // Images : OCR direct
-  if (['.png', '.jpg', '.jpeg'].includes(ext)) {
-    console.log('[CV] Fichier image détecté, lancement OCR...');
-    return await runOCR(filePath);
-  }
+    if (['.png', '.jpg', '.jpeg'].includes(ext)) {
+      try {
+        console.log('[CV] Fichier image détecté, lancement OCR...');
+        return await runOCR(filePath);
+      } catch (err) {
+        console.error('[CV] Erreur OCR :', err.message);
+        return '';
+      }
+    }
 
-  return '';
+    return '';
+  } catch (err) {
+    console.error('[CV] parseCVFile erreur :', err.message);
+    return '';
+  }
 }
 
 // ══════════════════════════════════════════
@@ -497,6 +509,7 @@ router.get('/kanban', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
       interview: [],
       test: [],
       hired: [],
+      rejected: [],
     };
 
     result.rows.forEach(c => {
@@ -578,10 +591,22 @@ router.get('/stats', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 
 router.get('/positions/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
-    const result = await pool.query(
+    const queries = [
       `SELECT p.*, (SELECT COUNT(*)::int FROM candidates c WHERE c.position_id = p.id AND c.status = 'hired') as filled
-       FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`
-    );
+       FROM positions p WHERE p.is_active = true ORDER BY p.created_at DESC`,
+      `SELECT p.*, 0 as filled FROM positions p WHERE p.is_active = true ORDER BY p.id DESC`,
+      `SELECT p.*, 0 as filled FROM positions p ORDER BY p.id DESC`,
+    ];
+    let result;
+    for (const sql of queries) {
+      try {
+        result = await pool.query(sql);
+        break;
+      } catch (colErr) {
+        if (colErr.code !== '42703') throw colErr;
+      }
+    }
+    if (!result) throw new Error('positions list failed');
     res.json(result.rows);
   } catch (err) {
     console.error('[POSITIONS] Erreur liste :', err);
@@ -636,7 +661,16 @@ router.delete('/positions/:id', authorize('ADMIN'), async (req, res) => {
 
 // POST /api/candidates/upload-cv-new — Upload CV → créer nouveau candidat
 // IMPORTANT: must be declared BEFORE /:id routes to avoid Express matching "upload-cv-new" as :id
-router.post('/upload-cv-new', authorize('ADMIN', 'RH'), upload.single('cv'), async (req, res) => {
+router.post('/upload-cv-new', authorize('ADMIN', 'RH'), (req, res, next) => {
+  upload.single('cv')(req, res, (err) => {
+    if (err) {
+      console.error('[CANDIDATES] Multer upload-cv-new :', err.message);
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Fichier trop volumineux (max 10 Mo)' });
+      return res.status(400).json({ error: err.message || 'Erreur upload fichier' });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Fichier CV requis' });
 
@@ -722,10 +756,14 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
       'assigned_team_id', 'position_id', 'comment',
     ];
 
+    // Champs qui doivent être NULL au lieu de '' pour PostgreSQL (date, FK, CHECK constraints)
+    const nullableFields = ['appointment_date', 'position_id', 'assigned_team_id', 'practical_test_result', 'sms_response', 'gender'];
+
     for (const field of allowedFields) {
       if (fields[field] !== undefined) {
         setClauses.push(`${field} = $${i}`);
-        values.push(fields[field]);
+        const val = nullableFields.includes(field) && fields[field] === '' ? null : fields[field];
+        values.push(val);
         i++;
       }
     }
@@ -753,7 +791,7 @@ router.put('/:id/status', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, comment } = req.body;
-    const validStatuses = ['received', 'preselected', 'interview', 'test', 'hired'];
+    const validStatuses = ['received', 'preselected', 'interview', 'test', 'hired', 'rejected'];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Statut invalide' });
@@ -908,6 +946,69 @@ router.get('/:id/history', authorize('ADMIN', 'RH'), async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('[CANDIDATES] Erreur historique :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/candidates/:id/convert-to-employee — Convertir candidat en employé
+router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { team_id, position, contract_type, contract_start, weekly_hours } = req.body;
+
+    // Vérifier que le candidat existe et est au statut 'hired'
+    const candidate = await pool.query('SELECT * FROM candidates WHERE id = $1', [id]);
+    if (candidate.rows.length === 0) return res.status(404).json({ error: 'Candidat non trouvé' });
+    if (candidate.rows[0].status !== 'hired') {
+      return res.status(400).json({ error: 'Le candidat doit être au statut "hired" pour être converti' });
+    }
+
+    // Vérifier qu'il n'est pas déjà converti
+    const existing = await pool.query('SELECT id FROM employees WHERE candidate_id = $1', [id]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'Ce candidat a déjà été converti en employé', employee_id: existing.rows[0].id });
+    }
+
+    const c = candidate.rows[0];
+
+    // Vérifier que le candidat a un nom/prénom
+    if (!c.first_name || !c.last_name) {
+      return res.status(400).json({ error: 'Le candidat doit avoir un prénom et un nom avant d\'être converti. Complétez sa fiche.' });
+    }
+
+    // Récupérer les compétences confirmées du candidat
+    const skillsResult = await pool.query(
+      "SELECT skill_name FROM candidate_skills WHERE candidate_id = $1 AND status IN ('confirmed', 'detected')",
+      [id]
+    );
+    const skills = skillsResult.rows.map(r => r.skill_name);
+
+    // Créer l'employé avec les données du candidat
+    const employee = await pool.query(
+      `INSERT INTO employees (candidate_id, first_name, last_name, phone, email,
+       team_id, position, contract_type, contract_start, has_permis_b, has_caces,
+       weekly_hours, skills)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [id, c.first_name, c.last_name, c.phone, c.email,
+       team_id || null, position || null, contract_type || 'CDD',
+       contract_start || new Date().toISOString().split('T')[0],
+       c.has_permis_b || false, c.has_caces || false,
+       weekly_hours || 35, skills]
+    );
+
+    // Logger dans l'historique du candidat
+    await pool.query(
+      'INSERT INTO candidate_history (candidate_id, from_status, to_status, comment, changed_by) VALUES ($1, $2, $3, $4, $5)',
+      [id, 'hired', 'converted', `Converti en employé #${employee.rows[0].id}`, req.user.id]
+    );
+
+    res.status(201).json({
+      message: 'Candidat converti en employé avec succès',
+      employee: employee.rows[0],
+      skills_transferred: skills.length,
+    });
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur conversion :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

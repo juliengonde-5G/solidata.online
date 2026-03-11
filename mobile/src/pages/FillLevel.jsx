@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import MobileShell from '../components/MobileShell';
 
 const FILL_LEVELS = [
-  { value: 0, label: 'Vide', emoji: '⬜', color: 'bg-gray-100 text-gray-600' },
-  { value: 25, label: '25%', emoji: '🟦', color: 'bg-blue-100 text-blue-600' },
-  { value: 50, label: '50%', emoji: '🟨', color: 'bg-yellow-100 text-yellow-600' },
-  { value: 75, label: '75%', emoji: '🟧', color: 'bg-orange-100 text-orange-600' },
-  { value: 100, label: 'Plein', emoji: '🟥', color: 'bg-red-100 text-red-600' },
+  { value: 0, label: 'Vide', emoji: '⬜', pct: '0%' },
+  { value: 1, label: '¼', emoji: '🟦', pct: '25%' },
+  { value: 2, label: '½', emoji: '🟨', pct: '50%' },
+  { value: 3, label: '¾', emoji: '🟧', pct: '75%' },
+  { value: 4, label: 'Plein', emoji: '🟥', pct: '100%' },
 ];
 
 export default function FillLevel() {
@@ -23,17 +24,16 @@ export default function FillLevel() {
     if (fillLevel === null) return;
     setLoading(true);
     try {
-      // Get current CAV info from tour
       const tourRes = await api.get(`/tours/${tourId}`);
       const cavs = tourRes.data.cavs || [];
       const currentIndex = cavs.findIndex(c => c.status !== 'collected');
       if (currentIndex >= 0) {
-        await api.put(`/tours/${tourId}/cav/${cavs[currentIndex].id || cavs[currentIndex].cav_id}`, {
+        const cav = cavs[currentIndex];
+        await api.put(`/tours/${tourId}/cav/${cav.cav_id}`, {
           status: 'collected',
           fill_level: fillLevel,
-          qr_code: scannedQR,
-          anomaly,
-          notes,
+          qr_scanned: true,
+          notes: anomaly ? `${anomaly}${notes ? ': ' + notes : ''}` : notes,
         });
       }
       localStorage.removeItem('scanned_qr');
@@ -42,54 +42,57 @@ export default function FillLevel() {
     setLoading(false);
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-solidata-green text-white p-4">
-        <button onClick={() => navigate('/tour-map')} className="text-white/70 text-sm mb-1">← Retour carte</button>
-        <h1 className="font-bold text-lg">Niveau de remplissage</h1>
-        {scannedQR && <p className="text-white/70 text-xs">QR : {scannedQR}</p>}
-      </header>
+  const selectedOption = FILL_LEVELS.find(o => o.value === fillLevel);
+  const pctDisplay = selectedOption ? selectedOption.pct : '—';
 
-      <div className="p-4 space-y-4">
-        {/* Fill Level Selection */}
-        <div>
-          <p className="font-medium text-sm mb-3">Estimez le niveau de remplissage :</p>
-          <div className="grid grid-cols-5 gap-2">
-            {FILL_LEVELS.map(level => (
-              <button
-                key={level.value}
-                onClick={() => setFillLevel(level.value)}
-                className={`flex flex-col items-center p-3 rounded-xl border-2 transition ${
-                  fillLevel === level.value ? 'border-solidata-green bg-solidata-green/5' : 'border-transparent bg-white'
-                } shadow-sm`}
-              >
-                <span className="text-2xl mb-1">{level.emoji}</span>
-                <span className="text-xs font-medium">{level.label}</span>
-              </button>
-            ))}
-          </div>
+  return (
+    <MobileShell
+      title="Niveau de remplissage"
+      subtitle={scannedQR ? `QR scanné` : 'Estimez le remplissage du conteneur'}
+      onBack={() => navigate('/tour-map')}
+    >
+      <div className="space-y-6">
+        <p className="font-medium text-gray-700">Choisissez le niveau observé :</p>
+        <div className="grid grid-cols-5 gap-2">
+          {FILL_LEVELS.map(level => (
+            <button
+              key={level.value}
+              type="button"
+              onClick={() => setFillLevel(level.value)}
+              className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all min-h-[72px] ${
+                fillLevel === level.value
+                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 shadow-md'
+                  : 'border-gray-200 bg-white'
+              }`}
+            >
+              <span className="text-2xl mb-1">{level.emoji}</span>
+              <span className="text-xs font-semibold text-gray-700">{level.label}</span>
+            </button>
+          ))}
         </div>
 
-        {/* Visual bar */}
         {fillLevel !== null && (
-          <div className="bg-white rounded-xl p-4 shadow-sm">
+          <div className="card-mobile p-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">Remplissage</span>
-              <span className="font-bold text-solidata-green">{fillLevel}%</span>
+              <span className="text-sm font-medium text-gray-600">Remplissage</span>
+              <span className="font-bold text-lg text-[var(--color-primary)]">{pctDisplay}</span>
             </div>
-            <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
               <div
-                className="h-full rounded-full transition-all bg-gradient-to-r from-solidata-green to-solidata-green-dark"
-                style={{ width: `${fillLevel}%` }}
+                className="h-full rounded-full transition-all bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)]"
+                style={{ width: `${(fillLevel / 4) * 100}%` }}
               />
             </div>
           </div>
         )}
 
-        {/* Anomaly */}
-        <div className="bg-white rounded-xl p-4 shadow-sm">
-          <label className="text-sm font-medium block mb-2">Anomalie constatée</label>
-          <select value={anomaly} onChange={e => setAnomaly(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
+        <div className="card-mobile p-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Anomalie constatée</label>
+          <select
+            value={anomaly}
+            onChange={e => setAnomaly(e.target.value)}
+            className="input-mobile"
+          >
             <option value="">Aucune anomalie</option>
             <option value="debordement">Débordement</option>
             <option value="vandalisme">Vandalisme</option>
@@ -99,26 +102,26 @@ export default function FillLevel() {
           </select>
         </div>
 
-        {/* Notes */}
-        <div className="bg-white rounded-xl p-4 shadow-sm">
-          <label className="text-sm font-medium block mb-2">Notes</label>
+        <div className="card-mobile p-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
           <textarea
             value={notes}
             onChange={e => setNotes(e.target.value)}
             placeholder="Observations..."
-            className="w-full border rounded-lg px-3 py-2 text-sm"
-            rows="2"
+            className="input-mobile min-h-[80px]"
+            rows={2}
           />
         </div>
 
         <button
+          type="button"
           onClick={submit}
           disabled={fillLevel === null || loading}
-          className="w-full bg-solidata-green text-white font-bold py-4 rounded-2xl shadow-lg disabled:opacity-50"
+          className="btn-primary-mobile py-4 text-base"
         >
           {loading ? 'Enregistrement...' : 'Valider la collecte'}
         </button>
       </div>
-    </div>
+    </MobileShell>
   );
 }

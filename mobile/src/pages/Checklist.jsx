@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import MobileShell, { TourStepBar } from '../components/MobileShell';
 
 const CHECKLIST_ITEMS = [
   { id: 'papiers', label: 'Papiers du véhicule', icon: '📄' },
@@ -19,8 +20,19 @@ export default function Checklist() {
   const [checked, setChecked] = useState({});
   const [notes, setNotes] = useState('');
   const [kmStart, setKmStart] = useState('');
+  const [tour, setTour] = useState(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await api.get(`/tours/${tourId}`);
+        setTour(res.data);
+      } catch (e) {}
+    };
+    if (tourId) load();
+  }, [tourId]);
 
   const toggle = (id) => setChecked(prev => ({ ...prev, [id]: !prev[id] }));
   const allChecked = CHECKLIST_ITEMS.every(item => checked[item.id]);
@@ -29,9 +41,11 @@ export default function Checklist() {
   const submit = async () => {
     try {
       await api.post(`/tours/${tourId}/checklist`, {
-        items: checked,
-        notes,
-        km_start: parseInt(kmStart) || 0,
+        vehicle_id: tour?.vehicle_id,
+        employee_id: tour?.driver_employee_id,
+        exterior_ok: allChecked,
+        fuel_level: '1/2',
+        km_start: parseInt(kmStart, 10) || 0,
       });
       await api.put(`/tours/${tourId}/status`, { status: 'in_progress' });
       navigate('/tour-map');
@@ -39,63 +53,79 @@ export default function Checklist() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-solidata-green text-white p-4">
-        <button onClick={() => navigate('/vehicle-select')} className="text-white/70 text-sm mb-1">← Retour</button>
-        <h1 className="font-bold text-lg">Checklist départ</h1>
-        <p className="text-white/70 text-xs">Tournée #{tourId} — {checkedCount}/{CHECKLIST_ITEMS.length} vérifiés</p>
-      </header>
-
-      {/* Progress bar */}
-      <div className="h-1 bg-gray-200">
-        <div className="h-1 bg-solidata-green transition-all" style={{ width: `${(checkedCount / CHECKLIST_ITEMS.length) * 100}%` }} />
+    <MobileShell
+      title="Checklist départ"
+      subtitle={`Tournée #${tourId} — ${checkedCount}/${CHECKLIST_ITEMS.length} vérifiés`}
+      onBack={() => navigate('/vehicle-select')}
+    >
+      <div className="mb-4">
+        <TourStepBar currentPath="/checklist" />
       </div>
 
-      <div className="p-4 space-y-3">
+      <div className="h-2 bg-gray-200 rounded-full overflow-hidden mb-6">
+        <div
+          className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-300"
+          style={{ width: `${(checkedCount / CHECKLIST_ITEMS.length) * 100}%` }}
+        />
+      </div>
+
+      <div className="space-y-2">
         {CHECKLIST_ITEMS.map(item => (
           <button
             key={item.id}
+            type="button"
             onClick={() => toggle(item.id)}
-            className={`w-full flex items-center gap-3 bg-white rounded-xl p-4 shadow-sm transition ${checked[item.id] ? 'ring-2 ring-solidata-green bg-solidata-green/5' : ''}`}
+            className={`w-full flex items-center gap-4 card-mobile p-4 transition-all ${
+              checked[item.id] ? 'ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5' : ''
+            }`}
           >
             <span className="text-2xl">{item.icon}</span>
-            <span className="flex-1 text-left font-medium text-sm">{item.label}</span>
-            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition ${checked[item.id] ? 'bg-solidata-green border-solidata-green text-white' : 'border-gray-300'}`}>
-              {checked[item.id] && <span className="text-xs">✓</span>}
+            <span className="flex-1 text-left font-medium text-gray-800">{item.label}</span>
+            <div
+              className={`w-8 h-8 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                checked[item.id] ? 'bg-[var(--color-primary)] border-[var(--color-primary)] text-white' : 'border-gray-300'
+              }`}
+            >
+              {checked[item.id] && (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
             </div>
           </button>
         ))}
+      </div>
 
-        <div className="bg-white rounded-xl p-4 shadow-sm">
-          <label className="text-sm font-medium text-gray-600 block mb-2">Kilométrage départ</label>
+      <div className="mt-6 space-y-4">
+        <div className="card-mobile p-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Kilométrage départ</label>
           <input
             type="number"
             value={kmStart}
             onChange={e => setKmStart(e.target.value)}
-            placeholder="Ex: 45230"
-            className="w-full border rounded-lg px-3 py-2 text-sm"
+            placeholder="Ex. 45230"
+            className="input-mobile"
           />
         </div>
-
-        <div className="bg-white rounded-xl p-4 shadow-sm">
-          <label className="text-sm font-medium text-gray-600 block mb-2">Remarques</label>
+        <div className="card-mobile p-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Remarques</label>
           <textarea
             value={notes}
             onChange={e => setNotes(e.target.value)}
             placeholder="Anomalies constatées..."
-            className="w-full border rounded-lg px-3 py-2 text-sm"
-            rows="2"
+            className="input-mobile min-h-[80px]"
+            rows={2}
           />
         </div>
-
         <button
+          type="button"
           onClick={submit}
           disabled={!allChecked}
-          className="w-full bg-solidata-green text-white font-bold py-4 rounded-2xl shadow-lg text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-primary-mobile py-4 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {allChecked ? 'Démarrer la tournée' : `${CHECKLIST_ITEMS.length - checkedCount} point(s) restant(s)`}
         </button>
       </div>
-    </div>
+    </MobileShell>
   );
 }

@@ -199,6 +199,7 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS employees (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        candidate_id INTEGER UNIQUE REFERENCES candidates(id) ON DELETE SET NULL,
         first_name VARCHAR(100) NOT NULL,
         last_name VARCHAR(100) NOT NULL,
         phone VARCHAR(20),
@@ -321,6 +322,8 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_cav_geom ON cav USING GIST(geom);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_cav_status ON cav(status);');
 
+    // Note: cav_qr_scans est créée plus bas, après la table tours (dépendance FK)
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS vehicles (
         id SERIAL PRIMARY KEY,
@@ -369,11 +372,31 @@ async function initDatabase() {
         started_at TIMESTAMP,
         completed_at TIMESTAMP,
         total_weight_kg DOUBLE PRECISION DEFAULT 0,
+        estimated_distance_km DOUBLE PRECISION,
+        estimated_duration_min INTEGER,
+        nb_cav INTEGER DEFAULT 0,
         ai_explanation TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    // cav_qr_scans : créée ici car dépend de tours(id)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_qr_scans (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER REFERENCES cav(id) ON DELETE CASCADE,
+        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+        scanned_by INTEGER REFERENCES users(id),
+        scan_type VARCHAR(30) DEFAULT 'collection' CHECK (scan_type IN ('collection', 'inspection', 'maintenance', 'inventory')),
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        notes TEXT,
+        scanned_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_qr_scans_cav ON cav_qr_scans(cav_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_qr_scans_date ON cav_qr_scans(scanned_at DESC);');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS tour_cav (
@@ -735,6 +758,26 @@ async function initDatabase() {
     console.log('[INIT-DB] Module V2 (Référentiels & Tri) ✓');
 
     // ══════════════════════════════════════════
+    // MODULE : Grille tarifaire
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS grille_tarifaire (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        exutoire_id INTEGER REFERENCES exutoires(id),
+        prix_tonne DOUBLE PRECISION NOT NULL,
+        trimestre INTEGER CHECK (trimestre BETWEEN 1 AND 4),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS grille_tarifaire_uniq
+      ON grille_tarifaire (annee, type, COALESCE(exutoire_id, 0), COALESCE(trimestre, 0));
+    `);
+    console.log('[INIT-DB] Module Grille tarifaire ✓');
+
+    // ══════════════════════════════════════════
     // MODULE V2 : Refashion
     // ══════════════════════════════════════════
     await client.query(`
@@ -828,6 +871,262 @@ async function initDatabase() {
     `);
     console.log('[INIT-DB] Module IA (ML Prédictif) ✓');
 
+    // Contexte collecte (météo, trafic) et apprentissage continu
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS collection_context (
+        id SERIAL PRIMARY KEY,
+        date DATE NOT NULL UNIQUE,
+        weather_code VARCHAR(20),
+        weather_label VARCHAR(50),
+        temp_max DOUBLE PRECISION,
+        precip_mm DOUBLE PRECISION,
+        weather_factor DOUBLE PRECISION DEFAULT 1.0,
+        traffic_factor DOUBLE PRECISION DEFAULT 1.0,
+        duration_factor DOUBLE PRECISION DEFAULT 1.0,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS evenements_locaux (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(255) NOT NULL,
+        type VARCHAR(50) NOT NULL DEFAULT 'brocante',
+        date_debut DATE NOT NULL,
+        date_fin DATE NOT NULL,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        adresse TEXT,
+        commune VARCHAR(100),
+        rayon_km DOUBLE PRECISION DEFAULT 2,
+        bonus_factor DOUBLE PRECISION DEFAULT 1.2,
+        notes TEXT,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    // Ajouter les colonnes distance/durée/nb_cav à tours si manquantes
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tours ADD COLUMN estimated_distance_km DOUBLE PRECISION;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tours ADD COLUMN estimated_duration_min INTEGER;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tours ADD COLUMN nb_cav INTEGER DEFAULT 0;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS collection_learning_feedback (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+        cav_id INTEGER REFERENCES cav(id) ON DELETE CASCADE,
+        predicted_fill_rate DOUBLE PRECISION NOT NULL,
+        observed_fill_level INTEGER CHECK (observed_fill_level BETWEEN 0 AND 5),
+        predicted_weight_kg DOUBLE PRECISION,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('[INIT-DB] Tables contexte & apprentissage collecte ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Historique (Dashboard Excel)
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS historique_mensuel (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        mois INTEGER NOT NULL CHECK (mois BETWEEN 1 AND 12),
+        section VARCHAR(50) NOT NULL,
+        categorie VARCHAR(255) NOT NULL,
+        valeur DOUBLE PRECISION NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(annee, mois, section, categorie)
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_historique_mensuel_annee ON historique_mensuel(annee, mois);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_historique_mensuel_section ON historique_mensuel(section);`);
+    console.log('[INIT-DB] Table historique_mensuel ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE RGPD : Conformité
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rgpd_registre (
+        id SERIAL PRIMARY KEY,
+        nom_traitement VARCHAR(255) NOT NULL,
+        finalite TEXT NOT NULL,
+        base_legale VARCHAR(100) NOT NULL,
+        categories_personnes TEXT,
+        categories_donnees TEXT,
+        destinataires TEXT,
+        duree_conservation VARCHAR(100),
+        mesures_securite TEXT,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rgpd_consents (
+        id SERIAL PRIMARY KEY,
+        entity_type VARCHAR(50) NOT NULL,
+        entity_id INTEGER NOT NULL,
+        consent_type VARCHAR(100) NOT NULL,
+        granted BOOLEAN DEFAULT true,
+        comment TEXT,
+        recorded_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(entity_type, entity_id, consent_type)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rgpd_audit_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        action VARCHAR(50) NOT NULL,
+        entity_type VARCHAR(50),
+        entity_id INTEGER,
+        details JSONB,
+        ip_address VARCHAR(50),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rgpd_audit_created ON rgpd_audit_log(created_at DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rgpd_audit_action ON rgpd_audit_log(action);');
+    console.log('[INIT-DB] Module RGPD ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATIONS (ajout colonnes sans casser l'existant)
+    // ══════════════════════════════════════════
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN candidate_id INTEGER UNIQUE REFERENCES candidates(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Tables pour exécution tri et colisages
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS batch_tracking (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(50) NOT NULL UNIQUE,
+        stock_movement_id INTEGER REFERENCES stock_movements(id),
+        chaine_id INTEGER REFERENCES chaines_tri(id),
+        poids_initial_kg DOUBLE PRECISION NOT NULL,
+        poids_restant_kg DOUBLE PRECISION,
+        status VARCHAR(20) DEFAULT 'en_attente' CHECK (status IN ('en_attente', 'en_cours', 'termine', 'annule')),
+        date_debut TIMESTAMP,
+        date_fin TIMESTAMP,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS operation_executions (
+        id SERIAL PRIMARY KEY,
+        batch_id INTEGER REFERENCES batch_tracking(id) NOT NULL,
+        operation_id INTEGER REFERENCES operations_tri(id) NOT NULL,
+        status VARCHAR(20) DEFAULT 'en_attente' CHECK (status IN ('en_attente', 'en_cours', 'termine')),
+        poids_entree_kg DOUBLE PRECISION,
+        poids_sortie_total_kg DOUBLE PRECISION,
+        perte_kg DOUBLE PRECISION DEFAULT 0,
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        completed_by INTEGER REFERENCES users(id),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS operation_outputs (
+        id SERIAL PRIMARY KEY,
+        execution_id INTEGER REFERENCES operation_executions(id) NOT NULL,
+        sortie_id INTEGER REFERENCES sorties_operation(id) NOT NULL,
+        poids_kg DOUBLE PRECISION NOT NULL,
+        categorie_sortante_id INTEGER REFERENCES categories_sortantes(id),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS colisages (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(50) NOT NULL UNIQUE,
+        categorie_sortante_id INTEGER REFERENCES categories_sortantes(id),
+        type_conteneur_id INTEGER REFERENCES types_conteneurs(id),
+        poids_kg DOUBLE PRECISION DEFAULT 0,
+        nb_articles INTEGER DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'ouvert' CHECK (status IN ('ouvert', 'scelle', 'expedie', 'livre')),
+        exutoire_id INTEGER REFERENCES exutoires(id),
+        expedition_id INTEGER REFERENCES expeditions(id),
+        scelle_at TIMESTAMP,
+        scelle_by INTEGER REFERENCES users(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS colisage_items (
+        id SERIAL PRIMARY KEY,
+        colisage_id INTEGER REFERENCES colisages(id) NOT NULL,
+        output_id INTEGER REFERENCES operation_outputs(id),
+        produit_fini_id INTEGER REFERENCES produits_finis(id),
+        poids_kg DOUBLE PRECISION,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS colisage_history (
+        id SERIAL PRIMARY KEY,
+        colisage_id INTEGER REFERENCES colisages(id) NOT NULL,
+        from_status VARCHAR(20),
+        to_status VARCHAR(20) NOT NULL,
+        comment TEXT,
+        changed_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // Status field for expeditions
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE expeditions ADD COLUMN status VARCHAR(20) DEFAULT 'preparee' CHECK (status IN ('preparee', 'chargee', 'expediee', 'livree'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Status field for produits_finis
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN status VARCHAR(20) DEFAULT 'en_stock' CHECK (status IN ('en_stock', 'colise', 'expedie', 'vendu'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages) ✓');
+
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)
     // ══════════════════════════════════════════
@@ -844,9 +1143,17 @@ async function initDatabase() {
       console.log('[INIT-DB] Utilisateur admin créé (admin / admin123)');
     }
 
-    // Migration: update teams constraint + data
+    // Migration: update teams constraint + data — drop ALL check constraints on type column
+    const teamChecks = await client.query(`
+      SELECT con.conname FROM pg_constraint con
+      JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
+      WHERE con.conrelid = 'teams'::regclass AND con.contype = 'c' AND att.attname = 'type'
+    `);
+    for (const row of teamChecks.rows) {
+      await client.query(`ALTER TABLE teams DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+    }
     await client.query(`
-      ALTER TABLE teams DROP CONSTRAINT IF EXISTS teams_type_check;
+      UPDATE teams SET type = 'logistique' WHERE type IS NOT NULL AND type NOT IN ('tri', 'collecte', 'logistique', 'btq_st_sever', 'btq_lhopital', 'administration');
       ALTER TABLE teams ADD CONSTRAINT teams_type_check
         CHECK (type IN ('tri', 'collecte', 'logistique', 'btq_st_sever', 'btq_lhopital', 'administration'));
     `);
@@ -910,9 +1217,12 @@ async function initDatabase() {
           ('Déstockage', 'destockage'),
           ('VAK Export', 'vak'),
           ('VAK Afrique', 'vak'),
-          ('VAK Moyen-Orient', 'vak');
+          ('VAK Moyen-Orient', 'vak'),
+          ('Extra 1er Choix', 'extra'),
+          ('Extra 2ème Choix', 'extra')
+        ON CONFLICT (nom) DO NOTHING;
       `);
-      console.log('[INIT-DB] 17 catégories sortantes créées');
+      console.log('[INIT-DB] Catégories sortantes créées');
     }
 
     // Chaînes de tri (2 chaînes)
@@ -1020,17 +1330,26 @@ async function initDatabase() {
       ALTER TABLE candidates ADD COLUMN IF NOT EXISTS comment TEXT;
     `);
 
-    // Migrate old statuses to new ones
+    // Drop ALL check constraints on status column FIRST (before updating values)
+    const candidateChecks = await client.query(`
+      SELECT con.conname FROM pg_constraint con
+      JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
+      WHERE con.conrelid = 'candidates'::regclass AND con.contype = 'c' AND att.attname = 'status'
+    `);
+    for (const row of candidateChecks.rows) {
+      await client.query(`ALTER TABLE candidates DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+    }
+
+    // Now migrate old statuses to new ones (constraint is gone, so new values are accepted)
     await client.query(`
       UPDATE candidates SET status = 'preselected' WHERE status = 'to_contact';
       UPDATE candidates SET status = 'interview' WHERE status = 'summoned';
       UPDATE candidates SET status = 'hired' WHERE status = 'recruited';
-      UPDATE candidates SET status = 'received' WHERE status = 'not_retained';
+      UPDATE candidates SET status = 'received' WHERE status IS NULL OR status NOT IN ('received', 'preselected', 'interview', 'test', 'hired');
     `);
 
-    // Update CHECK constraint to accept new statuses
+    // Re-add the constraint with the new allowed values
     await client.query(`
-      ALTER TABLE candidates DROP CONSTRAINT IF EXISTS candidates_status_check;
       ALTER TABLE candidates ADD CONSTRAINT candidates_status_check
         CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired'));
     `);
@@ -1055,6 +1374,486 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Migration statuts Kanban ✓');
 
+    // ══════════════════════════════════════════
+    // MIGRATION : Grille tarifaire + catégories Extra
+    // ══════════════════════════════════════════
+    await client.query(`
+      INSERT INTO categories_sortantes (nom, famille) VALUES
+        ('Extra 1er Choix', 'extra'),
+        ('Extra 2ème Choix', 'extra')
+      ON CONFLICT (nom) DO NOTHING;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS grille_tarifaire (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        exutoire_id INTEGER REFERENCES exutoires(id),
+        prix_tonne DOUBLE PRECISION NOT NULL,
+        trimestre INTEGER CHECK (trimestre BETWEEN 1 AND 4),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS grille_tarifaire_uniq
+      ON grille_tarifaire (annee, type, COALESCE(exutoire_id, 0), COALESCE(trimestre, 0));
+    `);
+
+    console.log('[INIT-DB] Migration grille tarifaire ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATION : Météo étendue + événements locaux
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE collection_context ADD COLUMN IF NOT EXISTS weather_label VARCHAR(50);
+      ALTER TABLE collection_context ADD COLUMN IF NOT EXISTS temp_max DOUBLE PRECISION;
+      ALTER TABLE collection_context ADD COLUMN IF NOT EXISTS precip_mm DOUBLE PRECISION;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS evenements_locaux (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(255) NOT NULL,
+        type VARCHAR(50) NOT NULL DEFAULT 'brocante',
+        date_debut DATE NOT NULL,
+        date_fin DATE NOT NULL,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        adresse TEXT,
+        commune VARCHAR(100),
+        rayon_km DOUBLE PRECISION DEFAULT 2,
+        bonus_factor DOUBLE PRECISION DEFAULT 1.2,
+        notes TEXT,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    console.log('[INIT-DB] Migration météo + événements locaux ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATION : UNIQUE index on cav.name + import Excel support
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cav_name_unique ON cav (name);
+    `);
+    await client.query(`
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS tournee VARCHAR(100);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS jours_collecte VARCHAR(100);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS freq_passage INTEGER DEFAULT 0;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS last_collection_date DATE;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS next_collection_date DATE;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS estimated_fill_rate DOUBLE PRECISION DEFAULT 0;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS daily_fill_rate DOUBLE PRECISION DEFAULT 0;
+    `);
+    console.log('[INIT-DB] Migration CAV (unique name + fill rate columns) ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATION : FKs manquantes + indexes performance
+    // ══════════════════════════════════════════
+    // FK users.team_id -> teams(id)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE users ADD CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    // FK candidates.assigned_team_id -> teams(id)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE candidates ADD CONSTRAINT fk_candidates_team FOREIGN KEY (assigned_team_id) REFERENCES teams(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    // FK candidates.position_id -> positions(id)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE candidates ADD CONSTRAINT fk_candidates_position FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    // Index on tonnage_history.cav_id for performance
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tonnage_history_cav ON tonnage_history(cav_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tonnage_history_date ON tonnage_history(date DESC);');
+    // Index on stock_movements
+    await client.query('CREATE INDEX IF NOT EXISTS idx_stock_movements_date ON stock_movements(date DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_stock_movements_type ON stock_movements(type);');
+    // Index on tours
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tours_date ON tours(date);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tours_status ON tours(status);');
+    // Candidate rejected status migration
+    const candidateChecks2 = await client.query(`
+      SELECT con.conname FROM pg_constraint con
+      JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
+      WHERE con.conrelid = 'candidates'::regclass AND con.contype = 'c' AND att.attname = 'status'
+    `);
+    for (const row of candidateChecks2.rows) {
+      await client.query(`ALTER TABLE candidates DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+    }
+    await client.query(`
+      UPDATE candidates SET status = 'received' WHERE status IS NULL OR status NOT IN ('received', 'preselected', 'interview', 'test', 'hired', 'rejected');
+    `);
+    await client.query(`
+      ALTER TABLE candidates ADD CONSTRAINT candidates_status_check
+        CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired', 'rejected'));
+    `);
+    // Employee insertion tracking columns
+    await client.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_status VARCHAR(30) DEFAULT 'none'
+        CHECK (insertion_status IN ('none', 'en_parcours', 'termine', 'abandon'));
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_start_date DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_end_date DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS prescripteur VARCHAR(100);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
+    `);
+    // Purge expired refresh tokens (cleanup)
+    await client.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
+    console.log('[INIT-DB] Migration FKs + indexes + statuts ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Parcours d'insertion — Diagnostics CIP
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_diagnostics (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        created_by INTEGER REFERENCES users(id),
+        updated_by INTEGER REFERENCES users(id),
+
+        -- IDENTITÉ & CONTEXTE SOCIAL
+        parcours_anterieur TEXT,
+        contraintes_sante TEXT,
+        contraintes_mobilite TEXT,
+        contraintes_familiales TEXT,
+        autres_contraintes TEXT,
+
+        -- DIAGNOSTIC FREINS SOCIAUX (1-5 : 1=pas de frein, 5=frein majeur)
+        frein_mobilite INTEGER DEFAULT 1 CHECK (frein_mobilite BETWEEN 1 AND 5),
+        frein_mobilite_detail TEXT,
+        frein_sante INTEGER DEFAULT 1 CHECK (frein_sante BETWEEN 1 AND 5),
+        frein_sante_detail TEXT,
+        frein_finances INTEGER DEFAULT 1 CHECK (frein_finances BETWEEN 1 AND 5),
+        frein_finances_detail TEXT,
+        frein_famille INTEGER DEFAULT 1 CHECK (frein_famille BETWEEN 1 AND 5),
+        frein_famille_detail TEXT,
+        frein_linguistique INTEGER DEFAULT 1 CHECK (frein_linguistique BETWEEN 1 AND 5),
+        frein_linguistique_detail TEXT,
+        frein_administratif INTEGER DEFAULT 1 CHECK (frein_administratif BETWEEN 1 AND 5),
+        frein_administratif_detail TEXT,
+        frein_numerique INTEGER DEFAULT 1 CHECK (frein_numerique BETWEEN 1 AND 5),
+        frein_numerique_detail TEXT,
+
+        -- QUESTIONNAIRE PCM SIMPLIFIÉ (réponses brutes)
+        pcm_q_travail_ideal TEXT,
+        pcm_q_reaction_stress TEXT,
+        pcm_q_relation_equipe TEXT,
+        pcm_q_motivation TEXT,
+        pcm_q_apprentissage TEXT,
+        pcm_q_communication TEXT,
+
+        -- OBSERVATIONS CIP EN SITUATION DE TRAVAIL
+        obs_taches_realisees TEXT,
+        obs_points_forts TEXT,
+        obs_difficultes TEXT,
+        obs_comportement_equipe TEXT,
+        obs_autonomie_ponctualite TEXT,
+
+        -- PRÉFÉRENCES & MOTIVATIONS
+        pref_aime_faire TEXT,
+        pref_ne_veut_plus TEXT,
+        pref_environnement_prefere TEXT,
+        pref_environnement_eviter TEXT,
+        pref_objectifs TEXT,
+
+        -- EXPLORAMA / OUTILS D'EXPLORATION
+        explorama_interets TEXT,
+        explorama_rejets TEXT,
+        explorama_gestes_positifs TEXT,
+        explorama_gestes_negatifs TEXT,
+        explorama_environnements TEXT,
+        explorama_rythme TEXT,
+
+        -- CAUSES DETAILLEES DES FREINS
+        frein_mobilite_causes TEXT,
+        frein_sante_causes TEXT,
+        frein_finances_causes TEXT,
+        frein_famille_causes TEXT,
+        frein_linguistique_causes TEXT,
+        frein_administratif_causes TEXT,
+        frein_numerique_causes TEXT,
+
+        -- ORIENTATION CIP
+        cip_hypotheses_metiers TEXT,
+        cip_questions TEXT,
+
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id)
+      );
+    `);
+    console.log('[INIT-DB] Module Insertion Diagnostics ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Fil d'actualite
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS news_articles (
+        id SERIAL PRIMARY KEY,
+        category VARCHAR(30) NOT NULL CHECK (category IN ('metier', 'local')),
+        title VARCHAR(255) NOT NULL,
+        summary TEXT,
+        content TEXT,
+        source_url VARCHAR(500),
+        source_name VARCHAR(100),
+        tags TEXT[],
+        is_pinned BOOLEAN DEFAULT false,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('[INIT-DB] Module News Articles ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Notification triggers
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notification_triggers (
+        id SERIAL PRIMARY KEY,
+        event VARCHAR(100) NOT NULL,
+        template_id INTEGER REFERENCES message_templates(id) ON DELETE CASCADE,
+        is_active BOOLEAN DEFAULT true,
+        delay_hours INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('[INIT-DB] Module Notification Triggers ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Objectifs periodiques
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS periodic_objectives (
+        id SERIAL PRIMARY KEY,
+        section VARCHAR(50) NOT NULL,
+        label VARCHAR(255) NOT NULL,
+        target_value DOUBLE PRECISION NOT NULL,
+        period VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (period IN ('daily', 'weekly', 'monthly', 'quarterly', 'yearly')),
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('[INIT-DB] Module Periodic Objectives ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Parcours insertion — Jalons obligatoires (Diagnostic, M+3, M+6, M+10, Sortie)
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_milestones (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        milestone_type VARCHAR(30) NOT NULL CHECK (milestone_type IN ('Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie')),
+        due_date DATE NOT NULL,
+        completed_date DATE,
+        status VARCHAR(30) NOT NULL DEFAULT 'a_planifier'
+          CHECK (status IN ('a_planifier', 'planifie', 'realise', 'reporte')),
+        interview_date TIMESTAMP,
+        interviewer_id INTEGER REFERENCES users(id),
+        -- Scores freins au moment du bilan (1-5)
+        frein_mobilite INTEGER CHECK (frein_mobilite BETWEEN 1 AND 5),
+        frein_sante INTEGER CHECK (frein_sante BETWEEN 1 AND 5),
+        frein_finances INTEGER CHECK (frein_finances BETWEEN 1 AND 5),
+        frein_famille INTEGER CHECK (frein_famille BETWEEN 1 AND 5),
+        frein_linguistique INTEGER CHECK (frein_linguistique BETWEEN 1 AND 5),
+        frein_administratif INTEGER CHECK (frein_administratif BETWEEN 1 AND 5),
+        frein_numerique INTEGER CHECK (frein_numerique BETWEEN 1 AND 5),
+        -- Questionnaire CIP (reponses par section)
+        cip_integration TEXT,
+        cip_competences TEXT,
+        cip_projet_pro TEXT,
+        cip_socialisation TEXT,
+        -- Contenu du bilan
+        bilan_professionnel TEXT,
+        bilan_social TEXT,
+        objectifs_realises TEXT,
+        objectifs_prochaine_periode TEXT,
+        observations TEXT,
+        actions_a_mener TEXT,
+        -- Avis global
+        avis_global VARCHAR(30) CHECK (avis_global IN ('tres_positif', 'positif', 'mitige', 'insuffisant')),
+        -- Bilan Sortie specifique
+        sortie_classification VARCHAR(20) CHECK (sortie_classification IN ('positive', 'negative')),
+        sortie_type VARCHAR(50),
+        sortie_commentaires TEXT,
+        sortie_employeur TEXT,
+        sortie_formation TEXT,
+        -- AI recommendations snapshot
+        ai_recommendations JSONB,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id, milestone_type)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_milestones_employee ON insertion_milestones(employee_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_milestones_status ON insertion_milestones(status);');
+
+    // Plan d'action CIP par jalon
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cip_action_plans (
+        id SERIAL PRIMARY KEY,
+        milestone_id INTEGER NOT NULL REFERENCES insertion_milestones(id) ON DELETE CASCADE,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        action_label TEXT NOT NULL,
+        category VARCHAR(30) NOT NULL CHECK (category IN ('competence', 'insertion', 'socialisation', 'frein')),
+        frein_type VARCHAR(30),
+        priority VARCHAR(20) DEFAULT 'moyenne' CHECK (priority IN ('haute', 'moyenne', 'basse')),
+        status VARCHAR(20) DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'en_cours', 'realise', 'abandonne')),
+        echeance DATE,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_action_plans_milestone ON cip_action_plans(milestone_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_action_plans_employee ON cip_action_plans(employee_id);');
+
+    // Alertes planification entretiens insertion
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_interview_alerts (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        milestone_type VARCHAR(30) NOT NULL,
+        alert_type VARCHAR(30) NOT NULL CHECK (alert_type IN ('planification', 'rappel_j7', 'rappel_j1', 'retard')),
+        sent_at TIMESTAMP,
+        is_sent BOOLEAN DEFAULT false,
+        target_date DATE NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    console.log('[INIT-DB] Module Parcours Insertion ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Maintenance préventive véhicules
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        vehicle_type VARCHAR(50) NOT NULL DEFAULT 'generic',
+        last_maintenance_date DATE,
+        last_maintenance_km INTEGER,
+        maintenance_interval_km INTEGER DEFAULT 20000,
+        maintenance_interval_months INTEGER DEFAULT 12,
+        controle_technique_date DATE,
+        oil_change_km INTEGER,
+        oil_change_date DATE,
+        tire_change_km INTEGER,
+        tire_change_date DATE,
+        brake_check_km INTEGER,
+        brake_check_date DATE,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vehicle_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance_alerts (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        alert_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        alerts JSONB NOT NULL DEFAULT '[]',
+        is_resolved BOOLEAN DEFAULT false,
+        resolved_by INTEGER REFERENCES users(id),
+        resolved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vehicle_id, alert_date)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_maint_alerts_vehicle ON vehicle_maintenance_alerts(vehicle_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_maint_alerts_resolved ON vehicle_maintenance_alerts(is_resolved);');
+    console.log('[INIT-DB] Module Maintenance Véhicules ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Capteurs ultrasons CAV (LoRaWAN)
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reference VARCHAR(100);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_type VARCHAR(50) DEFAULT 'ultrasonic';
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_reading DOUBLE PRECISION;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_reading_at TIMESTAMP;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_sensor_readings (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER NOT NULL REFERENCES cav(id) ON DELETE CASCADE,
+        sensor_reference VARCHAR(100) NOT NULL,
+        fill_level_percent DOUBLE PRECISION NOT NULL CHECK (fill_level_percent BETWEEN 0 AND 100),
+        distance_cm DOUBLE PRECISION,
+        battery_level DOUBLE PRECISION,
+        temperature DOUBLE PRECISION,
+        rssi INTEGER,
+        raw_data JSONB,
+        reading_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_cav ON cav_sensor_readings(cav_id, reading_at DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_ref ON cav_sensor_readings(sensor_reference);');
+    console.log('[INIT-DB] Module Capteurs CAV ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Inventaire physique produits finis
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS inventory_batches (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(50) NOT NULL UNIQUE,
+        type VARCHAR(20) NOT NULL DEFAULT 'partiel' CHECK (type IN ('partiel', 'complet')),
+        status VARCHAR(20) NOT NULL DEFAULT 'en_cours' CHECK (status IN ('en_cours', 'valide', 'annule')),
+        date DATE NOT NULL DEFAULT CURRENT_DATE,
+        notes TEXT,
+        total_theorique_kg DOUBLE PRECISION DEFAULT 0,
+        total_physique_kg DOUBLE PRECISION DEFAULT 0,
+        ecart_kg DOUBLE PRECISION DEFAULT 0,
+        ecart_percent DOUBLE PRECISION DEFAULT 0,
+        validated_by INTEGER REFERENCES users(id),
+        validated_at TIMESTAMP,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS inventory_items (
+        id SERIAL PRIMARY KEY,
+        batch_id INTEGER NOT NULL REFERENCES inventory_batches(id) ON DELETE CASCADE,
+        categorie_sortante_id INTEGER REFERENCES categories_sortantes(id),
+        categorie_nom VARCHAR(255),
+        stock_theorique_kg DOUBLE PRECISION DEFAULT 0,
+        stock_physique_kg DOUBLE PRECISION DEFAULT 0,
+        ecart_kg DOUBLE PRECISION DEFAULT 0,
+        ecart_percent DOUBLE PRECISION DEFAULT 0,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_inventory_items_batch ON inventory_items(batch_id);');
+    console.log('[INIT-DB] Module Inventaire Physique ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Taux de captation (population communes)
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS population_commune INTEGER;
+    `);
+    console.log('[INIT-DB] Colonne population_commune ajoutée à CAV ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');
@@ -1068,6 +1867,12 @@ async function initDatabase() {
   }
 }
 
-initDatabase()
-  .then(() => process.exit(0))
-  .catch(() => process.exit(1));
+// Ne faire process.exit que si le script est lancé en direct (node init-db.js)
+// Sinon, quand on est chargé depuis le serveur, ne pas quitter le processus
+if (require.main === module) {
+  initDatabase()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
+} else {
+  module.exports = { initDatabase };
+}

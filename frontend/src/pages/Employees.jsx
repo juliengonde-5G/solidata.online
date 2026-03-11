@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
@@ -26,6 +26,13 @@ export default function Employees() {
   const [contracts, setContracts] = useState([]);
   const [daysOff, setDaysOff] = useState([]);
   const [showContractForm, setShowContractForm] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [editError, setEditError] = useState('');
+  const [pcmProfile, setPcmProfile] = useState(null);
+  const [candidateData, setCandidateData] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const firstInputRef = useRef(null);
   const [contractForm, setContractForm] = useState({
     contract_type: 'CDI', duration_months: '', start_date: '', end_date: '',
     weekly_hours: 35, team_id: '', position_id: '',
@@ -54,6 +61,20 @@ export default function Employees() {
     setSelected(emp);
     setDetailTab('info');
     setShowContractForm(false);
+    setEditingEmployee(false);
+    setEditForm({
+      first_name: emp.first_name || '',
+      last_name: emp.last_name || '',
+      email: emp.email || '',
+      phone: emp.phone || '',
+      team_id: emp.team_id || '',
+      position: emp.position || '',
+      contract_type: emp.contract_type || 'CDI',
+      contract_start: emp.contract_start ? emp.contract_start.slice(0, 10) : '',
+      contract_end: emp.contract_end ? emp.contract_end.slice(0, 10) : '',
+      weekly_hours: emp.weekly_hours ?? 35,
+      is_active: emp.is_active !== false,
+    });
     try {
       const [cRes, aRes] = await Promise.all([
         api.get(`/employees/${emp.id}/contracts`),
@@ -61,17 +82,37 @@ export default function Employees() {
       ]);
       setContracts(cRes.data);
       setDaysOff(aRes.data);
+      // Charger le profil PCM et les données candidat si lié
+      if (emp.candidate_id) {
+        api.get(`/pcm/profiles/${emp.candidate_id}`).then(r => setPcmProfile(r.data)).catch(() => setPcmProfile(null));
+        api.get(`/candidates/${emp.candidate_id}`).then(r => setCandidateData(r.data)).catch(() => setCandidateData(null));
+      } else {
+        setPcmProfile(null);
+        setCandidateData(null);
+      }
     } catch (err) {
       console.error(err);
       setContracts([]);
       setDaysOff([]);
+      setPcmProfile(null);
     }
   };
 
   const createEmployee = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/employees', form);
+      const selectedPosition = positions.find(p => String(p.id) === String(form.position_id));
+      const payload = {
+        first_name: form.first_name,
+        last_name: form.last_name,
+        email: form.email || null,
+        phone: form.phone || null,
+        team_id: form.team_id ? Number(form.team_id) : null,
+        position: selectedPosition ? (selectedPosition.title || selectedPosition.name) : null,
+        contract_type: form.contract_type || 'CDI',
+        contract_start: form.hire_date || null,
+      };
+      await api.post('/employees', payload);
       setShowForm(false);
       setForm({ first_name: '', last_name: '', email: '', phone: '', position_id: '', team_id: '', contract_type: 'CDI', hire_date: '' });
       loadData();
@@ -96,6 +137,46 @@ export default function Employees() {
     try {
       await api.put(`/employees/${selected.id}/availability`, { days_off: newDays });
     } catch (err) { console.error(err); }
+  };
+
+  const updateEmployee = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selected) return;
+    setEditError('');
+    const firstName = (editForm.first_name || '').trim();
+    const lastName = (editForm.last_name || '').trim();
+    if (!firstName || !lastName) {
+      setEditError('Le prénom et le nom sont obligatoires.');
+      firstInputRef.current?.focus();
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        first_name: firstName,
+        last_name: lastName,
+        email: (editForm.email || '').trim() || null,
+        phone: (editForm.phone || '').trim() || null,
+        team_id: editForm.team_id ? Number(editForm.team_id) : null,
+        position: (editForm.position || '').trim() || null,
+        contract_type: editForm.contract_type || null,
+        contract_start: editForm.contract_start || null,
+        contract_end: editForm.contract_end || null,
+        weekly_hours: editForm.weekly_hours != null && editForm.weekly_hours !== '' ? Number(editForm.weekly_hours) : 35,
+        is_active: editForm.is_active,
+      };
+      const res = await api.put(`/employees/${selected.id}`, payload);
+      setSelected({ ...selected, ...res.data, team_name: teams.find(t => t.id === res.data.team_id)?.name });
+      setEditingEmployee(false);
+      loadData();
+    } catch (err) {
+      console.error(err);
+      const msg = err.response?.data?.error || err.message || 'Erreur lors de l\'enregistrement';
+      setEditError(msg);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handlePhotoUpload = async (employeeId, file) => {
@@ -207,6 +288,7 @@ export default function Employees() {
                   { key: 'info', label: 'Informations' },
                   { key: 'contracts', label: 'Contrats' },
                   { key: 'availability', label: 'Disponibilités' },
+                  { key: 'pcm', label: 'Profil PCM' },
                 ].map(t => (
                   <button key={t.key} onClick={() => setDetailTab(t.key)}
                     className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
@@ -221,21 +303,114 @@ export default function Employees() {
                 {/* Info tab */}
                 {detailTab === 'info' && (
                   <div className="space-y-3 text-sm">
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Prénom" value={selected.first_name} />
-                      <Field label="Nom" value={selected.last_name} />
-                      <Field label="Email" value={selected.email} />
-                      <Field label="Téléphone" value={selected.phone} />
-                      <Field label="Équipe" value={selected.team_name} />
-                      <Field label="Contrat" value={CONTRACT_LABELS[selected.contract_type] || selected.contract_type} />
-                      <Field label="Heures/sem" value={selected.weekly_hours ? `${selected.weekly_hours}h` : null} />
-                      <Field label="Matricule" value={selected.matricule} />
-                    </div>
-                    {selected.hire_date && <Field label="Date d'embauche" value={new Date(selected.hire_date).toLocaleDateString('fr-FR')} />}
-                    <div className="mt-4">
-                      <label className="text-xs text-gray-500 block mb-1">Photo</label>
-                      <input type="file" accept="image/*" onChange={e => e.target.files[0] && handlePhotoUpload(selected.id, e.target.files[0])} className="text-xs" />
-                    </div>
+                    {!editingEmployee ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field label="Prénom" value={selected.first_name} />
+                          <Field label="Nom" value={selected.last_name} />
+                          <Field label="Email" value={selected.email} />
+                          <Field label="Téléphone" value={selected.phone} />
+                          <Field label="Équipe" value={selected.team_name} />
+                          <Field label="Contrat" value={CONTRACT_LABELS[selected.contract_type] || selected.contract_type} />
+                          <Field label="Heures/sem" value={selected.weekly_hours ? `${selected.weekly_hours}h` : null} />
+                          <Field label="Matricule" value={selected.matricule} />
+                        </div>
+                        {(selected.contract_start || selected.hire_date) && (
+                          <Field label="Date d'embauche" value={new Date(selected.contract_start || selected.hire_date).toLocaleDateString('fr-FR')} />
+                        )}
+                        {candidateData?.cv_file_path && (
+                          <div className="mt-3">
+                            <label className="text-xs text-gray-500 block mb-1">CV du candidat</label>
+                            <a href={`/api/candidates/${selected.candidate_id}/download-cv`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-solidata-green hover:underline font-medium">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                              Telecharger le CV
+                            </a>
+                          </div>
+                        )}
+                        <div className="mt-4">
+                          <label className="text-xs text-gray-500 block mb-1">Photo</label>
+                          <input type="file" accept="image/*" onChange={e => e.target.files[0] && handlePhotoUpload(selected.id, e.target.files[0])} className="text-xs" />
+                        </div>
+                        <p className="text-xs text-gray-400 mt-2">En mode modification, le prénom et le nom sont obligatoires pour enregistrer.</p>
+                        <button type="button" onClick={() => { setEditingEmployee(true); setEditError(''); }} className="mt-2 w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90">
+                          Modifier
+                        </button>
+                      </>
+                    ) : (
+                      <form id="employee-edit-form" onSubmit={updateEmployee} noValidate className="space-y-3">
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-sm text-amber-800">
+                          <strong>Champs obligatoires :</strong> Prénom et Nom (marqués <span className="text-red-600 font-semibold">*</span>). Les autres champs sont facultatifs.
+                        </div>
+                        {editError && (
+                          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-sm flex items-center gap-2">
+                            <span className="flex-shrink-0">⚠</span>
+                            <span>{editError}</span>
+                            <button type="button" onClick={() => setEditError('')} className="ml-auto text-red-500 hover:text-red-700" aria-label="Fermer">×</button>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-gray-700 text-xs font-medium">Prénom <span className="text-red-500" aria-hidden="true">*</span></label>
+                            <input ref={firstInputRef} value={editForm.first_name} onChange={e => { setEditForm({ ...editForm, first_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" aria-required="true" />
+                          </div>
+                          <div>
+                            <label className="text-gray-700 text-xs font-medium">Nom <span className="text-red-500" aria-hidden="true">*</span></label>
+                            <input value={editForm.last_name} onChange={e => { setEditForm({ ...editForm, last_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" aria-required="true" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-gray-500 text-xs">Email</label>
+                          <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                        </div>
+                        <div>
+                          <label className="text-gray-500 text-xs">Téléphone</label>
+                          <input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                        </div>
+                        <div>
+                          <label className="text-gray-500 text-xs">Équipe</label>
+                          <select value={editForm.team_id} onChange={e => setEditForm({ ...editForm, team_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                            <option value="">—</option>
+                            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-gray-500 text-xs">Poste</label>
+                          <input value={editForm.position} onChange={e => setEditForm({ ...editForm, position: e.target.value })} placeholder="Ex: Chauffeur" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-gray-500 text-xs">Type de contrat</label>
+                            <select value={editForm.contract_type} onChange={e => setEditForm({ ...editForm, contract_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                              {Object.entries(CONTRACT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-gray-500 text-xs">Heures/sem</label>
+                            <input type="number" min="0" step="0.5" value={editForm.weekly_hours} onChange={e => setEditForm({ ...editForm, weekly_hours: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-gray-500 text-xs">Début contrat</label>
+                            <input type="date" value={editForm.contract_start} onChange={e => setEditForm({ ...editForm, contract_start: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          </div>
+                          <div>
+                            <label className="text-gray-500 text-xs">Fin contrat</label>
+                            <input type="date" value={editForm.contract_end} onChange={e => setEditForm({ ...editForm, contract_end: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input type="checkbox" id="emp-active" checked={editForm.is_active} onChange={e => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" />
+                          <label htmlFor="emp-active" className="text-sm">Actif</label>
+                        </div>
+                        <div className="flex gap-2 mt-4">
+                          <button type="button" onClick={() => setEditingEmployee(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                          <button type="submit" form="employee-edit-form" disabled={saving} onClick={e => e.stopPropagation()} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90 disabled:opacity-50 disabled:cursor-not-allowed">
+                            {saving ? 'Enregistrement…' : 'Enregistrer'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
                   </div>
                 )}
 
@@ -332,6 +507,47 @@ export default function Employees() {
                 )}
 
                 {/* Availability tab */}
+                {detailTab === 'pcm' && (
+                  <div className="space-y-3 text-sm">
+                    {!selected.candidate_id ? (
+                      <p className="text-gray-500 italic">Cet employé n'est pas lié à un candidat. Pas de profil PCM disponible.</p>
+                    ) : !pcmProfile ? (
+                      <p className="text-gray-500 italic">Aucun profil PCM enregistré pour ce candidat.</p>
+                    ) : (
+                      <>
+                        <div className="bg-purple-50 rounded-lg p-3">
+                          <p className="font-semibold text-purple-800 mb-1">Type de base</p>
+                          <p className="text-lg font-bold text-purple-900 capitalize">{pcmProfile.baseType || pcmProfile.base_type || '—'}</p>
+                        </div>
+                        {pcmProfile.phaseType && (
+                          <div className="bg-blue-50 rounded-lg p-3">
+                            <p className="font-semibold text-blue-800 mb-1">Phase actuelle</p>
+                            <p className="text-lg font-bold text-blue-900 capitalize">{pcmProfile.phaseType || pcmProfile.phase_type}</p>
+                          </div>
+                        )}
+                        {pcmProfile.report?.scores && (
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Scores PCM</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {Object.entries(pcmProfile.report.scores).map(([type, score]) => (
+                                <div key={type} className="flex items-center justify-between bg-gray-50 rounded px-3 py-1.5">
+                                  <span className="text-sm capitalize">{type}</span>
+                                  <span className="font-bold">{score}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {pcmProfile.riskAlert && (
+                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                            <p className="font-semibold text-orange-800 text-xs">Alerte RPS detectee — un suivi est recommande</p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {detailTab === 'availability' && (
                   <div className="space-y-4">
                     <p className="text-sm text-gray-500">Jours d'indisponibilité hebdomadaire :</p>

@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { Server } = require('socket.io');
 const pool = require('./config/database');
@@ -9,18 +11,42 @@ const pool = require('./config/database');
 const app = express();
 const server = http.createServer(app);
 
+// CORS — origines autorisées
+const ALLOWED_ORIGINS = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',')
+  : ['https://solidata.online', 'https://www.solidata.online', 'https://m.solidata.online'];
+if (process.env.NODE_ENV !== 'production') {
+  ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:3002');
+}
+
 // Socket.io
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'] },
 });
 
+// Trust proxy (derrière nginx)
+app.set('trust proxy', 1);
+
 // Middleware globaux
-app.use(cors());
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Fichiers statiques
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+// Rate limiting global
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false }));
+// Rate limiting strict pour auth
+app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { error: 'Trop de tentatives, réessayez plus tard' } }));
+
+// Créer dossiers uploads (évite 502 si multer ne peut pas créer)
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+['', 'cv', 'photos', 'incidents', 'qrcodes'].forEach((sub) => {
+  const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
+  try {
+    require('fs').mkdirSync(dir, { recursive: true });
+  } catch (_) {}
+});
+app.use('/uploads', express.static(uploadsDir));
 app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 
 // Rendre io accessible aux routes
@@ -56,6 +82,11 @@ app.use('/api/refashion', require('./routes/refashion'));
 app.use('/api/referentiels', require('./routes/referentiels'));
 app.use('/api/insertion', require('./routes/insertion'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/historique', require('./routes/historique'));
+app.use('/api/metropole', require('./routes/metropole'));
+app.use('/api/rgpd', require('./routes/rgpd'));
+app.use('/api/admin-db', require('./routes/admin-db'));
+app.use('/api/news', require('./routes/newsfeed'));
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -87,10 +118,13 @@ app.get('/api/health', async (req, res) => {
         reporting: true,
         tri: true,
         refashion: true,
+        metropole: true,
+        rgpd: true,
+        adminDb: true,
       },
     });
   } catch (err) {
-    res.status(500).json({ status: 'error', error: err.message });
+    res.status(500).json({ status: 'error', error: 'Service indisponible' });
   }
 });
 
@@ -153,9 +187,53 @@ async function initOnStartup() {
     );
     if (parseInt(tables.rows[0].count) < 5) {
       console.log('[DB] Tables manquantes, lancement init-db...');
-      require('./scripts/init-db');
+      const { initDatabase } = require('./scripts/init-db');
+      await initDatabase();
     } else {
       console.log(`[DB] ${tables.rows[0].count} tables trouvées`);
+      // Toujours appliquer les migrations de colonnes (idempotent)
+      try {
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_distance_km DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_duration_min INTEGER; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN nb_cav INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN ai_explanation TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        console.log('[DB] Migrations de colonnes vérifiées ✓');
+      } catch (e) { console.warn('[DB] Migration warning:', e.message); }
+    }
+
+    // Seed CAV si la table est vide
+    try {
+      const cavCount = await pool.query('SELECT COUNT(*) FROM cav');
+      if (parseInt(cavCount.rows[0].count) === 0) {
+        console.log('[DB] Table CAV vide, lancement du seed...');
+        const { seedCAV } = require('./scripts/seed-cav');
+        await seedCAV(pool);
+      } else {
+        console.log(`[DB] ${cavCount.rows[0].count} CAV déjà en base`);
+      }
+    } catch (err) {
+      console.error('[DB] Erreur seed CAV :', err.message);
+    }
+
+    // Cleanup expired refresh tokens
+    try {
+      const cleaned = await pool.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
+      if (cleaned.rowCount > 0) console.log(`[DB] ${cleaned.rowCount} refresh tokens expires purges`);
+    } catch (err) { /* table may not exist yet */ }
+
+    // Seed historique si la table est vide
+    try {
+      const histCount = await pool.query('SELECT COUNT(*) FROM historique_mensuel');
+      if (parseInt(histCount.rows[0].count) === 0) {
+        console.log('[DB] Table historique_mensuel vide, lancement du seed...');
+        const { seedHistorique } = require('./scripts/seed-historique');
+        await seedHistorique(pool);
+      } else {
+        console.log(`[DB] ${histCount.rows[0].count} entrées historiques déjà en base`);
+      }
+    } catch (err) {
+      console.error('[DB] Erreur seed historique :', err.message);
     }
   } catch (err) {
     console.error('[DB] Erreur connexion :', err.message);
@@ -173,7 +251,18 @@ server.listen(PORT, async () => {
   console.log(`  Port : ${PORT}`);
   console.log(`  Env  : ${process.env.NODE_ENV || 'development'}`);
   console.log(`══════════════════════════════════════════\n`);
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change-this-in-production') {
+    console.warn('[SECURITE] ATTENTION : JWT_SECRET non configure ! Definissez JWT_SECRET dans .env');
+  }
   await initOnStartup();
+
+  // Démarrer le scheduler CRON
+  try {
+    const { startScheduler } = require('./services/scheduler');
+    startScheduler();
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur démarrage :', err.message);
+  }
 });
 
 module.exports = { app, server, io };

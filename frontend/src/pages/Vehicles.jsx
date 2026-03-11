@@ -9,12 +9,15 @@ export default function Vehicles() {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [activeTab, setActiveTab] = useState('fleet');
+  const [maintenanceOverview, setMaintenanceOverview] = useState([]);
   const [form, setForm] = useState({
     registration: '', brand: '', model: '', type: 'camion', capacity_kg: 3500,
     next_maintenance: '', insurance_expiry: '',
   });
 
   useEffect(() => { loadVehicles(); }, []);
+  useEffect(() => { if (activeTab === 'maintenance') loadMaintenance(); }, [activeTab]);
 
   const loadVehicles = async () => {
     try {
@@ -22,6 +25,13 @@ export default function Vehicles() {
       setVehicles(res.data);
     } catch (err) { console.error(err); }
     setLoading(false);
+  };
+
+  const loadMaintenance = async () => {
+    try {
+      const res = await api.get('/vehicles/maintenance/overview');
+      setMaintenanceOverview(res.data);
+    } catch (err) { console.error(err); }
   };
 
   const createVehicle = async (e) => {
@@ -44,12 +54,55 @@ export default function Vehicles() {
             <h1 className="text-2xl font-bold text-solidata-dark">Véhicules</h1>
             <p className="text-gray-500">Gestion de la flotte — {vehicles.length} véhicule{vehicles.length > 1 ? 's' : ''}</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
-            + Nouveau véhicule
-          </button>
+          <div className="flex gap-2">
+            <div className="flex bg-gray-100 rounded-lg p-0.5">
+              <button onClick={() => setActiveTab('fleet')} className={`px-3 py-1.5 rounded-md text-sm ${activeTab === 'fleet' ? 'bg-white shadow font-medium' : 'text-gray-500'}`}>Flotte</button>
+              <button onClick={() => setActiveTab('maintenance')} className={`px-3 py-1.5 rounded-md text-sm ${activeTab === 'maintenance' ? 'bg-white shadow font-medium' : 'text-gray-500'}`}>Maintenance</button>
+            </div>
+            {activeTab === 'fleet' && (
+              <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+                + Nouveau véhicule
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {activeTab === 'maintenance' && (
+          <div className="space-y-4 mb-6">
+            {maintenanceOverview.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">Aucune donnee de maintenance. Configurez la maintenance sur chaque vehicule.</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {maintenanceOverview.map(v => (
+                  <div key={v.id} className={`bg-white rounded-xl shadow-sm border p-5 ${v.computed_alerts.some(a => a.urgency === 'critique') ? 'border-red-300' : v.computed_alerts.length > 0 ? 'border-orange-200' : ''}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="font-bold text-sm">{v.name || v.registration}</h3>
+                        <p className="text-xs text-gray-400">{v.vehicle_type || 'Type non configure'} — {v.current_km || 0} km</p>
+                      </div>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[v.status] || ''}`}>{STATUS_LABELS[v.status] || v.status}</span>
+                    </div>
+                    {v.computed_alerts.length > 0 ? (
+                      <div className="space-y-1">
+                        {v.computed_alerts.map((a, i) => (
+                          <div key={i} className={`text-xs px-2 py-1 rounded ${a.urgency === 'critique' ? 'bg-red-50 text-red-700' : 'bg-orange-50 text-orange-700'}`}>
+                            {a.urgency === 'critique' ? '!' : '~'} {a.message}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-green-600">Aucune alerte</p>
+                    )}
+                    {v.last_maintenance_date && <p className="text-xs text-gray-400 mt-2">Derniere revision: {new Date(v.last_maintenance_date).toLocaleDateString('fr-FR')} a {v.last_maintenance_km || '?'} km</p>}
+                    {v.controle_technique_date && <p className="text-xs text-gray-400">CT: {new Date(v.controle_technique_date).toLocaleDateString('fr-FR')}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'fleet' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {vehicles.map(v => (
             <div key={v.id} className="bg-white rounded-xl shadow-sm border p-5">
               <div className="flex items-center justify-between mb-3">
@@ -81,7 +134,7 @@ export default function Vehicles() {
           {vehicles.length === 0 && (
             <div className="col-span-full bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">Aucun véhicule enregistré</div>
           )}
-        </div>
+        </div>}
 
         {/* Form */}
         {showForm && (

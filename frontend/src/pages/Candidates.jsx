@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
-const STATUSES = ['received', 'preselected', 'interview', 'test', 'hired'];
+const STATUSES = ['received', 'preselected', 'interview', 'test', 'hired', 'rejected'];
 
 const STATUS_LABELS = {
-  received: 'Reçus',
-  preselected: 'Présélectionnés',
+  received: 'Recus',
+  preselected: 'Preselectionnes',
   interview: 'Entretien',
   test: 'Test',
-  hired: 'Recrutés',
+  hired: 'Recrutes',
+  rejected: 'Refuses',
 };
 
 const STATUS_COLORS = {
@@ -18,9 +20,11 @@ const STATUS_COLORS = {
   interview:   { bg: 'bg-purple-50', border: 'border-purple-200', drop: 'bg-purple-100 border-purple-400', badge: 'bg-purple-500' },
   test:        { bg: 'bg-orange-50', border: 'border-orange-200', drop: 'bg-orange-100 border-orange-400', badge: 'bg-orange-500' },
   hired:       { bg: 'bg-green-50',  border: 'border-green-200',  drop: 'bg-green-100 border-green-400',   badge: 'bg-green-500' },
+  rejected:    { bg: 'bg-red-50',    border: 'border-red-200',    drop: 'bg-red-100 border-red-400',       badge: 'bg-red-500' },
 };
 
 export default function Candidates() {
+  const navigate = useNavigate();
   const [kanban, setKanban] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -77,6 +81,20 @@ export default function Candidates() {
     } catch { setPcmProfile(null); }
   };
 
+  const handleConvertToEmployee = async (candidate) => {
+    if (!window.confirm(`Convertir ${candidate.first_name} ${candidate.last_name} en employé ?`)) return;
+    try {
+      const res = await api.post(`/candidates/${candidate.id}/convert-to-employee`, {
+        contract_type: 'CDD',
+        contract_start: new Date().toISOString().split('T')[0],
+      });
+      alert(`Employé créé avec succès (#${res.data.employee.id})`);
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur lors de la conversion');
+    }
+  };
+
   const moveCandidate = async (id, newStatus) => {
     try {
       await api.put(`/candidates/${id}/status`, { status: newStatus });
@@ -109,7 +127,6 @@ export default function Candidates() {
     fd.append('cv', file);
     try {
       const res = await api.post('/candidates/upload-cv-new', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 120000,
       });
       loadAll();
@@ -143,6 +160,13 @@ export default function Candidates() {
     } catch (err) { console.error(err); alert('Erreur création test PCM'); }
   };
 
+  const openPCMTestInApp = async (candidateId) => {
+    try {
+      const res = await api.post('/pcm/sessions', { candidate_id: candidateId, mode: 'autonomous' });
+      navigate(`/pcm-test/${res.data.access_token}`);
+    } catch (err) { console.error(err); alert('Erreur création test PCM'); }
+  };
+
   const openEdit = (c) => {
     setEditForm({
       first_name: c.first_name || '', last_name: c.last_name || '',
@@ -161,11 +185,18 @@ export default function Candidates() {
 
   const saveEdit = async () => {
     try {
-      const res = await api.put(`/candidates/${selected.id}`, { ...editForm, position_id: editForm.position_id || null });
+      const payload = { ...editForm, position_id: editForm.position_id || null };
+      // Convertir les chaînes vides en null pour les champs date et CHECK constraints
+      if (payload.appointment_date === '') payload.appointment_date = null;
+      if (!payload.practical_test_result) payload.practical_test_result = null;
+      const res = await api.put(`/candidates/${selected.id}`, payload);
       setEditing(false);
       setSelected(res.data);
       loadAll();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || 'Erreur lors de la sauvegarde');
+    }
   };
 
   const createPosition = async (e) => {
@@ -297,10 +328,10 @@ export default function Candidates() {
               <div className="p-5">
                 {detailTab === 'info' && (editing
                   ? <EditForm ef={editForm} set={setEditForm} save={saveEdit} cancel={() => setEditing(false)} positions={positions} />
-                  : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} />
+                  : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} onConvert={handleConvertToEmployee} />
                 )}
                 {detailTab === 'history' && <HistoryView history={history} />}
-                {detailTab === 'pcm' && <PCMView profile={pcmProfile} onStart={() => startPCMTest(selected.id)} />}
+                {detailTab === 'pcm' && <PCMView profile={pcmProfile} onStart={() => startPCMTest(selected.id)} onOpenInApp={() => openPCMTestInApp(selected.id)} />}
               </div>
             </div>
           </div>
@@ -375,7 +406,7 @@ function Pill({ label, value, color }) {
   return <div className={`px-3 py-1 rounded-full text-xs font-medium ${m[color]}`}>{label}: <strong>{value}</strong></div>;
 }
 
-function InfoView({ s, skills, positions, onMove }) {
+function InfoView({ s, skills, positions, onMove, onConvert }) {
   const pos = positions.find(p => p.id === s.position_id);
   return (
     <div className="space-y-3 text-sm">
@@ -392,6 +423,13 @@ function InfoView({ s, skills, positions, onMove }) {
           ))}
         </div>
       </div>
+      {s.status === 'hired' && !s.employee_id && (
+        <div className="pt-3">
+          <button onClick={() => onConvert && onConvert(s)} className="w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90 flex items-center justify-center gap-2">
+            <span>Créer un employé</span>
+          </button>
+        </div>
+      )}
       {skills.length > 0 && (
         <div className="pt-2"><p className="text-xs font-semibold text-gray-500 uppercase mb-2">Compétences</p>
           <div className="flex flex-wrap gap-1">{skills.map(sk => <Tag key={sk.skill_name} text={sk.skill_name.replace(/_/g, ' ')} c={sk.status === 'confirmed' ? 'green' : 'orange'} />)}</div>
@@ -437,13 +475,20 @@ function HistoryView({ history }) {
   );
 }
 
-function PCMView({ profile, onStart }) {
+function PCMView({ profile, onStart, onOpenInApp }) {
   const PCM_C = { analyseur: 'bg-blue-100 text-blue-700', perseverant: 'bg-green-100 text-green-700', empathique: 'bg-pink-100 text-pink-700', imagineur: 'bg-indigo-100 text-indigo-700', energiseur: 'bg-orange-100 text-orange-700', promoteur: 'bg-red-100 text-red-700' };
   if (!profile) return (
     <div className="text-center py-8">
       <p className="text-gray-500 text-sm mb-4">Aucun profil PCM</p>
-      <button onClick={onStart} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">Lancer un test PCM</button>
-      <p className="text-xs text-gray-400 mt-2">Le lien sera copié dans le presse-papier</p>
+      <div className="flex flex-col sm:flex-row gap-2 justify-center">
+        <button onClick={onOpenInApp} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">
+          Ouvrir le questionnaire
+        </button>
+        <button onClick={onStart} className="border border-purple-300 text-purple-600 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium">
+          Copier le lien à partager
+        </button>
+      </div>
+      <p className="text-xs text-gray-400 mt-3">Ouvrir dans l’app ou copier le lien pour l’envoyer au candidat</p>
     </div>
   );
   return (
@@ -460,7 +505,10 @@ function PCMView({ profile, onStart }) {
           ))}</div>
         </div>
       )}
-      <button onClick={onStart} className="w-full border border-purple-300 text-purple-600 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium">Relancer un test</button>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button onClick={onOpenInApp} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">Ouvrir le questionnaire</button>
+        <button onClick={onStart} className="flex-1 border border-purple-300 text-purple-600 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium">Copier le lien</button>
+      </div>
     </div>
   );
 }

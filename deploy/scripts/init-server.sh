@@ -1,9 +1,12 @@
 #!/bin/bash
 # ============================================================
 # SOLIDATA — Initialisation serveur Scaleway
-# Purge complète + installation propre
+# PURGE TOTALE du disque + réinstallation propre
 # Serveur : 51.159.144.100
 # Usage: sudo bash init-server.sh
+#
+# ⚠️  CE SCRIPT SUPPRIME TOUT : Docker, données, base,
+#     certificats, logs, cache. Le serveur repart à zéro.
 # ============================================================
 
 set -euo pipefail
@@ -14,87 +17,128 @@ EMAIL="admin@solidata.online"
 APP_DIR="/opt/solidata.online"
 DEPLOY_USER="solidata"
 REPO_URL="https://github.com/juliengonde-5G/solidata.online.git"
-BRANCH="claude/solidata-erp-app-KYMZZ"
+BRANCH="main"
 
 echo "============================================"
-echo "  SOLIDATA — Initialisation serveur"
+echo "  SOLIDATA — PURGE TOTALE + REINSTALLATION"
 echo "  IP: ${SERVER_IP}"
-echo "  Domaine: ${DOMAIN}"
 echo "============================================"
+echo ""
+echo "  Espace disque AVANT purge :"
+df -h /
 echo ""
 
 # ===========================================================
-# ÉTAPE 0 — PURGE COMPLÈTE DE L'INSTANCE
+# ÉTAPE 0 — PURGE TOTALE DU DISQUE
 # ===========================================================
-echo "[0/9] *** PURGE COMPLÈTE DE L'INSTANCE ***"
+echo "[0/9] *** PURGE TOTALE DU DISQUE ***"
 
-# --- Arrêt et suppression de tous les conteneurs Docker ---
+# --- Docker : tout supprimer ---
 if command -v docker &> /dev/null; then
-    echo "  Arrêt de tous les conteneurs Docker..."
+    echo "  [Docker] Arrêt de tous les conteneurs..."
     docker stop $(docker ps -aq) 2>/dev/null || true
-    echo "  Suppression de tous les conteneurs..."
+    echo "  [Docker] Suppression conteneurs..."
     docker rm -f $(docker ps -aq) 2>/dev/null || true
-    echo "  Suppression de toutes les images Docker..."
+    echo "  [Docker] Suppression images..."
     docker rmi -f $(docker images -aq) 2>/dev/null || true
-    echo "  Suppression de tous les volumes Docker..."
+    echo "  [Docker] Suppression volumes (TOUS, y compris pgdata)..."
     docker volume rm -f $(docker volume ls -q) 2>/dev/null || true
-    echo "  Suppression de tous les réseaux Docker..."
+    echo "  [Docker] Suppression réseaux..."
     docker network rm $(docker network ls -q --filter type=custom) 2>/dev/null || true
-    echo "  Purge complète Docker (builder cache, etc.)..."
+    echo "  [Docker] Purge system + builder cache..."
     docker system prune -af --volumes 2>/dev/null || true
-    echo "  Docker purgé."
+    docker builder prune -af 2>/dev/null || true
+    echo "  [Docker] Suppression overlay2 / couches intermédiaires..."
+    systemctl stop docker 2>/dev/null || true
+    rm -rf /var/lib/docker/overlay2/* 2>/dev/null || true
+    rm -rf /var/lib/docker/tmp/* 2>/dev/null || true
+    rm -rf /var/lib/docker/buildkit/* 2>/dev/null || true
+    # Tronquer les logs des containers (peut rester après rm)
+    find /var/lib/docker/containers/ -name '*-json.log' -exec truncate -s 0 {} \; 2>/dev/null || true
+    systemctl start docker 2>/dev/null || true
+    echo "  [Docker] Purgé."
 fi
 
-# --- Suppression des anciennes installations applicatives ---
-echo "  Nettoyage des répertoires applicatifs..."
+# --- Répertoires applicatifs ---
+echo "  [App] Suppression répertoires applicatifs..."
 rm -rf /opt/solidata.online 2>/dev/null || true
 rm -rf /opt/solidata.online-backups 2>/dev/null || true
 rm -rf /var/www/* 2>/dev/null || true
 rm -rf /tmp/solidata* 2>/dev/null || true
 
-# --- Arrêt et suppression des services existants ---
-echo "  Arrêt des services existants..."
+# --- Services systemd ---
+echo "  [Services] Arrêt et suppression..."
 systemctl stop solidata 2>/dev/null || true
 systemctl disable solidata 2>/dev/null || true
 rm -f /etc/systemd/system/solidata.service 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 
-# --- Suppression des anciennes configs Nginx standalone ---
-echo "  Nettoyage Nginx standalone (si installé hors Docker)..."
+# --- Nginx standalone ---
+echo "  [Nginx] Suppression Nginx standalone..."
 systemctl stop nginx 2>/dev/null || true
 apt-get remove -y nginx nginx-common nginx-full 2>/dev/null || true
 rm -rf /etc/nginx 2>/dev/null || true
 
-# --- Suppression d'anciennes bases PostgreSQL standalone ---
-echo "  Nettoyage PostgreSQL standalone (si installé hors Docker)..."
+# --- PostgreSQL standalone ---
+echo "  [PostgreSQL] Suppression PostgreSQL standalone..."
 systemctl stop postgresql 2>/dev/null || true
 apt-get remove -y postgresql* 2>/dev/null || true
 rm -rf /var/lib/postgresql 2>/dev/null || true
 rm -rf /etc/postgresql 2>/dev/null || true
 
-# --- Suppression de Node.js standalone (si installé) ---
-echo "  Nettoyage Node.js standalone..."
+# --- Node.js standalone ---
+echo "  [Node] Suppression Node.js standalone..."
 apt-get remove -y nodejs npm 2>/dev/null || true
 rm -rf /usr/local/lib/node_modules 2>/dev/null || true
 rm -rf ~/.npm ~/.nvm 2>/dev/null || true
 
-# --- Nettoyage des anciens certificats SSL ---
-echo "  Nettoyage certificats SSL existants..."
+# --- Certificats SSL ---
+echo "  [SSL] Suppression certificats..."
 rm -rf /etc/letsencrypt 2>/dev/null || true
 
-# --- Suppression des crontabs applicatifs ---
-echo "  Nettoyage crontab..."
+# --- Crontab ---
+echo "  [Cron] Nettoyage..."
 crontab -r 2>/dev/null || true
-
-# --- Nettoyage logrotate solidata ---
 rm -f /etc/logrotate.d/solidata 2>/dev/null || true
 
-# --- Nettoyage paquets résiduels ---
-echo "  Nettoyage paquets orphelins..."
-apt-get autoremove -y 2>/dev/null || true
-apt-get autoclean -y 2>/dev/null || true
+# --- Journaux système (gros consommateur sur petit disque) ---
+echo "  [Logs] Purge journaux système..."
+journalctl --vacuum-size=10M 2>/dev/null || true
+find /var/log -name '*.gz' -delete 2>/dev/null || true
+find /var/log -name '*.old' -delete 2>/dev/null || true
+find /var/log -name '*.1' -delete 2>/dev/null || true
+truncate -s 0 /var/log/syslog 2>/dev/null || true
+truncate -s 0 /var/log/kern.log 2>/dev/null || true
+truncate -s 0 /var/log/auth.log 2>/dev/null || true
+truncate -s 0 /var/log/daemon.log 2>/dev/null || true
+truncate -s 0 /var/log/dpkg.log 2>/dev/null || true
+truncate -s 0 /var/log/alternatives.log 2>/dev/null || true
+rm -rf /var/log/journal/* 2>/dev/null || true
 
-echo "  ✅ Purge complète terminée."
+# --- Cache APT + paquets orphelins ---
+echo "  [APT] Nettoyage paquets et cache..."
+apt-get autoremove -y --purge 2>/dev/null || true
+apt-get autoclean -y 2>/dev/null || true
+apt-get clean 2>/dev/null || true
+rm -rf /var/cache/apt/archives/*.deb 2>/dev/null || true
+
+# --- Tmp ---
+echo "  [Tmp] Nettoyage fichiers temporaires..."
+rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+
+# --- Snap (si installé, gros consommateur) ---
+if command -v snap &> /dev/null; then
+    echo "  [Snap] Suppression cache snap..."
+    snap list 2>/dev/null | awk 'NR>1{print $1}' | while read pkg; do
+        snap remove "$pkg" 2>/dev/null || true
+    done
+    rm -rf /var/lib/snapd/cache/* 2>/dev/null || true
+fi
+
+echo ""
+echo "  ✅ PURGE TOTALE TERMINÉE"
+echo "  Espace disque APRÈS purge :"
+df -h /
 echo ""
 
 # ===========================================================
@@ -105,6 +149,8 @@ echo ""
 echo "[1/9] Mise à jour système..."
 apt-get update && apt-get upgrade -y
 apt-get install -y curl git ufw fail2ban htop unzip
+# Nettoyer le cache APT juste après l'install
+apt-get clean
 
 # --- 2. Pare-feu UFW ---
 echo "[2/9] Configuration pare-feu..."
@@ -127,11 +173,28 @@ if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com | sh
     systemctl enable docker
     systemctl start docker
+    # Nettoyer le script d'install
+    apt-get clean
 fi
 
-if ! command -v docker compose &> /dev/null && ! docker compose version &> /dev/null; then
+if ! docker compose version &> /dev/null; then
     apt-get install -y docker-compose-plugin
+    apt-get clean
 fi
+
+# Configurer Docker pour limiter les logs (évite que le disque se remplisse)
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'DOCKERCONF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "5m",
+    "max-file": "2"
+  },
+  "storage-driver": "overlay2"
+}
+DOCKERCONF
+systemctl restart docker
 
 echo "Docker version: $(docker --version)"
 echo "Docker Compose version: $(docker compose version)"
@@ -148,23 +211,11 @@ echo "[6/9] Clone du dépôt et création structure..."
 cd /
 mkdir -p /opt/solidata.online-backups
 
-if [ -d "${APP_DIR}/.git" ]; then
-    echo "  Dépôt déjà présent, mise à jour..."
-    cd ${APP_DIR}
-    git fetch origin
-    git checkout ${BRANCH}
-    git pull origin ${BRANCH}
-elif [ -d "${APP_DIR}" ]; then
-    echo "  Répertoire existant mais pas un dépôt Git, nettoyage..."
-    rm -rf ${APP_DIR}
-    git clone ${REPO_URL} ${APP_DIR}
-    cd ${APP_DIR}
-    git checkout ${BRANCH}
-else
-    git clone ${REPO_URL} ${APP_DIR}
-    cd ${APP_DIR}
-    git checkout ${BRANCH}
-fi
+# Toujours repartir d'un clone frais après purge totale
+rm -rf ${APP_DIR}
+git clone ${REPO_URL} ${APP_DIR}
+cd ${APP_DIR}
+git checkout ${BRANCH}
 
 echo "  Branche active : $(git branch --show-current)"
 mkdir -p ${APP_DIR}/logs
@@ -175,8 +226,12 @@ chown -R ${DEPLOY_USER}:${DEPLOY_USER} /opt/solidata.online-backups
 # --- 7. Swap (si < 2Go RAM) ---
 echo "[7/9] Vérification swap..."
 TOTAL_RAM=$(free -m | awk '/^Mem:/{print $2}')
-if [ "$TOTAL_RAM" -lt 2048 ] && [ ! -f /swapfile ]; then
-    echo "RAM < 2Go, création swap 2Go..."
+if [ "$TOTAL_RAM" -lt 2048 ]; then
+    # Supprimer ancien swap si existant
+    swapoff /swapfile 2>/dev/null || true
+    rm -f /swapfile 2>/dev/null || true
+    sed -i '/swapfile/d' /etc/fstab 2>/dev/null || true
+    echo "RAM < 2Go (${TOTAL_RAM}Mo), création swap 2Go..."
     fallocate -l 2G /swapfile
     chmod 600 /swapfile
     mkswap /swapfile
@@ -191,11 +246,12 @@ cat > /etc/logrotate.d/solidata <<'LOGROTATE'
 /opt/solidata.online/logs/*.log {
     daily
     missingok
-    rotate 14
+    rotate 7
     compress
     delaycompress
     notifempty
     copytruncate
+    maxsize 10M
 }
 LOGROTATE
 
@@ -211,8 +267,9 @@ echo "  RAM          : $(free -h | awk '/Mem:/{print $2}')"
 
 echo ""
 echo "============================================"
-echo "  Serveur purgé et initialisé avec succès !"
+echo "  SERVEUR PURGÉ ET RÉINSTALLÉ !"
 echo "  IP: ${SERVER_IP}"
+echo "  Disque libre : $(df -h / | tail -1 | awk '{print $4}')"
 echo "============================================"
 echo ""
 echo "Dépôt cloné dans : ${APP_DIR}"

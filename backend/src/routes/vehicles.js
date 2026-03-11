@@ -3,6 +3,47 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
+// Auto-create vehicle_maintenance tables
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        vehicle_type VARCHAR(50) NOT NULL DEFAULT 'generic',
+        last_maintenance_date DATE,
+        last_maintenance_km INTEGER,
+        maintenance_interval_km INTEGER DEFAULT 20000,
+        maintenance_interval_months INTEGER DEFAULT 12,
+        controle_technique_date DATE,
+        oil_change_km INTEGER, oil_change_date DATE,
+        tire_change_km INTEGER, tire_change_date DATE,
+        brake_check_km INTEGER, brake_check_date DATE,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vehicle_id)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance_alerts (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        alert_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        alerts JSONB NOT NULL DEFAULT '[]',
+        is_resolved BOOLEAN DEFAULT false,
+        resolved_by INTEGER REFERENCES users(id),
+        resolved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vehicle_id, alert_date)
+      )
+    `);
+    console.log('[VEHICLES] Tables maintenance OK');
+  } catch (err) {
+    console.error('[VEHICLES] Migration maintenance :', err.message);
+  }
+})();
+
 router.use(authenticate);
 
 // GET /api/vehicles
@@ -101,6 +142,177 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
     res.json({ message: 'Véhicule mis hors service' });
   } catch (err) {
     console.error('[VEHICLES] Erreur suppression :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// MAINTENANCE PRÉVENTIVE
+// ══════════════════════════════════════════
+
+// Intervalles par type de véhicule (km / mois)
+const MAINTENANCE_PROFILES = {
+  'FIAT Ducato L3H2': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 30000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 40000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre', intervalle_km: 30000 },
+      { label: 'Filtre à air', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Courroie de distribution', intervalle_km: 120000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein', intervalle_km: 40000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+    ],
+  },
+  'Renault Master eTech': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 0, vidange_months: 0, // Pas de vidange moteur (électrique)
+    pneus_km: 40000, freins_km: 80000, // Freins regen = usure réduite
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Contrôle batterie haute tension', intervalle_km: 30000 },
+      { label: 'Liquide de refroidissement batterie', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein', intervalle_km: 80000 },
+      { label: 'Pneumatiques', intervalle_km: 40000 },
+      { label: 'Contrôle système de charge', intervalle_km: 30000 },
+    ],
+  },
+};
+
+// GET /api/vehicles/maintenance/profiles — Profils de maintenance disponibles
+router.get('/maintenance/profiles', (req, res) => {
+  res.json(MAINTENANCE_PROFILES);
+});
+
+// GET /api/vehicles/maintenance/overview — Vue d'ensemble maintenance flotte
+router.get('/maintenance/overview', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT v.id, v.name, v.registration, v.current_km, v.status,
+        vm.vehicle_type, vm.last_maintenance_date, vm.last_maintenance_km,
+        vm.maintenance_interval_km, vm.maintenance_interval_months,
+        vm.controle_technique_date, vm.oil_change_km, vm.oil_change_date,
+        vm.tire_change_km, vm.brake_check_km,
+        (SELECT COUNT(*) FROM vehicle_maintenance_alerts vma
+         WHERE vma.vehicle_id = v.id AND vma.is_resolved = false) as nb_alertes
+      FROM vehicles v
+      LEFT JOIN vehicle_maintenance vm ON vm.vehicle_id = v.id
+      WHERE v.status != 'out_of_service'
+      ORDER BY v.name
+    `);
+
+    const today = new Date();
+    const vehicles = result.rows.map(v => {
+      const alerts = [];
+
+      // Alerte km
+      if (v.maintenance_interval_km && v.last_maintenance_km) {
+        const kmSince = (v.current_km || 0) - v.last_maintenance_km;
+        const ratio = kmSince / v.maintenance_interval_km;
+        if (ratio >= 0.9) alerts.push({ type: 'revision_km', message: `Révision: ${kmSince}/${v.maintenance_interval_km} km`, urgency: ratio >= 1 ? 'critique' : 'attention' });
+      }
+
+      // Alerte date
+      if (v.maintenance_interval_months && v.last_maintenance_date) {
+        const nextDate = new Date(v.last_maintenance_date);
+        nextDate.setMonth(nextDate.getMonth() + v.maintenance_interval_months);
+        const daysUntil = Math.round((nextDate - today) / 86400000);
+        if (daysUntil <= 30) alerts.push({ type: 'revision_date', message: `Révision: dans ${daysUntil} jours`, urgency: daysUntil <= 0 ? 'critique' : 'attention' });
+      }
+
+      // Contrôle technique
+      if (v.controle_technique_date) {
+        const daysUntil = Math.round((new Date(v.controle_technique_date) - today) / 86400000);
+        if (daysUntil <= 60) alerts.push({ type: 'ct', message: `CT: dans ${daysUntil} jours`, urgency: daysUntil <= 30 ? 'critique' : 'attention' });
+      }
+
+      return { ...v, computed_alerts: alerts };
+    });
+
+    res.json(vehicles);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur maintenance overview :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/vehicles/:id/maintenance — Détail maintenance d'un véhicule
+router.get('/:id/maintenance', async (req, res) => {
+  try {
+    const maint = await pool.query('SELECT * FROM vehicle_maintenance WHERE vehicle_id = $1', [req.params.id]);
+    const alerts = await pool.query(
+      'SELECT * FROM vehicle_maintenance_alerts WHERE vehicle_id = $1 ORDER BY alert_date DESC LIMIT 20',
+      [req.params.id]
+    );
+    res.json({
+      maintenance: maint.rows[0] || null,
+      alerts: alerts.rows,
+      profiles: MAINTENANCE_PROFILES,
+    });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur maintenance detail :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/vehicles/:id/maintenance — Configurer/mettre à jour la maintenance
+router.put('/:id/maintenance', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const d = req.body;
+    const result = await pool.query(
+      `INSERT INTO vehicle_maintenance (vehicle_id, vehicle_type, last_maintenance_date, last_maintenance_km,
+        maintenance_interval_km, maintenance_interval_months, controle_technique_date,
+        oil_change_km, oil_change_date, tire_change_km, tire_change_date,
+        brake_check_km, brake_check_date, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       ON CONFLICT (vehicle_id) DO UPDATE SET
+        vehicle_type = COALESCE($2, vehicle_maintenance.vehicle_type),
+        last_maintenance_date = COALESCE($3, vehicle_maintenance.last_maintenance_date),
+        last_maintenance_km = COALESCE($4, vehicle_maintenance.last_maintenance_km),
+        maintenance_interval_km = COALESCE($5, vehicle_maintenance.maintenance_interval_km),
+        maintenance_interval_months = COALESCE($6, vehicle_maintenance.maintenance_interval_months),
+        controle_technique_date = COALESCE($7, vehicle_maintenance.controle_technique_date),
+        oil_change_km = COALESCE($8, vehicle_maintenance.oil_change_km),
+        oil_change_date = COALESCE($9, vehicle_maintenance.oil_change_date),
+        tire_change_km = COALESCE($10, vehicle_maintenance.tire_change_km),
+        tire_change_date = COALESCE($11, vehicle_maintenance.tire_change_date),
+        brake_check_km = COALESCE($12, vehicle_maintenance.brake_check_km),
+        brake_check_date = COALESCE($13, vehicle_maintenance.brake_check_date),
+        notes = COALESCE($14, vehicle_maintenance.notes),
+        updated_at = NOW()
+       RETURNING *`,
+      [
+        req.params.id, d.vehicle_type, d.last_maintenance_date, d.last_maintenance_km,
+        d.maintenance_interval_km, d.maintenance_interval_months, d.controle_technique_date,
+        d.oil_change_km, d.oil_change_date, d.tire_change_km, d.tire_change_date,
+        d.brake_check_km, d.brake_check_date, d.notes,
+      ]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur maintenance PUT :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/vehicles/:id/maintenance/resolve-alert — Résoudre une alerte
+router.post('/:id/maintenance/resolve-alert', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { alert_id } = req.body;
+    const result = await pool.query(
+      `UPDATE vehicle_maintenance_alerts SET is_resolved = true, resolved_by = $1, resolved_at = NOW()
+       WHERE id = $2 AND vehicle_id = $3 RETURNING *`,
+      [req.user.id, alert_id, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Alerte non trouvée' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur resolve alert :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

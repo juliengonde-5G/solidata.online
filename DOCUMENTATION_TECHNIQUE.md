@@ -1,10 +1,12 @@
 # SOLIDATA ERP — Documentation Technique Complète
 
-**Application :** SOLIDATA ERP — Logiciel de gestion pour Solidarité Textiles
-**Version :** 1.0.0
-**Date :** 8 mars 2026
-**Domaine :** https://solidata.online
-**Dépôt GitHub :** https://github.com/juliengonde-5G/solidata.online
+> **Fichier de référence officiel du projet.** Toute évolution technique, déploiement et maintenance doit s’appuyer sur ce document.
+
+**Application :** SOLIDATA ERP — Logiciel de gestion pour Solidarité Textiles  
+**Version :** 1.0.0  
+**Date :** 8 mars 2026  
+**Domaine :** https://solidata.online  
+**Dépôt GitHub :** https://github.com/juliengonde-5G/solidata.online  
 
 ---
 

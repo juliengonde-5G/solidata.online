@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOLIDATA - Presentation des modules</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', sans-serif; background: #1a1a2e; color: #333; }
+.slide { width: 960px; min-height: 540px; margin: 20px auto; background: white; border-radius: 16px; padding: 48px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); position: relative; overflow: hidden; page-break-after: always; }
+.slide::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 6px; background: linear-gradient(90deg, #3B82F6, #8B5CF6, #10B981); }
+.slide-number { position: absolute; bottom: 16px; right: 24px; font-size: 12px; color: #9CA3AF; }
+.logo { position: absolute; top: 16px; right: 24px; font-size: 14px; font-weight: 700; color: #3B82F6; }
+h1 { font-size: 36px; font-weight: 800; color: #1E3A5F; margin-bottom: 8px; }
+h2 { font-size: 28px; font-weight: 700; color: #1E3A5F; margin-bottom: 16px; }
+h3 { font-size: 18px; font-weight: 600; color: #3B82F6; margin-bottom: 8px; }
+.subtitle { font-size: 18px; color: #6B7280; margin-bottom: 24px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.card { background: #F8FAFC; border-radius: 12px; padding: 20px; border-left: 4px solid #3B82F6; }
+.card.green { border-left-color: #10B981; }
+.card.purple { border-left-color: #8B5CF6; }
+.card.orange { border-left-color: #F59E0B; }
+.card.red { border-left-color: #EF4444; }
+.card h3 { margin-bottom: 6px; }
+.card p, .card li { font-size: 13px; color: #4B5563; line-height: 1.6; }
+.card ul { padding-left: 16px; }
+.tag { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-right: 4px; }
+.tag-blue { background: #DBEAFE; color: #1D4ED8; }
+.tag-green { background: #D1FAE5; color: #065F46; }
+.tag-purple { background: #EDE9FE; color: #6D28D9; }
+.tag-orange { background: #FEF3C7; color: #92400E; }
+.big-number { font-size: 42px; font-weight: 800; color: #3B82F6; }
+.feature-list { list-style: none; padding: 0; }
+.feature-list li { padding: 6px 0; font-size: 14px; border-bottom: 1px solid #E5E7EB; }
+.feature-list li::before { content: '\2713'; color: #10B981; font-weight: bold; margin-right: 8px; }
+.roadmap-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.roadmap-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.roadmap-line { width: 2px; height: 30px; background: #E5E7EB; margin-left: 5px; }
+@media print { body { background: white; } .slide { box-shadow: none; margin: 0; border-radius: 0; } }
+</style>
+</head>
+<body>
+
+<!-- SLIDE 1: Couverture -->
+<div class="slide" style="display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;">
+  <h1 style="font-size:48px;margin-bottom:16px;">SOLIDATA</h1>
+  <p style="font-size:22px;color:#3B82F6;font-weight:600;margin-bottom:8px;">Plateforme de gestion integree</p>
+  <p class="subtitle">Solidarite Textile — Collecte, tri, recyclage &amp; insertion sociale</p>
+  <div style="margin-top:32px;">
+    <span class="tag tag-blue">ERP</span>
+    <span class="tag tag-green">IA Predictive</span>
+    <span class="tag tag-purple">Insertion</span>
+    <span class="tag tag-orange">Logistique</span>
+  </div>
+  <p style="margin-top:48px;font-size:14px;color:#9CA3AF;">Presentation des modules — 2026</p>
+  <span class="slide-number">1</span>
+</div>
+
+<!-- SLIDE 2: Vue d'ensemble -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Vue d'ensemble des modules</h2>
+  <p class="subtitle">8 modules interconnectes couvrant l'ensemble de la chaine de valeur</p>
+  <div class="grid3">
+    <div class="card"><h3>Recrutement</h3><p>Candidatures, PCM, entretiens, tests pratiques, embauche automatisee</p></div>
+    <div class="card green"><h3>Employes &amp; RH</h3><p>Contrats, equipes, postes, objectifs periodiques, gestion administrative</p></div>
+    <div class="card purple"><h3>Parcours Insertion</h3><p>Diagnostic CIP, jalons ASP, freins, plan d'action, moteur IA</p></div>
+    <div class="card orange"><h3>Collecte &amp; Logistique</h3><p>Tournees IA, prediction remplissage, optimisation TSP, meteo</p></div>
+    <div class="card red"><h3>CAV &amp; Stock</h3><p>Centres d'apport, capteurs IoT, stock temps reel, inventaires</p></div>
+    <div class="card"><h3>Flotte Vehicules</h3><p>Maintenance preventive, alertes, profils Ducato/Master eTech</p></div>
+    <div class="card green"><h3>Reporting Metropole</h3><p>Tonnages CO2, taux captation, conformite Refashion</p></div>
+    <div class="card purple"><h3>Fil d'actualite</h3><p>Veille sectorielle automatique, reglementation, ESS</p></div>
+  </div>
+  <span class="slide-number">2</span>
+</div>
+
+<!-- SLIDE 3: Module Recrutement -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Module 1 — Recrutement</h2>
+  <p class="subtitle">Du CV a l'embauche : un parcours structure et assiste par l'IA</p>
+  <div class="grid2">
+    <div>
+      <h3>Fonctionnalites cles</h3>
+      <ul class="feature-list">
+        <li>Reception et parsing automatique des CV (PDF, texte)</li>
+        <li>Profil PCM complet (6 types de personnalite, chiffre via AES-256)</li>
+        <li>Questionnaire Explorama (6 univers professionnels)</li>
+        <li>Planification d'entretiens avec notification SMS/email (Brevo)</li>
+        <li>Test pratique avec grille d'evaluation</li>
+        <li>Workflow candidat : recu → preselection → entretien → test → embauche</li>
+      </ul>
+    </div>
+    <div>
+      <div class="card purple">
+        <h3>Cas d'usage</h3>
+        <p><strong>Problematique :</strong> Le recrutement en IAE est chronophage, les profils sont souvent atypiques et difficiles a evaluer.</p>
+        <p style="margin-top:8px;"><strong>Solution :</strong> Solidata structure le processus, detecte les profils PCM pour adapter l'accompagnement, et centralise toutes les donnees du candidat pour un suivi continu jusqu'en insertion.</p>
+      </div>
+      <div class="card green" style="margin-top:12px;">
+        <h3>Impact</h3>
+        <p>Le PCM du recrutement est automatiquement reutilise dans le parcours d'insertion — zero ressaisie, continuite des donnees.</p>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number">3</span>
+</div>
+
+<!-- SLIDE 4: Module Parcours Insertion -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Module 2 — Parcours d'insertion</h2>
+  <p class="subtitle">Accompagnement CIP structure, conforme ASP/DIRECCTE, assiste par l'IA</p>
+  <div class="grid2">
+    <div>
+      <h3>Architecture du parcours</h3>
+      <div style="background:#F0F9FF;padding:12px;border-radius:8px;font-size:13px;line-height:2;">
+        <strong>1.</strong> Embauche (module recrutement)<br>
+        <strong>2.</strong> Diagnostic d'accueil (M+1 max) — CIP + freins + plan d'action<br>
+        <strong>3.</strong> Bilan M+3 — avancement freins + competences<br>
+        <strong>4.</strong> Bilan M+6 — mi-parcours approfondi<br>
+        <strong>5.</strong> Bilan M+10 — preparation sortie<br>
+        <strong>6.</strong> Bilan Sortie — classification positive/negative + rapport
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h3>Moteur IA continu</h3>
+        <ul><li>Alertes sur freins bloquants ou en regression</li>
+        <li>Recommandations d'accompagnement basees sur le PCM</li>
+        <li>Propositions de metiers adaptes au profil</li>
+        <li>Alertes de planification (retards, echeances)</li></ul>
+      </div>
+      <div class="card orange" style="margin-top:12px;">
+        <h3>Outils CIP</h3>
+        <ul><li>Questions indirectes pour diagnostic des freins</li>
+        <li>Radar chart evolution des freins par bilan</li>
+        <li>Timeline visuelle embauche → sortie</li>
+        <li>Plan d'action par jalon avec suivi d'avancement</li></ul>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number">4</span>
+</div>
+
+<!-- SLIDE 5: Module Collecte & Logistique -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Module 3 — Collecte &amp; Logistique IA</h2>
+  <p class="subtitle">Tournees intelligentes avec prediction de remplissage et optimisation de route</p>
+  <div class="grid2">
+    <div>
+      <h3>Prediction de remplissage</h3>
+      <ul class="feature-list">
+        <li>Historique 180 jours par CAV</li>
+        <li>Facteurs saisonniers (12 mois calibres)</li>
+        <li>Facteurs jour de la semaine (lundi pic, jeudi creux)</li>
+        <li>Impact meteo (Open-Meteo API)</li>
+        <li>Jours feries, vacances scolaires</li>
+        <li>Evenements locaux (brocantes, vide-greniers)</li>
+        <li>Apprentissage continu (correction bayesienne)</li>
+      </ul>
+    </div>
+    <div>
+      <div class="card green">
+        <h3>Optimisation de tournees</h3>
+        <ul><li>Algorithme TSP + 2-opt (Nearest Neighbor)</li>
+        <li>Max 7h de collecte par jour</li>
+        <li>Retour centre de tri toutes les 2 tonnes</li>
+        <li>Score de priorite par CAV (remplissage, anciennete, taille)</li>
+        <li>3 modes : Intelligent (IA), Standard (predefinies), Manuel</li></ul>
+      </div>
+      <div class="card" style="margin-top:12px;">
+        <h3>Cas d'usage</h3>
+        <p><strong>Problematique :</strong> Les tournees sont souvent basees sur l'habitude, pas sur les besoins reels.</p>
+        <p style="margin-top:4px;"><strong>Solution :</strong> L'IA priorise les CAV les plus remplis, optimise le trajet et genere une explication detaillee pour le collecteur.</p>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number">5</span>
+</div>
+
+<!-- SLIDE 6: Module CAV & Stock -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Module 4 — CAV &amp; Gestion du stock</h2>
+  <p class="subtitle">Centres d'apport volontaire, capteurs IoT et inventaires physiques</p>
+  <div class="grid2">
+    <div>
+      <h3>Gestion des CAV</h3>
+      <ul class="feature-list">
+        <li>Carte interactive (PostGIS) de tous les points de collecte</li>
+        <li>Suivi du remplissage en temps reel</li>
+        <li>QR codes pour les collecteurs (scan terrain)</li>
+        <li>Historique des passages et tonnages</li>
+        <li>Population par commune (taux de captation)</li>
+      </ul>
+      <div class="card orange" style="margin-top:16px;">
+        <h3>Inventaire physique</h3>
+        <p>Systeme de batch (partiel/complet), comparaison stock theorique vs physique, analyse des ecarts, validation ADMIN.</p>
+      </div>
+    </div>
+    <div>
+      <div class="card purple">
+        <h3>Capteurs IoT (a venir)</h3>
+        <p>Support des sondes a ultrasons LoRaWAN pour mesurer le niveau de remplissage des conteneurs en temps reel.</p>
+        <ul style="margin-top:8px;"><li>Webhook reception de donnees capteur</li>
+        <li>Historique des lectures (%, cm, batterie)</li>
+        <li>Integration avec le moteur predictif</li></ul>
+      </div>
+      <div class="card" style="margin-top:12px;">
+        <h3>Stock temps reel</h3>
+        <p>Categories de tri (reemploi, recyclage, dechets), suivi des flux entrants/sortants, alertes de seuil.</p>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number">6</span>
+</div>
+
+<!-- SLIDE 7: Module Flotte & Maintenance -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Module 5 — Flotte vehicules &amp; Maintenance</h2>
+  <p class="subtitle">Gestion preventive adaptee a chaque type de vehicule</p>
+  <div class="grid2">
+    <div>
+      <h3>Profils vehicules</h3>
+      <div class="card" style="margin-bottom:12px;">
+        <h3>FIAT Ducato L3H2</h3>
+        <p>Thermique diesel. Revision 30 000 km / 24 mois. Vidange 30 000 km. Pneus 50 000 km. Freins 40 000 km. CT 24 mois.</p>
+      </div>
+      <div class="card green">
+        <h3>Renault Master eTech</h3>
+        <p>Electrique. Revision 30 000 km / 24 mois. Pas de vidange. Pneus 40 000 km. Freins 80 000 km (freinage regeneratif). CT 24 mois.</p>
+      </div>
+    </div>
+    <div>
+      <h3>Systeme d'alertes</h3>
+      <ul class="feature-list">
+        <li>Alerte km : X% de l'intervalle de revision atteint</li>
+        <li>Alerte date : revision due dans les 30 jours</li>
+        <li>Alerte controle technique : dans les 60 jours</li>
+        <li>Dashboard maintenance avec code couleur urgence</li>
+        <li>Resolution d'alertes avec tracabilite</li>
+      </ul>
+      <div class="card red" style="margin-top:12px;">
+        <h3>Cas d'usage</h3>
+        <p>Plus d'oubli de maintenance. Le systeme alerte automatiquement a 7h, 12h et 18h via le scheduler CRON.</p>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number">7</span>
+</div>
+
+<!-- SLIDE 8: Module Reporting -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Module 6 — Reporting Metropole</h2>
+  <p class="subtitle">Indicateurs cles pour la conformite reglementaire et le pilotage</p>
+  <div class="grid3">
+    <div class="card"><h3>Tonnages</h3><p>Suivi des volumes collectes par periode, par zone, par categorie de tri.</p><p style="margin-top:8px;" class="big-number">kg</p></div>
+    <div class="card green"><h3>Impact CO2</h3><p>Calcul automatique : 1.493 kg CO2/kg textile (40% reemploi x 3.169 + 45% recyclage x 0.5)</p><p style="margin-top:8px;" class="big-number" style="color:#10B981;">tCO2</p></div>
+    <div class="card purple"><h3>Taux de captation</h3><p>kg/hab/an par commune. Objectif Refashion : 3.6 kg/hab/an. Comparaison et ecart.</p><p style="margin-top:8px;" class="big-number" style="color:#8B5CF6;">3.6</p></div>
+  </div>
+  <div style="margin-top:24px;">
+    <h3>Conformite reglementaire</h3>
+    <div class="grid2">
+      <div class="card orange">
+        <h3>ASP / DIRECCTE</h3>
+        <p>Suivi des CDDI, bilans obligatoires (M+3, M+6, M+10, Sortie), classification des sorties (positive/negative), reporting insertion.</p>
+      </div>
+      <div class="card">
+        <h3>Refashion / REP</h3>
+        <p>Tonnages declares, taux de valorisation (reemploi + recyclage), tracabilite de la matiere collectee.</p>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number">8</span>
+</div>
+
+<!-- SLIDE 9: Module RH & Notifications -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Module 7 — RH &amp; Notifications</h2>
+  <p class="subtitle">Gestion des employes, contrats et systeme d'alertes automatise</p>
+  <div class="grid2">
+    <div>
+      <h3>Gestion RH</h3>
+      <ul class="feature-list">
+        <li>Fiches employes completes (equipe, poste, contrats)</li>
+        <li>Multi-contrats avec suivi en cours / archives</li>
+        <li>Objectifs periodiques (mensuel, trimestriel, annuel)</li>
+        <li>Gestion des equipes et des postes</li>
+        <li>Roles : ADMIN, MANAGER, RH, COLLABORATEUR, AUTORITE</li>
+      </ul>
+    </div>
+    <div>
+      <div class="card green">
+        <h3>Notifications automatiques</h3>
+        <ul><li>Rappel entretien J-1 (SMS + email via Brevo)</li>
+        <li>Alerte fin de contrat J-30 et J-15</li>
+        <li>Rappel entretien insertion J-7 et J-1</li>
+        <li>Alerte retard jalon insertion</li>
+        <li>Templates de messages personnalisables</li></ul>
+      </div>
+      <div class="card" style="margin-top:12px;">
+        <h3>Scheduler CRON</h3>
+        <p>Execution automatique a 7h, 12h et 18h. Tous les jobs sont executes en parallele : RH, insertion, vehicules, veille.</p>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number">9</span>
+</div>
+
+<!-- SLIDE 10: Fil d'actualite -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Module 8 — Fil d'actualite &amp; Veille</h2>
+  <p class="subtitle">Veille sectorielle automatisee — 2 actus par fil + LinkedIn recyclage textile</p>
+  <div class="grid3">
+    <div>
+      <div class="card" style="margin-bottom:12px;">
+        <h3>Filiere &amp; Reglementation</h3>
+        <ul style="list-style:none;padding:0;">
+          <li style="padding:6px 0;border-bottom:1px solid #E5E7EB;font-size:12px;">
+            <strong>REP Textiles : les nouveaux objectifs 2025-2028</strong><br>
+            <span style="color:#6B7280;">Refashion rehausse ses objectifs de collecte et de valorisation pour la filiere.</span><br>
+            <a href="https://refashion.fr/pro/fr/actualites" target="_blank" style="color:#3B82F6;font-size:11px;text-decoration:none;">Lire l'article complet &rarr;</a>
+          </li>
+          <li style="padding:6px 0;font-size:12px;">
+            <strong>Nouvelle reglementation UE sur le tri textile</strong><br>
+            <span style="color:#6B7280;">L'Europe impose la collecte separee des textiles a partir de 2025.</span><br>
+            <a href="https://www.ecologie.gouv.fr/textiles-usages" target="_blank" style="color:#3B82F6;font-size:11px;text-decoration:none;">Lire l'article complet &rarr;</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <div class="card purple" style="margin-bottom:12px;">
+        <h3>Actualite ESS &amp; Insertion</h3>
+        <ul style="list-style:none;padding:0;">
+          <li style="padding:6px 0;border-bottom:1px solid #E5E7EB;font-size:12px;">
+            <strong>IAE : bilan des sorties positives en hausse</strong><br>
+            <span style="color:#6B7280;">Les structures d'insertion affichent un taux de sortie positive record en 2025.</span><br>
+            <a href="https://www.inclusion.beta.gouv.fr/" target="_blank" style="color:#3B82F6;font-size:11px;text-decoration:none;">Lire l'article complet &rarr;</a>
+          </li>
+          <li style="padding:6px 0;font-size:12px;">
+            <strong>Economie circulaire : les SIAE en premiere ligne</strong><br>
+            <span style="color:#6B7280;">Les ateliers chantiers d'insertion developpent le reemploi textile a grande echelle.</span><br>
+            <a href="https://www.federation-solidarite.org/" target="_blank" style="color:#3B82F6;font-size:11px;text-decoration:none;">Lire l'article complet &rarr;</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <div class="card green" style="margin-bottom:12px;">
+        <h3>Innovation &amp; Recyclage</h3>
+        <ul style="list-style:none;padding:0;">
+          <li style="padding:6px 0;border-bottom:1px solid #E5E7EB;font-size:12px;">
+            <strong>Recyclage fibre a fibre : les avancees 2025</strong><br>
+            <span style="color:#6B7280;">De nouvelles technologies permettent de recycler les melanges coton-polyester.</span><br>
+            <a href="https://www.fashionnetwork.com/fr/tag/recyclage-textile" target="_blank" style="color:#3B82F6;font-size:11px;text-decoration:none;">Lire l'article complet &rarr;</a>
+          </li>
+          <li style="padding:6px 0;font-size:12px;">
+            <strong>Logistique verte : optimiser la collecte textile</strong><br>
+            <span style="color:#6B7280;">Comment l'IA et l'IoT transforment la logistique de collecte des textiles usages.</span><br>
+            <a href="https://www.actu-environnement.com/ae/dossiers/textile/recyclage.php" target="_blank" style="color:#3B82F6;font-size:11px;text-decoration:none;">Lire l'article complet &rarr;</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:12px;">
+    <div class="card orange">
+      <h3 style="display:flex;align-items:center;gap:8px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="#0A66C2"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+        Fil LinkedIn — Recyclage Textile
+      </h3>
+      <p style="font-size:12px;color:#4B5563;margin-bottom:8px;">Profils et pages a suivre pour la veille sectorielle :</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <a href="https://www.linkedin.com/company/refashion-eco-organisme/" target="_blank" style="text-decoration:none;"><span class="tag tag-blue" style="cursor:pointer;">Refashion</span></a>
+        <a href="https://www.linkedin.com/company/le-relais-france/" target="_blank" style="text-decoration:none;"><span class="tag tag-green" style="cursor:pointer;">Le Relais</span></a>
+        <a href="https://www.linkedin.com/company/emmaus-france/" target="_blank" style="text-decoration:none;"><span class="tag tag-purple" style="cursor:pointer;">Emmaus France</span></a>
+        <a href="https://www.linkedin.com/company/federationsolidarite/" target="_blank" style="text-decoration:none;"><span class="tag tag-orange" style="cursor:pointer;">Federation Solidarite</span></a>
+        <a href="https://www.linkedin.com/company/reseau-textile/" target="_blank" style="text-decoration:none;"><span class="tag tag-blue" style="cursor:pointer;">Reseau Textile</span></a>
+        <a href="https://www.linkedin.com/company/ademe/" target="_blank" style="text-decoration:none;"><span class="tag tag-green" style="cursor:pointer;">ADEME</span></a>
+        <a href="https://www.linkedin.com/company/worn-again-technologies/" target="_blank" style="text-decoration:none;"><span class="tag tag-purple" style="cursor:pointer;">Worn Again Technologies</span></a>
+        <a href="https://www.linkedin.com/company/renaissance-textile/" target="_blank" style="text-decoration:none;"><span class="tag tag-orange" style="cursor:pointer;">Renaissance Textile</span></a>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number">10</span>
+</div>
+
+<!-- SLIDE 11: Prochaines fonctionnalites -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Ouverture — Prochaines fonctionnalites</h2>
+  <p class="subtitle">Feuille de route des evolutions a venir</p>
+  <div class="grid2">
+    <div>
+      <div class="card green" style="margin-bottom:16px;">
+        <h3>GPS temps reel — Geocoyote</h3>
+        <p>Integration avec les boitiers Geocoyote pour :</p>
+        <ul><li>Localisation en temps reel de la flotte</li>
+        <li>Historique des trajets et arrets</li>
+        <li>Alertes de zone (geofencing)</li>
+        <li>Optimisation dynamique des tournees en cours</li>
+        <li>Calcul des km reels vs estimes</li></ul>
+      </div>
+    </div>
+    <div>
+      <div class="card purple" style="margin-bottom:16px;">
+        <h3>Sondes a ultrasons — Remplissage CAV</h3>
+        <p>Deploiement de capteurs IoT LoRaWAN dans les conteneurs :</p>
+        <ul><li>Mesure du niveau de remplissage en continu</li>
+        <li>Transmission automatique au serveur (webhook)</li>
+        <li>Integration directe avec le moteur predictif</li>
+        <li>Alertes de debordement en temps reel</li>
+        <li>Reduction des tournees a vide</li></ul>
+      </div>
+    </div>
+  </div>
+  <div class="card orange" style="margin-top:8px;">
+    <h3>Impact attendu</h3>
+    <p>La combinaison GPS + sondes permettra de passer d'une logistique <strong>reactive</strong> a une logistique <strong>predictive en temps reel</strong>, avec une reduction estimee de 20-30% des km parcourus et une amelioration du taux de remplissage des vehicules.</p>
+  </div>
+  <span class="slide-number">11</span>
+</div>
+
+<!-- SLIDE 12: Architecture technique -->
+<div class="slide">
+  <span class="logo">SOLIDATA</span>
+  <h2>Architecture technique</h2>
+  <p class="subtitle">Stack moderne, deploiement Docker, securite renforcee</p>
+  <div class="grid3">
+    <div class="card"><h3>Frontend</h3><ul><li>React 18 + Vite</li><li>TailwindCSS</li><li>Recharts / SVG</li><li>PWA (manifest)</li></ul></div>
+    <div class="card green"><h3>Backend</h3><ul><li>Node.js + Express</li><li>PostgreSQL + PostGIS</li><li>JWT + Refresh tokens</li><li>Brevo API (SMS/email)</li></ul></div>
+    <div class="card purple"><h3>Infra</h3><ul><li>Docker Compose</li><li>Nginx reverse proxy</li><li>Certbot SSL (Let's Encrypt)</li><li>CRON scheduler integre</li></ul></div>
+  </div>
+  <div style="margin-top:24px;">
+    <div class="grid2">
+      <div class="card orange"><h3>Securite</h3><ul><li>AES-256 pour les rapports PCM</li><li>Rate limiting (express-rate-limit)</li><li>Helmet (headers securises)</li><li>RBAC (5 roles)</li><li>Validation (express-validator)</li></ul></div>
+      <div class="card"><h3>Performance</h3><ul><li>Indexes GiST (geospatial)</li><li>Indexes B-tree optimises</li><li>Auto-migration sans downtime</li><li>API RESTful avec pagination</li></ul></div>
+    </div>
+  </div>
+  <span class="slide-number">12</span>
+</div>
+
+</body>
+</html>

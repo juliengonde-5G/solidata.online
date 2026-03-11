@@ -50,36 +50,41 @@ export default function QRScanner() {
   };
 
   return (
-    <div className="min-h-screen bg-black flex flex-col">
-      {/* Header */}
-      <header className="bg-solidata-green text-white p-3 flex items-center justify-between flex-shrink-0">
-        <button onClick={() => { stopScanner(); navigate('/tour-map'); }} className="text-white/70 text-sm">← Carte</button>
-        <h1 className="font-bold">Scanner QR Code</h1>
-        <button onClick={skipQR} className="bg-white/20 rounded-lg px-3 py-1.5 text-xs">QR absent</button>
+    <div className="min-h-screen flex flex-col bg-gray-900">
+      <header className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-3 bg-gray-900 text-white">
+        <button
+          type="button"
+          onClick={() => { stopScanner(); navigate('/tour-map'); }}
+          className="touch-target flex items-center justify-center rounded-xl text-white/80 hover:bg-white/10 text-sm font-medium"
+        >
+          ← Carte
+        </button>
+        <h1 className="font-bold text-base">Scanner QR Code</h1>
+        <button
+          type="button"
+          onClick={skipQR}
+          className="touch-target flex items-center justify-center rounded-xl bg-white/20 hover:bg-white/30 text-sm font-medium px-4"
+        >
+          QR absent
+        </button>
       </header>
-
-      {/* Scanner area */}
       <div className="flex-1 flex flex-col items-center justify-center p-4">
         {error ? (
-          <div className="text-center">
-            <p className="text-red-400 mb-4">{error}</p>
-            <button onClick={skipQR} className="bg-solidata-green text-white px-6 py-3 rounded-xl font-bold">
+          <div className="text-center max-w-sm">
+            <p className="text-red-400 mb-6">{error}</p>
+            <button type="button" onClick={skipQR} className="btn-primary-mobile py-3.5">
               Saisie manuelle
             </button>
           </div>
         ) : (
           <>
-            <div className="relative w-full max-w-sm aspect-square rounded-2xl overflow-hidden">
-              <div id="qr-reader" className="w-full h-full"></div>
-              {/* Overlay frame */}
-              <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-solidata-green rounded-tl-xl"></div>
-                <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-solidata-green rounded-tr-xl"></div>
-                <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-solidata-green rounded-bl-xl"></div>
-                <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-solidata-green rounded-br-xl"></div>
+            <div className="relative w-full max-w-sm aspect-square rounded-3xl overflow-hidden ring-4 ring-white/20">
+              <div id="qr-reader" className="w-full h-full" />
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div className="w-56 h-56 border-4 border-[var(--color-primary)] rounded-2xl" />
               </div>
             </div>
-            <p className="text-white/50 text-sm mt-4">Visez le QR code du conteneur</p>
+            <p className="text-white/60 text-sm mt-6">Visez le QR code du conteneur</p>
           </>
         )}
       </div>

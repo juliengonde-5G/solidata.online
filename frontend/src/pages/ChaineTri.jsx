@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
+import DiagrammeFluxTri from '../components/DiagrammeFluxTri';
 
 export default function ChaineTri() {
   const [chains, setChains] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedChain, setSelectedChain] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [vue, setVue] = useState('diagramme'); // diagramme | chaines
 
   useEffect(() => { loadData(); }, []);
 
@@ -34,12 +36,37 @@ export default function ChaineTri() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-solidata-dark">Chaînes de tri</h1>
-          <p className="text-gray-500">Gestion des chaînes et catégories sortantes</p>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-solidata-dark">Chaînes de tri</h1>
+            <p className="text-gray-500">Flux de tri, postes de travail et exutoires</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setVue('diagramme')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'diagramme' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}
+            >
+              Diagramme des flux
+            </button>
+            <button
+              onClick={() => setVue('chaines')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'chaines' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}
+            >
+              Chaînes & catégories
+            </button>
+          </div>
         </div>
 
-        {/* Chains */}
+        {/* Diagramme des flux (mapping Chaîne Qualité + Recyclage Exclusif) */}
+        {vue === 'diagramme' && (
+          <div className="mb-8">
+            <DiagrammeFluxTri />
+          </div>
+        )}
+
+        {/* Chains (vue détail chaînes / catégories) */}
+        {vue === 'chaines' && (
+        <>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           {chains.map(chain => (
             <div key={chain.id} className="bg-white rounded-xl shadow-sm border p-5">
@@ -72,7 +99,7 @@ export default function ChaineTri() {
                 <div key={op.id} className="flex items-center gap-2">
                   <div className="bg-solidata-green/10 border border-solidata-green/30 rounded-xl p-4 min-w-[200px]">
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="w-6 h-6 rounded-full bg-solidata-green text-white flex items-center justify-center text-xs font-bold">{op.ordre}</span>
+                      <span className="w-6 h-6 rounded-full bg-solidata-green text-white flex items-center justify-center text-xs font-bold">{op.numero ?? op.ordre}</span>
                       <h4 className="font-semibold text-sm">{op.nom}</h4>
                     </div>
                     {op.description && <p className="text-xs text-gray-500">{op.description}</p>}
@@ -103,6 +130,8 @@ export default function ChaineTri() {
             ))}
           </div>
         </div>
+        </>
+        )}
       </div>
     </Layout>
   );

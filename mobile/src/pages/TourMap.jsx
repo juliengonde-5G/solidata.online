@@ -87,25 +87,41 @@ export default function TourMap() {
     }
   };
 
+  const intermediateReturn = async () => {
+    // Retour intermédiaire : pesée partielle puis reprise de la collecte
+    localStorage.setItem('intermediate_return', 'true');
+    navigate('/weigh-in');
+  };
+
   const currentCAV = cavs[currentCavIndex];
   const center = myPosition || (currentCAV ? [currentCAV.latitude, currentCAV.longitude] : [49.4231, 1.0993]);
 
   return (
-    <div className="h-screen flex flex-col">
-      {/* Header */}
-      <header className="bg-solidata-green text-white p-3 flex items-center justify-between flex-shrink-0">
-        <div>
-          <h1 className="font-bold">Tournée #{tourId}</h1>
-          <p className="text-white/70 text-xs">{currentCavIndex}/{cavs.length} CAV collectés</p>
+    <div className="h-screen flex flex-col bg-[var(--color-surface-2)]">
+      <header className="screen-header flex-shrink-0 flex flex-row items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="font-bold text-lg">Tournée #{tourId}</h1>
+          <p className="text-white/80 text-sm">{currentCavIndex}/{cavs.length} CAV collectés</p>
         </div>
-        <button onClick={() => navigate('/return-centre')} className="bg-white/20 rounded-lg px-3 py-1.5 text-sm">
-          Retour centre
-        </button>
+        <div className="flex gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={intermediateReturn}
+            className="touch-target flex items-center justify-center rounded-xl bg-amber-500/80 hover:bg-amber-500 text-xs font-medium px-3"
+          >
+            Pesée
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/return-centre')}
+            className="touch-target flex items-center justify-center rounded-xl bg-white/20 hover:bg-white/30 text-sm font-medium px-3"
+          >
+            Fin
+          </button>
+        </div>
       </header>
-
-      {/* Progress */}
-      <div className="h-1 bg-gray-200 flex-shrink-0">
-        <div className="h-1 bg-solidata-green transition-all" style={{ width: `${cavs.length > 0 ? (currentCavIndex / cavs.length) * 100 : 0}%` }} />
+      <div className="h-2 bg-white/20 flex-shrink-0">
+        <div className="h-full bg-white rounded-r-full transition-all duration-300" style={{ width: `${cavs.length > 0 ? (currentCavIndex / cavs.length) * 100 : 0}%` }} />
       </div>
 
       {/* Map */}
@@ -147,35 +163,34 @@ export default function TourMap() {
         </MapContainer>
       </div>
 
-      {/* Bottom CAV card */}
       {currentCAV && (
-        <div className="bg-white border-t shadow-lg p-4 flex-shrink-0">
-          <div className="flex items-center justify-between mb-2">
-            <div>
+        <div className="bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] p-4 flex-shrink-0 safe-bottom">
+          <div className="flex items-center justify-between mb-3">
+            <div className="min-w-0">
               <p className="text-xs text-gray-400">Prochain point #{currentCavIndex + 1}</p>
-              <h3 className="font-bold">{currentCAV.nom || currentCAV.cav_name}</h3>
-              <p className="text-xs text-gray-500">{currentCAV.commune} — {currentCAV.adresse || ''}</p>
+              <h3 className="font-bold text-gray-900 truncate">{currentCAV.nom || currentCAV.cav_name}</h3>
+              <p className="text-xs text-gray-500 truncate">{currentCAV.commune}</p>
             </div>
-            <div className="text-right">
-              <span className="text-xs text-orange-600 font-bold">{Math.round(currentCAV.estimated_fill_rate || 0)}%</span>
+            <div className="text-right flex-shrink-0 ml-2">
+              <span className="text-sm font-bold text-amber-600">{Math.round(currentCAV.predicted_fill_rate || currentCAV.estimated_fill_rate || 0)}%</span>
               <p className="text-[10px] text-gray-400">remplissage</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={goToCAV} className="flex-1 bg-solidata-green text-white font-bold py-3 rounded-xl">
+          <div className="flex gap-3">
+            <button type="button" onClick={goToCAV} className="flex-1 btn-primary-mobile py-3 text-base">
               Scanner QR Code
             </button>
-            <button onClick={() => navigate('/incident')} className="bg-red-500 text-white font-bold py-3 px-4 rounded-xl">
-              ⚠️
+            <button type="button" onClick={() => navigate('/incident')} className="touch-target flex items-center justify-center bg-red-500 text-white rounded-2xl px-4 font-semibold">
+              Incident
             </button>
           </div>
         </div>
       )}
 
       {!currentCAV && cavs.length > 0 && (
-        <div className="bg-green-50 border-t p-4 flex-shrink-0 text-center">
-          <p className="text-green-700 font-bold">Tous les CAV ont été collectés !</p>
-          <button onClick={() => navigate('/return-centre')} className="mt-2 bg-solidata-green text-white font-bold py-3 px-6 rounded-xl">
+        <div className="bg-green-50 border-t border-green-200 p-4 flex-shrink-0 text-center safe-bottom">
+          <p className="text-green-800 font-bold">Tous les CAV ont été collectés !</p>
+          <button type="button" onClick={() => navigate('/return-centre')} className="mt-3 btn-primary-mobile py-3">
             Retour au centre de tri
           </button>
         </div>

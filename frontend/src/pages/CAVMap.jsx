@@ -116,10 +116,10 @@ export default function CAVMap() {
                   >
                     <Popup>
                       <div className="text-xs">
-                        <p className="font-bold">{cav.nom}</p>
+                        <p className="font-bold">{cav.name}</p>
                         <p>{cav.commune}</p>
                         <p>Remplissage estimé : {Math.round(fillRate)}%</p>
-                        <p>Conteneurs : {cav.nb_conteneurs || '—'}</p>
+                        <p>Conteneurs : {cav.nb_containers || '—'}</p>
                       </div>
                     </Popup>
                   </Circle>
@@ -133,14 +133,14 @@ export default function CAVMap() {
             {selectedCav ? (
               <div className="bg-white rounded-xl shadow-sm border p-4">
                 <button onClick={() => setSelectedCav(null)} className="text-solidata-green text-xs hover:underline mb-2">← Retour</button>
-                <h3 className="font-bold text-lg mb-2">{selectedCav.nom}</h3>
+                <h3 className="font-bold text-lg mb-2">{selectedCav.name}</h3>
                 <div className="space-y-2 text-sm">
                   <p><span className="text-gray-500">Commune :</span> {selectedCav.commune}</p>
-                  <p><span className="text-gray-500">Adresse :</span> {selectedCav.adresse || '—'}</p>
-                  <p><span className="text-gray-500">Conteneurs :</span> {selectedCav.nb_conteneurs || '—'}</p>
-                  <p><span className="text-gray-500">Type :</span> {selectedCav.type_conteneur || '—'}</p>
-                  <p><span className="text-gray-500">QR Code :</span> {selectedCav.qr_code || '—'}</p>
-                  <p><span className="text-gray-500">Actif :</span> {selectedCav.is_active ? 'Oui' : 'Non'}</p>
+                  <p><span className="text-gray-500">Adresse :</span> {selectedCav.address || '—'}</p>
+                  <p><span className="text-gray-500">Conteneurs :</span> {selectedCav.nb_containers || '—'}</p>
+                  <p><span className="text-gray-500">Tournée :</span> {selectedCav.tournee || '—'}</p>
+                  <p><span className="text-gray-500">QR Code :</span> {selectedCav.qr_code_data ? 'Oui' : 'Non'}</p>
+                  <p><span className="text-gray-500">Statut :</span> {selectedCav.status === 'active' ? 'Actif' : 'Indisponible'}</p>
                 </div>
               </div>
             ) : (
@@ -154,7 +154,7 @@ export default function CAVMap() {
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="font-medium text-sm">{cav.nom}</p>
+                        <p className="font-medium text-sm">{cav.name}</p>
                         <p className="text-xs text-gray-400">{cav.commune}</p>
                       </div>
                       <div className="text-right">

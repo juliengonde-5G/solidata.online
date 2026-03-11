@@ -32,6 +32,7 @@ const PCM_TYPES = {
     },
     environnement: 'Bureau organisé, tâches structurées, délais clairs',
     correspondanceTP: 'Consciencieux (Big Five), ISTJ/INTJ (MBTI)',
+    comportementAvecAutres: 'Privilégie la clarté et le respect des règles ; à l\'aise quand les rôles et les attentes sont explicites.',
   },
   perseverant: {
     nom: 'Persévérant',
@@ -53,6 +54,7 @@ const PCM_TYPES = {
     },
     environnement: 'Mission porteuse de sens, espace pour s\'exprimer',
     correspondanceTP: 'Agréabilité faible + Consciencieux (Big Five), INFJ/ENFJ (MBTI)',
+    comportementAvecAutres: 'Recherche la cohérence des valeurs et la confiance ; s\'investit quand le sens et l\'intégrité sont reconnus.',
   },
   empathique: {
     nom: 'Empathique',
@@ -74,6 +76,7 @@ const PCM_TYPES = {
     },
     environnement: 'Cadre chaleureux, relations harmonieuses, feedback positif',
     correspondanceTP: 'Agréabilité haute (Big Five), ISFJ/ESFJ (MBTI)',
+    comportementAvecAutres: 'Crée du lien et de la bienveillance ; a besoin de reconnaissance personnelle et d\'un climat apaisé.',
   },
   imagineur: {
     nom: 'Imagineur',
@@ -95,6 +98,7 @@ const PCM_TYPES = {
     },
     environnement: 'Calme, peu de sollicitations, instructions claires',
     correspondanceTP: 'Introversion haute (Big Five), INTP/INFP (MBTI)',
+    comportementAvecAutres: 'Préfère les échanges calmes et structurés ; besoin de temps de réflexion et de peu de pression sociale.',
   },
   energiseur: {
     nom: 'Énergiseur',
@@ -116,6 +120,7 @@ const PCM_TYPES = {
     },
     environnement: 'Dynamique, varié, interactions fréquentes, challenges',
     correspondanceTP: 'Extraversion + Ouverture hautes (Big Five), ENFP/ESTP (MBTI)',
+    comportementAvecAutres: 'Apporte de l\'énergie et du ludique ; a besoin de stimulation et de reconnaissance dans l\'échange.',
   },
   promoteur: {
     nom: 'Promoteur',
@@ -137,8 +142,174 @@ const PCM_TYPES = {
     },
     environnement: 'Action, résultats rapides, autonomie, variété',
     correspondanceTP: 'Extraversion + Ouverture (Big Five), ESTP/ENTJ (MBTI)',
+    comportementAvecAutres: 'Direct et orienté action ; valorise l\'autonomie, les défis et l\'efficacité dans les relations.',
   },
 };
+
+// ══════════════════════════════════════════
+// ICÔNES ET TEXTES SIMPLIFIÉS (accessibilité, FALC)
+// ══════════════════════════════════════════
+const OPTION_ICONS = {
+  analyseur: '📋',
+  perseverant: '💪',
+  empathique: '❤️',
+  imagineur: '💭',
+  energiseur: '⚡',
+  promoteur: '🎯',
+};
+
+// Textes courts pour personnes peu à l'aise avec l'écrit / langue
+const TEXT_SIMPLE = {
+  questions: {
+    1: 'Pour décider, vous vous fiez surtout à :',
+    2: 'Au travail, on vous reconnaît surtout pour :',
+    3: 'Quand on vous explique quelque chose, vous écoutez surtout :',
+    4: 'Votre plus grande qualité au travail :',
+    5: 'Avec les autres, vous aimez surtout :',
+    6: 'Ce qui vous motive le plus au travail :',
+    7: 'Quand vous êtes stressé(e), vous :',
+    8: 'En cas de conflit, vous :',
+    9: 'Votre travail idéal, c\'est :',
+    10: 'Quand ça va mal, vous pensez :',
+    11: 'Vous préférez qu\'on vous parle :',
+    12: 'Quand vous expliquez à quelqu\'un, vous :',
+    13: 'Ce qui vous gêne le plus :',
+    14: 'Pour vous sentir bien, vous avez besoin de :',
+    15: 'Le compliment qui vous fait plaisir :',
+    16: 'Un jour de repos, vous préférez :',
+    17: 'Un mot pour vous décrire :',
+    18: 'En réunion, vous :',
+    19: 'Face à un imprévu, vous :',
+    20: 'Ce qui vous fatigue le plus :',
+  },
+  options: {
+    'analyseur': 'Les faits, les chiffres',
+    'perseverant': 'Vos idées, vos valeurs',
+    'empathique': 'Ce que vous ressentez',
+    'imagineur': 'Réfléchir à part',
+    'energiseur': 'Votre réaction immédiate',
+    'promoteur': 'Ce qui marche tout de suite',
+    'analyseur_2': 'Être précis et organisé',
+    'perseverant_2': 'Défendre vos idées',
+    'empathique_2': 'Écouter et aider',
+    'imagineur_2': 'Rester calme, réfléchir',
+    'energiseur_2': 'Apporter de l\'énergie',
+    'promoteur_2': 'Aller vite, être efficace',
+    'analyseur_3': 'La logique',
+    'perseverant_3': 'Les valeurs',
+    'empathique_3': 'Les émotions',
+    'imagineur_3': 'Les idées',
+    'energiseur_3': 'Ce qui est marrant',
+    'promoteur_3': 'Ce qu\'on peut faire',
+    'analyseur_4': 'Analyser, être précis',
+    'perseverant_4': 'Être responsable',
+    'empathique_4': 'Créer du lien',
+    'imagineur_4': 'Imaginer des solutions',
+    'energiseur_4': 'Être spontané',
+    'promoteur_4': 'Agir, obtenir des résultats',
+    'analyseur_5': 'Respect et clarté',
+    'perseverant_5': 'Confiance, mêmes valeurs',
+    'empathique_5': 'Chaleur, bienveillance',
+    'imagineur_5': 'Respect de mon calme',
+    'energiseur_5': 'Plaisir, partager',
+    'promoteur_5': 'Défis, action',
+    'analyseur_6': 'Être reconnu pour la qualité',
+    'perseverant_6': 'Défendre ce qui compte',
+    'empathique_6': 'Être apprécié',
+    'imagineur_6': 'Avoir du temps au calme',
+    'energiseur_6': 'S\'amuser',
+    'promoteur_6': 'Relever des défis',
+    'analyseur_7': 'Tout contrôler',
+    'perseverant_7': 'Imposer votre avis',
+    'empathique_7': 'Tout accepter',
+    'imagineur_7': 'Vous isoler',
+    'energiseur_7': 'Râler',
+    'promoteur_7': 'Prendre des risques',
+    'analyseur_8': 'Analyser, proposer des solutions',
+    'perseverant_8': 'Défendre votre position',
+    'empathique_8': 'Chercher l\'accord',
+    'imagineur_8': 'Prendre du recul',
+    'energiseur_8': 'Dédramatiser',
+    'promoteur_8': 'Agir vite',
+    'analyseur_9': 'Ordre, règles claires',
+    'perseverant_9': 'Donner du sens',
+    'empathique_9': 'Bonne ambiance',
+    'imagineur_9': 'Calme, réfléchir',
+    'energiseur_9': 'Variété, surprises',
+    'promoteur_9': 'Résultats, autonomie',
+    'analyseur_10': 'J\'ai mal fait',
+    'perseverant_10': 'Personne n\'est fiable',
+    'empathique_10': 'C\'est de ma faute',
+    'imagineur_10': 'J\'attends',
+    'energiseur_10': 'C\'est nul',
+    'promoteur_10': 'Il faut agir',
+    'analyseur_11': 'Infos claires, structurées',
+    'perseverant_11': 'Parler des valeurs',
+    'empathique_11': 'Paroles chaleureuses',
+    'imagineur_11': 'Instructions précises',
+    'energiseur_11': 'Léger, drôle',
+    'promoteur_11': 'Court, action',
+    'analyseur_12': 'Structurer, être logique',
+    'perseverant_12': 'Partager votre vision',
+    'empathique_12': 'Rassurer l\'autre',
+    'imagineur_12': 'Prendre le temps',
+    'energiseur_12': 'Exemples, humour',
+    'promoteur_12': 'Aller droit au but',
+    'analyseur_13': 'Manque de rigueur',
+    'perseverant_13': 'Injustice',
+    'empathique_13': 'Froideur, rejet',
+    'imagineur_13': 'Pression, pas de temps',
+    'energiseur_13': 'Ennui, routine',
+    'promoteur_13': 'Inaction',
+    'analyseur_14': 'Reconnaissance du travail',
+    'perseverant_14': 'Respect des opinions',
+    'empathique_14': 'Être aimé(e)',
+    'imagineur_14': 'Tranquillité',
+    'energiseur_14': 'Fun, contacts',
+    'promoteur_14': 'Défis',
+    'analyseur_15': 'Ton travail est impeccable',
+    'perseverant_15': 'J\'admire ton engagement',
+    'empathique_15': 'Tu es formidable',
+    'imagineur_15': 'Ton idée est originale',
+    'energiseur_15': 'Super ambiance avec toi',
+    'promoteur_15': 'Tu as relevé le défi',
+    'analyseur_16': 'Organiser, planifier',
+    'perseverant_16': 'Lire, vous informer',
+    'empathique_16': 'Être avec les proches',
+    'imagineur_16': 'Rester seul(e), rêver',
+    'energiseur_16': 'Sortir, voir du monde',
+    'promoteur_16': 'Sport, défi',
+    'analyseur_17': 'Rigoureux(se)',
+    'perseverant_17': 'Engagé(e)',
+    'empathique_17': 'Bienveillant(e)',
+    'imagineur_17': 'Réfléchi(e)',
+    'energiseur_17': 'Spontané(e)',
+    'promoteur_17': 'Déterminé(e)',
+    'analyseur_18': 'Prendre des notes',
+    'perseverant_18': 'Donner votre avis',
+    'empathique_18': 'Être attentif aux autres',
+    'imagineur_18': 'Écouter, réfléchir',
+    'energiseur_18': 'Animer, détendre',
+    'promoteur_18': 'Pousser à décider',
+    'analyseur_19': 'Analyser avant d\'agir',
+    'perseverant_19': 'Suivre vos principes',
+    'empathique_19': 'Consulter les gens',
+    'imagineur_19': 'Prendre du recul',
+    'energiseur_19': 'Improviser',
+    'promoteur_19': 'Agir tout de suite',
+    'analyseur_20': 'Travail bâclé',
+    'perseverant_20': 'Pas de sens',
+    'empathique_20': 'Conflits',
+    'imagineur_20': 'Trop de bruit, pas de calme',
+    'energiseur_20': 'Routine',
+    'promoteur_20': 'Attendre',
+  },
+};
+
+function getOptionLabelSimple(num, value) {
+  const key = value + (num > 1 ? '_' + num : '');
+  return TEXT_SIMPLE.options[key] || TEXT_SIMPLE.options[value] || value;
+}
 
 // ══════════════════════════════════════════
 // QUESTIONNAIRE PCM (20 questions)
@@ -365,11 +536,12 @@ function calculatePCMProfile(answers) {
     normalizedScores[type] = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
   }
 
-  // Construire l'immeuble PCM (ordre des étages)
+  // Construire l'immeuble PCM : uniquement les types avec un score > 0 (pas de 0% dans le graphique)
   const immeuble = Object.entries(scores)
+    .filter(([, raw]) => raw > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([type], index) => ({
-      etage: 6 - index,
+      etage: index + 1,
       type,
       nom: PCM_TYPES[type].nom,
       score: normalizedScores[type],
@@ -383,18 +555,32 @@ function calculatePCMProfile(answers) {
   const phaseData = PCM_TYPES[phaseType];
   const riskAlert = stressAnswers.length >= 2 && stressAnswers.every(a => a.answer_value === phaseType);
 
+  const baseData = PCM_TYPES[baseType];
+  const phaseDataPcm = PCM_TYPES[phaseType];
+
+  // Comportements principaux pour le rapport (avec les autres, sous stress, avec le manager)
+  const comportementsPrincipaux = {
+    avecAutres: baseData.comportementAvecAutres || `Canal privilégié : ${baseData.canal}. Points forts : ${baseData.pointsForts.join(', ')}.`,
+    sousStress: phaseDataPcm.stressNiveaux.map(s => `Niveau ${s.niveau} : ${s.comportement}`).join(' — '),
+    avecManager: {
+      do: baseData.guideManager?.do ?? [],
+      dont: baseData.guideManager?.dont ?? [],
+    },
+  };
+
   // Rapport complet
   const report = {
     base: {
       type: baseType,
-      ...PCM_TYPES[baseType],
+      ...baseData,
     },
     phase: {
       type: phaseType,
-      ...PCM_TYPES[phaseType],
+      ...phaseDataPcm,
     },
     scores: normalizedScores,
     immeuble,
+    comportementsPrincipaux,
     riskAlert,
     rpsIndicators: riskAlert ? [
       `Profil de phase ${PCM_TYPES[phaseType].nom} avec indices de stress élevé`,
@@ -402,9 +588,9 @@ function calculatePCMProfile(answers) {
       `Masques de stress observables : ${phaseData.masqueStress.join(', ')}`,
     ] : [],
     communicationTips: [
-      `Canal privilégié : ${PCM_TYPES[baseType].canal}`,
-      `Besoin psychologique : ${PCM_TYPES[baseType].besoinPsychologique}`,
-      `Points forts : ${PCM_TYPES[baseType].pointsForts.join(', ')}`,
+      `Canal privilégié : ${baseData.canal}`,
+      `Besoin psychologique : ${baseData.besoinPsychologique}`,
+      `Points forts : ${baseData.pointsForts.join(', ')}`,
     ],
   };
 
@@ -500,7 +686,23 @@ router.get('/sessions/:token', async (req, res) => {
       );
     }
 
-    res.json({ session, questions: PCM_QUESTIONS });
+    const candidateName = [session.first_name, session.last_name].filter(Boolean).join(' ') || 'Candidat';
+    res.json({
+      session: { ...session, candidate_name: candidateName },
+      questions: PCM_QUESTIONS.map(q => ({
+        num: q.num,
+        id: q.num,
+        category: q.category,
+        text: q.text,
+        text_simple: TEXT_SIMPLE.questions[q.num] || q.text,
+        options: (q.options || []).map(o => ({
+          value: o.value,
+          label: o.label,
+          label_simple: getOptionLabelSimple(q.num, o.value) || o.label,
+          icon: OPTION_ICONS[o.value] || '',
+        })),
+      })),
+    });
   } catch (err) {
     console.error('[PCM] Erreur accès session :', err);
     res.status(500).json({ error: 'Erreur serveur' });

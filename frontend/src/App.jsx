@@ -24,8 +24,15 @@ import Users from './pages/Users';
 import Settings from './pages/Settings';
 import Referentiels from './pages/Referentiels';
 import AdminPredictive from './pages/AdminPredictive';
+import CollectionProposals from './pages/CollectionProposals';
 import InsertionParcours from './pages/InsertionParcours';
 import PCMTest from './pages/PCMTest';
+import RGPD from './pages/RGPD';
+import AdminDB from './pages/AdminDB';
+import AdminCAV from './pages/AdminCAV';
+import ReportingMetropole from './pages/ReportingMetropole';
+import FillRateMap from './pages/FillRateMap';
+import NewsFeed from './pages/NewsFeed';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -56,7 +63,9 @@ function App() {
 
           {/* Collecte */}
           <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />
+          <Route path="/collection-proposals" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CollectionProposals /></ProtectedRoute>} />
           <Route path="/cav-map" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CAVMap /></ProtectedRoute>} />
+          <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FillRateMap /></ProtectedRoute>} />
           <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Vehicles /></ProtectedRoute>} />
           <Route path="/live-vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
 
@@ -73,12 +82,17 @@ function App() {
           <Route path="/reporting-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingProduction /></ProtectedRoute>} />
           <Route path="/reporting" element={<Navigate to="/reporting-collecte" />} />
           <Route path="/refashion" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Refashion /></ProtectedRoute>} />
+          <Route path="/reporting-metropole" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingMetropole /></ProtectedRoute>} />
 
           {/* Administration */}
           <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['ADMIN']}><Settings /></ProtectedRoute>} />
           <Route path="/referentiels" element={<ProtectedRoute roles={['ADMIN']}><Referentiels /></ProtectedRoute>} />
           <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />
+          <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN']}><RGPD /></ProtectedRoute>} />
+          <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
+          <Route path="/admin-cav" element={<ProtectedRoute roles={['ADMIN']}><AdminCAV /></ProtectedRoute>} />
+          <Route path="/news" element={<ProtectedRoute><NewsFeed /></ProtectedRoute>} />
 
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

@@ -23,7 +23,7 @@ A    m.solidata.online     → 51.159.144.100
 ssh root@51.159.144.100
 
 # Télécharger le script d'init (une seule commande)
-curl -sL https://raw.githubusercontent.com/juliengonde-5G/solidata.online/claude/solidata-erp-app-KYMZZ/deploy/scripts/init-server.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/juliengonde-5G/solidata.online/main/deploy/scripts/init-server.sh | sudo bash
 
 # OU manuellement :
 git clone https://github.com/juliengonde-5G/solidata.online.git /tmp/solidata-init
@@ -33,12 +33,12 @@ sudo bash /tmp/solidata-init/deploy/scripts/init-server.sh
 Ce script effectue automatiquement :
 1. **Purge complète** : arrêt/suppression de tous les conteneurs Docker, images, volumes, réseaux, anciennes installations (Nginx, PostgreSQL, Node.js standalone), certificats SSL, crontabs
 2. **Installation propre** : Docker, UFW (pare-feu), Fail2ban, Swap
-3. **Clone du dépôt** dans `/opt/solidata` + checkout de la bonne branche
+3. **Clone du dépôt** dans `/opt/solidata.online` (branche `main`)
 
 ## Étape 2 — Configuration
 
 ```bash
-cd /opt/solidata
+cd /opt/solidata.online
 
 # Copier et éditer les variables d'environnement
 cp .env.production .env
@@ -57,10 +57,15 @@ bash deploy/scripts/deploy.sh first
 ```
 
 Ce script :
-1. Build les 5 conteneurs Docker
+1. Build les 6 conteneurs Docker (db, backend, frontend, mobile, nginx, certbot)
 2. Démarre en HTTP temporairement
 3. Obtient le certificat SSL Let's Encrypt
 4. Bascule vers HTTPS
+5. Initialise la base de données (tables + seeds) et applique les migrations si présentes
+6. Affiche le statut des services
+
+Si l’init BDD n’a pas été faite automatiquement, exécuter manuellement :
+`docker compose -f docker-compose.prod.yml exec backend node src/scripts/init-db.js`
 
 ## Étape 4 — Vérification
 
@@ -104,7 +109,17 @@ crontab deploy/crontab.txt
 ## Opérations courantes
 
 ```bash
-# Mise à jour
+# Depuis votre PC : pousser le code vers le repo (avant de mettre à jour le serveur)
+bash push.sh "Description des changements"
+# ou sous Windows : push.bat "Description des changements"
+
+# Sur le serveur : vérifier la sync (optionnel)
+bash deploy/scripts/check-sync.sh
+
+# Sur le serveur : import historique production (KPI_Production 2026.xlsx)
+docker compose -f docker-compose.prod.yml exec backend npm run seed-production
+
+# Sur le serveur : mise à jour
 bash deploy/scripts/deploy.sh update
 
 # Redémarrage
@@ -117,11 +132,54 @@ bash deploy/scripts/deploy.sh stop
 bash deploy/scripts/backup.sh manual
 
 # Restauration
-bash deploy/scripts/restore.sh /opt/solidata-backups/db_manual_20260307.dump.gz
+bash deploy/scripts/restore.sh /opt/solidata.online-backups/db_manual_20260307.dump.gz
 
 # Logs en temps réel
 bash deploy/scripts/deploy.sh logs backend
 ```
+
+## Dépannage — 502 Bad Gateway
+
+Un 502 signifie que Nginx ne peut pas joindre le frontend ou le backend. Sur le serveur :
+
+```bash
+cd /opt/solidata.online
+
+# Vérifier que tous les conteneurs sont Up
+docker compose -f docker-compose.prod.yml ps
+
+# Si un conteneur est "Restarting" ou absent : voir les logs
+docker compose -f docker-compose.prod.yml logs --tail=80 frontend
+docker compose -f docker-compose.prod.yml logs --tail=80 backend
+
+# Redémarrer tout proprement
+bash deploy/scripts/deploy.sh restart
+# ou rebuild si besoin
+bash deploy/scripts/deploy.sh update
+```
+
+Causes fréquentes : conteneur frontend/backend en crash (erreur au build, fichier manquant), base de données non prête, ou mémoire insuffisante (OOM).
+
+## Dépannage — Les modifications ne remontent pas
+
+Si après `deploy.sh update` les changements (frontend, backend, mobile) n’apparaissent pas sur le site :
+
+1. **Vérifier que le serveur a bien le dernier code**  
+   Sur le serveur : `cd /opt/solidata.online && git status && git log -1 --oneline`  
+   Puis si besoin : `git pull origin main`.
+
+2. **Rebuild sans cache**  
+   Le script `deploy.sh update` reconstruit désormais les images avec `--no-cache` pour forcer l’utilisation du code à jour. Si vous utilisez une ancienne version du script, lancer à la main :
+   ```bash
+   cd /opt/solidata.online
+   git pull origin main
+   docker compose -f docker-compose.prod.yml build --no-cache
+   docker compose -f docker-compose.prod.yml up -d
+   ```
+   Sans `--no-cache`, Docker réutilise d’anciennes couches et peut servir une ancienne version du frontend.
+
+3. **En cas d’échec du build**  
+   Relancer uniquement après un `git pull origin main` réussi, pour être sûr que le correctif (ex. Tailwind mobile) est bien présent sur le serveur.
 
 ## Architecture production
 

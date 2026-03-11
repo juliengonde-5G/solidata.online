@@ -156,4 +156,241 @@ router.get('/invoice/:id', async (req, res) => {
   }
 });
 
+// GET /api/exports/cav — Export Excel des CAV avec tonnages mensuels (format CAV 20XX.xlsx)
+router.get('/cav', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+
+    const cavs = await pool.query(`
+      SELECT c.*,
+        (SELECT json_agg(json_build_object('month', EXTRACT(MONTH FROM th.date)::int, 'weight', SUM(th.weight_kg)))
+         FROM tonnage_history th
+         WHERE th.cav_id = c.id AND EXTRACT(YEAR FROM th.date) = $1
+         GROUP BY EXTRACT(MONTH FROM th.date)
+        ) as monthly_tonnage
+      FROM cav c ORDER BY c.name
+    `, [year]);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet(`CAV ${year}`);
+
+    // En-tête principale
+    sheet.mergeCells('A1:L1');
+    sheet.getCell('A1').value = `Solidarité Textiles - Compte rendu CAV ${year}`;
+    sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF1A202C' } };
+
+    // Sous-en-tête avec mois
+    const months = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+    // Headers
+    const headerRow = sheet.getRow(3);
+    const headers = ['PAV', 'Nb CAV', 'Adresse', 'Commune', 'Latitude', 'Longitude', 'Statut'];
+    months.forEach(m => headers.push(`${m} (kg)`));
+    headers.push('Total (kg)');
+
+    headerRow.values = headers;
+    headerRow.font = { bold: true, size: 10 };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
+
+    sheet.getColumn(1).width = 45;
+    sheet.getColumn(2).width = 8;
+    sheet.getColumn(3).width = 35;
+    sheet.getColumn(4).width = 20;
+    for (let i = 8; i <= 20; i++) sheet.getColumn(i).width = 12;
+
+    // Données
+    for (const cav of cavs.rows) {
+      const monthlyData = {};
+      if (cav.monthly_tonnage) {
+        for (const entry of cav.monthly_tonnage) {
+          monthlyData[entry.month] = parseFloat(entry.weight) || 0;
+        }
+      }
+
+      const rowData = [
+        cav.name,
+        cav.nb_containers,
+        cav.address,
+        cav.commune,
+        cav.latitude,
+        cav.longitude,
+        cav.status,
+      ];
+      let total = 0;
+      for (let m = 1; m <= 12; m++) {
+        const val = monthlyData[m] || 0;
+        rowData.push(Math.round(val));
+        total += val;
+      }
+      rowData.push(Math.round(total));
+      sheet.addRow(rowData);
+    }
+
+    // Ligne totaux
+    const totalRow = sheet.addRow([]);
+    totalRow.getCell(1).value = 'TOTAL';
+    totalRow.font = { bold: true };
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=CAV_${year}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[EXPORTS] Erreur export CAV :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/exports/tonnages — Export Excel détaillé des pesées (format Collect 20XX.xlsx)
+router.get('/tonnages', async (req, res) => {
+  try {
+    const { year } = req.query;
+    const yearFilter = year ? `AND EXTRACT(YEAR FROM th.date) = ${parseInt(year)}` : '';
+
+    const result = await pool.query(`
+      SELECT th.id, th.date, th.weight_kg, th.route_name, th.source,
+             c.name as cav_name, c.commune,
+             EXTRACT(MONTH FROM th.date)::int as mois,
+             CASE WHEN EXTRACT(MONTH FROM th.date) <= 3 THEN 'T1'
+                  WHEN EXTRACT(MONTH FROM th.date) <= 6 THEN 'T2'
+                  WHEN EXTRACT(MONTH FROM th.date) <= 9 THEN 'T3'
+                  ELSE 'T4' END as trimestre,
+             EXTRACT(YEAR FROM th.date)::int as annee
+      FROM tonnage_history th
+      LEFT JOIN cav c ON th.cav_id = c.id
+      WHERE 1=1 ${yearFilter}
+      ORDER BY th.date, th.id
+    `);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Tonnages');
+
+    sheet.mergeCells('A1:F1');
+    sheet.getCell('A1').value = `Saisies tonnages${year ? ` — ${year}` : ''}`;
+    sheet.getCell('A1').font = { bold: true, size: 14 };
+
+    sheet.getRow(3).values = ['ID', 'Origine', 'Catégorie', 'Poids net (kg)', 'Date', 'CAV', 'Commune', 'Mois', 'Trimestre', 'Année'];
+    sheet.getRow(3).font = { bold: true };
+    sheet.getRow(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
+
+    sheet.getColumn(1).width = 8;
+    sheet.getColumn(2).width = 16;
+    sheet.getColumn(3).width = 30;
+    sheet.getColumn(4).width = 14;
+    sheet.getColumn(5).width = 12;
+    sheet.getColumn(6).width = 35;
+
+    for (const row of result.rows) {
+      sheet.addRow([
+        row.id,
+        'Collecte de CAV',
+        row.route_name || row.cav_name,
+        row.weight_kg,
+        row.date,
+        row.cav_name,
+        row.commune,
+        row.mois,
+        row.trimestre,
+        row.annee,
+      ]);
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Collect_${year || 'all'}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[EXPORTS] Erreur export tonnages :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/exports/kpi-production — Export KPI production (format KPI_Production 20XX.xlsx)
+router.get('/kpi-production', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+
+    const result = await pool.query(
+      'SELECT * FROM production_daily WHERE EXTRACT(YEAR FROM date) = $1 ORDER BY date',
+      [year]
+    );
+
+    const workbook = new ExcelJS.Workbook();
+
+    // Feuille annuelle
+    const annualSheet = workbook.addWorksheet(`Production Annuel ${year}`);
+    annualSheet.getRow(1).values = ['', 'Total entrée ligne (kg)', 'Total entrée recyclage N°3 (kg)', 'TOTAL (t)', 'Objectif mois (t)', 'Diff'];
+    annualSheet.getRow(1).font = { bold: true };
+
+    const months = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+    for (let m = 0; m < 12; m++) {
+      const monthData = result.rows.filter(r => new Date(r.date).getMonth() === m);
+      const totalLigne = monthData.reduce((s, r) => s + (parseFloat(r.entree_ligne_kg) || 0), 0);
+      const totalR3 = monthData.reduce((s, r) => s + (parseFloat(r.entree_recyclage_r3_kg) || 0), 0);
+      const totalT = (totalLigne + totalR3) / 1000;
+      annualSheet.addRow([months[m], Math.round(totalLigne), Math.round(totalR3), Math.round(totalT * 1000) / 1000]);
+    }
+
+    // Feuilles mensuelles
+    for (let m = 0; m < 12; m++) {
+      const monthData = result.rows.filter(r => new Date(r.date).getMonth() === m);
+      if (monthData.length === 0) continue;
+
+      const monthSheet = workbook.addWorksheet(`${months[m]} ${year}`);
+      monthSheet.getRow(1).values = ['Date', 'Eff. Théo.', 'Eff. Réel', 'Entrée ligne (kg)', 'Obj. ligne', 'Entrée R3 (kg)', 'Obj. R3', 'Total (t)', 'Productivité', 'Commentaire'];
+      monthSheet.getRow(1).font = { bold: true };
+      monthSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
+
+      for (const day of monthData) {
+        monthSheet.addRow([
+          day.date, day.effectif_theorique, day.effectif_reel,
+          day.entree_ligne_kg, day.objectif_entree_ligne_kg,
+          day.entree_recyclage_r3_kg, day.objectif_entree_r3_kg,
+          day.total_jour_t, day.productivite_kg_per,
+          day.commentaire,
+        ]);
+      }
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=KPI_Production_${year}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[EXPORTS] Erreur export KPI :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/exports/stock — Export mouvements de stock (format Mvmt Invent 20XX.xlsx)
+router.get('/stock', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+
+    const result = await pool.query(`
+      SELECT * FROM stock_movements
+      WHERE EXTRACT(YEAR FROM date) = $1
+      ORDER BY date, id
+    `, [year]);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Mouvements');
+    sheet.getRow(1).values = ['ID', 'Type', 'Date', 'Poids (kg)', 'Origine', 'Catégorie', 'Destination', 'Notes'];
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
+
+    for (const row of result.rows) {
+      sheet.addRow([row.id, row.type, row.date, row.poids_kg, row.origine, row.categorie_collecte, row.destination, row.notes]);
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Mvmt_Invent_${year}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[EXPORTS] Erreur export stock :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;
