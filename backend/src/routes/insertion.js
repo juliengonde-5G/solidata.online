@@ -1866,10 +1866,11 @@ router.get('/', async (req, res) => {
       return { ...e, urgency, has_pcm: e.has_pcm > 0, has_diagnostic: e.has_diagnostic > 0 };
     });
 
+    console.log(`[INSERTION] GET / → ${employees.length} salaries actifs`);
     res.json(employees);
   } catch (err) {
-    console.error('[INSERTION] Erreur liste :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('[INSERTION] Erreur liste :', err.message, err.detail || '');
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
   }
 });
 

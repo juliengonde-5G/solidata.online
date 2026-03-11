@@ -497,11 +497,17 @@ export default function InsertionParcours() {
   const [savingDiag, setSavingDiag] = useState(false);
   const [freinsDefinitions, setFreinsDefinitions] = useState(null);
 
+  const [loadError, setLoadError] = useState(null);
+
   const loadEmployees = useCallback(async () => {
     try {
+      setLoadError(null);
       const res = await api.get('/api/insertion');
-      setEmployees(res.data);
-    } catch {}
+      setEmployees(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error('[InsertionParcours] Erreur chargement:', err);
+      setLoadError(err.response?.data?.detail || err.message || 'Erreur de chargement');
+    }
   }, []);
 
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
@@ -564,7 +570,9 @@ export default function InsertionParcours() {
         <div className="grid grid-cols-12 gap-4">
           {/* Liste employes */}
           <div className="col-span-3 bg-white rounded-lg border p-3 max-h-[80vh] overflow-y-auto">
-            <h2 className="font-semibold text-gray-700 mb-2">Salaries en parcours</h2>
+            <h2 className="font-semibold text-gray-700 mb-2">Salaries en parcours ({employees.length})</h2>
+            {loadError && <div className="text-red-600 text-xs mb-2 p-2 bg-red-50 rounded">{loadError}</div>}
+            {!loadError && employees.length === 0 && <div className="text-gray-400 text-sm p-2">Aucun salarie actif trouve</div>}
             {employees.map(emp => (
               <button key={emp.id} onClick={() => selectEmployee(emp)}
                 className={`w-full text-left p-2 rounded mb-1 text-sm transition ${
