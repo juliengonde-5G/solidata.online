@@ -120,6 +120,7 @@ bash deploy/scripts/deploy.sh update
 
 # Mise à jour + vérifications (health-check + test API /api/health)
 bash deploy/scripts/deploy-and-test.sh
+# Si « Permission denied », lancer avec bash explicitement (ci-dessus) ou : chmod +x deploy/scripts/deploy-and-test.sh
 ```
 
 **Depuis Windows (PowerShell)** — déploiement à distance puis tests :
