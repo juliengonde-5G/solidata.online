@@ -57,7 +57,66 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
     await addCol('explorama_environnements', 'TEXT');
     await addCol('explorama_rythme', 'TEXT');
 
-    // Migration milestones : ajouter nouvelles colonnes si table existait
+    // Colonnes insertion sur employees (si init-db pas encore re-execute)
+    try {
+      await pool.query(`
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_status VARCHAR(30) DEFAULT 'none';
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_start_date DATE;
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_end_date DATE;
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS prescripteur VARCHAR(100);
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
+      `);
+    } catch {}
+    // Ajouter CHECK constraint sur insertion_status si absente
+    try {
+      await pool.query(`ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_insertion_status_check`);
+      await pool.query(`ALTER TABLE employees ADD CONSTRAINT employees_insertion_status_check CHECK (insertion_status IN ('none', 'en_parcours', 'termine', 'abandon'))`);
+    } catch {}
+
+    // Creer table milestones si elle n'existe pas encore
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS insertion_milestones (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        milestone_type VARCHAR(30) NOT NULL CHECK (milestone_type IN ('Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie')),
+        due_date DATE NOT NULL,
+        completed_date DATE,
+        status VARCHAR(30) NOT NULL DEFAULT 'a_planifier'
+          CHECK (status IN ('a_planifier', 'planifie', 'realise', 'reporte')),
+        interview_date TIMESTAMP,
+        interviewer_id INTEGER REFERENCES users(id),
+        frein_mobilite INTEGER CHECK (frein_mobilite BETWEEN 1 AND 5),
+        frein_sante INTEGER CHECK (frein_sante BETWEEN 1 AND 5),
+        frein_finances INTEGER CHECK (frein_finances BETWEEN 1 AND 5),
+        frein_famille INTEGER CHECK (frein_famille BETWEEN 1 AND 5),
+        frein_linguistique INTEGER CHECK (frein_linguistique BETWEEN 1 AND 5),
+        frein_administratif INTEGER CHECK (frein_administratif BETWEEN 1 AND 5),
+        frein_numerique INTEGER CHECK (frein_numerique BETWEEN 1 AND 5),
+        cip_integration TEXT,
+        cip_competences TEXT,
+        cip_projet_pro TEXT,
+        cip_socialisation TEXT,
+        bilan_professionnel TEXT,
+        bilan_social TEXT,
+        objectifs_realises TEXT,
+        objectifs_prochaine_periode TEXT,
+        observations TEXT,
+        actions_a_mener TEXT,
+        avis_global VARCHAR(30) CHECK (avis_global IN ('tres_positif', 'positif', 'mitige', 'insuffisant')),
+        sortie_classification VARCHAR(20) CHECK (sortie_classification IN ('positive', 'negative')),
+        sortie_type VARCHAR(50),
+        sortie_commentaires TEXT,
+        sortie_employeur TEXT,
+        sortie_formation TEXT,
+        ai_recommendations JSONB,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id, milestone_type)
+      )
+    `);
+
+    // Migration milestones : ajouter nouvelles colonnes si table existait deja
     const addMsCol = async (col, type) => {
       try { await pool.query(`ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch {}
     };

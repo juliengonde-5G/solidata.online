@@ -3,6 +3,47 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
+// Auto-create vehicle_maintenance tables
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        vehicle_type VARCHAR(50) NOT NULL DEFAULT 'generic',
+        last_maintenance_date DATE,
+        last_maintenance_km INTEGER,
+        maintenance_interval_km INTEGER DEFAULT 20000,
+        maintenance_interval_months INTEGER DEFAULT 12,
+        controle_technique_date DATE,
+        oil_change_km INTEGER, oil_change_date DATE,
+        tire_change_km INTEGER, tire_change_date DATE,
+        brake_check_km INTEGER, brake_check_date DATE,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vehicle_id)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance_alerts (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        alert_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        alerts JSONB NOT NULL DEFAULT '[]',
+        is_resolved BOOLEAN DEFAULT false,
+        resolved_by INTEGER REFERENCES users(id),
+        resolved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vehicle_id, alert_date)
+      )
+    `);
+    console.log('[VEHICLES] Tables maintenance OK');
+  } catch (err) {
+    console.error('[VEHICLES] Migration maintenance :', err.message);
+  }
+})();
+
 router.use(authenticate);
 
 // GET /api/vehicles

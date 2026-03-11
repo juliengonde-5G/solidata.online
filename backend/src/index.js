@@ -24,6 +24,9 @@ const io = new Server(server, {
   cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'] },
 });
 
+// Trust proxy (derrière nginx)
+app.set('trust proxy', 1);
+
 // Middleware globaux
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
