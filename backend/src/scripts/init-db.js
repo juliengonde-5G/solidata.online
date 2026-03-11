@@ -1645,6 +1645,166 @@ async function initDatabase() {
     `);
     console.log('[INIT-DB] Module Periodic Objectives ✓');
 
+    // ══════════════════════════════════════════
+    // MODULE : Jalons insertion ASP (M+2, M+6, M+10)
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_milestones (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        milestone_type VARCHAR(30) NOT NULL CHECK (milestone_type IN ('Bilan M+2', 'Bilan M+6', 'Bilan M+10')),
+        due_date DATE NOT NULL,
+        completed_date DATE,
+        status VARCHAR(30) NOT NULL DEFAULT 'a_planifier'
+          CHECK (status IN ('a_planifier', 'planifie', 'realise', 'reporte')),
+        interview_date TIMESTAMP,
+        interviewer_id INTEGER REFERENCES users(id),
+        -- Scores freins au moment du bilan (1-5)
+        frein_mobilite INTEGER CHECK (frein_mobilite BETWEEN 1 AND 5),
+        frein_sante INTEGER CHECK (frein_sante BETWEEN 1 AND 5),
+        frein_finances INTEGER CHECK (frein_finances BETWEEN 1 AND 5),
+        frein_famille INTEGER CHECK (frein_famille BETWEEN 1 AND 5),
+        frein_linguistique INTEGER CHECK (frein_linguistique BETWEEN 1 AND 5),
+        frein_administratif INTEGER CHECK (frein_administratif BETWEEN 1 AND 5),
+        -- Contenu de l'entretien
+        bilan_professionnel TEXT,
+        bilan_social TEXT,
+        objectifs_realises TEXT,
+        objectifs_prochaine_periode TEXT,
+        observations TEXT,
+        actions_a_mener TEXT,
+        -- Avis global
+        avis_global VARCHAR(30) CHECK (avis_global IN ('tres_positif', 'positif', 'mitige', 'insuffisant')),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id, milestone_type)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_milestones_employee ON insertion_milestones(employee_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_milestones_status ON insertion_milestones(status);');
+    console.log('[INIT-DB] Module Insertion Milestones ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Maintenance préventive véhicules
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        vehicle_type VARCHAR(50) NOT NULL DEFAULT 'generic',
+        last_maintenance_date DATE,
+        last_maintenance_km INTEGER,
+        maintenance_interval_km INTEGER DEFAULT 20000,
+        maintenance_interval_months INTEGER DEFAULT 12,
+        controle_technique_date DATE,
+        oil_change_km INTEGER,
+        oil_change_date DATE,
+        tire_change_km INTEGER,
+        tire_change_date DATE,
+        brake_check_km INTEGER,
+        brake_check_date DATE,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vehicle_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance_alerts (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        alert_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        alerts JSONB NOT NULL DEFAULT '[]',
+        is_resolved BOOLEAN DEFAULT false,
+        resolved_by INTEGER REFERENCES users(id),
+        resolved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vehicle_id, alert_date)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_maint_alerts_vehicle ON vehicle_maintenance_alerts(vehicle_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_maint_alerts_resolved ON vehicle_maintenance_alerts(is_resolved);');
+    console.log('[INIT-DB] Module Maintenance Véhicules ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Capteurs ultrasons CAV (LoRaWAN)
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reference VARCHAR(100);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_type VARCHAR(50) DEFAULT 'ultrasonic';
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_reading DOUBLE PRECISION;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_reading_at TIMESTAMP;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_sensor_readings (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER NOT NULL REFERENCES cav(id) ON DELETE CASCADE,
+        sensor_reference VARCHAR(100) NOT NULL,
+        fill_level_percent DOUBLE PRECISION NOT NULL CHECK (fill_level_percent BETWEEN 0 AND 100),
+        distance_cm DOUBLE PRECISION,
+        battery_level DOUBLE PRECISION,
+        temperature DOUBLE PRECISION,
+        rssi INTEGER,
+        raw_data JSONB,
+        reading_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_cav ON cav_sensor_readings(cav_id, reading_at DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_ref ON cav_sensor_readings(sensor_reference);');
+    console.log('[INIT-DB] Module Capteurs CAV ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Inventaire physique produits finis
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS inventory_batches (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(50) NOT NULL UNIQUE,
+        type VARCHAR(20) NOT NULL DEFAULT 'partiel' CHECK (type IN ('partiel', 'complet')),
+        status VARCHAR(20) NOT NULL DEFAULT 'en_cours' CHECK (status IN ('en_cours', 'valide', 'annule')),
+        date DATE NOT NULL DEFAULT CURRENT_DATE,
+        notes TEXT,
+        total_theorique_kg DOUBLE PRECISION DEFAULT 0,
+        total_physique_kg DOUBLE PRECISION DEFAULT 0,
+        ecart_kg DOUBLE PRECISION DEFAULT 0,
+        ecart_percent DOUBLE PRECISION DEFAULT 0,
+        validated_by INTEGER REFERENCES users(id),
+        validated_at TIMESTAMP,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS inventory_items (
+        id SERIAL PRIMARY KEY,
+        batch_id INTEGER NOT NULL REFERENCES inventory_batches(id) ON DELETE CASCADE,
+        categorie_sortante_id INTEGER REFERENCES categories_sortantes(id),
+        categorie_nom VARCHAR(255),
+        stock_theorique_kg DOUBLE PRECISION DEFAULT 0,
+        stock_physique_kg DOUBLE PRECISION DEFAULT 0,
+        ecart_kg DOUBLE PRECISION DEFAULT 0,
+        ecart_percent DOUBLE PRECISION DEFAULT 0,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_inventory_items_batch ON inventory_items(batch_id);');
+    console.log('[INIT-DB] Module Inventaire Physique ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Taux de captation (population communes)
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS population_commune INTEGER;
+    `);
+    console.log('[INIT-DB] Colonne population_commune ajoutée à CAV ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

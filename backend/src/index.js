@@ -252,6 +252,14 @@ server.listen(PORT, async () => {
     console.warn('[SECURITE] ATTENTION : JWT_SECRET non configure ! Definissez JWT_SECRET dans .env');
   }
   await initOnStartup();
+
+  // Démarrer le scheduler CRON
+  try {
+    const { startScheduler } = require('./services/scheduler');
+    startScheduler();
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur démarrage :', err.message);
+  }
 });
 
 module.exports = { app, server, io };

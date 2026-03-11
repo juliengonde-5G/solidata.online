@@ -90,6 +90,27 @@ router.get('/dashboard', async (req, res) => {
       } catch (_) {}
     }
 
+    // Taux de captation (kg/hab/an)
+    let tauxCaptation = null;
+    try {
+      const popRes = await pool.query('SELECT COALESCE(SUM(population_commune), 0) as total_pop FROM cav WHERE population_commune IS NOT NULL');
+      const totalPop = parseInt(popRes.rows[0].total_pop) || 0;
+      if (totalPop > 0) {
+        // Collecte annuelle (12 derniers mois)
+        const annualRes = await pool.query(`
+          SELECT COALESCE(SUM(total_weight_kg), 0) as annual_kg FROM tours
+          WHERE status = 'completed' AND date >= NOW() - INTERVAL '12 months'
+        `);
+        const annualKg = parseFloat(annualRes.rows[0].annual_kg) || 0;
+        tauxCaptation = {
+          kg_par_hab_an: Math.round((annualKg / totalPop) * 100) / 100,
+          population_totale: totalPop,
+          collecte_annuelle_kg: annualKg,
+          objectif_refashion_kg: 3.6, // objectif Refashion : 3.6 kg/hab/an
+        };
+      }
+    } catch (_) {}
+
     res.json({
       period: { year: y, month: m },
       collecte: {
@@ -105,6 +126,7 @@ router.get('/dashboard', async (req, res) => {
           recyclage_tonnes: Math.round(co2Recyclage * 100) / 100,
         },
       },
+      taux_captation: tauxCaptation,
       effectifs: effectifs.rows[0],
       cav: cavStats.rows[0],
       historique_mensuel: historique.rows,

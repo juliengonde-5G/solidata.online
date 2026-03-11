@@ -63,12 +63,20 @@ export default function ReportingMetropole() {
         ) : d && (
           <>
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               <KPI label="Volume collecté" value={`${(d.collecte.total_tonnes).toFixed(1)} t`} sub={`${d.collecte.tours_completees} tournées`} color="green" />
               <KPI label="CO2 évité" value={`${d.emissions_evitees.co2_total_tonnes} t`} sub={`Réemploi: ${d.emissions_evitees.detail.reemploi_tonnes}t / Recyclage: ${d.emissions_evitees.detail.recyclage_tonnes}t`} color="blue" />
               <KPI label="Effectifs" value={d.effectifs.total} sub={`CDI/CDD: ${d.effectifs.cdi_cdd} | Intérim: ${d.effectifs.interimaires}`} color="purple" />
               <KPI label="CAV actifs" value={d.cav.actifs} sub={`dont ${d.cav.indisponibles} indisponible(s)`} color="amber" />
               <KPI label="CAV total" value={d.cav.total} sub={`${d.effectifs.formation} en formation`} color="gray" />
+              {d.taux_captation && (
+                <KPI
+                  label="Taux captation"
+                  value={`${d.taux_captation.kg_par_hab_an} kg/hab/an`}
+                  sub={`Objectif Refashion: ${d.taux_captation.objectif_refashion_kg} kg | Pop: ${(d.taux_captation.population_totale / 1000).toFixed(0)}k hab`}
+                  color={d.taux_captation.kg_par_hab_an >= d.taux_captation.objectif_refashion_kg ? 'green' : 'amber'}
+                />
+              )}
             </div>
 
             {/* Historique mensuel */}

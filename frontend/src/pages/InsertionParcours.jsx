@@ -304,6 +304,7 @@ export default function InsertionParcours() {
                     { id: 'analyse', label: 'Analyse IA' },
                     { id: 'questionnaire', label: 'Questionnaire CIP' },
                     { id: 'diagnostic', label: 'Diagnostic freins' },
+                    { id: 'jalons', label: 'Jalons ASP' },
                   ].map(tab => (
                     <button
                       key={tab.id}
@@ -343,6 +344,10 @@ export default function InsertionParcours() {
                     diagTab={diagTab}
                     setDiagTab={setDiagTab}
                   />
+                )}
+
+                {activeTab === 'jalons' && selectedEmp && (
+                  <MilestonesPanel employeeId={selectedEmp.id} employee={selectedEmp} />
                 )}
               </div>
             )}
@@ -1033,5 +1038,313 @@ function TextArea({ label, value, onChange, placeholder, small }) {
         rows={small ? 2 : 3}
       />
     </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// PANEL : Jalons insertion ASP + Radar chart
+// ══════════════════════════════════════════════════════════════
+
+function MilestonesPanel({ employeeId, employee }) {
+  const [milestones, setMilestones] = useState([]);
+  const [radarData, setRadarData] = useState(null);
+  const [template, setTemplate] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadData(); }, [employeeId]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [msRes, radarRes] = await Promise.all([
+        api.get(`/insertion/milestones/${employeeId}`),
+        api.get(`/insertion/milestones/${employeeId}/radar`),
+      ]);
+      setMilestones(msRes.data);
+      setRadarData(radarRes.data);
+    } catch (err) { console.error(err); }
+    setLoading(false);
+  };
+
+  const createMilestone = async (type) => {
+    try {
+      await api.post('/insertion/milestones', {
+        employee_id: employeeId,
+        milestone_type: type,
+        due_date: new Date().toISOString().split('T')[0],
+      });
+      loadData();
+    } catch (err) { console.error(err); }
+  };
+
+  const loadTemplate = async (type) => {
+    try {
+      const res = await api.get(`/insertion/interview-template/${encodeURIComponent(type)}`);
+      setTemplate(res.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const startEdit = (ms) => {
+    setEditingId(ms.id);
+    setEditForm({
+      status: ms.status,
+      frein_mobilite: ms.frein_mobilite || 1,
+      frein_sante: ms.frein_sante || 1,
+      frein_finances: ms.frein_finances || 1,
+      frein_famille: ms.frein_famille || 1,
+      frein_linguistique: ms.frein_linguistique || 1,
+      frein_administratif: ms.frein_administratif || 1,
+      bilan_professionnel: ms.bilan_professionnel || '',
+      bilan_social: ms.bilan_social || '',
+      objectifs_realises: ms.objectifs_realises || '',
+      objectifs_prochaine_periode: ms.objectifs_prochaine_periode || '',
+      observations: ms.observations || '',
+      actions_a_mener: ms.actions_a_mener || '',
+      avis_global: ms.avis_global || '',
+    });
+    loadTemplate(ms.milestone_type);
+  };
+
+  const saveEdit = async () => {
+    try {
+      await api.put(`/insertion/milestones/${editingId}`, {
+        ...editForm,
+        completed_date: editForm.status === 'realise' ? new Date().toISOString().split('T')[0] : null,
+      });
+      setEditingId(null);
+      loadData();
+    } catch (err) { console.error(err); }
+  };
+
+  const STATUS_LABELS = { a_planifier: 'A planifier', planifie: 'Planifie', realise: 'Realise', reporte: 'Reporte' };
+  const STATUS_COLORS = { a_planifier: 'bg-gray-100 text-gray-600', planifie: 'bg-blue-100 text-blue-700', realise: 'bg-green-100 text-green-700', reporte: 'bg-orange-100 text-orange-700' };
+  const AVIS_LABELS = { tres_positif: 'Tres positif', positif: 'Positif', mitige: 'Mitige', insuffisant: 'Insuffisant' };
+  const AVIS_COLORS = { tres_positif: 'bg-green-100 text-green-700', positif: 'bg-blue-100 text-blue-700', mitige: 'bg-yellow-100 text-yellow-700', insuffisant: 'bg-red-100 text-red-700' };
+
+  const existingTypes = milestones.map(m => m.milestone_type);
+  const allTypes = ['Bilan M+2', 'Bilan M+6', 'Bilan M+10'];
+
+  if (loading) return <div className="p-8 text-center text-gray-400">Chargement...</div>;
+
+  return (
+    <div className="space-y-4">
+      {/* Radar Chart — SVG spider/radar */}
+      {radarData && radarData.series.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border p-5">
+          <h3 className="font-semibold text-sm mb-3">Evolution des freins a l'emploi</h3>
+          <RadarChart data={radarData} />
+          <div className="flex flex-wrap gap-3 mt-3 justify-center">
+            {radarData.series.map((s, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-xs">
+                <span className="w-3 h-3 rounded-full" style={{ background: RADAR_COLORS[i] || '#999' }} />
+                <span>{s.label}{s.date ? ` (${new Date(s.date).toLocaleDateString('fr-FR')})` : ''}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-gray-400 text-center mt-2">Echelle 1 (pas de frein) a 5 (frein bloquant) — Plus le score est bas, meilleure est la situation</p>
+        </div>
+      )}
+
+      {/* Milestones list */}
+      <div className="bg-white rounded-xl shadow-sm border p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-sm">Jalons d'insertion ASP</h3>
+          {allTypes.filter(t => !existingTypes.includes(t)).length > 0 && (
+            <div className="flex gap-1">
+              {allTypes.filter(t => !existingTypes.includes(t)).map(t => (
+                <button key={t} onClick={() => createMilestone(t)}
+                  className="text-xs px-2 py-1 bg-violet-100 text-violet-700 rounded hover:bg-violet-200">
+                  + {t}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {milestones.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-4">Aucun jalon cree. Creez le premier bilan pour suivre l'evolution.</p>
+        ) : (
+          <div className="space-y-3">
+            {milestones.map(ms => (
+              <div key={ms.id} className="border rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-sm">{ms.milestone_type}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[ms.status]}`}>{STATUS_LABELS[ms.status]}</span>
+                    {ms.avis_global && <span className={`px-2 py-0.5 rounded text-xs font-medium ${AVIS_COLORS[ms.avis_global]}`}>{AVIS_LABELS[ms.avis_global]}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Echeance: {new Date(ms.due_date).toLocaleDateString('fr-FR')}</span>
+                    <button onClick={() => editingId === ms.id ? setEditingId(null) : startEdit(ms)}
+                      className="text-xs px-2 py-1 bg-gray-100 rounded hover:bg-gray-200">
+                      {editingId === ms.id ? 'Fermer' : 'Modifier'}
+                    </button>
+                  </div>
+                </div>
+
+                {ms.bilan_professionnel && <p className="text-xs text-gray-600 mt-1"><strong>Bilan pro:</strong> {ms.bilan_professionnel.substring(0, 150)}...</p>}
+
+                {editingId === ms.id && (
+                  <div className="mt-4 space-y-4 bg-gray-50 rounded-lg p-4">
+                    {/* Template d'entretien */}
+                    {template && (
+                      <div className="bg-violet-50 rounded-lg p-3 mb-3">
+                        <h4 className="font-semibold text-sm text-violet-800">{template.titre}</h4>
+                        <p className="text-xs text-violet-600 mb-2">{template.description}</p>
+                        {template.sections.map((sec, si) => (
+                          <div key={si} className="mb-2">
+                            <p className="text-xs font-medium text-violet-700">{sec.titre}</p>
+                            <ul className="list-disc list-inside text-xs text-violet-600">
+                              {sec.questions.map((q, qi) => <li key={qi}>{q}</li>)}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Status */}
+                    <div>
+                      <label className="text-xs font-medium text-gray-600">Statut</label>
+                      <select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})}
+                        className="w-full border rounded px-2 py-1.5 text-sm mt-1">
+                        <option value="a_planifier">A planifier</option>
+                        <option value="planifie">Planifie</option>
+                        <option value="realise">Realise</option>
+                        <option value="reporte">Reporte</option>
+                      </select>
+                    </div>
+
+                    {/* Freins — curseurs */}
+                    <div>
+                      <p className="text-xs font-medium text-gray-600 mb-2">Evaluation des freins (1 = pas de frein, 5 = bloquant)</p>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {[
+                          { key: 'frein_mobilite', label: 'Mobilite' },
+                          { key: 'frein_sante', label: 'Sante' },
+                          { key: 'frein_finances', label: 'Finances' },
+                          { key: 'frein_famille', label: 'Famille' },
+                          { key: 'frein_linguistique', label: 'Langue' },
+                          { key: 'frein_administratif', label: 'Administratif' },
+                        ].map(f => (
+                          <div key={f.key}>
+                            <label className="text-xs text-gray-500">{f.label}: {editForm[f.key]}/5</label>
+                            <input type="range" min="1" max="5" value={editForm[f.key]}
+                              onChange={e => setEditForm({...editForm, [f.key]: parseInt(e.target.value)})}
+                              className="w-full h-1.5 accent-violet-500" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Textes */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {[
+                        { key: 'bilan_professionnel', label: 'Bilan professionnel' },
+                        { key: 'bilan_social', label: 'Bilan social' },
+                        { key: 'objectifs_realises', label: 'Objectifs realises' },
+                        { key: 'objectifs_prochaine_periode', label: 'Objectifs prochaine periode' },
+                        { key: 'observations', label: 'Observations' },
+                        { key: 'actions_a_mener', label: 'Actions a mener' },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <label className="text-xs font-medium text-gray-600">{f.label}</label>
+                          <textarea value={editForm[f.key]} onChange={e => setEditForm({...editForm, [f.key]: e.target.value})}
+                            className="w-full border rounded px-2 py-1.5 text-sm mt-1 resize-none" rows="3" />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Avis global */}
+                    <div>
+                      <label className="text-xs font-medium text-gray-600">Avis global</label>
+                      <select value={editForm.avis_global} onChange={e => setEditForm({...editForm, avis_global: e.target.value})}
+                        className="w-full border rounded px-2 py-1.5 text-sm mt-1">
+                        <option value="">-- Selectionner --</option>
+                        <option value="tres_positif">Tres positif</option>
+                        <option value="positif">Positif</option>
+                        <option value="mitige">Mitige</option>
+                        <option value="insuffisant">Insuffisant</option>
+                      </select>
+                    </div>
+
+                    <button onClick={saveEdit}
+                      className="w-full bg-violet-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-violet-700">
+                      Enregistrer le bilan
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// SVG Radar Chart — Spider/toile d'araignee
+// ══════════════════════════════════════════════════════════════
+
+const RADAR_COLORS = ['#8B5CF6', '#3B82F6', '#10B981', '#F59E0B'];
+
+function RadarChart({ data }) {
+  const { axes, series } = data;
+  const n = axes.length;
+  const cx = 150, cy = 150, maxR = 110;
+  const levels = 5;
+
+  const getPoint = (index, value) => {
+    const angle = (Math.PI * 2 * index) / n - Math.PI / 2;
+    const r = (value / levels) * maxR;
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+  };
+
+  const gridPolygons = [];
+  for (let lv = 1; lv <= levels; lv++) {
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const p = getPoint(i, lv);
+      pts.push(`${p.x},${p.y}`);
+    }
+    gridPolygons.push(pts.join(' '));
+  }
+
+  return (
+    <svg viewBox="0 0 300 300" className="w-full max-w-[320px] mx-auto">
+      {/* Grid */}
+      {gridPolygons.map((pts, i) => (
+        <polygon key={i} points={pts} fill="none" stroke="#E5E7EB" strokeWidth="0.5" />
+      ))}
+      {/* Axis lines */}
+      {axes.map((_, i) => {
+        const p = getPoint(i, levels);
+        return <line key={i} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#D1D5DB" strokeWidth="0.5" />;
+      })}
+      {/* Axis labels */}
+      {axes.map((label, i) => {
+        const p = getPoint(i, levels + 0.8);
+        return <text key={i} x={p.x} y={p.y} textAnchor="middle" dominantBaseline="central" className="text-[9px] fill-gray-500">{label}</text>;
+      })}
+      {/* Data series */}
+      {series.map((s, si) => {
+        const pts = s.data.map((v, i) => {
+          const p = getPoint(i, v);
+          return `${p.x},${p.y}`;
+        }).join(' ');
+        const color = RADAR_COLORS[si] || '#999';
+        return (
+          <g key={si}>
+            <polygon points={pts} fill={color} fillOpacity="0.15" stroke={color} strokeWidth="1.5" />
+            {s.data.map((v, i) => {
+              const p = getPoint(i, v);
+              return <circle key={i} cx={p.x} cy={p.y} r="3" fill={color} />;
+            })}
+          </g>
+        );
+      })}
+    </svg>
   );
 }

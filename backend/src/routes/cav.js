@@ -465,4 +465,78 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// CAPTEURS ULTRASONS (LoRaWAN)
+// ══════════════════════════════════════════
+
+// PUT /api/cav/:id/sensor — Associer un capteur à un CAV
+router.put('/:id/sensor', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { sensor_reference, sensor_type, population_commune } = req.body;
+    const result = await pool.query(
+      `UPDATE cav SET sensor_reference = $1, sensor_type = COALESCE($2, 'ultrasonic'),
+       population_commune = COALESCE($3, population_commune)
+       WHERE id = $4 RETURNING id, name, sensor_reference, sensor_type, population_commune`,
+      [sensor_reference, sensor_type, population_commune, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[CAV] Erreur sensor PUT :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/cav/sensor-reading — Réception d'une lecture capteur (webhook LoRaWAN ou polling)
+router.post('/sensor-reading', async (req, res) => {
+  try {
+    const { sensor_reference, fill_level_percent, distance_cm, battery_level, temperature, rssi, raw_data } = req.body;
+    if (!sensor_reference || fill_level_percent == null) {
+      return res.status(400).json({ error: 'sensor_reference et fill_level_percent requis' });
+    }
+
+    // Trouver le CAV par référence capteur
+    const cav = await pool.query('SELECT id FROM cav WHERE sensor_reference = $1', [sensor_reference]);
+    if (cav.rows.length === 0) return res.status(404).json({ error: 'Capteur non associé à un CAV' });
+    const cavId = cav.rows[0].id;
+
+    // Enregistrer la lecture
+    await pool.query(
+      `INSERT INTO cav_sensor_readings (cav_id, sensor_reference, fill_level_percent, distance_cm, battery_level, temperature, rssi, raw_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [cavId, sensor_reference, fill_level_percent, distance_cm, battery_level, temperature, rssi, raw_data ? JSON.stringify(raw_data) : null]
+    );
+
+    // Mettre à jour le CAV
+    await pool.query(
+      `UPDATE cav SET sensor_last_reading = $1, sensor_last_reading_at = NOW(),
+       estimated_fill_rate = $1 WHERE id = $2`,
+      [fill_level_percent, cavId]
+    );
+
+    res.json({ ok: true, cav_id: cavId, fill_level_percent });
+  } catch (err) {
+    console.error('[CAV] Erreur sensor reading :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/cav/:id/sensor-history — Historique lectures capteur
+router.get('/:id/sensor-history', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const result = await pool.query(
+      `SELECT fill_level_percent, distance_cm, battery_level, temperature, reading_at
+       FROM cav_sensor_readings WHERE cav_id = $1
+       AND reading_at >= NOW() - make_interval(days => $2)
+       ORDER BY reading_at DESC`,
+      [req.params.id, days]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[CAV] Erreur sensor history :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

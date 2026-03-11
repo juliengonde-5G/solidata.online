@@ -1335,4 +1335,289 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// JALONS INSERTION ASP — M+2, M+6, M+10
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/insertion/milestones/:employeeId — Tous les jalons d'un salarié
+router.get('/milestones/:employeeId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT im.*, u.first_name as interviewer_first, u.last_name as interviewer_last
+       FROM insertion_milestones im
+       LEFT JOIN users u ON im.interviewer_id = u.id
+       WHERE im.employee_id = $1
+       ORDER BY im.due_date`,
+      [req.params.employeeId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[INSERTION] Erreur milestones GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/milestones — Créer un jalon manuellement
+router.post('/milestones', async (req, res) => {
+  try {
+    const { employee_id, milestone_type, due_date } = req.body;
+    if (!employee_id || !milestone_type) return res.status(400).json({ error: 'employee_id et milestone_type requis' });
+
+    const result = await pool.query(
+      `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (employee_id, milestone_type) DO UPDATE SET
+         due_date = COALESCE($3, insertion_milestones.due_date),
+         updated_at = NOW()
+       RETURNING *`,
+      [employee_id, milestone_type, due_date || new Date().toISOString().split('T')[0], req.user.id]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[INSERTION] Erreur milestones POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/milestones/:id — Mettre à jour un jalon (entretien bilan)
+router.put('/milestones/:id', async (req, res) => {
+  try {
+    const d = req.body;
+    const result = await pool.query(
+      `UPDATE insertion_milestones SET
+        status = COALESCE($1, status),
+        interview_date = COALESCE($2, interview_date),
+        interviewer_id = COALESCE($3, interviewer_id),
+        completed_date = COALESCE($4, completed_date),
+        frein_mobilite = COALESCE($5, frein_mobilite),
+        frein_sante = COALESCE($6, frein_sante),
+        frein_finances = COALESCE($7, frein_finances),
+        frein_famille = COALESCE($8, frein_famille),
+        frein_linguistique = COALESCE($9, frein_linguistique),
+        frein_administratif = COALESCE($10, frein_administratif),
+        bilan_professionnel = COALESCE($11, bilan_professionnel),
+        bilan_social = COALESCE($12, bilan_social),
+        objectifs_realises = COALESCE($13, objectifs_realises),
+        objectifs_prochaine_periode = COALESCE($14, objectifs_prochaine_periode),
+        observations = COALESCE($15, observations),
+        actions_a_mener = COALESCE($16, actions_a_mener),
+        avis_global = COALESCE($17, avis_global),
+        updated_at = NOW()
+      WHERE id = $18 RETURNING *`,
+      [
+        d.status, d.interview_date, d.interviewer_id, d.completed_date,
+        d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
+        d.frein_linguistique, d.frein_administratif,
+        d.bilan_professionnel, d.bilan_social,
+        d.objectifs_realises, d.objectifs_prochaine_periode,
+        d.observations, d.actions_a_mener, d.avis_global,
+        req.params.id,
+      ]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Jalon non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[INSERTION] Erreur milestones PUT :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/milestones/:employeeId/radar — Données radar chart (évolution freins)
+router.get('/milestones/:employeeId/radar', async (req, res) => {
+  try {
+    const empId = req.params.employeeId;
+
+    // Diagnostic initial
+    const diagRes = await pool.query(
+      'SELECT frein_mobilite, frein_sante, frein_finances, frein_famille, frein_linguistique, frein_administratif FROM insertion_diagnostics WHERE employee_id = $1',
+      [empId]
+    );
+
+    // Jalons réalisés avec scores
+    const milestonesRes = await pool.query(
+      `SELECT milestone_type, completed_date,
+        frein_mobilite, frein_sante, frein_finances, frein_famille, frein_linguistique, frein_administratif
+       FROM insertion_milestones
+       WHERE employee_id = $1 AND status = 'realise'
+       AND frein_mobilite IS NOT NULL
+       ORDER BY due_date`,
+      [empId]
+    );
+
+    const axes = ['Mobilité', 'Santé', 'Finances', 'Famille', 'Langue', 'Administratif'];
+    const axeKeys = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif'];
+
+    const series = [];
+
+    // Série initiale (diagnostic)
+    if (diagRes.rows.length > 0) {
+      const d = diagRes.rows[0];
+      series.push({
+        label: 'Diagnostic initial',
+        data: axeKeys.map(k => d[k] || 1),
+      });
+    }
+
+    // Séries jalons
+    for (const ms of milestonesRes.rows) {
+      series.push({
+        label: ms.milestone_type,
+        date: ms.completed_date,
+        data: axeKeys.map(k => ms[k] || 1),
+      });
+    }
+
+    res.json({ axes, series });
+  } catch (err) {
+    console.error('[INSERTION] Erreur radar :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/milestones-overview — Vue d'ensemble jalons (tous les employés en parcours)
+router.get('/milestones-overview', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT im.*, e.first_name, e.last_name, e.insertion_start_date,
+        u.first_name as interviewer_first, u.last_name as interviewer_last
+      FROM insertion_milestones im
+      JOIN employees e ON im.employee_id = e.id
+      LEFT JOIN users u ON im.interviewer_id = u.id
+      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+      ORDER BY im.due_date
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[INSERTION] Erreur milestones overview :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/interview-template/:milestoneType — Template d'entretien par période
+router.get('/interview-template/:milestoneType', (req, res) => {
+  const templates = {
+    'Bilan M+2': {
+      titre: 'Bilan d\'intégration — M+2',
+      description: 'Premier bilan après 2 mois de parcours. Focus sur l\'adaptation au poste et l\'environnement de travail.',
+      sections: [
+        {
+          titre: 'Intégration professionnelle',
+          questions: [
+            'Comment s\'est passée votre arrivée dans l\'équipe ?',
+            'Les consignes et les tâches sont-elles claires pour vous ?',
+            'Y a-t-il des difficultés dans l\'exécution de votre travail ?',
+            'Comment vous sentez-vous avec vos collègues ?',
+          ],
+        },
+        {
+          titre: 'Situation sociale',
+          questions: [
+            'Comment vous déplacez-vous pour venir travailler ? (Mobilité)',
+            'Comment vous sentez-vous physiquement ? (Santé)',
+            'Arrivez-vous à gérer vos dépenses courantes ? (Finances)',
+            'Avez-vous des contraintes familiales qui impactent le travail ? (Famille)',
+            'Comprenez-vous bien les consignes en français ? (Langue)',
+            'Vos démarches administratives sont-elles à jour ? (Administratif)',
+          ],
+        },
+        {
+          titre: 'Objectifs M+2 à M+6',
+          questions: [
+            'Quels objectifs aimeriez-vous atteindre d\'ici le prochain bilan ?',
+            'De quel soutien avez-vous besoin ?',
+          ],
+        },
+      ],
+    },
+    'Bilan M+6': {
+      titre: 'Bilan de mi-parcours — M+6',
+      description: 'Bilan intermédiaire. Évaluation des progrès, des compétences acquises et de l\'évolution des freins.',
+      sections: [
+        {
+          titre: 'Bilan des objectifs M+2',
+          questions: [
+            'Quels objectifs fixés au M+2 ont été atteints ?',
+            'Quels objectifs restent à travailler ?',
+            'Quelles compétences avez-vous développées ?',
+          ],
+        },
+        {
+          titre: 'Évolution professionnelle',
+          questions: [
+            'Êtes-vous plus autonome sur votre poste ?',
+            'Quels gestes professionnels maîtrisez-vous bien ?',
+            'Y a-t-il des tâches que vous aimeriez apprendre ?',
+            'Avez-vous une idée du métier que vous visez après le parcours ?',
+          ],
+        },
+        {
+          titre: 'Situation sociale — Évolution',
+          questions: [
+            'Comment a évolué votre situation en termes de mobilité ?',
+            'Comment a évolué votre santé depuis le début ?',
+            'Votre situation financière est-elle plus stable ?',
+            'Y a-t-il des changements familiaux à signaler ?',
+            'Votre niveau de français a-t-il progressé ?',
+            'Vos démarches administratives avancent-elles ?',
+          ],
+        },
+        {
+          titre: 'Objectifs M+6 à M+10',
+          questions: [
+            'Quels objectifs pour la dernière phase du parcours ?',
+            'Souhaitez-vous commencer à préparer votre sortie ?',
+          ],
+        },
+      ],
+    },
+    'Bilan M+10': {
+      titre: 'Bilan de fin de parcours — M+10',
+      description: 'Bilan final avant la sortie du dispositif. Préparation à l\'emploi pérenne ou à la formation qualifiante.',
+      sections: [
+        {
+          titre: 'Bilan global du parcours',
+          questions: [
+            'Quels sont vos principaux acquis depuis le début du parcours ?',
+            'Quelles compétences professionnelles maîtrisez-vous ?',
+            'Qu\'est-ce qui a le plus changé dans votre situation ?',
+          ],
+        },
+        {
+          titre: 'Projet professionnel',
+          questions: [
+            'Quel métier visez-vous ?',
+            'Avez-vous identifié des employeurs potentiels ?',
+            'Avez-vous besoin d\'une formation complémentaire ?',
+            'Votre CV est-il à jour ?',
+            'Êtes-vous prêt(e) pour des entretiens d\'embauche ?',
+          ],
+        },
+        {
+          titre: 'Situation sociale — Bilan final',
+          questions: [
+            'Mobilité : êtes-vous autonome dans vos déplacements ?',
+            'Santé : êtes-vous en capacité de travailler normalement ?',
+            'Finances : votre situation est-elle stabilisée ?',
+            'Famille : les contraintes familiales sont-elles gérées ?',
+            'Langue : vous sentez-vous à l\'aise en français au travail ?',
+            'Administratif : tous vos papiers sont-ils en règle ?',
+          ],
+        },
+        {
+          titre: 'Préparation sortie',
+          questions: [
+            'Souhaitez-vous rester dans le secteur textile / recyclage ?',
+            'Avez-vous des candidatures en cours ?',
+            'De quel accompagnement avez-vous encore besoin ?',
+          ],
+        },
+      ],
+    },
+  };
+
+  const template = templates[req.params.milestoneType];
+  if (!template) return res.status(404).json({ error: 'Type de bilan inconnu' });
+  res.json(template);
+});
+
 module.exports = router;
