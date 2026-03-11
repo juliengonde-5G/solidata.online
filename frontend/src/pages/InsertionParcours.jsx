@@ -169,19 +169,19 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
 
   useEffect(() => {
     // Load CIP questionnaire template
-    api.get(`/api/insertion/interview-template/${milestone.milestone_type}`).then(r => setTemplate(r.data)).catch(() => {});
+    api.get(`/insertion/interview-template/${milestone.milestone_type}`).then(r => setTemplate(r.data)).catch(() => {});
     // Load action plans
-    api.get(`/api/insertion/action-plans/${employeeId}`).then(r => {
+    api.get(`/insertion/action-plans/${employeeId}`).then(r => {
       setActionPlans(r.data.filter(a => a.milestone_id === milestone.id));
     }).catch(() => {});
     // Load radar data
-    api.get(`/api/insertion/milestones/${employeeId}/radar`).then(r => setRadarData(r.data)).catch(() => {});
+    api.get(`/insertion/milestones/${employeeId}/radar`).then(r => setRadarData(r.data)).catch(() => {});
   }, [milestone.id, milestone.milestone_type, employeeId]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.put(`/api/insertion/milestones/${milestone.id}`, form);
+      await api.put(`/insertion/milestones/${milestone.id}`, form);
       onSave();
     } catch (err) {
       alert('Erreur: ' + (err.response?.data?.error || err.message));
@@ -192,7 +192,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
   const handleAddAction = async () => {
     if (!newAction.action_label) return;
     try {
-      const res = await api.post('/api/insertion/action-plans', {
+      const res = await api.post('/insertion/action-plans', {
         milestone_id: milestone.id,
         employee_id: employeeId,
         ...newAction,
@@ -206,7 +206,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
 
   const handleUpdateAction = async (id, updates) => {
     try {
-      const res = await api.put(`/api/insertion/action-plans/${id}`, updates);
+      const res = await api.put(`/insertion/action-plans/${id}`, updates);
       setActionPlans(actionPlans.map(a => a.id === id ? res.data : a));
     } catch {}
   };
@@ -502,7 +502,7 @@ export default function InsertionParcours() {
   const loadEmployees = useCallback(async () => {
     try {
       setLoadError(null);
-      const res = await api.get('/api/insertion');
+      const res = await api.get('/insertion');
       setEmployees(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('[InsertionParcours] Erreur chargement:', err);
@@ -512,7 +512,7 @@ export default function InsertionParcours() {
 
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
   useEffect(() => {
-    api.get('/api/insertion/freins-definitions').then(r => setFreinsDefinitions(r.data)).catch(() => {});
+    api.get('/insertion/freins-definitions').then(r => setFreinsDefinitions(r.data)).catch(() => {});
   }, []);
 
   const selectEmployee = async (emp) => {
@@ -522,8 +522,8 @@ export default function InsertionParcours() {
     setLoading(true);
     try {
       const [analysisRes, diagRes] = await Promise.all([
-        api.get(`/api/insertion/${emp.id}`),
-        api.get(`/api/insertion/diagnostic/${emp.id}`),
+        api.get(`/insertion/${emp.id}`),
+        api.get(`/insertion/diagnostic/${emp.id}`),
       ]);
       setAnalysis(analysisRes.data);
       setDiagnostic(diagRes.data || {});
@@ -534,7 +534,7 @@ export default function InsertionParcours() {
   const initializeMilestones = async () => {
     if (!selectedEmployee) return;
     try {
-      await api.post(`/api/insertion/milestones/${selectedEmployee.id}/initialize`);
+      await api.post(`/insertion/milestones/${selectedEmployee.id}/initialize`);
       selectEmployee(selectedEmployee);
     } catch (err) {
       alert('Erreur: ' + (err.response?.data?.error || err.message));
@@ -545,7 +545,7 @@ export default function InsertionParcours() {
     if (!selectedEmployee || !diagnostic) return;
     setSavingDiag(true);
     try {
-      await api.put(`/api/insertion/diagnostic/${selectedEmployee.id}`, diagnostic);
+      await api.put(`/insertion/diagnostic/${selectedEmployee.id}`, diagnostic);
       selectEmployee(selectedEmployee);
     } catch (err) {
       alert('Erreur: ' + (err.response?.data?.error || err.message));
