@@ -7,7 +7,7 @@ const CryptoJS = require('crypto-js');
 router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
 
 // ══════════════════════════════════════════════════════════════
-// AUTO-MIGRATION — S'assurer que la table insertion_diagnostics existe avec toutes les colonnes
+// AUTO-MIGRATION — Tables insertion_diagnostics + milestones + action_plans
 // ══════════════════════════════════════════════════════════════
 (async () => {
   try {
@@ -26,12 +26,10 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
         frein_linguistique INTEGER DEFAULT 1, frein_linguistique_detail TEXT,
         frein_administratif INTEGER DEFAULT 1, frein_administratif_detail TEXT,
         frein_numerique INTEGER DEFAULT 1, frein_numerique_detail TEXT,
-        -- Sous-questions freins (approfondissement)
+        -- Sous-questions freins indirectes (scenarios)
         frein_mobilite_causes TEXT, frein_sante_causes TEXT, frein_finances_causes TEXT,
         frein_famille_causes TEXT, frein_linguistique_causes TEXT, frein_administratif_causes TEXT,
         frein_numerique_causes TEXT,
-        pcm_q_travail_ideal TEXT, pcm_q_reaction_stress TEXT, pcm_q_relation_equipe TEXT,
-        pcm_q_motivation TEXT, pcm_q_apprentissage TEXT, pcm_q_communication TEXT,
         obs_taches_realisees TEXT, obs_points_forts TEXT, obs_difficultes TEXT,
         obs_comportement_equipe TEXT, obs_autonomie_ponctualite TEXT,
         pref_aime_faire TEXT, pref_ne_veut_plus TEXT, pref_environnement_prefere TEXT,
@@ -44,7 +42,6 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
         UNIQUE(employee_id)
       )
     `);
-    // Ajouter les colonnes manquantes si la table existait deja
     const addCol = async (col, type) => {
       try { await pool.query(`ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch {}
     };
@@ -59,9 +56,68 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
     await addCol('explorama_gestes_negatifs', 'TEXT');
     await addCol('explorama_environnements', 'TEXT');
     await addCol('explorama_rythme', 'TEXT');
-    console.log('[INSERTION] Table insertion_diagnostics OK');
+
+    // Migration milestones : ajouter nouvelles colonnes si table existait
+    const addMsCol = async (col, type) => {
+      try { await pool.query(`ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch {}
+    };
+    await addMsCol('frein_numerique', 'INTEGER CHECK (frein_numerique BETWEEN 1 AND 5)');
+    await addMsCol('cip_integration', 'TEXT');
+    await addMsCol('cip_competences', 'TEXT');
+    await addMsCol('cip_projet_pro', 'TEXT');
+    await addMsCol('cip_socialisation', 'TEXT');
+    await addMsCol('sortie_classification', "VARCHAR(20) CHECK (sortie_classification IN ('positive', 'negative'))");
+    await addMsCol('sortie_type', 'VARCHAR(50)');
+    await addMsCol('sortie_commentaires', 'TEXT');
+    await addMsCol('sortie_employeur', 'TEXT');
+    await addMsCol('sortie_formation', 'TEXT');
+    await addMsCol('ai_recommendations', 'JSONB');
+
+    // Ajuster le CHECK constraint pour les nouveaux types de milestone
+    try {
+      await pool.query(`ALTER TABLE insertion_milestones DROP CONSTRAINT IF EXISTS insertion_milestones_milestone_type_check`);
+      await pool.query(`ALTER TABLE insertion_milestones ADD CONSTRAINT insertion_milestones_milestone_type_check CHECK (milestone_type IN ('Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie', 'Bilan M+2'))`);
+    } catch {}
+
+    // Table action plans CIP
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS cip_action_plans (
+          id SERIAL PRIMARY KEY,
+          milestone_id INTEGER NOT NULL REFERENCES insertion_milestones(id) ON DELETE CASCADE,
+          employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          action_label TEXT NOT NULL,
+          category VARCHAR(30) NOT NULL CHECK (category IN ('competence', 'insertion', 'socialisation', 'frein')),
+          frein_type VARCHAR(30),
+          priority VARCHAR(20) DEFAULT 'moyenne' CHECK (priority IN ('haute', 'moyenne', 'basse')),
+          status VARCHAR(20) DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'en_cours', 'realise', 'abandonne')),
+          echeance DATE,
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+    } catch {}
+
+    // Table alertes entretiens insertion
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS insertion_interview_alerts (
+          id SERIAL PRIMARY KEY,
+          employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          milestone_type VARCHAR(30) NOT NULL,
+          alert_type VARCHAR(30) NOT NULL CHECK (alert_type IN ('planification', 'rappel_j7', 'rappel_j1', 'retard')),
+          sent_at TIMESTAMP,
+          is_sent BOOLEAN DEFAULT false,
+          target_date DATE NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+    } catch {}
+
+    console.log('[INSERTION] Tables insertion OK');
   } catch (err) {
-    console.error('[INSERTION] Migration insertion_diagnostics :', err.message);
+    console.error('[INSERTION] Migration insertion :', err.message);
   }
 })();
 
@@ -290,77 +346,93 @@ const METIERS_CIBLES = {
 
 const FREINS_DEFINITIONS = {
   mobilite: {
-    label: 'Mobilité',
+    label: 'Mobilite',
     icon: 'car',
-    question_simple: 'Comment venez-vous au travail ?',
+    questions_indirectes: [
+      { q: 'Racontez-moi comment se passe votre trajet pour venir ici le matin.', indicateurs: ['duree', 'mode_transport', 'fiabilite'] },
+      { q: 'Si on vous proposait un poste a 30 minutes d\'ici, comment feriez-vous pour vous y rendre ?', indicateurs: ['autonomie', 'alternatives'] },
+      { q: 'Est-ce qu\'il vous est deja arrive de ne pas pouvoir venir quelque part a cause du transport ?', indicateurs: ['frequence_blocage'] },
+    ],
     niveaux: {
-      1: 'Pas de difficulté, transport autonome',
-      2: 'Léger, transports en commun accessibles',
-      3: 'Modéré, dépendance à un tiers ou transports limités',
-      4: 'Important, zone mal desservie ou pas de permis nécessaire',
-      5: 'Bloquant, aucun moyen de déplacement fiable',
+      1: 'Pas de difficulte, transport autonome',
+      2: 'Leger, transports en commun accessibles',
+      3: 'Modere, dependance a un tiers ou transports limites',
+      4: 'Important, zone mal desservie ou pas de permis necessaire',
+      5: 'Bloquant, aucun moyen de deplacement fiable',
     },
     actions_levee: [
       'Aide au passage du permis B (financement via plan d\'insertion)',
-      'Information sur les transports en commun et itinéraires',
+      'Information sur les transports en commun et itineraires',
       'Mise en relation avec des solutions de covoiturage',
-      'Aide à l\'achat / location de vélo ou trottinette',
+      'Aide a l\'achat / location de velo ou trottinette',
       'Rapprochement du lieu de travail si possible',
     ],
   },
   sante: {
-    label: 'Santé',
+    label: 'Sante',
     icon: 'heart',
-    question_simple: 'Comment vous sentez-vous physiquement pour travailler ?',
+    questions_indirectes: [
+      { q: 'Comment vous sentez-vous en general en ce moment ? Vous dormez bien ?', indicateurs: ['forme_generale', 'sommeil'] },
+      { q: 'Si vous deviez porter des charges lourdes ou rester debout longtemps, comment ca se passerait ?', indicateurs: ['capacite_physique', 'limitations'] },
+      { q: 'Avez-vous un medecin que vous voyez regulierement ?', indicateurs: ['suivi_medical', 'acces_soins'] },
+    ],
     niveaux: {
-      1: 'Bonne santé, pas de limitation',
-      2: 'Léger, petits soucis gérables',
-      3: 'Modéré, suivi médical en cours',
+      1: 'Bonne sante, pas de limitation',
+      2: 'Leger, petits soucis gerables',
+      3: 'Modere, suivi medical en cours',
       4: 'Important, limitations physiques ou psychologiques',
-      5: 'Bloquant, incapacité partielle ou arrêts fréquents',
+      5: 'Bloquant, incapacite partielle ou arrets frequents',
     },
     actions_levee: [
-      'Orientation vers le médecin du travail',
-      'Aménagement du poste (ergonomie, rythme)',
+      'Orientation vers le medecin du travail',
+      'Amenagement du poste (ergonomie, rythme)',
       'Mise en relation avec un accompagnement psychologique',
-      'Dossier RQTH si adapté',
-      'Réduction ou adaptation des horaires',
+      'Dossier RQTH si adapte',
+      'Reduction ou adaptation des horaires',
     ],
   },
   finances: {
     label: 'Finances',
     icon: 'wallet',
-    question_simple: 'Arrivez-vous à couvrir vos dépenses courantes ?',
+    questions_indirectes: [
+      { q: 'Si votre machine a laver tombait en panne demain, comment feriez-vous ?', indicateurs: ['capacite_imprevus', 'epargne'] },
+      { q: 'Comment ca se passe pour vous en fin de mois en general ?', indicateurs: ['tension_budget', 'regulaire'] },
+      { q: 'Est-ce qu\'il y a des choses dont vous avez besoin mais que vous ne pouvez pas vous permettre en ce moment ?', indicateurs: ['privations', 'precarite'] },
+    ],
     niveaux: {
       1: 'Situation stable',
-      2: 'Léger, fin de mois un peu juste',
-      3: 'Modéré, difficultés ponctuelles',
-      4: 'Important, endettement ou impayés',
-      5: 'Bloquant, situation de précarité aiguë',
+      2: 'Leger, fin de mois un peu juste',
+      3: 'Modere, difficultes ponctuelles',
+      4: 'Important, endettement ou impayes',
+      5: 'Bloquant, situation de precarite aigue',
     },
     actions_levee: [
       'Orientation vers l\'assistant(e) social(e)',
-      'Aide aux démarches d\'accès aux droits (CAF, APL, prime d\'activité)',
-      'Accompagnement à la gestion budgétaire',
-      'Aide d\'urgence (épicerie sociale, aide alimentaire)',
-      'Signalement au référent RSA si applicable',
+      'Aide aux demarches d\'acces aux droits (CAF, APL, prime d\'activite)',
+      'Accompagnement a la gestion budgetaire',
+      'Aide d\'urgence (epicerie sociale, aide alimentaire)',
+      'Signalement au referent RSA si applicable',
     ],
   },
   famille: {
     label: 'Famille',
     icon: 'family',
-    question_simple: 'Avez-vous des contraintes familiales pour vos horaires ?',
+    questions_indirectes: [
+      { q: 'Parlez-moi un peu de votre quotidien a la maison. Comment s\'organise votre journee ?', indicateurs: ['charge_familiale', 'organisation'] },
+      { q: 'Si on devait changer vos horaires de travail, est-ce que ca poserait un probleme ?', indicateurs: ['flexibilite', 'contraintes_garde'] },
+      { q: 'Y a-t-il des personnes qui comptent sur vous au quotidien ?', indicateurs: ['personnes_a_charge', 'isolement'] },
+    ],
     niveaux: {
       1: 'Pas de contrainte',
-      2: 'Léger, organisation familiale stable',
-      3: 'Modéré, garde d\'enfants à organiser',
-      4: 'Important, parent isolé ou personne à charge',
-      5: 'Bloquant, situation familiale empêchant la disponibilité',
+      2: 'Leger, organisation familiale stable',
+      3: 'Modere, garde d\'enfants a organiser',
+      4: 'Important, parent isole ou personne a charge',
+      5: 'Bloquant, situation familiale empechant la disponibilite',
     },
     actions_levee: [
-      'Aménagement des horaires (compatible crèche / école)',
-      'Aide à la recherche de mode de garde',
-      'Orientation vers des dispositifs d\'aide aux parents isolés',
+      'Amenagement des horaires (compatible creche / ecole)',
+      'Aide a la recherche de mode de garde',
+      'Orientation vers des dispositifs d\'aide aux parents isoles',
       'Adaptation du contrat (temps partiel choisi)',
       'Mise en relation avec les services sociaux',
     ],
@@ -368,171 +440,332 @@ const FREINS_DEFINITIONS = {
   linguistique: {
     label: 'Langue',
     icon: 'language',
-    question_simple: 'Comprenez-vous bien le français au travail ?',
+    questions_indirectes: [
+      { q: 'Si je vous donne une notice a lire, comment ca se passerait ?', indicateurs: ['lecture', 'comprehension_ecrit'] },
+      { q: 'Est-ce qu\'il vous arrive de ne pas comprendre ce qu\'on vous dit au travail ?', indicateurs: ['comprehension_orale', 'frequence'] },
+      { q: 'Si vous deviez appeler un organisme administratif au telephone, comment ca se passerait ?', indicateurs: ['expression_orale', 'autonomie_communication'] },
+    ],
     niveaux: {
-      1: 'Maîtrise courante',
-      2: 'Bon niveau oral, écrit fragile',
-      3: 'Compréhension correcte, expression limitée',
-      4: 'Difficultés importantes à l\'oral et à l\'écrit',
-      5: 'Barrière linguistique forte, nécessite un interprète',
+      1: 'Maitrise courante',
+      2: 'Bon niveau oral, ecrit fragile',
+      3: 'Comprehension correcte, expression limitee',
+      4: 'Difficultes importantes a l\'oral et a l\'ecrit',
+      5: 'Barriere linguistique forte, necessite un interprete',
     },
     actions_levee: [
-      'Orientation vers des cours de FLE (Français Langue Étrangère)',
+      'Orientation vers des cours de FLE (Francais Langue Etrangere)',
       'Supports visuels et pictogrammes sur le poste',
-      'Binômage avec un collègue parlant la même langue',
+      'Binomage avec un collegue parlant la meme langue',
       'Ateliers sociolinguistiques (ASL)',
-      'Adaptation des consignes (oral, démonstration)',
+      'Adaptation des consignes (oral, demonstration)',
     ],
   },
   administratif: {
     label: 'Administratif',
     icon: 'file',
-    question_simple: 'Vos papiers et démarches sont-ils à jour ?',
+    questions_indirectes: [
+      { q: 'Quand vous recevez un courrier officiel, comment reagissez-vous ?', indicateurs: ['comprehension_admin', 'stress_courrier'] },
+      { q: 'Si vous deviez faire une demarche a la CAF ou a la prefecture, sauriez-vous comment faire ?', indicateurs: ['autonomie_demarches', 'connaissance_organismes'] },
+      { q: 'Est-ce qu\'il y a des papiers ou des demarches que vous n\'avez pas encore pu faire ?', indicateurs: ['retard_administratif', 'blocages'] },
+    ],
     niveaux: {
-      1: 'Tout est en règle',
-      2: 'Léger, quelques démarches en cours',
-      3: 'Modéré, aide nécessaire pour certaines démarches',
+      1: 'Tout est en regle',
+      2: 'Leger, quelques demarches en cours',
+      3: 'Modere, aide necessaire pour certaines demarches',
       4: 'Important, situation administrative complexe',
-      5: 'Bloquant, titre de séjour en cours / problème majeur',
+      5: 'Bloquant, titre de sejour en cours / probleme majeur',
     },
     actions_levee: [
-      'Orientation vers le référent socio-professionnel',
-      'Aide aux démarches administratives (CPAM, CAF, Pôle Emploi)',
-      'Accompagnement pour le renouvellement de titre de séjour',
-      'Aide à la constitution de dossiers',
-      'Mise en relation avec un écrivain public ou association d\'aide',
+      'Orientation vers le referent socio-professionnel',
+      'Aide aux demarches administratives (CPAM, CAF, Pole Emploi)',
+      'Accompagnement pour le renouvellement de titre de sejour',
+      'Aide a la constitution de dossiers',
+      'Mise en relation avec un ecrivain public ou association d\'aide',
     ],
   },
   numerique: {
-    label: 'Numérique',
+    label: 'Numerique',
     icon: 'computer',
-    question_simple: 'Utilisez-vous un téléphone ou un ordinateur facilement ?',
+    questions_indirectes: [
+      { q: 'Si quelqu\'un vous envoyait un email important, comment le liriez-vous ?', indicateurs: ['acces_email', 'maitrise_outil'] },
+      { q: 'Montrez-moi comment vous utilisez votre telephone. Quelles applications utilisez-vous ?', indicateurs: ['maitrise_smartphone', 'usages'] },
+      { q: 'Si vous deviez remplir un formulaire en ligne, comment ca se passerait ?', indicateurs: ['autonomie_numerique', 'confiance'] },
+    ],
     niveaux: {
-      1: 'À l\'aise avec le numérique',
-      2: 'Basique, sait utiliser un téléphone et les messages',
-      3: 'Modéré, besoin d\'aide pour certaines tâches',
-      4: 'Important, très peu à l\'aise',
-      5: 'Bloquant, pas d\'accès ou pas de compétences numériques',
+      1: 'A l\'aise avec le numerique',
+      2: 'Basique, sait utiliser un telephone et les messages',
+      3: 'Modere, besoin d\'aide pour certaines taches',
+      4: 'Important, tres peu a l\'aise',
+      5: 'Bloquant, pas d\'acces ou pas de competences numeriques',
     },
     actions_levee: [
-      'Ateliers d\'initiation numérique',
-      'Aide à la création d\'adresse email et espace France Connect',
-      'Accompagnement individuel pour les démarches en ligne',
-      'Prêt ou aide à l\'acquisition d\'un smartphone',
-      'Fiche réflexe avec les manipulations de base',
+      'Ateliers d\'initiation numerique',
+      'Aide a la creation d\'adresse email et espace France Connect',
+      'Accompagnement individuel pour les demarches en ligne',
+      'Pret ou aide a l\'acquisition d\'un smartphone',
+      'Fiche reflexe avec les manipulations de base',
     ],
   },
 };
 
 // ══════════════════════════════════════════════════════════════
-// MOTEUR D'ANALYSE — Profil PCM simplifié depuis questionnaire
+// QUESTIONNAIRE CIP — Grilles d'entretien par jalon
 // ══════════════════════════════════════════════════════════════
 
-function detectPCMFromQuestionnaire(diagnostic) {
-  const scores = {};
-  Object.keys(PCM_KNOWLEDGE).forEach(k => { scores[k] = 0; });
-
-  // Combiner toutes les réponses textuelles
-  const responses = [
-    diagnostic.pcm_q_travail_ideal,
-    diagnostic.pcm_q_reaction_stress,
-    diagnostic.pcm_q_relation_equipe,
-    diagnostic.pcm_q_motivation,
-    diagnostic.pcm_q_apprentissage,
-    diagnostic.pcm_q_communication,
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  if (!responses) return null;
-
-  // Score par mots-clés
-  for (const [type, data] of Object.entries(PCM_KNOWLEDGE)) {
-    for (const mot of data.mots_cles_detection) {
-      const regex = new RegExp(mot, 'gi');
-      const matches = responses.match(regex);
-      if (matches) scores[type] += matches.length;
-    }
-  }
-
-  // Normaliser en FAIBLE / MODÉRÉ / FORT
-  const maxScore = Math.max(...Object.values(scores), 1);
-  const result = {};
-  for (const [type, score] of Object.entries(scores)) {
-    const ratio = score / maxScore;
-    result[type] = {
-      score,
-      niveau: ratio >= 0.6 ? 'FORT' : ratio >= 0.3 ? 'MODÉRÉ' : 'FAIBLE',
-      label: PCM_KNOWLEDGE[type].nom,
-      description: PCM_KNOWLEDGE[type].niveau_label,
-    };
-  }
-
-  return result;
-}
+const CIP_QUESTIONNAIRES = {
+  'Diagnostic accueil': {
+    titre: 'Diagnostic d\'accueil — M+1 max',
+    description: 'Premier entretien CIP. Evaluation initiale des freins, definition du plan d\'action et des priorites.',
+    sections: [
+      {
+        titre: 'Accueil et parcours',
+        champ: 'cip_integration',
+        questions: [
+          'Racontez-moi votre parcours avant d\'arriver ici. Qu\'est-ce que vous avez fait avant ?',
+          'Comment s\'est passee votre arrivee dans l\'equipe ? Qu\'est-ce qui vous a surpris ?',
+          'Qu\'est-ce que vous avez compris du travail qu\'on va vous demander ici ?',
+        ],
+      },
+      {
+        titre: 'Capacites et competences',
+        champ: 'cip_competences',
+        questions: [
+          'Qu\'est-ce que vous savez bien faire ? De quoi etes-vous fier ?',
+          'Y a-t-il des choses qui vous semblent difficiles dans le travail actuel ?',
+          'Comment apprenez-vous le mieux : en regardant, en ecoutant, ou en faisant ?',
+        ],
+      },
+      {
+        titre: 'Projet et aspirations',
+        champ: 'cip_projet_pro',
+        questions: [
+          'Si tout etait possible, quel travail aimeriez-vous faire plus tard ?',
+          'Qu\'est-ce qui est important pour vous dans un travail ?',
+          'Est-ce qu\'il y a des metiers qui vous font envie ou au contraire qui ne vous interessent pas du tout ?',
+        ],
+      },
+      {
+        titre: 'Vie sociale et quotidien',
+        champ: 'cip_socialisation',
+        questions: [
+          'En dehors du travail, comment occupez-vous votre temps ?',
+          'Est-ce que vous participez a des activites, des associations, du sport ?',
+          'Avez-vous des amis ou de la famille sur qui compter si vous avez un coup dur ?',
+        ],
+      },
+    ],
+  },
+  'Bilan M+3': {
+    titre: 'Bilan M+3 — Premier bilan de suivi',
+    description: 'Evaluation des progres depuis le diagnostic. Avancement du plan d\'action, evolution des freins.',
+    sections: [
+      {
+        titre: 'Evolution depuis le diagnostic',
+        champ: 'cip_integration',
+        questions: [
+          'Depuis votre arrivee, qu\'est-ce qui a change pour vous au travail ?',
+          'Y a-t-il des choses qui sont plus faciles maintenant qu\'au debut ?',
+          'Comment vous entendez-vous avec vos collegues et votre encadrant ?',
+        ],
+      },
+      {
+        titre: 'Competences acquises',
+        champ: 'cip_competences',
+        questions: [
+          'Quels gestes professionnels maitrisez-vous bien maintenant ?',
+          'Est-ce qu\'on vous a confie de nouvelles responsabilites ?',
+          'Y a-t-il des formations ou des apprentissages que vous aimeriez faire ?',
+        ],
+      },
+      {
+        titre: 'Projet professionnel',
+        champ: 'cip_projet_pro',
+        questions: [
+          'Votre idee de ce que vous voulez faire apres a-t-elle evolue ?',
+          'Avez-vous decouvert des metiers ou des activites qui vous plaisent ici ?',
+          'De quoi avez-vous besoin pour avancer vers votre projet ?',
+        ],
+      },
+      {
+        titre: 'Vie quotidienne',
+        champ: 'cip_socialisation',
+        questions: [
+          'Comment ca se passe chez vous en ce moment ?',
+          'Est-ce que vous avez pu commencer des demarches qu\'on avait prevues ensemble ?',
+          'Y a-t-il quelque chose qui vous empeche d\'avancer en ce moment ?',
+        ],
+      },
+    ],
+  },
+  'Bilan M+6': {
+    titre: 'Bilan M+6 — Mi-parcours',
+    description: 'Bilan de mi-parcours. Point approfondi sur les competences, le projet pro et la levee des freins.',
+    sections: [
+      {
+        titre: 'Bilan d\'integration',
+        champ: 'cip_integration',
+        questions: [
+          'Aujourd\'hui, comment vous sentez-vous dans votre travail au quotidien ?',
+          'Qu\'est-ce qui a le plus change depuis le debut du parcours ?',
+          'Si un nouveau collegue arrivait, que lui conseilleriez-vous ?',
+        ],
+      },
+      {
+        titre: 'Competences et autonomie',
+        champ: 'cip_competences',
+        questions: [
+          'Sur quelles taches etes-vous maintenant completement autonome ?',
+          'Pourriez-vous former quelqu\'un sur certains gestes ?',
+          'Quelles competences vous manquent encore pour etre a l\'aise ?',
+        ],
+      },
+      {
+        titre: 'Projet de sortie',
+        champ: 'cip_projet_pro',
+        questions: [
+          'Avez-vous une idee plus precise du metier que vous visez ?',
+          'Savez-vous comment on cherche un emploi dans ce secteur ?',
+          'Avez-vous besoin d\'une formation complementaire ? Laquelle ?',
+          'Votre CV est-il a jour ? Savez-vous rediger une lettre de motivation ?',
+        ],
+      },
+      {
+        titre: 'Situation globale',
+        champ: 'cip_socialisation',
+        questions: [
+          'Globalement, est-ce que votre situation personnelle s\'est amelioree ?',
+          'Quels freins avez-vous reussi a lever ? Lesquels persistent ?',
+          'De quel soutien avez-vous encore besoin pour la suite ?',
+        ],
+      },
+    ],
+  },
+  'Bilan M+10': {
+    titre: 'Bilan M+10 — Preparation sortie',
+    description: 'Derniere phase avant la sortie. Focus sur la preparation a l\'emploi perenne.',
+    sections: [
+      {
+        titre: 'Bilan du parcours',
+        champ: 'cip_integration',
+        questions: [
+          'Quels sont les 3 progres dont vous etes le plus fier depuis le debut ?',
+          'Qu\'est-ce que ce parcours vous a apporte ?',
+          'Comment vous sentez-vous a l\'idee de quitter le dispositif ?',
+        ],
+      },
+      {
+        titre: 'Competences finales',
+        champ: 'cip_competences',
+        questions: [
+          'Quelles competences maitrisez-vous que vous ne connaissiez pas avant ?',
+          'Quels savoir-etre avez-vous developpes (ponctualite, travail en equipe...) ?',
+          'Etes-vous pret a occuper un poste similaire chez un autre employeur ?',
+        ],
+      },
+      {
+        titre: 'Recherche d\'emploi',
+        champ: 'cip_projet_pro',
+        questions: [
+          'Quel type d\'emploi recherchez-vous concretement ?',
+          'Avez-vous deja postule quelque part ? Des entretiens en vue ?',
+          'Connaissez-vous les employeurs du secteur sur le territoire ?',
+          'Avez-vous besoin d\'aide pour preparer vos entretiens d\'embauche ?',
+        ],
+      },
+      {
+        titre: 'Stabilite personnelle',
+        champ: 'cip_socialisation',
+        questions: [
+          'Votre situation de logement est-elle stable ?',
+          'Toutes vos demarches administratives sont-elles reglees ?',
+          'Avez-vous un reseau de soutien (famille, amis, associations) ?',
+          'Y a-t-il encore des freins qui pourraient bloquer votre insertion ?',
+        ],
+      },
+    ],
+  },
+  'Bilan Sortie': {
+    titre: 'Bilan de sortie — Fin de parcours',
+    description: 'Bilan final avec rapport de sortie. Classification positive/negative et recommandations CIP.',
+    sections: [
+      {
+        titre: 'Bilan global',
+        champ: 'cip_integration',
+        questions: [
+          'Si vous deviez resume votre parcours en quelques mots, que diriez-vous ?',
+          'Qu\'est-ce qui a ete le plus difficile ? Le plus positif ?',
+          'Recommanderiez-vous ce dispositif a quelqu\'un dans votre situation ?',
+        ],
+      },
+      {
+        titre: 'Acquis definitifs',
+        champ: 'cip_competences',
+        questions: [
+          'Quelles competences allez-vous emmener avec vous ?',
+          'Quel est votre niveau d\'autonomie professionnel aujourd\'hui ?',
+          'Quels conseils donneriez-vous a votre vous du debut du parcours ?',
+        ],
+      },
+      {
+        titre: 'Situation a la sortie',
+        champ: 'cip_projet_pro',
+        questions: [
+          'Avez-vous un emploi ou une formation prevue apres le parcours ?',
+          'Si oui, chez quel employeur / quel organisme de formation ?',
+          'Si non, quel est votre plan pour les prochaines semaines ?',
+        ],
+      },
+      {
+        titre: 'Bilan personnel',
+        champ: 'cip_socialisation',
+        questions: [
+          'Comment evaluez-vous votre situation personnelle par rapport au debut ?',
+          'Quels freins avez-vous leves ? Lesquels persistent ?',
+          'De quel suivi auriez-vous besoin apres votre sortie ?',
+        ],
+      },
+    ],
+  },
+};
 
 // ══════════════════════════════════════════════════════════════
 // MOTEUR — Analyse complète d'insertion
 // ══════════════════════════════════════════════════════════════
 
-function analyzeInsertion(employee, contracts, candidate, pcmReport, teamMembers, position, diagnostic) {
+function analyzeInsertion(employee, contracts, candidate, pcmReport, teamMembers, position, diagnostic, milestones) {
+  // Utiliser le PCM du recrutement (pas de questionnaire PCM en insertion)
   const pcm = pcmReport ? JSON.parse(pcmReport) : null;
   const baseType = pcm?.base?.type?.toLowerCase();
   const pcmKnowledge = baseType ? PCM_KNOWLEDGE[baseType] : null;
   const currentContract = contracts.find(c => c.is_current) || contracts[0];
-  const positionName = position?.title || employee.position || 'Non défini';
 
-  // Détecter PCM depuis questionnaire si pas de rapport officiel
-  const pcmFromQuestionnaire = diagnostic ? detectPCMFromQuestionnaire(diagnostic) : null;
-  const dominantPCM = pcmKnowledge || getDominantPCM(pcmFromQuestionnaire);
+  // Profil PCM depuis rapport recrutement uniquement
+  const profilPCM = buildPCMFromReport(pcm);
+  const dominantPCM = pcmKnowledge;
 
-  // ═══════════════════════════════════════
-  // 1) FICHE SYNTHÈSE PROFIL
-  // ═══════════════════════════════════════
   const ficheSynthese = buildFicheSynthese(employee, dominantPCM, candidate, diagnostic, currentContract);
-
-  // ═══════════════════════════════════════
-  // 2) PROFIL PCM SIMPLIFIÉ
-  // ═══════════════════════════════════════
-  const profilPCM = pcmFromQuestionnaire || buildPCMFromReport(pcm);
-
-  // ═══════════════════════════════════════
-  // 3) CARTOGRAPHIE DES COMPÉTENCES
-  // ═══════════════════════════════════════
   const competences = buildCompetences(employee, candidate, diagnostic, dominantPCM);
-
-  // ═══════════════════════════════════════
-  // 4) PISTES DE MÉTIERS
-  // ═══════════════════════════════════════
   const pistesMetiers = buildPistesMetiers(employee, dominantPCM, diagnostic, candidate);
-
-  // ═══════════════════════════════════════
-  // 5) PARCOURS DE DÉVELOPPEMENT
-  // ═══════════════════════════════════════
   const parcoursDev = buildParcoursDev(employee, contracts, dominantPCM, diagnostic, pistesMetiers);
-
-  // ═══════════════════════════════════════
-  // 6) RECOMMANDATIONS CIP
-  // ═══════════════════════════════════════
   const recommandationsCIP = buildRecommandationsCIP(dominantPCM, diagnostic, candidate);
-
-  // ═══════════════════════════════════════
-  // DIAGNOSTIC FREINS SOCIAUX
-  // ═══════════════════════════════════════
   const freinsSociaux = diagnostic ? buildFreinsSociaux(diagnostic) : null;
+
+  // Recommandations IA continues (tout au long du parcours)
+  const aiRecommendations = buildAIRecommendations(employee, dominantPCM, diagnostic, milestones, freinsSociaux, pistesMetiers);
 
   // Score de confiance
   let dataPoints = 0;
-  if (pcm || pcmFromQuestionnaire) dataPoints += 3;
+  if (pcm) dataPoints += 3;
   if (candidate?.cv_raw_text) dataPoints += 2;
   if (candidate?.interview_comment) dataPoints += 2;
   if (candidate?.practical_test_result) dataPoints += 1;
   if (diagnostic) dataPoints += 2;
   if (teamMembers.length > 0) dataPoints += 1;
 
-  // Sources de donnees utilisees pour l'analyse
   const data_sources = {
-    pcm: { available: !!(pcm || pcmFromQuestionnaire), label: 'Profil PCM', detail: pcm ? `Type ${pcmKnowledge?.nom || 'detecte'}` : pcmFromQuestionnaire ? 'Questionnaire CIP' : null },
+    pcm: { available: !!pcm, label: 'Profil PCM (recrutement)', detail: pcmKnowledge ? `Type ${pcmKnowledge.nom}` : null },
     cv: { available: !!candidate?.cv_raw_text, label: 'CV', detail: candidate?.cv_raw_text ? `${extractSkillsFromCV(candidate.cv_raw_text).length} competences detectees` : null },
-    interview: { available: !!(candidate?.interview_comment), label: 'Entretien', detail: candidate?.interviewer_name ? `Par ${candidate.interviewer_name}` : candidate?.interview_comment ? 'Commentaire disponible' : null },
+    interview: { available: !!(candidate?.interview_comment), label: 'Entretien recrutement', detail: candidate?.interviewer_name ? `Par ${candidate.interviewer_name}` : null },
     test_pratique: { available: !!(candidate?.practical_test_result), label: 'Test pratique', detail: candidate?.practical_test_result ? `Resultat : ${candidate.practical_test_result}` : null },
     diagnostic: { available: !!diagnostic, label: 'Diagnostic CIP', detail: diagnostic ? `${freinsSociaux?.nb_freins_majeurs || 0} frein(s) majeur(s)` : null },
   };
@@ -545,8 +778,8 @@ function analyzeInsertion(employee, contracts, candidate, pcmReport, teamMembers
     parcours_dev: parcoursDev,
     recommandations_cip: recommandationsCIP,
     freins_sociaux: freinsSociaux,
+    ai_recommendations: aiRecommendations,
     data_sources,
-    // Retrocompatibilite
     profil_synthese: ficheSynthese.resume,
     adequation_poste: pistesMetiers.length > 0 ? { score: pistesMetiers[0].score, niveau: pistesMetiers[0].score >= 75 ? 'Bonne' : 'Acceptable', commentaire: pistesMetiers[0].pourquoi } : null,
     parcours_insertion: parcoursDev,
@@ -1047,6 +1280,119 @@ function buildFreinsSociaux(diagnostic) {
   return { freins, plan_actions, nb_freins_majeurs: freins.filter(f => f.niveau >= 4).length };
 }
 
+// ══════════════════════════════════════════════════════════════
+// MOTEUR IA — Recommandations continues tout au long du parcours
+// ══════════════════════════════════════════════════════════════
+
+function buildAIRecommendations(employee, pcm, diagnostic, milestones, freinsSociaux, pistesMetiers) {
+  const recommandations = { alertes: [], propositions: [], accompagnement: [] };
+  const ms = milestones || [];
+
+  // Alertes basees sur les freins
+  if (freinsSociaux) {
+    const freinsBloquants = freinsSociaux.freins.filter(f => f.niveau >= 4);
+    for (const f of freinsBloquants) {
+      recommandations.alertes.push({
+        type: 'frein_bloquant',
+        urgence: 'haute',
+        message: `Frein ${f.label} a niveau ${f.niveau}/5 — action prioritaire requise`,
+        actions_suggerees: f.actions.slice(0, 2),
+      });
+    }
+    const freinsModeres = freinsSociaux.freins.filter(f => f.niveau === 3);
+    for (const f of freinsModeres) {
+      recommandations.alertes.push({
+        type: 'frein_modere',
+        urgence: 'moyenne',
+        message: `Frein ${f.label} modere (${f.niveau}/5) — surveiller l'evolution`,
+        actions_suggerees: f.actions.slice(0, 1),
+      });
+    }
+  }
+
+  // Analyse evolution freins entre bilans
+  if (ms.length >= 2) {
+    const sorted = [...ms].filter(m => m.status === 'realise' && m.frein_mobilite != null).sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+    if (sorted.length >= 2) {
+      const last = sorted[sorted.length - 1];
+      const prev = sorted[sorted.length - 2];
+      const freinKeys = ['mobilite', 'sante', 'finances', 'famille', 'linguistique', 'administratif', 'numerique'];
+      for (const key of freinKeys) {
+        const lastVal = last[`frein_${key}`] || 0;
+        const prevVal = prev[`frein_${key}`] || 0;
+        if (lastVal > prevVal) {
+          recommandations.alertes.push({
+            type: 'frein_regression',
+            urgence: 'haute',
+            message: `Frein ${key} en regression (${prevVal} -> ${lastVal}) entre ${prev.milestone_type} et ${last.milestone_type}`,
+            actions_suggerees: ['Entretien urgent avec la CIP', 'Revoir le plan d\'action sur ce frein'],
+          });
+        } else if (lastVal < prevVal) {
+          recommandations.propositions.push({
+            type: 'frein_progression',
+            message: `Bonne progression sur ${key} (${prevVal} -> ${lastVal}). Continuer le plan d\'action.`,
+          });
+        }
+      }
+    }
+  }
+
+  // Propositions basees sur le PCM
+  if (pcm) {
+    recommandations.accompagnement.push({
+      type: 'communication',
+      message: `Utiliser le canal ${pcm.canal} pour communiquer avec ${employee.first_name}`,
+      detail: pcm.conseils_manager.join('. '),
+    });
+    recommandations.accompagnement.push({
+      type: 'motivation',
+      message: `Besoin principal : ${pcm.besoin}`,
+      detail: `Environnement ideal : ${pcm.environnement_ideal}`,
+    });
+    recommandations.accompagnement.push({
+      type: 'vigilance_stress',
+      message: `Sous stress : ${pcm.faiblesses_stress.join(', ')}`,
+      detail: pcm.risques_insertion,
+    });
+  }
+
+  // Propositions metiers
+  if (pistesMetiers && pistesMetiers.length > 0) {
+    const topMetier = pistesMetiers[0];
+    if (topMetier.score >= 70) {
+      recommandations.propositions.push({
+        type: 'metier_adapte',
+        message: `Metier recommande : ${topMetier.metier} (score ${topMetier.score}%)`,
+        detail: topMetier.pourquoi,
+      });
+    }
+  }
+
+  // Alertes de planification
+  const msNonRealises = ms.filter(m => m.status === 'a_planifier');
+  for (const m of msNonRealises) {
+    const dueDate = new Date(m.due_date);
+    const daysUntil = Math.round((dueDate - new Date()) / 86400000);
+    if (daysUntil < 0) {
+      recommandations.alertes.push({
+        type: 'retard_jalon',
+        urgence: 'haute',
+        message: `${m.milestone_type} en retard de ${Math.abs(daysUntil)} jours — planifier en urgence`,
+        actions_suggerees: ['Fixer une date d\'entretien immediatement'],
+      });
+    } else if (daysUntil <= 14) {
+      recommandations.alertes.push({
+        type: 'jalon_proche',
+        urgence: 'moyenne',
+        message: `${m.milestone_type} prevu dans ${daysUntil} jours — penser a planifier`,
+        actions_suggerees: ['Verifier la disponibilite du CIP', 'Preparer les documents'],
+      });
+    }
+  }
+
+  return recommandations;
+}
+
 function extractSkillsFromCV(cvText) {
   if (!cvText) return [];
   const skillPatterns = [
@@ -1064,6 +1410,94 @@ function extractSkillsFromCV(cvText) {
     if (match) found.add(match[0].trim());
   }
   return [...found].slice(0, 10);
+}
+
+// ══════════════════════════════════════════════════════════════
+// TIMELINE — Historique visuel du parcours embauche → sortie
+// ══════════════════════════════════════════════════════════════
+
+function buildTimeline(employee, contracts, milestones, diagnostic) {
+  const events = [];
+  const currentContract = contracts.find(c => c.is_current) || contracts[0];
+  const startDate = employee.insertion_start_date || currentContract?.start_date;
+  const endDate = currentContract?.end_date;
+
+  // 1. Embauche
+  if (startDate) {
+    events.push({
+      type: 'embauche',
+      label: 'Embauche',
+      date: startDate,
+      status: 'realise',
+      description: `Debut du contrat ${currentContract?.contract_type || 'CDDI'}`,
+    });
+  }
+
+  // 2. Diagnostic d'accueil
+  const diagMilestone = milestones.find(m => m.milestone_type === 'Diagnostic accueil');
+  events.push({
+    type: 'milestone',
+    label: 'Diagnostic accueil',
+    date: diagMilestone?.completed_date || diagMilestone?.due_date || (startDate ? addMonths(startDate, 1) : null),
+    status: diagMilestone?.status || 'a_planifier',
+    milestone_id: diagMilestone?.id,
+    has_diagnostic: !!diagnostic,
+  });
+
+  // 3-5. Bilans M+3, M+6, M+10
+  for (const type of ['Bilan M+3', 'Bilan M+6', 'Bilan M+10']) {
+    const ms = milestones.find(m => m.milestone_type === type);
+    const monthOffset = type === 'Bilan M+3' ? 3 : type === 'Bilan M+6' ? 6 : 10;
+    events.push({
+      type: 'milestone',
+      label: type,
+      date: ms?.completed_date || ms?.due_date || (startDate ? addMonths(startDate, monthOffset) : null),
+      status: ms?.status || 'a_planifier',
+      milestone_id: ms?.id,
+      avis_global: ms?.avis_global,
+    });
+  }
+
+  // 6. Bilan Sortie
+  const sortieMilestone = milestones.find(m => m.milestone_type === 'Bilan Sortie');
+  events.push({
+    type: 'milestone',
+    label: 'Bilan Sortie',
+    date: sortieMilestone?.completed_date || sortieMilestone?.due_date || endDate,
+    status: sortieMilestone?.status || 'a_planifier',
+    milestone_id: sortieMilestone?.id,
+    sortie_classification: sortieMilestone?.sortie_classification,
+  });
+
+  // 7. Fin de contrat
+  if (endDate) {
+    events.push({
+      type: 'fin_contrat',
+      label: 'Fin de contrat',
+      date: endDate,
+      status: new Date(endDate) < new Date() ? 'realise' : 'a_venir',
+    });
+  }
+
+  return {
+    events,
+    start_date: startDate,
+    end_date: endDate,
+    duree_totale_mois: startDate && endDate ? Math.round((new Date(endDate) - new Date(startDate)) / (30.44 * 86400000)) : null,
+    progression: calculateProgression(events),
+  };
+}
+
+function addMonths(dateStr, months) {
+  const d = new Date(dateStr);
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().split('T')[0];
+}
+
+function calculateProgression(events) {
+  const milestones = events.filter(e => e.type === 'milestone');
+  const realised = milestones.filter(e => e.status === 'realise').length;
+  return milestones.length > 0 ? Math.round((realised / milestones.length) * 100) : 0;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1109,8 +1543,6 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
         frein_linguistique, frein_linguistique_detail, frein_linguistique_causes,
         frein_administratif, frein_administratif_detail, frein_administratif_causes,
         frein_numerique, frein_numerique_detail, frein_numerique_causes,
-        pcm_q_travail_ideal, pcm_q_reaction_stress, pcm_q_relation_equipe,
-        pcm_q_motivation, pcm_q_apprentissage, pcm_q_communication,
         obs_taches_realisees, obs_points_forts, obs_difficultes,
         obs_comportement_equipe, obs_autonomie_ponctualite,
         pref_aime_faire, pref_ne_veut_plus, pref_environnement_prefere,
@@ -1123,11 +1555,10 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
         $1, $2, $2,
         $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
-        $29, $30, $31, $32, $33, $34,
-        $35, $36, $37, $38, $39,
-        $40, $41, $42, $43, $44,
-        $45, $46, $47, $48, $49, $50,
-        $51, $52
+        $29, $30, $31, $32, $33,
+        $34, $35, $36, $37, $38,
+        $39, $40, $41, $42, $43, $44,
+        $45, $46
       )
       ON CONFLICT (employee_id) DO UPDATE SET
         updated_by = $2, updated_at = NOW(),
@@ -1140,18 +1571,15 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
         frein_linguistique = $20, frein_linguistique_detail = $21, frein_linguistique_causes = $22,
         frein_administratif = $23, frein_administratif_detail = $24, frein_administratif_causes = $25,
         frein_numerique = $26, frein_numerique_detail = $27, frein_numerique_causes = $28,
-        pcm_q_travail_ideal = $29, pcm_q_reaction_stress = $30,
-        pcm_q_relation_equipe = $31, pcm_q_motivation = $32,
-        pcm_q_apprentissage = $33, pcm_q_communication = $34,
-        obs_taches_realisees = $35, obs_points_forts = $36, obs_difficultes = $37,
-        obs_comportement_equipe = $38, obs_autonomie_ponctualite = $39,
-        pref_aime_faire = $40, pref_ne_veut_plus = $41,
-        pref_environnement_prefere = $42, pref_environnement_eviter = $43,
-        pref_objectifs = $44,
-        explorama_interets = $45, explorama_rejets = $46,
-        explorama_gestes_positifs = $47, explorama_gestes_negatifs = $48,
-        explorama_environnements = $49, explorama_rythme = $50,
-        cip_hypotheses_metiers = $51, cip_questions = $52
+        obs_taches_realisees = $29, obs_points_forts = $30, obs_difficultes = $31,
+        obs_comportement_equipe = $32, obs_autonomie_ponctualite = $33,
+        pref_aime_faire = $34, pref_ne_veut_plus = $35,
+        pref_environnement_prefere = $36, pref_environnement_eviter = $37,
+        pref_objectifs = $38,
+        explorama_interets = $39, explorama_rejets = $40,
+        explorama_gestes_positifs = $41, explorama_gestes_negatifs = $42,
+        explorama_environnements = $43, explorama_rythme = $44,
+        cip_hypotheses_metiers = $45, cip_questions = $46
       RETURNING *
     `, [
       empId, req.user.id,
@@ -1165,9 +1593,6 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
       d.frein_linguistique || 1, d.frein_linguistique_detail || null, d.frein_linguistique_causes || null,
       d.frein_administratif || 1, d.frein_administratif_detail || null, d.frein_administratif_causes || null,
       d.frein_numerique || 1, d.frein_numerique_detail || null, d.frein_numerique_causes || null,
-      d.pcm_q_travail_ideal || null, d.pcm_q_reaction_stress || null,
-      d.pcm_q_relation_equipe || null, d.pcm_q_motivation || null,
-      d.pcm_q_apprentissage || null, d.pcm_q_communication || null,
       d.obs_taches_realisees || null, d.obs_points_forts || null,
       d.obs_difficultes || null, d.obs_comportement_equipe || null,
       d.obs_autonomie_ponctualite || null,
@@ -1269,11 +1694,32 @@ router.get('/:employeeId', async (req, res) => {
       diagnostic = diagRes.rows[0] || null;
     } catch { /* table might not exist yet */ }
 
-    // 8. Analyse complète
+    // 8. Jalons insertion
+    let milestones = [];
+    try {
+      const msRes = await pool.query(
+        'SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date', [empId]
+      );
+      milestones = msRes.rows;
+    } catch { /* table might not exist yet */ }
+
+    // 9. Plan d'action CIP
+    let actionPlans = [];
+    try {
+      const apRes = await pool.query(
+        'SELECT * FROM cip_action_plans WHERE employee_id = $1 ORDER BY created_at', [empId]
+      );
+      actionPlans = apRes.rows;
+    } catch { /* table might not exist yet */ }
+
+    // 10. Analyse complete
     const analysis = analyzeInsertion(
       employee, contractsRes.rows, candidate, pcmReport,
-      teamMembers, position, diagnostic
+      teamMembers, position, diagnostic, milestones
     );
+
+    // 11. Timeline du parcours
+    const timeline = buildTimeline(employee, contractsRes.rows, milestones, diagnostic);
 
     res.json({
       employee: {
@@ -1283,6 +1729,8 @@ router.get('/:employeeId', async (req, res) => {
         team_name: employee.team_name,
         position: employee.position,
         is_active: employee.is_active,
+        insertion_start_date: employee.insertion_start_date,
+        insertion_status: employee.insertion_status,
       },
       has_pcm: !!pcmReport,
       has_candidate_data: !!candidate,
@@ -1290,6 +1738,9 @@ router.get('/:employeeId', async (req, res) => {
       has_interview: !!candidate?.interview_comment,
       has_diagnostic: !!diagnostic,
       nb_contracts: contractsRes.rows.length,
+      milestones,
+      action_plans: actionPlans,
+      timeline,
       ...analysis,
     });
   } catch (err) {
@@ -1336,7 +1787,7 @@ router.get('/', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// JALONS INSERTION ASP — M+2, M+6, M+10
+// JALONS INSERTION — Diagnostic accueil, M+3, M+6, M+10, Sortie
 // ══════════════════════════════════════════════════════════════
 
 // GET /api/insertion/milestones/:employeeId — Tous les jalons d'un salarié
@@ -1379,7 +1830,7 @@ router.post('/milestones', async (req, res) => {
   }
 });
 
-// PUT /api/insertion/milestones/:id — Mettre à jour un jalon (entretien bilan)
+// PUT /api/insertion/milestones/:id — Mettre a jour un jalon (entretien bilan)
 router.put('/milestones/:id', async (req, res) => {
   try {
     const d = req.body;
@@ -1395,26 +1846,41 @@ router.put('/milestones/:id', async (req, res) => {
         frein_famille = COALESCE($8, frein_famille),
         frein_linguistique = COALESCE($9, frein_linguistique),
         frein_administratif = COALESCE($10, frein_administratif),
-        bilan_professionnel = COALESCE($11, bilan_professionnel),
-        bilan_social = COALESCE($12, bilan_social),
-        objectifs_realises = COALESCE($13, objectifs_realises),
-        objectifs_prochaine_periode = COALESCE($14, objectifs_prochaine_periode),
-        observations = COALESCE($15, observations),
-        actions_a_mener = COALESCE($16, actions_a_mener),
-        avis_global = COALESCE($17, avis_global),
+        frein_numerique = COALESCE($11, frein_numerique),
+        cip_integration = COALESCE($12, cip_integration),
+        cip_competences = COALESCE($13, cip_competences),
+        cip_projet_pro = COALESCE($14, cip_projet_pro),
+        cip_socialisation = COALESCE($15, cip_socialisation),
+        bilan_professionnel = COALESCE($16, bilan_professionnel),
+        bilan_social = COALESCE($17, bilan_social),
+        objectifs_realises = COALESCE($18, objectifs_realises),
+        objectifs_prochaine_periode = COALESCE($19, objectifs_prochaine_periode),
+        observations = COALESCE($20, observations),
+        actions_a_mener = COALESCE($21, actions_a_mener),
+        avis_global = COALESCE($22, avis_global),
+        sortie_classification = COALESCE($23, sortie_classification),
+        sortie_type = COALESCE($24, sortie_type),
+        sortie_commentaires = COALESCE($25, sortie_commentaires),
+        sortie_employeur = COALESCE($26, sortie_employeur),
+        sortie_formation = COALESCE($27, sortie_formation),
+        ai_recommendations = COALESCE($28, ai_recommendations),
         updated_at = NOW()
-      WHERE id = $18 RETURNING *`,
+      WHERE id = $29 RETURNING *`,
       [
         d.status, d.interview_date, d.interviewer_id, d.completed_date,
         d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
-        d.frein_linguistique, d.frein_administratif,
+        d.frein_linguistique, d.frein_administratif, d.frein_numerique,
+        d.cip_integration, d.cip_competences, d.cip_projet_pro, d.cip_socialisation,
         d.bilan_professionnel, d.bilan_social,
         d.objectifs_realises, d.objectifs_prochaine_periode,
         d.observations, d.actions_a_mener, d.avis_global,
+        d.sortie_classification, d.sortie_type, d.sortie_commentaires,
+        d.sortie_employeur, d.sortie_formation,
+        d.ai_recommendations ? JSON.stringify(d.ai_recommendations) : null,
         req.params.id,
       ]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Jalon non trouvé' });
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Jalon non trouve' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[INSERTION] Erreur milestones PUT :', err);
@@ -1444,8 +1910,8 @@ router.get('/milestones/:employeeId/radar', async (req, res) => {
       [empId]
     );
 
-    const axes = ['Mobilité', 'Santé', 'Finances', 'Famille', 'Langue', 'Administratif'];
-    const axeKeys = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif'];
+    const axes = ['Mobilite', 'Sante', 'Finances', 'Famille', 'Langue', 'Administratif', 'Numerique'];
+    const axeKeys = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif', 'frein_numerique'];
 
     const series = [];
 
@@ -1493,131 +1959,149 @@ router.get('/milestones-overview', async (req, res) => {
   }
 });
 
-// GET /api/insertion/interview-template/:milestoneType — Template d'entretien par période
+// GET /api/insertion/interview-template/:milestoneType — Questionnaire CIP par jalon
 router.get('/interview-template/:milestoneType', (req, res) => {
-  const templates = {
-    'Bilan M+2': {
-      titre: 'Bilan d\'intégration — M+2',
-      description: 'Premier bilan après 2 mois de parcours. Focus sur l\'adaptation au poste et l\'environnement de travail.',
-      sections: [
-        {
-          titre: 'Intégration professionnelle',
-          questions: [
-            'Comment s\'est passée votre arrivée dans l\'équipe ?',
-            'Les consignes et les tâches sont-elles claires pour vous ?',
-            'Y a-t-il des difficultés dans l\'exécution de votre travail ?',
-            'Comment vous sentez-vous avec vos collègues ?',
-          ],
-        },
-        {
-          titre: 'Situation sociale',
-          questions: [
-            'Comment vous déplacez-vous pour venir travailler ? (Mobilité)',
-            'Comment vous sentez-vous physiquement ? (Santé)',
-            'Arrivez-vous à gérer vos dépenses courantes ? (Finances)',
-            'Avez-vous des contraintes familiales qui impactent le travail ? (Famille)',
-            'Comprenez-vous bien les consignes en français ? (Langue)',
-            'Vos démarches administratives sont-elles à jour ? (Administratif)',
-          ],
-        },
-        {
-          titre: 'Objectifs M+2 à M+6',
-          questions: [
-            'Quels objectifs aimeriez-vous atteindre d\'ici le prochain bilan ?',
-            'De quel soutien avez-vous besoin ?',
-          ],
-        },
-      ],
-    },
-    'Bilan M+6': {
-      titre: 'Bilan de mi-parcours — M+6',
-      description: 'Bilan intermédiaire. Évaluation des progrès, des compétences acquises et de l\'évolution des freins.',
-      sections: [
-        {
-          titre: 'Bilan des objectifs M+2',
-          questions: [
-            'Quels objectifs fixés au M+2 ont été atteints ?',
-            'Quels objectifs restent à travailler ?',
-            'Quelles compétences avez-vous développées ?',
-          ],
-        },
-        {
-          titre: 'Évolution professionnelle',
-          questions: [
-            'Êtes-vous plus autonome sur votre poste ?',
-            'Quels gestes professionnels maîtrisez-vous bien ?',
-            'Y a-t-il des tâches que vous aimeriez apprendre ?',
-            'Avez-vous une idée du métier que vous visez après le parcours ?',
-          ],
-        },
-        {
-          titre: 'Situation sociale — Évolution',
-          questions: [
-            'Comment a évolué votre situation en termes de mobilité ?',
-            'Comment a évolué votre santé depuis le début ?',
-            'Votre situation financière est-elle plus stable ?',
-            'Y a-t-il des changements familiaux à signaler ?',
-            'Votre niveau de français a-t-il progressé ?',
-            'Vos démarches administratives avancent-elles ?',
-          ],
-        },
-        {
-          titre: 'Objectifs M+6 à M+10',
-          questions: [
-            'Quels objectifs pour la dernière phase du parcours ?',
-            'Souhaitez-vous commencer à préparer votre sortie ?',
-          ],
-        },
-      ],
-    },
-    'Bilan M+10': {
-      titre: 'Bilan de fin de parcours — M+10',
-      description: 'Bilan final avant la sortie du dispositif. Préparation à l\'emploi pérenne ou à la formation qualifiante.',
-      sections: [
-        {
-          titre: 'Bilan global du parcours',
-          questions: [
-            'Quels sont vos principaux acquis depuis le début du parcours ?',
-            'Quelles compétences professionnelles maîtrisez-vous ?',
-            'Qu\'est-ce qui a le plus changé dans votre situation ?',
-          ],
-        },
-        {
-          titre: 'Projet professionnel',
-          questions: [
-            'Quel métier visez-vous ?',
-            'Avez-vous identifié des employeurs potentiels ?',
-            'Avez-vous besoin d\'une formation complémentaire ?',
-            'Votre CV est-il à jour ?',
-            'Êtes-vous prêt(e) pour des entretiens d\'embauche ?',
-          ],
-        },
-        {
-          titre: 'Situation sociale — Bilan final',
-          questions: [
-            'Mobilité : êtes-vous autonome dans vos déplacements ?',
-            'Santé : êtes-vous en capacité de travailler normalement ?',
-            'Finances : votre situation est-elle stabilisée ?',
-            'Famille : les contraintes familiales sont-elles gérées ?',
-            'Langue : vous sentez-vous à l\'aise en français au travail ?',
-            'Administratif : tous vos papiers sont-ils en règle ?',
-          ],
-        },
-        {
-          titre: 'Préparation sortie',
-          questions: [
-            'Souhaitez-vous rester dans le secteur textile / recyclage ?',
-            'Avez-vous des candidatures en cours ?',
-            'De quel accompagnement avez-vous encore besoin ?',
-          ],
-        },
-      ],
-    },
-  };
-
-  const template = templates[req.params.milestoneType];
+  const template = CIP_QUESTIONNAIRES[req.params.milestoneType];
   if (!template) return res.status(404).json({ error: 'Type de bilan inconnu' });
   res.json(template);
+});
+
+// POST /api/insertion/milestones/:employeeId/initialize — Creer tous les jalons d'un parcours
+router.post('/milestones/:employeeId/initialize', async (req, res) => {
+  try {
+    const empId = req.params.employeeId;
+    const emp = await pool.query('SELECT insertion_start_date FROM employees WHERE id = $1', [empId]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Employe non trouve' });
+
+    const startDate = emp.rows[0].insertion_start_date || new Date().toISOString().split('T')[0];
+    const milestonesDef = [
+      { type: 'Diagnostic accueil', months: 1 },
+      { type: 'Bilan M+3', months: 3 },
+      { type: 'Bilan M+6', months: 6 },
+      { type: 'Bilan M+10', months: 10 },
+      { type: 'Bilan Sortie', months: 12 },
+    ];
+
+    const results = [];
+    for (const ms of milestonesDef) {
+      const dueDate = addMonths(startDate, ms.months);
+      const result = await pool.query(
+        `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (employee_id, milestone_type) DO UPDATE SET
+           due_date = COALESCE(NULLIF(insertion_milestones.due_date::text, ''), $3::date),
+           updated_at = NOW()
+         RETURNING *`,
+        [empId, ms.type, dueDate, req.user.id]
+      );
+      results.push(result.rows[0]);
+    }
+
+    res.status(201).json(results);
+  } catch (err) {
+    console.error('[INSERTION] Erreur initialize milestones :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// PLAN D'ACTION CIP
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/insertion/action-plans/:employeeId — Tous les plans d'action
+router.get('/action-plans/:employeeId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT ap.*, im.milestone_type
+       FROM cip_action_plans ap
+       JOIN insertion_milestones im ON ap.milestone_id = im.id
+       WHERE ap.employee_id = $1
+       ORDER BY ap.priority DESC, ap.created_at`,
+      [req.params.employeeId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[INSERTION] Erreur action-plans GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/action-plans — Creer une action
+router.post('/action-plans', async (req, res) => {
+  try {
+    const { milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes } = req.body;
+    if (!milestone_id || !employee_id || !action_label || !category) {
+      return res.status(400).json({ error: 'milestone_id, employee_id, action_label et category requis' });
+    }
+    const result = await pool.query(
+      `INSERT INTO cip_action_plans (milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [milestone_id, employee_id, action_label, category, frein_type || null, priority || 'moyenne', echeance || null, notes || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[INSERTION] Erreur action-plans POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/action-plans/:id — Mettre a jour une action
+router.put('/action-plans/:id', async (req, res) => {
+  try {
+    const d = req.body;
+    const result = await pool.query(
+      `UPDATE cip_action_plans SET
+        action_label = COALESCE($1, action_label),
+        status = COALESCE($2, status),
+        priority = COALESCE($3, priority),
+        echeance = COALESCE($4, echeance),
+        notes = COALESCE($5, notes),
+        updated_at = NOW()
+      WHERE id = $6 RETURNING *`,
+      [d.action_label, d.status, d.priority, d.echeance, d.notes, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Action non trouvee' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[INSERTION] Erreur action-plans PUT :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/insertion/action-plans/:id
+router.delete('/action-plans/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM cip_action_plans WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[INSERTION] Erreur action-plans DELETE :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/timeline/:employeeId — Timeline du parcours
+router.get('/timeline/:employeeId', async (req, res) => {
+  try {
+    const empId = req.params.employeeId;
+    const empRes = await pool.query(
+      'SELECT e.*, ec.start_date, ec.end_date, ec.contract_type FROM employees e LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true WHERE e.id = $1',
+      [empId]
+    );
+    if (empRes.rows.length === 0) return res.status(404).json({ error: 'Employe non trouve' });
+
+    const msRes = await pool.query('SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date', [empId]);
+    let diagnostic = null;
+    try {
+      const diagRes = await pool.query('SELECT created_at FROM insertion_diagnostics WHERE employee_id = $1', [empId]);
+      diagnostic = diagRes.rows[0] || null;
+    } catch {}
+
+    const timeline = buildTimeline(empRes.rows[0], [empRes.rows[0]], msRes.rows, diagnostic);
+    res.json(timeline);
+  } catch (err) {
+    console.error('[INSERTION] Erreur timeline :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 module.exports = router;

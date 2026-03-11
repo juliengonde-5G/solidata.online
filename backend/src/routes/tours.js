@@ -263,6 +263,8 @@ let SCORING_CONFIG = {
   vehicleFillTarget: 0.95,
   avgSpeed: 30,          // km/h vitesse moyenne
   timePerCav: 10,        // min par CAV
+  maxDailyHours: 7,      // max 7h de collecte par jour
+  returnEveryKg: 2000,   // retour centre de tri toutes les 2 tonnes
   historyDays: 180,      // jours d'historique analysés
   weeklyCollectionCycle: 7, // hypothèse collecte hebdomadaire
   densityThreshold: 3,   // nb conteneurs pour bonus densité
@@ -590,8 +592,10 @@ async function generateIntelligentTour(vehicleId, date) {
   // 5. Trier par score décroissant
   scoredCavs.sort((a, b) => b.score - a.score);
 
-  // 6. Sélectionner les CAV pour remplir le véhicule à 95% de sa capacité
+  // 6. Selectionner les CAV avec contrainte 7h max + retour centre toutes les 2t
   const maxCapacity = vehicle.max_capacity_kg * 0.95;
+  const maxDailyMinutes = (SCORING_CONFIG.maxDailyHours || 7) * 60;
+  const returnThresholdKg = SCORING_CONFIG.returnEveryKg || 2000;
   let estimatedWeight = 0;
   const selectedCavs = [];
   let urgentCount = 0;
@@ -606,18 +610,66 @@ async function generateIntelligentTour(vehicleId, date) {
     if (estimatedWeight >= maxCapacity) break;
   }
 
-  if (selectedCavs.length === 0) throw new Error('Aucun CAV sélectionné — vérifiez la capacité du véhicule et les données de remplissage.');
+  if (selectedCavs.length === 0) throw new Error('Aucun CAV selectionne — verifiez la capacite du vehicule et les donnees de remplissage.');
 
   // 7. Optimiser la route (TSP + 2-opt)
   let optimizedRoute = nearestNeighborTSP(selectedCavs, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
   optimizedRoute = twoOptImprove(optimizedRoute, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
 
-  // 8. Calculer distance et durée (avec facteur trafic / météo)
-  const totalDistance = calculateTotalDistance(optimizedRoute, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  // 8. Calculer distance et duree avec retours intermediaires au centre de tri
+  // Toutes les 2t chargees, le camion doit revenir au centre de tri
   const dateStr = typeof date === 'string' ? date : new Date(date).toISOString().split('T')[0];
   const context = await getContextForDate(dateStr);
-  const baseDurationMin = Math.round((totalDistance / SCORING_CONFIG.avgSpeed) * 60 + selectedCavs.length * SCORING_CONFIG.timePerCav);
-  const estimatedDuration = Math.round(baseDurationMin * context.durationFactor * context.trafficFactor);
+
+  let totalDistance = 0;
+  let totalDuration = 0;
+  let currentLoad = 0;
+  let nbRetours = 0;
+  let lastLat = CENTRE_TRI_LAT, lastLng = CENTRE_TRI_LNG;
+  const routeWithReturns = [];
+
+  for (let i = 0; i < optimizedRoute.length; i++) {
+    const cav = optimizedRoute[i];
+    const cavWeight = cav.prediction?.factors?.avgWeight || 50;
+    const distToCav = haversineDistance(lastLat, lastLng, cav.latitude, cav.longitude);
+
+    // Verifier si on doit retourner au centre avant (seuil 2t)
+    if (currentLoad + cavWeight > returnThresholdKg && currentLoad > 0) {
+      // Retour au centre de tri
+      const distRetour = haversineDistance(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+      totalDistance += distRetour;
+      totalDuration += Math.round((distRetour / SCORING_CONFIG.avgSpeed) * 60) + 15; // 15min dechargement
+      lastLat = CENTRE_TRI_LAT;
+      lastLng = CENTRE_TRI_LNG;
+      currentLoad = 0;
+      nbRetours++;
+      routeWithReturns.push({ type: 'retour_centre', after_cav_index: i - 1 });
+    }
+
+    // Aller au CAV
+    const dist = haversineDistance(lastLat, lastLng, cav.latitude, cav.longitude);
+    totalDistance += dist;
+    totalDuration += Math.round((dist / SCORING_CONFIG.avgSpeed) * 60) + SCORING_CONFIG.timePerCav;
+    currentLoad += cavWeight;
+    lastLat = cav.latitude;
+    lastLng = cav.longitude;
+
+    // Verifier contrainte 7h
+    const durationWithReturn = totalDuration + Math.round((haversineDistance(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG) / SCORING_CONFIG.avgSpeed) * 60);
+    if (durationWithReturn > maxDailyMinutes) {
+      // Tronquer la tournee ici
+      optimizedRoute = optimizedRoute.slice(0, i + 1);
+      estimatedWeight = optimizedRoute.reduce((s, c) => s + (c.prediction?.factors?.avgWeight || 50), 0);
+      break;
+    }
+  }
+
+  // Retour final au centre
+  const distRetourFinal = haversineDistance(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  totalDistance += distRetourFinal;
+  totalDuration += Math.round((distRetourFinal / SCORING_CONFIG.avgSpeed) * 60);
+
+  const estimatedDuration = Math.round(totalDuration * context.durationFactor * context.trafficFactor);
 
   // 9. Récupérer événements locaux actifs pour l'explication
   const localEvents = await getLocalEventsForDate(dateStr);
@@ -650,6 +702,9 @@ async function generateIntelligentTour(vehicleId, date) {
       maxCapacity: vehicle.max_capacity_kg,
       fillRate: Math.round((estimatedWeight / vehicle.max_capacity_kg) * 100),
       urgentCavs: urgentCount,
+      nbRetourscentre: nbRetours,
+      maxDailyHours: SCORING_CONFIG.maxDailyHours || 7,
+      returnEveryKg: returnThresholdKg,
     },
     explanation,
   };
@@ -657,14 +712,15 @@ async function generateIntelligentTour(vehicleId, date) {
 
 function generateAIExplanation(route, distance, duration, weight, urgentCount, vehicle, context, localEvents, vacationStatus) {
   const lines = [];
-  lines.push(`📊 Tournée intelligente générée pour ${vehicle.name || vehicle.registration}`);
-  lines.push(`\n🚛 ${route.length} points de collecte sélectionnés parmi les CAV actifs`);
-  lines.push(`📏 Distance totale estimée : ${Math.round(distance * 10) / 10} km`);
-  lines.push(`⏱️ Durée estimée : ${Math.floor(duration / 60)}h${String(duration % 60).padStart(2, '0')}`);
-  lines.push(`⚖️ Poids estimé : ${Math.round(weight)} kg / ${vehicle.max_capacity_kg} kg (${Math.round(weight / vehicle.max_capacity_kg * 100)}%)`);
+  lines.push(`Tournee intelligente generee pour ${vehicle.name || vehicle.registration}`);
+  lines.push(`\n${route.length} points de collecte selectionnes parmi les CAV actifs`);
+  lines.push(`Distance totale estimee : ${Math.round(distance * 10) / 10} km`);
+  lines.push(`Duree estimee : ${Math.floor(duration / 60)}h${String(duration % 60).padStart(2, '0')} (max ${SCORING_CONFIG.maxDailyHours || 7}h/jour)`);
+  lines.push(`Poids estime : ${Math.round(weight)} kg / ${vehicle.max_capacity_kg} kg (${Math.round(weight / vehicle.max_capacity_kg * 100)}%)`);
+  lines.push(`Retours centre de tri prevus : toutes les ${(SCORING_CONFIG.returnEveryKg || 2000) / 1000}t chargees`);
 
   if (urgentCount > 0) {
-    lines.push(`\n⚠️ ${urgentCount} CAV urgents (remplissage ≥80%)`);
+    lines.push(`\n${urgentCount} CAV urgents (remplissage >= 80%)`);
   }
 
   // Météo

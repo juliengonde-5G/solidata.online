@@ -2,7 +2,10 @@
  * Scheduler CRON — Execute les triggers automatiques
  * - Rappel entretien J-1
  * - Fin de contrat J-30 et J-15
- * - Autres evenements planifies
+ * - Jalons insertion (Diagnostic M+1, M+3, M+6, M+10)
+ * - Alertes planification entretiens insertion
+ * - Maintenance preventive vehicules
+ * - Veille sectorielle auto-feed news
  */
 const pool = require('../config/database');
 
@@ -157,14 +160,13 @@ async function checkContractEndings() {
 }
 
 /**
- * Bilans insertion ASP (M+2, M+6, M+10)
- * Cree automatiquement les entretiens de bilan quand les jalons arrivent
+ * Jalons insertion (Diagnostic M+1, Bilan M+3, M+6, M+10)
+ * Cree automatiquement les jalons quand les echeances arrivent
  */
 async function checkInsertionMilestones() {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    // Trouver les employes en parcours insertion dont un jalon tombe aujourd'hui
     const employees = await pool.query(
       `SELECT e.id, e.first_name, e.last_name, e.email, e.insertion_start_date
        FROM employees e
@@ -174,7 +176,8 @@ async function checkInsertionMilestones() {
     );
 
     const milestones = [
-      { months: 2, label: 'Bilan M+2' },
+      { months: 1, label: 'Diagnostic accueil' },
+      { months: 3, label: 'Bilan M+3' },
       { months: 6, label: 'Bilan M+6' },
       { months: 10, label: 'Bilan M+10' },
     ];
@@ -187,7 +190,6 @@ async function checkInsertionMilestones() {
         const msStr = milestoneDate.toISOString().split('T')[0];
 
         if (msStr === today) {
-          // Verifier qu'on n'a pas deja cree ce jalon
           const existing = await pool.query(
             `SELECT id FROM insertion_milestones WHERE employee_id = $1 AND milestone_type = $2`,
             [emp.id, ms.label]
@@ -209,6 +211,90 @@ async function checkInsertionMilestones() {
 }
 
 /**
+ * Alertes entretiens insertion — rappels automatiques
+ * - Jalon a_planifier avec echeance dans 14 jours -> alerte planification
+ * - Entretien planifie dans 7 jours -> rappel J-7
+ * - Entretien planifie demain -> rappel J-1
+ * - Jalon en retard -> alerte retard
+ */
+async function checkInsertionInterviewAlerts() {
+  try {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
+    // Jalons a planifier bientot ou en retard
+    const milestones = await pool.query(
+      `SELECT im.*, e.first_name, e.last_name, e.email, e.phone
+       FROM insertion_milestones im
+       JOIN employees e ON im.employee_id = e.id
+       WHERE im.status IN ('a_planifier', 'planifie')
+       AND e.is_active = true`
+    );
+
+    for (const ms of milestones.rows) {
+      const dueDate = new Date(ms.due_date);
+      const daysUntilDue = Math.round((dueDate - today) / 86400000);
+
+      // Jalon en retard (pas encore planifie et echeance depassee)
+      if (ms.status === 'a_planifier' && daysUntilDue < 0) {
+        await createInsertionAlert(ms, 'retard', todayStr);
+      }
+      // Planification requise dans 14 jours
+      else if (ms.status === 'a_planifier' && daysUntilDue <= 14 && daysUntilDue > 0) {
+        await createInsertionAlert(ms, 'planification', todayStr);
+      }
+
+      // Rappels pour entretiens planifies
+      if (ms.status === 'planifie' && ms.interview_date) {
+        const interviewDate = new Date(ms.interview_date);
+        const daysUntilInterview = Math.round((interviewDate - today) / 86400000);
+
+        if (daysUntilInterview === 7) {
+          await createInsertionAlert(ms, 'rappel_j7', todayStr);
+        } else if (daysUntilInterview === 1) {
+          await createInsertionAlert(ms, 'rappel_j1', todayStr);
+          // Envoyer notification Brevo si possible
+          if (ms.email || ms.phone) {
+            try {
+              await sendNotification(
+                { type: 'email', body: `Bonjour {prenom},\n\nRappel : votre entretien ${ms.milestone_type} est prevu demain.\n\nCordialement,\nSolidarite Textile`, subject: `Rappel entretien ${ms.milestone_type}` },
+                ms.email, ms.phone,
+                { prenom: ms.first_name, nom: ms.last_name }
+              );
+            } catch (err) {
+              console.error(`[SCHEDULER] Erreur envoi rappel insertion #${ms.id}:`, err.message);
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur checkInsertionInterviewAlerts:', err.message);
+  }
+}
+
+async function createInsertionAlert(milestone, alertType, targetDate) {
+  try {
+    // Eviter les doublons
+    const existing = await pool.query(
+      `SELECT id FROM insertion_interview_alerts
+       WHERE employee_id = $1 AND milestone_type = $2 AND alert_type = $3 AND target_date = $4`,
+      [milestone.employee_id, milestone.milestone_type, alertType, targetDate]
+    );
+    if (existing.rows.length > 0) return;
+
+    await pool.query(
+      `INSERT INTO insertion_interview_alerts (employee_id, milestone_type, alert_type, target_date)
+       VALUES ($1, $2, $3, $4)`,
+      [milestone.employee_id, milestone.milestone_type, alertType, targetDate]
+    );
+    console.log(`[SCHEDULER] Alerte ${alertType} pour ${milestone.first_name} ${milestone.last_name} — ${milestone.milestone_type}`);
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur createInsertionAlert:', err.message);
+  }
+}
+
+/**
  * Maintenance preventive vehicules
  */
 async function checkVehicleMaintenance() {
@@ -226,7 +312,6 @@ async function checkVehicleMaintenance() {
     for (const v of vehicles.rows) {
       const alerts = [];
 
-      // Alerte km
       if (v.maintenance_interval_km && v.last_maintenance_km) {
         const kmSince = (v.current_km || 0) - v.last_maintenance_km;
         if (kmSince >= v.maintenance_interval_km * 0.9) {
@@ -234,7 +319,6 @@ async function checkVehicleMaintenance() {
         }
       }
 
-      // Alerte date
       if (v.maintenance_interval_months && v.last_maintenance_date) {
         const lastDate = new Date(v.last_maintenance_date);
         const nextDate = new Date(lastDate);
@@ -245,7 +329,6 @@ async function checkVehicleMaintenance() {
         }
       }
 
-      // Controle technique
       if (v.controle_technique_date) {
         const ctDate = new Date(v.controle_technique_date);
         const daysUntil = Math.round((ctDate - today) / (1000 * 60 * 60 * 24));
@@ -255,7 +338,6 @@ async function checkVehicleMaintenance() {
       }
 
       if (alerts.length > 0) {
-        // Creer/updater alerte en base
         await pool.query(
           `INSERT INTO vehicle_maintenance_alerts (vehicle_id, alert_date, alerts, is_resolved)
            VALUES ($1, CURRENT_DATE, $2, false)
@@ -266,6 +348,72 @@ async function checkVehicleMaintenance() {
     }
   } catch (err) {
     console.error('[SCHEDULER] Erreur checkVehicleMaintenance:', err.message);
+  }
+}
+
+/**
+ * Veille sectorielle — Auto-alimentation du fil d'actualite
+ * Genere automatiquement des articles de veille pertinents pour le secteur
+ */
+async function autoFeedNews() {
+  try {
+    // Verifier si on a deja publie aujourd'hui (max 2 articles auto par jour)
+    const todayStr = new Date().toISOString().split('T')[0];
+    const existing = await pool.query(
+      `SELECT COUNT(*)::int as count FROM news_articles
+       WHERE created_at::date = $1 AND source_name = 'Veille automatique'`,
+      [todayStr]
+    );
+    if (existing.rows[0].count >= 2) return;
+
+    // Sources de veille thematiques pour le secteur textile/ESS/insertion
+    const veilleSources = [
+      // Filiere textile
+      {
+        category: 'metier',
+        themes: [
+          { title: 'Evolution de la collecte textile en France', tags: ['collecte', 'textile', 'statistiques'], summary: 'La filiere textile en France continue sa progression avec une augmentation des tonnages collectes. Les objectifs Refashion pour 2025 visent 3.6 kg/hab/an.' },
+          { title: 'Nouvelles normes de tri textile europeennes', tags: ['tri', 'reglementation', 'europe'], summary: 'L\'Union Europeenne renforce ses exigences en matiere de tri et valorisation des textiles usages. Impact sur les centres de tri.' },
+          { title: 'Innovation dans le recyclage des fibres textiles', tags: ['recyclage', 'innovation', 'R&D'], summary: 'Les nouvelles technologies de defibrage et refilature permettent de recycler davantage de matieres. Impact sur les taux de valorisation.' },
+          { title: 'Marche du reemploi textile en croissance', tags: ['reemploi', 'seconde-main', 'economie'], summary: 'Le marche de la seconde main textile continue sa croissance portee par la sensibilisation environnementale et le pouvoir d\'achat.' },
+          { title: 'REP textiles : bilan et perspectives', tags: ['REP', 'Refashion', 'reglementation'], summary: 'Refashion publie son bilan annuel de la filiere REP textiles. Objectifs, resultats et enjeux pour l\'annee a venir.' },
+          { title: 'Logistique verte dans la collecte textile', tags: ['logistique', 'environnement', 'CO2'], summary: 'Les solutions de logistique durable se developpent : vehicules electriques, optimisation de tournees, reduction de l\'empreinte carbone.' },
+        ],
+      },
+      // ESS / Insertion
+      {
+        category: 'local',
+        themes: [
+          { title: 'ESS : les structures d\'insertion en premiere ligne', tags: ['ESS', 'insertion', 'emploi'], summary: 'Les entreprises d\'insertion jouent un role cle dans le retour a l\'emploi des publics eloignes. Focus sur les resultats du secteur.' },
+          { title: 'CDDI et parcours d\'insertion : cadre reglementaire', tags: ['CDDI', 'reglementation', 'ASP'], summary: 'Rappel du cadre legal des CDDI et des obligations des structures d\'insertion en matiere de suivi des parcours.' },
+          { title: 'Dispositifs d\'aide a la mobilite pour les salaries en insertion', tags: ['mobilite', 'insertion', 'aide'], summary: 'Tour d\'horizon des aides a la mobilite disponibles pour les salaries en parcours d\'insertion professionnelle.' },
+          { title: 'Formation professionnelle et insertion par l\'activite economique', tags: ['formation', 'IAE', 'competences'], summary: 'Les formations accessibles aux salaries en insertion : CleA, FLE, qualifications metiers. Comment articuler parcours et formation.' },
+          { title: 'Levee des freins a l\'emploi : bonnes pratiques', tags: ['freins', 'accompagnement', 'CIP'], summary: 'Retour d\'experience sur les methodes efficaces pour lever les freins peripheriques a l\'emploi dans les structures d\'insertion.' },
+          { title: 'Economie circulaire et emploi social', tags: ['economie-circulaire', 'ESS', 'emploi'], summary: 'L\'economie circulaire genere des emplois locaux non delocalisables. Focus sur le secteur textile et les perspectives.' },
+        ],
+      },
+    ];
+
+    // Selectionner aleatoirement un article non encore publie
+    for (const source of veilleSources) {
+      const randomTheme = source.themes[Math.floor(Math.random() * source.themes.length)];
+
+      // Verifier si un article similaire existe deja
+      const similar = await pool.query(
+        `SELECT id FROM news_articles WHERE title = $1`,
+        [randomTheme.title]
+      );
+      if (similar.rows.length > 0) continue;
+
+      await pool.query(
+        `INSERT INTO news_articles (category, title, summary, source_name, tags, is_pinned)
+         VALUES ($1, $2, $3, 'Veille automatique', $4, false)`,
+        [source.category, randomTheme.title, randomTheme.summary, randomTheme.tags]
+      );
+      console.log(`[SCHEDULER] Article veille publie: ${randomTheme.title}`);
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur autoFeedNews:', err.message);
   }
 }
 
@@ -282,17 +430,16 @@ function startScheduler() {
   setTimeout(async () => {
     console.log('[SCHEDULER] Execution initiale...');
     await runAllJobs();
-  }, 10000); // 10s apres le demarrage pour laisser la DB s'initialiser
+  }, 10000);
 
   // Puis toutes les heures
   schedulerInterval = setInterval(async () => {
     const now = new Date();
-    // Executer les jobs a 7h, 12h et 18h
     if ([7, 12, 18].includes(now.getHours())) {
       console.log(`[SCHEDULER] Execution planifiee a ${now.toLocaleTimeString('fr-FR')}`);
       await runAllJobs();
     }
-  }, 60 * 60 * 1000); // Verifier toutes les heures
+  }, 60 * 60 * 1000);
 }
 
 async function runAllJobs() {
@@ -300,7 +447,9 @@ async function runAllJobs() {
     await checkAppointmentReminders();
     await checkContractEndings();
     await checkInsertionMilestones();
+    await checkInsertionInterviewAlerts();
     await checkVehicleMaintenance();
+    await autoFeedNews();
     console.log('[SCHEDULER] Tous les jobs executes');
   } catch (err) {
     console.error('[SCHEDULER] Erreur globale:', err.message);

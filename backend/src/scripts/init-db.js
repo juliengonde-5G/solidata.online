@@ -1646,13 +1646,13 @@ async function initDatabase() {
     console.log('[INIT-DB] Module Periodic Objectives ✓');
 
     // ══════════════════════════════════════════
-    // MODULE : Jalons insertion ASP (M+2, M+6, M+10)
+    // MODULE : Parcours insertion — Jalons obligatoires (Diagnostic, M+3, M+6, M+10, Sortie)
     // ══════════════════════════════════════════
     await client.query(`
       CREATE TABLE IF NOT EXISTS insertion_milestones (
         id SERIAL PRIMARY KEY,
         employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        milestone_type VARCHAR(30) NOT NULL CHECK (milestone_type IN ('Bilan M+2', 'Bilan M+6', 'Bilan M+10')),
+        milestone_type VARCHAR(30) NOT NULL CHECK (milestone_type IN ('Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie')),
         due_date DATE NOT NULL,
         completed_date DATE,
         status VARCHAR(30) NOT NULL DEFAULT 'a_planifier'
@@ -1666,7 +1666,13 @@ async function initDatabase() {
         frein_famille INTEGER CHECK (frein_famille BETWEEN 1 AND 5),
         frein_linguistique INTEGER CHECK (frein_linguistique BETWEEN 1 AND 5),
         frein_administratif INTEGER CHECK (frein_administratif BETWEEN 1 AND 5),
-        -- Contenu de l'entretien
+        frein_numerique INTEGER CHECK (frein_numerique BETWEEN 1 AND 5),
+        -- Questionnaire CIP (reponses par section)
+        cip_integration TEXT,
+        cip_competences TEXT,
+        cip_projet_pro TEXT,
+        cip_socialisation TEXT,
+        -- Contenu du bilan
         bilan_professionnel TEXT,
         bilan_social TEXT,
         objectifs_realises TEXT,
@@ -1675,6 +1681,14 @@ async function initDatabase() {
         actions_a_mener TEXT,
         -- Avis global
         avis_global VARCHAR(30) CHECK (avis_global IN ('tres_positif', 'positif', 'mitige', 'insuffisant')),
+        -- Bilan Sortie specifique
+        sortie_classification VARCHAR(20) CHECK (sortie_classification IN ('positive', 'negative')),
+        sortie_type VARCHAR(50),
+        sortie_commentaires TEXT,
+        sortie_employeur TEXT,
+        sortie_formation TEXT,
+        -- AI recommendations snapshot
+        ai_recommendations JSONB,
         created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW(),
@@ -1683,7 +1697,42 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_milestones_employee ON insertion_milestones(employee_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_milestones_status ON insertion_milestones(status);');
-    console.log('[INIT-DB] Module Insertion Milestones ✓');
+
+    // Plan d'action CIP par jalon
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cip_action_plans (
+        id SERIAL PRIMARY KEY,
+        milestone_id INTEGER NOT NULL REFERENCES insertion_milestones(id) ON DELETE CASCADE,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        action_label TEXT NOT NULL,
+        category VARCHAR(30) NOT NULL CHECK (category IN ('competence', 'insertion', 'socialisation', 'frein')),
+        frein_type VARCHAR(30),
+        priority VARCHAR(20) DEFAULT 'moyenne' CHECK (priority IN ('haute', 'moyenne', 'basse')),
+        status VARCHAR(20) DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'en_cours', 'realise', 'abandonne')),
+        echeance DATE,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_action_plans_milestone ON cip_action_plans(milestone_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_action_plans_employee ON cip_action_plans(employee_id);');
+
+    // Alertes planification entretiens insertion
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_interview_alerts (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        milestone_type VARCHAR(30) NOT NULL,
+        alert_type VARCHAR(30) NOT NULL CHECK (alert_type IN ('planification', 'rappel_j7', 'rappel_j1', 'retard')),
+        sent_at TIMESTAMP,
+        is_sent BOOLEAN DEFAULT false,
+        target_date DATE NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    console.log('[INIT-DB] Module Parcours Insertion ✓');
 
     // ══════════════════════════════════════════
     // MODULE : Maintenance préventive véhicules
