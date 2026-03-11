@@ -19,15 +19,8 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Créer dossiers uploads (évite 502 si multer ne peut pas créer)
-const uploadsDir = path.join(__dirname, '..', 'uploads');
-['', 'cv', 'photos', 'incidents', 'qrcodes'].forEach((sub) => {
-  const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
-  try {
-    require('fs').mkdirSync(dir, { recursive: true });
-  } catch (_) {}
-});
-app.use('/uploads', express.static(uploadsDir));
+// Fichiers statiques
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 
 // Rendre io accessible aux routes
@@ -160,8 +153,7 @@ async function initOnStartup() {
     );
     if (parseInt(tables.rows[0].count) < 5) {
       console.log('[DB] Tables manquantes, lancement init-db...');
-      const { initDatabase } = require('./scripts/init-db');
-      await initDatabase();
+      require('./scripts/init-db');
     } else {
       console.log(`[DB] ${tables.rows[0].count} tables trouvées`);
     }

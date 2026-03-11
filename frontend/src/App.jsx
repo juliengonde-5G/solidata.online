@@ -24,7 +24,6 @@ import Users from './pages/Users';
 import Settings from './pages/Settings';
 import Referentiels from './pages/Referentiels';
 import AdminPredictive from './pages/AdminPredictive';
-import CollectionProposals from './pages/CollectionProposals';
 import InsertionParcours from './pages/InsertionParcours';
 import PCMTest from './pages/PCMTest';
 
@@ -57,7 +56,6 @@ function App() {
 
           {/* Collecte */}
           <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />
-          <Route path="/collection-proposals" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CollectionProposals /></ProtectedRoute>} />
           <Route path="/cav-map" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CAVMap /></ProtectedRoute>} />
           <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Vehicles /></ProtectedRoute>} />
           <Route path="/live-vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import MobileShell, { TourStepBar } from '../components/MobileShell';
 
 export default function WeighIn() {
   const [grossWeight, setGrossWeight] = useState('');
@@ -15,8 +14,10 @@ export default function WeighIn() {
   const submit = async () => {
     setLoading(true);
     try {
-      await api.post(`/tours/${tourId}/weigh`, {
-        weight_kg: netWeight,
+      await api.post(`/tours/${tourId}/weigh-in`, {
+        gross_weight_kg: parseFloat(grossWeight) || 0,
+        tare_weight_kg: parseFloat(tareWeight) || 0,
+        net_weight_kg: netWeight,
       });
       await api.put(`/tours/${tourId}/status`, { status: 'completed' });
       navigate('/tour-summary');
@@ -25,49 +26,56 @@ export default function WeighIn() {
   };
 
   return (
-    <MobileShell title="Pesée du véhicule" subtitle="Enregistrez les données de pesée" onBack={() => navigate('/return-centre')}>
-      <div className="mb-4">
-        <TourStepBar currentPath="/weigh-in" />
-      </div>
-      <div className="space-y-4">
-        <div className="card-mobile p-6 text-center">
-          <p className="text-4xl mb-2">⚖️</p>
-          <p className="text-gray-600 text-sm">Poids brut − Tare = Poids net collecté</p>
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-solidata-green text-white p-4">
+        <button onClick={() => navigate('/return-centre')} className="text-white/70 text-sm mb-1">← Retour</button>
+        <h1 className="font-bold text-lg">Pesée du véhicule</h1>
+      </header>
+
+      <div className="p-4 space-y-4">
+        <div className="bg-white rounded-2xl p-6 shadow-sm text-center">
+          <p className="text-5xl mb-2">⚖️</p>
+          <p className="text-gray-500 text-sm">Enregistrez les données de pesée</p>
         </div>
-        <div className="card-mobile p-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Poids brut (kg)</label>
+
+        <div className="bg-white rounded-xl p-4 shadow-sm">
+          <label className="text-sm font-medium block mb-2">Poids brut (kg)</label>
           <input
             type="number"
             value={grossWeight}
             onChange={e => setGrossWeight(e.target.value)}
-            placeholder="Véhicule chargé"
-            className="input-mobile text-center text-lg font-semibold"
+            placeholder="Poids véhicule chargé"
+            className="w-full border rounded-lg px-3 py-3 text-lg font-bold text-center"
           />
         </div>
-        <div className="card-mobile p-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Tare véhicule (kg)</label>
+
+        <div className="bg-white rounded-xl p-4 shadow-sm">
+          <label className="text-sm font-medium block mb-2">Tare véhicule (kg)</label>
           <input
             type="number"
             value={tareWeight}
             onChange={e => setTareWeight(e.target.value)}
-            placeholder="Véhicule à vide"
-            className="input-mobile text-center text-lg font-semibold"
+            placeholder="Poids véhicule à vide"
+            className="w-full border rounded-lg px-3 py-3 text-lg font-bold text-center"
           />
         </div>
-        <div className="card-mobile p-6 text-center bg-[var(--color-primary)]/10 border-2 border-[var(--color-primary)]/30 rounded-2xl">
-          <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Poids net collecté</p>
-          <p className="text-4xl font-black text-[var(--color-primary)]">{netWeight.toFixed(0)}</p>
-          <p className="text-sm text-gray-500">kg ({(netWeight / 1000).toFixed(2)} t)</p>
+
+        {/* Net weight display */}
+        <div className="bg-solidata-green/10 border border-solidata-green/30 rounded-2xl p-6 text-center">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Poids net collecté</p>
+          <p className="text-4xl font-black text-solidata-green">{netWeight.toFixed(0)}</p>
+          <p className="text-sm text-gray-500">kilogrammes</p>
+          <p className="text-xs text-gray-400 mt-1">{(netWeight / 1000).toFixed(2)} tonnes</p>
         </div>
+
         <button
-          type="button"
           onClick={submit}
           disabled={!grossWeight || !tareWeight || loading}
-          className="btn-primary-mobile py-4 text-base disabled:opacity-50"
+          className="w-full bg-solidata-green text-white font-bold py-4 rounded-2xl shadow-lg disabled:opacity-50"
         >
           {loading ? 'Finalisation...' : 'Valider la pesée'}
         </button>
       </div>
-    </MobileShell>
+    </div>
   );
 }

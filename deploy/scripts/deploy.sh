@@ -45,11 +45,11 @@ case "${ACTION}" in
     CONF_DIR="deploy/nginx/conf.d"
 
     # Étape 1: Démarrer avec config HTTP uniquement (pour certbot)
-    log "Étape 1/6 — Démarrage en HTTP (sans SSL)..."
+    log "Étape 1/4 — Démarrage en HTTP (sans SSL)..."
 
     # Temporairement remplacer la config SSL par la config HTTP-only
     cp "${CONF_DIR}/solidata.conf" "${CONF_DIR}/solidata.conf.ssl-backup"
-    cp "${CONF_DIR}/solidata-initial.conf.disabled" "${CONF_DIR}/solidata.conf"
+    cp "${CONF_DIR}/solidata-initial.conf" "${CONF_DIR}/solidata.conf"
 
     docker compose -f ${COMPOSE_FILE} build --no-cache
     docker compose -f ${COMPOSE_FILE} up -d
@@ -65,7 +65,7 @@ case "${ACTION}" in
     fi
 
     # Étape 2: Obtenir certificat SSL
-    log "Étape 2/6 — Obtention certificat Let's Encrypt..."
+    log "Étape 2/4 — Obtention certificat Let's Encrypt..."
     docker compose -f ${COMPOSE_FILE} run --rm --entrypoint certbot certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
@@ -77,31 +77,13 @@ case "${ACTION}" in
         -d m.${DOMAIN}
 
     # Étape 3: Restaurer la config SSL
-    log "Étape 3/6 — Activation SSL..."
+    log "Étape 3/4 — Activation SSL..."
     cp "${CONF_DIR}/solidata.conf.ssl-backup" "${CONF_DIR}/solidata.conf"
     rm -f "${CONF_DIR}/solidata.conf.ssl-backup"
 
     # Étape 4: Redémarrer nginx avec SSL
-    log "Étape 4/6 — Redémarrage avec SSL..."
+    log "Étape 4/4 — Redémarrage avec SSL..."
     docker compose -f ${COMPOSE_FILE} restart nginx
-
-    # Étape 5: Initialisation base de données
-    log "Étape 5/6 — Initialisation base de données..."
-    sleep 5
-    if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/init-db.js 2>/dev/null; then
-        log "Base de données initialisée (tables + seeds)."
-    else
-        warn "init-db.js a échoué ou n'existe pas. Exécutez manuellement : docker compose -f ${COMPOSE_FILE} exec backend node src/scripts/init-db.js"
-    fi
-    if [ -f "backend/src/scripts/migrate-v2.js" ]; then
-        if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/migrate-v2.js 2>/dev/null; then
-            log "Migration v2 appliquée."
-        fi
-    fi
-
-    # Étape 6: Statut final
-    log "Étape 6/6 — Vérification..."
-    docker compose -f ${COMPOSE_FILE} ps
 
     log "=== DÉPLOIEMENT INITIAL TERMINÉ ==="
     log "Application disponible sur :"
@@ -129,9 +111,9 @@ case "${ACTION}" in
     log "Récupération du code..."
     git pull origin main
 
-    # Rebuild sans cache pour prendre en compte le nouveau code (évite que le frontend reste en cache)
-    log "Reconstruction des images (sans cache)..."
-    docker compose -f ${COMPOSE_FILE} build --no-cache
+    # Rebuild et redémarrage
+    log "Reconstruction des images..."
+    docker compose -f ${COMPOSE_FILE} build
 
     log "Redémarrage des services..."
     docker compose -f ${COMPOSE_FILE} up -d

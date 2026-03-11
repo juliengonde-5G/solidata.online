@@ -14,7 +14,7 @@ EMAIL="admin@solidata.online"
 APP_DIR="/opt/solidata.online"
 DEPLOY_USER="solidata"
 REPO_URL="https://github.com/juliengonde-5G/solidata.online.git"
-BRANCH="main"
+BRANCH="claude/solidata-erp-app-KYMZZ"
 
 echo "============================================"
 echo "  SOLIDATA — Initialisation serveur"

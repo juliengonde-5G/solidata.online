@@ -22,44 +22,6 @@ const CENTRE_TRI_LAT = parseFloat(process.env.CENTRE_TRI_LAT) || 49.4231;
 const CENTRE_TRI_LNG = parseFloat(process.env.CENTRE_TRI_LNG) || 1.0993;
 
 // ══════════════════════════════════════════════════════════════
-// CONTEXTE COLLECTE (météo, trafic, apprentissage)
-// ══════════════════════════════════════════════════════════════
-
-async function getContextForDate(dateStr) {
-  const res = await pool.query(
-    'SELECT * FROM collection_context WHERE date = $1',
-    [dateStr]
-  );
-  if (res.rows.length > 0) {
-    const row = res.rows[0];
-    return {
-      weatherFactor: parseFloat(row.weather_factor) || 1,
-      trafficFactor: parseFloat(row.traffic_factor) || 1,
-      durationFactor: parseFloat(row.duration_factor) || 1,
-      weatherCode: row.weather_code,
-      notes: row.notes,
-    };
-  }
-  // Optionnel : appeler Open-Meteo (gratuit, sans clé) pour la météo du jour
-  try {
-    const lat = CENTRE_TRI_LAT;
-    const lng = CENTRE_TRI_LNG;
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weather_code&timezone=Europe/Paris&start=${dateStr}&end=${dateStr}`;
-    const response = await globalThis.fetch(url);
-    const data = await response.json();
-    const code = data.daily?.weather_code?.[0];
-    // Facteur météo : pluie/neige = légère baisse remplissage ou durée plus longue
-    let weatherFactor = 1;
-    if (code >= 61 && code <= 67) weatherFactor = 0.95;  // pluie
-    if (code >= 80 && code <= 82) weatherFactor = 0.92;  // averse
-    if (code >= 71 && code <= 77) weatherFactor = 0.9;   // neige
-    return { weatherFactor, trafficFactor: 1, durationFactor: 1, weatherCode: String(code), notes: null };
-  } catch (e) {
-    return { weatherFactor: 1, trafficFactor: 1, durationFactor: 1, weatherCode: null, notes: null };
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
 // ALGORITHMES GÉOGRAPHIQUES
 // ══════════════════════════════════════════════════════════════
 
@@ -244,27 +206,6 @@ async function predictFillRate(cavId, targetDate) {
   // Plus de conteneurs = zone plus dense = remplissage potentiellement plus rapide
   if (cav.nb_containers >= 3) rawFill *= 1.1;
 
-  // Contexte météo (météo défavorable = moins de dépôts ou report)
-  const context = await getContextForDate(dateStr);
-  rawFill *= context.weatherFactor;
-
-  // Apprentissage continu : correction à partir des écarts prédit/observé
-  const feedbackResult = await pool.query(
-    `SELECT predicted_fill_rate, observed_fill_level FROM collection_learning_feedback
-     WHERE cav_id = $1 ORDER BY created_at DESC LIMIT 30`,
-    [cavId]
-  );
-  if (feedbackResult.rows.length >= 5) {
-    let sumRatio = 0, count = 0;
-    for (const row of feedbackResult.rows) {
-      const observedPct = (row.observed_fill_level ?? 0) * 20;
-      const pred = parseFloat(row.predicted_fill_rate) || 50;
-      if (pred > 0) { sumRatio += observedPct / pred; count++; }
-    }
-    const correction = count > 0 ? sumRatio / count : 1;
-    if (correction >= 0.5 && correction <= 1.5) rawFill *= correction;
-  }
-
   // Cap à 120%
   const fill = Math.min(120, Math.max(0, rawFill));
 
@@ -275,7 +216,6 @@ async function predictFillRate(cavId, targetDate) {
     fill: Math.round(fill),
     confidence: Math.round(confidence * 100) / 100,
     method: 'predictive',
-    contextUsed: { weatherFactor: context.weatherFactor },
     factors: {
       seasonal: SEASONAL_FACTORS[monthIndex],
       dayOfWeek: DAY_OF_WEEK_FACTORS[dayOfWeek],
@@ -353,12 +293,9 @@ async function generateIntelligentTour(vehicleId, date) {
   let optimizedRoute = nearestNeighborTSP(selectedCavs, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
   optimizedRoute = twoOptImprove(optimizedRoute, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
 
-  // 8. Calculer distance et durée (avec facteur trafic / météo)
+  // 8. Calculer distance et durée
   const totalDistance = calculateTotalDistance(optimizedRoute, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-  const dateStr = typeof date === 'string' ? date : new Date(date).toISOString().split('T')[0];
-  const context = await getContextForDate(dateStr);
-  const baseDurationMin = Math.round((totalDistance / SCORING_CONFIG.avgSpeed) * 60 + selectedCavs.length * SCORING_CONFIG.timePerCav);
-  const estimatedDuration = Math.round(baseDurationMin * context.durationFactor * context.trafficFactor);
+  const estimatedDuration = Math.round((totalDistance / 30) * 60 + selectedCavs.length * 10); // 30 km/h + 10 min par CAV
 
   // 9. Générer l'explication IA
   const explanation = generateAIExplanation(optimizedRoute, totalDistance, estimatedDuration, estimatedWeight, urgentCount, vehicle);
@@ -505,146 +442,6 @@ router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
   }
 });
 
-// GET /api/tours/proposals/daily — Propositions de tournées pour une date
-router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) => {
-  try {
-    const date = req.query.date || new Date().toISOString().split('T')[0];
-    const vehiclesResult = await pool.query(
-      `SELECT * FROM vehicles WHERE status = 'available' OR status = 'in_use' ORDER BY name`
-    );
-    const driversResult = await pool.query(
-      `SELECT e.id, e.first_name, e.last_name, e.team_id FROM employees e
-       JOIN teams t ON e.team_id = t.id WHERE t.type = 'collecte' AND e.is_active = true`
-    );
-    const existingTours = await pool.query(
-      `SELECT vehicle_id, driver_employee_id FROM tours WHERE date = $1 AND status NOT IN ('cancelled', 'completed')`,
-      [date]
-    );
-    const usedVehicleIds = new Set(existingTours.rows.map(r => r.vehicle_id));
-    const availableVehicles = vehiclesResult.rows.filter(v => !usedVehicleIds.has(v.id));
-
-    const proposals = [];
-    for (const vehicle of availableVehicles.slice(0, 5)) {
-      try {
-        const result = await generateIntelligentTour(vehicle.id, date);
-        proposals.push({
-          vehicle_id: vehicle.id,
-          vehicle_name: vehicle.name || vehicle.registration,
-          proposal: result,
-        });
-      } catch (err) {
-        console.warn('[TOURS] Proposition ignorée pour véhicule', vehicle.id, err.message);
-      }
-    }
-
-    const context = await getContextForDate(date);
-    res.json({
-      date,
-      context: { weatherFactor: context.weatherFactor, trafficFactor: context.trafficFactor, durationFactor: context.durationFactor },
-      availableVehicles: availableVehicles.length,
-      drivers: driversResult.rows,
-      proposals,
-    });
-  } catch (err) {
-    console.error('[TOURS] Erreur propositions journalières :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// GET /api/tours/proposals/weekly — Plan hebdomadaire (propositions par jour)
-router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) => {
-  try {
-    const weekStart = req.query.week_start;
-    let startDate;
-    if (weekStart) {
-      startDate = new Date(weekStart);
-    } else {
-      const d = new Date();
-      const day = d.getDay();
-      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-      startDate = new Date(d.getFullYear(), d.getMonth(), diff);
-    }
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(startDate);
-      d.setDate(d.getDate() + i);
-      days.push(d.toISOString().split('T')[0]);
-    }
-
-    const weekly = [];
-    for (const dateStr of days) {
-      const vehiclesResult = await pool.query(
-        `SELECT id, name, registration FROM vehicles WHERE status IN ('available', 'in_use')`
-      );
-      const existingTours = await pool.query(
-        `SELECT t.id, t.vehicle_id, v.name as vehicle_name FROM tours t LEFT JOIN vehicles v ON t.vehicle_id = v.id WHERE t.date = $1 AND t.status NOT IN ('cancelled', 'completed')`,
-        [dateStr]
-      );
-      const usedIds = new Set(existingTours.rows.map(r => r.vehicle_id));
-      const available = vehiclesResult.rows.filter(v => !usedIds.has(v.id));
-
-      let bestProposal = null;
-      if (available.length > 0) {
-        try {
-          const result = await generateIntelligentTour(available[0].id, dateStr);
-          bestProposal = { vehicle: available[0], stats: result.stats, cavCount: result.cavList.length };
-        } catch (e) {}
-      }
-
-      const context = await getContextForDate(dateStr);
-      weekly.push({
-        date: dateStr,
-        dayName: new Date(dateStr + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long' }),
-        existingTours: existingTours.rows,
-        availableVehicles: available.length,
-        suggestedTour: bestProposal,
-        context: { weatherFactor: context.weatherFactor, durationFactor: context.durationFactor },
-      });
-    }
-
-    res.json({ weekStart: days[0], weekEnd: days[6], days: weekly });
-  } catch (err) {
-    console.error('[TOURS] Erreur propositions hebdo :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// GET /api/tours/context/:date — Contexte (météo, trafic) pour une date
-router.get('/context/:date', authorize('ADMIN', 'MANAGER'), async (req, res) => {
-  try {
-    const context = await getContextForDate(req.params.date);
-    res.json(context);
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// PUT /api/tours/context — Enregistrer ou mettre à jour le contexte (admin)
-router.put('/context', authorize('ADMIN'), async (req, res) => {
-  try {
-    const { date, weather_factor, traffic_factor, duration_factor, weather_code, notes } = req.body;
-    if (!date) return res.status(400).json({ error: 'date requis' });
-
-    await pool.query(
-      `INSERT INTO collection_context (date, weather_factor, traffic_factor, duration_factor, weather_code, notes, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       ON CONFLICT (date) DO UPDATE SET
-         weather_factor = COALESCE(EXCLUDED.weather_factor, collection_context.weather_factor),
-         traffic_factor = COALESCE(EXCLUDED.traffic_factor, collection_context.traffic_factor),
-         duration_factor = COALESCE(EXCLUDED.duration_factor, collection_context.duration_factor),
-         weather_code = COALESCE(EXCLUDED.weather_code, collection_context.weather_code),
-         notes = COALESCE(EXCLUDED.notes, collection_context.notes),
-         updated_at = NOW()`,
-      [date, weather_factor ?? 1, traffic_factor ?? 1, duration_factor ?? 1, weather_code ?? null, notes ?? null]
-    );
-    const context = await getContextForDate(date);
-    res.json({ message: 'Contexte enregistré', context });
-  } catch (err) {
-    console.error('[TOURS] Erreur contexte :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
 // GET /api/tours/:id — Détail avec CAV et pesées
 router.get('/:id', async (req, res) => {
   try {
@@ -712,11 +509,11 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     );
     const tourId = tourResult.rows[0].id;
 
-    // Insérer les CAV (avec prédiction pour apprentissage continu)
+    // Insérer les CAV
     for (const cav of result.cavList) {
       await pool.query(
-        `INSERT INTO tour_cav (tour_id, cav_id, position, predicted_fill_rate) VALUES ($1, $2, $3, $4)`,
-        [tourId, cav.cav_id, cav.position, cav.predicted_fill ?? null]
+        'INSERT INTO tour_cav (tour_id, cav_id, position) VALUES ($1, $2, $3)',
+        [tourId, cav.cav_id, cav.position]
       );
     }
 
@@ -832,21 +629,6 @@ router.put('/:id/status', async (req, res) => {
           await pool.query(
             "INSERT INTO tonnage_history (date, cav_id, weight_kg, source) VALUES ($1, $2, $3, 'mobile')",
             [tour.date, tc.cav_id, weightPerCav]
-          );
-        }
-      }
-
-      // Apprentissage continu : enregistrer prédit vs observé (fill_level 0-5)
-      if (status === 'completed') {
-        const tourCavs = await pool.query(
-          'SELECT cav_id, predicted_fill_rate, fill_level FROM tour_cav WHERE tour_id = $1 AND predicted_fill_rate IS NOT NULL AND fill_level IS NOT NULL',
-          [req.params.id]
-        );
-        for (const tc of tourCavs.rows) {
-          await pool.query(
-            `INSERT INTO collection_learning_feedback (tour_id, cav_id, predicted_fill_rate, observed_fill_level)
-             VALUES ($1, $2, $3, $4)`,
-            [req.params.id, tc.cav_id, tc.predicted_fill_rate, tc.fill_level]
           );
         }
       }

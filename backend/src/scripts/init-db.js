@@ -828,38 +828,6 @@ async function initDatabase() {
     `);
     console.log('[INIT-DB] Module IA (ML Prédictif) ✓');
 
-    // Contexte collecte (météo, trafic) et apprentissage continu
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS collection_context (
-        id SERIAL PRIMARY KEY,
-        date DATE NOT NULL UNIQUE,
-        weather_code VARCHAR(20),
-        weather_factor DOUBLE PRECISION DEFAULT 1.0,
-        traffic_factor DOUBLE PRECISION DEFAULT 1.0,
-        duration_factor DOUBLE PRECISION DEFAULT 1.0,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    await client.query(`
-      DO $$ BEGIN
-        ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION;
-      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-    `);
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS collection_learning_feedback (
-        id SERIAL PRIMARY KEY,
-        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
-        cav_id INTEGER REFERENCES cav(id) ON DELETE CASCADE,
-        predicted_fill_rate DOUBLE PRECISION NOT NULL,
-        observed_fill_level INTEGER CHECK (observed_fill_level BETWEEN 0 AND 5),
-        predicted_weight_kg DOUBLE PRECISION,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log('[INIT-DB] Tables contexte & apprentissage collecte ✓');
-
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)
     // ══════════════════════════════════════════
@@ -1100,12 +1068,6 @@ async function initDatabase() {
   }
 }
 
-// Ne faire process.exit que si le script est lancé en direct (node init-db.js)
-// Sinon, quand on est chargé depuis le serveur, ne pas quitter le processus
-if (require.main === module) {
-  initDatabase()
-    .then(() => process.exit(0))
-    .catch(() => process.exit(1));
-} else {
-  module.exports = { initDatabase };
-}
+initDatabase()
+  .then(() => process.exit(0))
+  .catch(() => process.exit(1));

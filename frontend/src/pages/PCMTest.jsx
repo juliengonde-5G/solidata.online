@@ -73,9 +73,9 @@ export default function PCMTest() {
     if (answeredCount < totalQuestions) return;
     setPhase('submitting');
     try {
-      const formattedAnswers = Object.entries(answers).map(([num, value]) => ({
-        question_number: parseInt(num, 10),
-        answer_value: value,
+      const formattedAnswers = Object.entries(answers).map(([questionId, value]) => ({
+        question_id: parseInt(questionId),
+        answer: value,
       }));
       const res = await axios.post('/api/pcm/submit', {
         access_token: token,
@@ -159,32 +159,32 @@ export default function PCMTest() {
           <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-8 max-w-lg w-full">
             <div className="text-center mb-6">
               <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-white text-2xl font-bold" style={{ backgroundColor: BRAND_GREEN }}>
-                {(session?.first_name || session?.candidate_name)?.[0]?.toUpperCase() || '?'}
+                {session?.candidate_name?.[0]?.toUpperCase() || '?'}
               </div>
               <h2 className="text-xl sm:text-2xl font-bold text-gray-800">
-                Bonjour {session?.first_name || session?.candidate_name || 'candidat'} !
+                Bonjour {session?.candidate_name} !
               </h2>
-              <p className="text-gray-500 mt-1 text-sm">Quelques questions pour mieux vous connaitre</p>
+              <p className="text-gray-500 mt-1 text-sm">Bienvenue sur le test de personnalite PCM</p>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-4 sm:p-5 mb-6 space-y-3 text-sm text-gray-600">
-              <h3 className="font-semibold text-gray-800 text-base">Comment faire ?</h3>
+              <h3 className="font-semibold text-gray-800 text-base">Instructions</h3>
               <ul className="space-y-2">
                 <li className="flex gap-2">
                   <span className="font-bold mt-0.5" style={{ color: BRAND_GREEN }}>1.</span>
-                  <span><strong>{totalQuestions} questions</strong>. Choisissez la reponse (ou l’image) qui vous ressemble le plus.</span>
+                  <span>Le test comporte <strong>{totalQuestions} questions</strong>. Pour chaque question, choisissez la reponse qui vous correspond le mieux.</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="font-bold mt-0.5" style={{ color: BRAND_GREEN }}>2.</span>
-                  <span>Pas de bonne ou mauvaise reponse. Repondez comme vous sentez.</span>
+                  <span>Il n'y a pas de bonnes ou mauvaises reponses. Repondez spontanement, sans trop reflechir.</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="font-bold mt-0.5" style={{ color: BRAND_GREEN }}>3.</span>
-                  <span>Environ <strong>5 à 10 minutes</strong>.</span>
+                  <span>Le test prend environ <strong>5 a 10 minutes</strong>.</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="font-bold mt-0.5" style={{ color: BRAND_GREEN }}>4.</span>
-                  <span>Vos reponses restent <strong>confidentielles</strong>.</span>
+                  <span>Vos reponses sont <strong>confidentielles</strong> et utilisees uniquement dans le cadre du recrutement.</span>
                 </li>
               </ul>
             </div>
@@ -233,7 +233,7 @@ export default function PCMTest() {
               </svg>
             </div>
 
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">Merci {session?.first_name || session?.candidate_name} !</h2>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">Merci {session?.candidate_name} !</h2>
             <p className="text-gray-500 text-sm mb-6">Vos reponses ont ete enregistrees avec succes.</p>
 
             <div className="rounded-xl p-5 mb-6" style={{ backgroundColor: BRAND_GREEN + '10' }}>
@@ -256,10 +256,9 @@ export default function PCMTest() {
   // --- PHASE: TEST ---
   const q = questions[currentQ];
   if (!q) return null;
-  const questionKey = q.num ?? q.id ?? currentQ + 1;
 
   const options = q.options || [];
-  const currentAnswer = answers[questionKey];
+  const currentAnswer = answers[q.id];
   const isLastQuestion = currentQ === totalQuestions - 1;
   const allAnswered = answeredCount === totalQuestions;
 
@@ -295,44 +294,38 @@ export default function PCMTest() {
               <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold text-white mb-3" style={{ backgroundColor: BRAND_GREEN }}>
                 Q{currentQ + 1}
               </span>
-              <h2 className="text-lg sm:text-xl font-semibold text-gray-800 leading-relaxed">
-                {q.text_simple || q.text}
+              <h2 className="text-base sm:text-lg font-semibold text-gray-800 leading-relaxed">
+                {q.text}
               </h2>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {options.map((opt, idx) => {
                 const isSelected = currentAnswer === opt.value;
-                const label = opt.label_simple || opt.label;
                 return (
                   <button
                     key={idx}
-                    onClick={() => handleAnswer(questionKey, opt.value)}
-                    className={`w-full text-left p-4 sm:p-5 rounded-xl border-2 transition-all flex items-center gap-4 min-h-[56px] ${
+                    onClick={() => handleAnswer(q.id, opt.value)}
+                    className={`w-full text-left p-3.5 sm:p-4 rounded-xl border-2 transition-all text-sm sm:text-base ${
                       isSelected
                         ? 'border-green-400 bg-green-50 shadow-sm'
                         : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
                     }`}
-                    style={isSelected ? { borderColor: BRAND_GREEN, backgroundColor: BRAND_GREEN + '12' } : {}}
+                    style={isSelected ? { borderColor: BRAND_GREEN, backgroundColor: BRAND_GREEN + '08' } : {}}
                   >
-                    {opt.icon && (
-                      <span className="text-2xl sm:text-3xl flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-white border border-gray-100">
-                        {opt.icon}
-                      </span>
-                    )}
-                    <div className="flex-1 flex items-center gap-3">
+                    <div className="flex items-start gap-3">
                       <div
-                        className={`w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all ${
+                        className={`w-5 h-5 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all ${
                           isSelected ? 'border-green-500' : 'border-gray-300'
                         }`}
                         style={isSelected ? { borderColor: BRAND_GREEN } : {}}
                       >
                         {isSelected && (
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: BRAND_GREEN }} />
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BRAND_GREEN }} />
                         )}
                       </div>
-                      <span className={`text-base sm:text-lg ${isSelected ? 'font-semibold text-gray-800' : 'text-gray-700'}`}>
-                        {label}
+                      <span className={isSelected ? 'font-medium text-gray-800' : 'text-gray-600'}>
+                        {opt.label || opt.text}
                       </span>
                     </div>
                   </button>
@@ -364,7 +357,7 @@ export default function PCMTest() {
                   style={{
                     backgroundColor: idx === currentQ
                       ? BRAND_GREEN
-                      : answers[questions[idx]?.num ?? questions[idx]?.id] !== undefined
+                      : answers[questions[idx]?.id] !== undefined
                         ? BRAND_GREEN_LIGHT
                         : '#D1D5DB',
                   }}

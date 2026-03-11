@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
@@ -22,7 +21,6 @@ const STATUS_COLORS = {
 };
 
 export default function Candidates() {
-  const navigate = useNavigate();
   const [kanban, setKanban] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -111,6 +109,7 @@ export default function Candidates() {
     fd.append('cv', file);
     try {
       const res = await api.post('/candidates/upload-cv-new', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 120000,
       });
       loadAll();
@@ -141,13 +140,6 @@ export default function Candidates() {
       const link = `${window.location.origin}/pcm-test/${res.data.access_token}`;
       await navigator.clipboard.writeText(link);
       alert(`Lien du test PCM copié :\n${link}`);
-    } catch (err) { console.error(err); alert('Erreur création test PCM'); }
-  };
-
-  const openPCMTestInApp = async (candidateId) => {
-    try {
-      const res = await api.post('/pcm/sessions', { candidate_id: candidateId, mode: 'autonomous' });
-      navigate(`/pcm-test/${res.data.access_token}`);
     } catch (err) { console.error(err); alert('Erreur création test PCM'); }
   };
 
@@ -308,7 +300,7 @@ export default function Candidates() {
                   : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} />
                 )}
                 {detailTab === 'history' && <HistoryView history={history} />}
-                {detailTab === 'pcm' && <PCMView profile={pcmProfile} onStart={() => startPCMTest(selected.id)} onOpenInApp={() => openPCMTestInApp(selected.id)} />}
+                {detailTab === 'pcm' && <PCMView profile={pcmProfile} onStart={() => startPCMTest(selected.id)} />}
               </div>
             </div>
           </div>
@@ -445,20 +437,13 @@ function HistoryView({ history }) {
   );
 }
 
-function PCMView({ profile, onStart, onOpenInApp }) {
+function PCMView({ profile, onStart }) {
   const PCM_C = { analyseur: 'bg-blue-100 text-blue-700', perseverant: 'bg-green-100 text-green-700', empathique: 'bg-pink-100 text-pink-700', imagineur: 'bg-indigo-100 text-indigo-700', energiseur: 'bg-orange-100 text-orange-700', promoteur: 'bg-red-100 text-red-700' };
   if (!profile) return (
     <div className="text-center py-8">
       <p className="text-gray-500 text-sm mb-4">Aucun profil PCM</p>
-      <div className="flex flex-col sm:flex-row gap-2 justify-center">
-        <button onClick={onOpenInApp} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">
-          Ouvrir le questionnaire
-        </button>
-        <button onClick={onStart} className="border border-purple-300 text-purple-600 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium">
-          Copier le lien à partager
-        </button>
-      </div>
-      <p className="text-xs text-gray-400 mt-3">Ouvrir dans l’app ou copier le lien pour l’envoyer au candidat</p>
+      <button onClick={onStart} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">Lancer un test PCM</button>
+      <p className="text-xs text-gray-400 mt-2">Le lien sera copié dans le presse-papier</p>
     </div>
   );
   return (
@@ -475,10 +460,7 @@ function PCMView({ profile, onStart, onOpenInApp }) {
           ))}</div>
         </div>
       )}
-      <div className="flex flex-col sm:flex-row gap-2">
-        <button onClick={onOpenInApp} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">Ouvrir le questionnaire</button>
-        <button onClick={onStart} className="flex-1 border border-purple-300 text-purple-600 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium">Copier le lien</button>
-      </div>
+      <button onClick={onStart} className="w-full border border-purple-300 text-purple-600 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium">Relancer un test</button>
     </div>
   );
 }

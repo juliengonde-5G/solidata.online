@@ -9,12 +9,6 @@ export default {
         'solidata-yellow': '#F5A623',
         'solidata-dark': '#1A202C',
       },
-      fontFamily: {
-        sans: ['Plus Jakarta Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-      },
-      minHeight: {
-        touch: '44px',
-      },
     },
   },
   plugins: [],
