@@ -1565,6 +1565,70 @@ function calculateProgression(events) {
 
 const PCM_KEY = process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
 
+// GET /api/insertion — Vue d'ensemble de tous les employés actifs
+// IMPORTANT: doit etre AVANT /:employeeId pour ne pas etre intercepte
+router.get('/', async (req, res) => {
+  try {
+    // Detecter quelles tables existent pour adapter la requete
+    const tablesCheck = await pool.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name IN ('employee_contracts', 'pcm_reports', 'insertion_diagnostics')
+    `);
+    const existingTables = new Set(tablesCheck.rows.map(r => r.table_name));
+
+    let subqueries = '';
+    if (existingTables.has('employee_contracts')) {
+      subqueries += `,
+        COALESCE((SELECT COUNT(*)::int FROM employee_contracts WHERE employee_id = e.id), 0) as nb_contracts,
+        (SELECT ec.contract_type FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as current_contract_type,
+        (SELECT ec.end_date FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as contract_end_date`;
+    } else {
+      subqueries += `, 0 as nb_contracts, e.contract_type as current_contract_type, e.contract_end as contract_end_date`;
+    }
+    if (existingTables.has('pcm_reports')) {
+      subqueries += `,
+        CASE WHEN e.candidate_id IS NOT NULL THEN
+          COALESCE((SELECT COUNT(*)::int FROM pcm_reports pr WHERE pr.candidate_id = e.candidate_id), 0)
+        ELSE 0 END as has_pcm`;
+    } else {
+      subqueries += `, 0 as has_pcm`;
+    }
+    if (existingTables.has('insertion_diagnostics')) {
+      subqueries += `,
+        COALESCE((SELECT COUNT(*)::int FROM insertion_diagnostics diag WHERE diag.employee_id = e.id), 0) as has_diagnostic`;
+    } else {
+      subqueries += `, 0 as has_diagnostic`;
+    }
+
+    const result = await pool.query(`
+      SELECT e.id, e.first_name, e.last_name, e.is_active,
+        t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end
+        ${subqueries}
+      FROM employees e
+      LEFT JOIN teams t ON e.team_id = t.id
+      WHERE e.is_active = true
+      ORDER BY e.last_name, e.first_name
+    `);
+
+    const now = new Date();
+    const employees = result.rows.map(e => {
+      let urgency = null;
+      if (e.contract_end_date) {
+        const days = Math.round((new Date(e.contract_end_date) - now) / 86400000);
+        if (days <= 30) urgency = 'critique';
+        else if (days <= 60) urgency = 'attention';
+      }
+      return { ...e, urgency, has_pcm: e.has_pcm > 0, has_diagnostic: e.has_diagnostic > 0 };
+    });
+
+    console.log(`[INSERTION] GET / → ${employees.length} salaries actifs`);
+    res.json(employees);
+  } catch (err) {
+    console.error('[INSERTION] Erreur liste :', err.message, err.detail || '');
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+});
+
 // GET /api/insertion/freins-definitions — Référentiel des freins (pour le frontend)
 router.get('/freins-definitions', (req, res) => {
   res.json(FREINS_DEFINITIONS);
@@ -1672,208 +1736,6 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
 });
 
 // GET /api/insertion/:employeeId — Analyse complète
-router.get('/:employeeId', async (req, res) => {
-  try {
-    const empId = req.params.employeeId;
-
-    // 1. Données employé
-    const empRes = await pool.query(`
-      SELECT e.*, t.name as team_name, p.title as position_title
-      FROM employees e
-      LEFT JOIN teams t ON e.team_id = t.id
-      LEFT JOIN positions p ON p.title = e.position
-      WHERE e.id = $1
-    `, [empId]);
-    if (empRes.rows.length === 0) return res.status(404).json({ error: 'Employé non trouvé' });
-    const employee = empRes.rows[0];
-
-    // 2. Contrats
-    let contractsRes = { rows: [] };
-    try {
-      contractsRes = await pool.query(
-        'SELECT ec.*, t.name as team_name, p.title as position_title FROM employee_contracts ec LEFT JOIN teams t ON ec.team_id = t.id LEFT JOIN positions p ON ec.position_id = p.id WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC',
-        [empId]
-      );
-    } catch { /* table might not exist */ }
-
-    // 3. Candidat (par nom ou candidate_id)
-    let candidate = null;
-    try {
-      if (employee.candidate_id) {
-        const candRes = await pool.query('SELECT * FROM candidates WHERE id = $1', [employee.candidate_id]);
-        candidate = candRes.rows[0] || null;
-      }
-      if (!candidate) {
-        const candRes = await pool.query(
-          'SELECT * FROM candidates WHERE LOWER(first_name) = LOWER($1) AND LOWER(last_name) = LOWER($2) ORDER BY created_at DESC LIMIT 1',
-          [employee.first_name, employee.last_name]
-        );
-        candidate = candRes.rows[0] || null;
-      }
-    } catch { /* table might not exist */ }
-
-    // 4. Rapport PCM
-    let pcmReport = null;
-    if (candidate) {
-      try {
-        const pcmRes = await pool.query(
-          'SELECT encrypted_report FROM pcm_reports WHERE candidate_id = $1 ORDER BY created_at DESC LIMIT 1',
-          [candidate.id]
-        );
-        if (pcmRes.rows[0]?.encrypted_report) {
-          const bytes = CryptoJS.AES.decrypt(pcmRes.rows[0].encrypted_report, PCM_KEY);
-          pcmReport = bytes.toString(CryptoJS.enc.Utf8);
-        }
-      } catch { /* pcm might not exist */ }
-    }
-
-    // 5. Membres de l'équipe
-    let teamMembers = [];
-    if (employee.team_id) {
-      try {
-        const teamRes = await pool.query(
-          'SELECT id, first_name, last_name FROM employees WHERE team_id = $1 AND is_active = true AND id != $2',
-          [employee.team_id, empId]
-        );
-        teamMembers = teamRes.rows;
-      } catch { /* ignore */ }
-    }
-
-    // 6. Position
-    let position = null;
-    const currentContract = contractsRes.rows.find(c => c.is_current);
-    if (currentContract?.position_id) {
-      try {
-        const posRes = await pool.query('SELECT * FROM positions WHERE id = $1', [currentContract.position_id]);
-        position = posRes.rows[0] || null;
-      } catch { /* ignore */ }
-    }
-
-    // 7. Diagnostic CIP
-    let diagnostic = null;
-    try {
-      const diagRes = await pool.query('SELECT * FROM insertion_diagnostics WHERE employee_id = $1', [empId]);
-      diagnostic = diagRes.rows[0] || null;
-    } catch { /* table might not exist yet */ }
-
-    // 8. Jalons insertion
-    let milestones = [];
-    try {
-      const msRes = await pool.query(
-        'SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date', [empId]
-      );
-      milestones = msRes.rows;
-    } catch { /* table might not exist yet */ }
-
-    // 9. Plan d'action CIP
-    let actionPlans = [];
-    try {
-      const apRes = await pool.query(
-        'SELECT * FROM cip_action_plans WHERE employee_id = $1 ORDER BY created_at', [empId]
-      );
-      actionPlans = apRes.rows;
-    } catch { /* table might not exist yet */ }
-
-    // 10. Analyse complete
-    const analysis = analyzeInsertion(
-      employee, contractsRes.rows, candidate, pcmReport,
-      teamMembers, position, diagnostic, milestones
-    );
-
-    // 11. Timeline du parcours
-    const timeline = buildTimeline(employee, contractsRes.rows, milestones, diagnostic);
-
-    res.json({
-      employee: {
-        id: employee.id,
-        first_name: employee.first_name,
-        last_name: employee.last_name,
-        team_name: employee.team_name,
-        position: employee.position,
-        is_active: employee.is_active,
-        insertion_start_date: employee.insertion_start_date,
-        insertion_status: employee.insertion_status,
-      },
-      has_pcm: !!pcmReport,
-      has_candidate_data: !!candidate,
-      has_cv: !!candidate?.cv_raw_text,
-      has_interview: !!candidate?.interview_comment,
-      has_diagnostic: !!diagnostic,
-      nb_contracts: contractsRes.rows.length,
-      milestones,
-      action_plans: actionPlans,
-      timeline,
-      ...analysis,
-    });
-  } catch (err) {
-    console.error('[INSERTION] Erreur analyse :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// GET /api/insertion — Vue d'ensemble de tous les employés actifs
-router.get('/', async (req, res) => {
-  try {
-    // Detecter quelles tables existent pour adapter la requete
-    const tablesCheck = await pool.query(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('employee_contracts', 'pcm_reports', 'insertion_diagnostics')
-    `);
-    const existingTables = new Set(tablesCheck.rows.map(r => r.table_name));
-
-    let subqueries = '';
-    if (existingTables.has('employee_contracts')) {
-      subqueries += `,
-        COALESCE((SELECT COUNT(*)::int FROM employee_contracts WHERE employee_id = e.id), 0) as nb_contracts,
-        (SELECT ec.contract_type FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as current_contract_type,
-        (SELECT ec.end_date FROM employee_contracts ec WHERE ec.employee_id = e.id AND ec.is_current = true LIMIT 1) as contract_end_date`;
-    } else {
-      subqueries += `, 0 as nb_contracts, e.contract_type as current_contract_type, e.contract_end as contract_end_date`;
-    }
-    if (existingTables.has('pcm_reports')) {
-      subqueries += `,
-        CASE WHEN e.candidate_id IS NOT NULL THEN
-          COALESCE((SELECT COUNT(*)::int FROM pcm_reports pr WHERE pr.candidate_id = e.candidate_id), 0)
-        ELSE 0 END as has_pcm`;
-    } else {
-      subqueries += `, 0 as has_pcm`;
-    }
-    if (existingTables.has('insertion_diagnostics')) {
-      subqueries += `,
-        COALESCE((SELECT COUNT(*)::int FROM insertion_diagnostics diag WHERE diag.employee_id = e.id), 0) as has_diagnostic`;
-    } else {
-      subqueries += `, 0 as has_diagnostic`;
-    }
-
-    const result = await pool.query(`
-      SELECT e.id, e.first_name, e.last_name, e.is_active,
-        t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end
-        ${subqueries}
-      FROM employees e
-      LEFT JOIN teams t ON e.team_id = t.id
-      WHERE e.is_active = true
-      ORDER BY e.last_name, e.first_name
-    `);
-
-    const now = new Date();
-    const employees = result.rows.map(e => {
-      let urgency = null;
-      if (e.contract_end_date) {
-        const days = Math.round((new Date(e.contract_end_date) - now) / 86400000);
-        if (days <= 30) urgency = 'critique';
-        else if (days <= 60) urgency = 'attention';
-      }
-      return { ...e, urgency, has_pcm: e.has_pcm > 0, has_diagnostic: e.has_diagnostic > 0 };
-    });
-
-    console.log(`[INSERTION] GET / → ${employees.length} salaries actifs`);
-    res.json(employees);
-  } catch (err) {
-    console.error('[INSERTION] Erreur liste :', err.message, err.detail || '');
-    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
-  }
-});
-
 // ══════════════════════════════════════════════════════════════
 // JALONS INSERTION — Diagnostic accueil, M+3, M+6, M+10, Sortie
 // ══════════════════════════════════════════════════════════════
@@ -2188,6 +2050,149 @@ router.get('/timeline/:employeeId', async (req, res) => {
     res.json(timeline);
   } catch (err) {
     console.error('[INSERTION] Erreur timeline :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// GET /api/insertion/:employeeId — Analyse complete d'un salarié
+// IMPORTANT: DOIT etre la DERNIERE route GET car /:employeeId capture tout
+// ══════════════════════════════════════════════════════════════
+router.get('/:employeeId', async (req, res) => {
+  try {
+    const empId = req.params.employeeId;
+
+    // 1. Données employé
+    const empRes = await pool.query(`
+      SELECT e.*, t.name as team_name, p.title as position_title
+      FROM employees e
+      LEFT JOIN teams t ON e.team_id = t.id
+      LEFT JOIN positions p ON p.title = e.position
+      WHERE e.id = $1
+    `, [empId]);
+    if (empRes.rows.length === 0) return res.status(404).json({ error: 'Employé non trouvé' });
+    const employee = empRes.rows[0];
+
+    // 2. Contrats
+    let contractsRes = { rows: [] };
+    try {
+      contractsRes = await pool.query(
+        'SELECT ec.*, t.name as team_name, p.title as position_title FROM employee_contracts ec LEFT JOIN teams t ON ec.team_id = t.id LEFT JOIN positions p ON ec.position_id = p.id WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC',
+        [empId]
+      );
+    } catch { /* table might not exist */ }
+
+    // 3. Candidat (par nom ou candidate_id)
+    let candidate = null;
+    try {
+      if (employee.candidate_id) {
+        const candRes = await pool.query('SELECT * FROM candidates WHERE id = $1', [employee.candidate_id]);
+        candidate = candRes.rows[0] || null;
+      }
+      if (!candidate) {
+        const candRes = await pool.query(
+          'SELECT * FROM candidates WHERE LOWER(first_name) = LOWER($1) AND LOWER(last_name) = LOWER($2) ORDER BY created_at DESC LIMIT 1',
+          [employee.first_name, employee.last_name]
+        );
+        candidate = candRes.rows[0] || null;
+      }
+    } catch { /* table might not exist */ }
+
+    // 4. Rapport PCM
+    let pcmReport = null;
+    if (candidate) {
+      try {
+        const pcmRes = await pool.query(
+          'SELECT encrypted_report FROM pcm_reports WHERE candidate_id = $1 ORDER BY created_at DESC LIMIT 1',
+          [candidate.id]
+        );
+        if (pcmRes.rows[0]?.encrypted_report) {
+          const bytes = CryptoJS.AES.decrypt(pcmRes.rows[0].encrypted_report, PCM_KEY);
+          pcmReport = bytes.toString(CryptoJS.enc.Utf8);
+        }
+      } catch { /* pcm might not exist */ }
+    }
+
+    // 5. Membres de l'équipe
+    let teamMembers = [];
+    if (employee.team_id) {
+      try {
+        const teamRes = await pool.query(
+          'SELECT id, first_name, last_name FROM employees WHERE team_id = $1 AND is_active = true AND id != $2',
+          [employee.team_id, empId]
+        );
+        teamMembers = teamRes.rows;
+      } catch { /* ignore */ }
+    }
+
+    // 6. Position
+    let position = null;
+    const currentContract = contractsRes.rows.find(c => c.is_current);
+    if (currentContract?.position_id) {
+      try {
+        const posRes = await pool.query('SELECT * FROM positions WHERE id = $1', [currentContract.position_id]);
+        position = posRes.rows[0] || null;
+      } catch { /* ignore */ }
+    }
+
+    // 7. Diagnostic CIP
+    let diagnostic = null;
+    try {
+      const diagRes = await pool.query('SELECT * FROM insertion_diagnostics WHERE employee_id = $1', [empId]);
+      diagnostic = diagRes.rows[0] || null;
+    } catch { /* table might not exist yet */ }
+
+    // 8. Jalons insertion
+    let milestones = [];
+    try {
+      const msRes = await pool.query(
+        'SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date', [empId]
+      );
+      milestones = msRes.rows;
+    } catch { /* table might not exist yet */ }
+
+    // 9. Plan d'action CIP
+    let actionPlans = [];
+    try {
+      const apRes = await pool.query(
+        'SELECT * FROM cip_action_plans WHERE employee_id = $1 ORDER BY created_at', [empId]
+      );
+      actionPlans = apRes.rows;
+    } catch { /* table might not exist yet */ }
+
+    // 10. Analyse complete
+    const analysis = analyzeInsertion(
+      employee, contractsRes.rows, candidate, pcmReport,
+      teamMembers, position, diagnostic, milestones
+    );
+
+    // 11. Timeline du parcours
+    const timeline = buildTimeline(employee, contractsRes.rows, milestones, diagnostic);
+
+    res.json({
+      employee: {
+        id: employee.id,
+        first_name: employee.first_name,
+        last_name: employee.last_name,
+        team_name: employee.team_name,
+        position: employee.position,
+        is_active: employee.is_active,
+        insertion_start_date: employee.insertion_start_date,
+        insertion_status: employee.insertion_status,
+      },
+      has_pcm: !!pcmReport,
+      has_candidate_data: !!candidate,
+      has_cv: !!candidate?.cv_raw_text,
+      has_interview: !!candidate?.interview_comment,
+      has_diagnostic: !!diagnostic,
+      nb_contracts: contractsRes.rows.length,
+      milestones,
+      action_plans: actionPlans,
+      timeline,
+      ...analysis,
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur analyse :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
