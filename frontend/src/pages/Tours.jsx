@@ -80,19 +80,54 @@ export default function Tours() {
 
   return (
     <Layout>
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
+      <div className="p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Tournées de collecte</h1>
-            <p className="text-gray-500">Planification et suivi des tournées</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-solidata-dark">Tournées de collecte</h1>
+            <p className="text-gray-500 text-sm">Planification et suivi des tournées</p>
           </div>
-          <button onClick={openWizard} className="btn-primary text-sm font-medium">
+          <button onClick={openWizard} className="btn-primary text-sm font-medium w-full sm:w-auto">
             + Nouvelle tournée
           </button>
         </div>
 
-        {/* Tours List */}
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        {/* Tours List — Cards on mobile, Table on desktop */}
+        {/* Mobile cards */}
+        <div className="lg:hidden space-y-3">
+          {tours.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">Aucune tournée</div>
+          ) : tours.map(t => (
+            <div key={t.id} className="bg-white rounded-xl shadow-sm border p-4" onClick={() => loadTourDetail(t.id)}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold">{new Date(t.date).toLocaleDateString('fr-FR')}</span>
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[t.status] || ''}`}>
+                  {STATUS_LABELS[t.status] || t.status}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-700 mb-1">
+                <span className="font-medium">{t.registration || t.vehicle_registration || '—'}</span>
+                {t.mode === 'intelligent' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700">IA</span>}
+              </div>
+              <p className="text-xs text-gray-500 mb-2">{t.driver_name || [t.driver_first_name, t.driver_last_name].filter(Boolean).join(' ') || 'Pas de chauffeur'}</p>
+              <div className="flex items-center justify-between text-xs text-gray-500">
+                <span>{t.nb_cav || 0} CAV</span>
+                <span className="font-medium text-gray-700">{t.total_weight_kg || 0} kg</span>
+              </div>
+              <div className="flex gap-2 mt-3 pt-3 border-t">
+                {t.status === 'planned' && (
+                  <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'in_progress'); }} className="flex-1 text-center py-2 rounded-lg bg-orange-50 text-orange-600 text-xs font-medium">Démarrer</button>
+                )}
+                {t.status === 'in_progress' && (
+                  <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'completed'); }} className="flex-1 text-center py-2 rounded-lg bg-green-50 text-green-600 text-xs font-medium">Terminer</button>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); loadTourDetail(t.id); }} className="flex-1 text-center py-2 rounded-lg bg-gray-50 text-solidata-green text-xs font-medium">Détails</button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden lg:block bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
@@ -146,8 +181,8 @@ export default function Tours() {
 
         {/* Wizard Modal */}
         {showWizard && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50">
+            <div className="bg-white rounded-t-xl sm:rounded-xl p-5 sm:p-6 w-full sm:w-[520px] shadow-xl max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Nouvelle tournée — Étape {wizardStep}/4</h2>
                 <button onClick={() => setShowWizard(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
@@ -270,7 +305,7 @@ export default function Tours() {
         {/* Tour Detail Modal */}
         {selectedTour && (
           <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={() => setSelectedTour(null)}>
-            <div className="bg-white w-[480px] h-full overflow-y-auto shadow-xl p-6" onClick={e => e.stopPropagation()}>
+            <div className="bg-white w-full sm:w-[480px] h-full overflow-y-auto shadow-xl p-4 sm:p-6" onClick={e => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Détail tournée #{selectedTour.id}</h2>
                 <button onClick={() => setSelectedTour(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
