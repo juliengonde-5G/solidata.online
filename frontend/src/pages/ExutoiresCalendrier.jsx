@@ -117,8 +117,34 @@ export default function ExutoiresCalendrier() {
         api.get('/calendrier-logistique', { params: { date_from: dateFrom, date_to: dateTo } }),
         api.get('/calendrier-logistique/alertes'),
       ]);
-      setCalendarData(calRes.data);
-      setAlertes(alertRes.data);
+      // Normaliser la reponse : aplatir les expeditions depuis les semaines
+      const data = calRes.data || {};
+      const semaines = data.semaines || [];
+      const allExpeditions = semaines.flatMap(s => (s.expeditions || []).map(e => ({
+        ...e,
+        semaine: s.semaine,
+      })));
+      // Normaliser les semaines : convertir occupation_lieux (objet) en lieux (tableau)
+      for (const sem of semaines) {
+        if (sem.occupation_lieux && !sem.lieux) {
+          sem.lieux = Object.entries(sem.occupation_lieux).map(([nom, occupation_pct]) => ({
+            nom, occupation_pct
+          }));
+        }
+      }
+      // Normaliser le resume
+      const resume = data.resume || {};
+      setCalendarData({
+        semaines,
+        expeditions: allExpeditions,
+        resume: {
+          total_expeditions: resume.total_expeditions ?? 0,
+          tonnage_total: resume.total_tonnage ?? resume.tonnage_total ?? 0,
+          ca_previsionnel: resume.total_ca ?? resume.ca_previsionnel ?? 0,
+          taux_moyen_occupation: resume.taux_moyen_occupation ?? null,
+        },
+      });
+      setAlertes(Array.isArray(alertRes.data) ? alertRes.data : alertRes.data?.alertes || []);
     } catch (err) {
       console.error(err);
     }
@@ -276,13 +302,16 @@ export default function ExutoiresCalendrier() {
                             <div className="space-y-0.5">
                               <div className="text-[10px] text-gray-500 font-medium">{dayExps.length} exp.</div>
                               <div className="flex flex-wrap gap-0.5">
-                                {dayExps.slice(0, 6).map((exp, ei) => (
-                                  <div
-                                    key={ei}
-                                    className={`w-2.5 h-2.5 rounded-full ${TYPE_COLORS[exp.type_produit] || 'bg-gray-400'}`}
-                                    title={`${TYPES_PRODUIT[exp.type_produit] || exp.type_produit} — ${exp.client || ''}`}
-                                  />
-                                ))}
+                                {dayExps.slice(0, 6).map((exp, ei) => {
+                                  const tp = Array.isArray(exp.type_produit) ? exp.type_produit[0] : exp.type_produit;
+                                  return (
+                                    <div
+                                      key={ei}
+                                      className={`w-2.5 h-2.5 rounded-full ${TYPE_COLORS[tp] || 'bg-gray-400'}`}
+                                      title={`${TYPES_PRODUIT[tp] || tp} — ${exp.client || ''}`}
+                                    />
+                                  );
+                                })}
                                 {dayExps.length > 6 && (
                                   <span className="text-[9px] text-gray-400">+{dayExps.length - 6}</span>
                                 )}
@@ -392,8 +421,12 @@ export default function ExutoiresCalendrier() {
                                         <td className="py-2 pr-4 text-gray-700">{exp.client || '—'}</td>
                                         <td className="py-2 pr-4">
                                           <span className="inline-flex items-center gap-1">
-                                            <span className={`w-2 h-2 rounded-full ${TYPE_COLORS[exp.type_produit] || 'bg-gray-400'}`} />
-                                            {TYPES_PRODUIT[exp.type_produit] || exp.type_produit}
+                                            {(Array.isArray(exp.type_produit) ? exp.type_produit : [exp.type_produit]).map((tp, tpi) => (
+                                              <span key={tpi} className="inline-flex items-center gap-1">
+                                                <span className={`w-2 h-2 rounded-full ${TYPE_COLORS[tp] || 'bg-gray-400'}`} />
+                                                {TYPES_PRODUIT[tp] || tp}
+                                              </span>
+                                            ))}
                                           </span>
                                         </td>
                                         <td className="py-2 pr-4 text-gray-700">

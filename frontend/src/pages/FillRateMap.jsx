@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, Cell } from 'recharts';
 import 'leaflet/dist/leaflet.css';
 
 function getFillColor(rate) {
@@ -29,10 +30,24 @@ export default function FillRateMap() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedCav, setSelectedCav] = useState(null);
+  const [activityData, setActivityData] = useState(null);
+  const [activityLoading, setActivityLoading] = useState(false);
   const [filter, setFilter] = useState('all'); // all, critical, warning, ok
   const [sortBy, setSortBy] = useState('fill_rate'); // fill_rate, days_to_full, name
 
   useEffect(() => { loadData(); }, []);
+
+  // Charger l'histogramme d'activite quand un CAV est selectionne
+  useEffect(() => {
+    if (!selectedCav) { setActivityData(null); return; }
+    let cancelled = false;
+    setActivityLoading(true);
+    api.get(`/cav/${selectedCav.id}/activity`)
+      .then(res => { if (!cancelled) setActivityData(res.data); })
+      .catch(() => { if (!cancelled) setActivityData(null); })
+      .finally(() => { if (!cancelled) setActivityLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedCav?.id]);
 
   const loadData = async () => {
     try {
@@ -214,6 +229,57 @@ export default function FillRateMap() {
                     Prévision plein (80%) : <span className="font-bold">{new Date(selectedCav.predicted_full_date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
                   </div>
                 )}
+
+                {/* Histogramme activite -10j / +10j */}
+                <div className="mt-3 pt-3 border-t">
+                  <h4 className="text-xs font-semibold text-gray-700 mb-2">Activité : historique & prévision</h4>
+                  {activityLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-solidata-green border-t-transparent" />
+                    </div>
+                  ) : activityData?.jours ? (
+                    <div>
+                      <ResponsiveContainer width="100%" height={160}>
+                        <BarChart data={activityData.jours.map(j => ({
+                          ...j,
+                          label: new Date(j.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+                          shortLabel: new Date(j.date).getDate().toString(),
+                        }))} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                          <XAxis dataKey="shortLabel" tick={{ fontSize: 9 }} interval={1} />
+                          <YAxis tick={{ fontSize: 9 }} unit="%" domain={[0, 120]} />
+                          <Tooltip
+                            contentStyle={{ fontSize: 11, borderRadius: 8 }}
+                            formatter={(value, name) => {
+                              if (name === 'fill_pct') return [`${value}%`, 'Remplissage'];
+                              if (name === 'collecte_kg') return [`${value} kg`, 'Collecte'];
+                              return [value, name];
+                            }}
+                            labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
+                          />
+                          <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="3 3" strokeWidth={1} />
+                          <Bar dataKey="fill_pct" radius={[2, 2, 0, 0]} maxBarSize={12}>
+                            {activityData.jours.map((j, i) => (
+                              <Cell
+                                key={i}
+                                fill={j.type === 'prevision' ? '#93C5FD' : '#8BC540'}
+                                fillOpacity={j.collecte_kg > 0 ? 1 : 0.7}
+                                stroke={j.collecte_kg > 0 ? '#16A34A' : 'none'}
+                                strokeWidth={j.collecte_kg > 0 ? 2 : 0}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                      <div className="flex items-center justify-center gap-4 text-[10px] text-gray-500 mt-1">
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#8BC540]" /> Historique</span>
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#93C5FD]" /> Prévision</span>
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 bg-red-500" /> Seuil 80%</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 text-center py-2">Données non disponibles</p>
+                  )}
+                </div>
               </div>
             )}
 

@@ -770,14 +770,10 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
 router.use(authenticate);
 
 // GET /api/tours/my — Vehicules et tournees du jour (mobile)
-// Retourne les tournees planned/in_progress + les vehicules disponibles sans tournee
+// Retourne toutes les tournees du jour (planned + in_progress) + vehicules disponibles
 router.get('/my', async (req, res) => {
   try {
-    const userId = req.user.id;
-    const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
-    const employeeId = empResult.rows.length > 0 ? empResult.rows[0].id : null;
-
-    // 1. Tournees existantes du jour
+    // 1. Toutes les tournees du jour (pas de filtre par chauffeur)
     const toursResult = await pool.query(`
       SELECT t.*, v.registration, v.name as vehicle_name,
        CONCAT(e.first_name, ' ', e.last_name) as driver_name,
@@ -787,11 +783,10 @@ router.get('/my', async (req, res) => {
       FROM tours t
       LEFT JOIN vehicles v ON t.vehicle_id = v.id
       LEFT JOIN employees e ON t.driver_employee_id = e.id
-      WHERE
-        (t.date = CURRENT_DATE AND t.status = 'planned')
-        OR (t.driver_employee_id = $1 AND t.status = 'in_progress')
+      WHERE t.date = CURRENT_DATE
+        AND t.status IN ('planned', 'in_progress')
       ORDER BY t.status = 'in_progress' DESC, t.date ASC, t.created_at DESC
-    `, [employeeId]);
+    `);
 
     // 2. Vehicules disponibles sans tournee du jour
     const vehicleIdsInTours = toursResult.rows

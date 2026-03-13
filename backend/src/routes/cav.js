@@ -318,6 +318,115 @@ router.post('/batch-generate-qr', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// GET /api/cav/:id/activity — Histogramme activite : 10j passe + 10j futur
+router.get('/:id/activity', async (req, res) => {
+  try {
+    const cavId = req.params.id;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // 1. Verifier que le CAV existe
+    const cavResult = await pool.query('SELECT id, name, nb_containers, avg_fill_rate FROM cav WHERE id = $1', [cavId]);
+    if (cavResult.rows.length === 0) return res.status(404).json({ error: 'CAV non trouve' });
+    const cav = cavResult.rows[0];
+
+    // 2. Historique des 10 derniers jours — collectes reelles
+    const tenDaysAgo = new Date(today);
+    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+
+    const historyResult = await pool.query(
+      `SELECT date, SUM(weight_kg) as poids_kg
+       FROM tonnage_history
+       WHERE cav_id = $1 AND date >= $2 AND date <= $3
+       GROUP BY date ORDER BY date`,
+      [cavId, tenDaysAgo.toISOString().slice(0, 10), today.toISOString().slice(0, 10)]
+    );
+    const collectsByDate = {};
+    for (const row of historyResult.rows) {
+      collectsByDate[new Date(row.date).toISOString().slice(0, 10)] = parseFloat(row.poids_kg);
+    }
+
+    // 3. Parametres de prediction
+    const avgResult = await pool.query(
+      `SELECT AVG(weight_kg) as avg_weight,
+              COUNT(*) as nb_collectes
+       FROM tonnage_history WHERE cav_id = $1 AND date >= NOW() - INTERVAL '90 days'`,
+      [cavId]
+    );
+    const avgWeight = parseFloat(avgResult.rows[0].avg_weight) || 50;
+    const nbCollectes90d = parseInt(avgResult.rows[0].nb_collectes) || 0;
+    const avgDaysBetween = nbCollectes90d > 1 ? 90 / nbCollectes90d : 14;
+    const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
+    const capacityKg = (cav.nb_containers || 1) * 150;
+
+    // Facteurs saisonniers et jour de semaine
+    const SEASONAL = [0.88, 0.82, 0.94, 1.05, 1.12, 0.99, 1.19, 1.27, 1.13, 1.02, 0.84, 0.75];
+    const DOW = [1.1, 1.25, 1.09, 1.05, 0.49, 1.11, 1.15]; // dim, lun, mar, mer, jeu, ven, sam
+
+    // 4. Construire les donnees jour par jour
+    const days = [];
+
+    // -- Historique : 10 derniers jours
+    // On simule l'accumulation : chaque jour le conteneur se remplit, une collecte remet a zero
+    let accumulatedKg = 0;
+    for (let i = -10; i <= 10; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const monthIdx = d.getMonth();
+      const dowIdx = d.getDay();
+      const dailyRate = dailyAccumulation * SEASONAL[monthIdx] * DOW[dowIdx];
+
+      if (i <= 0) {
+        // Passe : donnees reelles ou estimation
+        const collected = collectsByDate[dateStr] || 0;
+        if (collected > 0) {
+          // Jour de collecte : on enregistre le poids collecte puis on remet a zero
+          days.push({
+            date: dateStr,
+            type: 'historique',
+            collecte_kg: Math.round(collected * 10) / 10,
+            accumulation_kg: Math.round(accumulatedKg * 10) / 10,
+            fill_pct: Math.min(120, Math.round((accumulatedKg / capacityKg) * 100)),
+          });
+          accumulatedKg = 0; // reset apres collecte
+        } else {
+          accumulatedKg += dailyRate;
+          days.push({
+            date: dateStr,
+            type: 'historique',
+            collecte_kg: 0,
+            accumulation_kg: Math.round(accumulatedKg * 10) / 10,
+            fill_pct: Math.min(120, Math.round((accumulatedKg / capacityKg) * 100)),
+          });
+        }
+      } else {
+        // Futur : prediction d'accumulation
+        accumulatedKg += dailyRate;
+        const fillPct = Math.min(120, Math.round((accumulatedKg / capacityKg) * 100));
+        days.push({
+          date: dateStr,
+          type: 'prevision',
+          collecte_kg: 0,
+          accumulation_kg: Math.round(accumulatedKg * 10) / 10,
+          fill_pct: fillPct,
+        });
+      }
+    }
+
+    res.json({
+      cav_id: cav.id,
+      cav_name: cav.name,
+      capacite_kg: capacityKg,
+      accumulation_quotidienne_kg: Math.round(dailyAccumulation * 10) / 10,
+      jours: days,
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur activity forecast :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/cav/:id
 router.get('/:id', async (req, res) => {
   try {
