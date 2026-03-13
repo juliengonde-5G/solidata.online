@@ -242,6 +242,59 @@ export default function ExutoiresCommandes() {
           </div>
         </div>
 
+        {/* Pipeline / Flow diagram */}
+        <div className="bg-white rounded-xl shadow-sm border p-4 mb-6 overflow-x-auto">
+          <h3 className="text-sm font-semibold text-gray-500 mb-3">Flux des commandes</h3>
+          <div className="flex items-center gap-1 min-w-[700px]">
+            {[
+              { key: 'en_attente', icon: '📋' },
+              { key: 'confirmee', icon: '✅' },
+              { key: 'en_preparation', icon: '📦' },
+              { key: 'chargee', icon: '🏗️' },
+              { key: 'expediee', icon: '🚛' },
+              { key: 'pesee_recue', icon: '⚖️' },
+              { key: 'facturee', icon: '💶' },
+              { key: 'cloturee', icon: '🔒' },
+            ].map((step, i, arr) => {
+              const count = commandes.filter(c => c.statut === step.key).length;
+              const statusInfo = STATUTS[step.key];
+              const hasItems = count > 0;
+              return (
+                <div key={step.key} className="flex items-center">
+                  <button
+                    onClick={() => setFilterStatut(filterStatut === step.key ? '' : step.key)}
+                    className={`flex flex-col items-center px-3 py-2 rounded-lg transition-all min-w-[80px] ${
+                      filterStatut === step.key
+                        ? 'ring-2 ring-solidata-green bg-solidata-green/10'
+                        : hasItems ? 'hover:bg-gray-50' : 'opacity-40'
+                    }`}
+                  >
+                    <span className="text-lg mb-1">{step.icon}</span>
+                    <span className={`text-lg font-bold ${hasItems ? 'text-solidata-dark' : 'text-gray-300'}`}>{count}</span>
+                    <span className="text-[10px] text-gray-500 leading-tight text-center">{statusInfo.label}</span>
+                  </button>
+                  {i < arr.length - 1 && (
+                    <div className={`text-gray-300 mx-0.5 ${count > 0 ? 'text-solidata-green' : ''}`}>→</div>
+                  )}
+                </div>
+              );
+            })}
+            {/* Annulées aside */}
+            <div className="ml-4 border-l pl-4">
+              <button
+                onClick={() => setFilterStatut(filterStatut === 'annulee' ? '' : 'annulee')}
+                className={`flex flex-col items-center px-3 py-2 rounded-lg min-w-[60px] ${
+                  filterStatut === 'annulee' ? 'ring-2 ring-red-400 bg-red-50' : 'hover:bg-gray-50'
+                }`}
+              >
+                <span className="text-lg mb-1">❌</span>
+                <span className="text-lg font-bold text-red-500">{commandes.filter(c => c.statut === 'annulee').length}</span>
+                <span className="text-[10px] text-gray-500">Annulées</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Filters row */}
         <div className="flex flex-wrap gap-3 mb-4">
           <select

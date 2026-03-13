@@ -1,6 +1,6 @@
 # Cahier des Charges — Module Logistique des Exutoires
 
-**Version :** 1.0
+**Version :** 1.1
 **Date :** 2026-03-13
 **Projet :** SOLIDATA.online
 **Module :** Logistique des Exutoires
@@ -53,7 +53,7 @@ Chaque sortie passe par ces statuts séquentiels. Un statut `ANNULÉ` est possib
 |-------|------|-------------|-------------|
 | `reference` | String | Auto | Référence auto-générée : `CMD-YYYY-NNNN` |
 | `client_id` | FK → clients | Oui | Client destinataire |
-| `type_produit` | Enum | Oui | Original / CSR / Effilo Blc / Effilo Couleur / Jean / Coton Blanc / Coton Couleur |
+| `type_produit` | TEXT[] | Oui | Tableau multi-types : Original / CSR / Effilo Blc / Effilo Couleur / Jean / Coton Blanc / Coton Couleur |
 | `date_commande` | Date | Oui | Date de la commande |
 | `prix_tonne` | Decimal | Oui | Prix de vente à la tonne (pré-rempli depuis grille, ajustable) |
 | `tonnage_prevu` | Decimal | Non | Tonnage estimé de la commande |
@@ -201,12 +201,32 @@ Lorsque le contrôle pesée est validé :
 
 #### 3.4.4 Lecture OCR des factures PDF
 
-**Technologie :** Tesseract.js (extraction texte) + expressions régulières pour parser :
+**Technologie :** pdf-parse (extraction texte PDF) + expressions régulières pour parser :
 - **Date** : formats `DD/MM/YYYY`, `DD-MM-YYYY`, `YYYY-MM-DD`
 - **Tonnage** : nombre décimal suivi de `t`, `T`, `tonne(s)`, `kg` (converti)
 - **Montant** : nombre décimal suivi de `€`, `EUR`, précédé de `Total`, `Montant`, `Net à payer`
 
 L'utilisateur peut toujours corriger les valeurs extraites manuellement.
+
+#### 3.4.5 Concordance facture/commande
+
+Lors de l'upload d'une facture PDF, le systeme effectue automatiquement des controles de concordance :
+
+| Controle | Description | Indicateur |
+|----------|-------------|------------|
+| **Client** | Recherche du nom du client (raison sociale) dans le texte OCR | Vert/Rouge |
+| **Tonnage** | Comparaison tonnage OCR vs pesee client (ou pesee interne) | Ecart % |
+| **Montant** | Comparaison montant OCR vs montant attendu (pesee x prix/tonne) | Ecart EUR |
+
+**Donnees de concordance retournees :**
+- `client_attendu` : Raison sociale attendue
+- `client_siret` : SIRET du client pour verification
+- `prix_tonne_commande` : Prix tonne de la commande
+- `pesee_reference` : Pesee de reference (client ou interne)
+- `pesee_source` : Source de la pesee ('client' ou 'interne')
+- `montant_attendu` : Montant calcule attendu
+- `client_trouve_dans_facture` : Boolean - nom client trouve dans le PDF
+- `ecart_tonnage` / `ecart_tonnage_pct` : Ecart tonnage absolu et pourcentage
 
 ---
 
@@ -282,6 +302,32 @@ L'équipe logistique est composée de 2-3 collaborateurs polyvalents, sans rôle
 
 ---
 
+### 3.8 Visualisations et tableaux de bord
+
+#### 3.8.1 Pipeline de suivi des commandes
+
+La page Commandes affiche un diagramme de flux horizontal montrant l'avancement des commandes par statut :
+
+```
+En attente → Confirmee → En preparation → Chargee → Expediee → Pesee recue → Facturee → Cloturee
+```
+
+- Chaque etape affiche le nombre de commandes dans ce statut
+- Clic sur une etape filtre la liste des commandes
+- Fleches de connexion entre les etapes
+- Code couleur par statut (jaune → vert → bleu → violet)
+
+#### 3.8.2 Production & Effectifs (Chaine de tri)
+
+Nouvel onglet sur la page Chaine de Tri affichant :
+
+- **Selecteur de mois** pour la periode analysee
+- **Cartes de synthese** : Effectif moyen, Total entree, Total sortie, Productivite moyenne
+- **Graphique en barres empilees** : Production journaliere par chaine (Qualite/R3) avec effectif affiche
+- **Tableau detaille** : Date, Effectif theorique/reel, Entree ligne/R3, Total jour, Productivite, Encadrant
+
+---
+
 ## 4. Modèle de données
 
 ### 4.1 Nouvelles tables
@@ -322,8 +368,7 @@ CREATE TABLE commandes_exutoires (
     id SERIAL PRIMARY KEY,
     reference VARCHAR(20) NOT NULL UNIQUE,
     client_id INTEGER NOT NULL REFERENCES clients_exutoires(id),
-    type_produit VARCHAR(30) NOT NULL
-        CHECK (type_produit IN ('original', 'csr', 'effilo_blanc', 'effilo_couleur', 'jean', 'coton_blanc', 'coton_couleur')),
+    type_produit TEXT[] NOT NULL,
     date_commande DATE NOT NULL,
     prix_tonne DECIMAL(10,2) NOT NULL,
     tonnage_prevu DECIMAL(10,3),
@@ -371,6 +416,7 @@ CREATE TABLE preparation_collaborateurs (
 CREATE TABLE controles_pesee (
     id SERIAL PRIMARY KEY,
     commande_id INTEGER NOT NULL REFERENCES commandes_exutoires(id),
+    pesee_interne DECIMAL(10,3),
     pesee_client DECIMAL(10,3) NOT NULL,
     ecart_pesee DECIMAL(10,3),
     ecart_pourcentage DECIMAL(5,2),
@@ -544,6 +590,8 @@ frontend/src/pages/
 6. **Statuts séquentiels** : Pas de retour en arrière sauf annulation
 7. **OCR** : Extraction automatique + correction manuelle toujours possible
 8. **Planning** : Les créneaux chargement apparaissent dans le planning général des collaborateurs
+9. **Multi-types** : Une commande peut contenir plusieurs types de produits (TEXT[] PostgreSQL)
+10. **Concordance facture** : Vérification automatique client/tonnage/montant lors de l'upload d'une facture PDF
 
 ---
 
