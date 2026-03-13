@@ -104,7 +104,7 @@ export default function ExutoiresTarifs() {
 
   const getClientName = (clientId) => {
     const c = clients.find(cl => cl.id === clientId);
-    return c ? c.nom : `Client #${clientId}`;
+    return c ? c.raison_sociale : `Client #${clientId}`;
   };
 
   if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
@@ -261,7 +261,7 @@ export default function ExutoiresTarifs() {
                   >
                     <option value="">Prix de référence (aucun client)</option>
                     {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.nom}</option>
+                      <option key={c.id} value={c.id}>{c.raison_sociale}</option>
                     ))}
                   </select>
                 </div>

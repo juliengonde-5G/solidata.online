@@ -46,6 +46,7 @@ export default function ExutoiresFacturation() {
     ocr_tonnage: '',
     ocr_montant: '',
   });
+  const [concordance, setConcordance] = useState(null);
 
   useEffect(() => {
     loadAll();
@@ -138,8 +139,9 @@ export default function ExutoiresFacturation() {
       const res = await api.post('/factures-exutoires', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setShowFactureForm(false);
       loadFactures();
-      // Open OCR correction modal with returned data
+      // Open OCR correction modal with returned data + concordance
       if (res.data) {
+        if (res.data.concordance) setConcordance(res.data.concordance);
         openOcrModal(res.data);
       }
     } catch (err) { console.error(err); }
@@ -520,15 +522,62 @@ export default function ExutoiresFacturation() {
           </div>
         )}
 
-        {/* ========== MODAL: Correction OCR ========== */}
+        {/* ========== MODAL: Correction OCR + Concordance ========== */}
         {showOcrModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowOcrModal(null)}>
-            <div className="bg-white rounded-xl p-6 w-[480px] shadow-xl" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-2 text-solidata-dark">Correction OCR</h2>
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowOcrModal(null); setConcordance(null); }}>
+            <div className="bg-white rounded-xl p-6 w-[560px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <h2 className="text-lg font-bold mb-2 text-solidata-dark">Correction OCR & Concordance</h2>
               <p className="text-sm text-gray-500 mb-4">
                 Vérifiez et corrigez les valeurs extraites de la facture{' '}
                 <span className="font-medium text-gray-700">{showOcrModal.commande_reference || `#${showOcrModal.commande_id}`}</span>
               </p>
+
+              {/* Concordance panel */}
+              {concordance && (
+                <div className="mb-4 bg-gray-50 rounded-lg p-3 space-y-2">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Contrôle de concordance</h3>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-1">
+                      <span className={`w-2 h-2 rounded-full ${concordance.client_trouve_dans_facture ? 'bg-green-500' : 'bg-red-500'}`} />
+                      <span className="text-gray-500">Client :</span>
+                      <span className="font-medium">{concordance.client_attendu}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {concordance.client_trouve_dans_facture
+                        ? <span className="text-green-600 font-medium">Trouvé dans la facture</span>
+                        : <span className="text-red-600 font-medium">Non trouvé dans la facture</span>
+                      }
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Prix commande :</span>{' '}
+                      <span className="font-medium">{concordance.prix_tonne_commande?.toFixed(2)} €/t</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Pesée ({concordance.pesee_source || '—'}) :</span>{' '}
+                      <span className="font-medium">{concordance.pesee_reference?.toFixed(3) || '—'} t</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Montant attendu :</span>{' '}
+                      <span className="font-medium">{concordance.montant_attendu?.toFixed(2) || '—'} €</span>
+                    </div>
+                    {concordance.ecart_tonnage != null && (
+                      <div>
+                        <span className="text-gray-500">Écart tonnage :</span>{' '}
+                        <span className={`font-medium ${Math.abs(concordance.ecart_tonnage_pct) > 5 ? 'text-red-600' : Math.abs(concordance.ecart_tonnage_pct) > 2 ? 'text-yellow-600' : 'text-green-600'}`}>
+                          {concordance.ecart_tonnage.toFixed(3)} t ({concordance.ecart_tonnage_pct.toFixed(1)}%)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {/* Overall status */}
+                  {concordance.client_trouve_dans_facture === false && (
+                    <div className="mt-2 bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
+                      Le nom du client "{concordance.client_attendu}" n'a pas été trouvé dans le texte de la facture. Vérifiez que la facture correspond bien à cette commande.
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-gray-500">Date extraite</label>
@@ -560,10 +609,15 @@ export default function ExutoiresFacturation() {
                     className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
                     placeholder="0.00"
                   />
+                  {concordance && concordance.montant_attendu != null && ocrForm.ocr_montant && (
+                    <div className={`mt-1 text-xs ${Math.abs(parseFloat(ocrForm.ocr_montant) - concordance.montant_attendu) < 1 ? 'text-green-600' : 'text-red-600'}`}>
+                      Écart avec montant attendu : {(parseFloat(ocrForm.ocr_montant) - concordance.montant_attendu).toFixed(2)} €
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowOcrModal(null)} className="flex-1 border rounded-lg py-2 text-sm">
+                <button type="button" onClick={() => { setShowOcrModal(null); setConcordance(null); }} className="flex-1 border rounded-lg py-2 text-sm">
                   Annuler
                 </button>
                 <button
@@ -571,7 +625,7 @@ export default function ExutoiresFacturation() {
                   onClick={submitOcrCorrection}
                   className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium"
                 >
-                  Corriger
+                  Corriger & Valider
                 </button>
               </div>
             </div>

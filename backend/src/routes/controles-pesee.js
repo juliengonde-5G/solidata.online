@@ -23,7 +23,8 @@ router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT cp.*, c.reference, c.type_produit, cl.raison_sociale
+      `SELECT cp.*, cp.statut_controle as statut, cp.ecart_pesee as ecart, cp.ecart_pourcentage as ecart_pct,
+              c.reference as commande_reference, c.type_produit, cl.raison_sociale as client_nom
        FROM controles_pesee cp
        JOIN commandes_exutoires c ON cp.commande_id = c.id
        JOIN clients_exutoires cl ON c.client_id = cl.id

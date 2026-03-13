@@ -120,6 +120,7 @@ async function migrateExutoires() {
       CREATE TABLE IF NOT EXISTS controles_pesee (
         id SERIAL PRIMARY KEY,
         commande_id INTEGER NOT NULL REFERENCES commandes_exutoires(id),
+        pesee_interne DECIMAL(10,3),
         pesee_client DECIMAL(10,3) NOT NULL,
         ecart_pesee DECIMAL(10,3),
         ecart_pourcentage DECIMAL(5,2),
@@ -189,6 +190,20 @@ async function migrateExutoires() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_historique_commande ON historique_commandes_exutoires(commande_id);');
     console.log('[MIGRATE-EXUTOIRES] Index créés');
 
+    // Migration: ajouter pesee_interne à controles_pesee si manquant
+    await client.query(`DO $$ BEGIN ALTER TABLE controles_pesee ADD COLUMN pesee_interne DECIMAL(10,3); EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+
+    // Migration: type_produit VARCHAR → TEXT[] pour support multi-types
+    const colType = await client.query(`
+      SELECT data_type FROM information_schema.columns
+      WHERE table_name = 'commandes_exutoires' AND column_name = 'type_produit'
+    `);
+    if (colType.rows.length > 0 && colType.rows[0].data_type !== 'ARRAY') {
+      await client.query(`ALTER TABLE commandes_exutoires DROP CONSTRAINT IF EXISTS commandes_exutoires_type_produit_check`);
+      await client.query(`ALTER TABLE commandes_exutoires ALTER COLUMN type_produit TYPE TEXT[] USING ARRAY[type_produit]`);
+      console.log('[MIGRATE-EXUTOIRES] Migration type_produit → TEXT[] effectuée');
+    }
+
     await client.query('COMMIT');
     console.log('[MIGRATE-EXUTOIRES] Migration terminée avec succès');
 
@@ -201,7 +216,7 @@ async function migrateExutoires() {
   }
 }
 
-module.exports = migrateExutoires;
+module.exports = { migrateExutoires };
 
 if (require.main === module) {
   migrateExutoires()

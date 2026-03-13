@@ -75,7 +75,8 @@ async function extractInvoiceData(pdfPath) {
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT f.*, c.reference, c.type_produit, c.prix_tonne, cl.raison_sociale
+      SELECT f.*, f.statut_facture as statut, c.reference as commande_reference, c.type_produit, c.prix_tonne,
+             cl.raison_sociale as client_nom
       FROM factures_exutoires f
       JOIN commandes_exutoires c ON f.commande_id = c.id
       JOIN clients_exutoires cl ON c.client_id = cl.id
@@ -104,30 +105,42 @@ router.post('/', upload.single('facture'), async (req, res) => {
     // Run OCR on uploaded PDF
     const ocrData = await extractInvoiceData(req.file.path);
 
-    // Calculate montant_attendu: pesee_client * prix_tonne, fallback to pesee_interne
-    let montant_attendu = null;
+    // Fetch commande + client details for concordance
     const commandeResult = await pool.query(
-      'SELECT prix_tonne FROM commandes_exutoires WHERE id = $1',
+      `SELECT c.*, cl.raison_sociale, cl.siret as client_siret
+       FROM commandes_exutoires c
+       JOIN clients_exutoires cl ON c.client_id = cl.id
+       WHERE c.id = $1`,
       [commande_id]
     );
     if (commandeResult.rows.length === 0) {
       return res.status(404).json({ error: 'Commande non trouvee' });
     }
-    const prix_tonne = parseFloat(commandeResult.rows[0].prix_tonne);
+    const commande = commandeResult.rows[0];
+    const prix_tonne = parseFloat(commande.prix_tonne);
+
+    // Calculate montant_attendu: pesee_client * prix_tonne, fallback to pesee_interne
+    let montant_attendu = null;
+    let pesee_reference = null;
+    let pesee_source = null;
 
     const peseeResult = await pool.query(
       'SELECT pesee_client FROM controles_pesee WHERE commande_id = $1',
       [commande_id]
     );
     if (peseeResult.rows.length > 0 && peseeResult.rows[0].pesee_client != null) {
-      montant_attendu = parseFloat(peseeResult.rows[0].pesee_client) * prix_tonne;
+      pesee_reference = parseFloat(peseeResult.rows[0].pesee_client);
+      pesee_source = 'client';
+      montant_attendu = pesee_reference * prix_tonne;
     } else {
       const prepResult = await pool.query(
         'SELECT pesee_interne FROM preparations_expedition WHERE commande_id = $1',
         [commande_id]
       );
       if (prepResult.rows.length > 0 && prepResult.rows[0].pesee_interne != null) {
-        montant_attendu = parseFloat(prepResult.rows[0].pesee_interne) * prix_tonne;
+        pesee_reference = parseFloat(prepResult.rows[0].pesee_interne);
+        pesee_source = 'interne';
+        montant_attendu = pesee_reference * prix_tonne;
       }
     }
 
@@ -147,6 +160,26 @@ router.post('/', upload.single('facture'), async (req, res) => {
       statut_facture = 'ecart';
     }
 
+    // Concordance checks
+    const concordance = {
+      client_attendu: commande.raison_sociale,
+      client_siret: commande.client_siret || null,
+      prix_tonne_commande: prix_tonne,
+      pesee_reference,
+      pesee_source,
+      montant_attendu,
+      types_produit: commande.type_produit,
+      // Check if OCR text contains client name
+      client_trouve_dans_facture: ocrData.raw_text
+        ? ocrData.raw_text.toLowerCase().includes((commande.raison_sociale || '').toLowerCase())
+        : null,
+      // Check if OCR tonnage matches pesee
+      ecart_tonnage: (ocrData.ocr_tonnage != null && pesee_reference != null)
+        ? ocrData.ocr_tonnage - pesee_reference : null,
+      ecart_tonnage_pct: (ocrData.ocr_tonnage != null && pesee_reference != null && pesee_reference > 0)
+        ? ((ocrData.ocr_tonnage - pesee_reference) / pesee_reference * 100) : null,
+    };
+
     const facturePath = req.file.filename;
 
     const result = await pool.query(
@@ -155,7 +188,7 @@ router.post('/', upload.single('facture'), async (req, res) => {
       [commande_id, facturePath, ocrData.ocr_date, ocrData.ocr_tonnage, ocrData.ocr_montant, montant_attendu, ecart_montant, statut_facture]
     );
 
-    res.status(201).json({ ...result.rows[0], ocr: ocrData });
+    res.status(201).json({ ...result.rows[0], ocr: ocrData, concordance });
   } catch (err) {
     console.error('[FACTURES-EXUTOIRES] Erreur creation :', err);
     res.status(500).json({ error: 'Erreur serveur' });

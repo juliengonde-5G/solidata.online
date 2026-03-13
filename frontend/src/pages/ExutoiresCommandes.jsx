@@ -21,7 +21,7 @@ const FREQUENCES = { unique: 'Unique', hebdomadaire: 'Hebdomadaire', bi_mensuel:
 
 const EMPTY_FORM = {
   client_id: '',
-  type_produit: '',
+  type_produit: [],
   date_commande: new Date().toISOString().slice(0, 10),
   prix_tonne: '',
   tonnage_prevu: '',
@@ -95,15 +95,18 @@ export default function ExutoiresCommandes() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ ...EMPTY_FORM, date_commande: new Date().toISOString().slice(0, 10) });
+    setForm({ ...EMPTY_FORM, type_produit: [], date_commande: new Date().toISOString().slice(0, 10) });
     setShowForm(true);
   };
 
   const openEdit = (commande) => {
     setEditing(commande);
+    const types = Array.isArray(commande.type_produit)
+      ? commande.type_produit
+      : commande.type_produit ? [commande.type_produit] : [];
     setForm({
       client_id: commande.client_id || '',
-      type_produit: commande.type_produit || '',
+      type_produit: types,
       date_commande: commande.date_commande ? commande.date_commande.slice(0, 10) : '',
       prix_tonne: commande.prix_tonne || '',
       tonnage_prevu: commande.tonnage_prevu || '',
@@ -124,12 +127,13 @@ export default function ExutoiresCommandes() {
     }
   };
 
-  const fetchPrice = async (clientId, typeProduit) => {
-    if (!clientId || !typeProduit) return;
+  const fetchPrice = async (clientId, types) => {
+    if (!clientId || !types || types.length === 0) return;
     try {
-      const res = await api.get('/tarifs-exutoires/prix', { params: { type_produit: typeProduit, client_id: clientId } });
-      if (res.data && res.data.prix !== undefined) {
-        setForm(prev => ({ ...prev, prix_tonne: res.data.prix }));
+      // Fetch price for first type as reference
+      const res = await api.get('/tarifs-exutoires/prix', { params: { type_produit: types[0], client_id: clientId } });
+      if (res.data && res.data.prix_tonne != null) {
+        setForm(prev => ({ ...prev, prix_tonne: res.data.prix_tonne }));
       }
     } catch (err) { console.error(err); }
   };
@@ -139,13 +143,21 @@ export default function ExutoiresCommandes() {
     fetchPrice(value, form.type_produit);
   };
 
-  const handleTypeChange = (value) => {
-    setForm(prev => ({ ...prev, type_produit: value }));
-    fetchPrice(form.client_id, value);
+  const handleTypeToggle = (type) => {
+    setForm(prev => {
+      const types = prev.type_produit.includes(type)
+        ? prev.type_produit.filter(t => t !== type)
+        : [...prev.type_produit, type];
+      return { ...prev, type_produit: types };
+    });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.type_produit || form.type_produit.length === 0) {
+      alert('Veuillez sélectionner au moins un type de produit');
+      return;
+    }
     const payload = {
       ...form,
       client_id: form.client_id || null,
@@ -300,7 +312,11 @@ export default function ExutoiresCommandes() {
                     <td className="p-3 text-sm font-medium font-mono">{cmd.reference || `#${cmd.id}`}</td>
                     <td className="p-3 text-sm">{formatDate(cmd.date_commande)}</td>
                     <td className="p-3 text-sm">{cmd.client_nom || getClientName(cmd.client_id)}</td>
-                    <td className="p-3 text-sm">{TYPES_PRODUIT[cmd.type_produit] || cmd.type_produit || '—'}</td>
+                    <td className="p-3 text-sm">
+                      {Array.isArray(cmd.type_produit)
+                        ? cmd.type_produit.map(t => TYPES_PRODUIT[t] || t).join(', ')
+                        : TYPES_PRODUIT[cmd.type_produit] || cmd.type_produit || '—'}
+                    </td>
                     <td className="p-3 text-sm text-right font-mono">{formatTonnage(cmd.tonnage_prevu)}</td>
                     <td className="p-3 text-sm text-right font-mono">{formatPrice(cmd.prix_tonne)}</td>
                     <td className="p-3 text-sm">{FREQUENCES[cmd.frequence] || cmd.frequence || '—'}</td>
@@ -359,18 +375,20 @@ export default function ExutoiresCommandes() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500">Type de produit *</label>
-                  <select
-                    value={form.type_produit}
-                    onChange={e => handleTypeChange(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-                    required
-                  >
-                    <option value="">Sélectionner...</option>
+                  <label className="text-xs text-gray-500">Types de produit * <span className="text-gray-400">(plusieurs possibles)</span></label>
+                  <div className="mt-1 grid grid-cols-2 gap-2">
                     {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
-                      <option key={k} value={k}>{v}</option>
+                      <label key={k} className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${form.type_produit.includes(k) ? 'bg-solidata-green/10 border-solidata-green' : 'hover:bg-gray-50'}`}>
+                        <input
+                          type="checkbox"
+                          checked={form.type_produit.includes(k)}
+                          onChange={() => handleTypeToggle(k)}
+                          className="accent-solidata-green"
+                        />
+                        {v}
+                      </label>
                     ))}
-                  </select>
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs text-gray-500">Date de commande *</label>
@@ -474,7 +492,11 @@ export default function ExutoiresCommandes() {
                   </div>
                   <div>
                     <span className="text-gray-500">Type :</span>{' '}
-                    <span className="font-medium">{TYPES_PRODUIT[showDetail.type_produit] || showDetail.type_produit}</span>
+                    <span className="font-medium">
+                      {Array.isArray(showDetail.type_produit)
+                        ? showDetail.type_produit.map(t => TYPES_PRODUIT[t] || t).join(', ')
+                        : TYPES_PRODUIT[showDetail.type_produit] || showDetail.type_produit}
+                    </span>
                   </div>
                   <div>
                     <span className="text-gray-500">Date commande :</span>{' '}

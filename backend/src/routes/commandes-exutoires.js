@@ -51,7 +51,7 @@ router.get('/', async (req, res) => {
     }
     if (type_produit) {
       params.push(type_produit);
-      query += ` AND c.type_produit = $${params.length}`;
+      query += ` AND $${params.length} = ANY(c.type_produit)`;
     }
     if (date_from) {
       params.push(date_from);
@@ -146,12 +146,15 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Champs obligatoires : client_id, type_produit, date_commande, prix_tonne' });
     }
 
+    // Normalize type_produit to array
+    const types = Array.isArray(type_produit) ? type_produit : [type_produit];
+
     const reference = await generateReference();
 
     const result = await pool.query(
       `INSERT INTO commandes_exutoires (reference, client_id, type_produit, date_commande, prix_tonne, tonnage_prevu, frequence, date_fin_recurrence, notes, statut)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'en_attente') RETURNING *`,
-      [reference, client_id, type_produit, date_commande, prix_tonne, tonnage_prevu || null, frequence || 'unique', date_fin_recurrence || null, notes || null]
+      [reference, client_id, types, date_commande, prix_tonne, tonnage_prevu || null, frequence || 'unique', date_fin_recurrence || null, notes || null]
     );
 
     await pool.query(
@@ -172,6 +175,9 @@ router.put('/:id', async (req, res) => {
   try {
     const { client_id, type_produit, date_commande, prix_tonne, tonnage_prevu, frequence, date_fin_recurrence, notes } = req.body;
 
+    // Normalize type_produit to array if provided
+    const types = type_produit ? (Array.isArray(type_produit) ? type_produit : [type_produit]) : null;
+
     const result = await pool.query(
       `UPDATE commandes_exutoires SET
        client_id = COALESCE($1, client_id),
@@ -184,7 +190,7 @@ router.put('/:id', async (req, res) => {
        notes = COALESCE($8, notes),
        updated_at = NOW()
        WHERE id = $9 RETURNING *`,
-      [client_id, type_produit, date_commande, prix_tonne, tonnage_prevu, frequence, date_fin_recurrence, notes, req.params.id]
+      [client_id, types, date_commande, prix_tonne, tonnage_prevu, frequence, date_fin_recurrence, notes, req.params.id]
     );
 
     if (result.rows.length === 0) {
