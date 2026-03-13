@@ -194,7 +194,7 @@ export default function ExutoiresFacturation() {
     conformes: controles.filter(c => c.statut === 'conforme').length,
     ecarts: controles.filter(c => c.statut === 'ecart_acceptable').length,
     litiges: controles.filter(c => c.statut === 'litige').length,
-    en_attente: controles.filter(c => c.statut === 'valide').length,
+    en_attente: controles.filter(c => c.statut !== 'valide').length,
   };
 
   if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;

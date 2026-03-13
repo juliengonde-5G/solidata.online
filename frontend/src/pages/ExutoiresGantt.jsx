@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
@@ -170,7 +171,7 @@ export default function ExutoiresGantt() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [loading, setLoading] = useState(true);
-  const timelineRef = useRef(null);
+  const routerNavigate = useNavigate();
 
   const { viewStart, viewEnd } = computeViewRange(currentDate, viewMode);
 
@@ -492,12 +493,12 @@ export default function ExutoiresGantt() {
 
         {item.id && (
           <div className="mt-3 pt-3 border-t border-gray-100">
-            <a
-              href={`/exutoires/preparations/${item.id}`}
+            <button
+              onClick={() => { setSelectedItem(null); routerNavigate('/exutoires-preparation'); }}
               className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium"
             >
               Voir la préparation &rarr;
-            </a>
+            </button>
           </div>
         )}
       </div>
@@ -621,7 +622,7 @@ export default function ExutoiresGantt() {
               </div>
 
               {/* Right: scrollable timeline */}
-              <div className="flex-1 overflow-x-auto" ref={timelineRef}>
+              <div className="flex-1 overflow-x-auto">
                 {/* Timeline header */}
                 <div className="h-10 bg-gray-50 border-b border-gray-200" style={{ minWidth: getGridMinWidth() }}>
                   {renderTimelineHeader()}

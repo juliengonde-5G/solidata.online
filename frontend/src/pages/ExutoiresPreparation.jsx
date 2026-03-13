@@ -53,7 +53,9 @@ export default function ExutoiresPreparation() {
 
   useEffect(() => { loadData(); }, []);
 
-  useEffect(() => { loadPreparations(); }, [filterLieu, filterStatut, filterDateFrom, filterDateTo]);
+  useEffect(() => {
+    if (!loading) loadPreparations();
+  }, [filterLieu, filterStatut, filterDateFrom, filterDateTo]);
 
   const loadData = async () => {
     try {
