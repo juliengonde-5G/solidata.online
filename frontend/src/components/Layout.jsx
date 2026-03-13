@@ -53,6 +53,18 @@ const menuSections = [
     ],
   },
   {
+    title: 'Exutoires',
+    items: [
+      { path: '/exutoires-commandes', label: 'Commandes', icon: IconList, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/exutoires-preparation', label: 'Préparation', icon: IconTruck, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/exutoires-gantt', label: 'Gantt Chargement', icon: IconChart, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/exutoires-facturation', label: 'Facturation', icon: IconMoney, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/exutoires-calendrier', label: 'Calendrier', icon: IconClock, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/exutoires-clients', label: 'Clients', icon: IconTeam, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/exutoires-tarifs', label: 'Grille Tarifaire', icon: IconMoney, roles: ['ADMIN', 'MANAGER'] },
+    ],
+  },
+  {
     title: 'Reporting',
     items: [
       { path: '/reporting-collecte', label: 'Collecte', icon: IconChart, roles: ['ADMIN', 'MANAGER'] },

@@ -88,6 +88,15 @@ app.use('/api/rgpd', require('./routes/rgpd'));
 app.use('/api/admin-db', require('./routes/admin-db'));
 app.use('/api/news', require('./routes/newsfeed'));
 
+// Lot 5 : Logistique Exutoires
+app.use('/api/clients-exutoires', require('./routes/clients-exutoires'));
+app.use('/api/tarifs-exutoires', require('./routes/tarifs-exutoires'));
+app.use('/api/commandes-exutoires', require('./routes/commandes-exutoires'));
+app.use('/api/preparations', require('./routes/preparations'));
+app.use('/api/controles-pesee', require('./routes/controles-pesee'));
+app.use('/api/factures-exutoires', require('./routes/factures-exutoires'));
+app.use('/api/calendrier-logistique', require('./routes/calendrier-logistique'));
+
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
@@ -121,6 +130,7 @@ app.get('/api/health', async (req, res) => {
         metropole: true,
         rgpd: true,
         adminDb: true,
+        exutoires: true,
       },
     });
   } catch (err) {
@@ -200,6 +210,13 @@ async function initOnStartup() {
         await pool.query(`DO $$ BEGIN ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
         console.log('[DB] Migrations de colonnes vérifiées ✓');
       } catch (e) { console.warn('[DB] Migration warning:', e.message); }
+
+      // Migration module Exutoires (idempotent)
+      try {
+        const { migrateExutoires } = require('./scripts/migrate-exutoires');
+        await migrateExutoires();
+        console.log('[DB] Migration Exutoires vérifiée ✓');
+      } catch (e) { console.warn('[DB] Migration Exutoires warning:', e.message); }
     }
 
     // Seed CAV si la table est vide

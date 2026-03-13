@@ -33,6 +33,13 @@ import AdminCAV from './pages/AdminCAV';
 import ReportingMetropole from './pages/ReportingMetropole';
 import FillRateMap from './pages/FillRateMap';
 import NewsFeed from './pages/NewsFeed';
+import ExutoiresCommandes from './pages/ExutoiresCommandes';
+import ExutoiresPreparation from './pages/ExutoiresPreparation';
+import ExutoiresGantt from './pages/ExutoiresGantt';
+import ExutoiresFacturation from './pages/ExutoiresFacturation';
+import ExutoiresCalendrier from './pages/ExutoiresCalendrier';
+import ExutoiresClients from './pages/ExutoiresClients';
+import ExutoiresTarifs from './pages/ExutoiresTarifs';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -75,6 +82,15 @@ function App() {
           <Route path="/stock" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Stock /></ProtectedRoute>} />
           <Route path="/produits-finis" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ProduitsFinis /></ProtectedRoute>} />
           <Route path="/expeditions" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Expeditions /></ProtectedRoute>} />
+
+          {/* Exutoires */}
+          <Route path="/exutoires-commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCommandes /></ProtectedRoute>} />
+          <Route path="/exutoires-preparation" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresPreparation /></ProtectedRoute>} />
+          <Route path="/exutoires-gantt" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresGantt /></ProtectedRoute>} />
+          <Route path="/exutoires-facturation" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresFacturation /></ProtectedRoute>} />
+          <Route path="/exutoires-calendrier" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCalendrier /></ProtectedRoute>} />
+          <Route path="/exutoires-clients" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresClients /></ProtectedRoute>} />
+          <Route path="/exutoires-tarifs" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresTarifs /></ProtectedRoute>} />
 
           {/* Reporting */}
           <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingCollecte /></ProtectedRoute>} />
