@@ -26,6 +26,7 @@ import Referentiels from './pages/Referentiels';
 import AdminPredictive from './pages/AdminPredictive';
 import CollectionProposals from './pages/CollectionProposals';
 import InsertionParcours from './pages/InsertionParcours';
+import PlanningHebdo from './pages/PlanningHebdo';
 import PCMTest from './pages/PCMTest';
 import RGPD from './pages/RGPD';
 import AdminDB from './pages/AdminDB';
@@ -67,6 +68,7 @@ function App() {
           <Route path="/work-hours" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><WorkHours /></ProtectedRoute>} />
           <Route path="/skills" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Skills /></ProtectedRoute>} />
           <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><InsertionParcours /></ProtectedRoute>} />
+          <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PlanningHebdo /></ProtectedRoute>} />
 
           {/* Collecte */}
           <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />

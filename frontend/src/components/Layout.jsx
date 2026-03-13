@@ -30,6 +30,7 @@ const menuSections = [
       { path: '/work-hours', label: 'Heures de travail', icon: IconClock, roles: ['ADMIN', 'RH'] },
       { path: '/skills', label: 'Compétences', icon: IconStar, roles: ['ADMIN', 'RH'] },
       { path: '/insertion', label: 'Parcours insertion', icon: IconHeart, roles: ['ADMIN', 'RH', 'MANAGER'] },
+      { path: '/planning-hebdo', label: 'Planning hebdo', icon: IconList, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {
