@@ -5,6 +5,20 @@ const { authenticate, authorize } = require('../middleware/auth');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
+// ══════════════════════════════════════════
+// Facteurs CO2 evite par type d'exutoire (t CO2eq / tonne textile)
+// Source: Refashion / ADEME — Analyse de Cycle de Vie textile 2023
+// ══════════════════════════════════════════
+const FACTEURS_CO2 = {
+  original:       3.169,  // Reemploi direct — evite production textile neuf
+  csr:            0.121,  // Combustible Solide de Recuperation — substitution energetique fossile
+  effilo_blanc:   0.500,  // Effilochage blanc — recyclage fibre (isolant, rembourrage)
+  effilo_couleur: 0.500,  // Effilochage couleur — recyclage fibre
+  jean:           0.500,  // Recyclage denim — effilochage fibre
+  coton_blanc:    0.750,  // Chiffons essuyage industriel — substitution produit neuf
+  coton_couleur:  0.750,  // Chiffons essuyage industriel — substitution produit neuf
+};
+
 // Helper: generate order reference
 async function generateReference() {
   const year = new Date().getFullYear();
@@ -89,6 +103,88 @@ router.get('/stats', async (req, res) => {
     });
   } catch (err) {
     console.error('[COMMANDES-EXUTOIRES] Erreur stats :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/commandes-exutoires/co2 — Emissions CO2 evitees par type d'exutoire
+router.get('/co2', async (req, res) => {
+  try {
+    const { year, month } = req.query;
+    const y = parseInt(year) || new Date().getFullYear();
+
+    let dateFrom, dateTo;
+    if (month) {
+      const m = parseInt(month);
+      dateFrom = `${y}-${String(m).padStart(2, '0')}-01`;
+      dateTo = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    } else {
+      dateFrom = `${y}-01-01`;
+      dateTo = `${y + 1}-01-01`;
+    }
+
+    // Recuperer les commandes cloturees/facturees avec pesee_client (ou pesee_interne en fallback)
+    const result = await pool.query(`
+      SELECT c.id, c.reference, c.type_produit, c.tonnage_prevu,
+             COALESCE(cp.pesee_client, pe.pesee_interne, c.tonnage_prevu) as tonnage_reel,
+             cl.raison_sociale as client_nom
+      FROM commandes_exutoires c
+      JOIN clients_exutoires cl ON c.client_id = cl.id
+      LEFT JOIN controles_pesee cp ON cp.commande_id = c.id
+      LEFT JOIN preparations_expedition pe ON pe.commande_id = c.id
+      WHERE c.statut IN ('pesee_recue', 'facturee', 'cloturee')
+        AND c.date_commande >= $1 AND c.date_commande < $2
+    `, [dateFrom, dateTo]);
+
+    // Calculer CO2 par type
+    const parType = {};
+    let co2Total = 0;
+    let tonnageTotal = 0;
+
+    for (const cmd of result.rows) {
+      const tonnage = parseFloat(cmd.tonnage_reel) || 0;
+      const types = Array.isArray(cmd.type_produit) ? cmd.type_produit : [cmd.type_produit];
+      // Repartir le tonnage equitablement entre les types
+      const tonnageParType = tonnage / types.length;
+
+      for (const type of types) {
+        const facteur = FACTEURS_CO2[type] || 0;
+        const co2 = tonnageParType * facteur;
+
+        if (!parType[type]) {
+          parType[type] = { type, tonnage: 0, co2_evite: 0, facteur, nb_commandes: 0 };
+        }
+        parType[type].tonnage += tonnageParType;
+        parType[type].co2_evite += co2;
+        parType[type].nb_commandes += 1;
+
+        co2Total += co2;
+        tonnageTotal += tonnageParType;
+      }
+    }
+
+    // Arrondir
+    const detail = Object.values(parType).map(d => ({
+      ...d,
+      tonnage: Math.round(d.tonnage * 1000) / 1000,
+      co2_evite: Math.round(d.co2_evite * 1000) / 1000,
+    })).sort((a, b) => b.co2_evite - a.co2_evite);
+
+    // Facteur moyen pondere
+    const facteurMoyen = tonnageTotal > 0 ? co2Total / tonnageTotal : 0;
+
+    res.json({
+      periode: month ? `${y}-${String(parseInt(month)).padStart(2, '0')}` : `${y}`,
+      tonnage_total: Math.round(tonnageTotal * 1000) / 1000,
+      co2_total_evite: Math.round(co2Total * 1000) / 1000,
+      facteur_moyen: Math.round(facteurMoyen * 1000) / 1000,
+      nb_commandes: result.rows.length,
+      detail_par_type: detail,
+      facteurs_reference: FACTEURS_CO2,
+      source: 'Refashion / ADEME — ACV textile 2023',
+    });
+  } catch (err) {
+    console.error('[COMMANDES-EXUTOIRES] Erreur CO2 :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

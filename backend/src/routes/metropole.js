@@ -29,13 +29,16 @@ router.get('/dashboard', async (req, res) => {
       WHERE date >= $1 AND date < $2
     `, [dateFrom, dateTo]);
 
-    // Émissions CO2 évitées (facteur: 1 tonne textile réemployé = 3.169 t CO2 évitées, recyclé = 0.5 t)
+    // Emissions CO2 evitees — facteurs Refashion/ADEME par type d'exutoire
+    // original=3.169, csr=0.121, effilo=0.500, jean=0.500, coton=0.750 (t CO2/t textile)
+    // Mix moyen : 40% reemploi + 35% recyclage fibre + 15% chiffons + 10% CSR
     const totalKg = parseFloat(collecte.rows[0].total_kg) || 0;
     const totalTonnes = totalKg / 1000;
-    // Hypothèse: 40% réemploi, 45% recyclage, 15% CSR/énergie
-    const co2Reemploi = totalTonnes * 0.40 * 3.169;
-    const co2Recyclage = totalTonnes * 0.45 * 0.5;
-    const co2Total = Math.round((co2Reemploi + co2Recyclage) * 100) / 100;
+    const co2Reemploi = totalTonnes * 0.40 * 3.169;     // Original / reemploi direct
+    const co2Recyclage = totalTonnes * 0.35 * 0.500;    // Effilochage / jean
+    const co2Chiffons = totalTonnes * 0.15 * 0.750;     // Coton blanc/couleur
+    const co2CSR = totalTonnes * 0.10 * 0.121;          // Combustible solide
+    const co2Total = Math.round((co2Reemploi + co2Recyclage + co2Chiffons + co2CSR) * 100) / 100;
 
     // Effectifs
     const effectifs = await pool.query(`

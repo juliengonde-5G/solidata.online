@@ -51,8 +51,11 @@ router.get('/dashboard', async (req, res) => {
     // Employés actifs
     const employees = await pool.query("SELECT COUNT(*) as total FROM employees WHERE is_active = true");
 
-    // CO2 évité
-    const co2 = parseFloat(collecte.rows[0].tonnage_collecte) * 3.6;
+    // CO2 evite — calcul affine par type d'exutoire
+    // Facteur par defaut base sur mix moyen: 40% reemploi (3.169) + 35% recyclage (0.5) + 15% chiffons (0.75) + 10% CSR (0.121)
+    // = 0.40*3.169 + 0.35*0.5 + 0.15*0.75 + 0.10*0.121 = 1.268 + 0.175 + 0.1125 + 0.0121 = 1.567 t CO2/t
+    const tonnageCollecteKg = parseFloat(collecte.rows[0].tonnage_collecte) || 0;
+    const co2 = (tonnageCollecteKg / 1000) * 1.567 * 1000; // resultat en kg CO2
 
     // Facturation
     const billing = await pool.query(
