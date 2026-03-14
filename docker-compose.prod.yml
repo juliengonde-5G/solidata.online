@@ -129,7 +129,7 @@ services:
     image: nginx:alpine
     container_name: solidata-proxy
     restart: always
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl >/dev/null 2>&1; mkdir -p /etc/letsencrypt/live/solidata.online && ( [ -f /etc/letsencrypt/live/solidata.online/fullchain.pem ] || openssl req -x509 -nodes -days 1 -newkey rsa:2048 -keyout /etc/letsencrypt/live/solidata.online/privkey.pem -out /etc/letsencrypt/live/solidata.online/fullchain.pem -subj /CN=solidata.online ) && exec nginx -g 'daemon off;'" ]
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl >/dev/null 2>&1; mkdir -p /etc/letsencrypt/live/solidata.online; CERT_DIR=/etc/letsencrypt/live/solidata.online; if [ -d /etc/letsencrypt/live/solidata.online-0001 ] && [ -f /etc/letsencrypt/live/solidata.online-0001/fullchain.pem ]; then cp -fL /etc/letsencrypt/live/solidata.online-0001/fullchain.pem $CERT_DIR/fullchain.pem; cp -fL /etc/letsencrypt/live/solidata.online-0001/privkey.pem $CERT_DIR/privkey.pem; echo 'Using Let\\'s Encrypt certificate from solidata.online-0001'; elif [ ! -f $CERT_DIR/fullchain.pem ]; then openssl req -x509 -nodes -days 1 -newkey rsa:2048 -keyout $CERT_DIR/privkey.pem -out $CERT_DIR/fullchain.pem -subj /CN=solidata.online; echo 'Generated self-signed certificate (first deploy)'; else echo 'Using existing certificate'; fi && exec nginx -g 'daemon off;'" ]
     ports:
       - "80:80"
       - "443:443"

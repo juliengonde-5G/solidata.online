@@ -247,6 +247,18 @@ case "${ACTION}" in
         warn "Backup SSL introuvable, la config actuelle est conservée."
     fi
 
+    # Certbot peut créer le certificat dans solidata.online-0001 au lieu de solidata.online
+    # (si le dossier solidata.online existait déjà avec l'auto-signé)
+    # On copie les vrais certs au bon endroit pour que Nginx les trouve
+    log "Vérification emplacement certificat Let's Encrypt..."
+    docker compose -f ${COMPOSE_FILE} exec -T nginx sh -c '
+        if [ -d /etc/letsencrypt/live/solidata.online-0001 ] && [ -f /etc/letsencrypt/live/solidata.online-0001/fullchain.pem ]; then
+            echo "Certificat trouvé dans solidata.online-0001, copie vers solidata.online..."
+            cp -fL /etc/letsencrypt/live/solidata.online-0001/fullchain.pem /etc/letsencrypt/live/solidata.online/fullchain.pem
+            cp -fL /etc/letsencrypt/live/solidata.online-0001/privkey.pem /etc/letsencrypt/live/solidata.online/privkey.pem
+        fi
+    '
+
     log "Redémarrage nginx avec SSL..."
     docker compose -f ${COMPOSE_FILE} restart nginx
     sleep 10
