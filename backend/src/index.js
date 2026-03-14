@@ -140,10 +140,27 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ══════════════════════════════════════════
-// SOCKET.IO - GPS & Tournées temps réel
+// SOCKET.IO - Auth & GPS temps réel
 // ══════════════════════════════════════════
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  if (!token) {
+    return next(new Error('Authentification requise'));
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    socket.user = decoded;
+    next();
+  } catch (err) {
+    return next(new Error('Token invalide'));
+  }
+});
+
 io.on('connection', (socket) => {
-  console.log(`[SOCKET] Client connecté : ${socket.id}`);
+  console.log(`[SOCKET] Client connecté : ${socket.id} (user: ${socket.user?.id})`);
 
   // Le chauffeur rejoint la room de sa tournée
   socket.on('join-tour', (tourId) => {

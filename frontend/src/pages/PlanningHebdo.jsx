@@ -71,16 +71,18 @@ export default function PlanningHebdo() {
 
   const goThisWeek = () => setMonday(getMonday(new Date()));
 
-  // Trouver les affectations d'un employe a un jour donne
-  const getAffectations = (posteId, dateStr) => {
+  // Trouver les affectations pour un poste a un jour donne
+  const getAffectations = (posteId, posteCode, dateStr) => {
     if (!planning) return [];
     return planning.affectations.filter(a => {
-      // Matcher par poste_id si c'est un poste positions
+      if (a.date !== dateStr) return false;
+      // Matcher par poste_code (postes virtuels et postes DB)
+      if (a.poste_code && posteCode) return a.poste_code === posteCode;
+      // Fallback : matcher par position_id pour les postes DB
       if (posteId.startsWith('pos_')) {
         const posId = parseInt(posteId.replace('pos_', ''));
-        return a.position_id === posId && a.date === dateStr;
+        return a.position_id === posId;
       }
-      // Pour les postes virtuels, pas de position_id — on match par date seule pour l'instant
       return false;
     });
   };
@@ -258,7 +260,7 @@ export default function PlanningHebdo() {
                               )}
                             </td>
                             {dates.map((d, i) => {
-                              const affs = getAffectations(poste.id, d);
+                              const affs = getAffectations(poste.id, poste.code, d);
                               const isToday = d === new Date().toISOString().slice(0, 10);
                               return (
                                 <td key={d} className={`p-1 text-center align-top ${isToday ? 'bg-blue-50/50' : ''}`}>

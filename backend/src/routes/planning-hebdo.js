@@ -214,7 +214,8 @@ router.get('/', async (req, res) => {
 
     // 1. Affectations existantes
     const scheduleResult = await pool.query(`
-      SELECT s.id, s.employee_id, s.date, s.status, s.position_id, s.is_provisional,
+      SELECT s.id, s.employee_id, s.date, s.status, s.position_id, s.poste_code,
+             s.is_provisional,
              e.first_name, e.last_name, e.has_permis_b, e.has_caces, e.skills,
              p.title as position_title
       FROM schedule s
@@ -355,14 +356,15 @@ router.post('/affecter', async (req, res) => {
       positionId = parseInt(poste_id.replace('pos_', ''));
     }
 
-    // Upsert dans schedule
+    // Upsert dans schedule (avec poste_code pour les postes virtuels)
     const result = await pool.query(`
-      INSERT INTO schedule (employee_id, date, status, position_id, is_provisional)
-      VALUES ($1, $2, 'work', $3, true)
+      INSERT INTO schedule (employee_id, date, status, position_id, poste_code, is_provisional)
+      VALUES ($1, $2, 'work', $3, $4, true)
       ON CONFLICT (employee_id, date)
-      DO UPDATE SET position_id = EXCLUDED.position_id, status = 'work', is_provisional = true
+      DO UPDATE SET position_id = EXCLUDED.position_id, poste_code = EXCLUDED.poste_code,
+                    status = 'work', is_provisional = true
       RETURNING *
-    `, [employee_id, date, positionId]);
+    `, [employee_id, date, positionId, poste_code || null]);
 
     res.json(result.rows[0]);
   } catch (err) {

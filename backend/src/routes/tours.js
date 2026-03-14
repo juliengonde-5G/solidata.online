@@ -13,7 +13,10 @@ const photoStorage = multer.diskStorage({
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
-  filename: (req, file, cb) => cb(null, `incident_${Date.now()}${path.extname(file.originalname)}`),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).replace(/[^a-zA-Z0-9.]/g, '');
+    cb(null, `incident_${Date.now()}${ext}`);
+  },
 });
 const upload = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -795,6 +798,12 @@ router.get('/my', async (req, res) => {
 
     let freeVehicles = [];
     try {
+      const vParams = [];
+      let vExclude = '';
+      if (vehicleIdsInTours.length > 0) {
+        vParams.push(vehicleIdsInTours);
+        vExclude = `AND v.id != ALL($1::int[])`;
+      }
       const vRes = await pool.query(`
         SELECT v.id as vehicle_id, v.registration, v.name as vehicle_name, v.type as vehicle_type,
           NULL as id, 'planned' as status, CURRENT_DATE as date,
@@ -802,9 +811,9 @@ router.get('/my', async (req, res) => {
           0 as nb_cav, 0 as collected_count, true as is_free_vehicle
         FROM vehicles v
         WHERE v.is_active = true
-          ${vehicleIdsInTours.length > 0 ? `AND v.id NOT IN (${vehicleIdsInTours.join(',')})` : ''}
+          ${vExclude}
         ORDER BY v.name, v.registration
-      `);
+      `, vParams);
       freeVehicles = vRes.rows;
     } catch { /* vehicles table might not have is_active */ }
 

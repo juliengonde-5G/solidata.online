@@ -1479,6 +1479,12 @@ async function initDatabase() {
     // Index on tours
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_date ON tours(date);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_status ON tours(status);');
+    // Schedule poste_code column for planning hebdo
+    await client.query(`
+      DO $$ BEGIN ALTER TABLE schedule ADD COLUMN poste_code VARCHAR(50); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_schedule_date ON schedule(date);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_schedule_poste ON schedule(poste_code);');
     // Candidate rejected status migration
     const candidateChecks2 = await client.query(`
       SELECT con.conname FROM pg_constraint con
