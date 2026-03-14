@@ -806,16 +806,18 @@ router.get('/my', async (req, res) => {
       }
       const vRes = await pool.query(`
         SELECT v.id as vehicle_id, v.registration, v.name as vehicle_name, v.type as vehicle_type,
-          NULL as id, 'planned' as status, CURRENT_DATE as date,
-          NULL as driver_employee_id, NULL as driver_name,
+          NULL::int as id, 'planned' as status, CURRENT_DATE as date,
+          NULL::int as driver_employee_id, NULL as driver_name,
           0 as nb_cav, 0 as collected_count, true as is_free_vehicle
         FROM vehicles v
-        WHERE v.is_active = true
+        WHERE v.status = 'available'
           ${vExclude}
         ORDER BY v.name, v.registration
       `, vParams);
       freeVehicles = vRes.rows;
-    } catch { /* vehicles table might not have is_active */ }
+    } catch (err) {
+      console.error('[TOURS] Erreur véhicules libres:', err.message);
+    }
 
     res.json([...toursResult.rows, ...freeVehicles]);
   } catch (err) {
