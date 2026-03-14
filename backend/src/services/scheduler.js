@@ -418,13 +418,41 @@ async function autoFeedNews() {
 }
 
 // ══════════════════════════════════════════
+// VERROU DISTRIBUÉ (Advisory Lock PostgreSQL)
+// ══════════════════════════════════════════
+
+const SCHEDULER_LOCK_ID = 123456789; // ID unique pour le advisory lock
+
+/**
+ * Acquiert un advisory lock PostgreSQL pour éviter les exécutions concurrentes
+ * dans un environnement multi-instance
+ */
+async function acquireLock() {
+  try {
+    const result = await pool.query('SELECT pg_try_advisory_lock($1) as acquired', [SCHEDULER_LOCK_ID]);
+    return result.rows[0].acquired;
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur acquisition lock:', err.message);
+    return false;
+  }
+}
+
+async function releaseLock() {
+  try {
+    await pool.query('SELECT pg_advisory_unlock($1)', [SCHEDULER_LOCK_ID]);
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur release lock:', err.message);
+  }
+}
+
+// ══════════════════════════════════════════
 // ORCHESTRATEUR
 // ══════════════════════════════════════════
 
 let schedulerInterval = null;
 
 function startScheduler() {
-  console.log('[SCHEDULER] Demarrage du scheduler (interval: 1h)');
+  console.log('[SCHEDULER] Demarrage du scheduler (interval: 1h, avec distributed locking)');
 
   // Executer immediatement au demarrage
   setTimeout(async () => {
@@ -443,6 +471,13 @@ function startScheduler() {
 }
 
 async function runAllJobs() {
+  // Distributed locking: seule une instance exécute les jobs
+  const locked = await acquireLock();
+  if (!locked) {
+    console.log('[SCHEDULER] Une autre instance exécute déjà les jobs, skip');
+    return;
+  }
+
   try {
     await checkAppointmentReminders();
     await checkContractEndings();
@@ -453,6 +488,8 @@ async function runAllJobs() {
     console.log('[SCHEDULER] Tous les jobs executes');
   } catch (err) {
     console.error('[SCHEDULER] Erreur globale:', err.message);
+  } finally {
+    await releaseLock();
   }
 }
 

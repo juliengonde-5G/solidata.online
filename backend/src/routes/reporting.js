@@ -49,7 +49,7 @@ router.get('/dashboard', async (req, res) => {
     `);
 
     // Employés actifs
-    const employees = await pool.query("SELECT COUNT(*) as total FROM employees WHERE is_active = true");
+    const employees = await pool.query('SELECT COUNT(*)::int as total FROM employees WHERE is_active = true');
 
     // CO2 evite — calcul affine par type d'exutoire
     // Facteur par defaut base sur mix moyen: 40% reemploi (3.169) + 35% recyclage (0.5) + 15% chiffons (0.75) + 10% CSR (0.121)

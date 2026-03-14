@@ -24,6 +24,24 @@ const io = new Server(server, {
   cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'] },
 });
 
+// Redis adapter pour Socket.IO (multi-instance support)
+(async () => {
+  try {
+    const { isRedisAvailable, createRedisClient } = require('./config/redis');
+    const { createAdapter } = require('@socket.io/redis-adapter');
+    const pubClient = createRedisClient();
+    const subClient = pubClient.duplicate();
+    await Promise.all([
+      new Promise((resolve, reject) => { pubClient.on('ready', resolve); pubClient.on('error', reject); }),
+      new Promise((resolve, reject) => { subClient.on('ready', resolve); subClient.on('error', reject); }),
+    ]);
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log('[SOCKET.IO] Redis adapter activé (multi-instance OK)');
+  } catch (err) {
+    console.warn('[SOCKET.IO] Redis non disponible, mode single-instance :', err.message);
+  }
+})();
+
 // Trust proxy (derrière nginx)
 app.set('trust proxy', 1);
 
@@ -39,12 +57,15 @@ app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, 
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { error: 'Trop de tentatives, réessayez plus tard' } }));
 
 // Créer dossiers uploads (évite 502 si multer ne peut pas créer)
+const fs = require('fs');
 const uploadsDir = path.join(__dirname, '..', 'uploads');
 ['', 'cv', 'photos', 'incidents', 'qrcodes'].forEach((sub) => {
   const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
   try {
-    require('fs').mkdirSync(dir, { recursive: true });
-  } catch (_) {}
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    console.warn('[INIT] Impossible de créer le dossier', dir, ':', err.message);
+  }
 });
 app.use('/uploads', express.static(uploadsDir));
 app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
@@ -98,6 +119,9 @@ app.use('/api/factures-exutoires', require('./routes/factures-exutoires'));
 app.use('/api/calendrier-logistique', require('./routes/calendrier-logistique'));
 app.use('/api/planning-hebdo', require('./routes/planning-hebdo'));
 
+// 404 handler pour les routes API non trouvées
+const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
+
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
@@ -139,11 +163,32 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// 404 + Global error handler (DOIT être après toutes les routes)
+app.use('/api', notFoundHandler);
+app.use(errorHandler);
+
 // ══════════════════════════════════════════
-// SOCKET.IO - GPS & Tournées temps réel
+// SOCKET.IO - Auth & GPS temps réel
 // ══════════════════════════════════════════
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  if (!token) {
+    return next(new Error('Authentification requise'));
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    socket.user = decoded;
+    next();
+  } catch (err) {
+    return next(new Error('Token invalide'));
+  }
+});
+
 io.on('connection', (socket) => {
-  console.log(`[SOCKET] Client connecté : ${socket.id}`);
+  console.log(`[SOCKET] Client connecté : ${socket.id} (user: ${socket.user?.id})`);
 
   // Le chauffeur rejoint la room de sa tournée
   socket.on('join-tour', (tourId) => {
@@ -280,6 +325,14 @@ server.listen(PORT, async () => {
     startScheduler();
   } catch (err) {
     console.error('[SCHEDULER] Erreur démarrage :', err.message);
+  }
+
+  // Initialiser les queues BullMQ (optionnel, dépend de Redis)
+  try {
+    const { initQueues } = require('./services/job-queue');
+    await initQueues();
+  } catch (err) {
+    console.warn('[JOB-QUEUE] Initialisation optionnelle échouée :', err.message);
   }
 });
 

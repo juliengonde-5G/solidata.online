@@ -43,7 +43,7 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
       )
     `);
     const addCol = async (col, type) => {
-      try { await pool.query(`ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch {}
+      try { await pool.query(`ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (err) { console.warn('[INSERTION] Migration col:', err.message); }
     };
     await addCol('frein_mobilite_causes', 'TEXT');
     await addCol('frein_sante_causes', 'TEXT');
@@ -66,12 +66,12 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS prescripteur VARCHAR(100);
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
       `);
-    } catch {}
+    } catch (err) { console.warn('[INSERTION] Migration employees cols:', err.message); }
     // Ajouter CHECK constraint sur insertion_status si absente
     try {
       await pool.query(`ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_insertion_status_check`);
       await pool.query(`ALTER TABLE employees ADD CONSTRAINT employees_insertion_status_check CHECK (insertion_status IN ('none', 'en_parcours', 'termine', 'abandon'))`);
-    } catch {}
+    } catch (err) { console.warn('[INSERTION] Migration constraint:', err.message); }
 
     // Creer table milestones si elle n'existe pas encore
     await pool.query(`
@@ -118,7 +118,7 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
 
     // Migration milestones : ajouter nouvelles colonnes si table existait deja
     const addMsCol = async (col, type) => {
-      try { await pool.query(`ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch {}
+      try { await pool.query(`ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (err) { console.warn('[INSERTION] Migration ms col:', err.message); }
     };
     await addMsCol('frein_numerique', 'INTEGER CHECK (frein_numerique BETWEEN 1 AND 5)');
     await addMsCol('cip_integration', 'TEXT');
@@ -136,7 +136,7 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
     try {
       await pool.query(`ALTER TABLE insertion_milestones DROP CONSTRAINT IF EXISTS insertion_milestones_milestone_type_check`);
       await pool.query(`ALTER TABLE insertion_milestones ADD CONSTRAINT insertion_milestones_milestone_type_check CHECK (milestone_type IN ('Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie', 'Bilan M+2'))`);
-    } catch {}
+    } catch (err) { console.warn('[INSERTION] Migration ms check:', err.message); }
 
     // Table action plans CIP
     try {
@@ -156,7 +156,7 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
           updated_at TIMESTAMP DEFAULT NOW()
         )
       `);
-    } catch {}
+    } catch (err) { console.warn('[INSERTION] Migration action_plans:', err.message); }
 
     // Table alertes entretiens insertion
     try {
@@ -172,7 +172,7 @@ router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));
           created_at TIMESTAMP DEFAULT NOW()
         )
       `);
-    } catch {}
+    } catch (err) { console.warn('[INSERTION] Migration alerts:', err.message); }
 
     console.log('[INSERTION] Tables insertion OK');
   } catch (err) {
@@ -1932,22 +1932,28 @@ router.post('/milestones/:employeeId/initialize', async (req, res) => {
       { type: 'Bilan Sortie', months: 12 },
     ];
 
-    const results = [];
+    // Batch insert all milestones in a single query
+    const values = [];
+    const placeholders = [];
+    let paramIdx = 1;
     for (const ms of milestonesDef) {
       const dueDate = addMonths(startDate, ms.months);
-      const result = await pool.query(
-        `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (employee_id, milestone_type) DO UPDATE SET
-           due_date = COALESCE(NULLIF(insertion_milestones.due_date::text, ''), $3::date),
-           updated_at = NOW()
-         RETURNING *`,
-        [empId, ms.type, dueDate, req.user.id]
-      );
-      results.push(result.rows[0]);
+      placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3})`);
+      values.push(empId, ms.type, dueDate, req.user.id);
+      paramIdx += 4;
     }
 
-    res.status(201).json(results);
+    const result = await pool.query(
+      `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
+       VALUES ${placeholders.join(', ')}
+       ON CONFLICT (employee_id, milestone_type) DO UPDATE SET
+         due_date = COALESCE(NULLIF(insertion_milestones.due_date::text, ''), EXCLUDED.due_date),
+         updated_at = NOW()
+       RETURNING *`,
+      values
+    );
+
+    res.status(201).json(result.rows);
   } catch (err) {
     console.error('[INSERTION] Erreur initialize milestones :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -2044,7 +2050,7 @@ router.get('/timeline/:employeeId', async (req, res) => {
     try {
       const diagRes = await pool.query('SELECT created_at FROM insertion_diagnostics WHERE employee_id = $1', [empId]);
       diagnostic = diagRes.rows[0] || null;
-    } catch {}
+    } catch (err) { console.warn('[INSERTION] Timeline diagnostic:', err.message); }
 
     const timeline = buildTimeline(empRes.rows[0], [empRes.rows[0]], msRes.rows, diagnostic);
     res.json(timeline);
@@ -2080,7 +2086,7 @@ router.get('/:employeeId', async (req, res) => {
         'SELECT ec.*, t.name as team_name, p.title as position_title FROM employee_contracts ec LEFT JOIN teams t ON ec.team_id = t.id LEFT JOIN positions p ON ec.position_id = p.id WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC',
         [empId]
       );
-    } catch { /* table might not exist */ }
+    } catch (err) { /* table might not exist */ }
 
     // 3. Candidat (par nom ou candidate_id)
     let candidate = null;
@@ -2096,7 +2102,7 @@ router.get('/:employeeId', async (req, res) => {
         );
         candidate = candRes.rows[0] || null;
       }
-    } catch { /* table might not exist */ }
+    } catch (err) { /* table might not exist */ }
 
     // 4. Rapport PCM
     let pcmReport = null;
@@ -2110,7 +2116,7 @@ router.get('/:employeeId', async (req, res) => {
           const bytes = CryptoJS.AES.decrypt(pcmRes.rows[0].encrypted_report, PCM_KEY);
           pcmReport = bytes.toString(CryptoJS.enc.Utf8);
         }
-      } catch { /* pcm might not exist */ }
+      } catch (err) { /* pcm might not exist */ }
     }
 
     // 5. Membres de l'équipe
@@ -2122,7 +2128,7 @@ router.get('/:employeeId', async (req, res) => {
           [employee.team_id, empId]
         );
         teamMembers = teamRes.rows;
-      } catch { /* ignore */ }
+      } catch (err) { /* ignore */ }
     }
 
     // 6. Position
@@ -2132,7 +2138,7 @@ router.get('/:employeeId', async (req, res) => {
       try {
         const posRes = await pool.query('SELECT * FROM positions WHERE id = $1', [currentContract.position_id]);
         position = posRes.rows[0] || null;
-      } catch { /* ignore */ }
+      } catch (err) { /* ignore */ }
     }
 
     // 7. Diagnostic CIP
@@ -2140,7 +2146,7 @@ router.get('/:employeeId', async (req, res) => {
     try {
       const diagRes = await pool.query('SELECT * FROM insertion_diagnostics WHERE employee_id = $1', [empId]);
       diagnostic = diagRes.rows[0] || null;
-    } catch { /* table might not exist yet */ }
+    } catch (err) { /* table might not exist yet */ }
 
     // 8. Jalons insertion
     let milestones = [];
@@ -2149,7 +2155,7 @@ router.get('/:employeeId', async (req, res) => {
         'SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date', [empId]
       );
       milestones = msRes.rows;
-    } catch { /* table might not exist yet */ }
+    } catch (err) { /* table might not exist yet */ }
 
     // 9. Plan d'action CIP
     let actionPlans = [];
@@ -2158,7 +2164,7 @@ router.get('/:employeeId', async (req, res) => {
         'SELECT * FROM cip_action_plans WHERE employee_id = $1 ORDER BY created_at', [empId]
       );
       actionPlans = apRes.rows;
-    } catch { /* table might not exist yet */ }
+    } catch (err) { /* table might not exist yet */ }
 
     // 10. Analyse complete
     const analysis = analyzeInsertion(

@@ -11,7 +11,10 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(__dirname, '../../uploads/pesee')),
-  filename: (req, file, cb) => cb(null, `pesee-${Date.now()}-${file.originalname}`)
+  filename: (req, file, cb) => {
+    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, `pesee-${Date.now()}-${safeName}`);
+  }
 });
 const upload = multer({ storage, fileFilter: (req, file, cb) => {
   cb(null, file.mimetype === 'application/pdf');

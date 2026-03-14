@@ -22,6 +22,26 @@ services:
       resources:
         limits:
           memory: 512M
+          cpus: '1.0'
+
+  # === REDIS (Cache, Socket.IO adapter, Job Queue) ===
+  redis:
+    image: redis:7-alpine
+    container_name: solidata-redis
+    restart: always
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+          cpus: '0.5'
 
   # === BACKEND API Node.js ===
   backend:
@@ -32,6 +52,8 @@ services:
     restart: always
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       DB_HOST: db
@@ -45,6 +67,8 @@ services:
       PORT: 3001
       NODE_ENV: production
       BREVO_API_KEY: ${BREVO_API_KEY:-}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       CENTRE_TRI_LAT: 49.4231
       CENTRE_TRI_LNG: 1.0993
     volumes:
@@ -60,7 +84,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 768M
+          cpus: '2.0'
     logging:
       driver: json-file
       options:
@@ -81,6 +106,7 @@ services:
       resources:
         limits:
           memory: 128M
+          cpus: '0.5'
 
   # === MOBILE PWA ===
   mobile:
@@ -96,13 +122,14 @@ services:
       resources:
         limits:
           memory: 128M
+          cpus: '0.5'
 
   # === NGINX Reverse Proxy SSL ===
   nginx:
     image: nginx:alpine
     container_name: solidata-proxy
     restart: always
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl >/dev/null 2>&1; mkdir -p /etc/letsencrypt/live/solidata.online && ( [ -f /etc/letsencrypt/live/solidata.online/fullchain.pem ] || openssl req -x509 -nodes -days 1 -newkey rsa:2048 -keyout /etc/letsencrypt/live/solidata.online/privkey.pem -out /etc/letsencrypt/live/solidata.online/fullchain.pem -subj /CN=solidata.online ) && exec nginx -g 'daemon off;'" ]
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl >/dev/null 2>&1; mkdir -p /etc/letsencrypt/live/solidata.online; CERT_DIR=/etc/letsencrypt/live/solidata.online; if [ -d /etc/letsencrypt/live/solidata.online-0001 ] && [ -f /etc/letsencrypt/live/solidata.online-0001/fullchain.pem ]; then cp -fL /etc/letsencrypt/live/solidata.online-0001/fullchain.pem $CERT_DIR/fullchain.pem; cp -fL /etc/letsencrypt/live/solidata.online-0001/privkey.pem $CERT_DIR/privkey.pem; echo 'Using Let\\'s Encrypt certificate from solidata.online-0001'; elif [ ! -f $CERT_DIR/fullchain.pem ]; then openssl req -x509 -nodes -days 1 -newkey rsa:2048 -keyout $CERT_DIR/privkey.pem -out $CERT_DIR/fullchain.pem -subj /CN=solidata.online; echo 'Generated self-signed certificate (first deploy)'; else echo 'Using existing certificate'; fi && exec nginx -g 'daemon off;'" ]
     ports:
       - "80:80"
       - "443:443"
@@ -119,6 +146,7 @@ services:
       resources:
         limits:
           memory: 64M
+          cpus: '0.5'
     logging:
       driver: json-file
       options:

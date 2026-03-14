@@ -13,7 +13,10 @@ const photoStorage = multer.diskStorage({
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
-  filename: (req, file, cb) => cb(null, `incident_${Date.now()}${path.extname(file.originalname)}`),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).replace(/[^a-zA-Z0-9.]/g, '');
+    cb(null, `incident_${Date.now()}${ext}`);
+  },
 });
 const upload = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -549,12 +552,12 @@ async function predictFillRate(cavId, targetDate) {
 // ══════════════════════════════════════════════════════════════
 async function generateIntelligentTour(vehicleId, date) {
   // 1. Récupérer le véhicule
-  const vResult = await pool.query('SELECT * FROM vehicles WHERE id = $1', [vehicleId]);
+  const vResult = await pool.query('SELECT id, registration, name, max_capacity_kg, team_id, status, current_km FROM vehicles WHERE id = $1', [vehicleId]);
   if (vResult.rows.length === 0) throw new Error('Véhicule non trouvé');
   const vehicle = vResult.rows[0];
 
   // 2. Récupérer tous les CAV actifs
-  const cavResult = await pool.query("SELECT * FROM cav WHERE status = 'active' ORDER BY name");
+  const cavResult = await pool.query("SELECT id, name, address, commune, latitude, longitude, nb_containers, status FROM cav WHERE status = 'active' ORDER BY name");
   const allCavs = cavResult.rows;
   if (allCavs.length === 0) throw new Error('Aucun CAV actif trouvé. Ajoutez des CAV avant de créer une tournée.');
 
@@ -795,18 +798,26 @@ router.get('/my', async (req, res) => {
 
     let freeVehicles = [];
     try {
+      const vParams = [];
+      let vExclude = '';
+      if (vehicleIdsInTours.length > 0) {
+        vParams.push(vehicleIdsInTours);
+        vExclude = `AND v.id != ALL($1::int[])`;
+      }
       const vRes = await pool.query(`
-        SELECT v.id as vehicle_id, v.registration, v.name as vehicle_name, v.type as vehicle_type,
-          NULL as id, 'planned' as status, CURRENT_DATE as date,
-          NULL as driver_employee_id, NULL as driver_name,
+        SELECT v.id as vehicle_id, v.registration, v.name as vehicle_name, NULL as vehicle_type,
+          NULL::int as id, 'planned' as status, CURRENT_DATE as date,
+          NULL::int as driver_employee_id, NULL as driver_name,
           0 as nb_cav, 0 as collected_count, true as is_free_vehicle
         FROM vehicles v
-        WHERE v.is_active = true
-          ${vehicleIdsInTours.length > 0 ? `AND v.id NOT IN (${vehicleIdsInTours.join(',')})` : ''}
+        WHERE v.status = 'available'
+          ${vExclude}
         ORDER BY v.name, v.registration
-      `);
+      `, vParams);
       freeVehicles = vRes.rows;
-    } catch { /* vehicles table might not have is_active */ }
+    } catch (err) {
+      console.error('[TOURS] Erreur véhicules libres:', err.message);
+    }
 
     res.json([...toursResult.rows, ...freeVehicles]);
   } catch (err) {

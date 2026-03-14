@@ -1479,6 +1479,12 @@ async function initDatabase() {
     // Index on tours
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_date ON tours(date);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_status ON tours(status);');
+    // Schedule poste_code column for planning hebdo
+    await client.query(`
+      DO $$ BEGIN ALTER TABLE schedule ADD COLUMN poste_code VARCHAR(50); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_schedule_date ON schedule(date);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_schedule_poste ON schedule(poste_code);');
     // Candidate rejected status migration
     const candidateChecks2 = await client.query(`
       SELECT con.conname FROM pg_constraint con
@@ -1853,6 +1859,16 @@ async function initDatabase() {
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS population_commune INTEGER;
     `);
     console.log('[INIT-DB] Colonne population_commune ajoutée à CAV ✓');
+
+    // ══════════════════════════════════════════
+    // INDEX ADDITIONNELS (Performance)
+    // ══════════════════════════════════════════
+    await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_appointment ON candidates(appointment_date) WHERE appointment_date IS NOT NULL;');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employee_contracts_end ON employee_contracts(end_date) WHERE end_date IS NOT NULL;');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vehicle_maintenance_vehicle ON vehicle_maintenance(vehicle_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employees_insertion ON employees(insertion_status) WHERE insertion_status != \'none\';');
+    console.log('[INIT-DB] Index additionnels créés ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
