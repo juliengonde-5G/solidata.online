@@ -26,7 +26,7 @@ const upload = multer({ storage, fileFilter: (req, file, cb) => {
 // OCR helper function
 async function extractInvoiceData(pdfPath) {
   try {
-    const dataBuffer = fs.readFileSync(pdfPath);
+    const dataBuffer = await fs.promises.readFile(pdfPath);
     const data = await pdfParse(dataBuffer);
     const text = data.text;
 

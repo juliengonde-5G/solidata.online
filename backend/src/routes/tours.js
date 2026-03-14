@@ -552,12 +552,12 @@ async function predictFillRate(cavId, targetDate) {
 // ══════════════════════════════════════════════════════════════
 async function generateIntelligentTour(vehicleId, date) {
   // 1. Récupérer le véhicule
-  const vResult = await pool.query('SELECT * FROM vehicles WHERE id = $1', [vehicleId]);
+  const vResult = await pool.query('SELECT id, registration, name, max_capacity_kg, team_id, status, current_km FROM vehicles WHERE id = $1', [vehicleId]);
   if (vResult.rows.length === 0) throw new Error('Véhicule non trouvé');
   const vehicle = vResult.rows[0];
 
   // 2. Récupérer tous les CAV actifs
-  const cavResult = await pool.query("SELECT * FROM cav WHERE status = 'active' ORDER BY name");
+  const cavResult = await pool.query("SELECT id, name, address, commune, latitude, longitude, nb_containers, status FROM cav WHERE status = 'active' ORDER BY name");
   const allCavs = cavResult.rows;
   if (allCavs.length === 0) throw new Error('Aucun CAV actif trouvé. Ajoutez des CAV avant de créer une tournée.');
 

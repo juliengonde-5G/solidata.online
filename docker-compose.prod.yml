@@ -22,6 +22,26 @@ services:
       resources:
         limits:
           memory: 512M
+          cpus: '1.0'
+
+  # === REDIS (Cache, Socket.IO adapter, Job Queue) ===
+  redis:
+    image: redis:7-alpine
+    container_name: solidata-redis
+    restart: always
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+          cpus: '0.5'
 
   # === BACKEND API Node.js ===
   backend:
@@ -32,6 +52,8 @@ services:
     restart: always
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       DB_HOST: db
@@ -45,6 +67,8 @@ services:
       PORT: 3001
       NODE_ENV: production
       BREVO_API_KEY: ${BREVO_API_KEY:-}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       CENTRE_TRI_LAT: 49.4231
       CENTRE_TRI_LNG: 1.0993
     volumes:
@@ -60,7 +84,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 768M
+          cpus: '2.0'
     logging:
       driver: json-file
       options:
@@ -81,6 +106,7 @@ services:
       resources:
         limits:
           memory: 128M
+          cpus: '0.5'
 
   # === MOBILE PWA ===
   mobile:
@@ -96,6 +122,7 @@ services:
       resources:
         limits:
           memory: 128M
+          cpus: '0.5'
 
   # === NGINX Reverse Proxy SSL ===
   nginx:
@@ -119,6 +146,7 @@ services:
       resources:
         limits:
           memory: 64M
+          cpus: '0.5'
     logging:
       driver: json-file
       options:

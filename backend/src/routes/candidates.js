@@ -154,7 +154,7 @@ async function parseCVFile(filePath) {
 
     if (ext === '.pdf') {
       try {
-        const buffer = fs.readFileSync(filePath);
+        const buffer = await fs.promises.readFile(filePath);
         const mod = require('pdf-parse');
         let text = '';
         if (mod.PDFParse) {

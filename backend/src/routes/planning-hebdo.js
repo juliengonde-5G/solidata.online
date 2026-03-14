@@ -47,7 +47,7 @@ router.get('/postes', async (req, res) => {
           obligatoire: p.est_obligatoire,
         });
       }
-    } catch { /* table may not exist */ }
+    } catch (err) { console.warn('[PLANNING] Table may not exist:', err.message); }
 
     // 2. Postes de collecte
     postes.push({
@@ -152,7 +152,7 @@ router.get('/postes', async (req, res) => {
     // 5. Ajouter les postes generiques de la table positions
     try {
       const positionsResult = await pool.query(
-        "SELECT * FROM positions WHERE is_active = true ORDER BY team_type, title"
+        "SELECT id, title, type, team_type, required_skills, is_active FROM positions WHERE is_active = true ORDER BY team_type, title"
       );
       for (const p of positionsResult.rows) {
         const filiere = p.team_type === 'tri' ? 'tri'

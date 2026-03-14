@@ -1860,6 +1860,16 @@ async function initDatabase() {
     `);
     console.log('[INIT-DB] Colonne population_commune ajoutée à CAV ✓');
 
+    // ══════════════════════════════════════════
+    // INDEX ADDITIONNELS (Performance)
+    // ══════════════════════════════════════════
+    await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_appointment ON candidates(appointment_date) WHERE appointment_date IS NOT NULL;');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employee_contracts_end ON employee_contracts(end_date) WHERE end_date IS NOT NULL;');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vehicle_maintenance_vehicle ON vehicle_maintenance(vehicle_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employees_insertion ON employees(insertion_status) WHERE insertion_status != \'none\';');
+    console.log('[INIT-DB] Index additionnels créés ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

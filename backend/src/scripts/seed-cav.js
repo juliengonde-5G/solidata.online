@@ -25,7 +25,7 @@ function findFile(filename) {
  * Format: COMMUNE - Address (Detail)\n\nN CAV\n\nTournées info\n\nFill rate
  */
 function parseKML(filePath) {
-  const xml = fs.readFileSync(filePath, 'utf-8');
+  const xml = require('fs').readFileSync(filePath, 'utf-8'); // Sync OK: startup-only script
   const cavs = [];
 
   // Match each Placemark block

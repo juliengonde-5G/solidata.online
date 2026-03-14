@@ -69,7 +69,7 @@ router.get('/', async (req, res) => {
 router.get('/available', async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM vehicles WHERE status = 'available' ORDER BY name"
+      "SELECT id, registration, name, max_capacity_kg, team_id, status, current_km FROM vehicles WHERE status = 'available' ORDER BY name"
     );
     res.json(result.rows);
   } catch (err) {
@@ -244,7 +244,7 @@ router.get('/maintenance/overview', authorize('ADMIN', 'MANAGER'), async (req, r
 // GET /api/vehicles/:id/maintenance — Détail maintenance d'un véhicule
 router.get('/:id/maintenance', async (req, res) => {
   try {
-    const maint = await pool.query('SELECT * FROM vehicle_maintenance WHERE vehicle_id = $1', [req.params.id]);
+    const maint = await pool.query('SELECT id, vehicle_id, vehicle_type, last_maintenance_date, last_maintenance_km, maintenance_interval_km, maintenance_interval_months, controle_technique_date, oil_change_km, oil_change_date, tire_change_km, tire_change_date, brake_check_km, brake_check_date, notes FROM vehicle_maintenance WHERE vehicle_id = $1', [req.params.id]);
     const alerts = await pool.query(
       'SELECT * FROM vehicle_maintenance_alerts WHERE vehicle_id = $1 ORDER BY alert_date DESC LIMIT 20',
       [req.params.id]
