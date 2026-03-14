@@ -805,7 +805,7 @@ router.get('/my', async (req, res) => {
         vExclude = `AND v.id != ALL($1::int[])`;
       }
       const vRes = await pool.query(`
-        SELECT v.id as vehicle_id, v.registration, v.name as vehicle_name, v.type as vehicle_type,
+        SELECT v.id as vehicle_id, v.registration, v.name as vehicle_name, NULL as vehicle_type,
           NULL::int as id, 'planned' as status, CURRENT_DATE as date,
           NULL::int as driver_employee_id, NULL as driver_name,
           0 as nb_cav, 0 as collected_count, true as is_free_vehicle
