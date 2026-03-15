@@ -1264,4 +1264,64 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// PLAN DE RECRUTEMENT MENSUEL
+// ══════════════════════════════════════════
+
+// GET /api/candidates/recruitment-plan?from=2026-01&to=2026-12
+router.get('/recruitment-plan', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let query = `
+      SELECT rp.*, p.title as position_title, p.type as position_type,
+        (SELECT COUNT(*) FROM candidates c WHERE c.position_id = rp.position_id AND c.status = 'hired'
+          AND to_char(c.updated_at, 'YYYY-MM') = rp.month) as hired_count
+      FROM recruitment_plan rp
+      JOIN positions p ON p.id = rp.position_id
+    `;
+    const params = [];
+    if (from && to) {
+      query += ' WHERE rp.month >= $1 AND rp.month <= $2';
+      params.push(from, to);
+    }
+    query += ' ORDER BY rp.month, p.title';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[RECRUITMENT-PLAN] Erreur GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/candidates/recruitment-plan — Créer/mettre à jour un besoin
+router.post('/recruitment-plan', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { position_id, month, slots_needed } = req.body;
+    if (!position_id || !month || slots_needed == null) {
+      return res.status(400).json({ error: 'position_id, month et slots_needed requis' });
+    }
+    const result = await pool.query(`
+      INSERT INTO recruitment_plan (position_id, month, slots_needed, created_by, updated_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (position_id, month) DO UPDATE SET slots_needed = $3, updated_at = NOW()
+      RETURNING *
+    `, [position_id, month, slots_needed, req.user.id]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[RECRUITMENT-PLAN] Erreur POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/candidates/recruitment-plan/:id
+router.delete('/recruitment-plan/:id', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM recruitment_plan WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Supprimé' });
+  } catch (err) {
+    console.error('[RECRUITMENT-PLAN] Erreur DELETE :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

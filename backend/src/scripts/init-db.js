@@ -1514,6 +1514,22 @@ async function initDatabase() {
     `);
     // Purge expired refresh tokens (cleanup)
     await client.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
+
+    // ══════════════════════════════════════════
+    // TABLE : Plan de recrutement mensuel
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS recruitment_plan (
+        id SERIAL PRIMARY KEY,
+        position_id INTEGER NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+        month VARCHAR(7) NOT NULL,
+        slots_needed INTEGER NOT NULL DEFAULT 0,
+        created_by INTEGER REFERENCES users(id),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(position_id, month)
+      );
+    `);
+
     console.log('[INIT-DB] Migration FKs + indexes + statuts ✓');
 
     // ══════════════════════════════════════════
