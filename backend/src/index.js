@@ -59,7 +59,7 @@ app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { e
 // Créer dossiers uploads (évite 502 si multer ne peut pas créer)
 const fs = require('fs');
 const uploadsDir = path.join(__dirname, '..', 'uploads');
-['', 'cv', 'photos', 'incidents', 'qrcodes'].forEach((sub) => {
+['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents'].forEach((sub) => {
   const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
   try {
     fs.mkdirSync(dir, { recursive: true });

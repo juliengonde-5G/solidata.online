@@ -659,6 +659,58 @@ router.delete('/positions/:id', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// DOCUMENTS RECRUTEMENT (livret, charte, procédure, fiches)
+// IMPORTANT: declared BEFORE /:id routes to avoid Express matching "documents" as :id
+// ══════════════════════════════════════════
+
+const RECRUITMENT_DOCS = {
+  livret_accueil: { filename: "Livret d'accueil collaborateur.pdf", label: "Livret d'accueil" },
+  charte_insertion: { filename: "Charte d'insertion.pdf", label: "Charte d'insertion" },
+  procedure_recrutement: { filename: 'Procédure recrutement.pdf', label: 'Procédure de recrutement' },
+  fiche_mise_en_situation_collecte: { filename: 'Fiche de mise en situation - Collecte  Manutention.pdf', label: 'Fiche mise en situation - Collecte/Manutention' },
+  fiche_mise_en_situation_craquage: { filename: 'Fiche de mise en situation - Craquage.pdf', label: 'Fiche mise en situation - Craquage' },
+  fiche_mise_en_situation_qualite: { filename: 'Fiche de mise en situation - Qualité.pdf', label: 'Fiche mise en situation - Qualité' },
+};
+
+// GET /api/candidates/documents/list — Liste des documents disponibles
+router.get('/documents/list', authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+  const docs = Object.entries(RECRUITMENT_DOCS).map(([key, doc]) => ({
+    key,
+    label: doc.label,
+    url: `/uploads/documents/${doc.filename}`,
+  }));
+  res.json(docs);
+});
+
+// GET /api/candidates/documents/download/:docKey — Télécharger un document
+router.get('/documents/download/:docKey', authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+  const doc = RECRUITMENT_DOCS[req.params.docKey];
+  if (!doc) return res.status(404).json({ error: 'Document non trouvé' });
+  const filePath = path.join(__dirname, '..', '..', 'uploads', 'documents', doc.filename);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Fichier introuvable' });
+  res.download(filePath, doc.filename);
+});
+
+// GET /api/candidates/documents/livret-content — Contenu du livret en texte structuré
+router.get('/documents/livret-content', authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+  res.json({
+    title: "Livret d'accueil collaborateur",
+    sections: [
+      { title: "Bienvenue !", content: "Merci de rejoindre Solidarité Textiles et Frip and Co, nos entreprises d'insertion. Ensemble nous allons construire le monde de demain et bouleverser les habitudes d'aujourd'hui. En rejoignant notre aventure, vous devenez un acteur privilégié de l'économie sociale et solidaire. Vous participez à réduire le gaspillage textile (activité Réemploi), préserver l'extraction de ressources naturelles et innover pour la production de nouveaux matériaux (activité Recyclage). Vous êtes la force de Solidarité Textiles et de Frip and Co." },
+      { title: "Qui sommes-nous ?", content: "Solidarité Textiles est une association Loi 1901 agréée « Chantier d'insertion », ayant pour mission de favoriser le retour à l'emploi par le recyclage et la valorisation du textile. Créée en 1995, elle a pour support d'activité la collecte, le tri, le conditionnement et la valorisation des textiles usagés. L'association compte 42 salariés en parcours d'insertion et 7 salariés permanents. Frip & Co, entreprise filiale, se charge de la vente des textiles valorisables." },
+      { title: "La filière TLC", content: "La collecte et le négoce des TLC usagés sont des activités économiques de longue date. Solidarité Textiles fait partie de la filière TLC en qualité de collecteur et opérateur de tri, répondant aux objectifs de Refashion (éco-organisme). Chaque trimestre, nous rendons compte des volumes collectés, triés, recyclés et revendus." },
+      { title: "Vos premiers pas", content: "Vous devenez Opérateur de Tri TLC. Vos cinq sens seront mis à rude épreuve. Il faut environ 3 mois pour trouver le bon rythme et 6 mois pour que tous vos sens soient en éveil. Les 5R : un moyen mnémotechnique pour lutter contre le gaspillage et réduire notre empreinte environnementale." },
+      { title: "Notre rôle", content: "4 camions sillonnent l'agglomération de Rouen. Nos chauffeurs font leurs tournées en binômes dès 7h30, récoltant plus de 5 tonnes de TLC par jour dans 240 collecteurs d'apport volontaire. Au total, 1600 tonnes de déchets textiles par an." },
+      { title: "Frip & Co", content: "Les vêtements collectés en bon état sont triés et conditionnés pour les boutiques Frip and Co (Centre-Ville, rue de l'Hôpital — 100 clients/jour) et Frip and Co Family (quartier Saint-Sever, rue Lafayette). En 2026 : ouverture du Vinted Pro et développement de l'upcycling." },
+      { title: "Votre contrat (CDDI)", content: "Contrat à Durée Déterminée d'Insertion — 1 mois de période d'essai, 5 mois renouvelable (24 mois max). 26 heures/semaine. 1 jour non travaillé par semaine. 1h de pause déjeuner. 15 jours de congés pour 5 mois." },
+      { title: "Vos interlocuteurs", content: "Conseillère d'Insertion Professionnelle pour votre projet professionnel. Encadrement technique : responsable des opérations, responsable logistique, responsable des boutiques et leurs adjoints." },
+      { title: "Cadre de vie professionnelle", content: "Convention collective « Atelier Chantier d'Insertion ». Mutuelle obligatoire. Prise en charge 50% transports en commun. Avantage : 1 carton de 5 kg de textiles/mois (sous condition d'assiduité)." },
+      { title: "Contact", content: "Solidarité Textiles : 02.32.10.34.81 — contact@solidarite-textiles.fr. CIP Aline ROIX : 06.61.01.10.41 — asp@solidarite-textiles.fr. Bureau technique : 02.32.10.38.79" },
+    ],
+  });
+});
+
 // POST /api/candidates/upload-cv-new — Upload CV → créer nouveau candidat
 // IMPORTANT: must be declared BEFORE /:id routes to avoid Express matching "upload-cv-new" as :id
 router.post('/upload-cv-new', authorize('ADMIN', 'RH'), (req, res, next) => {
@@ -811,6 +863,18 @@ router.put('/:id/status', authorize('ADMIN', 'RH'), async (req, res) => {
       'INSERT INTO candidate_history (candidate_id, from_status, to_status, comment, changed_by) VALUES ($1, $2, $3, $4, $5)',
       [id, fromStatus, status, comment, req.user.id]
     );
+
+    // Auto-délivrer le livret d'accueil + charte d'insertion quand le candidat est embauché
+    if (status === 'hired') {
+      for (const docType of ['livret_accueil', 'charte_insertion']) {
+        await pool.query(
+          `INSERT INTO recruitment_documents (candidate_id, document_type, delivered_by, delivery_method)
+           VALUES ($1, $2, $3, 'email')
+           ON CONFLICT (candidate_id, document_type) DO NOTHING`,
+          [id, docType, req.user.id]
+        ).catch(() => {}); // Ignore si table n'existe pas encore
+      }
+    }
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -1009,6 +1073,181 @@ router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, re
     });
   } catch (err) {
     console.error('[CANDIDATES] Erreur conversion :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// TRAME ENTRETIEN DE RECRUTEMENT
+// ══════════════════════════════════════════
+
+// GET /api/candidates/:id/interview-form — Récupérer l'entretien structuré
+router.get('/:id/interview-form', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM recruitment_interviews WHERE candidate_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [req.params.id]
+    );
+    res.json(result.rows[0] || null);
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur récup entretien :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/candidates/:id/interview-form — Sauvegarder l'entretien structuré
+router.post('/:id/interview-form', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const f = req.body;
+
+    // Vérifier que le candidat existe
+    const candidate = await pool.query('SELECT id FROM candidates WHERE id = $1', [id]);
+    if (candidate.rows.length === 0) return res.status(404).json({ error: 'Candidat non trouvé' });
+
+    // Upsert: supprimer l'ancien si existe, puis insérer
+    await pool.query('DELETE FROM recruitment_interviews WHERE candidate_id = $1', [id]);
+
+    const result = await pool.query(
+      `INSERT INTO recruitment_interviews (
+        candidate_id, interview_date, interviewer_id,
+        presentation_mots, parcours_professionnel, experiences_marquantes,
+        situation_actuelle, situation_actuelle_autre,
+        duree_sans_emploi, difficultes_recherche, difficultes_recherche_autre,
+        freins_emploi, freins_emploi_autre,
+        contraintes_horaires, contraintes_horaires_detail,
+        structure_accompagnement, structure_accompagnement_autre,
+        motivation_integration, motivation_reprise, attentes, attentes_autre,
+        experience_activite, comportement_equipe, reaction_consigne, travail_physique,
+        disponibilite_horaires, disponibilite_autre, organisation_ponctualite,
+        idee_metier, idee_metier_detail, amelioration_souhaitee, question_ouverte,
+        evaluation_globale, commentaire_evaluateur
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+        $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34
+      ) RETURNING *`,
+      [
+        id, f.interview_date || new Date(), req.user.id,
+        f.presentation_mots, f.parcours_professionnel, f.experiences_marquantes,
+        f.situation_actuelle || null, f.situation_actuelle_autre,
+        f.duree_sans_emploi || null, f.difficultes_recherche || [], f.difficultes_recherche_autre,
+        f.freins_emploi || [], f.freins_emploi_autre,
+        f.contraintes_horaires || null, f.contraintes_horaires_detail,
+        f.structure_accompagnement || [], f.structure_accompagnement_autre,
+        f.motivation_integration, f.motivation_reprise, f.attentes || [], f.attentes_autre,
+        f.experience_activite || [], f.comportement_equipe, f.reaction_consigne, f.travail_physique || null,
+        f.disponibilite_horaires || null, f.disponibilite_autre, f.organisation_ponctualite,
+        f.idee_metier || null, f.idee_metier_detail, f.amelioration_souhaitee, f.question_ouverte,
+        f.evaluation_globale || null, f.commentaire_evaluateur,
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur sauvegarde entretien :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// FICHES DE MISE EN SITUATION
+// ══════════════════════════════════════════
+
+// GET /api/candidates/:id/mise-en-situation — Récupérer les évaluations
+router.get('/:id/mise-en-situation', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT m.*, u.first_name as evaluator_name, u.last_name as evaluator_lastname
+       FROM mise_en_situation m
+       LEFT JOIN users u ON m.evaluator_id = u.id
+       WHERE m.candidate_id = $1 ORDER BY m.created_at DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur récup mise en situation :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/candidates/:id/mise-en-situation — Sauvegarder une évaluation
+router.post('/:id/mise-en-situation', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const f = req.body;
+
+    const validTypes = ['collecte_manutention', 'craquage', 'qualite'];
+    if (!validTypes.includes(f.type)) {
+      return res.status(400).json({ error: 'Type invalide. Types valides : ' + validTypes.join(', ') });
+    }
+
+    // Upsert par type : une seule évaluation par type par candidat
+    await pool.query('DELETE FROM mise_en_situation WHERE candidate_id = $1 AND type = $2', [id, f.type]);
+
+    const result = await pool.query(
+      `INSERT INTO mise_en_situation (
+        candidate_id, type, evaluator_id, evaluation_date,
+        respect_consignes, capacite_physique, endurance, comprehension,
+        qualite_travail, rapidite, securite, autonomie,
+        resultat, points_forts, points_amelioration, commentaire, duree_minutes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
+      [
+        id, f.type, req.user.id, f.evaluation_date || new Date(),
+        f.respect_consignes, f.capacite_physique, f.endurance, f.comprehension,
+        f.qualite_travail, f.rapidite, f.securite, f.autonomie,
+        f.resultat || null, f.points_forts, f.points_amelioration, f.commentaire, f.duree_minutes,
+      ]
+    );
+
+    // Mettre à jour le test pratique du candidat si au moins une évaluation est faite
+    await pool.query(
+      `UPDATE candidates SET practical_test_done = true, updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur sauvegarde mise en situation :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/candidates/:id/documents/deliver — Enregistrer la remise d'un document
+router.post('/:id/documents/deliver', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { document_type, delivery_method } = req.body;
+    if (!RECRUITMENT_DOCS[document_type]) {
+      return res.status(400).json({ error: 'Type de document invalide' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO recruitment_documents (candidate_id, document_type, delivered_by, delivery_method)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (candidate_id, document_type) DO UPDATE SET delivered_at = NOW(), delivered_by = $3, delivery_method = $4
+       RETURNING *`,
+      [req.params.id, document_type, req.user.id, delivery_method || 'telechargement']
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur remise document :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/candidates/:id/documents — Documents remis au candidat
+router.get('/:id/documents', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT d.*, u.first_name as delivered_by_name, u.last_name as delivered_by_lastname
+       FROM recruitment_documents d
+       LEFT JOIN users u ON d.delivered_by = u.id
+       WHERE d.candidate_id = $1 ORDER BY d.delivered_at DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur liste documents :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

@@ -1870,6 +1870,110 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_employees_insertion ON employees(insertion_status) WHERE insertion_status != \'none\';');
     console.log('[INIT-DB] Index additionnels créés ✓');
 
+    // ══════════════════════════════════════════
+    // MODULE : Parcours recrutement (entretien + mise en situation + documents)
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS recruitment_interviews (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        interview_date DATE,
+        interviewer_id INTEGER REFERENCES users(id),
+        -- I. Présentation
+        presentation_mots TEXT,
+        parcours_professionnel TEXT,
+        experiences_marquantes TEXT,
+        -- II. Situation actuelle
+        situation_actuelle VARCHAR(30) CHECK (situation_actuelle IN ('reconversion', 'retour_emploi', 'autre')),
+        situation_actuelle_autre TEXT,
+        duree_sans_emploi VARCHAR(30) CHECK (duree_sans_emploi IN ('moins_6_mois', '6_mois_1_an', 'plus_1_an')),
+        difficultes_recherche TEXT[],
+        difficultes_recherche_autre TEXT,
+        -- III. Freins à l'emploi
+        freins_emploi TEXT[],
+        freins_emploi_autre TEXT,
+        contraintes_horaires VARCHAR(20) CHECK (contraintes_horaires IN ('oui', 'certainement', 'non')),
+        contraintes_horaires_detail TEXT,
+        structure_accompagnement TEXT[],
+        structure_accompagnement_autre TEXT,
+        -- IV. Motivation
+        motivation_integration TEXT,
+        motivation_reprise TEXT,
+        attentes TEXT[],
+        attentes_autre TEXT,
+        -- V. Compétences et savoir-être
+        experience_activite TEXT[],
+        comportement_equipe TEXT,
+        reaction_consigne TEXT,
+        travail_physique VARCHAR(20) CHECK (travail_physique IN ('oui', 'non', 'ne_sais_pas')),
+        -- VI. Organisation et engagement
+        disponibilite_horaires VARCHAR(20) CHECK (disponibilite_horaires IN ('oui', 'non', 'autre')),
+        disponibilite_autre TEXT,
+        organisation_ponctualite TEXT,
+        -- VII. Projet professionnel
+        idee_metier VARCHAR(20) CHECK (idee_metier IN ('oui', 'non', 'autre')),
+        idee_metier_detail TEXT,
+        amelioration_souhaitee TEXT,
+        question_ouverte TEXT,
+        -- Évaluation globale
+        evaluation_globale VARCHAR(20) CHECK (evaluation_globale IN ('favorable', 'reserve', 'defavorable')),
+        commentaire_evaluateur TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS mise_en_situation (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        type VARCHAR(30) NOT NULL CHECK (type IN ('collecte_manutention', 'craquage', 'qualite')),
+        evaluator_id INTEGER REFERENCES users(id),
+        evaluation_date DATE DEFAULT CURRENT_DATE,
+        -- Critères d'évaluation (1-5)
+        respect_consignes INTEGER CHECK (respect_consignes BETWEEN 1 AND 5),
+        capacite_physique INTEGER CHECK (capacite_physique BETWEEN 1 AND 5),
+        endurance INTEGER CHECK (endurance BETWEEN 1 AND 5),
+        comprehension INTEGER CHECK (comprehension BETWEEN 1 AND 5),
+        qualite_travail INTEGER CHECK (qualite_travail BETWEEN 1 AND 5),
+        rapidite INTEGER CHECK (rapidite BETWEEN 1 AND 5),
+        securite INTEGER CHECK (securite BETWEEN 1 AND 5),
+        autonomie INTEGER CHECK (autonomie BETWEEN 1 AND 5),
+        -- Résultat global
+        resultat VARCHAR(20) CHECK (resultat IN ('conforme', 'a_ameliorer', 'non_conforme')),
+        points_forts TEXT,
+        points_amelioration TEXT,
+        commentaire TEXT,
+        duree_minutes INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS recruitment_documents (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        document_type VARCHAR(50) NOT NULL CHECK (document_type IN (
+          'livret_accueil', 'charte_insertion', 'procedure_recrutement',
+          'fiche_mise_en_situation_collecte', 'fiche_mise_en_situation_craquage',
+          'fiche_mise_en_situation_qualite'
+        )),
+        delivered_at TIMESTAMP DEFAULT NOW(),
+        delivered_by INTEGER REFERENCES users(id),
+        delivery_method VARCHAR(20) CHECK (delivery_method IN ('telechargement', 'email', 'remise_main')),
+        UNIQUE(candidate_id, document_type)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_recruitment_interviews_candidate ON recruitment_interviews(candidate_id);
+      CREATE INDEX IF NOT EXISTS idx_mise_en_situation_candidate ON mise_en_situation(candidate_id);
+      CREATE INDEX IF NOT EXISTS idx_recruitment_documents_candidate ON recruitment_documents(candidate_id);
+    `);
+
+    console.log('[INIT-DB] Module Parcours Recrutement (entretien + mise en situation + documents) ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

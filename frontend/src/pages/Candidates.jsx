@@ -37,6 +37,9 @@ export default function Candidates() {
   const [history, setHistory] = useState([]);
   const [skills, setSkills] = useState([]);
   const [pcmProfile, setPcmProfile] = useState(null);
+  const [interviewForm, setInterviewForm] = useState(null);
+  const [miseEnSituation, setMiseEnSituation] = useState([]);
+  const [candidateDocuments, setCandidateDocuments] = useState([]);
   const [detailTab, setDetailTab] = useState('info');
   const [draggedId, setDraggedId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
@@ -67,6 +70,9 @@ export default function Candidates() {
     setDetailTab('info');
     setEditing(false);
     setPcmProfile(null);
+    setInterviewForm(null);
+    setMiseEnSituation([]);
+    setCandidateDocuments([]);
     try {
       const [h, sk] = await Promise.all([
         api.get(`/candidates/${c.id}/history`),
@@ -79,6 +85,16 @@ export default function Candidates() {
       const p = await api.get(`/pcm/profiles/${c.id}`);
       setPcmProfile(p.data);
     } catch { setPcmProfile(null); }
+    try {
+      const [iForm, mes, docs] = await Promise.all([
+        api.get(`/candidates/${c.id}/interview-form`).catch(() => ({ data: null })),
+        api.get(`/candidates/${c.id}/mise-en-situation`).catch(() => ({ data: [] })),
+        api.get(`/candidates/${c.id}/documents`).catch(() => ({ data: [] })),
+      ]);
+      setInterviewForm(iForm.data);
+      setMiseEnSituation(mes.data);
+      setCandidateDocuments(docs.data);
+    } catch (err) { console.error(err); }
   };
 
   const handleConvertToEmployee = async (candidate) => {
@@ -317,11 +333,11 @@ export default function Candidates() {
                   <button onClick={() => { setSelected(null); setEditing(false); }} className="text-gray-400 hover:text-gray-600 text-xl ml-2">&times;</button>
                 </div>
               </div>
-              <div className="flex border-b px-5">
-                {['info', 'history', 'pcm'].map(t => (
+              <div className="flex border-b px-5 overflow-x-auto">
+                {['info', 'entretien', 'situation', 'documents', 'history', 'pcm'].map(t => (
                   <button key={t} onClick={() => setDetailTab(t)}
-                    className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${detailTab === t ? 'border-solidata-green text-solidata-green' : 'border-transparent text-gray-500'}`}>
-                    {{ info: 'Fiche', history: 'Historique', pcm: 'PCM' }[t]}
+                    className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition whitespace-nowrap ${detailTab === t ? 'border-solidata-green text-solidata-green' : 'border-transparent text-gray-500'}`}>
+                    {{ info: 'Fiche', entretien: 'Entretien', situation: 'Mise en situation', documents: 'Documents', history: 'Historique', pcm: 'PCM' }[t]}
                   </button>
                 ))}
               </div>
@@ -330,6 +346,9 @@ export default function Candidates() {
                   ? <EditForm ef={editForm} set={setEditForm} save={saveEdit} cancel={() => setEditing(false)} positions={positions} />
                   : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} onConvert={handleConvertToEmployee} />
                 )}
+                {detailTab === 'entretien' && <InterviewFormView candidateId={selected.id} data={interviewForm} onSaved={(d) => setInterviewForm(d)} />}
+                {detailTab === 'situation' && <MiseEnSituationView candidateId={selected.id} data={miseEnSituation} onSaved={(d) => setMiseEnSituation(d)} />}
+                {detailTab === 'documents' && <DocumentsView candidateId={selected.id} delivered={candidateDocuments} onDelivered={(d) => setCandidateDocuments(d)} />}
                 {detailTab === 'history' && <HistoryView history={history} />}
                 {detailTab === 'pcm' && <PCMView profile={pcmProfile} onStart={() => startPCMTest(selected.id)} onOpenInApp={() => openPCMTestInApp(selected.id)} />}
               </div>
@@ -576,3 +595,471 @@ function Modal({ title, onClose, children, wide }) {
 
 function Field({ l, v }) { return <div><span className="text-gray-500 text-xs">{l}</span><p className="font-medium">{v || '—'}</p></div>; }
 function EF({ l, v, o, t = 'text' }) { return <div><span className="text-gray-500 text-xs">{l}</span><input type={t} value={v} onChange={e => o(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" /></div>; }
+
+// ══════════════════════════════════════════
+// TRAME ENTRETIEN DE RECRUTEMENT
+// ══════════════════════════════════════════
+function InterviewFormView({ candidateId, data, onSaved }) {
+  const [editing, setEditing] = useState(!data);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(data || {
+    presentation_mots: '', parcours_professionnel: '', experiences_marquantes: '',
+    situation_actuelle: '', situation_actuelle_autre: '',
+    duree_sans_emploi: '', difficultes_recherche: [], difficultes_recherche_autre: '',
+    freins_emploi: [], freins_emploi_autre: '',
+    contraintes_horaires: '', contraintes_horaires_detail: '',
+    structure_accompagnement: [], structure_accompagnement_autre: '',
+    motivation_integration: '', motivation_reprise: '', attentes: [], attentes_autre: '',
+    experience_activite: [], comportement_equipe: '', reaction_consigne: '', travail_physique: '',
+    disponibilite_horaires: '', disponibilite_autre: '', organisation_ponctualite: '',
+    idee_metier: '', idee_metier_detail: '', amelioration_souhaitee: '', question_ouverte: '',
+    evaluation_globale: '', commentaire_evaluateur: '',
+  });
+
+  const u = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+  const toggleArr = (k, v) => setForm(prev => {
+    const arr = prev[k] || [];
+    return { ...prev, [k]: arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v] };
+  });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.post(`/candidates/${candidateId}/interview-form`, form);
+      onSaved(res.data);
+      setEditing(false);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur lors de la sauvegarde');
+    }
+    setSaving(false);
+  };
+
+  if (!editing && data) {
+    return (
+      <div className="space-y-4 text-sm">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-base">Trame d'entretien</h3>
+          <button onClick={() => setEditing(true)} className="text-xs bg-solidata-green text-white px-3 py-1.5 rounded-lg">Modifier</button>
+        </div>
+        {data.evaluation_globale && (
+          <div className={`px-3 py-2 rounded-lg font-medium text-sm ${data.evaluation_globale === 'favorable' ? 'bg-green-50 text-green-700' : data.evaluation_globale === 'reserve' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'}`}>
+            Evaluation : {data.evaluation_globale}
+          </div>
+        )}
+        <Section title="I. Présentation">
+          <Field l="Présentation en quelques mots" v={data.presentation_mots} />
+          <Field l="Parcours professionnel" v={data.parcours_professionnel} />
+          <Field l="Expériences marquantes" v={data.experiences_marquantes} />
+        </Section>
+        <Section title="II. Situation actuelle">
+          <Field l="Situation" v={{ reconversion: 'En reconversion', retour_emploi: 'En recherche de retour à l\'emploi', autre: data.situation_actuelle_autre || 'Autre' }[data.situation_actuelle]} />
+          <Field l="Durée sans emploi" v={{ moins_6_mois: 'Moins de 6 mois', '6_mois_1_an': 'Entre 6 mois et un an', plus_1_an: 'Plus d\'un an' }[data.duree_sans_emploi]} />
+          {data.difficultes_recherche?.length > 0 && <Field l="Difficultés de recherche" v={data.difficultes_recherche.join(', ')} />}
+        </Section>
+        <Section title="III. Freins à l'emploi">
+          {data.freins_emploi?.length > 0 && <Field l="Freins" v={data.freins_emploi.join(', ')} />}
+          <Field l="Contraintes horaires" v={{ oui: 'Oui', certainement: 'Certainement à l\'avenir', non: 'Non' }[data.contraintes_horaires]} />
+          {data.structure_accompagnement?.length > 0 && <Field l="Structure d'accompagnement" v={data.structure_accompagnement.join(', ')} />}
+        </Section>
+        <Section title="IV. Motivation">
+          <Field l="Motivation à intégrer le chantier" v={data.motivation_integration} />
+          <Field l="Motivation de reprise" v={data.motivation_reprise} />
+          {data.attentes?.length > 0 && <Field l="Attentes" v={data.attentes.join(', ')} />}
+        </Section>
+        <Section title="V. Compétences et savoir-être">
+          {data.experience_activite?.length > 0 && <Field l="Expérience dans l'activité" v={data.experience_activite.join(', ')} />}
+          <Field l="Comportement en équipe" v={data.comportement_equipe} />
+          <Field l="Réaction aux consignes" v={data.reaction_consigne} />
+          <Field l="Travail physique" v={{ oui: 'Oui', non: 'Non', ne_sais_pas: 'Ne sais pas' }[data.travail_physique]} />
+        </Section>
+        <Section title="VI. Organisation">
+          <Field l="Disponibilité horaires" v={{ oui: 'Oui', non: 'Non', autre: data.disponibilite_autre || 'Autre' }[data.disponibilite_horaires]} />
+          <Field l="Organisation ponctualité" v={data.organisation_ponctualite} />
+        </Section>
+        <Section title="VII. Projet professionnel">
+          <Field l="Idée de métier" v={{ oui: 'Oui', non: 'Non', autre: data.idee_metier_detail || 'Autre' }[data.idee_metier]} />
+          <Field l="Amélioration souhaitée" v={data.amelioration_souhaitee} />
+          <Field l="Question ouverte" v={data.question_ouverte} />
+        </Section>
+        {data.commentaire_evaluateur && <Section title="Commentaire évaluateur"><p className="text-gray-700">{data.commentaire_evaluateur}</p></Section>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 text-sm">
+      <h3 className="font-bold text-base">Trame d'entretien de recrutement</h3>
+      <Section title="I. Questions de présentation">
+        <TA l="Pouvez-vous vous présenter en quelques mots ?" v={form.presentation_mots || ''} o={v => u('presentation_mots', v)} />
+        <TA l="Parcours professionnel ?" v={form.parcours_professionnel || ''} o={v => u('parcours_professionnel', v)} />
+        <TA l="Expériences de travail marquantes ?" v={form.experiences_marquantes || ''} o={v => u('experiences_marquantes', v)} />
+      </Section>
+
+      <Section title="II. Situation actuelle">
+        <p className="text-xs text-gray-500 mb-1">Que faites-vous actuellement ?</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {[['reconversion', 'En reconversion'], ['retour_emploi', 'Retour à l\'emploi'], ['autre', 'Autre']].map(([k, l]) => (
+            <CB key={k} label={l} checked={form.situation_actuelle === k} onChange={() => u('situation_actuelle', k)} />
+          ))}
+        </div>
+        {form.situation_actuelle === 'autre' && <EF l="Précisez" v={form.situation_actuelle_autre || ''} o={v => u('situation_actuelle_autre', v)} />}
+        <p className="text-xs text-gray-500 mt-3 mb-1">Durée sans emploi</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {[['moins_6_mois', 'Moins de 6 mois'], ['6_mois_1_an', '6 mois - 1 an'], ['plus_1_an', 'Plus d\'un an']].map(([k, l]) => (
+            <CB key={k} label={l} checked={form.duree_sans_emploi === k} onChange={() => u('duree_sans_emploi', k)} />
+          ))}
+        </div>
+        <p className="text-xs text-gray-500 mt-3 mb-1">Difficultés de recherche d'emploi</p>
+        <div className="flex flex-wrap gap-2">
+          {['Freins personnels/sociaux', 'Freins psychologiques', 'Manque de compétences', 'Confiance fragile', 'Parcours difficile', 'Problèmes administratifs'].map(d => (
+            <CB key={d} label={d} checked={(form.difficultes_recherche || []).includes(d)} onChange={() => toggleArr('difficultes_recherche', d)} multi />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="III. Freins à l'emploi">
+        <p className="text-xs text-gray-500 mb-1">Difficultés particulières</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {['Transport', 'Santé', 'Logement', 'Administratif', 'Langue'].map(f => (
+            <CB key={f} label={f} checked={(form.freins_emploi || []).includes(f)} onChange={() => toggleArr('freins_emploi', f)} multi />
+          ))}
+        </div>
+        <EF l="Autre frein" v={form.freins_emploi_autre || ''} o={v => u('freins_emploi_autre', v)} />
+        <p className="text-xs text-gray-500 mt-3 mb-1">Contraintes d'horaires ?</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {[['oui', 'Oui'], ['certainement', 'Certainement'], ['non', 'Non']].map(([k, l]) => (
+            <CB key={k} label={l} checked={form.contraintes_horaires === k} onChange={() => u('contraintes_horaires', k)} />
+          ))}
+        </div>
+        {form.contraintes_horaires === 'oui' && <EF l="Précisez" v={form.contraintes_horaires_detail || ''} o={v => u('contraintes_horaires_detail', v)} />}
+        <p className="text-xs text-gray-500 mt-3 mb-1">Accompagné par une structure ?</p>
+        <div className="flex flex-wrap gap-2">
+          {['Mission locale', 'France Travail', 'Travailleur social', 'Aucune'].map(s => (
+            <CB key={s} label={s} checked={(form.structure_accompagnement || []).includes(s)} onChange={() => toggleArr('structure_accompagnement', s)} multi />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="IV. Motivation">
+        <TA l="Pourquoi intégrer ce chantier d'insertion ?" v={form.motivation_integration || ''} o={v => u('motivation_integration', v)} />
+        <TA l="Motivation à reprendre une activité ?" v={form.motivation_reprise || ''} o={v => u('motivation_reprise', v)} />
+        <p className="text-xs text-gray-500 mt-2 mb-1">Attentes</p>
+        <div className="flex flex-wrap gap-2">
+          {['Documents administratifs', 'Retour à l\'emploi', 'Formation/stage/immersion'].map(a => (
+            <CB key={a} label={a} checked={(form.attentes || []).includes(a)} onChange={() => toggleArr('attentes', a)} multi />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="V. Compétences et savoir-être">
+        <p className="text-xs text-gray-500 mb-1">Expérience dans ce type d'activité ?</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {['Bâtiment', 'Espaces verts', 'Nettoyage', 'Recyclerie'].map(a => (
+            <CB key={a} label={a} checked={(form.experience_activite || []).includes(a)} onChange={() => toggleArr('experience_activite', a)} multi />
+          ))}
+        </div>
+        <TA l="Comportement en équipe ?" v={form.comportement_equipe || ''} o={v => u('comportement_equipe', v)} />
+        <TA l="Réaction aux consignes/critiques ?" v={form.reaction_consigne || ''} o={v => u('reaction_consigne', v)} />
+        <p className="text-xs text-gray-500 mt-2 mb-1">À l'aise avec le travail physique ?</p>
+        <div className="flex flex-wrap gap-2">
+          {[['oui', 'Oui'], ['non', 'Non'], ['ne_sais_pas', 'Ne sais pas']].map(([k, l]) => (
+            <CB key={k} label={l} checked={form.travail_physique === k} onChange={() => u('travail_physique', k)} />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="VI. Organisation et engagement">
+        <p className="text-xs text-gray-500 mb-1">Disponible aux horaires proposés ?</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {[['oui', 'Oui'], ['non', 'Non'], ['autre', 'Autre']].map(([k, l]) => (
+            <CB key={k} label={l} checked={form.disponibilite_horaires === k} onChange={() => u('disponibilite_horaires', k)} />
+          ))}
+        </div>
+        {form.disponibilite_horaires === 'autre' && <EF l="Précisez" v={form.disponibilite_autre || ''} o={v => u('disponibilite_autre', v)} />}
+        <TA l="Comment vous organisez-vous pour être ponctuel ?" v={form.organisation_ponctualite || ''} o={v => u('organisation_ponctualite', v)} />
+      </Section>
+
+      <Section title="VII. Projet professionnel">
+        <p className="text-xs text-gray-500 mb-1">Idée de métier ?</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {[['oui', 'Oui'], ['non', 'Non'], ['autre', 'Autre']].map(([k, l]) => (
+            <CB key={k} label={l} checked={form.idee_metier === k} onChange={() => u('idee_metier', k)} />
+          ))}
+        </div>
+        {(form.idee_metier === 'oui' || form.idee_metier === 'autre') && <EF l="Précisez" v={form.idee_metier_detail || ''} o={v => u('idee_metier_detail', v)} />}
+        <TA l="Qu'aimeriez-vous améliorer à la fin du chantier ?" v={form.amelioration_souhaitee || ''} o={v => u('amelioration_souhaitee', v)} />
+        <TA l="Y a-t-il quelque chose d'important dans votre situation ?" v={form.question_ouverte || ''} o={v => u('question_ouverte', v)} />
+      </Section>
+
+      <Section title="Évaluation globale">
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[['favorable', 'Favorable'], ['reserve', 'Réservé'], ['defavorable', 'Défavorable']].map(([k, l]) => (
+            <CB key={k} label={l} checked={form.evaluation_globale === k} onChange={() => u('evaluation_globale', k)} />
+          ))}
+        </div>
+        <TA l="Commentaire de l'évaluateur" v={form.commentaire_evaluateur || ''} o={v => u('commentaire_evaluateur', v)} />
+      </Section>
+
+      <div className="flex gap-2 pt-3">
+        {data && <button onClick={() => setEditing(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>}
+        <button onClick={save} disabled={saving} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+          {saving ? 'Enregistrement...' : 'Enregistrer l\'entretien'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
+// FICHES DE MISE EN SITUATION
+// ══════════════════════════════════════════
+const MES_TYPES = {
+  collecte_manutention: { label: 'Collecte / Manutention', color: 'blue', desc: "Évaluer la capacité physique, l'endurance et la compréhension des consignes. Sélection des sacs, contrôle d'humidité, tri sec/mouillé." },
+  craquage: { label: 'Craquage', color: 'orange', desc: "Ouvrir les sacs, vider le contenu, séparer textile/chaussures. Mise sous élastique des chaussures bon état." },
+  qualite: { label: 'Qualité', color: 'purple', desc: "Craquage + tri qualité : très bonne qualité (réutilisation) vs recyclage. Évaluation de la précision du tri." },
+};
+
+const MES_CRITERIA = [
+  { key: 'respect_consignes', label: 'Respect des consignes' },
+  { key: 'capacite_physique', label: 'Capacité physique' },
+  { key: 'endurance', label: 'Endurance' },
+  { key: 'comprehension', label: 'Compréhension' },
+  { key: 'qualite_travail', label: 'Qualité du travail' },
+  { key: 'rapidite', label: 'Rapidité' },
+  { key: 'securite', label: 'Sécurité' },
+  { key: 'autonomie', label: 'Autonomie' },
+];
+
+function MiseEnSituationView({ candidateId, data, onSaved }) {
+  const [activeType, setActiveType] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({});
+
+  const startEval = (type) => {
+    const existing = data.find(d => d.type === type);
+    setForm(existing || { type, respect_consignes: 3, capacite_physique: 3, endurance: 3, comprehension: 3, qualite_travail: 3, rapidite: 3, securite: 3, autonomie: 3, resultat: '', points_forts: '', points_amelioration: '', commentaire: '', duree_minutes: 45 });
+    setActiveType(type);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.post(`/candidates/${candidateId}/mise-en-situation`, form);
+      const res = await api.get(`/candidates/${candidateId}/mise-en-situation`);
+      onSaved(res.data);
+      setActiveType(null);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur');
+    }
+    setSaving(false);
+  };
+
+  if (activeType) {
+    const meta = MES_TYPES[activeType];
+    return (
+      <div className="space-y-4 text-sm">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base">{meta.label}</h3>
+          <button onClick={() => setActiveType(null)} className="text-gray-400 hover:text-gray-600 text-sm">Retour</button>
+        </div>
+        <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">{meta.desc}</p>
+
+        <div className="space-y-3">
+          {MES_CRITERIA.map(c => (
+            <div key={c.key}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium text-gray-600">{c.label}</span>
+                <span className="text-xs font-bold text-solidata-green">{form[c.key]}/5</span>
+              </div>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map(v => (
+                  <button key={v} onClick={() => setForm(prev => ({ ...prev, [c.key]: v }))}
+                    className={`flex-1 py-1.5 rounded text-xs font-medium transition ${form[c.key] >= v ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <span className="text-xs text-gray-500">Durée (minutes)</span>
+          <input type="number" value={form.duree_minutes || ''} onChange={e => setForm(prev => ({ ...prev, duree_minutes: parseInt(e.target.value) || null }))} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+
+        <div>
+          <span className="text-xs text-gray-500">Résultat global</span>
+          <div className="flex gap-2 mt-1">
+            {[['conforme', 'Conforme', 'bg-green-100 text-green-700 border-green-300'], ['a_ameliorer', 'À améliorer', 'bg-yellow-100 text-yellow-700 border-yellow-300'], ['non_conforme', 'Non conforme', 'bg-red-100 text-red-700 border-red-300']].map(([k, l, c]) => (
+              <button key={k} onClick={() => setForm(prev => ({ ...prev, resultat: k }))}
+                className={`flex-1 py-2 rounded-lg text-xs font-medium border transition ${form.resultat === k ? c : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <TA l="Points forts" v={form.points_forts || ''} o={v => setForm(prev => ({ ...prev, points_forts: v }))} />
+        <TA l="Points d'amélioration" v={form.points_amelioration || ''} o={v => setForm(prev => ({ ...prev, points_amelioration: v }))} />
+        <TA l="Commentaire" v={form.commentaire || ''} o={v => setForm(prev => ({ ...prev, commentaire: v }))} />
+
+        <div className="flex gap-2 pt-2">
+          <button onClick={() => setActiveType(null)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+          <button onClick={save} disabled={saving} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+            {saving ? 'Enregistrement...' : 'Enregistrer'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 text-sm">
+      <h3 className="font-bold text-base">Mises en situation</h3>
+      <p className="text-xs text-gray-500">Évaluez le candidat sur 3 postes de travail (durée max : 45 min chacun)</p>
+
+      <div className="space-y-3">
+        {Object.entries(MES_TYPES).map(([type, meta]) => {
+          const existing = data.find(d => d.type === type);
+          const tagColors = { blue: 'bg-blue-50 border-blue-200', orange: 'bg-orange-50 border-orange-200', purple: 'bg-purple-50 border-purple-200' };
+          const avg = existing ? Math.round(MES_CRITERIA.reduce((s, c) => s + (existing[c.key] || 0), 0) / MES_CRITERIA.length * 10) / 10 : null;
+          return (
+            <div key={type} className={`border rounded-xl p-4 ${tagColors[meta.color]} cursor-pointer hover:shadow-md transition`} onClick={() => startEval(type)}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-semibold">{meta.label}</span>
+                {existing ? (
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${existing.resultat === 'conforme' ? 'bg-green-200 text-green-800' : existing.resultat === 'a_ameliorer' ? 'bg-yellow-200 text-yellow-800' : 'bg-red-200 text-red-800'}`}>
+                    {existing.resultat === 'conforme' ? 'Conforme' : existing.resultat === 'a_ameliorer' ? 'À améliorer' : 'Non conforme'}
+                  </span>
+                ) : <span className="text-xs text-gray-400">Non évalué</span>}
+              </div>
+              <p className="text-xs text-gray-500">{meta.desc}</p>
+              {existing && (
+                <div className="mt-2 flex items-center gap-3">
+                  <span className="text-xs text-gray-600">Moyenne : <strong>{avg}/5</strong></span>
+                  {existing.duree_minutes && <span className="text-xs text-gray-400">{existing.duree_minutes} min</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
+// DOCUMENTS RECRUTEMENT
+// ══════════════════════════════════════════
+const DOC_LABELS = {
+  livret_accueil: "Livret d'accueil",
+  charte_insertion: "Charte d'insertion",
+  procedure_recrutement: 'Procédure de recrutement',
+  fiche_mise_en_situation_collecte: 'Fiche - Collecte/Manutention',
+  fiche_mise_en_situation_craquage: 'Fiche - Craquage',
+  fiche_mise_en_situation_qualite: 'Fiche - Qualité',
+};
+
+function DocumentsView({ candidateId, delivered, onDelivered }) {
+  const [docs, setDocs] = useState([]);
+  const [livretContent, setLivretContent] = useState(null);
+  const [showLivret, setShowLivret] = useState(false);
+  const [delivering, setDelivering] = useState(null);
+
+  useEffect(() => {
+    api.get('/candidates/documents/list').then(r => setDocs(r.data)).catch(() => {});
+  }, []);
+
+  const viewLivret = async () => {
+    if (!livretContent) {
+      try {
+        const r = await api.get('/candidates/documents/livret-content');
+        setLivretContent(r.data);
+      } catch { return; }
+    }
+    setShowLivret(!showLivret);
+  };
+
+  const deliverDoc = async (docKey, method) => {
+    setDelivering(docKey);
+    try {
+      await api.post(`/candidates/${candidateId}/documents/deliver`, { document_type: docKey, delivery_method: method });
+      const r = await api.get(`/candidates/${candidateId}/documents`);
+      onDelivered(r.data);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur');
+    }
+    setDelivering(null);
+  };
+
+  const isDelivered = (key) => delivered.find(d => d.document_type === key);
+
+  return (
+    <div className="space-y-4 text-sm">
+      <h3 className="font-bold text-base">Documents du parcours</h3>
+
+      <div className="space-y-2">
+        {docs.map(doc => {
+          const del = isDelivered(doc.key);
+          return (
+            <div key={doc.key} className={`border rounded-lg p-3 ${del ? 'bg-green-50 border-green-200' : 'bg-white'}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-medium">{doc.label}</span>
+                  {del && <span className="text-xs text-green-600 ml-2">Remis le {new Date(del.delivered_at).toLocaleDateString('fr-FR')}</span>}
+                </div>
+                <div className="flex gap-1">
+                  <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200">PDF</a>
+                  {doc.key === 'livret_accueil' && <button onClick={viewLivret} className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200">{showLivret ? 'Masquer' : 'Lire'}</button>}
+                  {!del && (
+                    <button onClick={() => deliverDoc(doc.key, 'remise_main')} disabled={delivering === doc.key} className="text-xs bg-solidata-green text-white px-2 py-1 rounded hover:bg-solidata-green/80 disabled:opacity-50">
+                      {delivering === doc.key ? '...' : 'Remettre'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {showLivret && livretContent && (
+        <div className="border rounded-xl p-4 bg-white space-y-4 max-h-[50vh] overflow-y-auto">
+          <h4 className="font-bold text-lg text-center text-solidata-green">{livretContent.title}</h4>
+          {livretContent.sections.map((s, i) => (
+            <div key={i} className="border-t pt-3">
+              <h5 className="font-semibold text-sm mb-1">{s.title}</h5>
+              <p className="text-xs text-gray-600 leading-relaxed">{s.content}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
+// Shared micro-components
+// ══════════════════════════════════════════
+function Section({ title, children }) {
+  return <div className="border-t pt-3"><h4 className="font-semibold text-sm mb-2 text-gray-700">{title}</h4><div className="space-y-2">{children}</div></div>;
+}
+
+function CB({ label, checked, onChange, multi }) {
+  return (
+    <button onClick={onChange}
+      className={`text-xs px-2.5 py-1.5 rounded-lg border transition ${checked ? 'bg-solidata-green text-white border-solidata-green' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>
+      {multi && checked && '+ '}{label}
+    </button>
+  );
+}
+
+function TA({ l, v, o }) {
+  return (
+    <div>
+      <span className="text-gray-500 text-xs">{l}</span>
+      <textarea value={v} onChange={e => o(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} />
+    </div>
+  );
+}
