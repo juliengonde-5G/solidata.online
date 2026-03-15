@@ -505,15 +505,15 @@ router.get('/kanban', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 
     const kanban = {
       received: [],
-      preselected: [],
       interview: [],
-      test: [],
       hired: [],
       rejected: [],
     };
 
     result.rows.forEach(c => {
-      if (kanban[c.status]) kanban[c.status].push(c);
+      // Migrer les anciens statuts supprimés
+      const status = c.status === 'preselected' ? 'received' : c.status === 'test' ? 'interview' : c.status;
+      if (kanban[status]) kanban[status].push({ ...c, status });
     });
 
     res.json(kanban);
@@ -843,7 +843,7 @@ router.put('/:id/status', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, comment } = req.body;
-    const validStatuses = ['received', 'preselected', 'interview', 'test', 'hired', 'rejected'];
+    const validStatuses = ['received', 'interview', 'hired', 'rejected'];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Statut invalide' });

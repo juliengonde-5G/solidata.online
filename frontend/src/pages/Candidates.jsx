@@ -3,24 +3,33 @@ import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
-const STATUSES = ['received', 'preselected', 'interview', 'test', 'hired', 'rejected'];
+const STATUSES = ['received', 'interview', 'hired', 'rejected'];
 
 const STATUS_LABELS = {
   received: 'Recus',
-  preselected: 'Preselectionnes',
   interview: 'Entretien',
-  test: 'Test',
   hired: 'Recrutes',
   rejected: 'Refuses',
 };
 
 const STATUS_COLORS = {
   received:    { bg: 'bg-blue-50',   border: 'border-blue-200',   drop: 'bg-blue-100 border-blue-400',     badge: 'bg-blue-500' },
-  preselected: { bg: 'bg-yellow-50', border: 'border-yellow-200', drop: 'bg-yellow-100 border-yellow-400', badge: 'bg-yellow-500' },
   interview:   { bg: 'bg-purple-50', border: 'border-purple-200', drop: 'bg-purple-100 border-purple-400', badge: 'bg-purple-500' },
-  test:        { bg: 'bg-orange-50', border: 'border-orange-200', drop: 'bg-orange-100 border-orange-400', badge: 'bg-orange-500' },
   hired:       { bg: 'bg-green-50',  border: 'border-green-200',  drop: 'bg-green-100 border-green-400',   badge: 'bg-green-500' },
   rejected:    { bg: 'bg-red-50',    border: 'border-red-200',    drop: 'bg-red-100 border-red-400',       badge: 'bg-red-500' },
+};
+
+// Onglets visibles selon le statut du candidat
+const TABS_BY_STATUS = {
+  received:  ['info', 'history'],
+  interview: ['info', 'history', 'situation', 'entretien', 'pcm', 'documents'],
+  hired:     ['info', 'history', 'situation', 'entretien', 'pcm', 'documents'],
+  rejected:  ['info', 'history'],
+};
+
+const TAB_LABELS = {
+  info: 'Fiche', entretien: 'Entretien', situation: 'Mise en situation',
+  documents: 'Documents', history: 'Historique', pcm: 'PCM',
 };
 
 export default function Candidates() {
@@ -117,6 +126,9 @@ export default function Candidates() {
       loadAll();
       if (selected?.id === id) {
         setSelected(prev => ({ ...prev, status: newStatus }));
+        // Réinitialiser l'onglet si celui en cours n'est plus visible pour le nouveau statut
+        const allowedTabs = TABS_BY_STATUS[newStatus] || ['info', 'history'];
+        setDetailTab(prev => allowedTabs.includes(prev) ? prev : 'info');
         const h = await api.get(`/candidates/${id}/history`);
         setHistory(h.data);
       }
@@ -334,10 +346,10 @@ export default function Candidates() {
                 </div>
               </div>
               <div className="flex border-b px-5 overflow-x-auto">
-                {['info', 'entretien', 'situation', 'documents', 'history', 'pcm'].map(t => (
+                {(TABS_BY_STATUS[selected.status] || ['info', 'history']).map(t => (
                   <button key={t} onClick={() => setDetailTab(t)}
                     className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition whitespace-nowrap ${detailTab === t ? 'border-solidata-green text-solidata-green' : 'border-transparent text-gray-500'}`}>
-                    {{ info: 'Fiche', entretien: 'Entretien', situation: 'Mise en situation', documents: 'Documents', history: 'Historique', pcm: 'PCM' }[t]}
+                    {TAB_LABELS[t]}
                   </button>
                 ))}
               </div>

@@ -77,7 +77,7 @@ async function checkAppointmentReminders() {
     const candidates = await pool.query(
       `SELECT * FROM candidates
        WHERE appointment_date::date = $1
-       AND status IN ('preselected', 'interview')
+       AND status IN ('received', 'interview')
        AND (phone IS NOT NULL OR email IS NOT NULL)`,
       [tomorrowStr]
     );

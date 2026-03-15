@@ -1495,11 +1495,13 @@ async function initDatabase() {
       await client.query(`ALTER TABLE candidates DROP CONSTRAINT IF EXISTS "${row.conname}"`);
     }
     await client.query(`
-      UPDATE candidates SET status = 'received' WHERE status IS NULL OR status NOT IN ('received', 'preselected', 'interview', 'test', 'hired', 'rejected');
+      UPDATE candidates SET status = 'received' WHERE status IN ('preselected') OR status IS NULL;
+      UPDATE candidates SET status = 'interview' WHERE status IN ('test');
+      UPDATE candidates SET status = 'received' WHERE status NOT IN ('received', 'interview', 'hired', 'rejected');
     `);
     await client.query(`
       ALTER TABLE candidates ADD CONSTRAINT candidates_status_check
-        CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired', 'rejected'));
+        CHECK (status IN ('received', 'interview', 'hired', 'rejected'));
     `);
     // Employee insertion tracking columns
     await client.query(`
