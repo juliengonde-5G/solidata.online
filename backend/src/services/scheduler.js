@@ -417,6 +417,48 @@ async function autoFeedNews() {
   }
 }
 
+/**
+ * Purge automatique RGPD — Anonymise les candidats non recrutés > 24 mois (Art. 5 RGPD)
+ */
+async function purgeExpiredCandidates() {
+  try {
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - 24);
+
+    const expired = await pool.query(
+      `SELECT id, first_name, last_name FROM candidates
+       WHERE status != 'hired' AND created_at < $1
+       AND first_name != 'ANONYME'`,
+      [cutoff.toISOString()]
+    );
+
+    for (const candidate of expired.rows) {
+      await pool.query(
+        `UPDATE candidates SET
+         first_name = 'ANONYME', last_name = CONCAT('CANDIDAT-', id),
+         email = NULL, phone = NULL, cv_file_path = NULL, cv_raw_text = NULL,
+         comment = NULL, interviewer_name = NULL, interview_comment = NULL,
+         practical_test_comment = NULL, appointment_location = NULL,
+         updated_at = NOW()
+         WHERE id = $1`, [candidate.id]
+      );
+      await pool.query('DELETE FROM candidate_skills WHERE candidate_id = $1', [candidate.id]);
+      // Log RGPD audit
+      await pool.query(
+        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
+         VALUES (NULL, 'AUTO_PURGE_24M', 'candidate', $1, $2)`,
+        [candidate.id, JSON.stringify({ reason: 'Purge automatique RGPD 24 mois', original_name: `${candidate.first_name} ${candidate.last_name}` })]
+      );
+    }
+
+    if (expired.rows.length > 0) {
+      console.log(`[SCHEDULER] RGPD: ${expired.rows.length} candidat(s) anonymisé(s) (> 24 mois)`);
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur purgeExpiredCandidates:', err.message);
+  }
+}
+
 // ══════════════════════════════════════════
 // VERROU DISTRIBUÉ (Advisory Lock PostgreSQL)
 // ══════════════════════════════════════════
@@ -485,6 +527,7 @@ async function runAllJobs() {
     await checkInsertionInterviewAlerts();
     await checkVehicleMaintenance();
     await autoFeedNews();
+    await purgeExpiredCandidates();
     console.log('[SCHEDULER] Tous les jobs executes');
   } catch (err) {
     console.error('[SCHEDULER] Erreur globale:', err.message);

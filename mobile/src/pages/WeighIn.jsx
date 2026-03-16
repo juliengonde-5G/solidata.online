@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
 
 export default function WeighIn() {
@@ -22,12 +23,14 @@ export default function WeighIn() {
       if (isIntermediate) {
         // Retour intermédiaire : enregistrer la pesée puis reprendre la collecte
         localStorage.removeItem('intermediate_return');
+        vibrateSuccess();
         navigate('/tour-map');
       } else {
         await api.put(`/tours/${tourId}/status`, { status: 'completed' });
+        vibrateSuccess();
         navigate('/tour-summary');
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { vibrateError(); console.error(err); }
     setLoading(false);
   };
 

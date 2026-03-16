@@ -18,13 +18,24 @@ const storage = multer.diskStorage({
     cb(null, `cv_${Date.now()}${ext}`);
   },
 });
+const ALLOWED_MIMES = {
+  '.pdf': ['application/pdf'],
+  '.doc': ['application/msword'],
+  '.docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  '.png': ['image/png'],
+  '.jpg': ['image/jpeg'],
+  '.jpeg': ['image/jpeg'],
+};
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['.pdf', '.doc', '.docx', '.png', '.jpg', '.jpeg'];
     const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, allowed.includes(ext));
+    const allowedMimes = ALLOWED_MIMES[ext];
+    if (!allowedMimes) return cb(null, false);
+    // Vérification extension + MIME type pour éviter les fichiers déguisés
+    if (!allowedMimes.includes(file.mimetype)) return cb(null, false);
+    cb(null, true);
   },
 });
 
@@ -949,7 +960,12 @@ router.get('/:id/download-cv', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
     if (result.rows.length === 0 || !result.rows[0].cv_file_path) {
       return res.status(404).json({ error: 'CV non trouvé' });
     }
-    const filePath = path.join(__dirname, '..', '..', result.rows[0].cv_file_path);
+    const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
+    const filePath = path.resolve(__dirname, '..', '..', result.rows[0].cv_file_path);
+    // Protection Path Traversal : le fichier doit rester dans le dossier uploads
+    if (!filePath.startsWith(uploadsDir)) {
+      return res.status(403).json({ error: 'Accès interdit' });
+    }
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Fichier introuvable' });
     res.download(filePath);
   } catch (err) {
