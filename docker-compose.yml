@@ -71,8 +71,10 @@ services:
       - "443:443"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      - /etc/letsencrypt:/etc/letsencrypt
       - certbot-www:/var/www/certbot
+    entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]
 
   certbot:
     image: certbot/certbot
