@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-CERT_DIR="/etc/letsencrypt/live/solidata.online"
+CERT_DIR="/etc/letsencrypt/live/solidata.online-0001"
 CERT_FILE="$CERT_DIR/fullchain.pem"
 KEY_FILE="$CERT_DIR/privkey.pem"
 
