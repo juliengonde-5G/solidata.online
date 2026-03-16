@@ -252,6 +252,60 @@ Si après `deploy.sh update` les changements (frontend, backend, mobile) n’app
 3. **En cas d’échec du build**  
    Relancer uniquement après un `git pull origin main` réussi, pour être sûr que le correctif (ex. Tailwind mobile) est bien présent sur le serveur.
 
+## Dépannage SSL — Certificats Let's Encrypt
+
+### Nginx crash : `cannot load certificate`
+
+Nginx ne démarre pas et affiche `No such file or directory` pour les fichiers `.pem`.
+
+**Diagnostic :**
+
+```bash
+# Vérifier les certificats
+ls -la /etc/letsencrypt/live/
+ls -la /etc/letsencrypt/live/solidata.online*/
+ls -la /etc/letsencrypt/archive/solidata.online*/ 2>/dev/null || echo "PAS D'ARCHIVE"
+```
+
+**Cas 1 — Dossier `live/` existe mais `archive/` absent (symlinks cassés) :**
+
+```bash
+# Supprimer le dossier vide et régénérer les certificats
+rm -rf /etc/letsencrypt/live/solidata.online
+docker compose stop nginx
+docker run --rm -p 80:80 \
+  -v /etc/letsencrypt:/etc/letsencrypt \
+  certbot/certbot certonly --standalone \
+  -d solidata.online -d www.solidata.online -d m.solidata.online \
+  --email VOTRE_EMAIL --agree-tos --no-eff-email
+docker compose up -d
+```
+
+**Cas 2 — Certbot a créé les certs dans `solidata.online-0001` (ou `-0002`, etc.) :**
+
+Certbot suffixe le nom si le dossier `live/solidata.online/` existait déjà. Il faut mettre à jour les chemins dans :
+- `nginx/default.conf` (4 occurrences de `ssl_certificate` / `ssl_certificate_key`)
+- `nginx/entrypoint.sh` (variable `CERT_DIR`)
+
+```bash
+# Vérifier le vrai chemin
+ls /etc/letsencrypt/live/
+# Mettre à jour les fichiers, puis :
+docker compose restart nginx
+```
+
+**Cas 3 — Port 80 déjà occupé (certbot standalone échoue) :**
+
+```bash
+# Identifier le processus
+ss -tlnp | grep :80
+# Arrêter le service qui occupe le port, puis relancer certbot
+```
+
+**Note :** L'entrypoint nginx génère des certificats auto-signés temporaires si les vrais sont illisibles, permettant à nginx de démarrer (HTTPS avec avertissement navigateur).
+
+---
+
 ## Architecture production
 
 ```

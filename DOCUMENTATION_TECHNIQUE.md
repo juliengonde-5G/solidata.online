@@ -678,9 +678,60 @@ m.solidata.online                     → conteneur mobile (port 80)
 - **Fournisseur** : Let's Encrypt (gratuit)
 - **Outil** : Certbot (conteneur dédié)
 - **Certificat** : couvre `solidata.online`, `www.solidata.online`, `m.solidata.online`
-- **Emplacement** : `/etc/letsencrypt/live/solidata.online/`
+- **Emplacement** : `/etc/letsencrypt/live/solidata.online-0001/` (voir note ci-dessous)
 - **Renouvellement** : automatique 2 fois/jour via cron
 - **HSTS** : activé (max-age 2 ans)
+
+> **Note importante — Chemin des certificats :**
+> Certbot incrémente le nom du dossier (`solidata.online-0001`, `-0002`, etc.) si le dossier
+> `live/solidata.online/` existe déjà lors de la génération. Le chemin réel est celui configuré
+> dans `nginx/default.conf` et `nginx/entrypoint.sh`. En cas de régénération, vérifier et mettre
+> à jour ces deux fichiers. Voir la section « Dépannage SSL » ci-dessous.
+
+### Dépannage SSL — Certificats et Nginx
+
+**Symptôme** : Nginx crash en boucle avec `cannot load certificate ... No such file or directory`.
+
+**Causes possibles et résolution :**
+
+1. **Dossier `live/` vide (symlinks cassés)** — Le dossier `live/solidata.online/` existe mais
+   `archive/solidata.online/` est absent (les fichiers cert sont des symlinks vers `archive/`).
+   ```bash
+   # Diagnostic
+   ls -la /etc/letsencrypt/live/solidata.online*/
+   ls -la /etc/letsencrypt/archive/solidata.online*/ 2>/dev/null || echo "PAS D'ARCHIVE"
+
+   # Correction : supprimer le dossier vide et régénérer
+   rm -rf /etc/letsencrypt/live/solidata.online
+   docker compose stop nginx
+   docker run --rm -p 80:80 \
+     -v /etc/letsencrypt:/etc/letsencrypt \
+     certbot/certbot certonly --standalone \
+     -d solidata.online -d www.solidata.online -d m.solidata.online \
+     --email VOTRE_EMAIL --agree-tos --no-eff-email
+   ```
+
+2. **Chemin décalé (`-0001`, `-0002`, etc.)** — Certbot a créé les certs dans un dossier suffixé.
+   ```bash
+   # Vérifier le vrai chemin
+   ls /etc/letsencrypt/live/
+
+   # Mettre à jour nginx/default.conf et nginx/entrypoint.sh avec le bon chemin
+   # Puis redémarrer : docker compose restart nginx
+   ```
+
+3. **Certificats expirés** — Renouveler manuellement :
+   ```bash
+   docker compose stop nginx
+   docker run --rm -p 80:80 \
+     -v /etc/letsencrypt:/etc/letsencrypt \
+     certbot/certbot renew --standalone
+   docker compose up -d nginx
+   ```
+
+**Sécurité** : L'entrypoint nginx (`nginx/entrypoint.sh`) génère des certificats auto-signés
+temporaires si les vrais sont illisibles, pour que nginx puisse démarrer et servir le site en
+HTTPS (avec avertissement navigateur) le temps de corriger.
 
 ### Rate limiting
 
