@@ -1,7 +1,7 @@
 # Guide Utilisateur — SOLIDATA ERP
 
 > **Pour** : Tous les utilisateurs de Solidarité Textile
-> **Version** : 2.0 | **Date** : Mars 2026
+> **Version** : 1.2.0 | **Date** : 19 mars 2026
 
 ---
 
@@ -9,14 +9,14 @@
 
 1. [Premiers Pas](#1-premiers-pas)
 2. [Navigation dans l'Application](#2-navigation)
-3. [Recrutement](#3-recrutement)
-4. [Gestion d'Équipe](#4-gestion-déquipe)
-5. [Collecte](#5-collecte)
-6. [Tri & Production](#6-tri--production)
-7. [Exutoires & Logistique](#7-exutoires--logistique)
-8. [Reporting](#8-reporting)
-9. [Administration](#9-administration)
-10. [Application Mobile](#10-application-mobile)
+3. [Recrutement](#3-recrutement) — Kanban, Plan de recrutement, Test PCM
+4. [Gestion d'Équipe](#4-gestion-déquipe) — Collaborateurs, Heures, Insertion, Planning
+5. [Collecte](#5-collecte) — Tournées, Carte CAV, GPS, Propositions IA
+6. [Tri & Production](#6-tri--production) — Sessions, Stocks, Expéditions
+7. [Exutoires & Logistique](#7-exutoires--logistique) — Commandes, Préparation, Pesée, Facturation, Gantt
+8. [Reporting](#8-reporting) — Collecte, RH, Production, Refashion, Métropole
+9. [Administration](#9-administration) — Utilisateurs, Véhicules, RGPD, Référentiels, Base de données
+10. [Application Mobile](#10-application-mobile) — PWA chauffeur-collecteur
 11. [FAQ](#11-faq)
 
 ---
@@ -130,7 +130,7 @@ La page Candidats présente un **tableau Kanban** avec 4 colonnes :
 ```
 ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
 │  REÇUS   │  │ENTRETIEN │  │ RECRUTÉS │  │ REFUSÉS  │
-│          │  │          │  │          │  │          │
+│  (bleu)  │  │ (violet) │  │  (vert)  │  │ (rouge)  │
 │ ┌──────┐ │  │ ┌──────┐ │  │ ┌──────┐ │  │ ┌──────┐ │
 │ │Carte │ │  │ │Carte │ │  │ │Carte │ │  │ │Carte │ │
 │ │candi-│ │  │ │candi-│ │  │ │candi-│ │  │ │candi-│ │
@@ -138,6 +138,8 @@ La page Candidats présente un **tableau Kanban** avec 4 colonnes :
 │ └──────┘ │  │ └──────┘ │  │ └──────┘ │  │ └──────┘ │
 └──────────┘  └──────────┘  └──────────┘  └──────────┘
 ```
+
+Déplacez les candidats entre colonnes par **glisser-déposer** (drag & drop).
 
 **Ajouter un candidat** :
 1. Cliquez sur **+ Nouveau candidat**
@@ -152,14 +154,16 @@ La page Candidats présente un **tableau Kanban** avec 4 colonnes :
 
 **Changer le statut** :
 1. Ouvrez la fiche candidat
-2. Sélectionnez le nouveau statut dans le menu déroulant
+2. Cliquez sur les boutons de statut colorés en bas de la fiche
 3. L'historique du changement est automatiquement enregistré
+
+**Convertir en employé** :
+Pour un candidat au statut "Recruté", un bouton **Créer un employé** apparaît pour le basculer directement dans le module Gestion d'Équipe.
 
 **Onglets conditionnels** :
 Selon le statut du candidat, différents onglets apparaissent :
-- **Reçu** : Informations générales, CV
-- **Entretien** : + Entretien structuré, Mises en situation
-- **Recruté** : + Livret d'accueil, Documents
+- **Reçu / Refusé** : Fiche, Historique
+- **Entretien / Recruté** : Fiche, Historique, Mise en situation, Entretien structuré, PCM, Documents
 
 ### 3.2 Plan de Recrutement
 
@@ -168,24 +172,40 @@ Selon le statut du candidat, différents onglets apparaissent :
 3. Saisissez le nombre de postes à pourvoir par mois
 4. Le compteur affiche automatiquement : **recrutés / objectif**
 
-### 3.3 Matrice PCM
+### 3.3 Matrice PCM (Process Communication Model)
 
-Le test PCM (Process Communication Model) évalue le profil de personnalité des candidats.
+Le test PCM évalue le profil de personnalité des candidats à travers **20 questions** à 4 choix, réparties en 5 catégories (perception, style de management, canal de communication, motivation, stress).
 
 **Lancer un test** :
-1. Depuis la fiche candidat, cliquez sur **Lancer test PCM**
-2. Le candidat répond à **30 questions** à choix multiples
-3. Le résultat affiche un **profil radar** avec les 6 types de personnalité
+1. Depuis la fiche candidat (onglet PCM), cliquez sur **Lancer test PCM**
+2. Le candidat répond aux **20 questions** (une par une, barre de progression visible)
+3. Le résultat affiche le profil complet avec **Base**, **Phase** et **Immeuble**
 
-**Types de profils** :
-- Empathique : chaleureux, sensible
-- Travaillomane : organisé, logique
-- Persévérant : engagé, observateur
-- Rêveur : imaginatif, calme
-- Promoteur : adaptable, charmeur
-- Rebelle : créatif, spontané
+**Les 6 types de personnalité** :
+| Type | Caractéristiques | Perception |
+|------|-----------------|------------|
+| **Analyseur** | Organisé, logique, responsable | Pensée factuelle |
+| **Persévérant** | Engagé, observateur, consciencieux | Opinions, valeurs |
+| **Empathique** | Chaleureux, sensible, compatissant | Émotions, ressenti |
+| **Imagineur** | Imaginatif, calme, réfléchi | Réflexion intérieure |
+| **Énergiseur** | Créatif, spontané, ludique | Réactions, humour |
+| **Promoteur** | Adaptable, charmeur, persuasif | Actions, charme |
 
-> Des **alertes de risque** apparaissent si un profil est extrêmement déséquilibré, pour aider le RH dans sa prise de décision.
+**Comprendre le résultat** :
+- **Base** : votre type fondamental (stable dans le temps). C'est l'étage 1 de l'immeuble — votre fondation
+- **Phase** : votre type actif actuel (peut évoluer avec les événements de vie). Détermine vos motivations et comportements sous stress
+- **Immeuble PCM** : visualisation en bâtiment avec barres horizontales. La Base est toujours en bas (fondation), les autres types sont classés par intensité
+- **Radar** : graphique à 6 axes montrant vos scores normalisés (0-100 %) pour chaque type
+
+**Alertes RPS** :
+Si le score de stress de votre Phase dépasse 75 %, une alerte de **Risques Psychosociaux** apparaît en rouge. Cela signale un niveau de stress élevé nécessitant attention.
+
+**Exporter le profil** :
+Depuis la page de résultats, deux boutons d'export sont disponibles :
+1. **Export résultats** (vert) : génère un PDF A4 avec l'immeuble, les descriptions base/phase, le guide manager (comportements DO/DON'T), et les niveaux de stress
+2. **Fiche technique** (gris) : génère un PDF A4 avec le tableau des scores bruts et le détail des 20 réponses groupées par catégorie
+
+> Les deux exports s'ouvrent dans une fenêtre popup — utilisez **Ctrl+P** ou le bouton Imprimer pour sauvegarder en PDF.
 
 ---
 
@@ -213,7 +233,15 @@ Le test PCM (Process Communication Model) évalue le profil de personnalité des
 4. Le **total hebdomadaire** et les **heures supplémentaires** se calculent automatiquement
 5. Exportez en Excel si nécessaire
 
-### 4.3 Parcours Insertion (CDDI)
+### 4.3 Compétences
+
+1. Menu → Gestion Équipe → **Compétences**
+2. Consultez la **matrice compétences × collaborateurs**
+3. Référentiel de compétences : tri, collecte, mécanique, bureautique, etc.
+4. Affectez des **niveaux** par collaborateur (débutant, intermédiaire, confirmé, expert)
+5. Vue croisée pour identifier les forces et lacunes de l'équipe
+
+### 4.4 Parcours Insertion (CDDI)
 
 Pour les salariés en Contrat à Durée Déterminée d'Insertion :
 
@@ -221,19 +249,28 @@ Pour les salariés en Contrat à Durée Déterminée d'Insertion :
 1. Menu → Gestion Équipe → **Parcours insertion**
 2. Cliquez sur **Nouveau parcours**
 3. Sélectionnez le salarié CDDI
-4. Définissez les **objectifs** par domaine (savoir-être, technique, autonomie, etc.)
+4. Réalisez le **diagnostic initial** (évaluation des 7 freins périphériques)
 
-**Évaluation périodique** :
-1. Ouvrez le parcours du salarié
-2. Cliquez sur **Nouvelle évaluation**
-3. Notez chaque objectif (1 à 5)
-4. Ajoutez des commentaires
-5. Enregistrez
+**Les 7 freins périphériques** :
+Le système évalue automatiquement les freins à l'emploi sur un radar :
+- Logement, Mobilité, Santé, Administratif, Financier, Familial, Justice
+- Notation de 1 (frein fort) à 5 (aucun frein)
+- Visualisation en **graphique radar** pour identifier rapidement les points bloquants
+
+**3 jalons obligatoires** :
+Le parcours est jalonné de 3 évaluations planifiées automatiquement :
+- **M1** (1 mois) : première évaluation — le salarié s'adapte-t-il ?
+- **M6** (6 mois) : bilan intermédiaire — progression sur les freins
+- **M12** (12 mois) : bilan final — objectifs atteints ?
+Des alertes automatiques rappellent au CIP quand un jalon approche.
+
+**Plans d'action CIP** :
+Le Conseiller en Insertion Professionnelle peut définir des actions correctives pour chaque frein identifié (ex : aide au permis pour le frein mobilité, accompagnement Pôle emploi pour le frein administratif).
 
 **Suivi de progression** :
 - Un graphique montre l'**évolution des notes** dans le temps
 - Les objectifs atteints sont marqués en vert
-- Le bilan final est exportable pour les partenaires (DIRECCTE, Conseil Départemental)
+- Le bilan final est exportable pour les partenaires (DREETS, Conseil Départemental)
 
 ### 4.4 Planning Hebdomadaire
 
@@ -451,14 +488,53 @@ Quand le client confirme le poids reçu :
 2. Gérez la flotte : immatriculation, type, kilométrage
 3. Planifiez les **maintenances** : un véhicule en maintenance est indisponible pour les tournées
 
-### 9.3 RGPD
+### 9.3 Véhicules et Maintenance
+
+1. Menu → Administration → **Véhicules**
+2. Gérez la flotte : immatriculation, type, kilométrage, tare (poids à vide)
+3. Planifiez les **maintenances** : contrôle technique, vidange, pneus, freins
+4. Un véhicule en maintenance est automatiquement **indisponible** pour les tournées
+5. Des **alertes automatiques** rappellent les échéances de maintenance (km ou date)
+
+### 9.4 RGPD
 
 *Réservé aux ADMIN et RH*
 
 - **Registre des traitements** : liste de tous les traitements de données personnelles
-- **Export données** : exporter toutes les données d'un candidat ou employé (droit d'accès)
-- **Anonymisation** : supprimer les données personnelles d'une personne (droit à l'oubli)
+- **Export données** : exporter toutes les données d'un candidat ou employé (droit d'accès RGPD Art. 15)
+- **Anonymisation** : supprimer les données personnelles d'une personne (droit à l'oubli RGPD Art. 17) — noms remplacés par "ANONYME", fichiers supprimés, dans une transaction ACID
 - **Journal d'audit** : consulter l'historique de toutes les actions RGPD
+- **Purge automatique** : les données de plus de 24 mois peuvent être purgées automatiquement
+
+### 9.5 Fil d'Actualité
+
+1. Menu → Accueil → **Fil d'actualité**
+2. Publiez des articles pour toute l'équipe (texte libre, catégorisable)
+3. Les articles peuvent être **épinglés** pour rester en haut du fil
+4. Visible par tous les rôles
+
+### 9.6 Référentiels
+
+*Réservé aux ADMIN*
+
+1. Menu → Administration → **Référentiels**
+2. Gérez les données de base partagées :
+   - Associations partenaires
+   - Exutoires (destinataires produits triés)
+   - Catalogue produits
+   - Types de conteneurs
+   - Postes de travail
+
+### 9.7 Base de Données
+
+*Réservé aux ADMIN*
+
+1. Menu → Administration → **Base de données**
+2. Outils de maintenance :
+   - **Backup** : lancer une sauvegarde manuelle
+   - **Restauration** : restaurer depuis un backup
+   - **VACUUM** : optimiser les performances PostgreSQL
+   - **Statistiques** : voir la taille des tables, nombre de lignes
 
 ---
 
@@ -596,4 +672,4 @@ En cas de problème technique :
 
 ---
 
-*Guide utilisateur SOLIDATA ERP v2.0 — Solidarité Textile, Rouen — Mars 2026*
+*Guide utilisateur SOLIDATA ERP v1.2.0 — Solidarité Textile, Rouen — 19 mars 2026*

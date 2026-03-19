@@ -1,12 +1,12 @@
 # SOLIDATA ERP — Documentation Technique Complète
 
-> **Fichier de référence officiel du projet.** Toute évolution technique, déploiement et maintenance doit s’appuyer sur ce document.
+> **Fichier de référence officiel du projet.** Toute évolution technique, déploiement et maintenance doit s’appuyer sur ce document. Lisible par humain et IA.
 
-**Application :** SOLIDATA ERP — Logiciel de gestion pour Solidarité Textiles  
-**Version :** 1.0.0  
-**Date :** 8 mars 2026  
-**Domaine :** https://solidata.online  
-**Dépôt GitHub :** https://github.com/juliengonde-5G/solidata.online  
+**Application :** SOLIDATA ERP — Logiciel de gestion pour Solidarité Textiles
+**Version :** 1.2.0
+**Date :** 19 mars 2026
+**Domaine :** https://solidata.online
+**Dépôt GitHub :** https://github.com/juliengonde-5G/solidata.online
 
 ---
 
@@ -24,7 +24,7 @@
 10. [Application Mobile (PWA)](#10-application-mobile-pwa)
 11. [Configuration Nginx & SSL](#11-configuration-nginx--ssl)
 12. [Sécurité](#12-sécurité)
-13. [Variables d'environnement](#13-variables-denvironnement)
+13. [Variables d’environnement](#13-variables-denvironnement)
 14. [Déploiement — Guide pas à pas](#14-déploiement--guide-pas-à-pas)
 15. [Opérations courantes](#15-opérations-courantes)
 16. [Sauvegarde et restauration](#16-sauvegarde-et-restauration)
@@ -33,6 +33,7 @@
 19. [Accès et rôles utilisateur](#19-accès-et-rôles-utilisateur)
 20. [Données métier pré-chargées](#20-données-métier-pré-chargées)
 21. [Annexes](#21-annexes)
+22. [Historique de construction](#22-historique-de-construction)
 
 ---
 
@@ -76,7 +77,7 @@ Internet (utilisateurs)
                                                     └── PostgreSQL 15 + PostGIS 3.4
 ```
 
-**6 conteneurs Docker** en production :
+**7 conteneurs Docker** en production :
 
 | Conteneur | Image | Rôle | Port interne | Mémoire max |
 |-----------|-------|------|-------------|-------------|
@@ -85,6 +86,7 @@ Internet (utilisateurs)
 | `solidata-web` | Build `./frontend` | Interface web React (servi par Nginx) | 80 | 128 Mo |
 | `solidata-mobile` | Build `./mobile` | PWA mobile React (servi par Nginx) | 80 | 128 Mo |
 | `solidata-proxy` | `nginx:alpine` | Reverse proxy SSL, routing, rate limiting | 80, 443 | 64 Mo |
+| `solidata-redis` | `redis:7-alpine` | Cache, adaptateur Socket.IO, file d'attente jobs | 6379 | 192 Mo |
 | `solidata-certbot` | `certbot/certbot` | Renouvellement automatique certificat SSL | - | - |
 
 **Réseau Docker :** `solidata-network` (bridge interne)
@@ -121,6 +123,13 @@ Internet (utilisateurs)
 | **qrcode** | 1.5 | Génération QR codes (CAV) |
 | **xml2js** | 0.6 | Parsing fichiers KML (cartographie) |
 | **crypto-js** | 4.2 | Chiffrement AES-256 (rapports PCM) |
+| **Redis** | 7 (Alpine) | Cache, adaptateur Socket.IO multi-instance, file d'attente jobs |
+| **ioredis** | 5.10 | Client Redis pour Node.js |
+| **BullMQ** | 5.71 | File d'attente de jobs asynchrones (emails, ML, tâches longues) |
+| **winston** | 3.19 | Logging structuré (fichiers + console) |
+| **helmet** | 8.1 | Headers de sécurité Express |
+| **express-rate-limit** | 8.3 | Rate limiting API |
+| **express-validator** | 7.2 | Validation des entrées API |
 
 ### Frontend Web
 | Technologie | Version | Usage |
@@ -215,34 +224,50 @@ solidata.online/
 │       │   └── database.js        # Pool de connexion PostgreSQL
 │       ├── middleware/
 │       │   └── auth.js            # Vérification JWT
-│       ├── routes/                # 22 fichiers de routes API
-│       │   ├── auth.js            # Authentification (login, register, refresh)
-│       │   ├── users.js           # Gestion utilisateurs
-│       │   ├── settings.js        # Paramètres application
-│       │   ├── candidates.js      # Recrutement Kanban
-│       │   ├── pcm.js             # Test personnalité Process Com
+│       ├── routes/                # 36 fichiers de routes API
+│       │   ├── auth.js            # Authentification (login, refresh, logout, me)
+│       │   ├── users.js           # Gestion utilisateurs (CRUD)
+│       │   ├── settings.js        # Paramètres, templates, tarifs, objectifs, triggers
+│       │   ├── candidates.js      # Recrutement Kanban, CV, entretiens, mise en situation
+│       │   ├── pcm.js             # Test personnalité PCM (6 types, scoring, exports)
 │       │   ├── teams.js           # Équipes
-│       │   ├── employees.js       # Salariés
+│       │   ├── employees.js       # Salariés, contrats, planning, heures
 │       │   ├── cav.js             # Conteneurs d'Apport Volontaire
-│       │   ├── vehicles.js        # Véhicules
-│       │   ├── tours.js           # Tournées de collecte
+│       │   ├── vehicles.js        # Véhicules et maintenance
+│       │   ├── tours.js           # Tournées de collecte (3 modes)
 │       │   ├── stock.js           # Mouvements de stock
 │       │   ├── production.js      # Production quotidienne
-│       │   ├── billing.js         # Facturation
-│       │   ├── reporting.js       # Reporting
+│       │   ├── billing.js         # Facturation interne
+│       │   ├── reporting.js       # KPI et statistiques
 │       │   ├── exports.js         # Export Excel/PDF
-│       │   ├── tri.js             # Chaîne de tri
+│       │   ├── tri.js             # Chaînes de tri, opérations, postes
 │       │   ├── produits-finis.js   # Produits finis (code-barres)
 │       │   ├── expeditions.js     # Expéditions vers exutoires
-│       │   ├── refashion.js       # Reporting éco-organisme Refashion
+│       │   ├── refashion.js       # Reporting éco-organisme Refashion (DPAV)
 │       │   ├── referentiels.js    # Référentiels métier
 │       │   ├── insertion.js       # Parcours d'insertion IA
-│       │   └── notifications.js   # SMS/Email via Brevo
-│       └── scripts/               # Scripts d'initialisation
-│           ├── init-db.js         # Création tables + données initiales
-│           ├── seed-cav.js        # Import CAV depuis fichier Excel
+│       │   ├── notifications.js   # SMS/Email via Brevo
+│       │   ├── historique.js      # Dashboard historique KPI
+│       │   ├── newsfeed.js        # Fil d'actualités
+│       │   ├── rgpd.js            # RGPD (registre, audit, consentements)
+│       │   ├── metropole.js       # Reporting Métropole Rouen
+│       │   ├── admin-db.js        # Administration BDD (backup, vacuum, stats)
+│       │   ├── clients-exutoires.js    # Clients exutoires (CRUD)
+│       │   ├── tarifs-exutoires.js     # Grille tarifaire exutoires
+│       │   ├── commandes-exutoires.js  # Commandes exutoires (8 statuts)
+│       │   ├── factures-exutoires.js   # Facturation exutoires
+│       │   ├── preparations.js         # Préparation expéditions
+│       │   ├── controles-pesee.js      # Contrôle de pesée
+│       │   ├── calendrier-logistique.js # Calendrier logistique mensuel
+│       │   └── planning-hebdo.js       # Planning hebdomadaire par filière
+│       └── scripts/               # Scripts d'initialisation et migrations
+│           ├── init-db.js         # Création 70+ tables + données initiales + migrations
+│           ├── seed-cav.js        # Import CAV depuis Excel + KML (coordonnées GPS)
 │           ├── seed-data.js       # Données de démonstration
-│           └── seed-production.js # Données production exemple
+│           ├── seed-production.js # Import KPI_Production 2026.xlsx
+│           ├── seed-historique.js  # Données historiques mensuelles
+│           ├── migrate-exutoires.js # Migration module logistique exutoires
+│           └── import-excel.js    # Utilitaire import Excel générique
 │
 ├── frontend/                      # Application web React
 │   ├── Dockerfile                 # Build multi-stage (Node → Nginx)
@@ -258,34 +283,54 @@ solidata.online/
 │       │   └── api.js             # Client Axios configuré
 │       ├── components/
 │       │   └── Layout.jsx         # Sidebar + header + navigation
-│       └── pages/                 # 28 pages
+│       └── pages/                 # 44 pages
 │           ├── Login.jsx
-│           ├── Dashboard.jsx
-│           ├── Candidates.jsx     # Kanban recrutement
-│           ├── PersonalityMatrix.jsx
-│           ├── PCMTest.jsx        # Test PCM autonome (token)
-│           ├── Employees.jsx
-│           ├── WorkHours.jsx
-│           ├── Skills.jsx
-│           ├── InsertionParcours.jsx  # Parcours d'insertion IA
-│           ├── Tours.jsx
-│           ├── CAVMap.jsx         # Carte des CAV (Leaflet)
-│           ├── Vehicles.jsx
-│           ├── LiveVehicles.jsx   # Suivi GPS temps réel
-│           ├── Production.jsx
-│           ├── ChaineTri.jsx
-│           ├── Stock.jsx
-│           ├── ProduitsFinis.jsx
-│           ├── Expeditions.jsx
+│           ├── Dashboard.jsx          # KPI, comparaison annuelle, inventaire
+│           ├── NewsFeed.jsx           # Fil d'actualités
+│           │   ── RECRUTEMENT & RH ──
+│           ├── Candidates.jsx         # Kanban 5 colonnes, CV, entretiens, mise en situation
+│           ├── PersonalityMatrix.jsx  # Résultats PCM + export PDF A4
+│           ├── PCMTest.jsx            # Test PCM autonome (public, token)
+│           ├── Employees.jsx          # Fiches, contrats, disponibilités
+│           ├── WorkHours.jsx          # Saisie/validation heures
+│           ├── Skills.jsx             # Matrice compétences (15+ types)
+│           ├── PlanningHebdo.jsx      # Planning hebdo 4 filières
+│           ├── InsertionParcours.jsx   # Radar 7 freins, jalons M1/M6/M12
+│           │   ── COLLECTE ──
+│           ├── Tours.jsx              # Planification (3 modes: IA, standard, manuel)
+│           ├── CollectionProposals.jsx # Propositions IA quotidiennes/hebdo
+│           ├── CAVMap.jsx             # Carte interactive Leaflet
+│           ├── FillRateMap.jsx        # Taux remplissage CAV (couleurs)
+│           ├── Vehicles.jsx           # Flotte + maintenance
+│           ├── LiveVehicles.jsx       # GPS temps réel Socket.IO
+│           │   ── TRI & PRODUCTION ──
+│           ├── Production.jsx         # Saisie quotidienne + KPIs
+│           ├── ChaineTri.jsx          # Diagramme flux tri
+│           ├── Stock.jsx              # Mouvements + inventaire
+│           ├── ProduitsFinis.jsx      # Code-barres, catalogue
+│           ├── Expeditions.jsx        # Expéditions vers exutoires
+│           │   ── LOGISTIQUE EXUTOIRES (7 pages) ──
+│           ├── ExutoiresCommandes.jsx     # Commandes (8 statuts)
+│           ├── ExutoiresPreparation.jsx   # Préparation expéditions
+│           ├── ExutoiresGantt.jsx         # Gantt chargement
+│           ├── ExutoiresFacturation.jsx   # Facturation exutoires
+│           ├── ExutoiresCalendrier.jsx    # Calendrier mensuel + alertes
+│           ├── ExutoiresClients.jsx       # Gestion clients
+│           ├── ExutoiresTarifs.jsx        # Grille tarifaire
+│           │   ── REPORTING ──
 │           ├── ReportingCollecte.jsx
 │           ├── ReportingProduction.jsx
 │           ├── ReportingRH.jsx
-│           ├── Refashion.jsx
-│           ├── Billing.jsx
-│           ├── Users.jsx
-│           ├── Settings.jsx
-│           ├── Referentiels.jsx
-│           └── AdminPredictive.jsx  # Administration moteur prédictif
+│           ├── ReportingMetropole.jsx # Reporting Métropole Rouen
+│           ├── Refashion.jsx          # DPAV trimestriel + subventions
+│           │   ── ADMINISTRATION ──
+│           ├── Users.jsx              # Gestion comptes (5 rôles)
+│           ├── Settings.jsx           # Objectifs, tarifs, templates, triggers
+│           ├── Referentiels.jsx       # Associations, exutoires, catalogue, conteneurs
+│           ├── AdminPredictive.jsx    # Config IA (facteurs saisonniers, météo)
+│           ├── AdminCAV.jsx           # CRUD CAV sur carte + QR codes
+│           ├── AdminDB.jsx            # Backup, restore, VACUUM, purge
+│           └── RGPD.jsx              # Registre, audit log, consentements
 │
 ├── mobile/                        # Application mobile PWA
 │   ├── Dockerfile                 # Build multi-stage (Node → Nginx)
@@ -350,11 +395,16 @@ solidata.online/
 - Association aux postes ouverts (avec slots disponibles/pourvus)
 
 ### Module 3 — Tests de personnalité (PCM - Process Communication Model)
-- Sessions de test autonomes (lien avec token unique) ou accompagnées
-- Questionnaire multi-étapes
+- Sessions de test autonomes (lien public avec token unique) ou accompagnées
+- **20 questions** réparties en 5 catégories pondérées :
+  - Perception (Q1-3, poids 3) + Points forts (Q4, poids 2) + Relation (Q5, poids 2) + Communication (Q11-13, poids 1.5) → **déterminent la Base**
+  - Motivation (Q6,9, poids 2.5) + Stress (Q7-8,10, poids 2.5) + Besoins (Q14-17, poids 2) + Situation (Q18-20, poids 1.5) → **déterminent la Phase**
+- **6 types** : Analyseur, Persévérant, Empathique, Imagineur, Énergiseur, Promoteur
+- **Immeuble de personnalité** : Base toujours en étage 1 (fondation), autres types classés par score
+- Détection RPS (Risques Psychosociaux) si 2+ réponses stress correspondent au type Phase
 - Rapports chiffrés AES-256 (données sensibles)
-- Identification base/phase de personnalité
-- Alertes risques
+- **Export PDF A4** : page résultats (immeuble, comportements, guide manager) + fiche technique (réponses brutes)
+- Textes simplifiés FALC (Facile À Lire et À Comprendre) pour chaque question
 
 ### Module 4 — Gestion RH
 - Fiches employés (coordonnées, photo, compétences)
@@ -415,6 +465,77 @@ solidata.online/
 - Optimisation des tournées basée sur les prédictions
 - Historique des prédictions et métadonnées du modèle
 - **Moteur d'insertion** : parcours d'accompagnement personnalisé par salarié
+- Facteurs contextuels : météo, trafic, événements locaux
+- Feedback loop : comparaison prédiction vs observation réelle
+
+### Module 11 — Logistique Exutoires
+- **Clients exutoires** : raison sociale, SIRET, adresse, contacts, type (recycleur/fripier/export)
+- **Grille tarifaire** : prix par tonne par type de produit, par client, avec dates de validité
+- **Commandes** à 8 statuts : brouillon → confirmée → planifiée → en_preparation → chargée → expédiée → livrée → facturée
+- **Commandes récurrentes** : fréquence hebdomadaire/bimensuelle/mensuelle avec date de fin
+- **Préparation** : planification, 3 lieux de chargement (quai, extérieur, hangar), pesée interne
+- **Contrôle de pesée** : vérification poids avant expédition
+- **Facturation exutoires** : génération automatique depuis commandes livrées
+- **Calendrier logistique** : vue mensuelle, alertes surcharge, répartition par type produit
+- **Gantt chargement** : visualisation chronologique des préparations
+
+### Module 12 — Exécution du Tri (Batch Tracking)
+- **Batch tracking** : suivi des lots depuis l'entrée en chaîne jusqu'à la sortie
+- **Opérations exécutées** : poids entrée, poids sortie, perte, opérateur, horodatage
+- **Sorties d'opération** : ventilation par catégorie sortante
+- **Colisages** : création → scellage → expédition, code unique, type conteneur, exutoire
+- **Historique colisages** : traçabilité complète des changements de statut
+
+### Module 13 — Inventaire Physique
+- **Sessions d'inventaire** : partiel ou complet, avec validation
+- **Lignes d'inventaire** : stock théorique vs physique, écart en kg et en %
+- Réconciliation automatique des écarts
+
+### Module 14 — Maintenance Véhicules
+- **Fiches maintenance** : dernière maintenance, intervalle km/mois, contrôle technique
+- **Alertes automatiques** : vidange, pneus, freins, contrôle technique à date
+- Résolution des alertes par un responsable
+
+### Module 15 — Capteurs IoT CAV (LoRaWAN)
+- **Lectures capteurs** : référence capteur, niveau remplissage %, distance cm, batterie, température, RSSI
+- Données brutes JSON pour diagnostic
+- Intégration avec le moteur prédictif ML
+
+### Module 16 — RGPD & Conformité
+- **Registre des traitements** : finalité, base légale, catégories, durée conservation, mesures sécurité
+- **Consentements** : par entité (candidat/employé), type de consentement, horodatage
+- **Journal d'audit** : actions, entité, utilisateur, IP, détails JSON
+- Export des données personnelles et anonymisation
+
+### Module 17 — Parcours d'Insertion Avancé
+- **Diagnostic initial** : 20+ champs sociaux (logement, transport, santé, administratif, etc.)
+- **Jalons** : M1 (1 mois), M6 (6 mois), M12 (12 mois) avec entretien CIP
+- **Radar 7 freins** : mobilité, logement, santé, administratif, social, formation, emploi
+- **Plans d'action CIP** : actions par catégorie, priorité, échéance, statut
+- **Alertes entretien** : rappels automatiques avant chaque jalon
+- **Bilan de sortie** : avis global, type de sortie (emploi, formation, autre SIAE...)
+- **Recommandations IA** : suggestions basées sur le profil
+
+### Module 18 — Parcours Recrutement Structuré
+- **Entretien structuré** : formulaire 18+ champs (motivations, parcours, freins, disponibilités)
+- **Mise en situation** : types tri/collecte, 8 critères évalués de 1 à 5
+- **Documents** : 10+ types (pièce identité, RIB, justificatif domicile, etc.), suivi de remise
+- **Plan de recrutement** : par poste et par mois, suivi des slots nécessaires
+
+### Module 19 — Notifications & Triggers
+- **Templates messages** : SMS/email avec variables dynamiques
+- **Triggers automatiques** : événement déclencheur, template, délai, conditions JSON
+- Envoi via API Brevo (ex-Sendinblue)
+
+### Module 20 — Objectifs Périodiques
+- Définition d'objectifs par domaine, indicateur, unité
+- Périodicité : mensuel, trimestriel, annuel
+- Valeur cible avec commentaire
+
+### Module 21 — Fil d'Actualités
+- Articles avec catégorie, épinglage
+- Création/suppression par les admins
+- Visible par tous les utilisateurs connectés
 
 ---
 
@@ -426,7 +547,7 @@ solidata.online/
 - Utilisateur : `solidata_user`
 - Mot de passe : défini dans `.env` (`DB_PASSWORD`)
 
-### Tables (37 tables)
+### Tables (70+ tables)
 
 #### Authentification (4 tables)
 | Table | Description |
@@ -518,11 +639,84 @@ solidata.online/
 | `refashion_communes` | Ventilation par commune |
 | `refashion_subventions` | Calcul subventions par taux |
 
-#### IA / ML (2 tables)
+#### IA / ML (5 tables)
 | Table | Description |
 |-------|-------------|
-| `ml_fill_predictions` | Prédictions de remplissage CAV |
-| `ml_model_metadata` | Métadonnées des modèles IA |
+| `ml_fill_predictions` | Prédictions de remplissage CAV (par date, confiance, features JSON) |
+| `ml_model_metadata` | Métadonnées des modèles IA (version, métriques, chemin) |
+| `collection_context` | Contexte collecte journalier (météo, trafic, facteurs) |
+| `evenements_locaux` | Événements locaux impactant la collecte (type, rayon, bonus) |
+| `collection_learning_feedback` | Feedback ML (prédiction vs observation réelle) |
+
+#### Logistique Exutoires (4 tables)
+| Table | Description |
+|-------|-------------|
+| `clients_exutoires` | Clients (raison sociale, SIRET, adresse, contacts, type) |
+| `tarifs_exutoires` | Prix par tonne par type produit et client |
+| `commandes_exutoires` | Commandes (8 statuts, récurrence, tonnage, prix) |
+| `preparations_expedition` | Préparations (transporteur, pesée, lieu chargement, timestamps) |
+
+#### Exécution Tri & Colisages (6 tables)
+| Table | Description |
+|-------|-------------|
+| `batch_tracking` | Lots en cours de tri (code, poids initial/restant, statut) |
+| `operation_executions` | Exécution d'opérations par lot (poids entrée/sortie, perte) |
+| `operation_outputs` | Sorties d'opération (poids par catégorie sortante) |
+| `colisages` | Colis (code, catégorie, conteneur, poids, nb articles, exutoire) |
+| `colisage_items` | Contenu des colis (output ou produit fini, poids) |
+| `colisage_history` | Historique changements de statut des colis |
+
+#### Inventaire Physique (2 tables)
+| Table | Description |
+|-------|-------------|
+| `inventory_batches` | Sessions d'inventaire (partiel/complet, écarts globaux) |
+| `inventory_items` | Lignes d'inventaire (théorique vs physique, écart %) |
+
+#### Maintenance Véhicules (2 tables)
+| Table | Description |
+|-------|-------------|
+| `vehicle_maintenance` | Fiche maintenance (dernière date, intervalles, pneus, freins) |
+| `vehicle_maintenance_alerts` | Alertes maintenance (JSON, résolution) |
+
+#### Capteurs CAV IoT (1 table)
+| Table | Description |
+|-------|-------------|
+| `cav_sensor_readings` | Lectures capteurs LoRaWAN (niveau %, distance, batterie, T°, RSSI) |
+
+#### RGPD (3 tables)
+| Table | Description |
+|-------|-------------|
+| `rgpd_registre` | Registre des traitements (finalité, base légale, durée) |
+| `rgpd_consents` | Consentements par entité et type |
+| `rgpd_audit_log` | Journal d'audit (action, entité, user, IP, détails JSON) |
+
+#### Parcours Insertion (4 tables)
+| Table | Description |
+|-------|-------------|
+| `insertion_diagnostics` | Diagnostic social initial (20+ champs) |
+| `insertion_milestones` | Jalons M1/M6/M12 (entretien, 7 freins, bilan, sortie) |
+| `cip_action_plans` | Plans d'action CIP (catégorie, frein, priorité, échéance) |
+| `insertion_interview_alerts` | Alertes entretien automatiques |
+
+#### Recrutement Avancé (4 tables)
+| Table | Description |
+|-------|-------------|
+| `recruitment_interviews` | Entretiens structurés (18+ champs) |
+| `mise_en_situation` | Évaluations terrain (8 critères 1-5, résultat) |
+| `recruitment_documents` | Documents candidat (10+ types, suivi remise) |
+| `recruitment_plan` | Plan recrutement par poste/mois |
+
+#### Grille Tarifaire (1 table)
+| Table | Description |
+|-------|-------------|
+| `grille_tarifaire` | Tarifs par année, type, exutoire, trimestre |
+
+#### Autres (3 tables)
+| Table | Description |
+|-------|-------------|
+| `historique_mensuel` | Historique mensuel (année, mois, section, catégorie, valeur) |
+| `notification_triggers` | Triggers de notifications (événement, template, délai, conditions) |
+| `periodic_objectives` | Objectifs périodiques (domaine, indicateur, cible) |
 
 ### Index spatiaux et de performance
 - `idx_cav_geom` — Index GIST sur la géométrie des CAV
@@ -561,8 +755,21 @@ Base URL : `https://solidata.online/api`
 | `/api/expeditions` | `expeditions.js` | Expéditions vers exutoires |
 | `/api/refashion` | `refashion.js` | Reporting Refashion (DPAV, communes, subventions) |
 | `/api/referentiels` | `referentiels.js` | Exutoires, associations, catégories, catalogue |
-| `/api/insertion` | `insertion.js` | Parcours d'insertion IA |
+| `/api/insertion` | `insertion.js` | Parcours d'insertion IA (diagnostics, jalons, actions CIP) |
 | `/api/notifications` | `notifications.js` | Envoi SMS/email via Brevo |
+| `/api/historique` | `historique.js` | Dashboard historique KPI |
+| `/api/newsfeed` | `newsfeed.js` | Fil d'actualités (CRUD articles) |
+| `/api/rgpd` | `rgpd.js` | Registre, audit log, consentements, export, anonymisation |
+| `/api/metropole` | `metropole.js` | Reporting Métropole Rouen |
+| `/api/admin-db` | `admin-db.js` | Administration BDD (backup, restore, vacuum, purge, stats) |
+| `/api/clients-exutoires` | `clients-exutoires.js` | CRUD clients exutoires |
+| `/api/tarifs-exutoires` | `tarifs-exutoires.js` | Grille tarifaire exutoires |
+| `/api/commandes-exutoires` | `commandes-exutoires.js` | Commandes (8 statuts, récurrence) |
+| `/api/factures-exutoires` | `factures-exutoires.js` | Facturation exutoires |
+| `/api/preparations` | `preparations.js` | Préparation d'expéditions |
+| `/api/controles-pesee` | `controles-pesee.js` | Contrôle de pesée |
+| `/api/calendrier-logistique` | `calendrier-logistique.js` | Calendrier logistique mensuel |
+| `/api/planning-hebdo` | `planning-hebdo.js` | Planning hebdomadaire par filière |
 
 ### Health check
 `GET /api/health` — Retourne l'état de la base, la version PostgreSQL/PostGIS et les modules actifs.
@@ -614,7 +821,22 @@ URL : `https://solidata.online`
 | Utilisateurs | `/users` | ADMIN | Gestion comptes |
 | Paramètres | `/settings` | ADMIN | Configuration système |
 | Référentiels | `/referentiels` | ADMIN | Exutoires, catalogue, catégories |
-| Moteur prédictif | `/admin-predictive` | ADMIN | Administration IA |
+| Moteur prédictif | `/admin-predictive` | ADMIN | Administration IA (facteurs saisonniers, météo, événements) |
+| Admin CAV | `/admin-cav` | ADMIN | Création/édition CAV sur carte + QR codes |
+| Admin BDD | `/admin-db` | ADMIN | Backup, restore, VACUUM, purge, stats |
+| RGPD | `/rgpd` | ADMIN | Registre traitements, audit log, consentements, export |
+| Fil d'actualités | `/news` | Tous | Articles catégorisés, épinglage |
+| Propositions IA | `/collection-proposals` | ADMIN, MANAGER | Propositions de collecte IA |
+| Taux remplissage | `/fill-rate` | ADMIN, MANAGER | Carte taux de remplissage CAV |
+| Planning Hebdo | `/planning-hebdo` | ADMIN, MANAGER | Planning semaine (4 filières × 6 jours) |
+| Reporting Métropole | `/reporting-metropole` | ADMIN, MANAGER | DPAV Métropole Rouen |
+| Commandes | `/exutoires-commandes` | ADMIN, MANAGER | Commandes exutoires (8 statuts, récurrence) |
+| Préparation | `/exutoires-preparation` | ADMIN, MANAGER | Préparation expéditions (3 lieux, pesée) |
+| Gantt | `/exutoires-gantt` | ADMIN, MANAGER | Gantt chargement |
+| Facturation Exut. | `/exutoires-facturation` | ADMIN, MANAGER | Facturation exutoires |
+| Calendrier | `/exutoires-calendrier` | ADMIN, MANAGER | Calendrier logistique + alertes |
+| Clients Exutoires | `/exutoires-clients` | ADMIN, MANAGER | Gestion clients |
+| Tarifs Exutoires | `/exutoires-tarifs` | ADMIN, MANAGER | Grille tarifaire |
 
 ---
 
@@ -653,9 +875,14 @@ Application **Progressive Web App** installable sur téléphone, conçue pour le
 
 ### Fonctionnalités clés
 - **Installation sur écran d'accueil** (PWA, fonctionne hors-ligne partiellement)
-- **Scan QR code** via caméra du téléphone
-- **GPS en temps réel** avec envoi de positions au backend via WebSocket
-- **Interface tactile** optimisée pour utilisation en extérieur
+- **Scan QR code** via caméra arrière (bibliothèque html5-qrcode, zone 250×250px)
+- **GPS en temps réel** : watchPosition → Socket.IO emit toutes les 10 secondes
+- **Interface tactile** : cibles tactiles ≥60px (utilisation avec gants), safe-area-insets pour encoches
+- **Retour haptique** (Vibration API) : `vibrateSuccess()` 100ms, `vibrateError()` pattern [100,50,200], `vibrateTap()` 30ms
+- **Barre de progression** (TourStepBar) : 8 étapes visuelles avec aperçu de l'étape suivante
+- **Pesée intermédiaire** : possibilité de peser en cours de tournée (mid-route)
+- **Calcul CO2** : poids total × 1.493 = CO2 économisé (affiché dans le résumé)
+- **QR indisponible** : 4 motifs (absent, illisible, endommagé, problème caméra), sélection manuelle du CAV
 
 ---
 
@@ -1107,5 +1334,31 @@ SELECT * FROM settings ORDER BY category, key;
 
 ---
 
-*Document généré le 8 mars 2026 — SOLIDATA ERP v1.0.0*
-*Pour toute question technique : consulter le dépôt GitHub ou contacter l'équipe de développement.*
+---
+
+## 22. Historique de construction
+
+| Date | Version | Changements majeurs |
+|------|---------|---------------------|
+| 8 mars 2026 | 1.0.0 | Version initiale — 15 modules, 37 tables, 22 routes, 28 pages web, 11 pages mobile. Modules : auth, recrutement, PCM, RH, collecte, tri, production, stock, expéditions, facturation, reporting, Refashion, IA prédictive, insertion, notifications |
+| 10-15 mars 2026 | 1.1.0 | Module logistique exutoires complet : 7 pages web (commandes, préparation, Gantt, facturation, calendrier, clients, tarifs), 6 fichiers routes API, 4 tables BDD. Planning hebdomadaire par filière. Exécution tri avec batch tracking et colisages |
+| 16-18 mars 2026 | 1.1.x | Corrections UX mobile (Tailwind, touch targets). Dépannage SSL (symlinks cassés, chemin certbot suffixé). Tests de déploiement. Documentation déploiement enrichie |
+| 19 mars 2026 | 1.2.0 | **Fix moteur PCM** : immeuble avec Base toujours en fondation (étage 1), Q7 recatégorisée stress (au lieu de motivation), export PDF A4 (résultats + fiche technique avec réponses brutes). Route API `/api/pcm/profiles/:id/answers`. Documentation technique exhaustive (70+ tables, 36 routes, 44 pages). CLAUDE.md + prompts agents IA innovation |
+
+### Décisions d'architecture prises
+
+| Décision | Justification | Alternative considérée |
+|----------|---------------|----------------------|
+| PostgreSQL + PostGIS | Données géospatiales CAV + requêtes SQL complexes | MongoDB (rejeté : pas de support spatial natif performant) |
+| React SPA (pas SSR) | Application interne, pas de SEO nécessaire | Next.js (rejeté : surcharge pour un ERP interne) |
+| PWA mobile (pas natif) | Budget SIAE limité, une seule codebase web | React Native (rejeté : maintenance double) |
+| Socket.IO | Temps réel GPS + notifications simples | WebSocket brut (rejeté : pas de reconnexion auto) |
+| JWT (pas sessions) | API stateless, compatible mobile | Sessions express (rejeté : pas adapté mobile + API) |
+| Docker Compose | Déploiement simple sur un seul serveur | Kubernetes (rejeté : trop complexe pour 1 serveur) |
+| AES-256 pour PCM | Données psychologiques sensibles (RGPD) | Chiffrement BDD natif (rejeté : granularité insuffisante) |
+| Redis | Cache + adapter Socket.IO multi-instance + jobs BullMQ | Aucun cache (rejeté : performances Socket.IO) |
+
+---
+
+*Document mis à jour le 19 mars 2026 — SOLIDATA ERP v1.2.0*
+*Pour toute question technique : consulter le dépôt GitHub ou le fichier CLAUDE.md pour le contexte IA.*

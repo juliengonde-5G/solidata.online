@@ -1,6 +1,6 @@
-# Documentation Applicative — SOLIDATA ERP v2.0
+# Documentation Applicative — SOLIDATA ERP v1.2.0
 
-> **Version** : 2.0 | **Date** : 2026-03-15
+> **Version** : 1.2.0 | **Date** : 2026-03-19
 > **Éditeur** : Solidarité Textile — Rouen, Normandie
 > **URL** : https://solidata.online | **Mobile** : https://m.solidata.online
 
@@ -103,14 +103,16 @@ Le dashboard centralise les indicateurs clés :
 **API** : `backend/src/routes/candidates.js` (55 Ko)
 
 **Fonctionnalités** :
-- **Kanban Board** : 4 colonnes (Reçus → Entretien → Recrutés → Refusés)
+- **Kanban Board** : 4 colonnes (Reçus → Entretien → Recrutés → Refusés) avec drag & drop
 - **Upload CV** : PDF/DOC/DOCX, 10 Mo max, extraction texte automatique
 - **Parsing compétences** : Détection automatique des compétences depuis le CV (skill_keywords)
 - **Historique** : Traçabilité de chaque changement de statut avec date et utilisateur
+- **Conversion employé** : Bouton "Créer un employé" disponible sur les candidats recrutés (statut hired)
 - **Onglets conditionnels par statut** :
-  - Reçu : Infos générales, CV
-  - Entretien : + Entretien structuré, Mises en situation
-  - Recruté : + Livret d'accueil, Documents
+  - Reçu : Fiche, Historique
+  - Entretien : + Entretien structuré, Mise en situation, PCM, Documents
+  - Recruté : + Entretien structuré, Mise en situation, PCM, Documents
+  - Refusé : Fiche, Historique uniquement
 - **Recherche/filtre** : Par statut, compétences, date, poste
 
 #### 2.2.2 Plan de Recrutement
@@ -126,14 +128,37 @@ Le dashboard centralise les indicateurs clés :
 #### 2.2.3 Matrice PCM (Process Communication Model)
 **Route** : `/pcm` | **Rôles** : ADMIN, RH
 **Fichier** : `frontend/src/pages/PersonalityMatrix.jsx`
+**Test** : `frontend/src/pages/PCMTest.jsx`
 **API** : `backend/src/routes/pcm.js` (40 Ko)
 
 **Fonctionnalités** :
-- Test interactif de personnalité (30 questions)
-- 6 profils : Empathique, Travaillomane, Persévérant, Rêveur, Promoteur, Rebelle
-- Profil graphique radar
-- Alertes de risque (profils extrêmes)
-- Rapports chiffrés stockés en base
+- Test interactif de personnalité (**20 questions**, 4 choix par question)
+- **6 types** : Analyseur, Persévérant, Empathique, Imagineur, Énergiseur, Promoteur
+- **Scoring pondéré** sur 5 catégories : perception, style de management, canal de communication, motivation, stress
+- **Base** (type fondamental, stable) et **Phase** (type actif, peut évoluer) identifiés automatiquement
+  - Base = type dominant dans les catégories perception + style management + canal communication (poids total 17.5)
+  - Phase = type dominant dans les catégories motivation + stress (poids total 25)
+- **Immeuble PCM** : visualisation en bâtiment (barres horizontales), Base toujours à l'étage 1 (fondation)
+- **Profil graphique radar** : 6 axes avec scores normalisés 0-100 %
+- **Alertes RPS** : détection automatique de risques psychosociaux si le score stress de la Phase dépasse 75 %
+- **Guide Manager** : comportements recommandés (DO) et à éviter (DON'T) par type de base
+- **Accessibilité FALC** : descriptions en Facile à Lire et à Comprendre pour chaque type
+- **Export PDF A4** : deux exports disponibles depuis la page profil :
+  - *Export résultats* : page de synthèse avec immeuble, base/phase, comportements, guide manager, niveaux de stress
+  - *Fiche technique* : tableau des scores bruts + détail des 20 réponses groupées par catégorie
+- **Chiffrement** : données sensibles chiffrées AES-256 en base (profils PCM)
+- Rapports chiffrés stockés en base (table `pcm_reports`)
+
+**API PCM** :
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| GET | `/api/pcm/questionnaire` | Retourne les 20 questions |
+| GET | `/api/pcm/types` | Référentiel des 6 types PCM |
+| GET | `/api/pcm/types/:typeKey` | Détail d'un type |
+| POST | `/api/pcm/evaluate` | Évaluer les réponses et générer le profil |
+| GET | `/api/pcm/profiles/:candidateId` | Profil PCM d'un candidat |
+| GET | `/api/pcm/profiles/:candidateId/answers` | Réponses brutes enrichies (texte question, catégorie, libellé réponse) |
+| DELETE | `/api/pcm/:candidateId` | Supprimer le profil PCM |
 
 ### 2.3 Gestion d'Équipe
 
@@ -166,11 +191,13 @@ Le dashboard centralise les indicateurs clés :
 **Route** : `/insertion` | **Rôles** : ADMIN, RH, MANAGER
 **API** : `backend/src/routes/insertion.js` (98 Ko)
 
-- Création de parcours CDDI
-- Définition d'objectifs par domaine
-- Évaluations périodiques avec notation
-- Suivi de progression (graphiques)
-- Clôture de parcours avec bilan
+- Création de parcours CDDI avec diagnostic initial
+- **3 jalons obligatoires** : M1 (1 mois), M6 (6 mois), M12 (12 mois) — évaluations planifiées automatiquement
+- **Radar 7 freins périphériques** : logement, mobilité, santé, administratif, financier, familial, justice — notation 1 à 5 par frein, visualisation radar
+- **Plans d'action CIP** : le Conseiller en Insertion Professionnelle définit des actions correctives par frein identifié
+- **Alertes entretien** : rappels automatiques avant chaque jalon
+- Suivi de progression (graphiques d'évolution)
+- Clôture de parcours avec bilan exportable
 
 #### 2.3.5 Planning Hebdomadaire
 **Route** : `/planning-hebdo` | **Rôles** : ADMIN, MANAGER
@@ -209,7 +236,7 @@ Le dashboard centralise les indicateurs clés :
 
 #### 2.4.4 Remplissage CAV
 **Route** : `/fill-rate` | **Rôles** : ADMIN, MANAGER
-**API** : `backend/src/routes/fill-rate.js`
+**API** : `backend/src/routes/cav.js` (intégré aux routes CAV)
 
 - Tableau de bord taux de remplissage par CAV
 - Historique graphique (Recharts)
@@ -235,16 +262,16 @@ Le dashboard centralise les indicateurs clés :
 - Rendement par chaîne de tri
 
 #### 2.5.2 Chaînes de Tri
-**Route** : `/sorting-chains` | **Rôles** : ADMIN, MANAGER
-**API** : `backend/src/routes/sorting-chains.js`
+**Route** : `/chaine-tri` | **Rôles** : ADMIN, MANAGER
+**API** : `backend/src/routes/tri.js`
 
 - Configuration des chaînes de tri
 - Affectation collaborateurs par chaîne
 - Suivi performance par chaîne
 
 #### 2.5.3 Stocks
-**Route** : `/stock-mp` (matières premières), `/finished-products` (produits finis)
-**API** : `backend/src/routes/stock.js`
+**Route** : `/stock` (matières premières), `/produits-finis` (produits finis)
+**API** : `backend/src/routes/stock.js`, `backend/src/routes/produits-finis.js`
 
 - Mouvements de stock (entrée/sortie) avec traçabilité
 - Stock par catégorie et qualité
@@ -252,8 +279,8 @@ Le dashboard centralise les indicateurs clés :
 - Historique mouvements
 
 #### 2.5.4 Expéditions
-**Route** : `/shipments` | **Rôles** : ADMIN, MANAGER
-**API** : `backend/src/routes/shipments.js`
+**Route** : `/expeditions` | **Rôles** : ADMIN, MANAGER
+**API** : `backend/src/routes/expeditions.js`
 
 - Suivi des expéditions vers exutoires
 - Traçabilité par lot
@@ -579,7 +606,7 @@ bash deploy/scripts/restore.sh /backups/daily/solidata_20260315_020000.dump.gz
 ### 6.6 Monitoring
 
 **health-check.sh** vérifie toutes les 5 minutes :
-- Statut des 5 containers (db, backend, frontend, mobile, nginx)
+- Statut des 7 containers (db, backend, frontend, mobile, nginx, redis, certbot)
 - Réponses HTTP (frontend 200, API 401, mobile 200)
 - Espace disque (alerte 80 %, critique 90 %)
 - Mémoire utilisée
@@ -645,4 +672,4 @@ Toutes les opérations sont effectuées dans une **transaction ACID** avec rollb
 
 ---
 
-*Documentation générée le 2026-03-15. Basée sur l'audit complet du codebase SOLIDATA v2.0.*
+*Documentation applicative SOLIDATA ERP v1.2.0 — Solidarité Textile, Rouen — 19 mars 2026.*
