@@ -235,34 +235,42 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/commandes-exutoires
 router.post('/', async (req, res) => {
+  const client = await pool.connect();
   try {
     const { client_id, type_produit, date_commande, prix_tonne, tonnage_prevu, frequence, date_fin_recurrence, notes } = req.body;
 
     if (!client_id || !type_produit || !date_commande || !prix_tonne) {
+      client.release();
       return res.status(400).json({ error: 'Champs obligatoires : client_id, type_produit, date_commande, prix_tonne' });
     }
 
     // Normalize type_produit to array
     const types = Array.isArray(type_produit) ? type_produit : [type_produit];
 
+    await client.query('BEGIN');
+
     const reference = await generateReference();
 
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO commandes_exutoires (reference, client_id, type_produit, date_commande, prix_tonne, tonnage_prevu, frequence, date_fin_recurrence, notes, statut)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'en_attente') RETURNING *`,
       [reference, client_id, types, date_commande, prix_tonne, tonnage_prevu || null, frequence || 'unique', date_fin_recurrence || null, notes || null]
     );
 
-    await pool.query(
+    await client.query(
       `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, utilisateur_id)
        VALUES ($1, $2, $3, $4)`,
       [result.rows[0].id, null, 'en_attente', req.user.id]
     );
 
+    await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[COMMANDES-EXUTOIRES] Erreur creation :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
@@ -302,43 +310,58 @@ router.put('/:id', async (req, res) => {
 
 // PATCH /api/commandes-exutoires/:id/statut
 router.patch('/:id/statut', async (req, res) => {
+  const client = await pool.connect();
   try {
     const { statut, commentaire } = req.body;
 
     if (!statut || !STATUTS_VALIDES.includes(statut)) {
+      client.release();
       return res.status(400).json({ error: `Statut invalide. Valeurs acceptees : ${STATUTS_VALIDES.join(', ')}` });
     }
 
-    const current = await pool.query('SELECT statut FROM commandes_exutoires WHERE id = $1', [req.params.id]);
+    await client.query('BEGIN');
+
+    const current = await client.query('SELECT statut FROM commandes_exutoires WHERE id = $1', [req.params.id]);
     if (current.rows.length === 0) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(404).json({ error: 'Commande exutoire non trouvee' });
     }
 
     const ancienStatut = current.rows[0].statut;
 
-    const result = await pool.query(
+    const result = await client.query(
       'UPDATE commandes_exutoires SET statut = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
       [statut, req.params.id]
     );
 
-    await pool.query(
+    await client.query(
       `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, commentaire, utilisateur_id)
        VALUES ($1, $2, $3, $4, $5)`,
       [req.params.id, ancienStatut, statut, commentaire || null, req.user.id]
     );
 
+    await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[COMMANDES-EXUTOIRES] Erreur changement statut :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
 // PATCH /api/commandes-exutoires/:id/annuler
 router.patch('/:id/annuler', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const current = await pool.query('SELECT statut FROM commandes_exutoires WHERE id = $1', [req.params.id]);
+    await client.query('BEGIN');
+
+    const current = await client.query('SELECT statut FROM commandes_exutoires WHERE id = $1', [req.params.id]);
     if (current.rows.length === 0) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(404).json({ error: 'Commande exutoire non trouvee' });
     }
 
@@ -346,24 +369,30 @@ router.patch('/:id/annuler', async (req, res) => {
     const statutsNonAnnulables = ['expediee', 'pesee_recue', 'facturee', 'cloturee'];
 
     if (statutsNonAnnulables.includes(ancienStatut)) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(400).json({ error: `Impossible d'annuler une commande au statut "${ancienStatut}"` });
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       'UPDATE commandes_exutoires SET statut = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
       ['annulee', req.params.id]
     );
 
-    await pool.query(
+    await client.query(
       `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, commentaire, utilisateur_id)
        VALUES ($1, $2, $3, $4, $5)`,
       [req.params.id, ancienStatut, 'annulee', 'Annulation de la commande', req.user.id]
     );
 
+    await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[COMMANDES-EXUTOIRES] Erreur annulation :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

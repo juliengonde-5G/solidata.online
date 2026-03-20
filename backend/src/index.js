@@ -133,6 +133,7 @@ app.use('/api/controles-pesee', require('./routes/controles-pesee'));
 app.use('/api/factures-exutoires', require('./routes/factures-exutoires'));
 app.use('/api/calendrier-logistique', require('./routes/calendrier-logistique'));
 app.use('/api/planning-hebdo', require('./routes/planning-hebdo'));
+app.use('/api/dashboard', require('./routes/dashboard'));
 
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');

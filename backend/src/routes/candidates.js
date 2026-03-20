@@ -1032,20 +1032,23 @@ router.get('/:id/history', authorize('ADMIN', 'RH'), async (req, res) => {
 
 // POST /api/candidates/:id/convert-to-employee — Convertir candidat en employé
 router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, res) => {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
     const { team_id, position, contract_type, contract_start, weekly_hours } = req.body;
 
     // Vérifier que le candidat existe et est au statut 'hired'
-    const candidate = await pool.query('SELECT * FROM candidates WHERE id = $1', [id]);
-    if (candidate.rows.length === 0) return res.status(404).json({ error: 'Candidat non trouvé' });
+    const candidate = await client.query('SELECT * FROM candidates WHERE id = $1', [id]);
+    if (candidate.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Candidat non trouvé' }); }
     if (candidate.rows[0].status !== 'hired') {
+      client.release();
       return res.status(400).json({ error: 'Le candidat doit être au statut "hired" pour être converti' });
     }
 
     // Vérifier qu'il n'est pas déjà converti
-    const existing = await pool.query('SELECT id FROM employees WHERE candidate_id = $1', [id]);
+    const existing = await client.query('SELECT id FROM employees WHERE candidate_id = $1', [id]);
     if (existing.rows.length > 0) {
+      client.release();
       return res.status(409).json({ error: 'Ce candidat a déjà été converti en employé', employee_id: existing.rows[0].id });
     }
 
@@ -1053,18 +1056,21 @@ router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, re
 
     // Vérifier que le candidat a un nom/prénom
     if (!c.first_name || !c.last_name) {
+      client.release();
       return res.status(400).json({ error: 'Le candidat doit avoir un prénom et un nom avant d\'être converti. Complétez sa fiche.' });
     }
 
+    await client.query('BEGIN');
+
     // Récupérer les compétences confirmées du candidat
-    const skillsResult = await pool.query(
+    const skillsResult = await client.query(
       "SELECT skill_name FROM candidate_skills WHERE candidate_id = $1 AND status IN ('confirmed', 'detected')",
       [id]
     );
     const skills = skillsResult.rows.map(r => r.skill_name);
 
     // Créer l'employé avec les données du candidat
-    const employee = await pool.query(
+    const employee = await client.query(
       `INSERT INTO employees (candidate_id, first_name, last_name, phone, email,
        team_id, position, contract_type, contract_start, has_permis_b, has_caces,
        weekly_hours, skills)
@@ -1077,10 +1083,12 @@ router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, re
     );
 
     // Logger dans l'historique du candidat
-    await pool.query(
+    await client.query(
       'INSERT INTO candidate_history (candidate_id, from_status, to_status, comment, changed_by) VALUES ($1, $2, $3, $4, $5)',
       [id, 'hired', 'converted', `Converti en employé #${employee.rows[0].id}`, req.user.id]
     );
+
+    await client.query('COMMIT');
 
     res.status(201).json({
       message: 'Candidat converti en employé avec succès',
@@ -1088,8 +1096,11 @@ router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, re
       skills_transferred: skills.length,
     });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[CANDIDATES] Erreur conversion :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
