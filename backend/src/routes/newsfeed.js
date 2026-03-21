@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 // Auto-create table
 (async () => {
@@ -58,7 +60,10 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/news — Creer un article (ADMIN/RH)
-router.post('/', authorize('ADMIN', 'RH'), async (req, res) => {
+router.post('/', authorize('ADMIN', 'RH'), [
+  body('category').isIn(['metier', 'local']).withMessage('Catégorie invalide (metier ou local)'),
+  body('title').notEmpty().withMessage('Titre requis'),
+], validate, async (req, res) => {
   try {
     const { category, title, summary, content, source_url, source_name, tags, is_pinned } = req.body;
     if (!category || !title) {

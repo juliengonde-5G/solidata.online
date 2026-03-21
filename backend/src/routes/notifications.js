@@ -2,11 +2,15 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'RH'));
 
 // POST /api/notifications/send — Envoyer une notification (SMS ou email via Brevo)
-router.post('/send', async (req, res) => {
+router.post('/send', [
+  body('template_id').isInt().withMessage('ID template requis'),
+], validate, async (req, res) => {
   try {
     const { template_id, recipient_email, recipient_phone, variables } = req.body;
 

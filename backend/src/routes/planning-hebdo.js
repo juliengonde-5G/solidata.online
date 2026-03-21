@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -290,7 +292,10 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/planning-hebdo/affecter — Affecter un employe a un poste sur un jour
-router.post('/affecter', async (req, res) => {
+router.post('/affecter', [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('date').notEmpty().withMessage('Date requise'),
+], validate, async (req, res) => {
   try {
     const { employee_id, date, poste_id, poste_code } = req.body;
     if (!employee_id || !date) {
@@ -394,10 +399,11 @@ router.delete('/affecter', async (req, res) => {
 });
 
 // POST /api/planning-hebdo/confirmer — Confirmer le planning de la semaine
-router.post('/confirmer', async (req, res) => {
+router.post('/confirmer', [
+  body('week_start').notEmpty().withMessage('Date de début de semaine requise'),
+], validate, async (req, res) => {
   try {
     const { week_start } = req.body;
-    if (!week_start) return res.status(400).json({ error: 'week_start requis' });
 
     const monday = new Date(week_start);
     const saturday = new Date(monday);

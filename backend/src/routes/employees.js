@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 // Upload photo
 const photoStorage = multer.diskStorage({
@@ -58,7 +60,10 @@ router.get('/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 });
 
 // POST /api/employees
-router.post('/', authorize('ADMIN', 'RH'), async (req, res) => {
+router.post('/', authorize('ADMIN', 'RH'), [
+  body('first_name').notEmpty().withMessage('Prénom requis'),
+  body('last_name').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { user_id, first_name, last_name, phone, email, team_id, position,
       contract_type, contract_start, contract_end, has_permis_b, has_caces, weekly_hours, skills, candidate_id } = req.body;
@@ -181,7 +186,11 @@ router.get('/schedule/planning', authorize('ADMIN', 'RH', 'MANAGER'), async (req
 });
 
 // POST /api/employees/schedule
-router.post('/schedule', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.post('/schedule', authorize('ADMIN', 'RH', 'MANAGER'), [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('date').notEmpty().withMessage('Date requise'),
+  body('status').notEmpty().withMessage('Statut requis'),
+], validate, async (req, res) => {
   try {
     const { employee_id, date, status, position_id, is_provisional } = req.body;
     if (!employee_id || !date || !status) {
@@ -220,7 +229,9 @@ router.put('/schedule/:id/confirm', authorize('ADMIN', 'RH'), async (req, res) =
 });
 
 // POST /api/employees/schedule/bulk — Planification en masse
-router.post('/schedule/bulk', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.post('/schedule/bulk', authorize('ADMIN', 'RH', 'MANAGER'), [
+  body('entries').isArray({ min: 1 }).withMessage('Liste d\'entrées requise'),
+], validate, async (req, res) => {
   try {
     const { entries } = req.body; // [{employee_id, date, status, position_id}]
     if (!entries || !entries.length) return res.status(400).json({ error: 'Entrées requises' });
@@ -280,7 +291,11 @@ router.get('/work-hours/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
 });
 
 // POST /api/employees/work-hours
-router.post('/work-hours', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.post('/work-hours', authorize('ADMIN', 'RH', 'MANAGER'), [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('date').notEmpty().withMessage('Date requise'),
+  body('hours_worked').isFloat({ min: 0 }).withMessage('Heures travaillées requises (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { employee_id, date, hours_worked, overtime_hours, type, notes } = req.body;
     if (!employee_id || !date || hours_worked === undefined) {
@@ -385,7 +400,10 @@ router.get('/:id/contracts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, re
   }
 });
 
-router.post('/:id/contracts', authorize('ADMIN', 'RH'), async (req, res) => {
+router.post('/:id/contracts', authorize('ADMIN', 'RH'), [
+  body('contract_type').notEmpty().withMessage('Type de contrat requis'),
+  body('start_date').notEmpty().withMessage('Date de début requise'),
+], validate, async (req, res) => {
   try {
     const { contract_type, duration_months, start_date, end_date, weekly_hours, team_id, position_id } = req.body;
     const empId = req.params.id;

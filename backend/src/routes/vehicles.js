@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 // Auto-create vehicle_maintenance tables
 (async () => {
@@ -94,10 +96,11 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/vehicles
-router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/', authorize('ADMIN', 'MANAGER'), [
+  body('registration').notEmpty().withMessage('Immatriculation requise'),
+], validate, async (req, res) => {
   try {
     const { registration, name, max_capacity_kg, team_id, current_km } = req.body;
-    if (!registration) return res.status(400).json({ error: 'Immatriculation requise' });
 
     const result = await pool.query(
       `INSERT INTO vehicles (registration, name, max_capacity_kg, team_id, current_km)
@@ -301,7 +304,9 @@ router.put('/:id/maintenance', authorize('ADMIN', 'MANAGER'), async (req, res) =
 });
 
 // POST /api/vehicles/:id/maintenance/resolve-alert — Résoudre une alerte
-router.post('/:id/maintenance/resolve-alert', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/:id/maintenance/resolve-alert', authorize('ADMIN', 'MANAGER'), [
+  body('alert_id').isInt().withMessage('ID alerte requis'),
+], validate, async (req, res) => {
   try {
     const { alert_id } = req.body;
     const result = await pool.query(

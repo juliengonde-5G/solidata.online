@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -41,7 +43,11 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/controles-pesee — Create controle with PDF upload
-router.post('/', upload.single('ticket_pesee'), async (req, res) => {
+router.post('/', upload.single('ticket_pesee'), [
+  body('commande_id').isInt().withMessage('ID commande requis'),
+  body('pesee_client').isFloat({ min: 0 }).withMessage('Pesée client requise (valeur numérique)'),
+  body('date_reception_ticket').notEmpty().withMessage('Date de réception du ticket requise'),
+], validate, async (req, res) => {
   try {
     const { commande_id, pesee_client, date_reception_ticket, notes } = req.body;
 

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -65,7 +67,11 @@ router.get('/summary', async (req, res) => {
 });
 
 // POST /api/stock
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('type').isIn(['entree', 'sortie']).withMessage('Type requis (entree ou sortie)'),
+  body('date').notEmpty().withMessage('Date requise'),
+  body('poids_kg').isFloat({ min: 0 }).withMessage('Poids requis (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { type, date, poids_kg, matiere_id, destination, notes, code_barre,
       origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id } = req.body;
@@ -101,7 +107,9 @@ router.get('/matieres', async (req, res) => {
 });
 
 // POST /api/stock/matieres
-router.post('/matieres', async (req, res) => {
+router.post('/matieres', [
+  body('categorie').notEmpty().withMessage('Catégorie requise'),
+], validate, async (req, res) => {
   try {
     const { categorie, sous_categorie, qualite, destination_possible } = req.body;
     const result = await pool.query(

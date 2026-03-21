@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -57,7 +59,10 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/billing
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('client_name').notEmpty().withMessage('Nom du client requis'),
+  body('date').notEmpty().withMessage('Date requise'),
+], validate, async (req, res) => {
   try {
     const { client_name, client_address, client_email, date, due_date, notes, lines } = req.body;
     if (!client_name || !date) return res.status(400).json({ error: 'Client et date requis' });
@@ -107,7 +112,9 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/billing/:id/status
-router.put('/:id/status', async (req, res) => {
+router.put('/:id/status', [
+  body('status').isIn(['draft', 'sent', 'paid', 'overdue', 'cancelled']).withMessage('Statut invalide'),
+], validate, async (req, res) => {
   try {
     const { status } = req.body;
     const validStatuses = ['draft', 'sent', 'paid', 'overdue', 'cancelled'];

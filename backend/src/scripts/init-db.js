@@ -1992,6 +1992,83 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Module Parcours Recrutement (entretien + mise en situation + documents) ✓');
 
+    // ══════════════════════════════════════════
+    // MIGRATION : Vues matérialisées pour reporting
+    // ══════════════════════════════════════════
+    console.log('[INIT-DB] Migration vues matérialisées...');
+
+    // Vue matérialisée : KPIs collecte mensuels
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS mv_collecte_mensuelle AS
+      SELECT
+        TO_CHAR(date, 'YYYY-MM') as mois,
+        COUNT(*) as nb_tours,
+        ROUND(SUM(total_weight_kg)::numeric, 1) as total_kg,
+        ROUND(AVG(total_weight_kg)::numeric, 1) as avg_kg_tour,
+        COUNT(DISTINCT driver_id) as nb_chauffeurs
+      FROM tours
+      WHERE status = 'completed'
+      GROUP BY TO_CHAR(date, 'YYYY-MM')
+      ORDER BY mois;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_collecte_mois ON mv_collecte_mensuelle(mois);
+    `);
+
+    // Vue matérialisée : KPIs production mensuels
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS mv_production_mensuelle AS
+      SELECT
+        TO_CHAR(date, 'YYYY-MM') as mois,
+        ROUND(SUM(total_jour_t)::numeric, 2) as total_trie_t,
+        ROUND(AVG(total_jour_t)::numeric, 2) as avg_jour_t,
+        COUNT(*) as nb_jours
+      FROM production_daily
+      GROUP BY TO_CHAR(date, 'YYYY-MM')
+      ORDER BY mois;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_production_mois ON mv_production_mensuelle(mois);
+    `);
+
+    // Vue matérialisée : statistiques CAV
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS mv_cav_stats AS
+      SELECT
+        c.id as cav_id,
+        c.name,
+        c.commune,
+        c.status,
+        COUNT(DISTINCT tc.tour_id) as nb_collectes_total,
+        ROUND(AVG(tw.weight_kg)::numeric, 1) as avg_weight_kg,
+        MAX(t.date) as derniere_collecte,
+        COUNT(DISTINCT tc.tour_id) FILTER (WHERE t.date >= NOW() - INTERVAL '90 days') as nb_collectes_90j
+      FROM cav c
+      LEFT JOIN tour_cav tc ON tc.cav_id = c.id
+      LEFT JOIN tours t ON tc.tour_id = t.id AND t.status = 'completed'
+      LEFT JOIN tour_weights tw ON tw.tour_id = t.id AND tw.cav_id = c.id
+      GROUP BY c.id, c.name, c.commune, c.status;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_cav_stats_id ON mv_cav_stats(cav_id);
+    `);
+
+    // Vue matérialisée : KPIs RH
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS mv_rh_stats AS
+      SELECT
+        TO_CHAR(CURRENT_DATE, 'YYYY-MM') as mois,
+        COUNT(*) FILTER (WHERE is_active = true) as nb_actifs,
+        COUNT(*) FILTER (WHERE insertion_status = 'en_parcours') as nb_en_parcours,
+        COUNT(*) FILTER (WHERE insertion_status = 'termine') as nb_insertion_termines
+      FROM employees;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_rh_stats_mois ON mv_rh_stats(mois);
+    `);
+
+    console.log('[INIT-DB] Vues matérialisées créées ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

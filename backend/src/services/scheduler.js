@@ -487,6 +487,44 @@ async function releaseLock() {
   }
 }
 
+/**
+ * Purge automatique GPS — Supprime les positions > 90 jours (rétention RGPD)
+ */
+async function purgeOldGpsPositions() {
+  try {
+    // Keep GPS data for 90 days, delete older positions
+    const result = await pool.query(
+      `DELETE FROM gps_positions WHERE recorded_at < NOW() - INTERVAL '90 days'`
+    );
+    if (result.rowCount > 0) {
+      console.log(`[SCHEDULER] GPS: ${result.rowCount} position(s) supprimée(s) (> 90 jours)`);
+      // Log RGPD audit
+      await pool.query(
+        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
+         VALUES (NULL, 'AUTO_PURGE_GPS_90D', 'gps_positions', 0, $1)`,
+        [JSON.stringify({ rows_deleted: result.rowCount, retention_days: 90 })]
+      );
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur purgeOldGpsPositions:', err.message);
+  }
+}
+
+/**
+ * Rafraîchissement des vues matérialisées pour le reporting
+ */
+async function refreshMaterializedViews() {
+  try {
+    const views = ['mv_collecte_mensuelle', 'mv_production_mensuelle', 'mv_cav_stats', 'mv_rh_stats'];
+    for (const view of views) {
+      await pool.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY ${view}`);
+    }
+    console.log('[SCHEDULER] Vues matérialisées rafraîchies');
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur refreshMaterializedViews:', err.message);
+  }
+}
+
 // ══════════════════════════════════════════
 // ORCHESTRATEUR
 // ══════════════════════════════════════════
@@ -528,6 +566,8 @@ async function runAllJobs() {
     await checkVehicleMaintenance();
     await autoFeedNews();
     await purgeExpiredCandidates();
+    await purgeOldGpsPositions();
+    await refreshMaterializedViews();
     console.log('[SCHEDULER] Tous les jobs executes');
   } catch (err) {
     console.error('[SCHEDULER] Erreur globale:', err.message);

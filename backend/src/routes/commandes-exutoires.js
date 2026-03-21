@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -234,15 +236,15 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/commandes-exutoires
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('client_id').isInt().withMessage('ID client requis'),
+  body('type_produit').notEmpty().withMessage('Type de produit requis'),
+  body('date_commande').notEmpty().withMessage('Date de commande requise'),
+  body('prix_tonne').isFloat({ min: 0 }).withMessage('Prix par tonne requis (valeur numérique)'),
+], validate, async (req, res) => {
   const client = await pool.connect();
   try {
     const { client_id, type_produit, date_commande, prix_tonne, tonnage_prevu, frequence, date_fin_recurrence, notes } = req.body;
-
-    if (!client_id || !type_produit || !date_commande || !prix_tonne) {
-      client.release();
-      return res.status(400).json({ error: 'Champs obligatoires : client_id, type_produit, date_commande, prix_tonne' });
-    }
 
     // Normalize type_produit to array
     const types = Array.isArray(type_produit) ? type_produit : [type_produit];
@@ -309,7 +311,9 @@ router.put('/:id', async (req, res) => {
 });
 
 // PATCH /api/commandes-exutoires/:id/statut
-router.patch('/:id/statut', async (req, res) => {
+router.patch('/:id/statut', [
+  body('statut').isIn(['en_attente', 'confirmee', 'en_preparation', 'expediee', 'pesee_recue', 'facturee', 'cloturee', 'annulee']).withMessage('Statut invalide'),
+], validate, async (req, res) => {
   const client = await pool.connect();
   try {
     const { statut, commentaire } = req.body;

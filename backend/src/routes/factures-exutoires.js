@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -93,7 +95,9 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/factures-exutoires
-router.post('/', upload.single('facture'), async (req, res) => {
+router.post('/', upload.single('facture'), [
+  body('commande_id').isInt().withMessage('ID commande requis'),
+], validate, async (req, res) => {
   try {
     const { commande_id } = req.body;
 

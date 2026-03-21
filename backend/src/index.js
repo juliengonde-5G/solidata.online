@@ -9,6 +9,8 @@ const { Server } = require('socket.io');
 const pool = require('./config/database');
 const logger = require('./config/logger');
 
+const cookieParser = require('cookie-parser');
+
 const app = express();
 const server = http.createServer(app);
 
@@ -63,6 +65,7 @@ app.use(helmet({
   },
 }));
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -134,6 +137,9 @@ app.use('/api/factures-exutoires', require('./routes/factures-exutoires'));
 app.use('/api/calendrier-logistique', require('./routes/calendrier-logistique'));
 app.use('/api/planning-hebdo', require('./routes/planning-hebdo'));
 app.use('/api/dashboard', require('./routes/dashboard'));
+
+// Module ML : prédiction remplissage CAV
+app.use('/api/ml', require('./routes/ml'));
 
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');

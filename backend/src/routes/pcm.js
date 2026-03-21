@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const CryptoJS = require('crypto-js');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 // ══════════════════════════════════════════════════════════════
 // MOTEUR PCM (Process Communication Model) — Kahler 2024
@@ -648,12 +650,12 @@ router.get('/types/:typeKey', (req, res) => {
 });
 
 // POST /api/pcm/sessions — Créer une session de test
-router.post('/sessions', authenticate, authorize('ADMIN', 'RH'), async (req, res) => {
+router.post('/sessions', authenticate, authorize('ADMIN', 'RH'), [
+  body('candidate_id').isInt().withMessage('ID candidat requis'),
+  body('mode').notEmpty().withMessage('Mode requis'),
+], validate, async (req, res) => {
   try {
     const { candidate_id, mode } = req.body;
-    if (!candidate_id || !mode) {
-      return res.status(400).json({ error: 'candidate_id et mode requis' });
-    }
 
     const accessToken = crypto.randomBytes(32).toString('hex');
 
@@ -718,7 +720,9 @@ router.get('/sessions/:token', async (req, res) => {
 });
 
 // POST /api/pcm/submit — Soumettre les réponses et calculer le profil
-router.post('/submit', async (req, res) => {
+router.post('/submit', [
+  body('answers').isArray({ min: 15 }).withMessage('Minimum 15 réponses requises'),
+], validate, async (req, res) => {
   try {
     const { session_id, access_token, answers } = req.body;
 
