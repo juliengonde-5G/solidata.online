@@ -10,4 +10,6 @@ module.exports = {
   ],
   setupFiles: [],
   testTimeout: 10000,
+  forceExit: true,
+  silent: true,
 };

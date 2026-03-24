@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -49,7 +51,10 @@ router.get('/summary', async (req, res) => {
 });
 
 // POST /api/produits-finis
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('code_barre').notEmpty().withMessage('Code-barres requis'),
+  body('poids_kg').isFloat({ min: 0 }).withMessage('Poids requis (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
       poids_kg, date_fabrication, poste_id } = req.body;

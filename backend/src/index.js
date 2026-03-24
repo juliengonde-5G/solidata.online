@@ -7,6 +7,9 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { Server } = require('socket.io');
 const pool = require('./config/database');
+const logger = require('./config/logger');
+
+const cookieParser = require('cookie-parser');
 
 const app = express();
 const server = http.createServer(app);
@@ -36,9 +39,9 @@ const io = new Server(server, {
       new Promise((resolve, reject) => { subClient.on('ready', resolve); subClient.on('error', reject); }),
     ]);
     io.adapter(createAdapter(pubClient, subClient));
-    console.log('[SOCKET.IO] Redis adapter activé (multi-instance OK)');
+    logger.info('Socket.IO Redis adapter activé (multi-instance OK)');
   } catch (err) {
-    console.warn('[SOCKET.IO] Redis non disponible, mode single-instance :', err.message);
+    logger.warn('Socket.IO Redis non disponible, mode single-instance', { error: err.message });
   }
 })();
 
@@ -46,8 +49,23 @@ const io = new Server(server, {
 app.set('trust proxy', 1);
 
 // Middleware globaux
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://unpkg.com'],
+      connectSrc: ["'self'", 'wss:', 'ws:', 'https://api.open-meteo.com'],
+      frameSrc: ["'none'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+    },
+  },
+}));
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -59,12 +77,12 @@ app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { e
 // Créer dossiers uploads (évite 502 si multer ne peut pas créer)
 const fs = require('fs');
 const uploadsDir = path.join(__dirname, '..', 'uploads');
-['', 'cv', 'photos', 'incidents', 'qrcodes'].forEach((sub) => {
+['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents'].forEach((sub) => {
   const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
   try {
     fs.mkdirSync(dir, { recursive: true });
   } catch (err) {
-    console.warn('[INIT] Impossible de créer le dossier', dir, ':', err.message);
+    logger.warn('Impossible de créer le dossier', { dir, error: err.message });
   }
 });
 app.use('/uploads', express.static(uploadsDir));
@@ -118,6 +136,10 @@ app.use('/api/controles-pesee', require('./routes/controles-pesee'));
 app.use('/api/factures-exutoires', require('./routes/factures-exutoires'));
 app.use('/api/calendrier-logistique', require('./routes/calendrier-logistique'));
 app.use('/api/planning-hebdo', require('./routes/planning-hebdo'));
+app.use('/api/dashboard', require('./routes/dashboard'));
+
+// Module ML : prédiction remplissage CAV
+app.use('/api/ml', require('./routes/ml'));
 
 // Lot 6 : Pointage / Badgeage
 app.use('/api/pointage', require('./routes/pointage'));
@@ -175,6 +197,10 @@ app.use(errorHandler);
 // ══════════════════════════════════════════
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
+if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change-this-in-production') {
+  logger.error('FATAL: JWT_SECRET non configuré en production. Arrêt immédiat.');
+  process.exit(1);
+}
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.query?.token;
@@ -191,12 +217,12 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  console.log(`[SOCKET] Client connecté : ${socket.id} (user: ${socket.user?.id})`);
+  logger.debug(`Socket client connecté: ${socket.id}`, { userId: socket.user?.id });
 
   // Le chauffeur rejoint la room de sa tournée
   socket.on('join-tour', (tourId) => {
     socket.join(`tour-${tourId}`);
-    console.log(`[SOCKET] ${socket.id} rejoint tour-${tourId}`);
+    logger.debug(`Socket ${socket.id} rejoint tour-${tourId}`);
   });
 
   // Position GPS du chauffeur
@@ -212,7 +238,7 @@ io.on('connection', (socket) => {
         tourId, vehicleId, latitude, longitude, speed, timestamp: new Date(),
       });
     } catch (err) {
-      console.error('[SOCKET] Erreur GPS :', err);
+      logger.error('Erreur GPS Socket.IO', { error: err.message });
     }
   });
 
@@ -227,7 +253,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log(`[SOCKET] Client déconnecté : ${socket.id}`);
+    logger.debug(`Socket client déconnecté: ${socket.id}`);
   });
 });
 
@@ -238,18 +264,18 @@ async function initOnStartup() {
   try {
     // Vérifier la connexion
     await pool.query('SELECT 1');
-    console.log('[DB] Connexion PostgreSQL établie');
+    logger.info('Connexion PostgreSQL établie');
 
     // Vérifier si les tables existent
     const tables = await pool.query(
       "SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'public'"
     );
     if (parseInt(tables.rows[0].count) < 5) {
-      console.log('[DB] Tables manquantes, lancement init-db...');
+      logger.info('Tables manquantes, lancement init-db...');
       const { initDatabase } = require('./scripts/init-db');
       await initDatabase();
     } else {
-      console.log(`[DB] ${tables.rows[0].count} tables trouvées`);
+      logger.info(`${tables.rows[0].count} tables trouvées`);
       // Toujours appliquer les migrations de colonnes (idempotent)
       try {
         await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_distance_km DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
@@ -257,53 +283,53 @@ async function initOnStartup() {
         await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN nb_cav INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
         await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN ai_explanation TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
         await pool.query(`DO $$ BEGIN ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
-        console.log('[DB] Migrations de colonnes vérifiées ✓');
-      } catch (e) { console.warn('[DB] Migration warning:', e.message); }
+        logger.info('Migrations de colonnes vérifiées');
+      } catch (e) { logger.warn('Migration warning', { error: e.message }); }
 
       // Migration module Exutoires (idempotent)
       try {
         const { migrateExutoires } = require('./scripts/migrate-exutoires');
         await migrateExutoires();
-        console.log('[DB] Migration Exutoires vérifiée ✓');
-      } catch (e) { console.warn('[DB] Migration Exutoires warning:', e.message); }
+        logger.info('Migration Exutoires vérifiée');
+      } catch (e) { logger.warn('Migration Exutoires warning', { error: e.message }); }
     }
 
     // Seed CAV si la table est vide
     try {
       const cavCount = await pool.query('SELECT COUNT(*) FROM cav');
       if (parseInt(cavCount.rows[0].count) === 0) {
-        console.log('[DB] Table CAV vide, lancement du seed...');
+        logger.info('Table CAV vide, lancement du seed...');
         const { seedCAV } = require('./scripts/seed-cav');
         await seedCAV(pool);
       } else {
-        console.log(`[DB] ${cavCount.rows[0].count} CAV déjà en base`);
+        logger.info(`${cavCount.rows[0].count} CAV déjà en base`);
       }
     } catch (err) {
-      console.error('[DB] Erreur seed CAV :', err.message);
+      logger.error('Erreur seed CAV', { error: err.message });
     }
 
     // Cleanup expired refresh tokens
     try {
       const cleaned = await pool.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
-      if (cleaned.rowCount > 0) console.log(`[DB] ${cleaned.rowCount} refresh tokens expires purges`);
+      if (cleaned.rowCount > 0) logger.info(`${cleaned.rowCount} refresh tokens expirés purgés`);
     } catch (err) { /* table may not exist yet */ }
 
     // Seed historique si la table est vide
     try {
       const histCount = await pool.query('SELECT COUNT(*) FROM historique_mensuel');
       if (parseInt(histCount.rows[0].count) === 0) {
-        console.log('[DB] Table historique_mensuel vide, lancement du seed...');
+        logger.info('Table historique_mensuel vide, lancement du seed...');
         const { seedHistorique } = require('./scripts/seed-historique');
         await seedHistorique(pool);
       } else {
-        console.log(`[DB] ${histCount.rows[0].count} entrées historiques déjà en base`);
+        logger.info(`${histCount.rows[0].count} entrées historiques déjà en base`);
       }
     } catch (err) {
-      console.error('[DB] Erreur seed historique :', err.message);
+      logger.error('Erreur seed historique', { error: err.message });
     }
   } catch (err) {
-    console.error('[DB] Erreur connexion :', err.message);
-    console.log('[DB] Nouvelle tentative dans 5s...');
+    logger.error('Erreur connexion DB', { error: err.message });
+    logger.info('Nouvelle tentative dans 5s...');
     setTimeout(initOnStartup, 5000);
     return;
   }
@@ -312,13 +338,9 @@ async function initOnStartup() {
 // Démarrage serveur
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, async () => {
-  console.log(`\n══════════════════════════════════════════`);
-  console.log(`  SOLIDATA ERP - API Backend`);
-  console.log(`  Port : ${PORT}`);
-  console.log(`  Env  : ${process.env.NODE_ENV || 'development'}`);
-  console.log(`══════════════════════════════════════════\n`);
+  logger.info(`SOLIDATA ERP - API Backend démarré`, { port: PORT, env: process.env.NODE_ENV || 'development' });
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change-this-in-production') {
-    console.warn('[SECURITE] ATTENTION : JWT_SECRET non configure ! Definissez JWT_SECRET dans .env');
+    logger.warn('SECURITE: JWT_SECRET non configuré ! Définissez JWT_SECRET dans .env');
   }
   await initOnStartup();
 
@@ -327,7 +349,7 @@ server.listen(PORT, async () => {
     const { startScheduler } = require('./services/scheduler');
     startScheduler();
   } catch (err) {
-    console.error('[SCHEDULER] Erreur démarrage :', err.message);
+    logger.error('Scheduler erreur démarrage', { error: err.message });
   }
 
   // Initialiser les queues BullMQ (optionnel, dépend de Redis)
@@ -335,7 +357,7 @@ server.listen(PORT, async () => {
     const { initQueues } = require('./services/job-queue');
     await initQueues();
   } catch (err) {
-    console.warn('[JOB-QUEUE] Initialisation optionnelle échouée :', err.message);
+    logger.warn('Job-queue initialisation optionnelle échouée', { error: err.message });
   }
 });
 

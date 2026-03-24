@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate);
 
@@ -66,7 +68,9 @@ router.get('/chaines/:id', async (req, res) => {
 });
 
 // POST /api/tri/chaines
-router.post('/chaines', authorize('ADMIN'), async (req, res) => {
+router.post('/chaines', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { nom, description } = req.body;
     const result = await pool.query(
@@ -83,7 +87,10 @@ router.post('/chaines', authorize('ADMIN'), async (req, res) => {
 // ══════ OPÉRATIONS ══════
 
 // POST /api/tri/operations
-router.post('/operations', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/operations', authorize('ADMIN', 'MANAGER'), [
+  body('chaine_id').isInt().withMessage('ID chaîne requis'),
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { chaine_id, numero, nom, code, est_obligatoire, description } = req.body;
     const result = await pool.query(
@@ -101,7 +108,10 @@ router.post('/operations', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // ══════ POSTES ══════
 
 // POST /api/tri/postes
-router.post('/postes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/postes', authorize('ADMIN', 'MANAGER'), [
+  body('operation_id').isInt().withMessage('ID opération requis'),
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { operation_id, nom, code, est_obligatoire, permet_doublure, competences_requises } = req.body;
     const result = await pool.query(
@@ -119,7 +129,10 @@ router.post('/postes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // ══════ SORTIES ══════
 
 // POST /api/tri/sorties
-router.post('/sorties', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/sorties', authorize('ADMIN', 'MANAGER'), [
+  body('operation_id').isInt().withMessage('ID opération requis'),
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { operation_id, nom, type_sortie, operation_destination_id, categorie_sortante_id } = req.body;
     const result = await pool.query(
@@ -159,7 +172,10 @@ router.get('/categories-sortantes', async (req, res) => {
 // ══════ LOTS / BATCHES ══════
 
 // POST /api/tri/batches — Créer un lot à trier
-router.post('/batches', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/batches', authorize('ADMIN', 'MANAGER'), [
+  body('chaine_id').isInt().withMessage('ID chaîne requis'),
+  body('poids_initial_kg').isFloat({ min: 0 }).withMessage('Poids initial requis (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { stock_movement_id, chaine_id, poids_initial_kg } = req.body;
     if (!chaine_id || !poids_initial_kg) {
@@ -246,7 +262,10 @@ router.put('/batches/:id/start', authorize('ADMIN', 'MANAGER'), async (req, res)
 // ══════ EXÉCUTIONS D'OPÉRATIONS ══════
 
 // POST /api/tri/executions — Démarrer une opération sur un lot
-router.post('/executions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/executions', authorize('ADMIN', 'MANAGER'), [
+  body('batch_id').isInt().withMessage('ID lot requis'),
+  body('operation_id').isInt().withMessage('ID opération requis'),
+], validate, async (req, res) => {
   try {
     const { batch_id, operation_id, poids_entree_kg } = req.body;
     if (!batch_id || !operation_id) {
@@ -305,7 +324,10 @@ router.put('/executions/:id/complete', authorize('ADMIN', 'MANAGER'), async (req
 });
 
 // POST /api/tri/executions/:id/outputs — Ajouter une sortie à une opération
-router.post('/executions/:id/outputs', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/executions/:id/outputs', authorize('ADMIN', 'MANAGER'), [
+  body('sortie_id').isInt().withMessage('ID sortie requis'),
+  body('poids_kg').isFloat({ min: 0 }).withMessage('Poids requis (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { sortie_id, poids_kg, categorie_sortante_id, notes } = req.body;
     if (!sortie_id || !poids_kg) {
@@ -430,7 +452,9 @@ router.post('/colisages/:id/items', authorize('ADMIN', 'MANAGER'), async (req, r
 });
 
 // PUT /api/tri/colisages/:id/status — Changer le statut d'un colisage
-router.put('/colisages/:id/status', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/colisages/:id/status', authorize('ADMIN', 'MANAGER'), [
+  body('status').notEmpty().withMessage('Statut requis'),
+], validate, async (req, res) => {
   try {
     const { status, comment } = req.body;
     const validTransitions = {

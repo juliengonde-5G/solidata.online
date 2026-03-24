@@ -71,6 +71,7 @@ export default function CAVMap() {
           <div>
             <h1 className="text-2xl font-bold text-solidata-dark">Carte des CAV</h1>
             <p className="text-gray-500">{filtered.length} Conteneurs d'Apport Volontaire</p>
+            <p className="text-xs text-amber-600 italic mt-1">Taux de remplissage estimé par calcul algorithmique (remis à zéro après chaque collecte)</p>
           </div>
           <div className="flex gap-2 items-center">
             <select value={filterCommune} onChange={e => setFilterCommune(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
@@ -118,7 +119,7 @@ export default function CAVMap() {
                       <div className="text-xs">
                         <p className="font-bold">{cav.name}</p>
                         <p>{cav.commune}</p>
-                        <p>Remplissage estimé : {Math.round(fillRate)}%</p>
+                        <p>Remplissage estimé (algorithme) : {Math.round(fillRate)}%</p>
                         <p>Conteneurs : {cav.nb_containers || '—'}</p>
                       </div>
                     </Popup>

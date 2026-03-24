@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Html5Qrcode } from 'html5-qrcode';
+import { vibrateSuccess } from '../services/haptic';
 
 export default function QRScanner() {
   const [scanning, setScanning] = useState(true);
@@ -22,6 +23,7 @@ export default function QRScanner() {
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         (decodedText) => {
+          vibrateSuccess();
           setResult(decodedText);
           setScanning(false);
           stopScanner();
@@ -54,6 +56,7 @@ export default function QRScanner() {
       <header className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-3 bg-gray-900 text-white">
         <button
           type="button"
+          aria-label="Retour à la carte"
           onClick={() => { stopScanner(); navigate('/tour-map'); }}
           className="touch-target flex items-center justify-center rounded-xl text-white/80 hover:bg-white/10 text-sm font-medium"
         >
@@ -62,6 +65,7 @@ export default function QRScanner() {
         <h1 className="font-bold text-base">Scanner QR Code</h1>
         <button
           type="button"
+          aria-label="QR code absent, saisie manuelle"
           onClick={skipQR}
           className="touch-target flex items-center justify-center rounded-xl bg-white/20 hover:bg-white/30 text-sm font-medium px-4"
         >

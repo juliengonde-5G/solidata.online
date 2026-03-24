@@ -11,6 +11,7 @@ const hoverClass = 'hover:bg-slate-50';
 const menuSections = [
   {
     title: 'Accueil',
+    hubPath: '/',
     items: [
       { path: '/', label: 'Tableau de bord', icon: IconDashboard, roles: null },
       { path: '/news', label: 'Fil d\'actualité', icon: IconNews, roles: null },
@@ -18,6 +19,7 @@ const menuSections = [
   },
   {
     title: 'Recrutement',
+    hubPath: '/hub-recrutement',
     items: [
       { path: '/candidates', label: 'Candidats', icon: IconCandidates, roles: ['ADMIN', 'RH', 'MANAGER'] },
       { path: '/pcm', label: 'Matrice PCM', icon: IconBrain, roles: ['ADMIN', 'RH'] },
@@ -25,6 +27,7 @@ const menuSections = [
   },
   {
     title: 'Gestion Équipe',
+    hubPath: '/hub-equipe',
     items: [
       { path: '/employees', label: 'Collaborateurs', icon: IconTeam, roles: ['ADMIN', 'RH', 'MANAGER'] },
       { path: '/work-hours', label: 'Heures de travail', icon: IconClock, roles: ['ADMIN', 'RH'] },
@@ -36,6 +39,7 @@ const menuSections = [
   },
   {
     title: 'Collecte',
+    hubPath: '/hub-collecte',
     items: [
       { path: '/tours', label: 'Tournées', icon: IconTruck, roles: ['ADMIN', 'MANAGER'] },
       { path: '/collection-proposals', label: 'Propositions (IA)', icon: IconSparkles, roles: ['ADMIN', 'MANAGER'] },
@@ -46,6 +50,7 @@ const menuSections = [
   },
   {
     title: 'Tri & Production',
+    hubPath: '/hub-tri-production',
     items: [
       { path: '/production', label: 'Production', icon: IconFactory, roles: ['ADMIN', 'MANAGER'] },
       { path: '/chaine-tri', label: 'Chaînes de tri', icon: IconSort, roles: ['ADMIN', 'MANAGER'] },
@@ -56,6 +61,7 @@ const menuSections = [
   },
   {
     title: 'Exutoires',
+    hubPath: '/hub-exutoires',
     items: [
       { path: '/exutoires-commandes', label: 'Commandes', icon: IconList, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-preparation', label: 'Préparation', icon: IconTruck, roles: ['ADMIN', 'MANAGER'] },
@@ -68,6 +74,7 @@ const menuSections = [
   },
   {
     title: 'Reporting',
+    hubPath: '/hub-reporting',
     items: [
       { path: '/reporting-collecte', label: 'Collecte', icon: IconChart, roles: ['ADMIN', 'MANAGER'] },
       { path: '/reporting-rh', label: 'RH', icon: IconChartPeople, roles: ['ADMIN', 'RH'] },
@@ -78,6 +85,7 @@ const menuSections = [
   },
   {
     title: 'Administration',
+    hubPath: '/hub-admin',
     items: [
       { path: '/users', label: 'Utilisateurs', icon: IconLock, roles: ['ADMIN'] },
       { path: '/vehicles', label: 'Véhicules', icon: IconVehicle, roles: ['ADMIN'] },
@@ -133,15 +141,29 @@ export default function Layout({ children }) {
           {filteredSections.map(section => (
             <div key={section.title} className="mb-2">
               {sidebarOpen && (
-                <button
-                  onClick={() => toggleSection(section.title)}
-                  className="w-full px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider flex items-center justify-between rounded-lg text-slate-500 hover:text-primary hover:bg-primary-surface/50 transition"
-                >
-                  <span>{section.title}</span>
-                  <svg className={`w-3.5 h-3.5 transition-transform ${expandedSections.includes(section.title) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-0.5">
+                  {section.hubPath && section.hubPath !== '/' ? (
+                    <button
+                      onClick={() => { navigate(section.hubPath); if (window.innerWidth < 1024) setSidebarOpen(false); }}
+                      className="flex-1 px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider flex items-center rounded-lg text-slate-500 hover:text-primary hover:bg-primary-surface/50 transition text-left"
+                      title={`Vue d'ensemble ${section.title}`}
+                    >
+                      <span>{section.title}</span>
+                    </button>
+                  ) : (
+                    <span className="flex-1 px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      {section.title}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => toggleSection(section.title)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary-surface/50 transition"
+                  >
+                    <svg className={`w-3.5 h-3.5 transition-transform ${expandedSections.includes(section.title) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
               )}
               {(expandedSections.includes(section.title) || !sidebarOpen) && section.items.map(item => {
                 const isActive = location.pathname === item.path;

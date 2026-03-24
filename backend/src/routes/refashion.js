@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -62,7 +64,10 @@ router.get('/dpav', async (req, res) => {
 });
 
 // POST /api/refashion/dpav
-router.post('/dpav', async (req, res) => {
+router.post('/dpav', [
+  body('annee').isInt().withMessage('Année requise (valeur numérique)'),
+  body('trimestre').isInt({ min: 1, max: 4 }).withMessage('Trimestre requis (1-4)'),
+], validate, async (req, res) => {
   try {
     const { annee, trimestre, stock_debut_t, stock_fin_t, achats_t,
       ventes_reemploi_t, ventes_recyclage_t, csr_t, energie_t, tri_t, conformite_cdc, notes } = req.body;
@@ -117,7 +122,11 @@ router.get('/communes', async (req, res) => {
 });
 
 // POST /api/refashion/communes
-router.post('/communes', async (req, res) => {
+router.post('/communes', [
+  body('annee').isInt().withMessage('Année requise'),
+  body('trimestre').isInt({ min: 1, max: 4 }).withMessage('Trimestre requis (1-4)'),
+  body('commune').notEmpty().withMessage('Commune requise'),
+], validate, async (req, res) => {
   try {
     const { annee, trimestre, commune, code_postal, poids_kg } = req.body;
     const result = await pool.query(
@@ -156,7 +165,10 @@ router.get('/subventions', async (req, res) => {
 });
 
 // POST /api/refashion/subventions — Calcul automatique
-router.post('/subventions', async (req, res) => {
+router.post('/subventions', [
+  body('annee').isInt().withMessage('Année requise'),
+  body('trimestre').isInt({ min: 1, max: 4 }).withMessage('Trimestre requis (1-4)'),
+], validate, async (req, res) => {
   try {
     const { annee, trimestre, tonnage_reemploi, tonnage_recyclage, tonnage_csr,
       tonnage_energie, tonnage_entree, part_non_tlc,

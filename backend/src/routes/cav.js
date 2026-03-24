@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate);
 
@@ -43,12 +45,15 @@ router.get('/map', async (req, res) => {
       ORDER BY c.name
     `);
 
-    // Calcul du taux de remplissage estimé
+    // Calcul du taux de remplissage estimé (algorithmique)
+    // Le volume est considéré à zéro après chaque passage de chauffeur (collecte)
+    // L'accumulation repart donc de la date de dernière collecte
     const now = new Date();
     const monthIndex = now.getMonth();
     const seasonalFactors = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
 
     const cavWithFill = result.rows.map(cav => {
+      // Jours depuis dernière collecte = le CAV repart à 0 après chaque collecte
       const daysSinceCollection = cav.last_collection
         ? Math.floor((now - new Date(cav.last_collection)) / (86400000))
         : 30;
@@ -111,6 +116,7 @@ router.get('/fill-rate', async (req, res) => {
       const capacityKg = (cav.nb_containers || 1) * 150; // ~150kg par conteneur
 
       // Taux de remplissage estimé basé sur accumulation journalière
+      // Le volume repart à zéro après chaque collecte (daysSinceCollection)
       const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
       const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactors[monthIndex];
       const fillRate = Math.min(120, (accumulatedKg / capacityKg) * 100);
@@ -208,7 +214,9 @@ router.get('/communes', async (req, res) => {
 // ══════════════════════════════════════════
 
 // POST /api/cav/scan-qr — Scanner un QR code de CAV (depuis mobile)
-router.post('/scan-qr', async (req, res) => {
+router.post('/scan-qr', [
+  body('qr_data').notEmpty().withMessage('Données QR requises'),
+], validate, async (req, res) => {
   try {
     const { qr_data, tour_id, scan_type, latitude, longitude, notes } = req.body;
     if (!qr_data) return res.status(400).json({ error: 'Données QR requises' });
@@ -447,7 +455,11 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/cav
-router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/', authorize('ADMIN', 'MANAGER'), [
+  body('name').notEmpty().withMessage('Nom requis'),
+  body('latitude').isFloat().withMessage('Latitude invalide'),
+  body('longitude').isFloat().withMessage('Longitude invalide'),
+], validate, async (req, res) => {
   try {
     const { name, address, commune, latitude, longitude, nb_containers } = req.body;
     if (!name || !latitude || !longitude) {
@@ -597,7 +609,10 @@ router.put('/:id/sensor', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // POST /api/cav/sensor-reading — Réception d'une lecture capteur (webhook LoRaWAN ou polling)
-router.post('/sensor-reading', async (req, res) => {
+router.post('/sensor-reading', [
+  body('sensor_reference').notEmpty().withMessage('Référence capteur requise'),
+  body('fill_level_percent').isFloat({ min: 0, max: 120 }).withMessage('Niveau de remplissage invalide'),
+], validate, async (req, res) => {
   try {
     const { sensor_reference, fill_level_percent, distance_cm, battery_level, temperature, rssi, raw_data } = req.body;
     if (!sensor_reference || fill_level_percent == null) {

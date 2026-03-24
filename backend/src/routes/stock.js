@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -65,7 +67,11 @@ router.get('/summary', async (req, res) => {
 });
 
 // POST /api/stock
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('type').isIn(['entree', 'sortie']).withMessage('Type requis (entree ou sortie)'),
+  body('date').notEmpty().withMessage('Date requise'),
+  body('poids_kg').isFloat({ min: 0 }).withMessage('Poids requis (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { type, date, poids_kg, matiere_id, destination, notes, code_barre,
       origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id } = req.body;
@@ -101,7 +107,9 @@ router.get('/matieres', async (req, res) => {
 });
 
 // POST /api/stock/matieres
-router.post('/matieres', async (req, res) => {
+router.post('/matieres', [
+  body('categorie').notEmpty().withMessage('Catégorie requise'),
+], validate, async (req, res) => {
   try {
     const { categorie, sous_categorie, qualite, destination_possible } = req.body;
     const result = await pool.query(
@@ -170,12 +178,15 @@ router.get('/inventories', async (req, res) => {
 
 // POST /api/stock/inventories — Créer un nouvel inventaire
 router.post('/inventories', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const client = await pool.connect();
   try {
     const { type, notes } = req.body;
     const code = `INV-${type === 'complet' ? 'C' : 'P'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
 
+    await client.query('BEGIN');
+
     // Récupérer le stock théorique actuel par catégorie
-    const stockRes = await pool.query(`
+    const stockRes = await client.query(`
       SELECT cs.id as categorie_id, cs.nom as categorie_nom,
         COALESCE(SUM(CASE WHEN sm.type = 'entree' THEN sm.poids_kg ELSE -sm.poids_kg END), 0) as stock_theorique_kg
       FROM categories_sortantes cs
@@ -186,7 +197,7 @@ router.post('/inventories', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     const totalTheorique = stockRes.rows.reduce((s, r) => s + parseFloat(r.stock_theorique_kg || 0), 0);
 
-    const batch = await pool.query(
+    const batch = await client.query(
       `INSERT INTO inventory_batches (code, type, notes, total_theorique_kg, created_by)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [code, type || 'partiel', notes, totalTheorique, req.user.id]
@@ -194,17 +205,21 @@ router.post('/inventories', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     // Créer les lignes d'inventaire pré-remplies avec le stock théorique
     for (const cat of stockRes.rows) {
-      await pool.query(
+      await client.query(
         `INSERT INTO inventory_items (batch_id, categorie_sortante_id, categorie_nom, stock_theorique_kg)
          VALUES ($1, $2, $3, $4)`,
         [batch.rows[0].id, cat.categorie_id, cat.categorie_nom, cat.stock_theorique_kg]
       );
     }
 
+    await client.query('COMMIT');
     res.status(201).json(batch.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[STOCK] Erreur création inventaire :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
@@ -228,23 +243,26 @@ router.get('/inventories/:id', async (req, res) => {
 
 // PUT /api/stock/inventories/:id/items — Saisir les quantités physiques
 router.put('/inventories/:id/items', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const client = await pool.connect();
   try {
     const { items } = req.body; // [{id, stock_physique_kg, notes}]
-    if (!items || !Array.isArray(items)) return res.status(400).json({ error: 'items requis' });
+    if (!items || !Array.isArray(items)) { client.release(); return res.status(400).json({ error: 'items requis' }); }
+
+    await client.query('BEGIN');
 
     let totalPhysique = 0;
     let totalTheorique = 0;
 
     for (const item of items) {
       const physique = parseFloat(item.stock_physique_kg) || 0;
-      const existing = await pool.query('SELECT stock_theorique_kg FROM inventory_items WHERE id = $1 AND batch_id = $2', [item.id, req.params.id]);
+      const existing = await client.query('SELECT stock_theorique_kg FROM inventory_items WHERE id = $1 AND batch_id = $2', [item.id, req.params.id]);
       if (existing.rows.length === 0) continue;
 
       const theorique = parseFloat(existing.rows[0].stock_theorique_kg) || 0;
       const ecart = physique - theorique;
       const ecartPct = theorique > 0 ? Math.round((ecart / theorique) * 10000) / 100 : 0;
 
-      await pool.query(
+      await client.query(
         `UPDATE inventory_items SET stock_physique_kg = $1, ecart_kg = $2, ecart_percent = $3, notes = $4
          WHERE id = $5 AND batch_id = $6`,
         [physique, ecart, ecartPct, item.notes || null, item.id, req.params.id]
@@ -257,16 +275,20 @@ router.put('/inventories/:id/items', authorize('ADMIN', 'MANAGER'), async (req, 
     const ecartTotal = totalPhysique - totalTheorique;
     const ecartPctTotal = totalTheorique > 0 ? Math.round((ecartTotal / totalTheorique) * 10000) / 100 : 0;
 
-    await pool.query(
+    await client.query(
       `UPDATE inventory_batches SET total_physique_kg = $1, ecart_kg = $2, ecart_percent = $3, updated_at = NOW()
        WHERE id = $4`,
       [totalPhysique, ecartTotal, ecartPctTotal, req.params.id]
     );
 
+    await client.query('COMMIT');
     res.json({ total_physique_kg: totalPhysique, ecart_kg: ecartTotal, ecart_percent: ecartPctTotal });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[STOCK] Erreur saisie inventaire :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

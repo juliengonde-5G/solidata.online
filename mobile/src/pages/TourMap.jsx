@@ -106,6 +106,7 @@ export default function TourMap() {
         <div className="flex gap-2 flex-shrink-0">
           <button
             type="button"
+            aria-label="Pesée intermédiaire"
             onClick={intermediateReturn}
             className="touch-target flex items-center justify-center rounded-xl bg-amber-500/80 hover:bg-amber-500 text-xs font-medium px-3"
           >
@@ -113,6 +114,7 @@ export default function TourMap() {
           </button>
           <button
             type="button"
+            aria-label="Fin de tournée, retour au centre"
             onClick={() => navigate('/return-centre')}
             className="touch-target flex items-center justify-center rounded-xl bg-white/20 hover:bg-white/30 text-sm font-medium px-3"
           >
@@ -180,7 +182,7 @@ export default function TourMap() {
             <button type="button" onClick={goToCAV} className="flex-1 btn-primary-mobile py-3 text-base">
               Scanner QR Code
             </button>
-            <button type="button" onClick={() => navigate('/incident')} className="touch-target flex items-center justify-center bg-red-500 text-white rounded-2xl px-4 font-semibold">
+            <button type="button" aria-label="Signaler un incident" onClick={() => navigate('/incident')} className="touch-target flex items-center justify-center bg-red-500 text-white rounded-2xl px-4 font-semibold">
               Incident
             </button>
           </div>

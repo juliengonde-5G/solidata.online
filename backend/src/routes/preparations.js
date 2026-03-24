@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -120,13 +122,15 @@ router.get('/conflits', async (req, res) => {
 });
 
 // POST /api/preparations — Create preparation
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('commande_id').isInt().withMessage('ID commande requis'),
+  body('transporteur').notEmpty().withMessage('Transporteur requis'),
+  body('date_livraison_remorque').notEmpty().withMessage('Date livraison remorque requise'),
+  body('date_expedition').notEmpty().withMessage('Date expédition requise'),
+  body('lieu_chargement').notEmpty().withMessage('Lieu de chargement requis'),
+], validate, async (req, res) => {
   try {
     const { commande_id, transporteur, date_livraison_remorque, date_expedition, lieu_chargement, notes_preparation, collaborateurs } = req.body;
-
-    if (!commande_id || !transporteur || !date_livraison_remorque || !date_expedition || !lieu_chargement) {
-      return res.status(400).json({ error: 'commande_id, transporteur, date_livraison_remorque, date_expedition et lieu_chargement requis' });
-    }
 
     // Check for conflicts
     const conflictResult = await pool.query(
@@ -322,14 +326,12 @@ router.put('/:id', async (req, res) => {
 });
 
 // PATCH /api/preparations/:id/statut — Change preparation status
-router.patch('/:id/statut', async (req, res) => {
+router.patch('/:id/statut', [
+  body('statut_preparation').notEmpty().withMessage('Statut de préparation requis'),
+], validate, async (req, res) => {
   try {
     const { id } = req.params;
     const { statut_preparation, pesee_interne } = req.body;
-
-    if (!statut_preparation) {
-      return res.status(400).json({ error: 'statut_preparation requis' });
-    }
 
     // Fetch current preparation with commande info
     const existing = await pool.query(

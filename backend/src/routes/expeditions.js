@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -31,7 +33,12 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/expeditions
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('date').notEmpty().withMessage('Date requise'),
+  body('exutoire_id').isInt().withMessage('ID exutoire requis'),
+  body('categorie_sortante_id').isInt().withMessage('ID catégorie sortante requis'),
+  body('poids_kg').isFloat({ min: 0 }).withMessage('Poids requis (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { date, exutoire_id, categorie_sortante_id, type_conteneur_id,
       nb_conteneurs, poids_kg, valeur_euros, bon_livraison, notes } = req.body;

@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { startAutoSync, cacheReferenceData } from './services/sync';
 import Login from './pages/Login';
 import VehicleSelect from './pages/VehicleSelect';
 import Checklist from './pages/Checklist';
@@ -24,6 +26,11 @@ function ProtectedRoute({ children }) {
 }
 
 function App() {
+  useEffect(() => {
+    // Démarrer la synchronisation automatique offline/online
+    startAutoSync();
+  }, []);
+
   return (
     <BrowserRouter>
       <AuthProvider>

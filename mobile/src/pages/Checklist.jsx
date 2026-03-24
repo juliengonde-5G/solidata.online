@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { vibrateTap, vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
 
 const CHECKLIST_ITEMS = [
@@ -34,7 +35,7 @@ export default function Checklist() {
     if (tourId) load();
   }, [tourId]);
 
-  const toggle = (id) => setChecked(prev => ({ ...prev, [id]: !prev[id] }));
+  const toggle = (id) => { vibrateTap(); setChecked(prev => ({ ...prev, [id]: !prev[id] })); };
   const allChecked = CHECKLIST_ITEMS.every(item => checked[item.id]);
   const checkedCount = CHECKLIST_ITEMS.filter(item => checked[item.id]).length;
 
@@ -48,8 +49,9 @@ export default function Checklist() {
         km_start: parseInt(kmStart, 10) || 0,
       });
       await api.put(`/tours/${tourId}/status`, { status: 'in_progress' });
+      vibrateSuccess();
       navigate('/tour-map');
-    } catch (err) { console.error(err); }
+    } catch (err) { vibrateError(); console.error(err); }
   };
 
   return (
@@ -74,6 +76,9 @@ export default function Checklist() {
           <button
             key={item.id}
             type="button"
+            role="checkbox"
+            aria-checked={!!checked[item.id]}
+            aria-label={item.label}
             onClick={() => toggle(item.id)}
             className={`w-full flex items-center gap-4 card-mobile p-4 transition-all ${
               checked[item.id] ? 'ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5' : ''

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate);
 
@@ -40,7 +42,9 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/teams
-router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/', authorize('ADMIN', 'MANAGER'), [
+  body('name').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { name, type } = req.body;
     if (!name) return res.status(400).json({ error: 'Nom requis' });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
 
 const FILL_LEVELS = [
@@ -36,9 +37,10 @@ export default function FillLevel() {
           notes: anomaly ? `${anomaly}${notes ? ': ' + notes : ''}` : notes,
         });
       }
+      vibrateSuccess();
       localStorage.removeItem('scanned_qr');
       navigate('/tour-map');
-    } catch (err) { console.error(err); }
+    } catch (err) { vibrateError(); console.error(err); }
     setLoading(false);
   };
 
@@ -58,7 +60,8 @@ export default function FillLevel() {
             <button
               key={level.value}
               type="button"
-              onClick={() => setFillLevel(level.value)}
+              aria-label={`Remplissage ${level.pct}`}
+              onClick={() => { vibrateTap(); setFillLevel(level.value); }}
               className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all min-h-[72px] ${
                 fillLevel === level.value
                   ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 shadow-md'

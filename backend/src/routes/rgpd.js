@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate);
 
@@ -21,7 +23,11 @@ router.get('/registre', authorize('ADMIN'), async (req, res) => {
 });
 
 // POST /api/rgpd/registre — Ajouter un traitement
-router.post('/registre', authorize('ADMIN'), async (req, res) => {
+router.post('/registre', authorize('ADMIN'), [
+  body('nom_traitement').notEmpty().withMessage('Nom du traitement requis'),
+  body('finalite').notEmpty().withMessage('Finalité requise'),
+  body('base_legale').notEmpty().withMessage('Base légale requise'),
+], validate, async (req, res) => {
   try {
     const { nom_traitement, finalite, base_legale, categories_personnes, categories_donnees,
       destinataires, duree_conservation, mesures_securite } = req.body;
@@ -91,7 +97,9 @@ router.get('/export/:type/:id', authorize('ADMIN', 'RH'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // POST /api/rgpd/anonymize/:type/:id — Anonymiser les données personnelles
-router.post('/anonymize/:type/:id', authorize('ADMIN'), async (req, res) => {
+router.post('/anonymize/:type/:id', authorize('ADMIN'), [
+  body('reason').notEmpty().withMessage('Motif d\'anonymisation requis'),
+], validate, async (req, res) => {
   try {
     const { type, id } = req.params;
     const { reason } = req.body;
@@ -180,7 +188,11 @@ router.get('/consent/:type/:id', authorize('ADMIN', 'RH'), async (req, res) => {
 });
 
 // POST /api/rgpd/consent — Enregistrer un consentement
-router.post('/consent', authorize('ADMIN', 'RH'), async (req, res) => {
+router.post('/consent', authorize('ADMIN', 'RH'), [
+  body('entity_type').notEmpty().withMessage('Type d\'entité requis'),
+  body('entity_id').isInt().withMessage('ID entité requis'),
+  body('consent_type').notEmpty().withMessage('Type de consentement requis'),
+], validate, async (req, res) => {
   try {
     const { entity_type, entity_id, consent_type, granted, comment } = req.body;
     if (!entity_type || !entity_id || !consent_type) {
