@@ -34,6 +34,7 @@ import AdminCAV from './pages/AdminCAV';
 import ReportingMetropole from './pages/ReportingMetropole';
 import FillRateMap from './pages/FillRateMap';
 import NewsFeed from './pages/NewsFeed';
+import Pointage from './pages/Pointage';
 import ExutoiresCommandes from './pages/ExutoiresCommandes';
 import ExutoiresPreparation from './pages/ExutoiresPreparation';
 import ExutoiresGantt from './pages/ExutoiresGantt';
@@ -69,6 +70,7 @@ function App() {
           <Route path="/skills" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Skills /></ProtectedRoute>} />
           <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><InsertionParcours /></ProtectedRoute>} />
           <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PlanningHebdo /></ProtectedRoute>} />
+          <Route path="/pointage" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Pointage /></ProtectedRoute>} />
 
           {/* Collecte */}
           <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />

@@ -296,6 +296,59 @@ async function initDatabase() {
     console.log('[INIT-DB] Module 4 (Équipes & Planning) ✓');
 
     // ══════════════════════════════════════════
+    // MODULE 4b : Pointage / Badgeage
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS pointage_terminals (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        location VARCHAR(200) DEFAULT 'Centre de tri',
+        api_key VARCHAR(255) NOT NULL UNIQUE,
+        is_active BOOLEAN DEFAULT true,
+        last_ping TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badges (
+        id SERIAL PRIMARY KEY,
+        badge_uid VARCHAR(50) NOT NULL UNIQUE,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+        label VARCHAR(100),
+        is_active BOOLEAN DEFAULT true,
+        assigned_at TIMESTAMP,
+        unassigned_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS pointage_events (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+        badge_uid VARCHAR(50),
+        terminal_id INTEGER REFERENCES pointage_terminals(id),
+        date DATE NOT NULL DEFAULT CURRENT_DATE,
+        event_time TIMESTAMP NOT NULL DEFAULT NOW(),
+        event_type VARCHAR(20) NOT NULL CHECK (event_type IN ('entry', 'exit', 'unknown', 'excess')),
+        status VARCHAR(20) NOT NULL DEFAULT 'accepted' CHECK (status IN ('accepted', 'rejected', 'duplicate')),
+        source VARCHAR(20) NOT NULL DEFAULT 'badge' CHECK (source IN ('badge', 'manual')),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // Index pour performances
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_pointage_events_date ON pointage_events(date);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_pointage_events_employee ON pointage_events(employee_id, date);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_badges_uid ON badges(badge_uid);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_badges_employee ON badges(employee_id);`);
+
+    console.log('[INIT-DB] Module 4b (Pointage / Badgeage) ✓');
+
+    // ══════════════════════════════════════════
     // MODULE 5 : Collecte
     // ══════════════════════════════════════════
     await client.query(`

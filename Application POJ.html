@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solidarité Textiles - Planning v1.0</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👕</text></svg>">
+    
+    <!-- Polices -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
+    
+    <!-- Librairies PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        :root {
+            --vert-sarcelle: #008678;
+            --vert-fonce: #006e61;
+            --jaune-ensoleille: #FFDC80;
+            --terre-beige: #b56320;
+            --gris-fonce: #253036;
+            --fond-creme: #FFFAF6;
+            --azur: #4da3ff;
+            --rouge-prioritaire: #e74c3c;
+            --violet-vak: #8e44ad;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            background: radial-gradient(circle at top, #fff8e1 0%, var(--fond-creme) 60%, #ffffff 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: var(--gris-fonce);
+            line-height: 1.5;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; padding-bottom: 50px; }
+
+        /* Header */
+        .header {
+            background: #ffffff;
+            padding: 20px 32px;
+            border-radius: 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            flex-wrap: wrap;
+            border: 1px solid rgba(0,0,0,0.03);
+        }
+
+        .header-left { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+        .header img { width: 70px; height: 70px; object-fit: contain; border-radius: 16px; background: white; padding: 5px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #eee; }
+        .header-text h1 { font-family: 'Pacifico', cursive; font-size: 26px; color: var(--vert-sarcelle); letter-spacing: 0.5px; line-height: 1.2; }
+        .header-text p { font-size: 13px; color: #666; margin-top: 2px; }
+        .header-tag { background: var(--vert-sarcelle); color: white; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(0,134,120,0.2); }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            background: #ffffff;
+            border-radius: 16px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.04);
+            padding: 6px;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            flex: 1;
+            min-width: 120px;
+            padding: 10px 16px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            border-radius: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn.active {
+            background: var(--vert-sarcelle);
+            color: white;
+            box-shadow: 0 4px 12px rgba(0,134,120,0.25);
+        }
+        
+        .tab-btn.vak-active {
+            background: var(--violet-vak);
+        }
+
+        .tab-btn:hover:not(.active) { background: #f4f4f4; color: #333; }
+
+        /* Content */
+        .tab-content { display: none; background: #ffffff; padding: 32px; border-radius: 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.02); }
+        .tab-content.active { display: block; animation: fadeIn 0.3s ease-out; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Accueil */
+        .accueil { background: linear-gradient(135deg, rgba(0,134,120,0.06), rgba(255,220,128,0.12)); padding: 40px 32px; border-radius: 20px; }
+        .accueil h2 { font-family: 'Pacifico', cursive; font-size: 28px; color: var(--vert-sarcelle); margin-bottom: 12px; }
+        
+        .quick-access { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin: 30px 0; }
+        .quick-card {
+            background: #ffffff; padding: 24px; border-radius: 18px; box-shadow: 0 8px 20px rgba(0,0,0,0.05); cursor: pointer; transition: all 0.2s ease;
+            border: 1px solid transparent; display: flex; flex-direction: column; align-items: center; text-align: center;
+        }
+        .quick-card:hover { transform: translateY(-4px); box-shadow: 0 12px 25px rgba(0,0,0,0.1); border-color: var(--vert-sarcelle); }
+        .quick-card h3 { font-size: 16px; color: var(--gris-fonce); margin: 10px 0 5px; font-weight: 600; }
+        .quick-card .emoji { font-size: 32px; }
+
+        /* UI Elements */
+        .section { margin-bottom: 32px; }
+        .section h3 { font-size: 19px; color: var(--gris-fonce); margin-bottom: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 500; color: #555; font-size: 13px; }
+        .form-group input, .form-group select {
+            width: 100%; padding: 10px 14px; border: 1px solid #e0e0e0; border-radius: 10px; font-size: 14px; background: #ffffff; transition: all 0.2s ease;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none; border-color: var(--vert-sarcelle); box-shadow: 0 0 0 3px rgba(0,134,120,0.1);
+        }
+
+        .btn {
+            padding: 10px 20px; border: none; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600; margin: 4px;
+            transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+        }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-primary { background: var(--vert-sarcelle); color: #ffffff; }
+        .btn-primary:hover { background: var(--vert-fonce); }
+        .btn-success { background: #27ae60; color: #ffffff; }
+        .btn-danger { background: var(--rouge-prioritaire); color: #ffffff; }
+        .btn-secondary { background: #f0f2f5; color: #555; }
+        .btn-secondary:hover { background: #e1e4e8; color: #333; }
+        .btn-warning { background: var(--jaune-ensoleille); color: var(--gris-fonce); }
+        .btn-vak { background: var(--violet-vak); color: white; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+        /* Lists & Grids */
+        .post-grid, .planning-grid, .postes-list, .collaborateurs-list, .export-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 14px; }
+        
+        .post-card, .collab-card, .vak-card, .export-card {
+            background: #ffffff; border-radius: 16px; padding: 18px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #f0f0f0;
+            transition: all 0.2s ease; position: relative;
+        }
+        .post-card:hover, .collab-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.08); border-color: #e0e0e0; }
+        
+        .post-card.obligatoire { border-left: 4px solid var(--jaune-ensoleille); }
+        
+        .badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; margin: 2px; }
+        .badge-success { background: #e8f8f5; color: #16a085; }
+        .badge-warning { background: #fff8e1; color: #f39c12; }
+        .badge-danger { background: #fdedec; color: #c0392b; }
+        .badge-info { background: #eaf2f8; color: #2980b9; }
+        
+        .obligatoire-badge {
+            position: absolute; top: 10px; right: 10px; background: var(--rouge-prioritaire); color: #ffffff;
+            padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+        }
+
+        .card-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #f5f5f5; padding-top: 10px; }
+
+        /* Stats */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-top: 18px; }
+        .stat-card { background: #ffffff; padding: 16px; border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); border: 1px solid #f5f5f5; text-align: center; }
+        .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-bottom: 6px; }
+        .stat-number { font-size: 26px; font-weight: 700; margin-bottom: 0; line-height: 1; }
+        .stat-good { color: var(--vert-sarcelle); }
+        .stat-warning { color: #f39c12; }
+        .stat-danger { color: var(--rouge-prioritaire); }
+
+        /* Alerts */
+        .alert {
+            padding: 12px 20px; border-radius: 12px; margin: 0; font-size: 14px; display: flex; align-items: center; gap: 12px;
+            position: fixed; bottom: 30px; right: 30px; z-index: 9999; animation: slideIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15); font-weight: 500;
+        }
+        @keyframes slideIn { from { transform: translateY(100px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .alert-error { background: #fff5f5; color: #c0392b; border-left: 5px solid #c0392b; }
+        .alert-success { background: #f0fdf4; color: #16a085; border-left: 5px solid #16a085; }
+
+        /* Headers Catégories */
+        .category-header {
+            grid-column: 1 / -1;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 8px;
+            color: var(--vert-sarcelle);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-size: 14px;
+        }
+        
+        .checkbox-container { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 14px; cursor: pointer; user-select: none; }
+        .checkbox-container input { width: 18px; height: 18px; margin: 0; accent-color: var(--vert-sarcelle); }
+
+        /* PDF Loader overlay */
+        .loader-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.85);
+            z-index: 10000; display: none; flex-direction: column; justify-content: center; align-items: center;
+        }
+        .loader-spinner {
+            width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid var(--vert-sarcelle); border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .header { padding: 16px; flex-direction: column; text-align: center; gap: 15px; }
+            .header-left { flex-direction: column; justify-content: center; }
+            .tab-content { padding: 20px 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="loader-overlay" id="globalLoader">
+    <div class="loader-spinner"></div>
+    <div style="font-weight:600; color:#555;">Traitement en cours...</div>
+</div>
+
+<div class="container">
+    <div class="header">
+        <div class="header-left">
+            <img src="https://agi-prod-file-upload-public-main-use1.s3.amazonaws.com/ff458fdf-01ea-488c-83e5-c83917380099" alt="Logo Solidarité Textiles">
+            <div class="header-text">
+                <h1>Solidarité Textiles</h1>
+                <p>Gestion des affectations & Module VAK</p>
+            </div>
+        </div>
+        <div class="header-tag">Version 1.0</div>
+    </div>
+
+    <!-- TABS -->
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab(event, 'accueil')">Accueil</button>
+        <button class="tab-btn" onclick="switchTab(event, 'planning')">Planning Quotidien</button>
+        <button class="tab-btn" onclick="switchTab(event, 'vak')" id="tabVakBtn">Événements VAK</button>
+        <button class="tab-btn" onclick="switchTab(event, 'postes')">Postes (Std)</button>
+        <button class="tab-btn" onclick="switchTab(event, 'collaborateurs')">Collaborateurs</button>
+        <button class="tab-btn" onclick="switchTab(event, 'exports')">Exports / Données</button>
+    </div>
+
+    <!-- ACCUEIL -->
+    <div id="accueil" class="tab-content active">
+        <div class="accueil">
+            <h2>Espace de planification</h2>
+            <p>Vision globale des effectifs, des besoins journaliers et des événements VAK.</p>
+
+            <div class="quick-access">
+                <div class="quick-card" onclick="switchTab(event, 'planning')">
+                    <div class="emoji">📅</div>
+                    <h3>Planning Jour</h3>
+                    <p>Gérer les affectations quotidiennes.</p>
+                </div>
+                <div class="quick-card" onclick="switchTab(event, 'vak')">
+                    <div class="emoji">🎪</div>
+                    <h3>Module VAK</h3>
+                    <p>Organiser les ventes événementielles.</p>
+                </div>
+                <div class="quick-card" onclick="switchTab(event, 'exports')">
+                    <div class="emoji">💾</div>
+                    <h3>Données</h3>
+                    <p>Sauvegardes et Exports CSV.</p>
+                </div>
+            </div>
+
+            <!-- STATUS SAUVEGARDE -->
+            <div id="backupStatusBar" style="background:#ffffff; padding:16px 20px; border-radius:14px; box-shadow:0 8px 18px rgba(0,0,0,0.06); margin:18px 0; border-left: 5px solid #ccc;">
+              <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items: center;">
+                <div>
+                  <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#777; margin-bottom: 2px;">État Sauvegarde</div>
+                  <div id="backupModeLabel" style="font-weight:600; font-size: 15px;">—</div>
+                </div>
+                <div style="text-align: right;">
+                  <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#777; margin-bottom: 2px;">Dernière synchro</div>
+                  <div id="backupLastSavedLabel" style="font-weight:600; font-family: monospace;">—</div>
+                </div>
+              </div>
+              <div id="backupLoadedLabel" style="margin-top:8px; font-size:12px; color:#666; font-style: italic;"></div>
+            </div>
+
+            <div style="background:#ffffff; padding: 24px 20px; border-radius:18px; box-shadow:0 10px 26px rgba(0,0,0,0.08);">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom: 15px;">
+                    <h3 style="margin:0; font-size:18px; color:var(--gris-fonce);">Statistiques du jour</h3>
+                    <div>
+                        <input type="date" id="accueilDateStats" onchange="updateAccueilStats()" style="padding:8px 12px; border-radius:10px; border:1px solid #ddd; font-family:inherit;">
+                    </div>
+                </div>
+                <div class="stats-grid" id="accueilStats"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODULE VAK -->
+    <div id="vak" class="tab-content">
+        <div class="section">
+            <h2 style="color:var(--violet-vak); font-family:'Pacifico', cursive;">Module VAK</h2>
+            <p style="margin-bottom:20px; color:#666;">Gestion des Ventes au Kilo annuelles.</p>
+            
+            <div style="display:flex; gap:10px; margin-bottom:25px; flex-wrap:wrap; background: #f9f9f9; padding: 5px; border-radius: 12px; width: fit-content;">
+                <button class="btn btn-sm btn-vak" onclick="showVakSection('vak-events')">Liste des VAK</button>
+                <button class="btn btn-sm btn-secondary" onclick="showVakSection('vak-postes')">Postes VAK</button>
+                <button class="btn btn-sm btn-secondary" onclick="showVakSection('vak-planning')">Planning & Export</button>
+            </div>
+
+            <!-- SECTION 1: EVENTS LIST -->
+            <div id="vak-events" class="vak-section">
+                <h3>Créer un événement VAK</h3>
+                <div style="background: rgba(142, 68, 173, 0.05); padding: 24px; border-radius: 18px; margin-bottom:20px; border: 1px solid rgba(142, 68, 173, 0.1);">
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px; align-items:end;">
+                        <div class="form-group">
+                            <label>Nom de la VAK</label>
+                            <input type="text" id="vakName" placeholder="Ex: VAK Hiver 2026">
+                        </div>
+                        <div class="form-group">
+                            <label>Date Début</label>
+                            <input type="date" id="vakStart">
+                        </div>
+                        <div class="form-group">
+                            <label>Date Fin</label>
+                            <input type="date" id="vakEnd">
+                        </div>
+                        <button class="btn btn-vak" onclick="createVakEvent()">Créer VAK</button>
+                    </div>
+                </div>
+                <h3>Événements programmés</h3>
+                <div class="post-grid" id="vakList"></div>
+            </div>
+
+            <!-- SECTION 2: VAK POSTES -->
+            <div id="vak-postes" class="vak-section" style="display:none;">
+                <h3>Configuration des Postes VAK</h3>
+                <p style="font-size:13px; color:#666; margin-bottom:15px;">Ces postes sont spécifiques aux événements VAK.</p>
+                <div style="background: rgba(142, 68, 173, 0.05); padding: 24px; border-radius: 18px; margin-bottom:20px;">
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px; align-items:end;">
+                        <div class="form-group">
+                            <label>Nom du poste</label>
+                            <input type="text" id="vakPosteNom" placeholder="Ex: Caisse Entrée">
+                        </div>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <select id="vakPosteObligatoire">
+                                <option value="true">Obligatoire (par défaut)</option>
+                                <option value="false">Facultatif</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-secondary" onclick="createVakPoste()">Ajouter Poste</button>
+                    </div>
+                </div>
+                <div class="postes-list" id="vakPostesList"></div>
+            </div>
+
+            <!-- SECTION 3: VAK PLANNING -->
+            <div id="vak-planning" class="vak-section" style="display:none;">
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 18px; border:1px solid #ddd;">
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+                        <div class="form-group">
+                            <label>Choisir la VAK</label>
+                            <select id="vakSelect" onchange="loadVakDays()"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Journée</label>
+                            <select id="vakDaySelect" onchange="loadVakPlanning()"></select>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
+                        <button class="btn btn-vak" onclick="loadVakPlanning()">Charger Planning</button>
+                        <button class="btn btn-warning" onclick="exportVakDayPDF()">📄 Exporter PDF Journée</button>
+                    </div>
+                </div>
+
+                <div id="vakGridContainer" class="planning-grid" style="margin-top:20px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PLANNING STD -->
+    <div id="planning" class="tab-content">
+        <div class="section">
+            <h3>Planning Journalier (Standard)</h3>
+            <div style="background: rgba(0,134,120,0.05); padding: 24px; border-radius: 18px; border: 1px solid rgba(0,134,120,0.1);">
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:16px; align-items:end;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Date du planning</label>
+                        <input type="date" id="planningDate" onchange="loadPlanning()">
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-primary" onclick="loadPlanning()">Rafraîchir</button>
+                        <button class="btn btn-danger" onclick="clearPlanning()" id="clearPlanningBtn">Vider Journée</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="stats-grid" id="planningStats"></div>
+            <div id="planningAlerts"></div>
+            <div class="planning-grid" id="planningGrid"></div>
+        </div>
+
+        <div class="section" style="margin-top:40px; border-top:2px dashed #eee; padding-top:30px;">
+            <h3>Export Semaine PDF</h3>
+            <div style="background: #fff8e1; padding: 24px; border-radius: 18px; border:1px solid #ffe082;">
+                <p style="font-size:13px; color:#666; margin-bottom:15px;">Générez un PDF complet de la semaine pour affichage.</p>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:16px; align-items:end;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Sélectionnez un jour de la semaine</label>
+                        <input type="date" id="exportDate">
+                    </div>
+                    <button class="btn btn-warning" onclick="generateWeeklyPDF()">🖨️ Générer PDF Semaine</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- POSTES STD -->
+    <div id="postes" class="tab-content">
+        <div class="section">
+            <h3 id="formPosteTitle">Nouveau poste (Standard)</h3>
+            <div style="background: #f4fcfc; padding: 24px; border-radius: 18px; border: 1px solid #d0ece7;">
+                <input type="hidden" id="posteIdEdit">
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:16px;">
+                    <div class="form-group">
+                        <label>Nom</label>
+                        <input type="text" id="posteNom" placeholder="Ex: Opérateur tri R3">
+                    </div>
+                    <div class="form-group">
+                        <label>Groupe</label>
+                        <select id="posteGroupe">
+                            <option value="Tri">Tri</option>
+                            <option value="Logistique">Logistique</option>
+                            <option value="Collecte">Collecte</option>
+                            <option value="Autre">Autre</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label style="margin-bottom:12px; font-weight:600;">Options & Qualifications :</label>
+                        <div style="display:flex; gap:20px; flex-wrap:wrap;">
+                            <label class="checkbox-container">
+                                <input type="checkbox" id="posteObligatoire"> Poste Prioritaire
+                            </label>
+                            <label class="checkbox-container">
+                                <input type="checkbox" id="posteReqCaces"> Requis : CACES
+                            </label>
+                            <label class="checkbox-container">
+                                <input type="checkbox" id="posteReqPermis"> Requis : Permis B
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div style="display:flex; gap:10px; grid-column: 1 / -1;">
+                        <button class="btn btn-success" id="btnSavePoste" onclick="savePoste()">Enregistrer</button>
+                        <button class="btn btn-secondary" id="btnCancelPoste" onclick="resetPosteForm()" style="display:none;">Annuler</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="section">
+            <h3>Liste des postes</h3>
+            <div class="postes-list" id="postesList"></div>
+        </div>
+    </div>
+
+    <!-- COLLABORATEURS -->
+    <div id="collaborateurs" class="tab-content">
+        <div class="section">
+            <h3 id="formCollabTitle">Nouveau collaborateur</h3>
+            <div style="background: #f4fcfc; padding: 24px; border-radius: 18px; border: 1px solid #d0ece7;">
+                <input type="hidden" id="collabIdEdit">
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:16px;">
+                    <div class="form-group"><label>Nom</label><input type="text" id="collabNom" placeholder="DIALLO"></div>
+                    <div class="form-group"><label>Prénom</label><input type="text" id="collabPrenom" placeholder="Bounty"></div>
+                    <div class="form-group"><label>Contrat</label><select id="collabTemps"><option value="26h">26h</option><option value="35h">35h</option></select></div>
+                    <div class="form-group"><label>CACES</label><select id="collabCaces"><option value="Non">Non</option><option value="Oui">Oui</option></select></div>
+                    <div class="form-group"><label>Permis B</label><select id="collabPermis"><option value="Non">Non</option><option value="Oui">Oui</option></select></div>
+                    <div class="form-group"><label>Indisponibilité Hebdo</label><select id="collabIndispo"><option value="">Aucun</option><option value="Lundi">Lundi</option><option value="Mardi">Mardi</option><option value="Mercredi">Mercredi</option><option value="Jeudi">Jeudi</option><option value="Vendredi">Vendredi</option></select></div>
+                </div>
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <button class="btn btn-success" id="btnSaveCollab" onclick="saveCollaborateur()">Enregistrer</button>
+                    <button class="btn btn-secondary" id="btnCancelEdit" onclick="resetCollabForm()" style="display:none;">Annuler</button>
+                </div>
+            </div>
+        </div>
+        <div class="section">
+            <h3>Équipe</h3>
+            <div class="collaborateurs-list" id="collaborateursList"></div>
+        </div>
+    </div>
+
+    <!-- EXPORTS / DONNÉES -->
+    <div id="exports" class="tab-content">
+        <div class="section">
+            <h3>Export des données brutes (CSV)</h3>
+            <p style="margin-bottom:20px; color:#666;">Téléchargez les données pour usage externe (Excel).</p>
+            
+            <div class="export-grid">
+                <div class="export-card">
+                    <div style="font-size:30px; margin-bottom:10px;">📅</div>
+                    <h4 style="margin-bottom:5px;">Planning Complet</h4>
+                    <p style="font-size:12px; color:#666; margin-bottom:15px;">Historique des affectations.</p>
+                    <button class="btn btn-secondary btn-sm" onclick="exportCsvPlanning()">Télécharger CSV</button>
+                </div>
+                
+                <div class="export-card">
+                    <div style="font-size:30px; margin-bottom:10px;">👥</div>
+                    <h4 style="margin-bottom:5px;">Collaborateurs</h4>
+                    <p style="font-size:12px; color:#666; margin-bottom:15px;">Base de données RH.</p>
+                    <button class="btn btn-secondary btn-sm" onclick="exportCsvCollaborateurs()">Télécharger CSV</button>
+                </div>
+
+                <div class="export-card">
+                    <div style="font-size:30px; margin-bottom:10px;">📦</div>
+                    <h4 style="margin-bottom:5px;">Postes</h4>
+                    <p style="font-size:12px; color:#666; margin-bottom:15px;">Configuration structurelle.</p>
+                    <button class="btn btn-secondary btn-sm" onclick="exportCsvPostes()">Télécharger CSV</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- SECTION BACKUP JSON -->
+        <div class="section" style="border-top:2px dashed #eee; padding-top:30px; margin-top:30px;">
+            <h3 style="color:var(--vert-sarcelle);">Sauvegarde partagée (JSON)</h3>
+            <div class="export-card" style="border:2px solid var(--azur); max-width: 600px;">
+              <div style="font-size:30px; margin-bottom:10px;">🧩</div>
+              <h4 style="margin-bottom:5px;">Synchronisation Fichier (SharePoint/OneDrive)</h4>
+              <p style="font-size:13px; color:#555; margin-bottom:20px; line-height:1.6;">
+                1. Au démarrage, cliquez sur "Connecter fichier" pour activer la sauvegarde automatique.<br>
+                2. Utilisez "Importer" si vous changez d'ordinateur pour récupérer les données.
+              </p>
+            
+              <div style="display:flex; flex-direction:column; gap:10px;">
+                  <button class="btn btn-primary" onclick="connectBackupFile()">1. Connecter fichier JSON (Auto-Save)</button>
+                  <button class="btn btn-secondary" onclick="exportBackupNow()">2. Exporter JSON manuellement</button>
+              </div>
+            
+              <div style="margin-top:20px; border-top:1px dashed #ccc; padding-top:15px; background:#f9f9f9; padding:10px; border-radius:8px;">
+                <p style="font-size:12px; margin-bottom:8px; font-weight:600;">Restaurer depuis une sauvegarde :</p>
+                <input type="file" id="importBackupInput" accept=".json,application/json" style="display:none" onchange="importBackupFromInput(this.files[0])">
+                <button class="btn btn-warning btn-sm" onclick="document.getElementById('importBackupInput').click()">Importer un fichier JSON</button>
+              </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    /* -------------------------------------------------------------------------- */
+    /*                                 DATA STORE                                 */
+    /* -------------------------------------------------------------------------- */
+    let COLLABORATEURS = JSON.parse(localStorage.getItem('collaborateurs')) || [];
+    let POSTES = JSON.parse(localStorage.getItem('postes')) || [];
+    let affectations = JSON.parse(localStorage.getItem('affectations')) || {};
+    
+    // VAK DATA
+    let VAKS = JSON.parse(localStorage.getItem('vaks')) || [];
+    let VAK_POSTES = JSON.parse(localStorage.getItem('vak_postes')) || [];
+    let VAK_AFFECTATIONS = JSON.parse(localStorage.getItem('vak_affectations')) || {}; 
+
+    // BACKUP META
+    let BACKUP_FILE_HANDLE = null;
+    let AUTO_SAVE_TIMER = null;
+    let BACKUP_META = JSON.parse(localStorage.getItem('backup_meta')) || {
+      fileName: null,
+      loadedAt: null,
+      lastSavedAt: null,
+      mode: "manuel"
+    };
+
+    /* -------------------------------------------------------------------------- */
+    /*                                INITIALIZATION                              */
+    /* -------------------------------------------------------------------------- */
+    
+    // Init Demo Data if empty
+    if (COLLABORATEURS.length === 0) {
+        COLLABORATEURS = [
+            { id: 1, nom: 'DIALLO', prenom: 'Bounty', temps: '26h', caces: 'Non', permis: 'Oui', indispo: '' },
+            { id: 2, nom: 'MARTIN', prenom: 'Sophie', temps: '35h', caces: 'Oui', permis: 'Oui', indispo: '' },
+            { id: 3, nom: 'DUPONT', prenom: 'Pierre', temps: '26h', caces: 'Non', permis: 'Non', indispo: 'Mercredi' }
+        ];
+    }
+    if (POSTES.length === 0) {
+        POSTES = [
+            { id: 1, nom: 'Opérateur tri R3', obligatoire: true, groupe: 'Tri', reqCaces: false, reqPermis: false },
+            { id: 2, nom: 'Chauffeur Collecte', obligatoire: true, groupe: 'Collecte', reqCaces: false, reqPermis: true },
+            { id: 3, nom: 'Opérateur Logistique', obligatoire: false, groupe: 'Logistique', reqCaces: true, reqPermis: false },
+            { id: 4, nom: 'Opérateur tri Fine', obligatoire: true, groupe: 'Tri', reqCaces: false, reqPermis: false }
+        ];
+    }
+    
+    // Set Dates
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('planningDate').value = today;
+    document.getElementById('accueilDateStats').value = today;
+    document.getElementById('exportDate').value = today;
+
+    // Initial Save & Render
+    saveData();
+    updateBackupStatusUI();
+    updateAccueilStats();
+
+    /* -------------------------------------------------------------------------- */
+    /*                                CORE FUNCTIONS                              */
+    /* -------------------------------------------------------------------------- */
+
+    function saveData() {
+        try {
+            localStorage.setItem('collaborateurs', JSON.stringify(COLLABORATEURS));
+            localStorage.setItem('postes', JSON.stringify(POSTES));
+            localStorage.setItem('affectations', JSON.stringify(affectations));
+            localStorage.setItem('vaks', JSON.stringify(VAKS));
+            localStorage.setItem('vak_postes', JSON.stringify(VAK_POSTES));
+            localStorage.setItem('vak_affectations', JSON.stringify(VAK_AFFECTATIONS));
+            
+            scheduleAutoBackupSave();
+        } catch (e) {
+            console.error("Save Error", e);
+            showAlert("Erreur sauvegarde locale (Espace plein?)", "error");
+        }
+    }
+
+    function switchTab(event, tabName) {
+        event.preventDefault();
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        
+        document.getElementById(tabName).classList.add('active');
+        if (event.target.classList.contains('tab-btn')) event.target.classList.add('active');
+        else document.querySelector(`.tab-btn[onclick*="${tabName}"]`).classList.add('active');
+
+        // Contextual Refresh
+        if (tabName === 'accueil') updateAccueilStats();
+        if (tabName === 'postes') refreshPostesList();
+        if (tabName === 'collaborateurs') refreshCollaborateursList();
+        if (tabName === 'planning') loadPlanning();
+        if (tabName === 'vak') { refreshVakList(); refreshVakPostesList(); updateVakSelects(); }
+    }
+
+    function showAlert(msg, type) {
+        const alert = document.createElement('div');
+        alert.className = `alert ${type === 'error' ? 'alert-error' : 'alert-success'}`;
+        alert.textContent = msg;
+        document.body.appendChild(alert);
+        setTimeout(() => alert.remove(), 3000);
+    }
+    
+    function toggleLoader(show) {
+        document.getElementById('globalLoader').style.display = show ? 'flex' : 'none';
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                            BACKUP & SYNC ENGINE                            */
+    /* -------------------------------------------------------------------------- */
+    
+    function persistBackupMeta() {
+      localStorage.setItem('backup_meta', JSON.stringify(BACKUP_META));
+      updateBackupStatusUI();
+    }
+
+    function updateBackupStatusUI() {
+      const loadedEl = document.getElementById('backupLoadedLabel');
+      const savedEl = document.getElementById('backupLastSavedLabel');
+      const modeEl = document.getElementById('backupModeLabel');
+      const container = document.getElementById('backupStatusBar');
+
+      if (!loadedEl || !savedEl || !modeEl) return;
+
+      loadedEl.textContent = BACKUP_META.fileName
+        ? `Fichier lié : ${BACKUP_META.fileName}`
+        : 'Aucun fichier lié (données locales uniquement)';
+
+      savedEl.textContent = BACKUP_META.lastSavedAt || '—';
+      
+      if (BACKUP_META.mode === 'auto') {
+          modeEl.textContent = '🟢 SYNCHRO ACTIVE';
+          modeEl.style.color = '#16a085';
+          container.style.borderLeftColor = '#16a085';
+      } else {
+          modeEl.textContent = '🟠 MODE MANUEL';
+          modeEl.style.color = '#f39c12';
+          container.style.borderLeftColor = '#f39c12';
+      }
+    }
+
+    function getBackupPayload() {
+      return {
+        version: "v1.0-release",
+        exportedAt: new Date().toISOString(),
+        collaborateurs: COLLABORATEURS,
+        postes: POSTES,
+        affectations: affectations,
+        vaks: VAKS,
+        vak_postes: VAK_POSTES,
+        vak_affectations: VAK_AFFECTATIONS
+      };
+    }
+
+    async function connectBackupFile() {
+      if (!('showSaveFilePicker' in window)) {
+        showAlert("Navigateur non compatible (Utilisez Chrome/Edge).", "error");
+        return;
+      }
+      try {
+        BACKUP_FILE_HANDLE = await window.showSaveFilePicker({
+          suggestedName: "planning_data.json",
+          types: [{ description: "JSON Backup", accept: { "application/json": [".json"] } }],
+        });
+
+        BACKUP_META.fileName = BACKUP_FILE_HANDLE.name;
+        BACKUP_META.loadedAt = new Date().toLocaleString('fr-FR');
+        BACKUP_META.mode = "auto";
+        persistBackupMeta();
+
+        await autoSaveBackupNow(); 
+        showAlert("Connexion réussie ! Sauvegarde automatique activée.", "success");
+      } catch (e) {
+        console.warn("User cancelled or error", e);
+      }
+    }
+
+    async function autoSaveBackupNow() {
+      if (!BACKUP_FILE_HANDLE) return;
+      try {
+        const payload = getBackupPayload();
+        const jsonText = JSON.stringify(payload, null, 2);
+        const writable = await BACKUP_FILE_HANDLE.createWritable();
+        await writable.write(jsonText);
+        await writable.close();
+
+        BACKUP_META.lastSavedAt = new Date().toLocaleString('fr-FR');
+        persistBackupMeta();
+      } catch (e) {
+        console.error("AutoSave Failed", e);
+        BACKUP_META.mode = "manuel"; 
+        persistBackupMeta();
+        showAlert("Erreur sauvegarde auto. Reconnectez le fichier.", "error");
+      }
+    }
+
+    function scheduleAutoBackupSave() {
+      if (BACKUP_META.mode !== "auto") return;
+      if (!BACKUP_FILE_HANDLE) return;
+      if (AUTO_SAVE_TIMER) clearTimeout(AUTO_SAVE_TIMER);
+      AUTO_SAVE_TIMER = setTimeout(() => {
+        autoSaveBackupNow();
+      }, 1000);
+    }
+
+    function exportBackupNow() {
+      const payload = getBackupPayload();
+      const jsonText = JSON.stringify(payload, null, 2);
+      const blob = new Blob([jsonText], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `planning_backup_${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      BACKUP_META.lastSavedAt = new Date().toLocaleString('fr-FR');
+      persistBackupMeta();
+    }
+
+    async function importBackupFromInput(file) {
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        COLLABORATEURS = data.collaborateurs || [];
+        POSTES = data.postes || [];
+        affectations = data.affectations || {};
+        VAKS = data.vaks || [];
+        VAK_POSTES = data.vak_postes || [];
+        VAK_AFFECTATIONS = data.vak_affectations || {};
+
+        BACKUP_META.fileName = file.name;
+        BACKUP_META.loadedAt = new Date().toLocaleString('fr-FR');
+        BACKUP_META.mode = "manuel"; 
+        
+        saveData(); 
+        persistBackupMeta();
+        
+        // Refresh UI
+        refreshPostesList();
+        refreshCollaborateursList();
+        loadPlanning();
+        refreshVakList();
+        refreshVakPostesList();
+        updateVakSelects();
+        updateAccueilStats();
+
+        showAlert("Données restaurées avec succès.", "success");
+      } catch (e) {
+        showAlert("Fichier JSON invalide.", "error");
+      }
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                              PLANNING LOGIC                                */
+    /* -------------------------------------------------------------------------- */
+
+    function generateCollabOptions(selectedId, poste, assignedIds) {
+        let options = '<option value="">-- Libre --</option>';
+        const sortedCollabs = [...COLLABORATEURS].sort((a,b) => a.nom.localeCompare(b.nom));
+        
+        sortedCollabs.forEach(c => {
+            // Anti-doublon: Ignore si déjà affecté ailleurs
+            if (assignedIds && assignedIds.includes(c.id) && c.id != selectedId) {
+                return; 
+            }
+
+            // Qualifs check
+            let isQualified = true;
+            if (poste.reqCaces === true && c.caces !== 'Oui') isQualified = false;
+            if (poste.reqPermis === true && c.permis !== 'Oui') isQualified = false;
+            
+            if (isQualified || c.id == selectedId) {
+                const selected = (c.id == selectedId) ? 'selected' : '';
+                options += `<option value="${c.id}" ${selected}>${c.nom} ${c.prenom} (${c.temps})</option>`;
+            }
+        });
+        return options;
+    }
+
+    function loadPlanning() {
+        const dateStr = document.getElementById('planningDate').value;
+        if (!dateStr) return;
+        
+        const dayData = affectations[dateStr] || {};
+        const takenCollabIds = Object.values(dayData).map(v => parseInt(v));
+
+        const sorted = [...POSTES].sort((a,b) => {
+            if(a.groupe < b.groupe) return -1;
+            if(a.groupe > b.groupe) return 1;
+            if (a.obligatoire && !b.obligatoire) return -1;
+            if (!a.obligatoire && b.obligatoire) return 1;
+            return a.nom.localeCompare(b.nom);
+        });
+        
+        let html = '';
+        let currentGroup = null;
+
+        sorted.forEach(p => {
+            if(p.groupe !== currentGroup) {
+                currentGroup = p.groupe;
+                html += `<div class="category-header">${currentGroup}</div>`;
+            }
+            
+            const collabId = dayData[p.id];
+            const options = generateCollabOptions(collabId, p, takenCollabIds);
+            
+            let qualifBadges = "";
+            if(p.reqCaces) qualifBadges += `<span class="badge badge-warning">CACES</span>`;
+            if(p.reqPermis) qualifBadges += `<span class="badge badge-info">PERMIS B</span>`;
+
+            html += `
+            <div class="post-card ${p.obligatoire ? 'obligatoire' : ''}">
+                ${p.obligatoire ? '<div class="obligatoire-badge">PRIORITAIRE</div>' : ''}
+                <div class="post-name"><b>${p.nom}</b></div>
+                <div style="margin-bottom:12px; font-size:12px;">${qualifBadges}</div>
+                
+                <div class="form-group" style="margin-bottom:0;">
+                    <select style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd; background:#f9f9f9;" 
+                        onchange="updateAffectation('${dateStr}', ${p.id}, this.value)">
+                        ${options}
+                    </select>
+                </div>
+            </div>`;
+        });
+        
+        document.getElementById('planningGrid').innerHTML = html;
+        
+        // Stats
+        const total = POSTES.length;
+        const filled = Object.keys(dayData).length;
+        document.getElementById('planningStats').innerHTML = `
+            <div class="stat-card">
+                <div class="stat-label">Postes Pourvus</div>
+                <div class="stat-number ${filled===total?'stat-good':'stat-warning'}">${filled} / ${total}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Taux Remplissage</div>
+                <div class="stat-number ${filled===total?'stat-good':'stat-warning'}">${Math.round(filled/total*100)}%</div>
+            </div>
+        `;
+    }
+
+    function updateAffectation(dateStr, postId, collabId) {
+        if(!affectations[dateStr]) affectations[dateStr] = {};
+        if(collabId === "") delete affectations[dateStr][postId];
+        else affectations[dateStr][postId] = parseInt(collabId);
+        
+        saveData();
+        loadPlanning(); // Reload to refresh filtered lists
+        updateAccueilStats();
+    }
+
+    function clearPlanning() {
+        const d = document.getElementById('planningDate').value;
+        if(confirm("Voulez-vous vraiment vider tout le planning de ce jour ?")) {
+            delete affectations[d];
+            saveData();
+            loadPlanning();
+            updateAccueilStats();
+        }
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                          PDF GENERATION (WEEK)                             */
+    /* -------------------------------------------------------------------------- */
+
+    async function generateWeeklyPDF() {
+        const dateInput = document.getElementById('exportDate').value;
+        if (!dateInput) return showAlert("Sélectionnez une date dans 'Semaine du'", "error");
+        
+        toggleLoader(true); // Show loader
+
+        // Delay to allow UI render
+        setTimeout(async () => {
+            try {
+                let d = new Date(dateInput);
+                let day = d.getDay();
+                let diff = d.getDate() - day + (day == 0 ? -6 : 1);
+                let monday = new Date(d.setDate(diff));
+                
+                let html = `
+                <div style="font-family:Poppins, sans-serif; padding:30px; width:1100px; background:white;">
+                    <div style="text-align:center; margin-bottom:20px; border-bottom:4px solid #008678; padding-bottom:15px;">
+                        <h1 style="color:#008678; margin:0; font-size:28px;">Solidarité Textiles</h1>
+                        <h3 style="color:#555; margin:5px 0;">Planning de la semaine du ${monday.toLocaleDateString()}</h3>
+                    </div>
+                    <table style="width:100%; border-collapse:collapse; font-size:12px; border:1px solid #ccc;">
+                        <thead>
+                            <tr style="background:#008678; color:white;">
+                                <th style="padding:10px; border:1px solid #ccc; width:15%;">Poste</th>
+                `;
+                
+                let daysOfWeek = [];
+                for(let i=0; i<5; i++) {
+                    let current = new Date(monday);
+                    current.setDate(monday.getDate() + i);
+                    let dateStr = current.toISOString().split('T')[0];
+                    daysOfWeek.push({ date: dateStr, label: current.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric'}) });
+                    html += `<th style="padding:10px; border:1px solid #ccc; width:17%; text-transform:capitalize;">${daysOfWeek[i].label}</th>`;
+                }
+                html += `</tr></thead><tbody>`;
+                
+                const sortedPostes = [...POSTES].sort((a,b) => (a.groupe === b.groupe) ? a.nom.localeCompare(b.nom) : a.groupe.localeCompare(b.groupe));
+                let lastGroup = null;
+                
+                sortedPostes.forEach(p => {
+                    if(p.groupe !== lastGroup) {
+                        html += `<tr style="background:#e8f6f3;"><td colspan="6" style="padding:8px; font-weight:bold; color:#006e61; border:1px solid #ccc; letter-spacing:1px;">${p.groupe.toUpperCase()}</td></tr>`;
+                        lastGroup = p.groupe;
+                    }
+                    html += `<tr><td style="padding:8px; border:1px solid #ccc; font-weight:600;">${p.nom}</td>`;
+                    
+                    daysOfWeek.forEach(day => {
+                        let cellText = "";
+                        let dayAff = affectations[day.date];
+                        if(dayAff && dayAff[p.id]) {
+                            const c = COLLABORATEURS.find(x => x.id == dayAff[p.id]);
+                            if(c) cellText = `${c.prenom} ${c.nom}`;
+                        }
+                        html += `<td style="padding:8px; border:1px solid #ccc; text-align:center;">${cellText}</td>`;
+                    });
+                    html += `</tr>`;
+                });
+                
+                html += `</tbody></table></div>`;
+                
+                const container = document.createElement('div');
+                container.innerHTML = html;
+                container.style.position = 'absolute';
+                container.style.left = '-9999px';
+                document.body.appendChild(container);
+                
+                const canvas = await html2canvas(container, { scale: 2 });
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('l', 'mm', 'a4');
+                const imgData = canvas.toDataURL('image/png');
+                const imgProps = pdf.getImageProperties(imgData);
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+                pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
+                pdf.save(`Planning_Semaine_${dateInput}.pdf`);
+                
+                document.body.removeChild(container);
+                showAlert("PDF généré avec succès !", "success");
+
+            } catch(e) {
+                console.error(e);
+                showAlert("Erreur lors de la génération PDF", "error");
+            } finally {
+                toggleLoader(false);
+            }
+        }, 100);
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                              MODULE VAK                                    */
+    /* -------------------------------------------------------------------------- */
+    
+    // (Similaire à la logique standard mais séparée pour clarté)
+    function showVakSection(sectionId) {
+        document.querySelectorAll('.vak-section').forEach(s => s.style.display = 'none');
+        document.getElementById(sectionId).style.display = 'block';
+    }
+
+    function createVakEvent() {
+        const nom = document.getElementById('vakName').value;
+        const start = document.getElementById('vakStart').value;
+        const end = document.getElementById('vakEnd').value;
+        if(!nom || !start || !end) return showAlert("Remplissez tout", "error");
+        VAKS.push({ id: Date.now(), nom, start, end });
+        saveData();
+        refreshVakList();
+        updateVakSelects();
+        showAlert("VAK créée", "success");
+    }
+
+    function deleteVak(id) {
+        if(!confirm("Supprimer cette VAK ?")) return;
+        VAKS = VAKS.filter(v => v.id != id);
+        saveData();
+        refreshVakList();
+    }
+
+    function refreshVakList() {
+        const container = document.getElementById('vakList');
+        container.innerHTML = '';
+        VAKS.forEach(v => {
+            container.innerHTML += `
+                <div class="vak-card">
+                    <h4 style="color:var(--violet-vak); font-weight:700;">${v.nom}</h4>
+                    <p style="font-size:12px; color:#666; margin-top:4px;">Du ${new Date(v.start).toLocaleDateString()} au ${new Date(v.end).toLocaleDateString()}</p>
+                    <div class="card-actions"><button class="btn btn-danger btn-sm" onclick="deleteVak(${v.id})">Suppr</button></div>
+                </div>
+            `;
+        });
+    }
+
+    function createVakPoste() {
+        const nom = document.getElementById('vakPosteNom').value;
+        const oblig = document.getElementById('vakPosteObligatoire').value === 'true';
+        if(!nom) return;
+        VAK_POSTES.push({ id: 'vp_'+Date.now(), nom, obligatoire: oblig });
+        saveData();
+        refreshVakPostesList();
+        document.getElementById('vakPosteNom').value = '';
+    }
+
+    function deleteVakPoste(id) {
+        if(!confirm("Supprimer ce poste VAK ?")) return;
+        VAK_POSTES = VAK_POSTES.filter(p => p.id !== id);
+        saveData();
+        refreshVakPostesList();
+    }
+
+    function refreshVakPostesList() {
+        const list = document.getElementById('vakPostesList');
+        list.innerHTML = VAK_POSTES.map(p => `
+            <div class="post-card ${p.obligatoire ? 'obligatoire' : ''}">
+                <div class="post-name"><b>${p.nom}</b></div>
+                <span class="badge ${p.obligatoire ? 'badge-danger' : 'badge-info'}">${p.obligatoire ? 'Obligatoire' : 'Facultatif'}</span>
+                <div class="card-actions"><button class="btn btn-danger btn-sm" onclick="deleteVakPoste('${p.id}')">X</button></div>
+            </div>
+        `).join('');
+    }
+
+    function updateVakSelects() {
+        const sel = document.getElementById('vakSelect');
+        sel.innerHTML = '<option value="">-- Choisir une VAK --</option>' + VAKS.map(v => `<option value="${v.id}">${v.nom}</option>`).join('');
+    }
+
+    function loadVakDays() {
+        const vakId = document.getElementById('vakSelect').value;
+        const daySel = document.getElementById('vakDaySelect');
+        daySel.innerHTML = '';
+        if(!vakId) return;
+        const vak = VAKS.find(v => v.id == vakId);
+        let current = new Date(vak.start);
+        const end = new Date(vak.end);
+        while(current <= end) {
+            const val = current.toISOString().split('T')[0];
+            daySel.innerHTML += `<option value="${val}">${current.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})}</option>`;
+            current.setDate(current.getDate() + 1);
+        }
+    }
+
+    function loadVakPlanning() {
+        const vakId = document.getElementById('vakSelect').value;
+        const date = document.getElementById('vakDaySelect').value;
+        if(!vakId || !date) return;
+        const container = document.getElementById('vakGridContainer');
+        const sorted = [...VAK_POSTES].sort((a,b) => (a.obligatoire === b.obligatoire) ? a.nom.localeCompare(b.nom) : a.obligatoire ? -1 : 1);
+        
+        let html = '';
+        sorted.forEach(p => {
+            const key = `${vakId}_${date}_${p.id}`;
+            const currentVal = VAK_AFFECTATIONS[key];
+            const options = generateCollabOptions(currentVal, {reqCaces:false, reqPermis:false}, null);
+
+            html += `
+            <div class="post-card ${p.obligatoire ? 'obligatoire' : ''}">
+                ${p.obligatoire ? '<div class="obligatoire-badge">PRIORITAIRE</div>' : ''}
+                <div class="post-name"><b>${p.nom}</b></div>
+                <div style="margin-top:10px;">
+                    <select class="assign-select" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;" 
+                        onchange="updateVakAffectation('${key}', this.value)">
+                        ${options}
+                    </select>
+                </div>
+            </div>`;
+        });
+        container.innerHTML = html;
+    }
+
+    function updateVakAffectation(key, value) {
+        if(value) VAK_AFFECTATIONS[key] = value;
+        else delete VAK_AFFECTATIONS[key];
+        saveData();
+    }
+    
+    async function exportVakDayPDF() {
+        const vakId = document.getElementById('vakSelect').value;
+        const date = document.getElementById('vakDaySelect').value;
+        if(!vakId || !date) return showAlert("Sélectionnez VAK et Date", "error");
+        
+        toggleLoader(true);
+        setTimeout(async () => {
+            try {
+                const vak = VAKS.find(v => v.id == vakId);
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                let html = `
+                <div style="font-family:Poppins, sans-serif; padding:30px; width:800px; background:white;">
+                    <div style="text-align:center; margin-bottom:20px; border-bottom:4px solid #8e44ad; padding-bottom:15px;">
+                        <h1 style="color:#8e44ad; margin:0;">${vak.nom}</h1>
+                        <h2 style="color:#555; margin:5px 0;">Planning du ${new Date(date).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'})}</h2>
+                    </div>
+                    <table style="width:100%; border-collapse:collapse; font-size:12px; border:1px solid #ccc;">
+                        <thead>
+                            <tr style="background:#8e44ad; color:white;">
+                                <th style="padding:10px; border:1px solid #ccc; width:40%;">Poste</th>
+                                <th style="padding:10px; border:1px solid #ccc; width:60%;">Affectation</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                const sorted = [...VAK_POSTES].sort((a,b) => (a.obligatoire === b.obligatoire) ? 0 : a.obligatoire ? -1 : 1);
+                sorted.forEach(p => {
+                    const key = `${vakId}_${date}_${p.id}`;
+                    const val = VAK_AFFECTATIONS[key];
+                    let cellContent = "";
+                    let bg = "#fff";
+                    if(val) {
+                        const c = COLLABORATEURS.find(x => x.id == val);
+                        if(c) cellContent = `${c.prenom} ${c.nom}`;
+                    } else {
+                        if(p.obligatoire) bg = "#fff5f5";
+                    }
+                    html += `
+                    <tr style="background:${bg}">
+                        <td style="padding:10px; border:1px solid #ccc; font-weight:bold;">${p.nom} ${p.obligatoire ? '(Prioritaire)' : ''}</td>
+                        <td style="padding:10px; border:1px solid #ccc;">${cellContent}</td>
+                    </tr>`;
+                });
+                html += `</tbody></table></div>`;
+                
+                const container = document.createElement('div');
+                container.innerHTML = html;
+                container.style.position = 'absolute';
+                container.style.left = '-9999px';
+                document.body.appendChild(container);
+                
+                const canvas = await html2canvas(container, { scale: 2 });
+                const imgData = canvas.toDataURL('image/png');
+                pdf.addImage(imgData, 'PNG', 10, 10, 190, 0); 
+                pdf.save(`VAK_Planning_${date}.pdf`);
+                document.body.removeChild(container);
+                showAlert("PDF VAK Généré !", "success");
+            } catch(e) {
+                console.error(e);
+                showAlert("Erreur PDF VAK", "error");
+            } finally {
+                toggleLoader(false);
+            }
+        }, 100);
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                              MANAGEMENT (CRUD)                             */
+    /* -------------------------------------------------------------------------- */
+    
+    // POSTES CRUD
+    function savePoste() {
+        const idEdit = document.getElementById('posteIdEdit').value;
+        const nom = document.getElementById('posteNom').value;
+        const groupe = document.getElementById('posteGroupe').value;
+        const obligatoire = document.getElementById('posteObligatoire').checked;
+        const reqCaces = document.getElementById('posteReqCaces').checked;
+        const reqPermis = document.getElementById('posteReqPermis').checked;
+
+        if(!nom) return showAlert("Nom du poste requis", "error");
+
+        if (idEdit) {
+            const index = POSTES.findIndex(p => p.id == idEdit);
+            if(index > -1) {
+                POSTES[index] = { id: parseInt(idEdit), nom, groupe, obligatoire, reqCaces, reqPermis };
+                showAlert("Poste mis à jour", "success");
+            }
+        } else {
+            POSTES.push({ id: Date.now(), nom, groupe, obligatoire, reqCaces, reqPermis });
+            showAlert("Nouveau poste créé", "success");
+        }
+        saveData();
+        refreshPostesList();
+        resetPosteForm();
+    }
+
+    function editPoste(id) {
+        const p = POSTES.find(x => x.id == id);
+        if(!p) return;
+        document.getElementById('posteIdEdit').value = p.id;
+        document.getElementById('posteNom').value = p.nom;
+        document.getElementById('posteGroupe').value = p.groupe;
+        document.getElementById('posteObligatoire').checked = p.obligatoire;
+        document.getElementById('posteReqCaces').checked = p.reqCaces || false;
+        document.getElementById('posteReqPermis').checked = p.reqPermis || false;
+
+        document.getElementById('formPosteTitle').textContent = "Modifier le poste";
+        document.getElementById('btnSavePoste').textContent = "Modifier";
+        document.getElementById('btnCancelPoste').style.display = "inline-block";
+        document.getElementById('formPosteTitle').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function deletePoste(id) {
+        if(confirm("Supprimer ce poste ?")) {
+            POSTES = POSTES.filter(p => p.id != id);
+            saveData();
+            refreshPostesList();
+        }
+    }
+
+    function resetPosteForm() {
+        document.getElementById('posteIdEdit').value = "";
+        document.getElementById('posteNom').value = "";
+        document.getElementById('posteGroupe').value = "Tri";
+        document.getElementById('posteObligatoire').checked = false;
+        document.getElementById('posteReqCaces').checked = false;
+        document.getElementById('posteReqPermis').checked = false;
+
+        document.getElementById('formPosteTitle').textContent = "Nouveau poste (Standard)";
+        document.getElementById('btnSavePoste').textContent = "Enregistrer";
+        document.getElementById('btnCancelPoste').style.display = "none";
+    }
+
+    function refreshPostesList() {
+        const sorted = [...POSTES].sort((a,b) => {
+            if(a.groupe < b.groupe) return -1;
+            if(a.groupe > b.groupe) return 1;
+            return a.nom.localeCompare(b.nom);
+        });
+        let html = '';
+        let currentGroup = null;
+        sorted.forEach(p => {
+             if(p.groupe !== currentGroup) {
+                currentGroup = p.groupe;
+                html += `<div class="category-header" style="margin-top:15px; font-size:13px;">${currentGroup}</div>`;
+            }
+            html += `
+            <div class="post-card ${p.obligatoire ? 'obligatoire' : ''}">
+                <div style="font-weight:600;">${p.nom}</div>
+                <div style="font-size:12px; color:#777; margin-bottom:6px;">${p.groupe}</div>
+                
+                ${p.obligatoire ? '<span class="badge badge-warning">Prioritaire</span>' : ''}
+                ${p.reqCaces ? '<span class="badge badge-info">CACES</span>' : ''}
+                ${p.reqPermis ? '<span class="badge badge-info">Permis</span>' : ''}
+                
+                <div class="card-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="editPoste(${p.id})">Modifier</button>
+                    <button class="btn btn-danger btn-sm" onclick="deletePoste(${p.id})">Suppr</button>
+                </div>
+            </div>`;
+        });
+        document.getElementById('postesList').innerHTML = html;
+    }
+
+    // COLLABS CRUD
+    function saveCollaborateur() {
+        const idEdit = document.getElementById('collabIdEdit').value;
+        const nom = document.getElementById('collabNom').value;
+        const prenom = document.getElementById('collabPrenom').value;
+        const temps = document.getElementById('collabTemps').value;
+        const caces = document.getElementById('collabCaces').value;
+        const permis = document.getElementById('collabPermis').value;
+        const indispo = document.getElementById('collabIndispo').value;
+        if(!nom || !prenom) return showAlert("Nom et Prénom requis", "error");
+
+        if (idEdit) {
+            const index = COLLABORATEURS.findIndex(c => c.id == idEdit);
+            if (index > -1) {
+                COLLABORATEURS[index] = { id: parseInt(idEdit), nom: nom.toUpperCase(), prenom, temps, caces, permis, indispo };
+                showAlert("Collaborateur mis à jour", "success");
+            }
+        } else {
+            COLLABORATEURS.push({ id: Date.now(), nom: nom.toUpperCase(), prenom, temps, caces, permis, indispo });
+            showAlert("Collaborateur ajouté", "success");
+        }
+        saveData();
+        refreshCollaborateursList();
+        resetCollabForm();
+        updateAccueilStats();
+    }
+
+    function editCollaborateur(id) {
+        const c = COLLABORATEURS.find(x => x.id == id);
+        if (!c) return;
+        document.getElementById('collabIdEdit').value = c.id;
+        document.getElementById('collabNom').value = c.nom;
+        document.getElementById('collabPrenom').value = c.prenom;
+        document.getElementById('collabTemps').value = c.temps;
+        document.getElementById('collabCaces').value = c.caces;
+        document.getElementById('collabPermis').value = c.permis;
+        document.getElementById('collabIndispo').value = c.indispo;
+        document.getElementById('formCollabTitle').textContent = "Modifier le collaborateur";
+        document.getElementById('btnSaveCollab').textContent = "Modifier";
+        document.getElementById('btnCancelEdit').style.display = "inline-block";
+        document.getElementById('formCollabTitle').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function deleteCollaborateur(id) {
+        if(confirm("Supprimer ce collaborateur définitivement ?")) {
+            COLLABORATEURS = COLLABORATEURS.filter(c => c.id != id);
+            saveData();
+            refreshCollaborateursList();
+            updateAccueilStats();
+        }
+    }
+
+    function resetCollabForm() {
+        document.getElementById('collabIdEdit').value = "";
+        document.getElementById('collabNom').value = "";
+        document.getElementById('collabPrenom').value = "";
+        document.getElementById('collabTemps').value = "26h";
+        document.getElementById('collabCaces').value = "Non";
+        document.getElementById('collabPermis').value = "Non";
+        document.getElementById('collabIndispo').value = "";
+        document.getElementById('formCollabTitle').textContent = "Nouveau collaborateur";
+        document.getElementById('btnSaveCollab').textContent = "Enregistrer";
+        document.getElementById('btnCancelEdit').style.display = "none";
+    }
+
+    function refreshCollaborateursList() {
+        document.getElementById('collaborateursList').innerHTML = COLLABORATEURS.map(c => `
+            <div class="collab-card">
+                <b>${c.nom} ${c.prenom}</b> <span style="font-size:12px; color:#777;">(${c.temps})</span>
+                <div style="font-size:12px; margin-top:4px; color:#555;">${c.indispo ? '⚠️ Abs: '+c.indispo : '✅ Dispo'}</div>
+                <div style="margin-top:8px;">
+                    ${c.caces==='Oui' ? '<span class="badge badge-info">CACES</span>' : ''}
+                    ${c.permis==='Oui' ? '<span class="badge badge-success">PERMIS</span>' : ''}
+                </div>
+                <div class="card-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="editCollaborateur(${c.id})">Modifier</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteCollaborateur(${c.id})">Suppr.</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                              STATS & CSV                                   */
+    /* -------------------------------------------------------------------------- */
+    
+    function updateAccueilStats() {
+        const dateStr = document.getElementById('accueilDateStats').value;
+        if (!dateStr) return;
+        const dateObj = new Date(dateStr);
+        const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+        const dayName = days[dateObj.getDay()];
+        const presentCollabs = COLLABORATEURS.filter(c => c.indispo !== dayName);
+        const countPresent = presentCollabs.length;
+        const dayData = affectations[dateStr] || {};
+        const assignedCollabIds = Object.values(dayData).map(Number);
+        const uniqueAssignedCount = new Set(assignedCollabIds).size;
+        const countIdle = Math.max(0, countPresent - uniqueAssignedCount);
+        const mandatoryPosts = POSTES.filter(p => p.obligatoire);
+        const filledMandatory = mandatoryPosts.filter(p => dayData[p.id]).length;
+        const countMissingMandatory = mandatoryPosts.length - filledMandatory;
+
+        document.getElementById('accueilStats').innerHTML = `
+            <div class="stat-card">
+                <div class="stat-label">Présents (${dayName})</div>
+                <div class="stat-number" style="color:var(--azur);">${countPresent}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Postes Prioritaires Vides</div>
+                <div class="stat-number ${countMissingMandatory > 0 ? 'stat-danger' : 'stat-good'}">${countMissingMandatory}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Collaborateurs Libres</div>
+                <div class="stat-number ${countIdle > 0 ? 'stat-warning' : 'stat-good'}">${countIdle}</div>
+            </div>
+        `;
+    }
+
+    function downloadCSV(csvContent, fileName) {
+        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function exportCsvPlanning() {
+        let csv = "Date;Groupe;Poste;Prioritaire;Collaborateur_Nom;Collaborateur_Prenom;Contrat\n";
+        Object.keys(affectations).sort().forEach(date => {
+            const dayAff = affectations[date];
+            if (!dayAff) return;
+            Object.keys(dayAff).forEach(posteId => {
+                const collabId = dayAff[posteId];
+                const poste = POSTES.find(p => p.id == posteId);
+                const collab = COLLABORATEURS.find(c => c.id == collabId);
+                if(poste && collab) {
+                    csv += `${date};${poste.groupe};${poste.nom};${poste.obligatoire?'OUI':'NON'};${collab.nom};${collab.prenom};${collab.temps}\n`;
+                }
+            });
+        });
+        downloadCSV(csv, `Planning_Global_${new Date().toISOString().slice(0,10)}.csv`);
+    }
+
+    function exportCsvCollaborateurs() {
+        let csv = "ID;Nom;Prénom;Contrat;CACES;Permis;Indisponibilité\n";
+        COLLABORATEURS.forEach(c => {
+            csv += `${c.id};${c.nom};${c.prenom};${c.temps};${c.caces};${c.permis};${c.indispo || 'Aucune'}\n`;
+        });
+        downloadCSV(csv, `RH_Effectifs_${new Date().toISOString().slice(0,10)}.csv`);
+    }
+
+    function exportCsvPostes() {
+        let csv = "ID;Groupe;Nom;Prioritaire;Requis_Caces;Requis_Permis\n";
+        POSTES.forEach(p => {
+            csv += `${p.id};${p.groupe};${p.nom};${p.obligatoire?'OUI':'NON'};${p.reqCaces?'OUI':'NON'};${p.reqPermis?'OUI':'NON'}\n`;
+        });
+        downloadCSV(csv, `Config_Postes_${new Date().toISOString().slice(0,10)}.csv`);
+    }
+</script>
+</body>
+</html>
