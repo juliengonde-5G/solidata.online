@@ -8,7 +8,7 @@ Application de gestion des candidatures et d'analyse de personnalité PCM pour l
 - **Backend** : FastAPI (Python 3.11) + SQLite
 - **Conteneurisation** : Docker Compose
 - **OCR** : Tesseract (fra + eng) pour parsing CV
-- **Déploiement** : Synology NAS DSM 7 (82.65.155.79)
+- **Déploiement** : VPS Scaleway (anciennement Synology NAS DSM 7)
 - **Ports** : Frontend 8082, Backend API 8001
 
 ## Architecture des fichiers

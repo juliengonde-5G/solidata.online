@@ -75,5 +75,5 @@
 
 - Stack initiale : FastAPI (Python) + SQLite + React single-file
 - Module candidatures + analyse PCM basique
-- Deploiement Synology NAS
+- Deploiement Synology NAS (migré depuis vers VPS Scaleway)
 - *Cette version a ete entierement remplacee par la v1.0.0*

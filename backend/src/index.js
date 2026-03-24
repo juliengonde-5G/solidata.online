@@ -119,6 +119,9 @@ app.use('/api/factures-exutoires', require('./routes/factures-exutoires'));
 app.use('/api/calendrier-logistique', require('./routes/calendrier-logistique'));
 app.use('/api/planning-hebdo', require('./routes/planning-hebdo'));
 
+// Lot 6 : Pointage / Badgeage
+app.use('/api/pointage', require('./routes/pointage'));
+
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 
