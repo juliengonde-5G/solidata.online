@@ -202,10 +202,10 @@ export default function ReportingMetropole() {
                         </div>
                       )}
 
-                      {/* Niveaux de remplissage */}
+                      {/* Niveaux de remplissage constatés lors des collectes */}
                       {cavDetail.fill_history?.length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Niveaux de remplissage</p>
+                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Niveau de remplissage constaté par le chauffeur à chaque collecte</p>
                           <div className="flex items-end gap-0.5 h-24 bg-gray-50 rounded-lg p-2">
                             {cavDetail.fill_history.slice(0, 20).reverse().map((f, i) => {
                               const pct = f.fill_level ? (f.fill_level / 5) * 100 : 0;

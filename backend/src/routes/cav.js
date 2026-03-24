@@ -45,12 +45,15 @@ router.get('/map', async (req, res) => {
       ORDER BY c.name
     `);
 
-    // Calcul du taux de remplissage estimé
+    // Calcul du taux de remplissage estimé (algorithmique)
+    // Le volume est considéré à zéro après chaque passage de chauffeur (collecte)
+    // L'accumulation repart donc de la date de dernière collecte
     const now = new Date();
     const monthIndex = now.getMonth();
     const seasonalFactors = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
 
     const cavWithFill = result.rows.map(cav => {
+      // Jours depuis dernière collecte = le CAV repart à 0 après chaque collecte
       const daysSinceCollection = cav.last_collection
         ? Math.floor((now - new Date(cav.last_collection)) / (86400000))
         : 30;
@@ -113,6 +116,7 @@ router.get('/fill-rate', async (req, res) => {
       const capacityKg = (cav.nb_containers || 1) * 150; // ~150kg par conteneur
 
       // Taux de remplissage estimé basé sur accumulation journalière
+      // Le volume repart à zéro après chaque collecte (daysSinceCollection)
       const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
       const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactors[monthIndex];
       const fillRate = Math.min(120, (accumulatedKg / capacityKg) * 100);
