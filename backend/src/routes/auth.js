@@ -7,6 +7,7 @@ const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { logActivity } = require('../middleware/activity-logger');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
@@ -65,6 +66,9 @@ router.post('/login', [
       'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
       [user.id, refreshToken, expiresAt]
     );
+
+    // Logger la connexion
+    logActivity({ userId: user.id, username: user.username, action: 'login', ip: req.ip });
 
     // Set refresh token as HttpOnly cookie
     res.cookie('refreshToken', refreshToken, {

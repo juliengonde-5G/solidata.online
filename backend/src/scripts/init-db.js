@@ -2122,6 +2122,61 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Vues matérialisées créées ✓');
 
+    // ══════════════════════════════════════════
+    // MIGRATIONS v1.3.0 — Véhicules enrichis + Événements + Journal d'activité
+    // ══════════════════════════════════════════
+
+    // Colonnes manquantes sur vehicles (brand, model, type, tare, maintenance, assurance)
+    const vehicleMigrations = [
+      { col: 'brand', def: "VARCHAR(50)" },
+      { col: 'model', def: "VARCHAR(50)" },
+      { col: 'type', def: "VARCHAR(30) DEFAULT 'utilitaire'" },
+      { col: 'tare_weight_kg', def: "DOUBLE PRECISION" },
+      { col: 'next_maintenance', def: "DATE" },
+      { col: 'insurance_expiry', def: "DATE" },
+    ];
+    for (const m of vehicleMigrations) {
+      await client.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS ${m.col} ${m.def}`);
+    }
+    console.log('[INIT-DB] Migration vehicles colonnes enrichies ✓');
+
+    // Table événements véhicules (historique accidents, entretiens, CT, etc.)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_events (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        event_type VARCHAR(30) NOT NULL CHECK (event_type IN ('entretien', 'accident', 'controle_technique', 'reparation', 'pneus', 'vidange', 'freins', 'autre')),
+        event_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        km_at_event INTEGER,
+        description TEXT,
+        cost DOUBLE PRECISION,
+        performed_by VARCHAR(100),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vehicle_events_vehicle ON vehicle_events(vehicle_id, event_date DESC)');
+    console.log('[INIT-DB] Table vehicle_events créée ✓');
+
+    // Table journal d'activité utilisateurs
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_activity_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        username VARCHAR(100),
+        action VARCHAR(50) NOT NULL,
+        entity_type VARCHAR(50),
+        entity_id INTEGER,
+        details JSONB,
+        ip_address VARCHAR(50),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_created ON user_activity_log(created_at DESC)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_user ON user_activity_log(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_action ON user_activity_log(action)');
+    console.log('[INIT-DB] Table user_activity_log créée ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

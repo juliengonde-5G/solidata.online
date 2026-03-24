@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -95,16 +95,33 @@ const menuSections = [
       { path: '/rgpd', label: 'RGPD', icon: IconLock, roles: ['ADMIN'] },
       { path: '/admin-cav', label: 'Gestion CAV', icon: IconMap, roles: ['ADMIN'] },
       { path: '/admin-db', label: 'Base de données', icon: IconGear, roles: ['ADMIN'] },
+      { path: '/activity-log', label: 'Journal d\'activité', icon: IconList, roles: ['ADMIN'] },
     ],
   },
 ];
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [expandedSections, setExpandedSections] = useState(['Accueil', 'Recrutement', 'Gestion Équipe']);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const getActiveSection = useCallback(() => {
+    for (const section of menuSections) {
+      if (section.items.some(item => item.path === location.pathname)) {
+        return section.title;
+      }
+    }
+    return 'Accueil';
+  }, [location.pathname]);
+
+  const [expandedSections, setExpandedSections] = useState(() => [getActiveSection()]);
+
+  // Auto-expand the section containing the active route on navigation
+  useEffect(() => {
+    const active = getActiveSection();
+    setExpandedSections(prev => prev.includes(active) ? prev : [...prev, active]);
+  }, [location.pathname, getActiveSection]);
 
   const toggleSection = (title) => {
     setExpandedSections(prev =>

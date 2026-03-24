@@ -44,6 +44,7 @@ import ExutoiresCalendrier from './pages/ExutoiresCalendrier';
 import ExutoiresClients from './pages/ExutoiresClients';
 import ExutoiresTarifs from './pages/ExutoiresTarifs';
 import Billing from './pages/Billing';
+import ActivityLog from './pages/ActivityLog';
 
 // Hub pages
 import HubRecrutement from './pages/HubRecrutement';
@@ -135,6 +136,7 @@ function App() {
             <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />
             <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN']}><RGPD /></ProtectedRoute>} />
             <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
+            <Route path="/activity-log" element={<ProtectedRoute roles={['ADMIN']}><ActivityLog /></ProtectedRoute>} />
             <Route path="/admin-cav" element={<ProtectedRoute roles={['ADMIN']}><AdminCAV /></ProtectedRoute>} />
             <Route path="/news" element={<ProtectedRoute><NewsFeed /></ProtectedRoute>} />
 

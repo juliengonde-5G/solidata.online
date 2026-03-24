@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { autoLogActivity } = require('../middleware/activity-logger');
 
 // Auto-create vehicle_maintenance tables
 (async () => {
@@ -47,6 +48,7 @@ const { validate } = require('../middleware/validate');
 })();
 
 router.use(authenticate);
+router.use(autoLogActivity('vehicle'));
 
 // GET /api/vehicles
 router.get('/', async (req, res) => {
@@ -100,12 +102,12 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
   body('registration').notEmpty().withMessage('Immatriculation requise'),
 ], validate, async (req, res) => {
   try {
-    const { registration, name, max_capacity_kg, team_id, current_km } = req.body;
+    const { registration, name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, current_km, next_maintenance, insurance_expiry } = req.body;
 
     const result = await pool.query(
-      `INSERT INTO vehicles (registration, name, max_capacity_kg, team_id, current_km)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [registration.toUpperCase(), name, max_capacity_kg || 3500, team_id, current_km || 0]
+      `INSERT INTO vehicles (registration, name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, current_km, next_maintenance, insurance_expiry)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [registration.toUpperCase(), name, brand, model, type || 'utilitaire', max_capacity_kg || 3500, tare_weight_kg, team_id, current_km || 0, next_maintenance || null, insurance_expiry || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -118,13 +120,16 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
 // PUT /api/vehicles/:id
 router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { name, max_capacity_kg, team_id, status, current_km } = req.body;
+    const { name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, status, current_km, next_maintenance, insurance_expiry } = req.body;
     const result = await pool.query(
-      `UPDATE vehicles SET name = COALESCE($1, name), max_capacity_kg = COALESCE($2, max_capacity_kg),
-       team_id = COALESCE($3, team_id), status = COALESCE($4, status),
-       current_km = COALESCE($5, current_km), updated_at = NOW()
-       WHERE id = $6 RETURNING *`,
-      [name, max_capacity_kg, team_id, status, current_km, req.params.id]
+      `UPDATE vehicles SET
+       name = COALESCE($1, name), brand = COALESCE($2, brand), model = COALESCE($3, model),
+       type = COALESCE($4, type), max_capacity_kg = COALESCE($5, max_capacity_kg),
+       tare_weight_kg = COALESCE($6, tare_weight_kg), team_id = COALESCE($7, team_id),
+       status = COALESCE($8, status), current_km = COALESCE($9, current_km),
+       next_maintenance = $10, insurance_expiry = $11, updated_at = NOW()
+       WHERE id = $12 RETURNING *`,
+      [name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, status, current_km, next_maintenance || null, insurance_expiry || null, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
     res.json(result.rows[0]);
@@ -318,6 +323,113 @@ router.post('/:id/maintenance/resolve-alert', authorize('ADMIN', 'MANAGER'), [
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[VEHICLES] Erreur resolve alert :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// ÉVÉNEMENTS / HISTORIQUE VÉHICULE
+// ══════════════════════════════════════════
+
+// GET /api/vehicles/:id/events — Historique des événements d'un véhicule
+router.get('/:id/events', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT ve.*, u.first_name || ' ' || u.last_name as created_by_name
+       FROM vehicle_events ve
+       LEFT JOIN users u ON ve.created_by = u.id
+       WHERE ve.vehicle_id = $1
+       ORDER BY ve.event_date DESC, ve.created_at DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur events GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/vehicles/:id/events — Ajouter un événement
+router.post('/:id/events', authorize('ADMIN', 'MANAGER'), [
+  body('event_type').notEmpty().withMessage('Type requis'),
+  body('event_date').notEmpty().withMessage('Date requise'),
+], validate, async (req, res) => {
+  try {
+    const { event_type, event_date, km_at_event, description, cost, performed_by } = req.body;
+    const result = await pool.query(
+      `INSERT INTO vehicle_events (vehicle_id, event_type, event_date, km_at_event, description, cost, performed_by, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [req.params.id, event_type, event_date, km_at_event, description, cost, performed_by, req.user.id]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur events POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/vehicles/:id/events/:eventId — Supprimer un événement
+router.delete('/:id/events/:eventId', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM vehicle_events WHERE id = $1 AND vehicle_id = $2 RETURNING id',
+      [req.params.eventId, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Événement non trouvé' });
+    res.json({ message: 'Événement supprimé' });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur events DELETE :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/vehicles/maintenance/schedule/:id — Grille d'entretien constructeur
+router.get('/maintenance/schedule/:id', async (req, res) => {
+  try {
+    const vehicle = await pool.query('SELECT v.*, vm.vehicle_type FROM vehicles v LEFT JOIN vehicle_maintenance vm ON vm.vehicle_id = v.id WHERE v.id = $1', [req.params.id]);
+    if (vehicle.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    const v = vehicle.rows[0];
+    const profile = MAINTENANCE_PROFILES[v.vehicle_type] || null;
+    const currentKm = v.current_km || 0;
+
+    // Charger les événements d'entretien pour calculer l'état de chaque opération
+    const events = await pool.query(
+      `SELECT event_type, event_date, km_at_event, description FROM vehicle_events
+       WHERE vehicle_id = $1 ORDER BY event_date DESC`,
+      [req.params.id]
+    );
+
+    let schedule = [];
+    if (profile && profile.operations) {
+      schedule = profile.operations.map(op => {
+        // Chercher le dernier événement correspondant à cette opération
+        const lastEvent = events.rows.find(e =>
+          e.description && e.description.toLowerCase().includes(op.label.toLowerCase().split(' ')[0])
+        );
+        const lastKm = lastEvent ? lastEvent.km_at_event : 0;
+        const lastDate = lastEvent ? lastEvent.event_date : null;
+        const kmSince = currentKm - (lastKm || 0);
+        const ratio = op.intervalle_km > 0 ? kmSince / op.intervalle_km : 0;
+        let status = 'ok';
+        if (ratio >= 1) status = 'depasse';
+        else if (ratio >= 0.85) status = 'bientot';
+
+        return {
+          label: op.label,
+          intervalle_km: op.intervalle_km,
+          last_km: lastKm,
+          last_date: lastDate,
+          km_since: kmSince,
+          ratio: Math.round(ratio * 100),
+          status,
+        };
+      });
+    }
+
+    res.json({ vehicle: v, profile_name: v.vehicle_type, profile, schedule });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur schedule :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
