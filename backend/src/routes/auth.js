@@ -5,6 +5,9 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
+const { logActivity } = require('../middleware/activity-logger');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
@@ -22,7 +25,10 @@ function parseExpiry(str) {
 }
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', [
+  body('username').notEmpty().withMessage('Nom d\'utilisateur requis'),
+  body('password').notEmpty().withMessage('Mot de passe requis'),
+], validate, async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -61,6 +67,19 @@ router.post('/login', async (req, res) => {
       [user.id, refreshToken, expiresAt]
     );
 
+    // Logger la connexion
+    logActivity({ userId: user.id, username: user.username, action: 'login', ip: req.ip });
+
+    // Set refresh token as HttpOnly cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Strict',
+      maxAge: parseExpiry(JWT_REFRESH_EXPIRES_IN),
+      path: '/',
+    });
+
+    // Still send refreshToken in body for backward compatibility
     res.json({
       accessToken,
       refreshToken,
@@ -84,7 +103,8 @@ router.post('/login', async (req, res) => {
 // POST /api/auth/refresh
 router.post('/refresh', async (req, res) => {
   try {
-    const { refreshToken } = req.body;
+    // Read refresh token from cookie OR body (backward compatibility)
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
     if (!refreshToken) {
       return res.status(400).json({ error: 'Refresh token requis' });
     }
@@ -120,6 +140,15 @@ router.post('/refresh', async (req, res) => {
       [row.user_id, newRefreshToken, expiresAt]
     );
 
+    // Set new refresh token as HttpOnly cookie
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Strict',
+      maxAge: parseExpiry(JWT_REFRESH_EXPIRES_IN),
+      path: '/',
+    });
+
     res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken });
   } catch (err) {
     console.error('[AUTH] Erreur refresh :', err);
@@ -131,6 +160,15 @@ router.post('/refresh', async (req, res) => {
 router.post('/logout', authenticate, async (req, res) => {
   try {
     await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [req.user.id]);
+
+    // Clear the refreshToken cookie
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Strict',
+      path: '/',
+    });
+
     res.json({ message: 'Déconnexion réussie' });
   } catch (err) {
     console.error('[AUTH] Erreur logout :', err);
@@ -157,7 +195,10 @@ router.get('/me', authenticate, async (req, res) => {
 });
 
 // PUT /api/auth/password
-router.put('/password', authenticate, async (req, res) => {
+router.put('/password', authenticate, [
+  body('currentPassword').notEmpty().withMessage('Mot de passe actuel requis'),
+  body('newPassword').isLength({ min: 6 }).withMessage('Le nouveau mot de passe doit contenir au moins 6 caractères'),
+], validate, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {

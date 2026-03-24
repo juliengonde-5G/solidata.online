@@ -1548,11 +1548,13 @@ async function initDatabase() {
       await client.query(`ALTER TABLE candidates DROP CONSTRAINT IF EXISTS "${row.conname}"`);
     }
     await client.query(`
-      UPDATE candidates SET status = 'received' WHERE status IS NULL OR status NOT IN ('received', 'preselected', 'interview', 'test', 'hired', 'rejected');
+      UPDATE candidates SET status = 'received' WHERE status IN ('preselected') OR status IS NULL;
+      UPDATE candidates SET status = 'interview' WHERE status IN ('test');
+      UPDATE candidates SET status = 'received' WHERE status NOT IN ('received', 'interview', 'hired', 'rejected');
     `);
     await client.query(`
       ALTER TABLE candidates ADD CONSTRAINT candidates_status_check
-        CHECK (status IN ('received', 'preselected', 'interview', 'test', 'hired', 'rejected'));
+        CHECK (status IN ('received', 'interview', 'hired', 'rejected'));
     `);
     // Employee insertion tracking columns
     await client.query(`
@@ -1565,6 +1567,22 @@ async function initDatabase() {
     `);
     // Purge expired refresh tokens (cleanup)
     await client.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
+
+    // ══════════════════════════════════════════
+    // TABLE : Plan de recrutement mensuel
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS recruitment_plan (
+        id SERIAL PRIMARY KEY,
+        position_id INTEGER NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+        month VARCHAR(7) NOT NULL,
+        slots_needed INTEGER NOT NULL DEFAULT 0,
+        created_by INTEGER REFERENCES users(id),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(position_id, month)
+      );
+    `);
+
     console.log('[INIT-DB] Migration FKs + indexes + statuts ✓');
 
     // ══════════════════════════════════════════
@@ -1922,6 +1940,242 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_employees_insertion ON employees(insertion_status) WHERE insertion_status != \'none\';');
     console.log('[INIT-DB] Index additionnels créés ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE : Parcours recrutement (entretien + mise en situation + documents)
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS recruitment_interviews (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        interview_date DATE,
+        interviewer_id INTEGER REFERENCES users(id),
+        -- I. Présentation
+        presentation_mots TEXT,
+        parcours_professionnel TEXT,
+        experiences_marquantes TEXT,
+        -- II. Situation actuelle
+        situation_actuelle VARCHAR(30) CHECK (situation_actuelle IN ('reconversion', 'retour_emploi', 'autre')),
+        situation_actuelle_autre TEXT,
+        duree_sans_emploi VARCHAR(30) CHECK (duree_sans_emploi IN ('moins_6_mois', '6_mois_1_an', 'plus_1_an')),
+        difficultes_recherche TEXT[],
+        difficultes_recherche_autre TEXT,
+        -- III. Freins à l'emploi
+        freins_emploi TEXT[],
+        freins_emploi_autre TEXT,
+        contraintes_horaires VARCHAR(20) CHECK (contraintes_horaires IN ('oui', 'certainement', 'non')),
+        contraintes_horaires_detail TEXT,
+        structure_accompagnement TEXT[],
+        structure_accompagnement_autre TEXT,
+        -- IV. Motivation
+        motivation_integration TEXT,
+        motivation_reprise TEXT,
+        attentes TEXT[],
+        attentes_autre TEXT,
+        -- V. Compétences et savoir-être
+        experience_activite TEXT[],
+        comportement_equipe TEXT,
+        reaction_consigne TEXT,
+        travail_physique VARCHAR(20) CHECK (travail_physique IN ('oui', 'non', 'ne_sais_pas')),
+        -- VI. Organisation et engagement
+        disponibilite_horaires VARCHAR(20) CHECK (disponibilite_horaires IN ('oui', 'non', 'autre')),
+        disponibilite_autre TEXT,
+        organisation_ponctualite TEXT,
+        -- VII. Projet professionnel
+        idee_metier VARCHAR(20) CHECK (idee_metier IN ('oui', 'non', 'autre')),
+        idee_metier_detail TEXT,
+        amelioration_souhaitee TEXT,
+        question_ouverte TEXT,
+        -- Évaluation globale
+        evaluation_globale VARCHAR(20) CHECK (evaluation_globale IN ('favorable', 'reserve', 'defavorable')),
+        commentaire_evaluateur TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS mise_en_situation (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        type VARCHAR(30) NOT NULL CHECK (type IN ('collecte_manutention', 'craquage', 'qualite')),
+        evaluator_id INTEGER REFERENCES users(id),
+        evaluation_date DATE DEFAULT CURRENT_DATE,
+        -- Critères d'évaluation (1-5)
+        respect_consignes INTEGER CHECK (respect_consignes BETWEEN 1 AND 5),
+        capacite_physique INTEGER CHECK (capacite_physique BETWEEN 1 AND 5),
+        endurance INTEGER CHECK (endurance BETWEEN 1 AND 5),
+        comprehension INTEGER CHECK (comprehension BETWEEN 1 AND 5),
+        qualite_travail INTEGER CHECK (qualite_travail BETWEEN 1 AND 5),
+        rapidite INTEGER CHECK (rapidite BETWEEN 1 AND 5),
+        securite INTEGER CHECK (securite BETWEEN 1 AND 5),
+        autonomie INTEGER CHECK (autonomie BETWEEN 1 AND 5),
+        -- Résultat global
+        resultat VARCHAR(20) CHECK (resultat IN ('conforme', 'a_ameliorer', 'non_conforme')),
+        points_forts TEXT,
+        points_amelioration TEXT,
+        commentaire TEXT,
+        duree_minutes INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS recruitment_documents (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        document_type VARCHAR(50) NOT NULL CHECK (document_type IN (
+          'livret_accueil', 'charte_insertion', 'procedure_recrutement',
+          'fiche_mise_en_situation_collecte', 'fiche_mise_en_situation_craquage',
+          'fiche_mise_en_situation_qualite'
+        )),
+        delivered_at TIMESTAMP DEFAULT NOW(),
+        delivered_by INTEGER REFERENCES users(id),
+        delivery_method VARCHAR(20) CHECK (delivery_method IN ('telechargement', 'email', 'remise_main')),
+        UNIQUE(candidate_id, document_type)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_recruitment_interviews_candidate ON recruitment_interviews(candidate_id);
+      CREATE INDEX IF NOT EXISTS idx_mise_en_situation_candidate ON mise_en_situation(candidate_id);
+      CREATE INDEX IF NOT EXISTS idx_recruitment_documents_candidate ON recruitment_documents(candidate_id);
+    `);
+
+    console.log('[INIT-DB] Module Parcours Recrutement (entretien + mise en situation + documents) ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATION : Vues matérialisées pour reporting
+    // ══════════════════════════════════════════
+    console.log('[INIT-DB] Migration vues matérialisées...');
+
+    // Vue matérialisée : KPIs collecte mensuels
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS mv_collecte_mensuelle AS
+      SELECT
+        TO_CHAR(date, 'YYYY-MM') as mois,
+        COUNT(*) as nb_tours,
+        ROUND(SUM(total_weight_kg)::numeric, 1) as total_kg,
+        ROUND(AVG(total_weight_kg)::numeric, 1) as avg_kg_tour,
+        COUNT(DISTINCT driver_id) as nb_chauffeurs
+      FROM tours
+      WHERE status = 'completed'
+      GROUP BY TO_CHAR(date, 'YYYY-MM')
+      ORDER BY mois;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_collecte_mois ON mv_collecte_mensuelle(mois);
+    `);
+
+    // Vue matérialisée : KPIs production mensuels
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS mv_production_mensuelle AS
+      SELECT
+        TO_CHAR(date, 'YYYY-MM') as mois,
+        ROUND(SUM(total_jour_t)::numeric, 2) as total_trie_t,
+        ROUND(AVG(total_jour_t)::numeric, 2) as avg_jour_t,
+        COUNT(*) as nb_jours
+      FROM production_daily
+      GROUP BY TO_CHAR(date, 'YYYY-MM')
+      ORDER BY mois;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_production_mois ON mv_production_mensuelle(mois);
+    `);
+
+    // Vue matérialisée : statistiques CAV
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS mv_cav_stats AS
+      SELECT
+        c.id as cav_id,
+        c.name,
+        c.commune,
+        c.status,
+        COUNT(DISTINCT tc.tour_id) as nb_collectes_total,
+        ROUND(AVG(tw.weight_kg)::numeric, 1) as avg_weight_kg,
+        MAX(t.date) as derniere_collecte,
+        COUNT(DISTINCT tc.tour_id) FILTER (WHERE t.date >= NOW() - INTERVAL '90 days') as nb_collectes_90j
+      FROM cav c
+      LEFT JOIN tour_cav tc ON tc.cav_id = c.id
+      LEFT JOIN tours t ON tc.tour_id = t.id AND t.status = 'completed'
+      LEFT JOIN tour_weights tw ON tw.tour_id = t.id AND tw.cav_id = c.id
+      GROUP BY c.id, c.name, c.commune, c.status;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_cav_stats_id ON mv_cav_stats(cav_id);
+    `);
+
+    // Vue matérialisée : KPIs RH
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS mv_rh_stats AS
+      SELECT
+        TO_CHAR(CURRENT_DATE, 'YYYY-MM') as mois,
+        COUNT(*) FILTER (WHERE is_active = true) as nb_actifs,
+        COUNT(*) FILTER (WHERE insertion_status = 'en_parcours') as nb_en_parcours,
+        COUNT(*) FILTER (WHERE insertion_status = 'termine') as nb_insertion_termines
+      FROM employees;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_rh_stats_mois ON mv_rh_stats(mois);
+    `);
+
+    console.log('[INIT-DB] Vues matérialisées créées ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATIONS v1.3.0 — Véhicules enrichis + Événements + Journal d'activité
+    // ══════════════════════════════════════════
+
+    // Colonnes manquantes sur vehicles (brand, model, type, tare, maintenance, assurance)
+    const vehicleMigrations = [
+      { col: 'brand', def: "VARCHAR(50)" },
+      { col: 'model', def: "VARCHAR(50)" },
+      { col: 'type', def: "VARCHAR(30) DEFAULT 'utilitaire'" },
+      { col: 'tare_weight_kg', def: "DOUBLE PRECISION" },
+      { col: 'next_maintenance', def: "DATE" },
+      { col: 'insurance_expiry', def: "DATE" },
+    ];
+    for (const m of vehicleMigrations) {
+      await client.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS ${m.col} ${m.def}`);
+    }
+    console.log('[INIT-DB] Migration vehicles colonnes enrichies ✓');
+
+    // Table événements véhicules (historique accidents, entretiens, CT, etc.)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_events (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        event_type VARCHAR(30) NOT NULL CHECK (event_type IN ('entretien', 'accident', 'controle_technique', 'reparation', 'pneus', 'vidange', 'freins', 'autre')),
+        event_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        km_at_event INTEGER,
+        description TEXT,
+        cost DOUBLE PRECISION,
+        performed_by VARCHAR(100),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vehicle_events_vehicle ON vehicle_events(vehicle_id, event_date DESC)');
+    console.log('[INIT-DB] Table vehicle_events créée ✓');
+
+    // Table journal d'activité utilisateurs
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_activity_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        username VARCHAR(100),
+        action VARCHAR(50) NOT NULL,
+        entity_type VARCHAR(50),
+        entity_id INTEGER,
+        details JSONB,
+        ip_address VARCHAR(50),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_created ON user_activity_log(created_at DESC)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_user ON user_activity_log(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_action ON user_activity_log(action)');
+    console.log('[INIT-DB] Table user_activity_log créée ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');

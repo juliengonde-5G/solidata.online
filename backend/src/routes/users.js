@@ -3,9 +3,13 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
+const { autoLogActivity } = require('../middleware/activity-logger');
 
 // Toutes les routes nécessitent ADMIN
 router.use(authenticate, authorize('ADMIN'));
+router.use(autoLogActivity('user'));
 
 // GET /api/users
 router.get('/', async (req, res) => {
@@ -22,7 +26,11 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/users
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('username').notEmpty().withMessage('Nom d\'utilisateur requis'),
+  body('password').isLength({ min: 6 }).withMessage('Mot de passe de 6 caractères minimum requis'),
+  body('role').isIn(['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE']).withMessage('Rôle invalide'),
+], validate, async (req, res) => {
   try {
     const { username, password, email, role, first_name, last_name, phone, team_id } = req.body;
 
@@ -83,7 +91,9 @@ router.put('/:id', async (req, res) => {
 });
 
 // PUT /api/users/:id/reset-password
-router.put('/:id/reset-password', async (req, res) => {
+router.put('/:id/reset-password', [
+  body('newPassword').isLength({ min: 6 }).withMessage('Mot de passe de 6 caractères minimum requis'),
+], validate, async (req, res) => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
