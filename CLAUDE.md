@@ -2,7 +2,7 @@
 
 > **Ce fichier est le contexte de référence pour tout agent IA (Claude, Copilot, etc.) travaillant sur le projet SOLIDATA.**
 > Il est lu automatiquement par Claude Code au démarrage de chaque session.
-> Dernière mise à jour : 19 mars 2026
+> Dernière mise à jour : 24 mars 2026
 
 ---
 
@@ -281,6 +281,16 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | `docs/PLAN_TESTS_COMPLET.md` | Plan de test (133 cas) | QA |
 | `docs/DIAGRAMME_CHAINE_TRI.md` | Flux chaîne de tri | Métier |
 | `docs/DIAGRAMME_FLUX_COMPLET.md` | Flux complet collecte→expédition | Métier |
+| `docs/SCHEMA_CHAINE_TRI.md` | Schéma visuel détaillé chaîne de tri | Métier |
+| `docs/SCHEMA_FLUX_MATIERES.md` | Schéma visuel flux matières entrant→sortant | Métier |
+| `docs/PRESENTATION_COMPLETE_SOLIDATA.md` | Présentation complète de l'application | Direction |
+| `docs/PRESENTATION_TECHNIQUE_SOLIDATA.md` | Présentation technique détaillée | Technique |
+| `docs/PRESENTATION_CONSEIL_ADMINISTRATION.md` | Présentation pour le CA | Direction |
+| `docs/FORMATION_CHAUFFEURS.md` | Formation chauffeurs-collecteurs (langage simplifié) | Formation |
+| `docs/FORMATION_MANAGER_COLLECTE_LOGISTIQUE.md` | Formation manager collecte & logistique | Formation |
+| `docs/FORMATION_MANAGER_CHAINE_TRI.md` | Formation manager chaîne de tri (pas-à-pas) | Formation |
+| `docs/FORMATION_MANAGER_RH_INSERTION.md` | Formation manager RH & insertion | Formation |
+| `docs/PROPOSITIONS_AMELIORATION.md` | Propositions d'amélioration UX/accessibilité | Évolution |
 
 ---
 
@@ -292,6 +302,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | 10-15 mars 2026 | 1.1.0 | Module logistique exutoires complet (7 pages, 6 routes API, 4 tables) |
 | 16-18 mars 2026 | 1.1.x | Corrections UX, Tailwind mobile, dépannage SSL, tests déploiement |
 | 19 mars 2026 | 1.2.0 | Fix moteur PCM (immeuble base fondation, Q7→stress, exports PDF A4), documentation exhaustive |
+| 24 mars 2026 | 1.2.1 | Documentation complète : schémas visuels, 3 présentations, 4 supports de formation par profil, propositions d'amélioration |
 
 ---
 

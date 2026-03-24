@@ -3,8 +3,8 @@
 > **Fichier de référence officiel du projet.** Toute évolution technique, déploiement et maintenance doit s’appuyer sur ce document. Lisible par humain et IA.
 
 **Application :** SOLIDATA ERP — Logiciel de gestion pour Solidarité Textiles
-**Version :** 1.2.0
-**Date :** 19 mars 2026
+**Version :** 1.2.1
+**Date :** 24 mars 2026
 **Domaine :** https://solidata.online
 **Dépôt GitHub :** https://github.com/juliengonde-5G/solidata.online
 

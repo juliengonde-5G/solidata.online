@@ -1,7 +1,13 @@
 # Guide Utilisateur — SOLIDATA ERP
 
 > **Pour** : Tous les utilisateurs de Solidarité Textile
-> **Version** : 1.2.0 | **Date** : 19 mars 2026
+> **Version** : 1.2.1 | **Date** : 24 mars 2026
+>
+> **Voir aussi les guides de formation par profil** :
+> - [Formation Chauffeurs](FORMATION_CHAUFFEURS.md) — Guide visuel simplifié
+> - [Formation Manager Collecte & Logistique](FORMATION_MANAGER_COLLECTE_LOGISTIQUE.md)
+> - [Formation Manager Chaîne de Tri](FORMATION_MANAGER_CHAINE_TRI.md) — Guide pas-à-pas
+> - [Formation Manager RH & Insertion](FORMATION_MANAGER_RH_INSERTION.md)
 
 ---
 
