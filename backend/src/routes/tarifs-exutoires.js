@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -72,7 +74,11 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/tarifs-exutoires — Créer un tarif
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('type_produit').isIn(['original', 'csr', 'effilo_blanc', 'effilo_couleur', 'jean', 'coton_blanc', 'coton_couleur']).withMessage('Type de produit invalide'),
+  body('prix_reference_tonne').isFloat().withMessage('Prix par tonne requis (valeur numérique)'),
+  body('date_debut').notEmpty().withMessage('Date de début requise'),
+], validate, async (req, res) => {
   try {
     const { type_produit, prix_reference_tonne, date_debut, client_id, date_fin } = req.body;
 

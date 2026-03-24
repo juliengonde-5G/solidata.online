@@ -77,7 +77,7 @@ async function checkAppointmentReminders() {
     const candidates = await pool.query(
       `SELECT * FROM candidates
        WHERE appointment_date::date = $1
-       AND status IN ('preselected', 'interview')
+       AND status IN ('received', 'interview')
        AND (phone IS NOT NULL OR email IS NOT NULL)`,
       [tomorrowStr]
     );
@@ -417,6 +417,48 @@ async function autoFeedNews() {
   }
 }
 
+/**
+ * Purge automatique RGPD — Anonymise les candidats non recrutés > 24 mois (Art. 5 RGPD)
+ */
+async function purgeExpiredCandidates() {
+  try {
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - 24);
+
+    const expired = await pool.query(
+      `SELECT id, first_name, last_name FROM candidates
+       WHERE status != 'hired' AND created_at < $1
+       AND first_name != 'ANONYME'`,
+      [cutoff.toISOString()]
+    );
+
+    for (const candidate of expired.rows) {
+      await pool.query(
+        `UPDATE candidates SET
+         first_name = 'ANONYME', last_name = CONCAT('CANDIDAT-', id),
+         email = NULL, phone = NULL, cv_file_path = NULL, cv_raw_text = NULL,
+         comment = NULL, interviewer_name = NULL, interview_comment = NULL,
+         practical_test_comment = NULL, appointment_location = NULL,
+         updated_at = NOW()
+         WHERE id = $1`, [candidate.id]
+      );
+      await pool.query('DELETE FROM candidate_skills WHERE candidate_id = $1', [candidate.id]);
+      // Log RGPD audit
+      await pool.query(
+        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
+         VALUES (NULL, 'AUTO_PURGE_24M', 'candidate', $1, $2)`,
+        [candidate.id, JSON.stringify({ reason: 'Purge automatique RGPD 24 mois', original_name: `${candidate.first_name} ${candidate.last_name}` })]
+      );
+    }
+
+    if (expired.rows.length > 0) {
+      console.log(`[SCHEDULER] RGPD: ${expired.rows.length} candidat(s) anonymisé(s) (> 24 mois)`);
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur purgeExpiredCandidates:', err.message);
+  }
+}
+
 // ══════════════════════════════════════════
 // VERROU DISTRIBUÉ (Advisory Lock PostgreSQL)
 // ══════════════════════════════════════════
@@ -442,6 +484,44 @@ async function releaseLock() {
     await pool.query('SELECT pg_advisory_unlock($1)', [SCHEDULER_LOCK_ID]);
   } catch (err) {
     console.error('[SCHEDULER] Erreur release lock:', err.message);
+  }
+}
+
+/**
+ * Purge automatique GPS — Supprime les positions > 90 jours (rétention RGPD)
+ */
+async function purgeOldGpsPositions() {
+  try {
+    // Keep GPS data for 90 days, delete older positions
+    const result = await pool.query(
+      `DELETE FROM gps_positions WHERE recorded_at < NOW() - INTERVAL '90 days'`
+    );
+    if (result.rowCount > 0) {
+      console.log(`[SCHEDULER] GPS: ${result.rowCount} position(s) supprimée(s) (> 90 jours)`);
+      // Log RGPD audit
+      await pool.query(
+        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
+         VALUES (NULL, 'AUTO_PURGE_GPS_90D', 'gps_positions', 0, $1)`,
+        [JSON.stringify({ rows_deleted: result.rowCount, retention_days: 90 })]
+      );
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur purgeOldGpsPositions:', err.message);
+  }
+}
+
+/**
+ * Rafraîchissement des vues matérialisées pour le reporting
+ */
+async function refreshMaterializedViews() {
+  try {
+    const views = ['mv_collecte_mensuelle', 'mv_production_mensuelle', 'mv_cav_stats', 'mv_rh_stats'];
+    for (const view of views) {
+      await pool.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY ${view}`);
+    }
+    console.log('[SCHEDULER] Vues matérialisées rafraîchies');
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur refreshMaterializedViews:', err.message);
   }
 }
 
@@ -485,6 +565,9 @@ async function runAllJobs() {
     await checkInsertionInterviewAlerts();
     await checkVehicleMaintenance();
     await autoFeedNews();
+    await purgeExpiredCandidates();
+    await purgeOldGpsPositions();
+    await refreshMaterializedViews();
     console.log('[SCHEDULER] Tous les jobs executes');
   } catch (err) {
     console.error('[SCHEDULER] Erreur globale:', err.message);

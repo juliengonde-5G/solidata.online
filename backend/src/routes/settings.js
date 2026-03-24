@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN'));
 
@@ -49,13 +51,14 @@ router.get('/templates', async (req, res) => {
 });
 
 // POST /api/settings/templates
-router.post('/templates', async (req, res) => {
+router.post('/templates', [
+  body('name').notEmpty().withMessage('Nom requis'),
+  body('type').notEmpty().withMessage('Type requis'),
+  body('category').notEmpty().withMessage('Catégorie requise'),
+  body('body').notEmpty().withMessage('Contenu requis'),
+], validate, async (req, res) => {
   try {
     const { name, type, category, subject, body, variables } = req.body;
-
-    if (!name || !type || !category || !body) {
-      return res.status(400).json({ error: 'Champs requis : name, type, category, body' });
-    }
 
     const result = await pool.query(
       `INSERT INTO message_templates (name, type, category, subject, body, variables)
@@ -122,12 +125,13 @@ router.get('/tarifs', async (req, res) => {
 });
 
 // PUT /api/settings/tarifs — upsert a tariff line
-router.put('/tarifs', async (req, res) => {
+router.put('/tarifs', [
+  body('annee').isInt().withMessage('Année requise (valeur numérique)'),
+  body('type').notEmpty().withMessage('Type requis'),
+  body('prix_tonne').isFloat().withMessage('Prix par tonne requis (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { annee, type, exutoire_id, prix_tonne, trimestre } = req.body;
-    if (!annee || !type || prix_tonne == null) {
-      return res.status(400).json({ error: 'Champs requis : annee, type, prix_tonne' });
-    }
     const exId = exutoire_id || null;
     const tri = trimestre ? parseInt(trimestre) : null;
 
@@ -209,12 +213,15 @@ router.get('/objectives', async (req, res) => {
   }
 });
 
-router.post('/objectives', async (req, res) => {
+router.post('/objectives', [
+  body('domaine').notEmpty().withMessage('Domaine requis'),
+  body('indicateur').notEmpty().withMessage('Indicateur requis'),
+  body('periode').isIn(['mensuel', 'trimestriel', 'annuel']).withMessage('Période invalide'),
+  body('annee').isInt().withMessage('Année requise (valeur numérique)'),
+  body('valeur_cible').isFloat().withMessage('Valeur cible requise (valeur numérique)'),
+], validate, async (req, res) => {
   try {
     const { domaine, indicateur, unite, periode, annee, mois, trimestre, valeur_cible, commentaire } = req.body;
-    if (!domaine || !indicateur || !periode || !annee || valeur_cible == null) {
-      return res.status(400).json({ error: 'Champs obligatoires : domaine, indicateur, periode, annee, valeur_cible' });
-    }
     const result = await pool.query(
       `INSERT INTO periodic_objectives (domaine, indicateur, unite, periode, annee, mois, trimestre, valeur_cible, commentaire)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
@@ -298,12 +305,13 @@ router.get('/triggers', async (req, res) => {
   }
 });
 
-router.post('/triggers', async (req, res) => {
+router.post('/triggers', [
+  body('name').notEmpty().withMessage('Nom requis'),
+  body('event').notEmpty().withMessage('Événement requis'),
+  body('template_id').isInt().withMessage('ID template requis'),
+], validate, async (req, res) => {
   try {
     const { name, event, template_id, delay_minutes, conditions } = req.body;
-    if (!name || !event || !template_id) {
-      return res.status(400).json({ error: 'Champs requis : name, event, template_id' });
-    }
     const result = await pool.query(
       `INSERT INTO notification_triggers (name, event, template_id, delay_minutes, conditions)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -39,7 +41,14 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/clients-exutoires
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('raison_sociale').notEmpty().withMessage('Raison sociale requise'),
+  body('adresse').notEmpty().withMessage('Adresse requise'),
+  body('code_postal').notEmpty().withMessage('Code postal requis'),
+  body('ville').notEmpty().withMessage('Ville requise'),
+  body('contact_nom').notEmpty().withMessage('Nom du contact requis'),
+  body('contact_email').isEmail().withMessage('Email du contact invalide'),
+], validate, async (req, res) => {
   try {
     const { raison_sociale, adresse, code_postal, ville, contact_nom, contact_email, siret, contact_telephone, type_client } = req.body;
 

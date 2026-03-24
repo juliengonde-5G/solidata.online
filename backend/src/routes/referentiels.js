@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate);
 
@@ -14,7 +16,9 @@ router.get('/associations', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/associations', authorize('ADMIN'), async (req, res) => {
+router.post('/associations', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { nom, type, adresse, commune, contact_nom, contact_tel } = req.body;
     const result = await pool.query(
@@ -49,7 +53,9 @@ router.get('/exutoires', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/exutoires', authorize('ADMIN'), async (req, res) => {
+router.post('/exutoires', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { nom, type, adresse, contact_nom, contact_email, contact_tel } = req.body;
     const result = await pool.query(
@@ -84,7 +90,9 @@ router.get('/catalogue', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
-router.post('/catalogue', authorize('ADMIN'), async (req, res) => {
+router.post('/catalogue', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
   try {
     const { nom, categorie_eco_org, genre, saison, gamme } = req.body;
     const result = await pool.query(

@@ -3,6 +3,7 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
+  withCredentials: true,
 });
 
 // Intercepteur request : ajoute le token Bearer
@@ -45,14 +46,16 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
+        // Send refresh request — cookie will be sent automatically via withCredentials
+        // Also send refreshToken from localStorage as fallback for backward compatibility
         const refreshToken = localStorage.getItem('refreshToken');
-        if (!refreshToken) throw new Error('Pas de refresh token');
-
-        const res = await axios.post('/api/auth/refresh', { refreshToken });
+        const res = await axios.post('/api/auth/refresh', { refreshToken: refreshToken || undefined }, { withCredentials: true });
         const { accessToken, refreshToken: newRefresh } = res.data;
 
         localStorage.setItem('accessToken', accessToken);
-        localStorage.setItem('refreshToken', newRefresh);
+        if (newRefresh) {
+          localStorage.setItem('refreshToken', newRefresh);
+        }
 
         processQueue(null, accessToken);
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;

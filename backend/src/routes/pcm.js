@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const CryptoJS = require('crypto-js');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 // ══════════════════════════════════════════════════════════════
 // MOTEUR PCM (Process Communication Model) — Kahler 2024
@@ -365,7 +367,7 @@ const PCM_QUESTIONS = [
     { value: 'energiseur', label: 'M\'amuser et partager de bons moments' },
     { value: 'promoteur', label: 'Relever des défis et obtenir des résultats' },
   ]},
-  { num: 7, category: 'motivation', text: 'Quand vous êtes stressé(e), vous avez tendance à :', options: [
+  { num: 7, category: 'stress', text: 'Quand vous êtes stressé(e), vous avez tendance à :', options: [
     { value: 'analyseur', label: 'Vouloir tout contrôler et sur-détailler' },
     { value: 'perseverant', label: 'Imposer votre point de vue avec insistance' },
     { value: 'empathique', label: 'Tout accepter et vous oublier' },
@@ -536,16 +538,24 @@ function calculatePCMProfile(answers) {
     normalizedScores[type] = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
   }
 
-  // Construire l'immeuble PCM : uniquement les types avec un score > 0 (pas de 0% dans le graphique)
-  const immeuble = Object.entries(scores)
+  // Construire l'immeuble PCM : Base toujours en étage 1 (fondation),
+  // puis les autres types classés par score décroissant.
+  // On utilise les scores de catégorie (base+phase) pondérés pour un classement cohérent.
+  const immeubleEntries = Object.entries(scores)
     .filter(([, raw]) => raw > 0)
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => {
+      // La Base est toujours en premier (fondation de l'immeuble)
+      if (a[0] === baseType) return -1;
+      if (b[0] === baseType) return 1;
+      return b[1] - a[1];
+    })
     .map(([type], index) => ({
       etage: index + 1,
       type,
       nom: PCM_TYPES[type].nom,
       score: normalizedScores[type],
     }));
+  const immeuble = immeubleEntries;
 
   // Évaluation du risque RPS
   const stressAnswers = answers.filter(a => {
@@ -640,12 +650,12 @@ router.get('/types/:typeKey', (req, res) => {
 });
 
 // POST /api/pcm/sessions — Créer une session de test
-router.post('/sessions', authenticate, authorize('ADMIN', 'RH'), async (req, res) => {
+router.post('/sessions', authenticate, authorize('ADMIN', 'RH'), [
+  body('candidate_id').isInt().withMessage('ID candidat requis'),
+  body('mode').notEmpty().withMessage('Mode requis'),
+], validate, async (req, res) => {
   try {
     const { candidate_id, mode } = req.body;
-    if (!candidate_id || !mode) {
-      return res.status(400).json({ error: 'candidate_id et mode requis' });
-    }
 
     const accessToken = crypto.randomBytes(32).toString('hex');
 
@@ -710,7 +720,9 @@ router.get('/sessions/:token', async (req, res) => {
 });
 
 // POST /api/pcm/submit — Soumettre les réponses et calculer le profil
-router.post('/submit', async (req, res) => {
+router.post('/submit', [
+  body('answers').isArray({ min: 15 }).withMessage('Minimum 15 réponses requises'),
+], validate, async (req, res) => {
   try {
     const { session_id, access_token, answers } = req.body;
 
@@ -788,6 +800,45 @@ router.get('/profiles', authenticate, authorize('ADMIN', 'RH'), async (req, res)
     res.json(result.rows);
   } catch (err) {
     console.error('[PCM] Erreur liste profils :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/pcm/profiles/:candidateId/answers — Réponses brutes d'un candidat
+router.get('/profiles/:candidateId/answers', authenticate, authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    // Trouver la dernière session complétée pour ce candidat
+    const sessionRes = await pool.query(
+      `SELECT ps.id FROM pcm_sessions ps
+       WHERE ps.candidate_id = $1 AND ps.status = 'completed'
+       ORDER BY ps.completed_at DESC LIMIT 1`,
+      [req.params.candidateId]
+    );
+    if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Aucune session trouvée' });
+
+    const sessionId = sessionRes.rows[0].id;
+    const answersRes = await pool.query(
+      'SELECT question_number, answer_value, created_at FROM pcm_answers WHERE session_id = $1 ORDER BY question_number',
+      [sessionId]
+    );
+
+    // Enrichir avec les textes des questions
+    const enriched = answersRes.rows.map(a => {
+      const q = PCM_QUESTIONS.find(qu => qu.num === a.question_number);
+      const opt = q?.options?.find(o => o.value === a.answer_value);
+      return {
+        question_number: a.question_number,
+        category: q?.category || 'unknown',
+        question_text: q?.text || '',
+        answer_value: a.answer_value,
+        answer_label: opt?.label || a.answer_value,
+        created_at: a.created_at,
+      };
+    });
+
+    res.json({ sessionId, answers: enriched, questionnaire: PCM_QUESTIONS.map(q => ({ num: q.num, category: q.category, text: q.text })) });
+  } catch (err) {
+    console.error('[PCM] Erreur réponses brutes :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

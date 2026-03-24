@@ -5,6 +5,23 @@ const { authenticate, authorize } = require('../middleware/auth');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER', 'AUTORITE'));
 
+/**
+ * Helper: check if a materialized view exists and is populated
+ */
+async function mvExists(viewName) {
+  try {
+    const result = await pool.query(
+      `SELECT EXISTS (
+        SELECT 1 FROM pg_matviews WHERE matviewname = $1
+      ) as exists`,
+      [viewName]
+    );
+    return result.rows[0].exists;
+  } catch {
+    return false;
+  }
+}
+
 // GET /api/reporting/dashboard — KPIs globaux
 router.get('/dashboard', async (req, res) => {
   try {
@@ -48,8 +65,16 @@ router.get('/dashboard', async (req, res) => {
       FROM candidates
     `);
 
-    // Employés actifs
-    const employees = await pool.query('SELECT COUNT(*)::int as total FROM employees WHERE is_active = true');
+    // Employés actifs — use materialized view if available
+    let employees;
+    if (await mvExists('mv_rh_stats')) {
+      const mvResult = await pool.query('SELECT nb_actifs as total FROM mv_rh_stats LIMIT 1');
+      employees = mvResult.rows.length > 0
+        ? { rows: [{ total: parseInt(mvResult.rows[0].total) }] }
+        : await pool.query('SELECT COUNT(*)::int as total FROM employees WHERE is_active = true');
+    } else {
+      employees = await pool.query('SELECT COUNT(*)::int as total FROM employees WHERE is_active = true');
+    }
 
     // CO2 evite — calcul affine par type d'exutoire
     // Facteur par defaut base sur mix moyen: 40% reemploi (3.169) + 35% recyclage (0.5) + 15% chiffons (0.75) + 10% CSR (0.121)
@@ -92,6 +117,15 @@ router.get('/dashboard', async (req, res) => {
 router.get('/collecte', async (req, res) => {
   try {
     const { group_by, date_from, date_to } = req.query;
+
+    // Use materialized view for monthly grouping without date filters (fast path)
+    if (group_by === 'month' && !date_from && !date_to && await mvExists('mv_collecte_mensuelle')) {
+      const result = await pool.query(
+        `SELECT mois as periode, nb_tours, total_kg, avg_kg_tour as avg_kg FROM mv_collecte_mensuelle ORDER BY mois`
+      );
+      return res.json(result.rows);
+    }
+
     const grouping = group_by === 'month' ? "TO_CHAR(date, 'YYYY-MM')" : 'date';
 
     let query = `
@@ -117,6 +151,21 @@ router.get('/collecte', async (req, res) => {
 // GET /api/reporting/cav-map — Données carte CAV prédictive
 router.get('/cav-map', async (req, res) => {
   try {
+    // Try materialized view first for fast CAV stats
+    if (await mvExists('mv_cav_stats')) {
+      const result = await pool.query(`
+        SELECT c.id, c.name, c.latitude, c.longitude, c.commune, c.nb_containers, c.status,
+         mv.derniere_collecte as last_collection,
+         mv.avg_weight_kg as avg_90d,
+         mv.nb_collectes_90j as nb_collectes_90d
+        FROM cav c
+        LEFT JOIN mv_cav_stats mv ON mv.cav_id = c.id
+        WHERE c.status = 'active'
+      `);
+      return res.json(result.rows);
+    }
+
+    // Fallback to direct query
     const result = await pool.query(`
       SELECT c.id, c.name, c.latitude, c.longitude, c.commune, c.nb_containers, c.status,
        (SELECT MAX(th.date) FROM tonnage_history th WHERE th.cav_id = c.id) as last_collection,

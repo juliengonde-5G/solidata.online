@@ -2,6 +2,10 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
+if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change-this-in-production') {
+  console.error('[FATAL] JWT_SECRET non configuré en production. Arrêt immédiat.');
+  process.exit(1);
+}
 
 /**
  * Middleware d'authentification JWT

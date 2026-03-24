@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { body } = require('express-validator');
+const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -71,7 +73,9 @@ router.get('/dashboard', async (req, res) => {
 });
 
 // POST /api/production — Saisir KPI journalier
-router.post('/', async (req, res) => {
+router.post('/', [
+  body('date').notEmpty().withMessage('Date requise'),
+], validate, async (req, res) => {
   try {
     const { date, effectif_theorique, effectif_reel, entree_ligne_kg, objectif_entree_ligne_kg,
       entree_recyclage_r3_kg, objectif_entree_r3_kg, encadrant, commentaire } = req.body;

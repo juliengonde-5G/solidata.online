@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 
@@ -11,10 +11,189 @@ const TYPE_COLORS = {
   promoteur: '#EF4444',
 };
 
+const TYPE_LABELS = {
+  analyseur: 'Analyseur',
+  perseverant: 'Perseverant',
+  empathique: 'Empathique',
+  imagineur: 'Imagineur',
+  energiseur: 'Energiseur',
+  promoteur: 'Promoteur',
+};
+
+const CATEGORY_LABELS = {
+  perception: 'Perception (Base)',
+  points_forts: 'Points forts',
+  relation: 'Relation',
+  motivation: 'Motivation (Phase)',
+  stress: 'Stress (Phase)',
+  communication: 'Communication',
+  besoin: 'Besoins psychologiques',
+  situation: 'Situation',
+};
+
+// ───────────────────────────────────────────
+// Export helpers : ouvre une fenêtre A4 pour impression/PDF
+// ───────────────────────────────────────────
+function openPrintWindow(title, bodyHtml) {
+  const w = window.open('', '_blank', 'width=800,height=1100');
+  if (!w) { alert('Popup bloquée — autorisez les popups pour exporter.'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"/>
+<title>${title}</title>
+<style>
+  @page { size: A4; margin: 15mm 12mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; line-height: 1.45; padding: 0; }
+  .header { background: #2D8C4E; color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+  .header h1 { font-size: 18px; font-weight: 700; }
+  .header .sub { font-size: 11px; opacity: .85; }
+  .section { margin: 12px 0; padding: 0 4px; }
+  .section-title { font-size: 13px; font-weight: 700; color: #2D8C4E; border-bottom: 2px solid #2D8C4E; padding-bottom: 3px; margin-bottom: 8px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 10px; font-weight: 600; }
+  .bar-bg { background: #f3f4f6; border-radius: 4px; height: 22px; position: relative; margin-bottom: 3px; }
+  .bar-fill { height: 22px; border-radius: 4px; display: flex; align-items: center; padding-left: 6px; color: white; font-size: 10px; font-weight: 600; min-width: 50px; }
+  .bar-label { font-size: 9px; color: #6b7280; position: absolute; left: 4px; top: 50%; transform: translateY(-50%); }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  th { background: #f9fafb; text-align: left; padding: 5px 6px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e5e7eb; }
+  td { padding: 5px 6px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  .tip-do { color: #15803d; } .tip-dont { color: #dc2626; }
+  .stress-badge { display: inline-block; width: 20px; height: 20px; border-radius: 50%; text-align: center; line-height: 20px; color: white; font-size: 9px; font-weight: 700; margin-right: 4px; }
+  .rps-alert { background: #fef2f2; border: 2px solid #fca5a5; border-radius: 6px; padding: 8px 12px; margin-top: 8px; }
+  .rps-alert h4 { color: #b91c1c; font-weight: 700; margin-bottom: 4px; }
+  .footer { text-align: center; color: #9ca3af; font-size: 9px; margin-top: 16px; padding-top: 8px; border-top: 1px solid #e5e7eb; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style></head><body>${bodyHtml}</body></html>`);
+  w.document.close();
+  setTimeout(() => w.print(), 400);
+}
+
+function exportResultsPDF(profile) {
+  const r = profile.report;
+  const cand = profile.candidate;
+  const date = new Date(profile.createdAt).toLocaleDateString('fr-FR');
+
+  const immeubleHtml = (r.immeuble || []).map(e =>
+    `<div class="bar-bg"><div class="bar-fill" style="width:${Math.max(e.score, 15)}%;background:${TYPE_COLORS[e.type]}">${e.nom} (${e.score}%)</div></div>`
+  ).join('');
+
+  const stressHtml = (r.phase?.stressNiveaux || []).map(s => {
+    const bg = s.niveau === 1 ? '#facc15' : s.niveau === 2 ? '#f97316' : '#dc2626';
+    return `<div style="margin-bottom:4px"><span class="stress-badge" style="background:${bg}">${s.niveau}</span> ${s.comportement}</div>`;
+  }).join('');
+
+  const doHtml = (r.comportementsPrincipaux?.avecManager?.do || []).map(t => `<li class="tip-do">&#10003; ${t}</li>`).join('');
+  const dontHtml = (r.comportementsPrincipaux?.avecManager?.dont || []).map(t => `<li class="tip-dont">&#10007; ${t}</li>`).join('');
+
+  const rpsHtml = profile.riskAlert ? `<div class="rps-alert"><h4>Alerte Risques Psychosociaux</h4><ul>${(r.rpsIndicators || []).map(i => `<li>${i}</li>`).join('')}</ul></div>` : '';
+
+  const body = `
+    <div class="header"><div><h1>SOLIDATA — Profil PCM</h1><div class="sub">${cand.first_name} ${cand.last_name} | ${date}</div></div><div style="text-align:right"><div class="sub">Process Communication Model</div></div></div>
+
+    <div class="section"><div class="grid2">
+      <div>
+        <div class="section-title">Immeuble de personnalite</div>
+        ${immeubleHtml}
+      </div>
+      <div>
+        <div class="section-title">Base et Phase</div>
+        <div class="card" style="margin-bottom:8px">
+          <div style="font-weight:700;margin-bottom:4px">Base : <span class="badge" style="background:${TYPE_COLORS[r.base?.type]}">${r.base?.nom}</span></div>
+          <div style="font-size:10px;color:#4b5563">Perception : ${r.base?.perception || ''}</div>
+          <div style="font-size:10px;color:#4b5563">Canal : ${r.base?.canal || ''}</div>
+          <div style="font-size:10px;color:#4b5563">Points forts : ${(r.base?.pointsForts || []).join(', ')}</div>
+          <div style="font-size:10px;color:#4b5563">Besoin : ${r.base?.besoinPsychologique || ''}</div>
+        </div>
+        <div class="card">
+          <div style="font-weight:700;margin-bottom:4px">Phase : <span class="badge" style="background:${TYPE_COLORS[r.phase?.type]}">${r.phase?.nom}</span></div>
+          <div style="font-size:10px;color:#4b5563">Besoin : ${r.phase?.besoinPsychologique || ''}</div>
+          <div style="font-size:10px;color:#4b5563">Driver : ${r.phase?.driverPrincipal || ''}</div>
+        </div>
+      </div>
+    </div></div>
+
+    <div class="section"><div class="section-title">Comportements principaux</div>
+      <div class="card" style="margin-bottom:6px"><strong>Avec les autres :</strong> ${r.comportementsPrincipaux?.avecAutres || ''}</div>
+      <div class="card" style="margin-bottom:6px"><strong>Sous stress :</strong> ${r.comportementsPrincipaux?.sousStress || ''}</div>
+    </div>
+
+    <div class="section"><div class="grid2">
+      <div><div class="section-title">Guide Manager</div>
+        <ul style="list-style:none;padding:0">${doHtml}${dontHtml}</ul>
+      </div>
+      <div><div class="section-title">Niveaux de stress (Phase)</div>${stressHtml}</div>
+    </div></div>
+
+    ${rpsHtml}
+    <div class="footer">SOLIDATA ERP — Document confidentiel — ${date}</div>
+  `;
+
+  openPrintWindow(`PCM_${cand.last_name}_${cand.first_name}`, body);
+}
+
+function exportTechnicalPDF(profile, rawAnswers) {
+  const cand = profile.candidate;
+  const date = new Date(profile.createdAt).toLocaleDateString('fr-FR');
+  const scores = profile.report.scores || {};
+
+  const scoresHtml = Object.entries(scores).map(([type, pct]) =>
+    `<tr><td><span class="badge" style="background:${TYPE_COLORS[type]}">${TYPE_LABELS[type] || type}</span></td><td style="text-align:right;font-weight:600">${pct}%</td>
+    <td><div style="background:#f3f4f6;border-radius:3px;height:14px;width:100%"><div style="height:14px;border-radius:3px;width:${pct}%;background:${TYPE_COLORS[type]}"></div></div></td></tr>`
+  ).join('');
+
+  const groupedByCategory = {};
+  for (const a of (rawAnswers || [])) {
+    if (!groupedByCategory[a.category]) groupedByCategory[a.category] = [];
+    groupedByCategory[a.category].push(a);
+  }
+
+  let answersHtml = '';
+  for (const [cat, answers] of Object.entries(groupedByCategory)) {
+    answersHtml += `<tr><td colspan="4" style="background:#f0fdf4;font-weight:700;color:#2D8C4E;padding:6px">${CATEGORY_LABELS[cat] || cat}</td></tr>`;
+    for (const a of answers) {
+      answersHtml += `<tr>
+        <td style="width:30px;text-align:center;color:#9ca3af">Q${a.question_number}</td>
+        <td style="width:45%">${a.question_text}</td>
+        <td><span class="badge" style="background:${TYPE_COLORS[a.answer_value] || '#6b7280'}">${TYPE_LABELS[a.answer_value] || a.answer_value}</span></td>
+        <td style="font-size:9px;color:#4b5563">${a.answer_label}</td>
+      </tr>`;
+    }
+  }
+
+  const body = `
+    <div class="header"><div><h1>SOLIDATA — Fiche Technique PCM</h1><div class="sub">${cand.first_name} ${cand.last_name} | ${date} | Document interne</div></div><div style="text-align:right"><div class="sub">Resultats bruts du questionnaire</div></div></div>
+
+    <div class="section"><div class="grid2">
+      <div><div class="section-title">Synthese</div>
+        <div class="card">
+          <div>Base : <span class="badge" style="background:${TYPE_COLORS[profile.baseType]}">${TYPE_LABELS[profile.baseType] || profile.baseType}</span></div>
+          <div style="margin-top:4px">Phase : <span class="badge" style="background:${TYPE_COLORS[profile.phaseType]}">${TYPE_LABELS[profile.phaseType] || profile.phaseType}</span></div>
+          <div style="margin-top:4px">Alerte RPS : ${profile.riskAlert ? '<span style="color:#dc2626;font-weight:700">OUI</span>' : '<span style="color:#16a34a">Non</span>'}</div>
+        </div>
+      </div>
+      <div><div class="section-title">Scores normalises (0-100%)</div>
+        <table>${scoresHtml}</table>
+      </div>
+    </div></div>
+
+    <div class="section"><div class="section-title">Reponses detaillees (${(rawAnswers || []).length} questions)</div>
+      <table>
+        <thead><tr><th>#</th><th>Question</th><th>Type</th><th>Reponse choisie</th></tr></thead>
+        <tbody>${answersHtml}</tbody>
+      </table>
+    </div>
+
+    <div class="footer">SOLIDATA ERP — Fiche technique confidentielle — ${date}</div>
+  `;
+
+  openPrintWindow(`PCM_TECHNIQUE_${cand.last_name}_${cand.first_name}`, body);
+}
+
 export default function PersonalityMatrix() {
   const [profiles, setProfiles] = useState([]);
   const [types, setTypes] = useState([]);
   const [selectedProfile, setSelectedProfile] = useState(null);
+  const [rawAnswers, setRawAnswers] = useState(null);
   const [view, setView] = useState('list'); // list, types, profile
 
   useEffect(() => {
@@ -24,11 +203,23 @@ export default function PersonalityMatrix() {
 
   const loadProfile = async (candidateId) => {
     try {
-      const res = await api.get(`/pcm/profiles/${candidateId}`);
-      setSelectedProfile(res.data);
+      const [profRes, ansRes] = await Promise.all([
+        api.get(`/pcm/profiles/${candidateId}`),
+        api.get(`/pcm/profiles/${candidateId}/answers`).catch(() => ({ data: null })),
+      ]);
+      setSelectedProfile(profRes.data);
+      setRawAnswers(ansRes.data?.answers || null);
       setView('profile');
     } catch (err) { console.error(err); }
   };
+
+  const handleExportResults = useCallback(() => {
+    if (selectedProfile) exportResultsPDF(selectedProfile);
+  }, [selectedProfile]);
+
+  const handleExportTechnical = useCallback(() => {
+    if (selectedProfile) exportTechnicalPDF(selectedProfile, rawAnswers);
+  }, [selectedProfile, rawAnswers]);
 
   return (
     <Layout>
@@ -36,7 +227,7 @@ export default function PersonalityMatrix() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-solidata-dark">Matrice PCM</h1>
-            <p className="text-gray-500">Process Communication Model — 6 types de personnalité</p>
+            <p className="text-gray-500">Process Communication Model — 6 types de personnalite</p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>Profils</button>
@@ -72,7 +263,7 @@ export default function PersonalityMatrix() {
                       </span>
                     </td>
                     <td className="p-3">
-                      {p.risk_alert && <span className="text-red-500 text-xs font-bold">⚠ Alerte</span>}
+                      {p.risk_alert && <span className="text-red-500 text-xs font-bold">Alerte</span>}
                     </td>
                     <td className="p-3 text-xs text-gray-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</td>
                     <td className="p-3">
@@ -83,7 +274,7 @@ export default function PersonalityMatrix() {
                   </tr>
                 ))}
                 {profiles.length === 0 && (
-                  <tr><td colSpan="6" className="p-8 text-center text-gray-400">Aucun profil PCM généré</td></tr>
+                  <tr><td colSpan="6" className="p-8 text-center text-gray-400">Aucun profil PCM genere</td></tr>
                 )}
               </tbody>
             </table>
@@ -117,7 +308,25 @@ export default function PersonalityMatrix() {
 
         {view === 'profile' && selectedProfile && (
           <div className="space-y-6">
-            <button onClick={() => setView('list')} className="text-solidata-green text-sm hover:underline">← Retour à la liste</button>
+            <div className="flex items-center justify-between">
+              <button onClick={() => setView('list')} className="text-solidata-green text-sm hover:underline">← Retour a la liste</button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleExportResults}
+                  className="px-3 py-1.5 rounded-lg text-sm bg-solidata-green text-white hover:opacity-90 flex items-center gap-1.5"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                  Export resultats
+                </button>
+                <button
+                  onClick={handleExportTechnical}
+                  className="px-3 py-1.5 rounded-lg text-sm bg-gray-600 text-white hover:opacity-90 flex items-center gap-1.5"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  Fiche technique
+                </button>
+              </div>
+            </div>
 
             <div className="bg-white rounded-xl shadow-sm border p-6">
               <h2 className="text-xl font-bold mb-4">
@@ -128,7 +337,7 @@ export default function PersonalityMatrix() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <h3 className="font-semibold mb-3">Immeuble PCM</h3>
-                  <p className="text-xs text-gray-500 mb-2">Classement des types par score (uniquement les types avec un score ; cohérent avec la Base et la Phase).</p>
+                  <p className="text-xs text-gray-500 mb-2">Classement des types par score (Base en fondation, etage 1).</p>
                   <div className="space-y-1">
                     {selectedProfile.report.immeuble?.map(etage => (
                       <div key={etage.type} className="flex items-center gap-2">
@@ -139,6 +348,7 @@ export default function PersonalityMatrix() {
                             style={{ width: `${etage.score}%`, backgroundColor: TYPE_COLORS[etage.type], minWidth: '60px' }}
                           >
                             {etage.nom} ({etage.score}%)
+                            {etage.etage === 1 && <span className="ml-1 opacity-80">[Base]</span>}
                           </div>
                         </div>
                       </div>
@@ -178,7 +388,7 @@ export default function PersonalityMatrix() {
                     <div className="flex flex-wrap gap-4">
                       {selectedProfile.report.comportementsPrincipaux.avecManager?.do?.length > 0 && (
                         <div className="flex-1 min-w-[200px]">
-                          <p className="text-xs text-green-600 font-medium mb-1">À privilégier</p>
+                          <p className="text-xs text-green-600 font-medium mb-1">A privilegier</p>
                           <ul className="text-sm text-gray-700 list-disc list-inside space-y-0.5">
                             {selectedProfile.report.comportementsPrincipaux.avecManager.do.map((tip, i) => (
                               <li key={i}>{tip}</li>
@@ -188,7 +398,7 @@ export default function PersonalityMatrix() {
                       )}
                       {selectedProfile.report.comportementsPrincipaux.avecManager?.dont?.length > 0 && (
                         <div className="flex-1 min-w-[200px]">
-                          <p className="text-xs text-red-600 font-medium mb-1">À éviter</p>
+                          <p className="text-xs text-red-600 font-medium mb-1">A eviter</p>
                           <ul className="text-sm text-gray-700 list-disc list-inside space-y-0.5">
                             {selectedProfile.report.comportementsPrincipaux.avecManager.dont.map((tip, i) => (
                               <li key={i}>{tip}</li>
@@ -248,7 +458,7 @@ export default function PersonalityMatrix() {
             {/* Alerte RPS */}
             {selectedProfile.riskAlert && (
               <div className="bg-red-50 border-2 border-red-300 rounded-xl p-5">
-                <h3 className="font-bold text-red-700 mb-2">⚠ Alerte Risques Psychosociaux</h3>
+                <h3 className="font-bold text-red-700 mb-2">Alerte Risques Psychosociaux</h3>
                 <ul className="space-y-1">
                   {selectedProfile.report.rpsIndicators?.map((ind, i) => (
                     <li key={i} className="text-sm text-red-800">{ind}</li>

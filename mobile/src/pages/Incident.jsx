@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { vibrateTap, vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
 
 const INCIDENT_TYPES = [
@@ -30,8 +31,9 @@ export default function Incident() {
       formData.append('employee_id', '');
 
       await api.post(`/tours/${tourId}/incidents`, formData);
+      vibrateSuccess();
       navigate('/tour-map');
-    } catch (err) { console.error(err); }
+    } catch (err) { vibrateError(); console.error(err); }
     setLoading(false);
   };
 
@@ -48,7 +50,8 @@ export default function Incident() {
             <button
               key={t.value}
               type="button"
-              onClick={() => setType(t.value)}
+              aria-label={`Type incident : ${t.label}`}
+              onClick={() => { vibrateTap(); setType(t.value); }}
               className={`flex items-center gap-3 card-mobile p-4 text-left transition-all ${
                 type === t.value ? 'ring-2 ring-red-500 bg-red-50' : ''
               }`}
