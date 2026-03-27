@@ -20,8 +20,8 @@ async function generateInvoiceNumber() {
   return `FAC-${year}-${String(num).padStart(4, '0')}`;
 }
 
-// GET /api/billing
-router.get('/', async (req, res) => {
+// GET /api/billing/invoices (+ alias /api/billing)
+router.get('/invoices', async (req, res) => {
   try {
     const { status, date_from, date_to } = req.query;
     let query = 'SELECT * FROM invoices WHERE 1=1';
@@ -40,8 +40,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/billing/:id
-router.get('/:id', async (req, res) => {
+// GET /api/billing/invoices/:id
+router.get('/invoices/:id', async (req, res) => {
   try {
     const invoice = await pool.query('SELECT * FROM invoices WHERE id = $1', [req.params.id]);
     if (invoice.rows.length === 0) return res.status(404).json({ error: 'Facture non trouvée' });
@@ -58,8 +58,14 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/billing
-router.post('/', [
+// GET /api/billing (alias)
+router.get('/', async (req, res, next) => {
+  req.url = '/invoices';
+  router.handle(req, res, next);
+});
+
+// POST /api/billing/invoices
+router.post('/invoices', [
   body('client_name').notEmpty().withMessage('Nom du client requis'),
   body('date').notEmpty().withMessage('Date requise'),
 ], validate, async (req, res) => {
@@ -111,8 +117,8 @@ router.post('/', [
   }
 });
 
-// PUT /api/billing/:id/status
-router.put('/:id/status', [
+// PUT /api/billing/invoices/:id/status
+router.put('/invoices/:id/status', [
   body('status').isIn(['draft', 'sent', 'paid', 'overdue', 'cancelled']).withMessage('Statut invalide'),
 ], validate, async (req, res) => {
   try {
