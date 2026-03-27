@@ -677,7 +677,7 @@ const DOC_TYPES = [
 ];
 
 // GET /api/vehicles/:id/documents — Liste des documents d'un véhicule
-router.get('/:id/documents', async (req, res) => {
+router.get('/:id/documents', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT vd.*, u.first_name || ' ' || u.last_name as created_by_name
@@ -729,7 +729,7 @@ router.post('/:id/documents', authorize('ADMIN', 'MANAGER'), uploadVehicleDoc.si
 });
 
 // GET /api/vehicles/:id/documents/:docId/download — Télécharger un document
-router.get('/:id/documents/:docId/download', async (req, res) => {
+router.get('/:id/documents/:docId/download', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT filename, original_name, mime_type FROM vehicle_documents WHERE id = $1 AND vehicle_id = $2',

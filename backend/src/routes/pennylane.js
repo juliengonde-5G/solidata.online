@@ -81,16 +81,19 @@ router.put('/config', authorize('ADMIN'), [
   try {
     const { api_key, company_id, is_active, sync_invoices, sync_suppliers, sync_journal } = req.body;
 
-    // Chiffrement simple de la clé API (en production, utiliser AES-256 via crypto-js)
+    // Chiffrement AES-256-CBC avec IV aléatoire
     const crypto = require('crypto');
-    const API_ENCRYPTION_KEY = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET || 'default-key';
+    const API_ENCRYPTION_KEY = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET;
+    if (!API_ENCRYPTION_KEY) return res.status(500).json({ error: 'Clé de chiffrement non configurée (PENNYLANE_ENCRYPTION_KEY ou JWT_SECRET requis)' });
     let api_key_encrypted = null;
     if (api_key) {
+      const iv = crypto.randomBytes(16);
       const cipher = crypto.createCipheriv('aes-256-cbc',
         crypto.createHash('sha256').update(API_ENCRYPTION_KEY).digest(),
-        Buffer.alloc(16, 0)
+        iv
       );
-      api_key_encrypted = cipher.update(api_key, 'utf8', 'hex') + cipher.final('hex');
+      const encrypted = cipher.update(api_key, 'utf8', 'hex') + cipher.final('hex');
+      api_key_encrypted = iv.toString('hex') + ':' + encrypted;
     }
 
     const existing = await pool.query('SELECT id FROM pennylane_config LIMIT 1');
@@ -141,14 +144,16 @@ router.post('/test', authorize('ADMIN'), async (req, res) => {
       return res.status(400).json({ error: 'Pennylane non configuré ou inactif', connected: false });
     }
 
-    // Déchiffrer la clé API
+    // Déchiffrer la clé API (format iv_hex:encrypted_hex)
     const crypto = require('crypto');
-    const API_ENCRYPTION_KEY = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET || 'default-key';
+    const API_ENCRYPTION_KEY = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET;
+    if (!API_ENCRYPTION_KEY) return res.status(500).json({ error: 'Clé de chiffrement non configurée' });
+    const [ivHex, encryptedHex] = config.rows[0].api_key_encrypted.split(':');
     const decipher = crypto.createDecipheriv('aes-256-cbc',
       crypto.createHash('sha256').update(API_ENCRYPTION_KEY).digest(),
-      Buffer.alloc(16, 0)
+      Buffer.from(ivHex, 'hex')
     );
-    const apiKey = decipher.update(config.rows[0].api_key_encrypted, 'hex', 'utf8') + decipher.final('utf8');
+    const apiKey = decipher.update(encryptedHex, 'hex', 'utf8') + decipher.final('utf8');
 
     // Test API Pennylane
     const https = require('https');

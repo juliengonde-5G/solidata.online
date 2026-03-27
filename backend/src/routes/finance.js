@@ -133,41 +133,49 @@ router.post('/import/gl', upload.single('file'), async (req, res) => {
 
     const exerciseId = await getOrCreateExercise(detectedYear);
 
-    // Delete existing entries for this year then insert
-    await pool.query('DELETE FROM financial_gl_entries WHERE exercise_id = $1', [exerciseId]);
+    // Import dans une transaction SQL (rollback si erreur)
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM financial_gl_entries WHERE exercise_id = $1', [exerciseId]);
 
-    // Batch insert
-    for (let i = 0; i < rows.length; i += 500) {
-      const batch = rows.slice(i, i + 500);
-      const values = [];
-      const placeholders = [];
-      let paramIdx = 1;
+      for (let i = 0; i < rows.length; i += 500) {
+        const batch = rows.slice(i, i + 500);
+        const values = [];
+        const placeholders = [];
+        let paramIdx = 1;
 
-      for (const r of batch) {
-        placeholders.push(`($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`);
-        values.push(exerciseId, r.line_id, r.date, r.journal, r.account, r.account_label,
-          r.vat_rate, r.piece_label, r.line_label, r.invoice_number, r.third_party,
-          r.family_category, r.category, r.analytical_code, r.currency || 'EUR',
-          r.exchange_rate, r.debit, r.credit, r.balance);
+        for (const r of batch) {
+          placeholders.push(`($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`);
+          values.push(exerciseId, r.line_id, r.date, r.journal, r.account, r.account_label,
+            r.vat_rate, r.piece_label, r.line_label, r.invoice_number, r.third_party,
+            r.family_category, r.category, r.analytical_code, r.currency || 'EUR',
+            r.exchange_rate, r.debit, r.credit, r.balance);
+        }
+
+        await client.query(`INSERT INTO financial_gl_entries
+          (exercise_id, line_id, date, journal, account, account_label, vat_rate, piece_label,
+           line_label, invoice_number, third_party, family_category, category, analytical_code,
+           currency, exchange_rate, debit, credit, balance)
+          VALUES ${placeholders.join(',')}`, values);
       }
 
-      await pool.query(`INSERT INTO financial_gl_entries
-        (exercise_id, line_id, date, journal, account, account_label, vat_rate, piece_label,
-         line_label, invoice_number, third_party, family_category, category, analytical_code,
-         currency, exchange_rate, debit, credit, balance)
-        VALUES ${placeholders.join(',')}`, values);
+      await client.query(
+        'INSERT INTO financial_import_logs (exercise_id, type, filename, row_count, period, imported_by) VALUES ($1, $2, $3, $4, $5, $6)',
+        [exerciseId, 'Grand Livre', req.file.originalname, rows.length, String(detectedYear), req.user.id]
+      );
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
     }
-
-    // Log import
-    await pool.query(
-      'INSERT INTO financial_import_logs (exercise_id, type, filename, row_count, period, imported_by) VALUES ($1, $2, $3, $4, $5, $6)',
-      [exerciseId, 'Grand Livre', req.file.originalname, rows.length, String(detectedYear), req.user.id]
-    );
 
     res.json({ year: detectedYear, count: rows.length, exerciseId });
   } catch (err) {
     console.error('[FINANCE] Erreur import GL :', err);
-    res.status(500).json({ error: 'Erreur import: ' + err.message });
+    res.status(500).json({ error: 'Erreur import GL' });
   }
 });
 
@@ -211,27 +219,38 @@ router.post('/import/transactions', upload.single('file'), async (req, res) => {
 
     if (!detectedYear) detectedYear = new Date().getFullYear();
     const exerciseId = await getOrCreateExercise(detectedYear);
-    await pool.query('DELETE FROM financial_transactions WHERE exercise_id = $1', [exerciseId]);
 
-    for (let i = 0; i < rows.length; i += 500) {
-      const batch = rows.slice(i, i + 500);
-      const values = [];
-      const placeholders = [];
-      let p = 1;
-      for (const r of batch) {
-        placeholders.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
-        values.push(exerciseId, r.date, r.month, r.bank_account, r.label, r.amount, r.third_party, r.justified, r.pl);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM financial_transactions WHERE exercise_id = $1', [exerciseId]);
+
+      for (let i = 0; i < rows.length; i += 500) {
+        const batch = rows.slice(i, i + 500);
+        const values = [];
+        const placeholders = [];
+        let p = 1;
+        for (const r of batch) {
+          placeholders.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+          values.push(exerciseId, r.date, r.month, r.bank_account, r.label, r.amount, r.third_party, r.justified, r.pl);
+        }
+        await client.query(`INSERT INTO financial_transactions (exercise_id, date, month, bank_account, label, amount, third_party, justified, pl) VALUES ${placeholders.join(',')}`, values);
       }
-      await pool.query(`INSERT INTO financial_transactions (exercise_id, date, month, bank_account, label, amount, third_party, justified, pl) VALUES ${placeholders.join(',')}`, values);
-    }
 
-    await pool.query('INSERT INTO financial_import_logs (exercise_id, type, filename, row_count, period, imported_by) VALUES ($1,$2,$3,$4,$5,$6)',
-      [exerciseId, 'Transactions', req.file.originalname, rows.length, String(detectedYear), req.user.id]);
+      await client.query('INSERT INTO financial_import_logs (exercise_id, type, filename, row_count, period, imported_by) VALUES ($1,$2,$3,$4,$5,$6)',
+        [exerciseId, 'Transactions', req.file.originalname, rows.length, String(detectedYear), req.user.id]);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     res.json({ year: detectedYear, count: rows.length });
   } catch (err) {
     console.error('[FINANCE] Erreur import transactions :', err);
-    res.status(500).json({ error: 'Erreur: ' + err.message });
+    res.status(500).json({ error: 'Erreur import' });
   }
 });
 
@@ -267,7 +286,7 @@ router.post('/import/budget', upload.single('file'), async (req, res) => {
     });
     if (!catCol) catCol = 1;
 
-    let count = 0;
+    const budgetRows = [];
     sheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return;
       const category = row.getCell(catCol).value;
@@ -276,14 +295,18 @@ router.post('/import/budget', upload.single('file'), async (req, res) => {
       for (const [col, month] of Object.entries(monthCols)) {
         const amount = parseNum(row.getCell(parseInt(col)).value);
         if (amount !== 0) {
-          pool.query(
-            'INSERT INTO financial_budgets (exercise_id, category, month, amount, created_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (exercise_id, category, month) DO UPDATE SET amount = $4',
-            [exerciseId, String(category).trim(), month, amount, req.user.id]
-          );
-          count++;
+          budgetRows.push({ category: String(category).trim(), month, amount });
         }
       }
     });
+
+    for (const item of budgetRows) {
+      await pool.query(
+        'INSERT INTO financial_budgets (exercise_id, category, month, amount, created_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (exercise_id, category, month) DO UPDATE SET amount = $4',
+        [exerciseId, item.category, item.month, item.amount, req.user.id]
+      );
+    }
+    const count = budgetRows.length;
 
     await pool.query('INSERT INTO financial_import_logs (exercise_id, type, filename, row_count, period, imported_by) VALUES ($1,$2,$3,$4,$5,$6)',
       [exerciseId, 'Budget', req.file.originalname, count, String(year), req.user.id]);
@@ -291,7 +314,7 @@ router.post('/import/budget', upload.single('file'), async (req, res) => {
     res.json({ year, count });
   } catch (err) {
     console.error('[FINANCE] Erreur import budget :', err);
-    res.status(500).json({ error: 'Erreur: ' + err.message });
+    res.status(500).json({ error: 'Erreur import' });
   }
 });
 
@@ -654,29 +677,6 @@ router.get('/logs', async (req, res) => {
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// ══════════════════════════════════════════
-// PENNYLANE PROXY (direct from backend)
-// ══════════════════════════════════════════
-
-const PENNYLANE_BASE = 'https://app.pennylane.com/api/external/v2';
-
-router.post('/pennylane/test', async (req, res) => {
-  try {
-    const apiKey = req.headers['x-pennylane-key'];
-    if (!apiKey) return res.status(400).json({ error: 'Cle API requise (header X-Pennylane-Key)' });
-
-    const resp = await fetch(`${PENNYLANE_BASE}/me`, {
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Accept': 'application/json' }
-    });
-
-    if (!resp.ok) return res.status(resp.status).json({ error: 'Erreur Pennylane: ' + resp.status });
-    const data = await resp.json();
-    res.json({ ok: true, data });
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur connexion: ' + err.message });
   }
 });
 
