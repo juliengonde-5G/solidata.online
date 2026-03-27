@@ -122,20 +122,8 @@ router.get('/available', async (req, res) => {
   }
 });
 
-// GET /api/vehicles/:id
-router.get('/:id', async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT v.*, t.name as team_name FROM vehicles v LEFT JOIN teams t ON v.team_id = t.id WHERE v.id = $1',
-      [req.params.id]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('[VEHICLES] Erreur détail :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
+// GET /api/vehicles/:id — déplacé après les routes statiques pour éviter que /:id intercepte /maintenance/*, /document-types/*
+// Voir plus bas dans le fichier
 
 // POST /api/vehicles
 router.post('/', authorize('ADMIN', 'MANAGER'), [
@@ -562,7 +550,7 @@ router.post('/:id/maintenance/resolve-alert', authorize('ADMIN', 'MANAGER'), [
 router.get('/:id/events', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT ve.*, u.first_name || ' ' || u.last_name as created_by_name
+      `SELECT ve.*, COALESCE(u.first_name || ' ' || u.last_name, 'Système') as created_by_name
        FROM vehicle_events ve
        LEFT JOIN users u ON ve.created_by = u.id
        WHERE ve.vehicle_id = $1
@@ -680,7 +668,7 @@ const DOC_TYPES = [
 router.get('/:id/documents', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT vd.*, u.first_name || ' ' || u.last_name as created_by_name
+      `SELECT vd.*, COALESCE(u.first_name || ' ' || u.last_name, 'Système') as created_by_name
        FROM vehicle_documents vd
        LEFT JOIN users u ON vd.created_by = u.id
        WHERE vd.vehicle_id = $1
@@ -697,6 +685,21 @@ router.get('/:id/documents', authorize('ADMIN', 'MANAGER'), async (req, res) => 
 // GET /api/vehicles/document-types — Types de documents disponibles
 router.get('/document-types/list', (req, res) => {
   res.json(DOC_TYPES);
+});
+
+// GET /api/vehicles/:id — DOIT être après toutes les routes statiques (/maintenance/*, /document-types/*)
+router.get('/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT v.*, t.name as team_name FROM vehicles v LEFT JOIN teams t ON v.team_id = t.id WHERE v.id = $1',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur détail :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // POST /api/vehicles/:id/documents — Uploader un document

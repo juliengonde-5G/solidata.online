@@ -28,7 +28,7 @@ router.get('/', authorize('ADMIN'), async (req, res) => {
     const result = await pool.query(query, params);
 
     // Compteur total
-    let countQuery = 'SELECT COUNT(*) FROM user_activity_log WHERE 1=1';
+    let countQuery = 'SELECT COUNT(*) as count FROM user_activity_log WHERE 1=1';
     const countParams = [];
     if (user_id) { countParams.push(user_id); countQuery += ` AND user_id = $${countParams.length}`; }
     if (action) { countParams.push(action); countQuery += ` AND action = $${countParams.length}`; }
