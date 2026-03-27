@@ -160,6 +160,7 @@ router.post('/test', authorize('ADMIN'), async (req, res) => {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Accept': 'application/json',
+          'X-Use-2026-API-Changes': 'true',
         },
         timeout: 10000,
       };
@@ -258,30 +259,26 @@ router.post('/sync/invoices', authorize('ADMIN', 'MANAGER'), async (req, res) =>
 
     for (const invoice of Object.values(invoiceMap)) {
       try {
-        // Mapping Solidata → Pennylane
-        const pennylaneInvoice = {
+        // Mapping Solidata → Pennylane API v2
+        const pennylanePayload = {
           date: invoice.date ? new Date(invoice.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           deadline: invoice.due_date ? new Date(invoice.due_date).toISOString().split('T')[0] : null,
-          invoice_number: invoice.invoice_number,
+          external_reference: invoice.invoice_number || null,
           currency: 'EUR',
-          customer: {
-            name: invoice.client_name || 'Client Solidata',
-            address: invoice.client_address || '',
-            emails: invoice.client_email ? [invoice.client_email] : [],
-          },
-          line_items: invoice.lines.map(l => ({
+          draft: false,
+          invoice_lines: invoice.lines.map(l => ({
             label: l.description || 'Prestation',
             quantity: l.quantity || 1,
             unit: 'piece',
             vat_rate: 'FR_200',
-            unit_price: parseFloat(l.unit_price) || 0,
+            raw_currency_unit_price: String(parseFloat(l.unit_price) || 0),
           })),
         };
 
-        // Appel réel API Pennylane
+        // Appel réel API Pennylane v2
         const https = require('https');
         const plResult = await new Promise((resolve, reject) => {
-          const postData = JSON.stringify({ invoice: pennylaneInvoice });
+          const postData = JSON.stringify(pennylanePayload);
           const options = {
             hostname: 'app.pennylane.com',
             path: '/api/external/v2/customer_invoices',
@@ -290,6 +287,7 @@ router.post('/sync/invoices', authorize('ADMIN', 'MANAGER'), async (req, res) =>
               'Authorization': `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
               'Accept': 'application/json',
+              'X-Use-2026-API-Changes': 'true',
               'Content-Length': Buffer.byteLength(postData),
             },
             timeout: 15000,
