@@ -11,6 +11,7 @@ import Skills from './pages/Skills';
 import Tours from './pages/Tours';
 import CAVMap from './pages/CAVMap';
 import Vehicles from './pages/Vehicles';
+import VehicleMaintenance from './pages/VehicleMaintenance';
 import LiveVehicles from './pages/LiveVehicles';
 import Production from './pages/Production';
 import ChaineTri from './pages/ChaineTri';
@@ -110,6 +111,7 @@ function App() {
             <Route path="/cav-map" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CAVMap /></ProtectedRoute>} />
             <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FillRateMap /></ProtectedRoute>} />
             <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Vehicles /></ProtectedRoute>} />
+            <Route path="/vehicle-maintenance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VehicleMaintenance /></ProtectedRoute>} />
             <Route path="/live-vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
 
             {/* Tri / Production */}

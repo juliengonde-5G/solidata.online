@@ -117,6 +117,7 @@ const menuSections = [
     items: [
       { path: '/users', label: 'Utilisateurs', icon: IconLock, roles: ['ADMIN'] },
       { path: '/vehicles', label: 'Véhicules', icon: IconVehicle, roles: ['ADMIN'] },
+      { path: '/vehicle-maintenance', label: 'Maintenance', icon: IconGear, roles: ['ADMIN'] },
       { path: '/settings', label: 'Configuration', icon: IconGear, roles: ['ADMIN'] },
       { path: '/referentiels', label: 'Référentiels', icon: IconList, roles: ['ADMIN'] },
       { path: '/admin-predictive', label: 'Moteur prédictif', icon: IconBrain, roles: ['ADMIN'] },
