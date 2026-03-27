@@ -46,7 +46,7 @@ export default function Referentiels() {
 
   const tabs = [
     { key: 'associations', label: 'Associations', count: associations.length },
-    { key: 'exutoires', label: 'Exutoires', count: exutoires.length },
+    { key: 'exutoires', label: 'Débouchés', count: exutoires.length },
     { key: 'catalogue', label: 'Catalogue Produits', count: catalogue.length },
     { key: 'conteneurs', label: 'Types Conteneurs', count: conteneurs.length },
   ];
@@ -107,7 +107,7 @@ export default function Referentiels() {
           </div>
         )}
 
-        {/* Exutoires */}
+        {/* Débouchés */}
         {view === 'exutoires' && (
           <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
             <table className="w-full">
@@ -170,7 +170,7 @@ export default function Referentiels() {
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
             <form onSubmit={createItem} className="bg-white rounded-xl p-6 w-[400px] shadow-xl">
               <h2 className="text-lg font-bold mb-4">
-                {view === 'associations' ? 'Nouvelle association' : view === 'exutoires' ? 'Nouvel exutoire' : 'Nouveau produit'}
+                {view === 'associations' ? 'Nouvelle association' : view === 'exutoires' ? 'Nouveau débouché' : 'Nouveau produit'}
               </h2>
               <div className="space-y-3">
                 <input placeholder="Nom *" value={form.nom || ''} onChange={e => setForm({ ...form, nom: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />

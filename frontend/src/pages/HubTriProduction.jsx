@@ -52,7 +52,7 @@ export default function HubTriProduction() {
     { path: '/chaine-tri', title: 'Chaînes de tri', desc: 'Gestion des chaînes et opérations de tri', icon: IconSort },
     { path: '/stock', title: 'Stock MP', desc: 'Mouvements de stock et inventaire matières premières', icon: IconBox },
     { path: '/produits-finis', title: 'Produits finis', desc: 'Catalogue et suivi des produits fabriqués', icon: IconTag },
-    { path: '/expeditions', title: 'Expéditions', desc: 'Expéditions vers exutoires et bons de livraison', icon: IconShip },
+    { path: '/expeditions', title: 'Expéditions', desc: 'Expéditions et bons de livraison', icon: IconShip },
   ];
 
   return (

@@ -214,8 +214,8 @@ export default function ExutoiresCommandes() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Commandes Exutoires</h1>
-            <p className="text-gray-500">Gestion des commandes et expéditions exutoires</p>
+            <h1 className="text-2xl font-bold text-solidata-dark">Commandes Logistiques</h1>
+            <p className="text-gray-500">Gestion des commandes et expéditions</p>
           </div>
           <button onClick={openCreate} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
             + Nouvelle commande
@@ -399,7 +399,7 @@ export default function ExutoiresCommandes() {
                 );
               })}
               {commandes.length === 0 && (
-                <tr><td colSpan="9" className="p-8 text-center text-gray-400">Aucune commande exutoire</td></tr>
+                <tr><td colSpan="9" className="p-8 text-center text-gray-400">Aucune commande logistique</td></tr>
               )}
             </tbody>
           </table>
@@ -410,7 +410,7 @@ export default function ExutoiresCommandes() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowForm(false); setEditing(null); }}>
             <form onSubmit={handleSubmit} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h2 className="text-lg font-bold mb-4 text-solidata-dark">
-                {editing ? 'Modifier la commande' : 'Nouvelle commande exutoire'}
+                {editing ? 'Modifier la commande' : 'Nouvelle commande logistique'}
               </h2>
               <div className="space-y-3">
                 <div>

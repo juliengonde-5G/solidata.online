@@ -313,7 +313,7 @@ export default function Settings() {
                       )}
                       {tt.parClient && (
                         <div className="flex-1">
-                          <label className="text-[10px] text-gray-500 block mb-0.5">Client (exutoire)</label>
+                          <label className="text-[10px] text-gray-500 block mb-0.5">Client</label>
                           <select value={tarifForm.exutoire_id} onChange={e => setTarifForm({ ...tarifForm, exutoire_id: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required>
                             <option value="">Choisir…</option>
                             {exutoires.map(ex => <option key={ex.id} value={ex.id}>{ex.nom}</option>)}

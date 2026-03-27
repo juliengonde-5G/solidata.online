@@ -168,9 +168,9 @@ export default function DiagrammeFluxTri() {
           />
         </div>
 
-        {/* Sortants / Exutoires */}
+        {/* Sortants / Débouchés */}
         <div className="border-t-2 border-gray-300 pt-6 mt-6">
-          <h3 className="text-lg font-bold text-solidata-dark mb-2">Sorties (37 exutoires)</h3>
+          <h3 className="text-lg font-bold text-solidata-dark mb-2">Sorties (37 débouchés)</h3>
           <p className="text-sm text-gray-600 mb-2">
             Stock PF (SaisiesP) · Balles recyclage · Balles CSR · Balles Chiffons · Original (brut) → Pesée sortie (Sortants) →
           </p>
@@ -216,7 +216,7 @@ function BlocOperation({ titre, postes, sorties, entrant, couleur }) {
               <p className="text-gray-700 text-xs mb-2">{entrant}</p>
             </>
           )}
-          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Sortie d’opération → exutoire</p>
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Sortie d’opération → débouché</p>
           <ul className="space-y-0.5">
             {sorties.map((s, i) => (
               <li key={i} className="flex flex-wrap gap-1 items-baseline">
