@@ -73,12 +73,13 @@ export default function Settings() {
         api.get('/pennylane/config').catch(() => ({ data: null })),
         api.get('/pennylane/status').catch(() => ({ data: null })),
       ]);
-      const cfg = cfgRes.data;
-      setPlConfig({ ...cfg, ...statusRes.data });
-      if (cfg) {
+      const cfg = cfgRes.data || {};
+      const st = statusRes.data || {};
+      setPlConfig({ ...cfg, ...st });
+      if (cfg.company_id) {
         setPlForm(prev => ({ ...prev, company_id: cfg.company_id || '', is_active: cfg.is_active || false }));
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error('[Settings] Pennylane load error:', err); }
   };
 
   const savePennylane = async () => {
