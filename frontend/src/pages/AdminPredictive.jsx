@@ -38,8 +38,9 @@ export default function AdminPredictive() {
   const [predictions, setPredictions] = useState([]);
   const [discovering, setDiscovering] = useState(false);
   const [discoveryResult, setDiscoveryResult] = useState(null);
+  const [sources, setSources] = useState([]);
 
-  useEffect(() => { loadConfig(); loadEvents(); loadAutoStats(); }, []);
+  useEffect(() => { loadConfig(); loadEvents(); loadAutoStats(); loadSources(); }, []);
 
   const loadConfig = async () => {
     try {
@@ -64,6 +65,13 @@ export default function AdminPredictive() {
       ]);
       setAutoStats(statsRes.data);
       setPredictions(predRes.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const loadSources = async () => {
+    try {
+      const res = await api.get('/tours/events-auto/sources');
+      setSources(res.data);
     } catch (err) { console.error(err); }
   };
 
@@ -293,7 +301,7 @@ export default function AdminPredictive() {
         </Section>
 
         {/* ══════════ DÉCOUVERTE AUTOMATIQUE IA ══════════ */}
-        <Section title="Decouverte automatique IA" desc="Analyse predictive pour alimenter la base d'evenements locaux automatiquement">
+        <Section title="Decouverte automatique IA" desc="Recherche multi-sources dans les agendas publics et analyse predictive saisonniere">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
             <div className="bg-indigo-50 rounded-lg p-3 text-center">
               <p className="text-2xl font-bold text-indigo-700">{autoStats?.total_events || 0}</p>
@@ -313,6 +321,43 @@ export default function AdminPredictive() {
             </div>
           </div>
 
+          {/* Sources de données */}
+          {sources.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Sources de donnees</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {sources.map(src => {
+                  const isActive = src.key_configured;
+                  const needsKey = src.requires_key && !src.key_configured;
+                  return (
+                    <div key={src.id} className={`flex items-center gap-2 p-2.5 rounded-lg border text-sm ${isActive ? 'bg-green-50 border-green-200' : needsKey ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isActive ? 'bg-green-500' : needsKey ? 'bg-amber-400' : 'bg-gray-400'}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-gray-700 truncate">{src.name}</p>
+                        <p className="text-[10px] text-gray-400">{isActive ? src.coverage : needsKey ? `Cle API requise (${src.env_var})` : 'Inactive'}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Répartition par source */}
+          {autoStats?.by_source && Object.keys(autoStats.by_source).length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Repartition par source</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(autoStats.by_source).map(([source, count]) => (
+                  <span key={source} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs border border-indigo-200">
+                    <span className="font-bold">{count}</span>
+                    <span>{source}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-3 mb-4">
             <button
               onClick={runAutoDiscovery}
@@ -322,7 +367,7 @@ export default function AdminPredictive() {
               {discovering ? (
                 <>
                   <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                  Analyse en cours...
+                  Recherche multi-sources en cours...
                 </>
               ) : (
                 <>
@@ -331,7 +376,7 @@ export default function AdminPredictive() {
                 </>
               )}
             </button>
-            <p className="text-xs text-gray-400">Genere automatiquement des evenements saisonniers et des predictions de brocantes basees sur l'analyse IA</p>
+            <p className="text-xs text-gray-400">Interroge OpenAgenda, Open Data Rouen, Seine-Maritime et genere des predictions saisonnieres IA</p>
           </div>
 
           {discoveryResult && (
@@ -339,6 +384,15 @@ export default function AdminPredictive() {
               <p className={`text-sm font-medium ${discoveryResult.error ? 'text-red-700' : 'text-green-700'}`}>
                 {discoveryResult.error || discoveryResult.message}
               </p>
+              {discoveryResult.by_source && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {Object.entries(discoveryResult.by_source).map(([source, count]) => (
+                    <span key={source} className="text-xs px-2 py-0.5 bg-white/60 rounded">
+                      {source}: <strong>{count}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
