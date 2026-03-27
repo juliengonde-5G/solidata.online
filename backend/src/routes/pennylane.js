@@ -5,6 +5,75 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const crypto = require('crypto');
+const https = require('https');
+
+// ══════════════════════════════════════════
+// HELPERS CHIFFREMENT + API PENNYLANE
+// ══════════════════════════════════════════
+
+function getEncryptionKey() {
+  const key = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET;
+  if (!key) throw new Error('Clé de chiffrement non configurée (PENNYLANE_ENCRYPTION_KEY ou JWT_SECRET requis)');
+  return crypto.createHash('sha256').update(key).digest();
+}
+
+function decryptApiKey(encrypted) {
+  const [ivHex, encryptedHex] = encrypted.split(':');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', getEncryptionKey(), Buffer.from(ivHex, 'hex'));
+  return decipher.update(encryptedHex, 'hex', 'utf8') + decipher.final('utf8');
+}
+
+function encryptApiKey(plaintext) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', getEncryptionKey(), iv);
+  return iv.toString('hex') + ':' + cipher.update(plaintext, 'utf8', 'hex') + cipher.final('hex');
+}
+
+function pennylaneRequest(apiKey, method, path, body = null) {
+  return new Promise((resolve, reject) => {
+    const postData = body ? JSON.stringify(body) : null;
+    const options = {
+      hostname: 'app.pennylane.com', path: `/api/external/v2${path}`, method,
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Accept': 'application/json', 'X-Use-2026-API-Changes': 'true' },
+      timeout: 15000,
+    };
+    if (postData) { options.headers['Content-Type'] = 'application/json'; options.headers['Content-Length'] = Buffer.byteLength(postData); }
+    const request = https.request(options, (response) => {
+      let data = '';
+      response.on('data', chunk => data += chunk);
+      response.on('end', () => { try { resolve({ status: response.statusCode, data: JSON.parse(data) }); } catch { resolve({ status: response.statusCode, data }); } });
+    });
+    request.on('error', reject);
+    request.on('timeout', () => { request.destroy(); reject(new Error('Timeout Pennylane')); });
+    if (postData) request.write(postData);
+    request.end();
+  });
+}
+
+async function getActiveApiKey() {
+  const config = await pool.query('SELECT api_key_encrypted, company_id FROM pennylane_config WHERE is_active = true LIMIT 1');
+  if (config.rows.length === 0) return null;
+  return { apiKey: decryptApiKey(config.rows[0].api_key_encrypted), companyId: config.rows[0].company_id };
+}
+
+async function fetchAllPages(apiKey, basePath, params = {}) {
+  const allItems = [];
+  let page = 1;
+  const perPage = 100;
+  while (true) {
+    const qs = new URLSearchParams({ ...params, page: String(page), per_page: String(perPage) });
+    const result = await pennylaneRequest(apiKey, 'GET', `${basePath}?${qs.toString()}`);
+    if (result.status !== 200) throw new Error(`Pennylane API ${result.status}: ${JSON.stringify(result.data?.error || result.data?.message || '')}`);
+    const items = result.data?.ledger_entries || result.data?.bank_transactions || result.data?.ledger_accounts || result.data?.customer_invoices || result.data?.items || result.data?.data || [];
+    if (!Array.isArray(items) || items.length === 0) break;
+    allItems.push(...items);
+    if (items.length < perPage) break;
+    page++;
+    await new Promise(r => setTimeout(r, 250)); // rate limit 5 req/s
+  }
+  return allItems;
+}
 
 // Auto-create tables
 (async () => {
@@ -81,19 +150,10 @@ router.put('/config', authorize('ADMIN'), [
   try {
     const { api_key, company_id, is_active, sync_invoices, sync_suppliers, sync_journal } = req.body;
 
-    // Chiffrement AES-256-CBC avec IV aléatoire
-    const crypto = require('crypto');
-    const API_ENCRYPTION_KEY = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET;
-    if (!API_ENCRYPTION_KEY) return res.status(500).json({ error: 'Clé de chiffrement non configurée (PENNYLANE_ENCRYPTION_KEY ou JWT_SECRET requis)' });
     let api_key_encrypted = null;
     if (api_key) {
-      const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv('aes-256-cbc',
-        crypto.createHash('sha256').update(API_ENCRYPTION_KEY).digest(),
-        iv
-      );
-      const encrypted = cipher.update(api_key, 'utf8', 'hex') + cipher.final('hex');
-      api_key_encrypted = iv.toString('hex') + ':' + encrypted;
+      try { api_key_encrypted = encryptApiKey(api_key); }
+      catch (e) { return res.status(500).json({ error: e.message }); }
     }
 
     const existing = await pool.query('SELECT id FROM pennylane_config LIMIT 1');
@@ -139,60 +199,12 @@ router.put('/config', authorize('ADMIN'), [
 // POST /api/pennylane/test — Tester la connexion Pennylane
 router.post('/test', authorize('ADMIN'), async (req, res) => {
   try {
-    const config = await pool.query('SELECT api_key_encrypted, company_id FROM pennylane_config WHERE is_active = true LIMIT 1');
-    if (config.rows.length === 0) {
-      return res.status(400).json({ error: 'Pennylane non configuré ou inactif', connected: false });
-    }
-
-    // Déchiffrer la clé API (format iv_hex:encrypted_hex)
-    const crypto = require('crypto');
-    const API_ENCRYPTION_KEY = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET;
-    if (!API_ENCRYPTION_KEY) return res.status(500).json({ error: 'Clé de chiffrement non configurée' });
-    const [ivHex, encryptedHex] = config.rows[0].api_key_encrypted.split(':');
-    const decipher = crypto.createDecipheriv('aes-256-cbc',
-      crypto.createHash('sha256').update(API_ENCRYPTION_KEY).digest(),
-      Buffer.from(ivHex, 'hex')
-    );
-    const apiKey = decipher.update(encryptedHex, 'hex', 'utf8') + decipher.final('utf8');
-
-    // Test API Pennylane
-    const https = require('https');
-    const testResult = await new Promise((resolve, reject) => {
-      const options = {
-        hostname: 'app.pennylane.com',
-        path: '/api/external/v2/me',
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Accept': 'application/json',
-          'X-Use-2026-API-Changes': 'true',
-        },
-        timeout: 10000,
-      };
-      const request = https.request(options, (response) => {
-        let data = '';
-        response.on('data', chunk => data += chunk);
-        response.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            resolve({ status: response.statusCode, data: parsed });
-          } catch {
-            resolve({ status: response.statusCode, data: data });
-          }
-        });
-      });
-      request.on('error', reject);
-      request.on('timeout', () => { request.destroy(); reject(new Error('Timeout')); });
-      request.end();
-    });
-
+    const active = await getActiveApiKey();
+    if (!active) return res.status(400).json({ error: 'Pennylane non configuré ou inactif', connected: false });
+    const testResult = await pennylaneRequest(active.apiKey, 'GET', '/me');
     if (testResult.status === 200) {
       await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
-      res.json({
-        connected: true,
-        company: testResult.data?.company_name || testResult.data?.current_company?.name || testResult.data?.name || config.rows[0].company_id,
-        message: 'Connexion Pennylane OK',
-      });
+      res.json({ connected: true, company: testResult.data?.company_name || testResult.data?.current_company?.name || testResult.data?.name || active.companyId, message: 'Connexion Pennylane OK' });
     } else if (testResult.status === 401) {
       res.json({ connected: false, error: 'Clé API invalide ou expirée' });
     } else {
@@ -211,10 +223,8 @@ router.post('/test', authorize('ADMIN'), async (req, res) => {
 // POST /api/pennylane/sync/invoices — Synchroniser les factures vers Pennylane
 router.post('/sync/invoices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const config = await pool.query('SELECT api_key_encrypted, company_id FROM pennylane_config WHERE is_active = true LIMIT 1');
-    if (config.rows.length === 0) {
-      return res.status(400).json({ error: 'Pennylane non configuré' });
-    }
+    const active = await getActiveApiKey();
+    if (!active) return res.status(400).json({ error: 'Pennylane non configuré' });
 
     // Récupérer les factures non synchronisées
     const invoices = await pool.query(`
@@ -253,15 +263,6 @@ router.post('/sync/invoices', authorize('ADMIN', 'MANAGER'), async (req, res) =>
       }
     });
 
-    // Déchiffrer la clé API pour les appels
-    const crypto = require('crypto');
-    const API_ENCRYPTION_KEY = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET || 'default-key';
-    const decipher = crypto.createDecipheriv('aes-256-cbc',
-      crypto.createHash('sha256').update(API_ENCRYPTION_KEY).digest(),
-      Buffer.alloc(16, 0)
-    );
-    const apiKey = decipher.update(config.rows[0].api_key_encrypted, 'hex', 'utf8') + decipher.final('utf8');
-
     for (const invoice of Object.values(invoiceMap)) {
       try {
         // Mapping Solidata → Pennylane API v2
@@ -280,36 +281,7 @@ router.post('/sync/invoices', authorize('ADMIN', 'MANAGER'), async (req, res) =>
           })),
         };
 
-        // Appel réel API Pennylane v2
-        const https = require('https');
-        const plResult = await new Promise((resolve, reject) => {
-          const postData = JSON.stringify(pennylanePayload);
-          const options = {
-            hostname: 'app.pennylane.com',
-            path: '/api/external/v2/customer_invoices',
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-              'X-Use-2026-API-Changes': 'true',
-              'Content-Length': Buffer.byteLength(postData),
-            },
-            timeout: 15000,
-          };
-          const request = https.request(options, (response) => {
-            let data = '';
-            response.on('data', chunk => data += chunk);
-            response.on('end', () => {
-              try { resolve({ status: response.statusCode, data: JSON.parse(data) }); }
-              catch { resolve({ status: response.statusCode, data }); }
-            });
-          });
-          request.on('error', reject);
-          request.on('timeout', () => { request.destroy(); reject(new Error('Timeout Pennylane')); });
-          request.write(postData);
-          request.end();
-        });
+        const plResult = await pennylaneRequest(active.apiKey, 'POST', '/customer_invoices', pennylanePayload);
 
         if (plResult.status >= 200 && plResult.status < 300) {
           const plId = plResult.data?.invoice?.id || plResult.data?.id || `PL-${invoice.invoice_number}`;
@@ -347,6 +319,178 @@ router.post('/sync/invoices', authorize('ADMIN', 'MANAGER'), async (req, res) =>
   } catch (err) {
     console.error('[PENNYLANE] Erreur sync factures :', err);
     res.status(500).json({ error: 'Erreur synchronisation' });
+  }
+});
+
+// ══════════════════════════════════════════
+// SYNC PULL : GL ANALYTIQUE (Pennylane → Solidata)
+// ══════════════════════════════════════════
+
+router.post('/sync/gl', authorize('ADMIN'), async (req, res) => {
+  try {
+    const active = await getActiveApiKey();
+    if (!active) return res.status(400).json({ error: 'Pennylane non configuré' });
+    const fiscalYear = parseInt(req.body.year) || new Date().getFullYear();
+
+    const syncLog = await pool.query(
+      `INSERT INTO pennylane_sync_log (sync_type, direction, status, created_by) VALUES ('gl_analytique', 'pull', 'in_progress', $1) RETURNING id`, [req.user.id]);
+
+    const entries = await fetchAllPages(active.apiKey, '/ledger_entries', { 'filter[date_from]': `${fiscalYear}-01-01`, 'filter[date_to]': `${fiscalYear}-12-31` });
+
+    if (entries.length === 0) {
+      await pool.query(`UPDATE pennylane_sync_log SET status = 'completed', completed_at = NOW(), records_count = 0 WHERE id = $1`, [syncLog.rows[0].id]);
+      return res.json({ year: fiscalYear, count: 0, message: 'Aucune écriture trouvée sur Pennylane' });
+    }
+
+    let exResult = await pool.query('SELECT id FROM financial_exercises WHERE year = $1', [fiscalYear]);
+    if (exResult.rows.length === 0) exResult = await pool.query('INSERT INTO financial_exercises (year) VALUES ($1) RETURNING id', [fiscalYear]);
+    const exerciseId = exResult.rows[0].id;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("DELETE FROM financial_gl_entries WHERE exercise_id = $1 AND source = 'api'", [exerciseId]);
+
+      // Flatten ledger entries → lines
+      const allLines = [];
+      for (const e of entries) {
+        const lines = e.ledger_entry_lines || e.lines || [e];
+        for (const line of lines) {
+          allLines.push({
+            exercise_id: exerciseId,
+            line_id: String(line.id || e.id || ''),
+            date: e.date || line.date || null,
+            journal: e.journal?.code || e.journal_code || null,
+            account: line.ledger_account?.number || line.account_number || line.account || null,
+            account_label: line.ledger_account?.label || line.account_label || null,
+            vat_rate: parseFloat(line.vat_rate) || 0,
+            piece_label: e.label || line.label || null,
+            line_label: line.label || null,
+            invoice_number: e.invoice_number || line.invoice_number || null,
+            third_party: line.third_party || e.third_party || null,
+            family_category: line.family_category || line.category_group || null,
+            category: line.category || line.analytic_category || null,
+            analytical_code: line.analytic_code || line.analytical_code || line.cost_center || null,
+            currency: line.currency || 'EUR',
+            exchange_rate: parseFloat(line.exchange_rate) || 1,
+            debit: parseFloat(line.debit) || 0,
+            credit: parseFloat(line.credit) || 0,
+          });
+        }
+      }
+
+      for (let i = 0; i < allLines.length; i += 500) {
+        const batch = allLines.slice(i, i + 500);
+        const values = []; const placeholders = []; let p = 1;
+        for (const r of batch) {
+          placeholders.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},'api')`);
+          values.push(r.exercise_id, r.line_id, r.date, r.journal, r.account, r.account_label, r.vat_rate, r.piece_label, r.line_label, r.invoice_number, r.third_party, r.family_category, r.category, r.analytical_code, r.currency, r.exchange_rate, r.debit, r.credit, r.debit - r.credit);
+        }
+        if (placeholders.length > 0) {
+          await client.query(`INSERT INTO financial_gl_entries (exercise_id,line_id,date,journal,account,account_label,vat_rate,piece_label,line_label,invoice_number,third_party,family_category,category,analytical_code,currency,exchange_rate,debit,credit,balance,source) VALUES ${placeholders.join(',')}`, values);
+        }
+      }
+
+      await client.query('INSERT INTO financial_import_logs (exercise_id,type,filename,row_count,period,imported_by) VALUES ($1,$2,$3,$4,$5,$6)', [exerciseId, 'GL Pennylane API', 'sync-pennylane', allLines.length, String(fiscalYear), req.user.id]);
+      await client.query('COMMIT');
+    } catch (txErr) { await client.query('ROLLBACK'); throw txErr; }
+    finally { client.release(); }
+
+    await pool.query(`UPDATE pennylane_sync_log SET status = 'completed', completed_at = NOW(), records_count = $1 WHERE id = $2`, [allLines.length, syncLog.rows[0].id]);
+    await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
+    res.json({ year: fiscalYear, count: allLines.length, message: `${allLines.length} écriture(s) importée(s) depuis Pennylane` });
+  } catch (err) {
+    console.error('[PENNYLANE] Erreur sync GL :', err);
+    res.status(500).json({ error: 'Erreur synchronisation GL' });
+  }
+});
+
+// ══════════════════════════════════════════
+// SYNC PULL : MOUVEMENTS DE TRESORERIE
+// ══════════════════════════════════════════
+
+router.post('/sync/transactions', authorize('ADMIN'), async (req, res) => {
+  try {
+    const active = await getActiveApiKey();
+    if (!active) return res.status(400).json({ error: 'Pennylane non configuré' });
+    const fiscalYear = parseInt(req.body.year) || new Date().getFullYear();
+
+    const syncLog = await pool.query(
+      `INSERT INTO pennylane_sync_log (sync_type, direction, status, created_by) VALUES ('transactions', 'pull', 'in_progress', $1) RETURNING id`, [req.user.id]);
+
+    const transactions = await fetchAllPages(active.apiKey, '/bank_transactions', { 'filter[date_from]': `${fiscalYear}-01-01`, 'filter[date_to]': `${fiscalYear}-12-31` });
+
+    if (transactions.length === 0) {
+      await pool.query(`UPDATE pennylane_sync_log SET status = 'completed', completed_at = NOW(), records_count = 0 WHERE id = $1`, [syncLog.rows[0].id]);
+      return res.json({ year: fiscalYear, count: 0, message: 'Aucune transaction trouvée' });
+    }
+
+    let exResult = await pool.query('SELECT id FROM financial_exercises WHERE year = $1', [fiscalYear]);
+    if (exResult.rows.length === 0) exResult = await pool.query('INSERT INTO financial_exercises (year) VALUES ($1) RETURNING id', [fiscalYear]);
+    const exerciseId = exResult.rows[0].id;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("DELETE FROM financial_transactions WHERE exercise_id = $1 AND COALESCE(pl, '') = 'pennylane-api'", [exerciseId]);
+
+      for (let i = 0; i < transactions.length; i += 500) {
+        const batch = transactions.slice(i, i + 500);
+        const values = []; const placeholders = []; let p = 1;
+        for (const t of batch) {
+          const txDate = t.date || t.operation_date || null;
+          const month = txDate ? new Date(txDate).toLocaleString('fr-FR', { month: 'long' }) : null;
+          placeholders.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+          values.push(exerciseId, txDate, month, t.bank_account?.name || t.bank_account_name || null, t.label || t.wording || t.description || null, parseFloat(t.amount) || 0, t.third_party || t.supplier_name || t.customer_name || null, t.justified ?? t.matched ?? false, 'pennylane-api');
+        }
+        if (placeholders.length > 0) {
+          await client.query(`INSERT INTO financial_transactions (exercise_id,date,month,bank_account,label,amount,third_party,justified,pl) VALUES ${placeholders.join(',')}`, values);
+        }
+      }
+
+      await client.query('INSERT INTO financial_import_logs (exercise_id,type,filename,row_count,period,imported_by) VALUES ($1,$2,$3,$4,$5,$6)', [exerciseId, 'Transactions Pennylane API', 'sync-pennylane', transactions.length, String(fiscalYear), req.user.id]);
+      await client.query('COMMIT');
+    } catch (txErr) { await client.query('ROLLBACK'); throw txErr; }
+    finally { client.release(); }
+
+    await pool.query(`UPDATE pennylane_sync_log SET status = 'completed', completed_at = NOW(), records_count = $1 WHERE id = $2`, [transactions.length, syncLog.rows[0].id]);
+    await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
+    res.json({ year: fiscalYear, count: transactions.length, message: `${transactions.length} transaction(s) importée(s)` });
+  } catch (err) {
+    console.error('[PENNYLANE] Erreur sync transactions :', err);
+    res.status(500).json({ error: 'Erreur synchronisation transactions' });
+  }
+});
+
+// ══════════════════════════════════════════
+// SYNC PULL : BALANCES COMPTABLES
+// ══════════════════════════════════════════
+
+router.get('/sync/balances', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const active = await getActiveApiKey();
+    if (!active) return res.status(400).json({ error: 'Pennylane non configuré' });
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+
+    const accounts = await fetchAllPages(active.apiKey, '/ledger_accounts', { 'filter[fiscal_year]': String(year) });
+
+    const balance = { year, classes: {}, totals: { debit: 0, credit: 0, balance: 0 }, accounts: [] };
+    for (const acc of accounts) {
+      const number = acc.number || acc.account_number || '';
+      const classe = number.charAt(0);
+      const debit = parseFloat(acc.debit_amount || acc.debit || acc.total_debit) || 0;
+      const credit = parseFloat(acc.credit_amount || acc.credit || acc.total_credit) || 0;
+      const solde = debit - credit;
+      if (!balance.classes[classe]) balance.classes[classe] = { debit: 0, credit: 0, balance: 0, count: 0 };
+      balance.classes[classe].debit += debit; balance.classes[classe].credit += credit; balance.classes[classe].balance += solde; balance.classes[classe].count++;
+      balance.totals.debit += debit; balance.totals.credit += credit; balance.totals.balance += solde;
+      balance.accounts.push({ number, label: acc.label || acc.name || '', debit, credit, balance: solde });
+    }
+    balance.accounts.sort((a, b) => a.number.localeCompare(b.number));
+    res.json(balance);
+  } catch (err) {
+    console.error('[PENNYLANE] Erreur balances :', err);
+    res.status(500).json({ error: 'Erreur récupération balances' });
   }
 });
 
