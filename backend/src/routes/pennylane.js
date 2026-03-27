@@ -155,7 +155,7 @@ router.post('/test', authorize('ADMIN'), async (req, res) => {
     const testResult = await new Promise((resolve, reject) => {
       const options = {
         hostname: 'app.pennylane.com',
-        path: '/api/external/v2/company',
+        path: '/api/external/v2/me',
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -184,7 +184,7 @@ router.post('/test', authorize('ADMIN'), async (req, res) => {
       await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
       res.json({
         connected: true,
-        company: testResult.data?.company?.name || testResult.data?.name || config.rows[0].company_id,
+        company: testResult.data?.company_name || testResult.data?.current_company?.name || testResult.data?.name || config.rows[0].company_id,
         message: 'Connexion Pennylane OK',
       });
     } else if (testResult.status === 401) {
