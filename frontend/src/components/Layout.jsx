@@ -73,6 +73,19 @@ const menuSections = [
     ],
   },
   {
+    title: 'Finance',
+    hubPath: '/finance',
+    items: [
+      { path: '/finance', label: 'Synthese', icon: IconDashboard, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/import', label: 'Import GL', icon: IconBox, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/operations', label: 'Operations', icon: IconFactory, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/tresorerie', label: 'Tresorerie', icon: IconMoney, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/pl', label: 'P&L Centre', icon: IconChartBar, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/bilan', label: 'Bilan / CR', icon: IconChart, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/controles', label: 'Controles', icon: IconStar, roles: ['ADMIN', 'MANAGER'] },
+    ],
+  },
+  {
     title: 'Reporting',
     hubPath: '/hub-reporting',
     items: [

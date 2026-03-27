@@ -46,6 +46,15 @@ import ExutoiresTarifs from './pages/ExutoiresTarifs';
 import Billing from './pages/Billing';
 import ActivityLog from './pages/ActivityLog';
 
+// Finance module
+import Finance from './pages/Finance';
+import FinanceImport from './pages/FinanceImport';
+import FinanceOperations from './pages/FinanceOperations';
+import FinanceTresorerie from './pages/FinanceTresorerie';
+import FinancePL from './pages/FinancePL';
+import FinanceBilan from './pages/FinanceBilan';
+import FinanceControles from './pages/FinanceControles';
+
 // Hub pages
 import HubRecrutement from './pages/HubRecrutement';
 import HubEquipe from './pages/HubEquipe';
@@ -128,6 +137,15 @@ function App() {
 
             {/* Facturation */}
             <Route path="/billing" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Billing /></ProtectedRoute>} />
+
+            {/* Finance */}
+            <Route path="/finance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Finance /></ProtectedRoute>} />
+            <Route path="/finance/import" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceImport /></ProtectedRoute>} />
+            <Route path="/finance/operations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceOperations /></ProtectedRoute>} />
+            <Route path="/finance/tresorerie" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceTresorerie /></ProtectedRoute>} />
+            <Route path="/finance/pl" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinancePL /></ProtectedRoute>} />
+            <Route path="/finance/bilan" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceBilan /></ProtectedRoute>} />
+            <Route path="/finance/controles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceControles /></ProtectedRoute>} />
 
             {/* Administration */}
             <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />
