@@ -14,11 +14,10 @@ export default function Pennylane() {
   const [syncing, setSyncing] = useState(false);
   const [syncingGL, setSyncingGL] = useState(false);
   const [syncingTx, setSyncingTx] = useState(false);
-  const [syncingBal, setSyncingBal] = useState(false);
+  const [loadingBalances, setLoadingBalances] = useState(false);
   const [testResult, setTestResult] = useState(null);
-  const [syncResult, setSyncResult] = useState(null);
-  const [balances, setBalances] = useState(null);
   const [showConfig, setShowConfig] = useState(false);
+  const [balances, setBalances] = useState(null);
   const [configForm, setConfigForm] = useState({
     api_key: '', company_id: '', is_active: false,
     sync_invoices: true, sync_suppliers: true, sync_journal: true,
@@ -76,31 +75,55 @@ export default function Pennylane() {
   };
 
   const syncInvoices = async () => {
-    setSyncing(true); setSyncResult(null);
-    try { const res = await api.post('/pennylane/sync/invoices'); setSyncResult({ type: 'Factures', ...res.data }); loadAll(); }
-    catch (err) { setSyncResult({ type: 'Factures', error: err.response?.data?.error || 'Erreur' }); }
+    setSyncing(true);
+    try {
+      const res = await api.post('/pennylane/sync/invoices');
+      alert(res.data.message);
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur synchronisation');
+    }
     setSyncing(false);
   };
+
   const syncGL = async () => {
-    setSyncingGL(true); setSyncResult(null);
-    try { const res = await api.post('/pennylane/sync/gl', { year: new Date().getFullYear() }); setSyncResult({ type: 'GL Analytique', ...res.data }); loadAll(); }
-    catch (err) { setSyncResult({ type: 'GL Analytique', error: err.response?.data?.error || 'Erreur' }); }
+    setSyncingGL(true);
+    try {
+      const res = await api.post('/pennylane/sync/gl');
+      alert(res.data.message);
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur import GL analytique');
+    }
     setSyncingGL(false);
   };
+
   const syncTransactions = async () => {
-    setSyncingTx(true); setSyncResult(null);
-    try { const res = await api.post('/pennylane/sync/transactions', { year: new Date().getFullYear() }); setSyncResult({ type: 'Transactions', ...res.data }); loadAll(); }
-    catch (err) { setSyncResult({ type: 'Transactions', error: err.response?.data?.error || 'Erreur' }); }
+    setSyncingTx(true);
+    try {
+      const res = await api.post('/pennylane/sync/transactions');
+      alert(res.data.message);
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur import transactions');
+    }
     setSyncingTx(false);
   };
-  const loadBalances = async () => {
-    setSyncingBal(true); setSyncResult(null);
-    try { const res = await api.get(`/pennylane/sync/balances?year=${new Date().getFullYear()}`); setBalances(res.data); setSyncResult({ type: 'Balances', message: `${res.data.accounts?.length || 0} compte(s) récupéré(s)` }); }
-    catch (err) { setSyncResult({ type: 'Balances', error: err.response?.data?.error || 'Erreur' }); }
-    setSyncingBal(false);
+
+  const fetchBalances = async () => {
+    setLoadingBalances(true);
+    setBalances(null);
+    try {
+      const res = await api.get('/pennylane/sync/balances');
+      setBalances(res.data);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur chargement balances');
+    }
+    setLoadingBalances(false);
   };
 
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const formatAmount = (n) => typeof n === 'number' ? n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 
   if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
 
@@ -161,43 +184,103 @@ export default function Pennylane() {
         {/* Actions */}
         <div className="bg-white rounded-xl shadow-sm border p-6">
           <h2 className="font-bold text-slate-800 mb-4">Actions de synchronisation</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-            <button onClick={testConnection} disabled={testing || !status?.configured} className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition disabled:opacity-50">
-              <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center"><IconPlug className="w-5 h-5 text-indigo-600" /></div>
-              <div className="text-left"><p className="font-medium text-sm">{testing ? 'Test en cours...' : 'Tester la connexion'}</p><p className="text-xs text-slate-400">Vérifier l'API Pennylane</p></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Test connexion */}
+            <button
+              onClick={testConnection}
+              disabled={testing || !status?.configured}
+              className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
+                <IconPlug className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-sm">{testing ? 'Test en cours...' : 'Tester la connexion'}</p>
+                <p className="text-xs text-slate-400">Verifier l'API Pennylane</p>
+              </div>
             </button>
-            <button onClick={syncInvoices} disabled={syncing || !status?.active} className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-green-300 hover:bg-green-50 transition disabled:opacity-50">
-              <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center"><IconSync className="w-5 h-5 text-green-600" /></div>
-              <div className="text-left"><p className="font-medium text-sm">{syncing ? 'Synchronisation...' : 'Factures → Pennylane'}</p><p className="text-xs text-slate-400">Pousser les factures</p></div>
+
+            {/* Push factures */}
+            <button
+              onClick={syncInvoices}
+              disabled={syncing || !status?.active}
+              className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-green-300 hover:bg-green-50 transition disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                <IconSync className="w-5 h-5 text-green-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-sm">{syncing ? 'Synchronisation...' : 'Synchroniser factures'}</p>
+                <p className="text-xs text-slate-400">Pousser vers Pennylane</p>
+              </div>
             </button>
-            <button onClick={() => window.open('https://app.pennylane.com', '_blank')} className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-purple-300 hover:bg-purple-50 transition">
-              <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center"><IconExternal className="w-5 h-5 text-purple-600" /></div>
-              <div className="text-left"><p className="font-medium text-sm">Ouvrir Pennylane</p><p className="text-xs text-slate-400">Accéder à l'interface</p></div>
+
+            {/* Pull GL analytique */}
+            <button
+              onClick={syncGL}
+              disabled={syncingGL || !status?.active}
+              className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-amber-300 hover:bg-amber-50 transition disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
+                <IconDownload className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-sm">{syncingGL ? 'Import en cours...' : 'GL Analytique'}</p>
+                <p className="text-xs text-slate-400">Importer le grand livre</p>
+              </div>
+            </button>
+
+            {/* Pull transactions */}
+            <button
+              onClick={syncTransactions}
+              disabled={syncingTx || !status?.active}
+              className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-cyan-300 hover:bg-cyan-50 transition disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-lg bg-cyan-100 flex items-center justify-center">
+                <IconDownload className="w-5 h-5 text-cyan-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-sm">{syncingTx ? 'Import en cours...' : 'Tresorerie'}</p>
+                <p className="text-xs text-slate-400">Importer les transactions</p>
+              </div>
+            </button>
+
+            {/* Balances comptables */}
+            <button
+              onClick={fetchBalances}
+              disabled={loadingBalances || !status?.active}
+              className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-violet-300 hover:bg-violet-50 transition disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center">
+                <IconDownload className="w-5 h-5 text-violet-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-sm">{loadingBalances ? 'Chargement...' : 'Balances comptables'}</p>
+                <p className="text-xs text-slate-400">Consulter les soldes</p>
+              </div>
+            </button>
+
+            {/* Ouvrir Pennylane */}
+            <button
+              onClick={() => window.open('https://app.pennylane.com', '_blank')}
+              className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-purple-300 hover:bg-purple-50 transition"
+            >
+              <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                <IconExternal className="w-5 h-5 text-purple-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-sm">Ouvrir Pennylane</p>
+                <p className="text-xs text-slate-400">Acceder a l'interface</p>
+              </div>
             </button>
           </div>
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Import depuis Pennylane</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <button onClick={syncGL} disabled={syncingGL || !status?.active} className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition disabled:opacity-50">
-              <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center"><IconDownload className="w-5 h-5 text-blue-600" /></div>
-              <div className="text-left"><p className="font-medium text-sm">{syncingGL ? 'Import en cours...' : 'GL Analytique'}</p><p className="text-xs text-slate-400">Écritures comptables → Finance</p></div>
-            </button>
-            <button onClick={syncTransactions} disabled={syncingTx || !status?.active} className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-teal-300 hover:bg-teal-50 transition disabled:opacity-50">
-              <div className="w-10 h-10 rounded-lg bg-teal-100 flex items-center justify-center"><IconDownload className="w-5 h-5 text-teal-600" /></div>
-              <div className="text-left"><p className="font-medium text-sm">{syncingTx ? 'Import en cours...' : 'Trésorerie'}</p><p className="text-xs text-slate-400">Mouvements bancaires → Finance</p></div>
-            </button>
-            <button onClick={loadBalances} disabled={syncingBal || !status?.active} className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-amber-300 hover:bg-amber-50 transition disabled:opacity-50">
-              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center"><IconDownload className="w-5 h-5 text-amber-600" /></div>
-              <div className="text-left"><p className="font-medium text-sm">{syncingBal ? 'Chargement...' : 'Balances comptables'}</p><p className="text-xs text-slate-400">Soldes par compte</p></div>
-            </button>
-          </div>
+
+          {/* Test result */}
           {testResult && (
             <div className={`mt-4 p-4 rounded-lg ${testResult.connected ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-              <p className={`text-sm font-medium ${testResult.connected ? 'text-green-700' : 'text-red-700'}`}>{testResult.connected ? `Connexion réussie — ${testResult.company || testResult.message}` : `Échec — ${testResult.error}`}</p>
-            </div>
-          )}
-          {syncResult && (
-            <div className={`mt-4 p-4 rounded-lg ${syncResult.error ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
-              <p className={`text-sm font-medium ${syncResult.error ? 'text-red-700' : 'text-green-700'}`}>{syncResult.type} : {syncResult.error || syncResult.message || `${syncResult.count || 0} élément(s) synchronisé(s)`}</p>
+              <p className={`text-sm font-medium ${testResult.connected ? 'text-green-700' : 'text-red-700'}`}>
+                {testResult.connected ? `Connexion reussie — ${testResult.company || testResult.message}` : `Echec — ${testResult.error}`}
+              </p>
             </div>
           )}
         </div>
@@ -205,22 +288,60 @@ export default function Pennylane() {
         {/* Balances comptables */}
         {balances && (
           <div className="bg-white rounded-xl shadow-sm border p-6">
-            <h2 className="font-bold text-slate-800 mb-4">Balances comptables {balances.year}</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-              <div className="bg-blue-50 rounded-lg p-3"><p className="text-xs text-blue-500">Total débit</p><p className="text-lg font-bold text-blue-700">{(balances.totals?.debit || 0).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €</p></div>
-              <div className="bg-red-50 rounded-lg p-3"><p className="text-xs text-red-500">Total crédit</p><p className="text-lg font-bold text-red-700">{(balances.totals?.credit || 0).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €</p></div>
-              <div className="bg-green-50 rounded-lg p-3"><p className="text-xs text-green-500">Solde</p><p className="text-lg font-bold text-green-700">{(balances.totals?.balance || 0).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €</p></div>
-              <div className="bg-slate-50 rounded-lg p-3"><p className="text-xs text-slate-500">Comptes</p><p className="text-lg font-bold text-slate-700">{balances.accounts?.length || 0}</p></div>
-            </div>
-            {balances.classes && Object.entries(balances.classes).sort().map(([cls, data]) => (
-              <div key={cls} className="flex items-center justify-between py-2 border-t text-sm">
-                <span className="font-medium">Classe {cls}</span>
-                <span className="text-slate-500">{data.count} comptes</span>
-                <span className="text-blue-600">{data.debit.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €</span>
-                <span className="text-red-600">{data.credit.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €</span>
-                <span className={data.balance >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>{data.balance.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €</span>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-slate-800">Balances comptables Pennylane</h2>
+              <div className="flex items-center gap-4 text-xs text-slate-500">
+                <span>{balances.total_accounts} compte(s)</span>
+                <span>Mis a jour : {formatDate(balances.fetched_at)}</span>
+                <button onClick={() => setBalances(null)} className="text-slate-400 hover:text-slate-600 text-xs underline">Fermer</button>
               </div>
-            ))}
+            </div>
+
+            {/* Totaux */}
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              <div className="bg-green-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-green-600 mb-1">Total Debit</p>
+                <p className="text-lg font-bold text-green-700">{formatAmount(balances.totals?.debit)}</p>
+              </div>
+              <div className="bg-red-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-red-600 mb-1">Total Credit</p>
+                <p className="text-lg font-bold text-red-700">{formatAmount(balances.totals?.credit)}</p>
+              </div>
+              <div className="bg-indigo-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-indigo-600 mb-1">Solde</p>
+                <p className="text-lg font-bold text-indigo-700">{formatAmount(balances.totals?.balance)}</p>
+              </div>
+            </div>
+
+            {/* Table des comptes */}
+            {balances.accounts?.length > 0 && (
+              <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0">
+                    <tr className="text-left text-xs text-slate-500 uppercase bg-slate-50">
+                      <th className="px-3 py-2">Compte</th>
+                      <th className="px-3 py-2">Libelle</th>
+                      <th className="px-3 py-2 text-right">Debit</th>
+                      <th className="px-3 py-2 text-right">Credit</th>
+                      <th className="px-3 py-2 text-right">Solde</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {balances.accounts.map((acc, i) => (
+                      <tr key={i} className="border-t hover:bg-slate-50">
+                        <td className="px-3 py-2 font-mono text-xs">{acc.account_number}</td>
+                        <td className="px-3 py-2 text-slate-700 truncate max-w-[200px]">{acc.account_label}</td>
+                        <td className="px-3 py-2 text-right text-green-700">{acc.debit ? formatAmount(acc.debit) : ''}</td>
+                        <td className="px-3 py-2 text-right text-red-700">{acc.credit ? formatAmount(acc.credit) : ''}</td>
+                        <td className={`px-3 py-2 text-right font-medium ${acc.balance >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                          {formatAmount(acc.balance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -340,9 +461,9 @@ function IconPlug({ className }) {
 function IconSync({ className }) {
   return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>;
 }
-function IconExternal({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>;
-}
 function IconDownload({ className }) {
   return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>;
+}
+function IconExternal({ className }) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>;
 }
