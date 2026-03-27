@@ -81,9 +81,203 @@ const uploadVehicleDoc = multer({
         created_at TIMESTAMP DEFAULT NOW()
       )
     `);
-    console.log('[VEHICLES] Tables maintenance + documents OK');
+    // Tables profils de maintenance constructeur (dynamiques)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance_profiles (
+        id SERIAL PRIMARY KEY,
+        vehicle_type VARCHAR(100) NOT NULL UNIQUE,
+        brand VARCHAR(50) NOT NULL,
+        model VARCHAR(100) NOT NULL,
+        engine_code VARCHAR(50),
+        timing_system VARCHAR(20) DEFAULT 'courroie',
+        adblue_equipped BOOLEAN DEFAULT true,
+        revision_km INTEGER DEFAULT 30000,
+        revision_months INTEGER DEFAULT 24,
+        is_default BOOLEAN DEFAULT false,
+        source VARCHAR(50) DEFAULT 'constructeur',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance_profile_items (
+        id SERIAL PRIMARY KEY,
+        profile_id INTEGER NOT NULL REFERENCES vehicle_maintenance_profiles(id) ON DELETE CASCADE,
+        item_code VARCHAR(50) NOT NULL,
+        label_fr VARCHAR(255) NOT NULL,
+        interval_km INTEGER,
+        interval_months INTEGER,
+        interval_note TEXT,
+        estimated_cost_eur DECIMAL(10,2),
+        sort_order INTEGER DEFAULT 0,
+        UNIQUE(profile_id, item_code)
+      )
+    `);
+    console.log('[VEHICLES] Tables maintenance + documents + profiles OK');
   } catch (err) {
     console.error('[VEHICLES] Migration maintenance :', err.message);
+  }
+})();
+
+// ══════════════════════════════════════════
+// SEED PROFILS MAINTENANCE CONSTRUCTEUR
+// ══════════════════════════════════════════
+(async () => {
+  try {
+    const SEED_PROFILES = [
+      {
+        vehicle_type: 'FIAT Ducato 2.3 MultiJet', brand: 'FIAT', model: 'Ducato 2.3 MultiJet',
+        engine_code: 'F1AGL411x', timing_system: 'courroie', adblue_equipped: true,
+        revision_km: 48000, revision_months: 24,
+        items: [
+          { item_code: 'vidange_huile', label_fr: 'Vidange huile moteur + filtre', interval_km: 48000, interval_months: 24, estimated_cost_eur: 180 },
+          { item_code: 'filtre_air', label_fr: 'Filtre à air', interval_km: 48000, interval_months: 24, estimated_cost_eur: 45 },
+          { item_code: 'filtre_carburant', label_fr: 'Filtre à carburant', interval_km: 48000, interval_months: 36, estimated_cost_eur: 65 },
+          { item_code: 'filtre_habitacle', label_fr: 'Filtre habitacle', interval_km: 30000, interval_months: 24, estimated_cost_eur: 35 },
+          { item_code: 'courroie_distribution', label_fr: 'Courroie de distribution', interval_km: 192000, interval_months: 60, estimated_cost_eur: 850 },
+          { item_code: 'liquide_frein', label_fr: 'Liquide de frein', interval_km: null, interval_months: 24, estimated_cost_eur: 80 },
+          { item_code: 'plaquettes_frein_controle', label_fr: 'Contrôle plaquettes de frein', interval_km: 30000, interval_months: 12, estimated_cost_eur: 30 },
+          { item_code: 'plaquettes_frein_remplacement', label_fr: 'Remplacement plaquettes de frein', interval_km: 50000, interval_months: null, estimated_cost_eur: 220 },
+          { item_code: 'liquide_refroidissement', label_fr: 'Liquide de refroidissement', interval_km: null, interval_months: 60, estimated_cost_eur: 120 },
+          { item_code: 'huile_boite_vitesses', label_fr: 'Huile boîte de vitesses', interval_km: 80000, interval_months: null, estimated_cost_eur: 120 },
+          { item_code: 'rotation_pneus', label_fr: 'Rotation des pneus', interval_km: 15000, interval_months: 12, estimated_cost_eur: 40 },
+          { item_code: 'controle_technique', label_fr: 'Contrôle technique', interval_km: null, interval_months: 24, estimated_cost_eur: 85 },
+          { item_code: 'adblue_controle', label_fr: 'Contrôle AdBlue', interval_km: 48000, interval_months: 24, estimated_cost_eur: 25 },
+          { item_code: 'courroie_accessoires', label_fr: 'Courroie accessoires', interval_km: 120000, interval_months: 60, estimated_cost_eur: 150 },
+        ],
+      },
+      {
+        vehicle_type: 'Renault Master 2.3 dCi', brand: 'Renault', model: 'Master 2.3 dCi',
+        engine_code: 'M9T', timing_system: 'chaine', adblue_equipped: true,
+        revision_km: 30000, revision_months: 24,
+        items: [
+          { item_code: 'vidange_huile', label_fr: 'Vidange huile moteur + filtre', interval_km: 30000, interval_months: 24, estimated_cost_eur: 170 },
+          { item_code: 'filtre_air', label_fr: 'Filtre à air', interval_km: 30000, interval_months: 24, estimated_cost_eur: 40 },
+          { item_code: 'filtre_carburant', label_fr: 'Filtre à carburant', interval_km: 60000, interval_months: 48, estimated_cost_eur: 55 },
+          { item_code: 'filtre_habitacle', label_fr: 'Filtre habitacle', interval_km: 30000, interval_months: 24, estimated_cost_eur: 30 },
+          { item_code: 'chaine_distribution', label_fr: 'Chaîne de distribution', interval_km: 250000, interval_months: null, estimated_cost_eur: 1200 },
+          { item_code: 'liquide_frein', label_fr: 'Liquide de frein', interval_km: null, interval_months: 24, estimated_cost_eur: 75 },
+          { item_code: 'plaquettes_frein_controle', label_fr: 'Contrôle plaquettes de frein', interval_km: 30000, interval_months: 12, estimated_cost_eur: 30 },
+          { item_code: 'plaquettes_frein_remplacement', label_fr: 'Remplacement plaquettes de frein', interval_km: 50000, interval_months: null, estimated_cost_eur: 200 },
+          { item_code: 'liquide_refroidissement', label_fr: 'Liquide de refroidissement', interval_km: null, interval_months: 60, estimated_cost_eur: 110 },
+          { item_code: 'huile_boite_vitesses', label_fr: 'Huile boîte de vitesses', interval_km: 80000, interval_months: null, estimated_cost_eur: 110 },
+          { item_code: 'rotation_pneus', label_fr: 'Rotation des pneus', interval_km: 15000, interval_months: 12, estimated_cost_eur: 40 },
+          { item_code: 'controle_technique', label_fr: 'Contrôle technique', interval_km: null, interval_months: 24, estimated_cost_eur: 85 },
+          { item_code: 'adblue_controle', label_fr: 'Contrôle AdBlue', interval_km: 30000, interval_months: 24, estimated_cost_eur: 25 },
+          { item_code: 'courroie_accessoires', label_fr: 'Courroie accessoires', interval_km: 120000, interval_months: 72, estimated_cost_eur: 140 },
+        ],
+      },
+      {
+        vehicle_type: 'Iveco Daily 2.3/3.0', brand: 'Iveco', model: 'Daily 2.3/3.0',
+        engine_code: 'F1AGL411/F1CGL411', timing_system: 'chaine', adblue_equipped: true,
+        revision_km: 40000, revision_months: 12,
+        items: [
+          { item_code: 'vidange_huile', label_fr: 'Vidange huile moteur + filtre', interval_km: 40000, interval_months: 12, estimated_cost_eur: 190 },
+          { item_code: 'filtre_air', label_fr: 'Filtre à air', interval_km: 40000, interval_months: 12, estimated_cost_eur: 50 },
+          { item_code: 'filtre_carburant', label_fr: 'Filtre à carburant', interval_km: 40000, interval_months: 12, estimated_cost_eur: 70 },
+          { item_code: 'filtre_habitacle', label_fr: 'Filtre habitacle', interval_km: 15000, interval_months: 12, estimated_cost_eur: 35 },
+          { item_code: 'chaine_distribution', label_fr: 'Chaîne de distribution', interval_km: 350000, interval_months: null, estimated_cost_eur: 1400 },
+          { item_code: 'liquide_frein', label_fr: 'Liquide de frein', interval_km: null, interval_months: 24, estimated_cost_eur: 80 },
+          { item_code: 'plaquettes_frein_controle', label_fr: 'Contrôle plaquettes de frein', interval_km: 40000, interval_months: 12, estimated_cost_eur: 30 },
+          { item_code: 'plaquettes_frein_remplacement', label_fr: 'Remplacement plaquettes de frein', interval_km: 60000, interval_months: null, estimated_cost_eur: 240 },
+          { item_code: 'liquide_refroidissement', label_fr: 'Liquide de refroidissement', interval_km: null, interval_months: 36, estimated_cost_eur: 130 },
+          { item_code: 'huile_boite_vitesses', label_fr: 'Huile boîte de vitesses', interval_km: 120000, interval_months: null, estimated_cost_eur: 180 },
+          { item_code: 'rotation_pneus', label_fr: 'Rotation des pneus', interval_km: 15000, interval_months: 12, estimated_cost_eur: 40 },
+          { item_code: 'controle_technique', label_fr: 'Contrôle technique', interval_km: null, interval_months: 24, estimated_cost_eur: 85 },
+          { item_code: 'adblue_controle', label_fr: 'Contrôle AdBlue', interval_km: 40000, interval_months: 12, estimated_cost_eur: 25 },
+          { item_code: 'courroie_accessoires', label_fr: 'Courroie accessoires', interval_km: 120000, interval_months: null, estimated_cost_eur: 150 },
+        ],
+      },
+      {
+        vehicle_type: 'Mercedes Sprinter 2.0 OM654', brand: 'Mercedes', model: 'Sprinter 2.0 OM654',
+        engine_code: 'OM654', timing_system: 'chaine', adblue_equipped: true,
+        revision_km: 32000, revision_months: 12,
+        items: [
+          { item_code: 'vidange_huile', label_fr: 'Vidange huile moteur + filtre', interval_km: 32000, interval_months: 12, estimated_cost_eur: 250 },
+          { item_code: 'filtre_air', label_fr: 'Filtre à air', interval_km: 96000, interval_months: 36, estimated_cost_eur: 55 },
+          { item_code: 'filtre_carburant', label_fr: 'Filtre à carburant', interval_km: 32000, interval_months: 12, estimated_cost_eur: 70 },
+          { item_code: 'filtre_habitacle', label_fr: 'Filtre habitacle', interval_km: 64000, interval_months: 24, estimated_cost_eur: 45 },
+          { item_code: 'chaine_distribution', label_fr: 'Chaîne de distribution', interval_km: 250000, interval_months: null, estimated_cost_eur: 1500 },
+          { item_code: 'liquide_frein', label_fr: 'Liquide de frein', interval_km: null, interval_months: 24, estimated_cost_eur: 90 },
+          { item_code: 'plaquettes_frein_controle', label_fr: 'Contrôle plaquettes de frein', interval_km: 16000, interval_months: 12, estimated_cost_eur: 30 },
+          { item_code: 'plaquettes_frein_remplacement', label_fr: 'Remplacement plaquettes de frein', interval_km: 50000, interval_months: null, estimated_cost_eur: 280 },
+          { item_code: 'liquide_refroidissement', label_fr: 'Liquide de refroidissement', interval_km: null, interval_months: 180, estimated_cost_eur: 150 },
+          { item_code: 'huile_boite_vitesses', label_fr: 'Huile boîte de vitesses', interval_km: 96000, interval_months: 36, estimated_cost_eur: 350 },
+          { item_code: 'rotation_pneus', label_fr: 'Rotation des pneus', interval_km: 16000, interval_months: 12, estimated_cost_eur: 40 },
+          { item_code: 'controle_technique', label_fr: 'Contrôle technique', interval_km: null, interval_months: 24, estimated_cost_eur: 85 },
+          { item_code: 'adblue_controle', label_fr: 'Contrôle AdBlue', interval_km: 32000, interval_months: 12, estimated_cost_eur: 25 },
+          { item_code: 'courroie_accessoires', label_fr: 'Courroie accessoires', interval_km: 64000, interval_months: null, estimated_cost_eur: 160 },
+        ],
+      },
+      {
+        vehicle_type: 'Peugeot Boxer 2.2 BlueHDi', brand: 'Peugeot', model: 'Boxer 2.2 BlueHDi',
+        engine_code: 'DW12RUx', timing_system: 'courroie', adblue_equipped: true,
+        revision_km: 50000, revision_months: 24,
+        items: [
+          { item_code: 'vidange_huile', label_fr: 'Vidange huile moteur + filtre', interval_km: 50000, interval_months: 24, estimated_cost_eur: 175 },
+          { item_code: 'filtre_air', label_fr: 'Filtre à air', interval_km: 50000, interval_months: 48, estimated_cost_eur: 45 },
+          { item_code: 'filtre_carburant', label_fr: 'Filtre à carburant', interval_km: 50000, interval_months: 48, estimated_cost_eur: 60 },
+          { item_code: 'filtre_habitacle', label_fr: 'Filtre habitacle', interval_km: 30000, interval_months: 24, estimated_cost_eur: 30 },
+          { item_code: 'courroie_distribution', label_fr: 'Courroie de distribution', interval_km: 150000, interval_months: 120, estimated_cost_eur: 850 },
+          { item_code: 'liquide_frein', label_fr: 'Liquide de frein', interval_km: null, interval_months: 24, estimated_cost_eur: 75 },
+          { item_code: 'plaquettes_frein_controle', label_fr: 'Contrôle plaquettes de frein', interval_km: 30000, interval_months: 12, estimated_cost_eur: 30 },
+          { item_code: 'plaquettes_frein_remplacement', label_fr: 'Remplacement plaquettes de frein', interval_km: 50000, interval_months: null, estimated_cost_eur: 210 },
+          { item_code: 'liquide_refroidissement', label_fr: 'Liquide de refroidissement', interval_km: null, interval_months: 60, estimated_cost_eur: 115 },
+          { item_code: 'huile_boite_vitesses', label_fr: 'Huile boîte de vitesses', interval_km: 80000, interval_months: null, estimated_cost_eur: 115 },
+          { item_code: 'rotation_pneus', label_fr: 'Rotation des pneus', interval_km: 15000, interval_months: 12, estimated_cost_eur: 40 },
+          { item_code: 'controle_technique', label_fr: 'Contrôle technique', interval_km: null, interval_months: 24, estimated_cost_eur: 85 },
+          { item_code: 'adblue_controle', label_fr: 'Contrôle AdBlue', interval_km: 50000, interval_months: 24, estimated_cost_eur: 25 },
+          { item_code: 'courroie_accessoires', label_fr: 'Courroie accessoires', interval_km: 120000, interval_months: 72, estimated_cost_eur: 145 },
+        ],
+      },
+      {
+        vehicle_type: 'Citroën Jumper 2.2 BlueHDi', brand: 'Citroën', model: 'Jumper 2.2 BlueHDi',
+        engine_code: 'DW12RUx', timing_system: 'courroie', adblue_equipped: true,
+        revision_km: 50000, revision_months: 24,
+        items: [
+          { item_code: 'vidange_huile', label_fr: 'Vidange huile moteur + filtre', interval_km: 50000, interval_months: 24, estimated_cost_eur: 175 },
+          { item_code: 'filtre_air', label_fr: 'Filtre à air', interval_km: 50000, interval_months: 48, estimated_cost_eur: 45 },
+          { item_code: 'filtre_carburant', label_fr: 'Filtre à carburant', interval_km: 50000, interval_months: 48, estimated_cost_eur: 60 },
+          { item_code: 'filtre_habitacle', label_fr: 'Filtre habitacle', interval_km: 30000, interval_months: 24, estimated_cost_eur: 30 },
+          { item_code: 'courroie_distribution', label_fr: 'Courroie de distribution', interval_km: 140000, interval_months: 120, estimated_cost_eur: 850 },
+          { item_code: 'liquide_frein', label_fr: 'Liquide de frein', interval_km: null, interval_months: 24, estimated_cost_eur: 75 },
+          { item_code: 'plaquettes_frein_controle', label_fr: 'Contrôle plaquettes de frein', interval_km: 30000, interval_months: 12, estimated_cost_eur: 30 },
+          { item_code: 'plaquettes_frein_remplacement', label_fr: 'Remplacement plaquettes de frein', interval_km: 50000, interval_months: null, estimated_cost_eur: 210 },
+          { item_code: 'liquide_refroidissement', label_fr: 'Liquide de refroidissement', interval_km: null, interval_months: 60, estimated_cost_eur: 115 },
+          { item_code: 'huile_boite_vitesses', label_fr: 'Huile boîte de vitesses', interval_km: 80000, interval_months: null, estimated_cost_eur: 115 },
+          { item_code: 'rotation_pneus', label_fr: 'Rotation des pneus', interval_km: 15000, interval_months: 12, estimated_cost_eur: 40 },
+          { item_code: 'controle_technique', label_fr: 'Contrôle technique', interval_km: null, interval_months: 24, estimated_cost_eur: 85 },
+          { item_code: 'adblue_controle', label_fr: 'Contrôle AdBlue', interval_km: 50000, interval_months: 24, estimated_cost_eur: 25 },
+          { item_code: 'courroie_accessoires', label_fr: 'Courroie accessoires', interval_km: 120000, interval_months: 72, estimated_cost_eur: 145 },
+        ],
+      },
+    ];
+
+    for (const p of SEED_PROFILES) {
+      // Insert profile if not exists (idempotent via UNIQUE on vehicle_type)
+      const existing = await pool.query('SELECT id FROM vehicle_maintenance_profiles WHERE vehicle_type = $1', [p.vehicle_type]);
+      if (existing.rows.length > 0) continue; // Already seeded
+
+      const profileResult = await pool.query(
+        `INSERT INTO vehicle_maintenance_profiles (vehicle_type, brand, model, engine_code, timing_system, adblue_equipped, revision_km, revision_months, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'constructeur') RETURNING id`,
+        [p.vehicle_type, p.brand, p.model, p.engine_code, p.timing_system, p.adblue_equipped, p.revision_km, p.revision_months]
+      );
+      const profileId = profileResult.rows[0].id;
+
+      for (let i = 0; i < p.items.length; i++) {
+        const item = p.items[i];
+        await pool.query(
+          `INSERT INTO vehicle_maintenance_profile_items (profile_id, item_code, label_fr, interval_km, interval_months, estimated_cost_eur, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (profile_id, item_code) DO NOTHING`,
+          [profileId, item.item_code, item.label_fr, item.interval_km, item.interval_months, item.estimated_cost_eur, i]
+        );
+      }
+    }
+    console.log('[VEHICLES] Seed profils maintenance constructeur OK');
+  } catch (err) {
+    console.error('[VEHICLES] Seed profils maintenance :', err.message);
   }
 })();
 
@@ -407,9 +601,161 @@ const MAINTENANCE_PROFILES = {
   },
 };
 
-// GET /api/vehicles/maintenance/profiles — Profils de maintenance disponibles
+// GET /api/vehicles/maintenance/profiles — Profils de maintenance disponibles (hardcodés, rétro-compatibilité)
 router.get('/maintenance/profiles', (req, res) => {
   res.json(MAINTENANCE_PROFILES);
+});
+
+// ══════════════════════════════════════════
+// PROFILS MAINTENANCE CONSTRUCTEUR (DB)
+// ══════════════════════════════════════════
+
+// GET /api/vehicles/maintenance/profiles-db — Liste tous les profils DB avec items
+router.get('/maintenance/profiles-db', async (req, res) => {
+  try {
+    const profiles = await pool.query(
+      'SELECT * FROM vehicle_maintenance_profiles ORDER BY brand, model'
+    );
+    const items = await pool.query(
+      'SELECT * FROM vehicle_maintenance_profile_items ORDER BY profile_id, sort_order'
+    );
+
+    const itemsByProfile = {};
+    for (const item of items.rows) {
+      if (!itemsByProfile[item.profile_id]) itemsByProfile[item.profile_id] = [];
+      itemsByProfile[item.profile_id].push(item);
+    }
+
+    const result = profiles.rows.map(p => ({
+      ...p,
+      items: itemsByProfile[p.id] || [],
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur profiles-db GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/vehicles/maintenance/profiles-db — Créer un profil (ADMIN)
+router.post('/maintenance/profiles-db', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { vehicle_type, brand, model, engine_code, timing_system, adblue_equipped, revision_km, revision_months, items } = req.body;
+    if (!vehicle_type || !brand || !model) {
+      return res.status(400).json({ error: 'vehicle_type, brand et model sont requis' });
+    }
+
+    const profileResult = await pool.query(
+      `INSERT INTO vehicle_maintenance_profiles (vehicle_type, brand, model, engine_code, timing_system, adblue_equipped, revision_km, revision_months, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'custom') RETURNING *`,
+      [vehicle_type, brand, model, engine_code || null, timing_system || 'courroie', adblue_equipped !== false, revision_km || 30000, revision_months || 24]
+    );
+    const profile = profileResult.rows[0];
+
+    const insertedItems = [];
+    if (Array.isArray(items)) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const itemResult = await pool.query(
+          `INSERT INTO vehicle_maintenance_profile_items (profile_id, item_code, label_fr, interval_km, interval_months, interval_note, estimated_cost_eur, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+          [profile.id, item.item_code, item.label_fr, item.interval_km || null, item.interval_months || null, item.interval_note || null, item.estimated_cost_eur || null, i]
+        );
+        insertedItems.push(itemResult.rows[0]);
+      }
+    }
+
+    res.status(201).json({ ...profile, items: insertedItems });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Un profil avec ce vehicle_type existe déjà' });
+    console.error('[VEHICLES] Erreur profiles-db POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/vehicles/maintenance/profiles-db/:id — Mettre à jour un profil (ADMIN)
+router.put('/maintenance/profiles-db/:id', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { vehicle_type, brand, model, engine_code, timing_system, adblue_equipped, revision_km, revision_months, items } = req.body;
+
+    const profileResult = await pool.query(
+      `UPDATE vehicle_maintenance_profiles SET
+        vehicle_type = COALESCE($1, vehicle_type),
+        brand = COALESCE($2, brand),
+        model = COALESCE($3, model),
+        engine_code = COALESCE($4, engine_code),
+        timing_system = COALESCE($5, timing_system),
+        adblue_equipped = COALESCE($6, adblue_equipped),
+        revision_km = COALESCE($7, revision_km),
+        revision_months = COALESCE($8, revision_months),
+        updated_at = NOW()
+       WHERE id = $9 RETURNING *`,
+      [vehicle_type, brand, model, engine_code, timing_system, adblue_equipped, revision_km, revision_months, req.params.id]
+    );
+    if (profileResult.rows.length === 0) return res.status(404).json({ error: 'Profil non trouvé' });
+    const profile = profileResult.rows[0];
+
+    // Si items fournis, remplacer tous les items
+    let updatedItems = [];
+    if (Array.isArray(items)) {
+      await pool.query('DELETE FROM vehicle_maintenance_profile_items WHERE profile_id = $1', [profile.id]);
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const itemResult = await pool.query(
+          `INSERT INTO vehicle_maintenance_profile_items (profile_id, item_code, label_fr, interval_km, interval_months, interval_note, estimated_cost_eur, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+          [profile.id, item.item_code, item.label_fr, item.interval_km || null, item.interval_months || null, item.interval_note || null, item.estimated_cost_eur || null, i]
+        );
+        updatedItems.push(itemResult.rows[0]);
+      }
+    } else {
+      const existingItems = await pool.query(
+        'SELECT * FROM vehicle_maintenance_profile_items WHERE profile_id = $1 ORDER BY sort_order',
+        [profile.id]
+      );
+      updatedItems = existingItems.rows;
+    }
+
+    res.json({ ...profile, items: updatedItems });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Un profil avec ce vehicle_type existe déjà' });
+    console.error('[VEHICLES] Erreur profiles-db PUT :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/vehicles/maintenance/profiles-db/:id — Supprimer un profil (ADMIN)
+router.delete('/maintenance/profiles-db/:id', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM vehicle_maintenance_profiles WHERE id = $1 RETURNING id, vehicle_type',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Profil non trouvé' });
+    res.json({ message: 'Profil supprimé', deleted: result.rows[0] });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur profiles-db DELETE :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/vehicles/maintenance/profiles-db/:id — Détail d'un profil avec items
+router.get('/maintenance/profiles-db/:id', async (req, res) => {
+  try {
+    const profile = await pool.query('SELECT * FROM vehicle_maintenance_profiles WHERE id = $1', [req.params.id]);
+    if (profile.rows.length === 0) return res.status(404).json({ error: 'Profil non trouvé' });
+
+    const items = await pool.query(
+      'SELECT * FROM vehicle_maintenance_profile_items WHERE profile_id = $1 ORDER BY sort_order',
+      [req.params.id]
+    );
+
+    res.json({ ...profile.rows[0], items: items.rows });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur profiles-db/:id GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // GET /api/vehicles/maintenance/overview — Vue d'ensemble maintenance flotte
@@ -605,8 +951,30 @@ router.get('/maintenance/schedule/:id', async (req, res) => {
     if (vehicle.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
 
     const v = vehicle.rows[0];
-    const profile = MAINTENANCE_PROFILES[v.vehicle_type] || null;
     const currentKm = v.current_km || 0;
+
+    // 1. Chercher un profil DB correspondant au vehicle_type
+    let dbProfile = null;
+    let dbItems = [];
+    let profileSource = 'hardcoded';
+    if (v.vehicle_type) {
+      const dbProfileResult = await pool.query(
+        'SELECT * FROM vehicle_maintenance_profiles WHERE vehicle_type = $1',
+        [v.vehicle_type]
+      );
+      if (dbProfileResult.rows.length > 0) {
+        dbProfile = dbProfileResult.rows[0];
+        const dbItemsResult = await pool.query(
+          'SELECT * FROM vehicle_maintenance_profile_items WHERE profile_id = $1 ORDER BY sort_order',
+          [dbProfile.id]
+        );
+        dbItems = dbItemsResult.rows;
+        profileSource = 'database';
+      }
+    }
+
+    // 2. Fallback sur le profil hardcodé si pas de profil DB
+    const hardcodedProfile = MAINTENANCE_PROFILES[v.vehicle_type] || null;
 
     // Charger les événements d'entretien pour calculer l'état de chaque opération
     const events = await pool.query(
@@ -616,9 +984,50 @@ router.get('/maintenance/schedule/:id', async (req, res) => {
     );
 
     let schedule = [];
-    if (profile && profile.operations) {
-      schedule = profile.operations.map(op => {
-        // Chercher le dernier événement correspondant à cette opération
+    let profile = null;
+    let profileName = v.vehicle_type;
+
+    if (dbProfile && dbItems.length > 0) {
+      // Utiliser le profil DB
+      profile = {
+        revision_km: dbProfile.revision_km,
+        revision_months: dbProfile.revision_months,
+        brand: dbProfile.brand,
+        model: dbProfile.model,
+        engine_code: dbProfile.engine_code,
+        timing_system: dbProfile.timing_system,
+        adblue_equipped: dbProfile.adblue_equipped,
+        source: dbProfile.source,
+      };
+      schedule = dbItems.map(item => {
+        const lastEvent = events.rows.find(e =>
+          e.description && e.description.toLowerCase().includes(item.label_fr.toLowerCase().split(' ')[0])
+        );
+        const lastKm = lastEvent ? lastEvent.km_at_event : 0;
+        const lastDate = lastEvent ? lastEvent.event_date : null;
+        const kmSince = currentKm - (lastKm || 0);
+        const ratio = item.interval_km > 0 ? kmSince / item.interval_km : 0;
+        let status = 'ok';
+        if (ratio >= 1) status = 'depasse';
+        else if (ratio >= 0.85) status = 'bientot';
+
+        return {
+          label: item.label_fr,
+          item_code: item.item_code,
+          intervalle_km: item.interval_km,
+          intervalle_months: item.interval_months,
+          estimated_cost_eur: item.estimated_cost_eur,
+          last_km: lastKm,
+          last_date: lastDate,
+          km_since: kmSince,
+          ratio: Math.round(ratio * 100),
+          status,
+        };
+      });
+    } else if (hardcodedProfile && hardcodedProfile.operations) {
+      // Fallback : profil hardcodé
+      profile = hardcodedProfile;
+      schedule = hardcodedProfile.operations.map(op => {
         const lastEvent = events.rows.find(e =>
           e.description && e.description.toLowerCase().includes(op.label.toLowerCase().split(' ')[0])
         );
@@ -642,7 +1051,7 @@ router.get('/maintenance/schedule/:id', async (req, res) => {
       });
     }
 
-    res.json({ vehicle: v, profile_name: v.vehicle_type, profile, schedule });
+    res.json({ vehicle: v, profile_name: profileName, profile, profile_source: profileSource, schedule });
   } catch (err) {
     console.error('[VEHICLES] Erreur schedule :', err);
     res.status(500).json({ error: 'Erreur serveur' });
