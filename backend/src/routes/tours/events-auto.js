@@ -349,38 +349,48 @@ async function importEvents(rawEvents) {
   for (const evt of rawEvents) {
     if (!evt.nom || !evt.date_debut) continue;
 
-    // Classifier le type
-    const type = classifyEvent(evt.nom, evt.description);
-    const bonus = calculateBonus(type, evt.nom);
+    try {
+      // Classifier le type
+      const type = classifyEvent(evt.nom, evt.description);
+      const bonus = calculateBonus(type, evt.nom);
 
-    // Vérifier doublon (même source_id, ou même nom+date)
-    const existing = await pool.query(
-      `SELECT id FROM evenements_locaux
-       WHERE (notes LIKE $1)
-       OR (nom = $2 AND date_debut = $3)
-       LIMIT 1`,
-      [`%${evt.source_id}%`, evt.nom, evt.date_debut]
-    );
+      // Vérifier doublon (même source_id dans notes, ou même nom+date)
+      let existing;
+      if (evt.source_id) {
+        existing = await pool.query(
+          `SELECT id FROM evenements_locaux
+           WHERE (COALESCE(notes, '') LIKE $1)
+           OR (nom = $2 AND date_debut = $3)
+           LIMIT 1`,
+          [`%${evt.source_id}%`, evt.nom, evt.date_debut]
+        );
+      } else {
+        existing = await pool.query(
+          `SELECT id FROM evenements_locaux
+           WHERE nom = $1 AND date_debut = $2
+           LIMIT 1`,
+          [evt.nom, evt.date_debut]
+        );
+      }
 
-    if (existing.rows.length > 0) {
-      results.skipped++;
-      continue;
-    }
-
-    // Vérifier que c'est dans la zone géographique (si coordonnées disponibles)
-    if (evt.latitude && evt.longitude) {
-      const dist = haversineDistance(
-        ZONE_REFERENCE.latitude, ZONE_REFERENCE.longitude,
-        parseFloat(evt.latitude), parseFloat(evt.longitude)
-      );
-      if (dist > ZONE_REFERENCE.rayon_km) {
+      if (existing.rows.length > 0) {
         results.skipped++;
         continue;
       }
-    }
 
-    try {
-      const sourceInfo = `Source : ${evt.source}${evt.source_url ? ` — ${evt.source_url}` : ''} [${evt.source_id}]`;
+      // Vérifier que c'est dans la zone géographique (si coordonnées disponibles)
+      if (evt.latitude && evt.longitude) {
+        const dist = haversineDistance(
+          ZONE_REFERENCE.latitude, ZONE_REFERENCE.longitude,
+          parseFloat(evt.latitude), parseFloat(evt.longitude)
+        );
+        if (dist > ZONE_REFERENCE.rayon_km) {
+          results.skipped++;
+          continue;
+        }
+      }
+
+      const sourceInfo = `Source : ${evt.source}${evt.source_url ? ` — ${evt.source_url}` : ''}${evt.source_id ? ` [${evt.source_id}]` : ''}`;
       const inserted = await pool.query(
         `INSERT INTO evenements_locaux (nom, type, date_debut, date_fin, latitude, longitude, adresse, commune, rayon_km, bonus_factor, notes, is_active)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true) RETURNING id, nom`,
@@ -493,6 +503,7 @@ router.post('/events-auto/discover', authorize('ADMIN'), async (req, res) => {
     // Dédupliquer par nom + date
     const seen = new Set();
     const uniqueEvents = allExternalEvents.filter(evt => {
+      if (!evt.nom || !evt.date_debut) return false;
       const key = `${evt.nom.toLowerCase().trim()}|${evt.date_debut}`;
       if (seen.has(key)) return false;
       seen.add(key);
