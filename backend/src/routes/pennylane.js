@@ -247,37 +247,82 @@ router.post('/sync/invoices', authorize('ADMIN', 'MANAGER'), async (req, res) =>
       }
     });
 
+    // Déchiffrer la clé API pour les appels
+    const crypto = require('crypto');
+    const API_ENCRYPTION_KEY = process.env.PENNYLANE_ENCRYPTION_KEY || process.env.JWT_SECRET || 'default-key';
+    const decipher = crypto.createDecipheriv('aes-256-cbc',
+      crypto.createHash('sha256').update(API_ENCRYPTION_KEY).digest(),
+      Buffer.alloc(16, 0)
+    );
+    const apiKey = decipher.update(config.rows[0].api_key_encrypted, 'hex', 'utf8') + decipher.final('utf8');
+
     for (const invoice of Object.values(invoiceMap)) {
       try {
         // Mapping Solidata → Pennylane
         const pennylaneInvoice = {
-          date: invoice.date,
-          deadline: invoice.due_date,
+          date: invoice.date ? new Date(invoice.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          deadline: invoice.due_date ? new Date(invoice.due_date).toISOString().split('T')[0] : null,
           invoice_number: invoice.invoice_number,
           currency: 'EUR',
           customer: {
-            name: invoice.client_name,
-            address: invoice.client_address,
+            name: invoice.client_name || 'Client Solidata',
+            address: invoice.client_address || '',
             emails: invoice.client_email ? [invoice.client_email] : [],
           },
           line_items: invoice.lines.map(l => ({
-            label: l.description,
-            quantity: l.quantity,
+            label: l.description || 'Prestation',
+            quantity: l.quantity || 1,
             unit: 'piece',
             vat_rate: 'FR_200',
-            unit_price: l.unit_price,
+            unit_price: parseFloat(l.unit_price) || 0,
           })),
         };
 
-        // Enregistrer le mapping (simulation — en prod, utiliser l'ID retourné par Pennylane)
-        await pool.query(
-          `INSERT INTO pennylane_mappings (local_type, local_id, pennylane_type, pennylane_id)
-           VALUES ('invoice', $1, 'customer_invoice', $2)
-           ON CONFLICT (local_type, local_id) DO UPDATE SET pennylane_id = $2, last_synced_at = NOW()`,
-          [invoice.id, `PL-${invoice.invoice_number}`]
-        );
-        results.synced++;
-        results.details.push({ invoice_number: invoice.invoice_number, status: 'ok' });
+        // Appel réel API Pennylane
+        const https = require('https');
+        const plResult = await new Promise((resolve, reject) => {
+          const postData = JSON.stringify({ invoice: pennylaneInvoice });
+          const options = {
+            hostname: 'app.pennylane.com',
+            path: '/api/external/v2/customer_invoices',
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Content-Length': Buffer.byteLength(postData),
+            },
+            timeout: 15000,
+          };
+          const request = https.request(options, (response) => {
+            let data = '';
+            response.on('data', chunk => data += chunk);
+            response.on('end', () => {
+              try { resolve({ status: response.statusCode, data: JSON.parse(data) }); }
+              catch { resolve({ status: response.statusCode, data }); }
+            });
+          });
+          request.on('error', reject);
+          request.on('timeout', () => { request.destroy(); reject(new Error('Timeout Pennylane')); });
+          request.write(postData);
+          request.end();
+        });
+
+        if (plResult.status >= 200 && plResult.status < 300) {
+          const plId = plResult.data?.invoice?.id || plResult.data?.id || `PL-${invoice.invoice_number}`;
+          await pool.query(
+            `INSERT INTO pennylane_mappings (local_type, local_id, pennylane_type, pennylane_id)
+             VALUES ('invoice', $1, 'customer_invoice', $2)
+             ON CONFLICT (local_type, local_id) DO UPDATE SET pennylane_id = $2, last_synced_at = NOW()`,
+            [invoice.id, String(plId)]
+          );
+          results.synced++;
+          results.details.push({ invoice_number: invoice.invoice_number, status: 'ok', pennylane_id: plId });
+        } else {
+          const errMsg = plResult.data?.error || plResult.data?.message || `HTTP ${plResult.status}`;
+          results.errors++;
+          results.details.push({ invoice_number: invoice.invoice_number, status: 'error', error: errMsg });
+        }
       } catch (syncErr) {
         results.errors++;
         results.details.push({ invoice_number: invoice.invoice_number, status: 'error', error: syncErr.message });

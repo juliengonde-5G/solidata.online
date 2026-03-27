@@ -40,7 +40,14 @@ export default function Settings() {
   const [showTriggerForm, setShowTriggerForm] = useState(false);
   const [triggerForm, setTriggerForm] = useState({ name: '', event: '', template_id: '', delay_minutes: 0 });
 
-  useEffect(() => { loadData(); loadTriggers(); }, []);
+  // Pennylane
+  const [plConfig, setPlConfig] = useState(null);
+  const [plTesting, setPlTesting] = useState(false);
+  const [plTestResult, setPlTestResult] = useState(null);
+  const [plForm, setPlForm] = useState({ api_key: '', company_id: '', is_active: false });
+  const [plSaving, setPlSaving] = useState(false);
+
+  useEffect(() => { loadData(); loadTriggers(); loadPennylane(); }, []);
   useEffect(() => { loadTarifs(); }, [tarifAnnee]);
   useEffect(() => { loadObjectives(); }, [objAnnee]);
 
@@ -58,6 +65,45 @@ export default function Settings() {
       setExutoires(exuRes.data.filter(e => e.is_active !== false));
     } catch (err) { console.error(err); }
     setLoading(false);
+  };
+
+  const loadPennylane = async () => {
+    try {
+      const [cfgRes, statusRes] = await Promise.all([
+        api.get('/pennylane/config').catch(() => ({ data: null })),
+        api.get('/pennylane/status').catch(() => ({ data: null })),
+      ]);
+      const cfg = cfgRes.data;
+      setPlConfig({ ...cfg, ...statusRes.data });
+      if (cfg) {
+        setPlForm(prev => ({ ...prev, company_id: cfg.company_id || '', is_active: cfg.is_active || false }));
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const savePennylane = async () => {
+    setPlSaving(true);
+    try {
+      await api.put('/pennylane/config', plForm);
+      setPlTestResult(null);
+      loadPennylane();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur sauvegarde Pennylane');
+    }
+    setPlSaving(false);
+  };
+
+  const testPennylane = async () => {
+    setPlTesting(true);
+    setPlTestResult(null);
+    try {
+      const res = await api.post('/pennylane/test');
+      setPlTestResult(res.data);
+      if (res.data.connected) loadPennylane();
+    } catch (err) {
+      setPlTestResult({ connected: false, error: err.response?.data?.error || 'Erreur de connexion' });
+    }
+    setPlTesting(false);
   };
 
   const loadTarifs = async () => {
@@ -206,6 +252,91 @@ export default function Settings() {
             </p>
           </div>
         )}
+
+        {/* Pennylane */}
+        <div className="bg-white rounded-xl shadow-sm border p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
+                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </div>
+              <div>
+                <h2 className="font-semibold text-solidata-dark">Connexion Pennylane</h2>
+                <p className="text-xs text-gray-400">Comptabilite — synchronisation factures</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {plConfig?.active ? (
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Connecte
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 text-xs font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400" /> Deconnecte
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="text-xs text-gray-500 font-medium block mb-1">Cle API Pennylane</label>
+              <input
+                type="password"
+                placeholder="pl_api_..."
+                value={plForm.api_key}
+                onChange={e => setPlForm({ ...plForm, api_key: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+              <p className="text-[10px] text-gray-400 mt-0.5">Vide = conserver la cle existante</p>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 font-medium block mb-1">ID Societe Pennylane</label>
+              <input
+                placeholder="ex: solidarite-textiles"
+                value={plForm.company_id}
+                onChange={e => setPlForm({ ...plForm, company_id: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex flex-col justify-between">
+              <label className="flex items-center gap-2 text-sm mt-5">
+                <input type="checkbox" checked={plForm.is_active} onChange={e => setPlForm({ ...plForm, is_active: e.target.checked })} className="rounded" />
+                Connexion active
+              </label>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={savePennylane}
+              disabled={plSaving || !plForm.company_id}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {plSaving ? 'Enregistrement...' : 'Enregistrer'}
+            </button>
+            <button
+              onClick={testPennylane}
+              disabled={plTesting || !plConfig?.configured}
+              className="px-4 py-2 bg-white border border-indigo-300 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-50 disabled:opacity-50"
+            >
+              {plTesting ? 'Test...' : 'Tester la connexion'}
+            </button>
+            <a href="/pennylane" className="px-4 py-2 text-indigo-600 text-sm hover:underline">
+              Page Pennylane complete →
+            </a>
+          </div>
+
+          {plTestResult && (
+            <div className={`mt-3 p-3 rounded-lg text-sm ${plTestResult.connected ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+              {plTestResult.connected ? `Connexion reussie — ${plTestResult.company || 'OK'}` : `Echec — ${plTestResult.error}`}
+            </div>
+          )}
+
+          {plConfig?.last_sync && (
+            <p className="text-xs text-gray-400 mt-3">Derniere sync : {new Date(plConfig.last_sync).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} • {plConfig.total_mappings || 0} element(s) synchronise(s)</p>
+          )}
+        </div>
 
         {/* Settings */}
         <div className="bg-white rounded-xl shadow-sm border mb-8">
