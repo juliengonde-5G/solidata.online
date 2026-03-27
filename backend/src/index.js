@@ -148,6 +148,9 @@ app.use('/api/ml', require('./routes/ml'));
 // Lot 6 : Pointage / Badgeage
 app.use('/api/pointage', require('./routes/pointage'));
 
+// Module Finance : Tableau de bord financier (GL Pennylane, budget, KPIs)
+app.use('/api/finance', require('./routes/finance'));
+
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 
