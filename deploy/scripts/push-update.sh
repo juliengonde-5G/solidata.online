@@ -41,17 +41,19 @@ echo ""
 
 # 3. Merge de la branche dans main puis déploiement
 echo "▶ Merge $BRANCH → main et déploiement..."
-ssh "$SERVER" bash -s <<REMOTE_DEPLOY
+ssh "$SERVER" bash <<EOF
 set -e
-cd $REMOTE_DIR
+cd /opt/solidata.online
 
-echo "  → git fetch..."
-git fetch origin
+echo "  → git fetch (branche + main)..."
+git fetch origin main
+git fetch origin $BRANCH:refs/remotes/origin/$BRANCH
 
 echo "  → Checkout main..."
 git checkout main
+git pull origin main
 
-echo "  → Merge de la branche $BRANCH..."
+echo "  → Merge de la branche origin/$BRANCH..."
 git merge origin/$BRANCH -m "merge: intégrer $BRANCH (Pennylane, docs véhicules, UX, IA événements multi-sources)"
 
 echo "  → Lancement deploy.sh update..."
@@ -59,7 +61,7 @@ bash deploy/scripts/deploy.sh update
 
 echo ""
 echo "✓ Déploiement terminé !"
-REMOTE_DEPLOY
+EOF
 
 echo ""
 echo "══════════════════════════════════════════"
