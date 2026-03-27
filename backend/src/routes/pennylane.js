@@ -108,10 +108,13 @@ async function getActiveApiKey() {
  */
 async function fetchAllPages(path, apiKey, params = {}) {
   const allItems = [];
-  let page = 1;
-  const perPage = 100;
+  let cursor = null;
+  const limit = 100;
+  let pages = 0;
   while (true) {
-    const qs = new URLSearchParams({ ...params, page: String(page), per_page: String(perPage) });
+    const qsParams = { ...params, limit: String(limit) };
+    if (cursor) qsParams.cursor = cursor;
+    const qs = new URLSearchParams(qsParams);
     const fullPath = `${path}?${qs.toString()}`;
     const result = await pennylaneRequest('GET', fullPath, apiKey);
     if (result.status !== 200) {
@@ -119,13 +122,18 @@ async function fetchAllPages(path, apiKey, params = {}) {
     }
     // Pennylane v2 renvoie les données dans un champ selon l'endpoint
     const items = Array.isArray(result.data) ? result.data
-      : result.data?.items || result.data?.ledger_entries || result.data?.bank_transactions || result.data?.ledger_accounts || result.data?.data || [];
+      : result.data?.items || result.data?.ledger_entries || result.data?.transactions || result.data?.ledger_accounts || result.data?.data || [];
     allItems.push(...items);
-    // Pas de page suivante si on a reçu moins que perPage
-    if (items.length < perPage) break;
-    page++;
-    // Sécurité : max 200 pages (20 000 éléments)
-    if (page > 200) break;
+    // Pagination par curseur : continuer si has_more + next_cursor
+    if (result.data?.has_more && result.data?.next_cursor) {
+      cursor = result.data.next_cursor;
+    } else {
+      break;
+    }
+    pages++;
+    if (pages > 200) break;
+    // Rate limit Pennylane : 5 req/s
+    await new Promise(r => setTimeout(r, 250));
   }
   return allItems;
 }
@@ -404,11 +412,13 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       [req.user.id]
     );
 
-    // Récupérer toutes les écritures depuis Pennylane
-    const entries = await fetchAllPages('/ledger_entries', apiKey);
-
-    // Déterminer ou créer l'exercice comptable pour l'année en cours
-    const year = new Date().getFullYear();
+    // Récupérer les écritures Pennylane filtrées par année
+    const year = parseInt(req.body.year) || new Date().getFullYear();
+    const filter = JSON.stringify([
+      { field: 'date', operator: 'gteq', value: `${year}-01-01` },
+      { field: 'date', operator: 'lteq', value: `${year}-12-31` },
+    ]);
+    const entries = await fetchAllPages('/ledger_entries', apiKey, { filter });
     await client.query('BEGIN');
 
     const exResult = await client.query(
@@ -515,11 +525,13 @@ router.post('/sync/transactions', authorize('ADMIN', 'MANAGER'), async (req, res
       [req.user.id]
     );
 
-    // Récupérer toutes les transactions bancaires depuis Pennylane
-    const transactions = await fetchAllPages('/bank_transactions', apiKey);
-
-    // Déterminer ou créer l'exercice comptable pour l'année en cours
-    const year = new Date().getFullYear();
+    // Récupérer les transactions bancaires filtrées par année
+    const year = parseInt(req.body.year) || new Date().getFullYear();
+    const filter = JSON.stringify([
+      { field: 'date', operator: 'gteq', value: `${year}-01-01` },
+      { field: 'date', operator: 'lteq', value: `${year}-12-31` },
+    ]);
+    const transactions = await fetchAllPages('/transactions', apiKey, { filter });
     await client.query('BEGIN');
 
     const exResult = await client.query(
@@ -613,36 +625,55 @@ router.post('/sync/transactions', authorize('ADMIN', 'MANAGER'), async (req, res
 router.get('/sync/balances', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { apiKey } = await getActiveApiKey();
+    const year = parseInt(req.query.year) || new Date().getFullYear();
 
-    const accounts = await fetchAllPages('/ledger_accounts', apiKey);
+    // Essayer d'abord /trial_balance (endpoint dédié v2), sinon fallback /ledger_accounts
+    let accounts = [];
+    try {
+      const tbResult = await pennylaneRequest('GET', `/trial_balance?start_date=${year}-01-01&end_date=${year}-12-31`, apiKey);
+      if (tbResult.status === 200) {
+        const tbData = Array.isArray(tbResult.data) ? tbResult.data
+          : tbResult.data?.items || tbResult.data?.trial_balance || tbResult.data?.data || [];
+        accounts = tbData.map(row => ({
+          number: row.account_number || row.number || '',
+          label: row.account_label || row.label || row.name || '',
+          debit: parseFloat(row.debit) || 0,
+          credit: parseFloat(row.credit) || 0,
+        }));
+      }
+    } catch (tbErr) {
+      console.log('[PENNYLANE] trial_balance non disponible, fallback ledger_accounts :', tbErr.message);
+    }
 
-    // Formater les données pour la réponse
+    // Fallback : comptes du plan comptable
+    if (accounts.length === 0) {
+      const raw = await fetchAllPages('/ledger_accounts', apiKey);
+      accounts = raw.map(acc => ({
+        number: acc.number || acc.account_number || '',
+        label: acc.name || acc.label || '',
+        debit: parseFloat(acc.debit_total || acc.debit || acc.debit_amount) || 0,
+        credit: parseFloat(acc.credit_total || acc.credit || acc.credit_amount) || 0,
+      }));
+    }
+
+    // Formater
     const balances = accounts.map(acc => ({
-      account_number: acc.number || acc.account_number || '',
-      account_label: acc.name || acc.label || '',
-      debit: parseFloat(acc.debit_total || acc.debit) || 0,
-      credit: parseFloat(acc.credit_total || acc.credit) || 0,
-      balance: (parseFloat(acc.debit_total || acc.debit) || 0) - (parseFloat(acc.credit_total || acc.credit) || 0),
-      account_class: (acc.number || acc.account_number || '')[0] || '',
+      account_number: acc.number,
+      account_label: acc.label,
+      debit: acc.debit,
+      credit: acc.credit,
+      balance: acc.debit - acc.credit,
+      account_class: acc.number.charAt(0) || '',
     }));
-
-    // Trier par numéro de compte
     balances.sort((a, b) => a.account_number.localeCompare(b.account_number));
 
-    // Totaux
-    const totals = balances.reduce((t, b) => ({
-      debit: t.debit + b.debit,
-      credit: t.credit + b.credit,
-    }), { debit: 0, credit: 0 });
+    const totals = balances.reduce((t, b) => ({ debit: t.debit + b.debit, credit: t.credit + b.credit }), { debit: 0, credit: 0 });
 
     res.json({
+      year,
       accounts: balances,
       total_accounts: balances.length,
-      totals: {
-        debit: Math.round(totals.debit * 100) / 100,
-        credit: Math.round(totals.credit * 100) / 100,
-        balance: Math.round((totals.debit - totals.credit) * 100) / 100,
-      },
+      totals: { debit: Math.round(totals.debit * 100) / 100, credit: Math.round(totals.credit * 100) / 100, balance: Math.round((totals.debit - totals.credit) * 100) / 100 },
       fetched_at: new Date().toISOString(),
     });
   } catch (err) {
