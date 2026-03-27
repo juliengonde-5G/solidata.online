@@ -45,13 +45,13 @@ export default function HubExutoires() {
   ];
 
   const cards = [
-    { path: '/exutoires-commandes', title: 'Commandes', desc: 'Suivi des commandes exutoires (8 statuts)', icon: IconList },
+    { path: '/exutoires-commandes', title: 'Commandes', desc: 'Suivi des commandes logistiques (8 statuts)', icon: IconList },
     { path: '/exutoires-preparation', title: 'Préparation', desc: 'Préparation des expéditions et colisage', icon: IconTruck },
     { path: '/exutoires-gantt', title: 'Gantt Chargement', desc: 'Planning Gantt des chargements', icon: IconChart },
-    { path: '/exutoires-facturation', title: 'Facturation', desc: 'Gestion des factures exutoires', icon: IconMoney },
+    { path: '/exutoires-facturation', title: 'Facturation', desc: 'Gestion des factures logistiques', icon: IconMoney },
     { path: '/exutoires-calendrier', title: 'Calendrier', desc: 'Calendrier logistique des expéditions', icon: IconCalendar },
-    { path: '/exutoires-clients', title: 'Clients', desc: 'Gestion des clients exutoires', icon: IconTeam },
-    { path: '/exutoires-tarifs', title: 'Grille Tarifaire', desc: 'Tarifs et conditions par exutoire', icon: IconMoney },
+    { path: '/exutoires-clients', title: 'Clients', desc: 'Gestion des clients et débouchés', icon: IconTeam },
+    { path: '/exutoires-tarifs', title: 'Grille Tarifaire', desc: 'Tarifs et conditions par client', icon: IconMoney },
   ];
 
   return (
@@ -62,9 +62,9 @@ export default function HubExutoires() {
             <span className="w-10 h-10 rounded-card bg-primary-surface flex items-center justify-center">
               <IconList className="w-5 h-5 text-primary" />
             </span>
-            Exutoires — Vue d'ensemble
+            Logistique — Vue d'ensemble
           </h1>
-          <p className="text-slate-500 mt-1 text-sm ml-[52px]">Commandes, préparation, facturation et logistique exutoires</p>
+          <p className="text-slate-500 mt-1 text-sm ml-[52px]">Commandes, préparation, facturation et logistique</p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

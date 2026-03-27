@@ -44,7 +44,17 @@ import ExutoiresCalendrier from './pages/ExutoiresCalendrier';
 import ExutoiresClients from './pages/ExutoiresClients';
 import ExutoiresTarifs from './pages/ExutoiresTarifs';
 import Billing from './pages/Billing';
+import Pennylane from './pages/Pennylane';
 import ActivityLog from './pages/ActivityLog';
+
+// Finance module
+import Finance from './pages/Finance';
+import FinanceImport from './pages/FinanceImport';
+import FinanceOperations from './pages/FinanceOperations';
+import FinanceTresorerie from './pages/FinanceTresorerie';
+import FinancePL from './pages/FinancePL';
+import FinanceBilan from './pages/FinanceBilan';
+import FinanceControles from './pages/FinanceControles';
 
 // Hub pages
 import HubRecrutement from './pages/HubRecrutement';
@@ -109,7 +119,7 @@ function App() {
             <Route path="/produits-finis" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ProduitsFinis /></ProtectedRoute>} />
             <Route path="/expeditions" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Expeditions /></ProtectedRoute>} />
 
-            {/* Exutoires */}
+            {/* Logistique */}
             <Route path="/exutoires-commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCommandes /></ProtectedRoute>} />
             <Route path="/exutoires-preparation" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresPreparation /></ProtectedRoute>} />
             <Route path="/exutoires-gantt" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresGantt /></ProtectedRoute>} />
@@ -128,6 +138,16 @@ function App() {
 
             {/* Facturation */}
             <Route path="/billing" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Billing /></ProtectedRoute>} />
+            <Route path="/pennylane" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Pennylane /></ProtectedRoute>} />
+
+            {/* Finance */}
+            <Route path="/finance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Finance /></ProtectedRoute>} />
+            <Route path="/finance/import" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceImport /></ProtectedRoute>} />
+            <Route path="/finance/operations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceOperations /></ProtectedRoute>} />
+            <Route path="/finance/tresorerie" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceTresorerie /></ProtectedRoute>} />
+            <Route path="/finance/pl" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinancePL /></ProtectedRoute>} />
+            <Route path="/finance/bilan" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceBilan /></ProtectedRoute>} />
+            <Route path="/finance/controles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceControles /></ProtectedRoute>} />
 
             {/* Administration */}
             <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />

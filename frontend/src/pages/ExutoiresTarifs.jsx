@@ -115,7 +115,7 @@ export default function ExutoiresTarifs() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Grille Tarifaire Exutoires</h1>
+            <h1 className="text-2xl font-bold text-solidata-dark">Grille Tarifaire Logistique</h1>
             <p className="text-gray-500">Gestion des prix de référence et négociés</p>
           </div>
           <button onClick={openCreate} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">

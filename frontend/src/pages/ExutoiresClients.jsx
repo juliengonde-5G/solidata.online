@@ -116,8 +116,8 @@ export default function ExutoiresClients() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Clients Exutoires</h1>
-            <p className="text-gray-500">Gestion des clients exutoires et débouchés</p>
+            <h1 className="text-2xl font-bold text-solidata-dark">Clients Logistiques</h1>
+            <p className="text-gray-500">Gestion des clients et débouchés</p>
           </div>
           <button onClick={openCreate} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
             + Nouveau client
@@ -194,7 +194,7 @@ export default function ExutoiresClients() {
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan="7" className="p-8 text-center text-gray-400">Aucun client exutoire</td></tr>
+                <tr><td colSpan="7" className="p-8 text-center text-gray-400">Aucun client logistique</td></tr>
               )}
             </tbody>
           </table>
@@ -205,7 +205,7 @@ export default function ExutoiresClients() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowForm(false); setEditing(null); }}>
             <form onSubmit={handleSubmit} className="bg-white rounded-xl p-6 w-[500px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h2 className="text-lg font-bold mb-4 text-solidata-dark">
-                {editing ? 'Modifier le client' : 'Nouveau client exutoire'}
+                {editing ? 'Modifier le client' : 'Nouveau client logistique'}
               </h2>
               <div className="space-y-3">
                 <div>

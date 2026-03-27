@@ -56,7 +56,7 @@ export default function HubAdmin() {
     { path: '/users', title: 'Utilisateurs', desc: 'Gestion des comptes et rôles utilisateurs', icon: IconLock },
     { path: '/vehicles', title: 'Véhicules', desc: 'Parc véhicules, maintenance et contrôles', icon: IconVehicle },
     { path: '/settings', title: 'Configuration', desc: 'Paramètres généraux de l\'application', icon: IconGear },
-    { path: '/referentiels', title: 'Référentiels', desc: 'Associations, exutoires, catalogues', icon: IconList },
+    { path: '/referentiels', title: 'Référentiels', desc: 'Associations, débouchés, catalogues', icon: IconList },
     { path: '/admin-predictive', title: 'Moteur prédictif', desc: 'Configuration du moteur IA prédictif', icon: IconBrain },
     { path: '/rgpd', title: 'RGPD', desc: 'Registre des traitements et conformité', icon: IconShield },
     { path: '/admin-cav', title: 'Gestion CAV', desc: 'Administration des conteneurs d\'apport', icon: IconMap },

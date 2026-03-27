@@ -208,7 +208,7 @@ export default function ExutoiresFacturation() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-solidata-dark">Facturation & Contrôles</h1>
-            <p className="text-gray-500 text-sm">Contrôles de pesée et gestion des factures exutoires</p>
+            <p className="text-gray-500 text-sm">Contrôles de pesée et gestion des factures logistiques</p>
           </div>
         </div>
 
@@ -393,7 +393,7 @@ export default function ExutoiresFacturation() {
                     );
                   })}
                   {factures.length === 0 && (
-                    <tr><td colSpan="9" className="p-8 text-center text-gray-400">Aucune facture exutoire</td></tr>
+                    <tr><td colSpan="9" className="p-8 text-center text-gray-400">Aucune facture logistique</td></tr>
                   )}
                 </tbody>
               </table>

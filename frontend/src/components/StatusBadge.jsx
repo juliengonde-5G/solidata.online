@@ -5,7 +5,7 @@ const statusMappings = {
   recruited: { label: 'Recrute', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   rejected: { label: 'Refuse', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 
-  // Commandes exutoires
+  // Commandes logistiques
   draft: { label: 'Brouillon', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
   pending: { label: 'En attente', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
   confirmed: { label: 'Confirmee', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },

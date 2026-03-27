@@ -61,7 +61,7 @@ export default function ChaineTri() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-solidata-dark">Chaînes de tri</h1>
-            <p className="text-gray-500">Flux de tri, postes de travail et exutoires</p>
+            <p className="text-gray-500">Flux de tri, postes de travail et débouchés</p>
           </div>
           <div className="flex gap-2">
             <button

@@ -67,6 +67,7 @@ services:
       PORT: 3001
       NODE_ENV: production
       BREVO_API_KEY: ${BREVO_API_KEY:-}
+      OPENAGENDA_API_KEY: ${OPENAGENDA_API_KEY:-}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CENTRE_TRI_LAT: 49.4231

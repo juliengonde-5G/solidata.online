@@ -5,8 +5,21 @@ import { useAuth } from '../contexts/AuthContext';
 // ══════════════════════════════════════════
 // MENU CONFIG — Charte bleu pétrole, icônes plates
 // ══════════════════════════════════════════
-const activeClass = 'bg-primary-surface text-primary-dark border-l-4 border-primary font-semibold';
 const hoverClass = 'hover:bg-slate-50';
+
+// Couleurs par module — chaque section a son identité visuelle
+const MODULE_COLORS = {
+  'Accueil':          { active: 'bg-teal-50 text-teal-700 border-l-4 border-teal-500 font-semibold', icon: 'text-teal-500', header: 'text-teal-600' },
+  'Recrutement':      { active: 'bg-blue-50 text-blue-700 border-l-4 border-blue-500 font-semibold', icon: 'text-blue-500', header: 'text-blue-600' },
+  'Gestion Équipe':   { active: 'bg-emerald-50 text-emerald-700 border-l-4 border-emerald-500 font-semibold', icon: 'text-emerald-500', header: 'text-emerald-600' },
+  'Collecte':         { active: 'bg-teal-50 text-teal-700 border-l-4 border-teal-500 font-semibold', icon: 'text-teal-500', header: 'text-teal-600' },
+  'Tri & Production': { active: 'bg-amber-50 text-amber-700 border-l-4 border-amber-500 font-semibold', icon: 'text-amber-500', header: 'text-amber-600' },
+  'Logistique':       { active: 'bg-purple-50 text-purple-700 border-l-4 border-purple-500 font-semibold', icon: 'text-purple-500', header: 'text-purple-600' },
+  'Finances':         { active: 'bg-indigo-50 text-indigo-700 border-l-4 border-indigo-500 font-semibold', icon: 'text-indigo-500', header: 'text-indigo-600' },
+  'Reporting':        { active: 'bg-rose-50 text-rose-700 border-l-4 border-rose-500 font-semibold', icon: 'text-rose-500', header: 'text-rose-600' },
+  'Administration':   { active: 'bg-slate-100 text-slate-700 border-l-4 border-slate-500 font-semibold', icon: 'text-slate-500', header: 'text-slate-600' },
+};
+const defaultColors = { active: 'bg-primary-surface text-primary-dark border-l-4 border-primary font-semibold', icon: 'text-primary', header: 'text-primary' };
 
 const menuSections = [
   {
@@ -60,7 +73,7 @@ const menuSections = [
     ],
   },
   {
-    title: 'Exutoires',
+    title: 'Logistique',
     hubPath: '/hub-exutoires',
     items: [
       { path: '/exutoires-commandes', label: 'Commandes', icon: IconList, roles: ['ADMIN', 'MANAGER'] },
@@ -70,6 +83,21 @@ const menuSections = [
       { path: '/exutoires-calendrier', label: 'Calendrier', icon: IconClock, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-clients', label: 'Clients', icon: IconTeam, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-tarifs', label: 'Grille Tarifaire', icon: IconMoney, roles: ['ADMIN', 'MANAGER'] },
+    ],
+  },
+  {
+    title: 'Finances',
+    hubPath: '/finance',
+    items: [
+      { path: '/finance', label: 'Synthèse', icon: IconDashboard, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/import', label: 'Import GL', icon: IconBox, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/operations', label: 'Opérations', icon: IconFactory, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/tresorerie', label: 'Trésorerie', icon: IconMoney, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/pl', label: 'P&L Centre', icon: IconChartBar, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/bilan', label: 'Bilan / CR', icon: IconChart, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/finance/controles', label: 'Contrôles', icon: IconStar, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/billing', label: 'Facturation', icon: IconMoney, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/pennylane', label: 'Pennylane', icon: IconPennylane, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {
@@ -162,13 +190,13 @@ export default function Layout({ children }) {
                   {section.hubPath && section.hubPath !== '/' ? (
                     <button
                       onClick={() => { navigate(section.hubPath); if (window.innerWidth < 1024) setSidebarOpen(false); }}
-                      className="flex-1 px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider flex items-center rounded-lg text-slate-500 hover:text-primary hover:bg-primary-surface/50 transition text-left"
+                      className={`flex-1 px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider flex items-center rounded-lg transition text-left ${(MODULE_COLORS[section.title] || defaultColors).header} hover:opacity-80`}
                       title={`Vue d'ensemble ${section.title}`}
                     >
                       <span>{section.title}</span>
                     </button>
                   ) : (
-                    <span className="flex-1 px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <span className={`flex-1 px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider ${(MODULE_COLORS[section.title] || defaultColors).header}`}>
                       {section.title}
                     </span>
                   )}
@@ -185,16 +213,17 @@ export default function Layout({ children }) {
               {(expandedSections.includes(section.title) || !sidebarOpen) && section.items.map(item => {
                 const isActive = location.pathname === item.path;
                 const Icon = item.icon;
+                const colors = MODULE_COLORS[section.title] || defaultColors;
                 return (
                   <button
                     key={item.path}
                     onClick={() => { navigate(item.path); if (window.innerWidth < 1024) setSidebarOpen(false); }}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg mb-0.5 transition-all border-l-[3px] border-transparent ${
-                      isActive ? activeClass : `text-slate-600 ${hoverClass}`
+                      isActive ? colors.active : `text-slate-600 ${hoverClass}`
                     }`}
                     title={item.label}
                   >
-                    <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-primary' : 'text-slate-400'}`} />
+                    <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? colors.icon : 'text-slate-400'}`} />
                     {sidebarOpen && <span className="truncate">{item.label}</span>}
                   </button>
                 );
@@ -347,6 +376,9 @@ function IconNews({ className }) {
 }
 function IconBadge({ className }) {
   return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" strokeWidth={1.8} /><circle cx="12" cy="10" r="3" strokeWidth={1.8} /><path strokeLinecap="round" strokeWidth={1.8} d="M8 17h8M10 5h4" /></svg>;
+}
+function IconPennylane({ className }) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 }
 function IconLogout({ className }) {
   return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>;

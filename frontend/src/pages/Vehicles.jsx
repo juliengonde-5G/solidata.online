@@ -21,6 +21,21 @@ const EVENT_COLORS = {
   accident: 'bg-red-200 text-red-800', autre: 'bg-gray-100 text-gray-700',
 };
 
+const DOC_TYPE_LABELS = {
+  carte_grise: 'Carte grise', assurance: 'Assurance', controle_technique: 'CT',
+  facture_entretien: 'Facture entretien', facture_reparation: 'Facture réparation',
+  permis_conduire: 'Permis', constat: 'Constat', autre: 'Autre',
+};
+const DOC_TYPE_OPTIONS = [
+  { value: 'carte_grise', label: 'Carte grise' },
+  { value: 'assurance', label: 'Attestation assurance' },
+  { value: 'controle_technique', label: 'Contrôle technique' },
+  { value: 'facture_entretien', label: 'Facture entretien' },
+  { value: 'facture_reparation', label: 'Facture réparation' },
+  { value: 'constat', label: 'Constat amiable' },
+  { value: 'autre', label: 'Autre document' },
+];
+
 const emptyForm = {
   registration: '', name: '', brand: '', model: '', type: 'utilitaire',
   max_capacity_kg: 3500, tare_weight_kg: '', current_km: 0,
@@ -47,6 +62,12 @@ export default function Vehicles() {
     event_type: 'entretien', event_date: new Date().toISOString().split('T')[0],
     km_at_event: '', description: '', cost: '', performed_by: '',
   });
+
+  // Documents
+  const [documents, setDocuments] = useState([]);
+  const [showDocForm, setShowDocForm] = useState(false);
+  const [docForm, setDocForm] = useState({ doc_type: 'autre', title: '', expiry_date: '', notes: '' });
+  const [docFile, setDocFile] = useState(null);
 
   useEffect(() => { loadVehicles(); }, []);
   useEffect(() => { if (activeTab === 'maintenance') loadMaintenance(); }, [activeTab]);
@@ -80,10 +101,46 @@ export default function Vehicles() {
     } catch (err) { console.error(err); setEvents([]); }
   }, []);
 
+  const loadDocuments = useCallback(async (vehicleId) => {
+    try {
+      const res = await api.get(`/vehicles/${vehicleId}/documents`);
+      setDocuments(res.data);
+    } catch (err) { console.error(err); setDocuments([]); }
+  }, []);
+
+  const addDocument = async (e) => {
+    e.preventDefault();
+    if (!selectedVehicle || !docFile) return;
+    const formData = new FormData();
+    formData.append('file', docFile);
+    formData.append('doc_type', docForm.doc_type);
+    formData.append('title', docForm.title || docFile.name);
+    if (docForm.expiry_date) formData.append('expiry_date', docForm.expiry_date);
+    if (docForm.notes) formData.append('notes', docForm.notes);
+    try {
+      await api.post(`/vehicles/${selectedVehicle.id}/documents`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setShowDocForm(false);
+      setDocForm({ doc_type: 'autre', title: '', expiry_date: '', notes: '' });
+      setDocFile(null);
+      loadDocuments(selectedVehicle.id);
+    } catch (err) { console.error(err); alert('Erreur lors de l\'upload'); }
+  };
+
+  const deleteDocument = async (docId) => {
+    if (!confirm('Supprimer ce document ?')) return;
+    try {
+      await api.delete(`/vehicles/${selectedVehicle.id}/documents/${docId}`);
+      loadDocuments(selectedVehicle.id);
+    } catch (err) { console.error(err); }
+  };
+
   const selectVehicle = (v) => {
     setSelectedVehicle(v);
     loadSchedule(v.id);
     loadEvents(v.id);
+    loadDocuments(v.id);
     setActiveTab('detail');
   };
 
@@ -359,6 +416,57 @@ export default function Vehicles() {
                 </div>
               )}
             </div>
+
+            {/* Documents véhicule */}
+            <div className="bg-white rounded-xl shadow-sm border p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold">Documents</h3>
+                <button onClick={() => setShowDocForm(true)} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700">
+                  + Ajouter un document
+                </button>
+              </div>
+              {documents.length === 0 ? (
+                <p className="text-gray-400 text-sm">Aucun document pour ce véhicule. Ajoutez carte grise, assurance, factures...</p>
+              ) : (
+                <div className="space-y-2">
+                  {documents.map(doc => (
+                    <div key={doc.id} className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 border">
+                      <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                        <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{doc.title}</p>
+                        <div className="flex gap-3 mt-0.5 text-xs text-gray-400">
+                          <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded text-[10px]">
+                            {DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type}
+                          </span>
+                          <span>{new Date(doc.created_at).toLocaleDateString('fr-FR')}</span>
+                          {doc.file_size && <span>{(doc.file_size / 1024).toFixed(0)} Ko</span>}
+                          {doc.expiry_date && (
+                            <span className={new Date(doc.expiry_date) < new Date() ? 'text-red-500 font-medium' : ''}>
+                              Expire : {new Date(doc.expiry_date).toLocaleDateString('fr-FR')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-1 flex-shrink-0">
+                        <a
+                          href={`/api/vehicles/${selectedVehicle.id}/documents/${doc.id}/download`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="text-indigo-500 hover:text-indigo-700 p-1.5 rounded hover:bg-indigo-50"
+                          title="Télécharger"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        </a>
+                        <button onClick={() => deleteDocument(doc.id)} className="text-red-400 hover:text-red-600 p-1.5 rounded hover:bg-red-50" title="Supprimer">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -423,6 +531,44 @@ export default function Vehicles() {
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
                 <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">{editingId ? 'Enregistrer' : 'Créer'}</button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Modale Ajouter document */}
+        {showDocForm && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <form onSubmit={addDocument} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
+              <h2 className="text-lg font-bold mb-4">Ajouter un document</h2>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-gray-500">Type de document</label>
+                  <select value={docForm.doc_type} onChange={e => setDocForm({ ...docForm, doc_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                    {DOC_TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Titre</label>
+                  <input value={docForm.title} onChange={e => setDocForm({ ...docForm, title: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Ex: Carte grise Ducato" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Fichier *</label>
+                  <input type="file" onChange={e => setDocFile(e.target.files[0])} className="w-full border rounded-lg px-3 py-2 text-sm" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" />
+                  <p className="text-[10px] text-gray-400 mt-1">PDF, images, Word, Excel — max 10 Mo</p>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Date d'expiration (optionnel)</label>
+                  <input type="date" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Notes</label>
+                  <textarea value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} placeholder="Remarques..." />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button type="button" onClick={() => { setShowDocForm(false); setDocFile(null); }} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium">Enregistrer</button>
               </div>
             </form>
           </div>
