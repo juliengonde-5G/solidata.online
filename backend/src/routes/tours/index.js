@@ -24,6 +24,7 @@ const crudRouter = require('./crud');
 const proposalsRouter = require('./proposals');
 const createExecutionRouter = require('./execution');
 const eventsRouter = require('./events');
+const eventsAutoRouter = require('./events-auto');
 const statsRouter = require('./stats');
 
 // All routes require authentication
@@ -35,6 +36,9 @@ router.use('/', executionRouter);
 
 // Mount events routes
 router.use('/', eventsRouter);
+
+// Mount auto-discovery events routes
+router.use('/', eventsAutoRouter);
 
 // Mount stats/reporting routes
 router.use('/', statsRouter);

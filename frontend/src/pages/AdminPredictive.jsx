@@ -33,7 +33,13 @@ export default function AdminPredictive() {
   const [weatherPreview, setWeatherPreview] = useState(null);
   const [weatherDate, setWeatherDate] = useState(new Date().toISOString().split('T')[0]);
 
-  useEffect(() => { loadConfig(); loadEvents(); }, []);
+  // IA Auto-discovery
+  const [autoStats, setAutoStats] = useState(null);
+  const [predictions, setPredictions] = useState([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryResult, setDiscoveryResult] = useState(null);
+
+  useEffect(() => { loadConfig(); loadEvents(); loadAutoStats(); }, []);
 
   const loadConfig = async () => {
     try {
@@ -48,6 +54,31 @@ export default function AdminPredictive() {
       const res = await api.get('/tours/events');
       setEvents(res.data);
     } catch (err) { console.error(err); }
+  };
+
+  const loadAutoStats = async () => {
+    try {
+      const [statsRes, predRes] = await Promise.all([
+        api.get('/tours/events-auto/stats').catch(() => ({ data: null })),
+        api.get('/tours/events-auto/predictions?weeks=6').catch(() => ({ data: [] })),
+      ]);
+      setAutoStats(statsRes.data);
+      setPredictions(predRes.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const runAutoDiscovery = async () => {
+    setDiscovering(true);
+    setDiscoveryResult(null);
+    try {
+      const res = await api.post('/tours/events-auto/discover', { months_ahead: 3 });
+      setDiscoveryResult(res.data);
+      loadEvents();
+      loadAutoStats();
+    } catch (err) {
+      setDiscoveryResult({ error: err.response?.data?.error || 'Erreur' });
+    }
+    setDiscovering(false);
   };
 
   const loadWeatherPreview = async () => {
@@ -258,6 +289,106 @@ export default function AdminPredictive() {
 
           {events.length === 0 && (
             <p className="text-xs text-gray-300 italic">Aucun événement enregistré</p>
+          )}
+        </Section>
+
+        {/* ══════════ DÉCOUVERTE AUTOMATIQUE IA ══════════ */}
+        <Section title="Decouverte automatique IA" desc="Analyse predictive pour alimenter la base d'evenements locaux automatiquement">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
+            <div className="bg-indigo-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-indigo-700">{autoStats?.total_events || 0}</p>
+              <p className="text-xs text-indigo-500">Evenements actifs</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-green-700">{autoStats?.upcoming_events || 0}</p>
+              <p className="text-xs text-green-500">A venir</p>
+            </div>
+            <div className="bg-purple-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-purple-700">{autoStats?.predicted_by_ia || 0}</p>
+              <p className="text-xs text-purple-500">Generes par IA</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-amber-700">x{autoStats?.avg_bonus_factor || '1.00'}</p>
+              <p className="text-xs text-amber-500">Impact moyen</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              onClick={runAutoDiscovery}
+              disabled={discovering}
+              className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              {discovering ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  Analyse en cours...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                  Lancer la decouverte automatique (3 mois)
+                </>
+              )}
+            </button>
+            <p className="text-xs text-gray-400">Genere automatiquement des evenements saisonniers et des predictions de brocantes basees sur l'analyse IA</p>
+          </div>
+
+          {discoveryResult && (
+            <div className={`p-4 rounded-lg mb-4 ${discoveryResult.error ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
+              <p className={`text-sm font-medium ${discoveryResult.error ? 'text-red-700' : 'text-green-700'}`}>
+                {discoveryResult.error || discoveryResult.message}
+              </p>
+            </div>
+          )}
+
+          {/* Predictions impact par semaine */}
+          {predictions.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Previsions d'impact sur la collecte</h3>
+              <div className="space-y-2">
+                {predictions.map((pred, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 border">
+                    <div className="flex-shrink-0 w-20">
+                      <p className="text-xs font-bold text-gray-600">{pred.week_label}</p>
+                      <p className="text-[10px] text-gray-400">{new Date(pred.week_start).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</p>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                          pred.combined_impact_factor > 1.1 ? 'bg-green-100 text-green-700' :
+                          pred.combined_impact_factor < 0.95 ? 'bg-orange-100 text-orange-700' :
+                          'bg-gray-100 text-gray-600'
+                        }`}>
+                          {pred.estimated_volume_change}
+                        </span>
+                        <span className="text-xs text-gray-400">{pred.events_count} evenement(s)</span>
+                        <span className="text-[10px] text-gray-300">{pred.seasonal_context}</span>
+                      </div>
+                      {pred.events.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {pred.events.slice(0, 3).map(ev => (
+                            <span key={ev.id} className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded">
+                              {ev.nom.length > 30 ? ev.nom.substring(0, 30) + '...' : ev.nom}
+                            </span>
+                          ))}
+                          {pred.events.length > 3 && <span className="text-[10px] text-gray-400">+{pred.events.length - 3} autres</span>}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-shrink-0">
+                      <div className="w-16 bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${pred.brocante_probability >= 0.7 ? 'bg-green-500' : pred.brocante_probability >= 0.4 ? 'bg-amber-400' : 'bg-gray-400'}`}
+                          style={{ width: `${Math.round(pred.brocante_probability * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-gray-400 text-center mt-0.5">{Math.round(pred.brocante_probability * 100)}%</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </Section>
 

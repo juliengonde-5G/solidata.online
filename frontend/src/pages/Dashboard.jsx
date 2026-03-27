@@ -56,7 +56,7 @@ const MODULE_CARDS = [
   },
   {
     key: 'exutoires',
-    title: 'Exutoires',
+    title: 'Logistique',
     description: 'Commandes, préparation, facturation',
     path: '/hub-exutoires',
     icon: IconShip,

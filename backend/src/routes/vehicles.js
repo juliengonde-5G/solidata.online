@@ -5,6 +5,30 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Configuration Multer pour documents véhicules
+const vehicleDocsDir = path.join(__dirname, '..', '..', 'uploads', 'vehicle-docs');
+try { fs.mkdirSync(vehicleDocsDir, { recursive: true }); } catch (e) { /* ignore */ }
+
+const vehicleDocStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, vehicleDocsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `v${req.params.id}-${Date.now()}${ext}`);
+  },
+});
+const uploadVehicleDoc = multer({
+  storage: vehicleDocStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext));
+  },
+});
 
 // Auto-create vehicle_maintenance tables
 (async () => {
@@ -41,7 +65,23 @@ const { autoLogActivity } = require('../middleware/activity-logger');
         UNIQUE(vehicle_id, alert_date)
       )
     `);
-    console.log('[VEHICLES] Tables maintenance OK');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_documents (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        doc_type VARCHAR(50) NOT NULL DEFAULT 'autre',
+        title VARCHAR(255) NOT NULL,
+        filename VARCHAR(500) NOT NULL,
+        original_name VARCHAR(500),
+        file_size INTEGER,
+        mime_type VARCHAR(100),
+        expiry_date DATE,
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('[VEHICLES] Tables maintenance + documents OK');
   } catch (err) {
     console.error('[VEHICLES] Migration maintenance :', err.message);
   }
@@ -175,10 +215,197 @@ const MAINTENANCE_PROFILES = {
       { label: 'Pneumatiques', intervalle_km: 50000 },
     ],
   },
+  'FIAT Ducato L2H2': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 30000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 40000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre', intervalle_km: 30000 },
+      { label: 'Filtre à air', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Courroie de distribution', intervalle_km: 120000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein', intervalle_km: 40000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+    ],
+  },
   'Renault Master eTech': {
     revision_km: 30000, revision_months: 24,
-    vidange_km: 0, vidange_months: 0, // Pas de vidange moteur (électrique)
-    pneus_km: 40000, freins_km: 80000, // Freins regen = usure réduite
+    vidange_km: 0, vidange_months: 0,
+    pneus_km: 40000, freins_km: 80000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Contrôle batterie haute tension', intervalle_km: 30000 },
+      { label: 'Liquide de refroidissement batterie', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein', intervalle_km: 80000 },
+      { label: 'Pneumatiques', intervalle_km: 40000 },
+      { label: 'Contrôle système de charge', intervalle_km: 30000 },
+    ],
+  },
+  'Renault Master L2H2 dCi': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 30000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 40000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 30000 },
+      { label: 'Filtre à air', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Filtre à gasoil', intervalle_km: 60000 },
+      { label: 'Courroie accessoires', intervalle_km: 120000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein avant', intervalle_km: 40000 },
+      { label: 'Plaquettes de frein arrière', intervalle_km: 60000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+      { label: 'Liquide de refroidissement', intervalle_km: 120000 },
+    ],
+  },
+  'Renault Master L3H2 dCi': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 30000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 40000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 30000 },
+      { label: 'Filtre à air', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Filtre à gasoil', intervalle_km: 60000 },
+      { label: 'Courroie accessoires', intervalle_km: 120000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein avant', intervalle_km: 40000 },
+      { label: 'Plaquettes de frein arrière', intervalle_km: 60000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+      { label: 'Liquide de refroidissement', intervalle_km: 120000 },
+    ],
+  },
+  'Mercedes Sprinter 314 CDI': {
+    revision_km: 25000, revision_months: 12,
+    vidange_km: 25000, vidange_months: 12,
+    pneus_km: 50000, freins_km: 45000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 25000 },
+      { label: 'Filtre à air', intervalle_km: 50000 },
+      { label: 'Filtre habitacle', intervalle_km: 25000 },
+      { label: 'Filtre à gasoil', intervalle_km: 50000 },
+      { label: 'Courroie poly-V', intervalle_km: 100000 },
+      { label: 'Liquide de frein', intervalle_km: 50000 },
+      { label: 'Plaquettes de frein', intervalle_km: 45000 },
+      { label: 'Disques de frein', intervalle_km: 90000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+      { label: 'Liquide AdBlue', intervalle_km: 10000 },
+      { label: 'Liquide de refroidissement', intervalle_km: 100000 },
+    ],
+  },
+  'Mercedes Sprinter 516 CDI': {
+    revision_km: 25000, revision_months: 12,
+    vidange_km: 25000, vidange_months: 12,
+    pneus_km: 45000, freins_km: 40000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 25000 },
+      { label: 'Filtre à air', intervalle_km: 50000 },
+      { label: 'Filtre habitacle', intervalle_km: 25000 },
+      { label: 'Filtre à gasoil', intervalle_km: 50000 },
+      { label: 'Courroie poly-V', intervalle_km: 100000 },
+      { label: 'Liquide de frein', intervalle_km: 50000 },
+      { label: 'Plaquettes de frein', intervalle_km: 40000 },
+      { label: 'Disques de frein', intervalle_km: 80000 },
+      { label: 'Pneumatiques', intervalle_km: 45000 },
+      { label: 'Liquide AdBlue', intervalle_km: 10000 },
+    ],
+  },
+  'Iveco Daily 35S16': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 30000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 40000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 30000 },
+      { label: 'Filtre à air', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Filtre à gasoil', intervalle_km: 60000 },
+      { label: 'Courroie de distribution', intervalle_km: 120000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein', intervalle_km: 40000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+      { label: 'Liquide de refroidissement', intervalle_km: 90000 },
+    ],
+  },
+  'Peugeot Boxer L3H2': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 30000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 40000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 30000 },
+      { label: 'Filtre à air', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Courroie de distribution', intervalle_km: 150000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein avant', intervalle_km: 40000 },
+      { label: 'Plaquettes de frein arrière', intervalle_km: 60000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+      { label: 'Batterie', intervalle_km: 120000 },
+    ],
+  },
+  'Citroën Jumper L3H2': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 30000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 40000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 30000 },
+      { label: 'Filtre à air', intervalle_km: 60000 },
+      { label: 'Filtre habitacle', intervalle_km: 30000 },
+      { label: 'Courroie de distribution', intervalle_km: 150000 },
+      { label: 'Liquide de frein', intervalle_km: 60000 },
+      { label: 'Plaquettes de frein avant', intervalle_km: 40000 },
+      { label: 'Plaquettes de frein arrière', intervalle_km: 60000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+    ],
+  },
+  'Volkswagen Crafter L3H3': {
+    revision_km: 20000, revision_months: 24,
+    vidange_km: 20000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 45000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 20000 },
+      { label: 'Filtre à air', intervalle_km: 40000 },
+      { label: 'Filtre habitacle', intervalle_km: 20000 },
+      { label: 'Filtre à gasoil', intervalle_km: 40000 },
+      { label: 'Courroie de distribution', intervalle_km: 130000 },
+      { label: 'Liquide de frein', intervalle_km: 40000 },
+      { label: 'Plaquettes de frein', intervalle_km: 45000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+      { label: 'Liquide AdBlue', intervalle_km: 10000 },
+    ],
+  },
+  'MAN TGE L3H2': {
+    revision_km: 20000, revision_months: 24,
+    vidange_km: 20000, vidange_months: 24,
+    pneus_km: 50000, freins_km: 45000,
+    controle_technique_months: 24,
+    operations: [
+      { label: 'Vidange moteur + filtre à huile', intervalle_km: 20000 },
+      { label: 'Filtre à air', intervalle_km: 40000 },
+      { label: 'Filtre habitacle', intervalle_km: 20000 },
+      { label: 'Filtre à gasoil', intervalle_km: 40000 },
+      { label: 'Courroie de distribution', intervalle_km: 130000 },
+      { label: 'Liquide de frein', intervalle_km: 40000 },
+      { label: 'Plaquettes de frein', intervalle_km: 45000 },
+      { label: 'Pneumatiques', intervalle_km: 50000 },
+      { label: 'Liquide AdBlue', intervalle_km: 10000 },
+    ],
+  },
+  'Renault Kangoo E-Tech': {
+    revision_km: 30000, revision_months: 24,
+    vidange_km: 0, vidange_months: 0,
+    pneus_km: 40000, freins_km: 80000,
     controle_technique_months: 24,
     operations: [
       { label: 'Contrôle batterie haute tension', intervalle_km: 30000 },
@@ -430,6 +657,115 @@ router.get('/maintenance/schedule/:id', async (req, res) => {
     res.json({ vehicle: v, profile_name: v.vehicle_type, profile, schedule });
   } catch (err) {
     console.error('[VEHICLES] Erreur schedule :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// DOCUMENTS VÉHICULE
+// ══════════════════════════════════════════
+
+const DOC_TYPES = [
+  { value: 'carte_grise', label: 'Carte grise' },
+  { value: 'assurance', label: 'Attestation assurance' },
+  { value: 'controle_technique', label: 'Contrôle technique' },
+  { value: 'facture_entretien', label: 'Facture entretien' },
+  { value: 'facture_reparation', label: 'Facture réparation' },
+  { value: 'permis_conduire', label: 'Permis de conduire' },
+  { value: 'constat', label: 'Constat amiable' },
+  { value: 'autre', label: 'Autre document' },
+];
+
+// GET /api/vehicles/:id/documents — Liste des documents d'un véhicule
+router.get('/:id/documents', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT vd.*, u.first_name || ' ' || u.last_name as created_by_name
+       FROM vehicle_documents vd
+       LEFT JOIN users u ON vd.created_by = u.id
+       WHERE vd.vehicle_id = $1
+       ORDER BY vd.created_at DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur documents GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/vehicles/document-types — Types de documents disponibles
+router.get('/document-types/list', (req, res) => {
+  res.json(DOC_TYPES);
+});
+
+// POST /api/vehicles/:id/documents — Uploader un document
+router.post('/:id/documents', authorize('ADMIN', 'MANAGER'), uploadVehicleDoc.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
+
+    const { doc_type, title, expiry_date, notes } = req.body;
+    const result = await pool.query(
+      `INSERT INTO vehicle_documents (vehicle_id, doc_type, title, filename, original_name, file_size, mime_type, expiry_date, notes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [
+        req.params.id,
+        doc_type || 'autre',
+        title || req.file.originalname,
+        req.file.filename,
+        req.file.originalname,
+        req.file.size,
+        req.file.mimetype,
+        expiry_date || null,
+        notes || null,
+        req.user.id,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur documents POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/vehicles/:id/documents/:docId/download — Télécharger un document
+router.get('/:id/documents/:docId/download', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT filename, original_name, mime_type FROM vehicle_documents WHERE id = $1 AND vehicle_id = $2',
+      [req.params.docId, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document non trouvé' });
+
+    const doc = result.rows[0];
+    const filePath = path.join(vehicleDocsDir, doc.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Fichier introuvable' });
+
+    res.setHeader('Content-Disposition', `attachment; filename="${doc.original_name}"`);
+    res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
+    res.sendFile(filePath);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur download :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/vehicles/:id/documents/:docId — Supprimer un document
+router.delete('/:id/documents/:docId', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM vehicle_documents WHERE id = $1 AND vehicle_id = $2 RETURNING filename',
+      [req.params.docId, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document non trouvé' });
+
+    // Supprimer le fichier physique
+    const filePath = path.join(vehicleDocsDir, result.rows[0].filename);
+    try { fs.unlinkSync(filePath); } catch (e) { /* fichier déjà supprimé */ }
+
+    res.json({ message: 'Document supprimé' });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur documents DELETE :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

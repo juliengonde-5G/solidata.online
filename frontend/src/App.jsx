@@ -44,6 +44,7 @@ import ExutoiresCalendrier from './pages/ExutoiresCalendrier';
 import ExutoiresClients from './pages/ExutoiresClients';
 import ExutoiresTarifs from './pages/ExutoiresTarifs';
 import Billing from './pages/Billing';
+import Pennylane from './pages/Pennylane';
 import ActivityLog from './pages/ActivityLog';
 
 // Hub pages
@@ -128,6 +129,7 @@ function App() {
 
             {/* Facturation */}
             <Route path="/billing" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Billing /></ProtectedRoute>} />
+            <Route path="/pennylane" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Pennylane /></ProtectedRoute>} />
 
             {/* Administration */}
             <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />

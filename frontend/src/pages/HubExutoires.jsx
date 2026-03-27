@@ -62,9 +62,9 @@ export default function HubExutoires() {
             <span className="w-10 h-10 rounded-card bg-primary-surface flex items-center justify-center">
               <IconList className="w-5 h-5 text-primary" />
             </span>
-            Exutoires — Vue d'ensemble
+            Logistique — Vue d'ensemble
           </h1>
-          <p className="text-slate-500 mt-1 text-sm ml-[52px]">Commandes, préparation, facturation et logistique exutoires</p>
+          <p className="text-slate-500 mt-1 text-sm ml-[52px]">Commandes, préparation, facturation et logistique</p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

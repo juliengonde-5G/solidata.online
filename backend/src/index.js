@@ -77,7 +77,7 @@ app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { e
 // Créer dossiers uploads (évite 502 si multer ne peut pas créer)
 const fs = require('fs');
 const uploadsDir = path.join(__dirname, '..', 'uploads');
-['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents'].forEach((sub) => {
+['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents', 'vehicle-docs'].forEach((sub) => {
   const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -139,6 +139,9 @@ app.use('/api/calendrier-logistique', require('./routes/calendrier-logistique'))
 app.use('/api/planning-hebdo', require('./routes/planning-hebdo'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 
+// Module Finances / Pennylane
+app.use('/api/pennylane', require('./routes/pennylane'));
+
 // Module ML : prédiction remplissage CAV
 app.use('/api/ml', require('./routes/ml'));
 
@@ -182,6 +185,7 @@ app.get('/api/health', async (req, res) => {
         rgpd: true,
         adminDb: true,
         exutoires: true,
+        pennylane: true,
       },
     });
   } catch (err) {
