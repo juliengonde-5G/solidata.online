@@ -34,7 +34,7 @@ const fmtPct = (v) => {
 };
 
 const SUB_PAGES = [
-  { path: '/finance/import', label: 'Import Comptable', description: 'Importer GL, ecritures, budget', icon: IconUpload, color: 'blue' },
+  { path: '/pennylane', label: 'Pennylane', description: 'Synchroniser GL, transactions, balances', icon: IconUpload, color: 'blue' },
   { path: '/finance/operations', label: 'Donnees Operationnelles', description: 'Volumes, couts, marges par centre', icon: IconCalc, color: 'emerald' },
   { path: '/finance/tresorerie', label: 'Tresorerie', description: 'Position, encaissements, decaissements', icon: IconBank, color: 'teal' },
   { path: '/finance/pl', label: 'Compte de Resultat', description: 'P&L par centre, budget vs reel', icon: IconPL, color: 'amber' },

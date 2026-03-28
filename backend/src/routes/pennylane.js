@@ -419,6 +419,14 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       { field: 'date', operator: 'lteq', value: `${year}-12-31` },
     ]);
     const entries = await fetchAllPages('/ledger_entries', apiKey, { filter });
+
+    // Log la structure de la première entrée pour diagnostiquer le mapping
+    if (entries.length > 0) {
+      console.log('[PENNYLANE] Structure première entrée GL :', JSON.stringify(entries[0], null, 2));
+      console.log('[PENNYLANE] Clés disponibles :', Object.keys(entries[0]).join(', '));
+    }
+    console.log('[PENNYLANE] Total entrées récupérées :', entries.length);
+
     await client.query('BEGIN');
 
     const exResult = await client.query(
@@ -446,22 +454,46 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
       for (const entry of batch) {
         const entryDate = entry.date || entry.lettering_date || null;
-        const debit = parseFloat(entry.debit) || 0;
-        const credit = parseFloat(entry.credit) || 0;
+
+        // Pennylane v2 : les montants peuvent être dans différents formats
+        let debit = 0, credit = 0;
+        if (entry.debit != null && entry.credit != null) {
+          debit = parseFloat(entry.debit) || 0;
+          credit = parseFloat(entry.credit) || 0;
+        } else if (entry.debit_amount != null || entry.credit_amount != null) {
+          debit = parseFloat(entry.debit_amount) || 0;
+          credit = parseFloat(entry.credit_amount) || 0;
+        } else if (entry.amount != null || entry.currency_amount != null) {
+          // Montant unique : positif = débit, négatif = crédit
+          const amount = parseFloat(entry.currency_amount ?? entry.amount) || 0;
+          if (amount >= 0) { debit = amount; } else { credit = Math.abs(amount); }
+        }
         const balance = debit - credit;
+
+        // Pennylane v2 : le numéro de compte peut être dans plan_item ou account
+        const accountNumber = entry.account_number || entry.account
+          || (entry.plan_item && (entry.plan_item.number || entry.plan_item.account_number))
+          || null;
+        const accountLabel = entry.account_name || entry.account_label
+          || (entry.plan_item && (entry.plan_item.label || entry.plan_item.name))
+          || null;
+        const journalCode = entry.journal_code || entry.journal
+          || (typeof entry.journal === 'object' && entry.journal?.code)
+          || null;
 
         placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
         values.push(
           exerciseId,
           entry.id ? String(entry.id) : null,
           entryDate,
-          entry.journal_code || entry.journal || null,
-          entry.account_number || entry.account || null,
-          entry.account_name || entry.account_label || null,
+          journalCode,
+          accountNumber,
+          accountLabel,
           entry.label || entry.piece_label || null,
-          entry.line_label || entry.description || null,
+          entry.line_label || entry.description || entry.wording || null,
           entry.invoice_number || entry.document_number || null,
-          entry.third_party || entry.customer_name || entry.supplier_name || null,
+          entry.third_party || entry.customer_name || entry.supplier_name
+            || (entry.third_party_name) || null,
           entry.analytical_reference || entry.analytical_code || null,
           entry.currency || 'EUR',
           debit,

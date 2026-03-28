@@ -58,6 +58,56 @@ async function getOrCreateExercise(year) {
 }
 
 // ══════════════════════════════════════════
+// DIAGNOSTIC — Vérifier les données importées
+// ══════════════════════════════════════════
+
+router.get('/diagnostic/:year', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+
+    const exercise = await pool.query('SELECT * FROM financial_exercises WHERE year = $1', [year]);
+    if (exercise.rows.length === 0) return res.json({ error: 'Aucun exercice pour ' + year, exercises: [] });
+
+    const exId = exercise.rows[0].id;
+
+    const counts = await pool.query(`
+      SELECT COUNT(*) as total,
+        SUM(debit) as sum_debit, SUM(credit) as sum_credit,
+        COUNT(CASE WHEN account IS NOT NULL THEN 1 END) as with_account,
+        COUNT(CASE WHEN account LIKE '6%' THEN 1 END) as class6,
+        COUNT(CASE WHEN account LIKE '7%' THEN 1 END) as class7,
+        COUNT(CASE WHEN account LIKE '5%' THEN 1 END) as class5,
+        COUNT(CASE WHEN source = 'api' THEN 1 END) as from_api,
+        COUNT(CASE WHEN source = 'file' THEN 1 END) as from_file
+      FROM financial_gl_entries WHERE exercise_id = $1
+    `, [exId]);
+
+    const sample = await pool.query(
+      'SELECT id, account, account_label, debit, credit, date, source, journal FROM financial_gl_entries WHERE exercise_id = $1 LIMIT 10',
+      [exId]
+    );
+
+    const accountClasses = await pool.query(`
+      SELECT SUBSTRING(account, 1, 1) as class, COUNT(*) as count,
+             SUM(debit) as debit, SUM(credit) as credit
+      FROM financial_gl_entries WHERE exercise_id = $1 AND account IS NOT NULL
+      GROUP BY SUBSTRING(account, 1, 1) ORDER BY class
+    `, [exId]);
+
+    res.json({
+      year,
+      exercise: exercise.rows[0],
+      counts: counts.rows[0],
+      account_classes: accountClasses.rows,
+      sample: sample.rows,
+    });
+  } catch (err) {
+    console.error('[FINANCE] Erreur diagnostic :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════
 // EXERCISES
 // ══════════════════════════════════════════
 
