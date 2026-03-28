@@ -2134,6 +2134,7 @@ async function initDatabase() {
       { col: 'tare_weight_kg', def: "DOUBLE PRECISION" },
       { col: 'next_maintenance', def: "DATE" },
       { col: 'insurance_expiry', def: "DATE" },
+      { col: 'assigned_driver_id', def: "INTEGER REFERENCES employees(id) ON DELETE SET NULL" },
     ];
     for (const m of vehicleMigrations) {
       await client.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS ${m.col} ${m.def}`);

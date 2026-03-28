@@ -288,7 +288,10 @@ router.use(autoLogActivity('vehicle'));
 router.get('/', async (req, res) => {
   try {
     const { status, team_id } = req.query;
-    let query = 'SELECT v.*, t.name as team_name FROM vehicles v LEFT JOIN teams t ON v.team_id = t.id WHERE 1=1';
+    let query = `SELECT v.*, t.name as team_name,
+       CONCAT(e.first_name, ' ', e.last_name) as assigned_driver_name
+       FROM vehicles v LEFT JOIN teams t ON v.team_id = t.id
+       LEFT JOIN employees e ON v.assigned_driver_id = e.id WHERE 1=1`;
     const params = [];
 
     if (status) { params.push(status); query += ` AND v.status = $${params.length}`; }
@@ -357,6 +360,36 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[VEHICLES] Erreur modification :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/vehicles/:id/assign-driver — Affecter un chauffeur à un véhicule (lien simple)
+router.put('/:id/assign-driver', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { employee_id } = req.body; // null pour désaffecter
+
+    // Si on affecte un chauffeur, vérifier qu'il n'est pas déjà affecté à un autre véhicule
+    if (employee_id) {
+      const existing = await pool.query(
+        'SELECT id, registration FROM vehicles WHERE assigned_driver_id = $1 AND id != $2',
+        [employee_id, req.params.id]
+      );
+      if (existing.rows.length > 0) {
+        return res.status(409).json({
+          error: `Ce chauffeur est déjà affecté au véhicule ${existing.rows[0].registration}`
+        });
+      }
+    }
+
+    const result = await pool.query(
+      'UPDATE vehicles SET assigned_driver_id = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [employee_id || null, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur assign-driver :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

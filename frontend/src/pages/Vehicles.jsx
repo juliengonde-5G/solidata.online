@@ -40,6 +40,7 @@ const emptyForm = {
   registration: '', name: '', brand: '', model: '', type: 'utilitaire',
   max_capacity_kg: 3500, tare_weight_kg: '', current_km: 0,
   next_maintenance: '', insurance_expiry: '', team_id: '', status: 'available',
+  assigned_driver_id: '',
 };
 
 export default function Vehicles() {
@@ -69,7 +70,9 @@ export default function Vehicles() {
   const [docForm, setDocForm] = useState({ doc_type: 'autre', title: '', expiry_date: '', notes: '' });
   const [docFile, setDocFile] = useState(null);
 
-  useEffect(() => { loadVehicles(); }, []);
+  const [employees, setEmployees] = useState([]);
+
+  useEffect(() => { loadVehicles(); loadEmployees(); }, []);
   useEffect(() => { if (activeTab === 'maintenance') loadMaintenance(); }, [activeTab]);
 
   const loadVehicles = async () => {
@@ -78,6 +81,13 @@ export default function Vehicles() {
       setVehicles(res.data);
     } catch (err) { console.error(err); }
     setLoading(false);
+  };
+
+  const loadEmployees = async () => {
+    try {
+      const res = await api.get('/employees');
+      setEmployees(res.data);
+    } catch (err) { console.error(err); }
   };
 
   const loadMaintenance = async () => {
@@ -159,6 +169,7 @@ export default function Vehicles() {
       current_km: v.current_km || 0, next_maintenance: v.next_maintenance ? v.next_maintenance.split('T')[0] : '',
       insurance_expiry: v.insurance_expiry ? v.insurance_expiry.split('T')[0] : '',
       team_id: v.team_id || '', status: v.status || 'available',
+      assigned_driver_id: v.assigned_driver_id || '',
     });
     setShowForm(true);
   };
@@ -166,15 +177,28 @@ export default function Vehicles() {
   const saveVehicle = async (e) => {
     e.preventDefault();
     try {
-      const payload = { ...form, tare_weight_kg: form.tare_weight_kg ? parseFloat(form.tare_weight_kg) : null };
+      const { assigned_driver_id, ...rest } = form;
+      const payload = { ...rest, tare_weight_kg: rest.tare_weight_kg ? parseFloat(rest.tare_weight_kg) : null };
+      let vehicleId = editingId;
       if (editingId) {
         await api.put(`/vehicles/${editingId}`, payload);
       } else {
-        await api.post('/vehicles', payload);
+        const res = await api.post('/vehicles', payload);
+        vehicleId = res.data.id;
+      }
+      // Affecter le chauffeur (lien véhicule-chauffeur)
+      if (vehicleId) {
+        await api.put(`/vehicles/${vehicleId}/assign-driver`, {
+          employee_id: assigned_driver_id ? parseInt(assigned_driver_id) : null,
+        });
       }
       setShowForm(false);
       loadVehicles();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      const msg = err.response?.data?.error;
+      if (msg) alert(msg);
+      else console.error(err);
+    }
   };
 
   const addEvent = async (e) => {
@@ -257,6 +281,7 @@ export default function Vehicles() {
                   <p><span className="text-gray-400">Kilométrage :</span> {(v.current_km || 0).toLocaleString('fr-FR')} km</p>
                   {v.next_maintenance && <p><span className="text-gray-400">Proch. maintenance :</span> {new Date(v.next_maintenance).toLocaleDateString('fr-FR')}</p>}
                   {v.insurance_expiry && <p><span className="text-gray-400">Assurance :</span> {new Date(v.insurance_expiry).toLocaleDateString('fr-FR')}</p>}
+                  {v.assigned_driver_name && v.assigned_driver_name.trim() && <p><span className="text-gray-400">Chauffeur :</span> <span className="font-medium text-solidata-green">{v.assigned_driver_name}</span></p>}
                 </div>
               </div>
             ))}
@@ -526,6 +551,15 @@ export default function Vehicles() {
                     <label className="text-xs text-gray-500">Expiration assurance</label>
                     <input type="date" value={form.insurance_expiry} onChange={e => setForm({ ...form, insurance_expiry: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Chauffeur attitré</label>
+                  <select value={form.assigned_driver_id} onChange={e => setForm({ ...form, assigned_driver_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                    <option value="">— Aucun —</option>
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
               <div className="flex gap-2 mt-4">

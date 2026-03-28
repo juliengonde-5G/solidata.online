@@ -25,6 +25,9 @@ export default function VehicleSelect() {
         navigate('/tour-map');
         return;
       }
+      // Pré-sélectionner le véhicule attitré du chauffeur
+      const assigned = res.data.find(t => t.is_assigned_vehicle);
+      if (assigned) setSelectedTour(assigned);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -109,7 +112,12 @@ export default function VehicleSelect() {
                     {tour.is_free_vehicle ? '\u{1F697}' : '\u{1F69B}'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-gray-900 text-lg">{tour.registration || 'Vehicule'}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-gray-900 text-lg">{tour.registration || 'Vehicule'}</p>
+                      {tour.is_assigned_vehicle && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Mon véhicule</span>
+                      )}
+                    </div>
                     {tour.vehicle_name && <p className="text-sm text-gray-600">{tour.vehicle_name}</p>}
                     <p className="text-sm text-gray-500 mt-1">
                       {tour.is_free_vehicle ? (
