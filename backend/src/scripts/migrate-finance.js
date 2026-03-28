@@ -29,19 +29,19 @@ async function migrateFinance() {
       CREATE TABLE IF NOT EXISTS financial_gl_entries (
         id SERIAL PRIMARY KEY,
         exercise_id INTEGER REFERENCES financial_exercises(id) ON DELETE CASCADE,
-        line_id VARCHAR(50),
+        line_id VARCHAR(100),
         date DATE,
-        journal VARCHAR(20),
-        account VARCHAR(20),
-        account_label VARCHAR(255),
+        journal VARCHAR(50),
+        account VARCHAR(50),
+        account_label VARCHAR(500),
         vat_rate DECIMAL(5,2),
-        piece_label VARCHAR(255),
-        line_label VARCHAR(500),
-        invoice_number VARCHAR(100),
-        third_party VARCHAR(255),
-        family_category VARCHAR(100),
-        category VARCHAR(255),
-        analytical_code VARCHAR(100),
+        piece_label VARCHAR(500),
+        line_label VARCHAR(1000),
+        invoice_number VARCHAR(200),
+        third_party VARCHAR(500),
+        family_category VARCHAR(200),
+        category VARCHAR(500),
+        analytical_code VARCHAR(200),
         currency VARCHAR(10) DEFAULT 'EUR',
         exchange_rate DECIMAL(10,4) DEFAULT 1,
         debit DECIMAL(15,2) DEFAULT 0,
@@ -154,6 +154,27 @@ async function migrateFinance() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_fin_budget_exercise ON financial_budgets(exercise_id)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_fin_ops_exercise ON financial_operational_data(exercise_id)');
     console.log('[MIGRATE-FINANCE] Index créés ✓');
+
+    // ══════════════════════════════════════════
+    // MIGRATION : Élargir colonnes GL si trop courtes (Pennylane)
+    // ══════════════════════════════════════════
+    const glWidenings = [
+      { col: 'line_id', def: 'VARCHAR(100)' },
+      { col: 'journal', def: 'VARCHAR(50)' },
+      { col: 'account', def: 'VARCHAR(50)' },
+      { col: 'account_label', def: 'VARCHAR(500)' },
+      { col: 'piece_label', def: 'VARCHAR(500)' },
+      { col: 'line_label', def: 'VARCHAR(1000)' },
+      { col: 'invoice_number', def: 'VARCHAR(200)' },
+      { col: 'third_party', def: 'VARCHAR(500)' },
+      { col: 'family_category', def: 'VARCHAR(200)' },
+      { col: 'category', def: 'VARCHAR(500)' },
+      { col: 'analytical_code', def: 'VARCHAR(200)' },
+    ];
+    for (const w of glWidenings) {
+      await client.query(`ALTER TABLE financial_gl_entries ALTER COLUMN ${w.col} TYPE ${w.def}`);
+    }
+    console.log('[MIGRATE-FINANCE] Colonnes GL élargies ✓');
 
     // ══════════════════════════════════════════
     // DONNEES PAR DEFAUT

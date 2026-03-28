@@ -621,51 +621,32 @@ router.post('/sync/transactions', authorize('ADMIN', 'MANAGER'), async (req, res
 // SYNCHRONISATION — BALANCES COMPTABLES (lecture seule)
 // ══════════════════════════════════════════
 
-// GET /api/pennylane/sync/balances — Récupérer la balance des comptes depuis Pennylane
+// GET /api/pennylane/sync/balances — Balance des comptes calculée depuis le GL importé en base
 router.get('/sync/balances', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { apiKey } = await getActiveApiKey();
     const year = parseInt(req.query.year) || new Date().getFullYear();
 
-    // Essayer d'abord /trial_balance (endpoint dédié v2), sinon fallback /ledger_accounts
-    let accounts = [];
-    try {
-      const tbResult = await pennylaneRequest('GET', `/trial_balance?start_date=${year}-01-01&end_date=${year}-12-31`, apiKey);
-      if (tbResult.status === 200) {
-        const tbData = Array.isArray(tbResult.data) ? tbResult.data
-          : tbResult.data?.items || tbResult.data?.trial_balance || tbResult.data?.data || [];
-        accounts = tbData.map(row => ({
-          number: row.account_number || row.number || '',
-          label: row.account_label || row.label || row.name || '',
-          debit: parseFloat(row.debit) || 0,
-          credit: parseFloat(row.credit) || 0,
-        }));
-      }
-    } catch (tbErr) {
-      console.log('[PENNYLANE] trial_balance non disponible, fallback ledger_accounts :', tbErr.message);
-    }
+    // Calculer les balances depuis le GL importé en base (source fiable)
+    const result = await pool.query(`
+      SELECT g.account as account_number,
+             MAX(g.account_label) as account_label,
+             ROUND(SUM(g.debit)::numeric, 2) as debit,
+             ROUND(SUM(g.credit)::numeric, 2) as credit,
+             ROUND(SUM(g.debit - g.credit)::numeric, 2) as balance
+      FROM financial_gl_entries g
+      JOIN financial_exercises e ON g.exercise_id = e.id
+      WHERE e.year = $1 AND g.account IS NOT NULL
+      GROUP BY g.account
+      ORDER BY g.account
+    `, [year]);
 
-    // Fallback : comptes du plan comptable
-    if (accounts.length === 0) {
-      const raw = await fetchAllPages('/ledger_accounts', apiKey);
-      accounts = raw.map(acc => ({
-        number: acc.number || acc.account_number || '',
-        label: acc.name || acc.label || '',
-        debit: parseFloat(acc.debit_total || acc.debit || acc.debit_amount) || 0,
-        credit: parseFloat(acc.credit_total || acc.credit || acc.credit_amount) || 0,
-      }));
-    }
-
-    // Formater
-    const balances = accounts.map(acc => ({
-      account_number: acc.number,
-      account_label: acc.label,
-      debit: acc.debit,
-      credit: acc.credit,
-      balance: acc.debit - acc.credit,
-      account_class: acc.number.charAt(0) || '',
+    const balances = result.rows.map(acc => ({
+      ...acc,
+      debit: parseFloat(acc.debit) || 0,
+      credit: parseFloat(acc.credit) || 0,
+      balance: parseFloat(acc.balance) || 0,
+      account_class: (acc.account_number || '').charAt(0),
     }));
-    balances.sort((a, b) => a.account_number.localeCompare(b.account_number));
 
     const totals = balances.reduce((t, b) => ({ debit: t.debit + b.debit, credit: t.credit + b.credit }), { debit: 0, credit: 0 });
 

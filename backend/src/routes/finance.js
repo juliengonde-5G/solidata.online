@@ -319,6 +319,112 @@ router.post('/import/budget', upload.single('file'), async (req, res) => {
 });
 
 // ══════════════════════════════════════════
+// TRESORERIE — Données structurées pour la page trésorerie
+// ══════════════════════════════════════════
+
+router.get('/gl/:year/tresorerie', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+    const MONTHS_FR = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
+
+    // Toutes les écritures des comptes 512 (banque/trésorerie)
+    const r = await pool.query(`
+      SELECT g.date, g.account, g.account_label, g.third_party, g.piece_label, g.line_label,
+             g.debit, g.credit, g.journal
+      FROM financial_gl_entries g
+      JOIN financial_exercises e ON g.exercise_id = e.id
+      WHERE e.year = $1 AND g.account LIKE '512%'
+      ORDER BY g.date, g.id
+    `, [year]);
+
+    const entries = r.rows;
+
+    // Mensuel : encaissements (debit), décaissements (credit), solde cumulé
+    const monthly = Array.from({ length: 12 }, () => ({ encaissements: 0, decaissements: 0, solde: 0 }));
+    let cumul = 0;
+
+    for (const e of entries) {
+      if (!e.date) continue;
+      const m = new Date(e.date).getMonth();
+      const debit = parseFloat(e.debit) || 0;
+      const credit = parseFloat(e.credit) || 0;
+      monthly[m].encaissements += debit;
+      monthly[m].decaissements += credit;
+    }
+
+    for (let i = 0; i < 12; i++) {
+      cumul += monthly[i].encaissements - monthly[i].decaissements;
+      monthly[i].solde = Math.round(cumul * 100) / 100;
+      monthly[i].encaissements = Math.round(monthly[i].encaissements * 100) / 100;
+      monthly[i].decaissements = Math.round(monthly[i].decaissements * 100) / 100;
+    }
+
+    // KPIs
+    const totalEncaissements = monthly.reduce((s, m) => s + m.encaissements, 0);
+    const totalDecaissements = monthly.reduce((s, m) => s + m.decaissements, 0);
+    const now = new Date();
+    const currentMonth = now.getFullYear() === year ? now.getMonth() : 11;
+    const position = monthly[currentMonth]?.solde || 0;
+    const prevPosition = currentMonth > 0 ? monthly[currentMonth - 1]?.solde || 0 : 0;
+
+    // Waterfall
+    const waterfall = [
+      { label: 'Solde initial', value: 0, invisible: 0, type: 'total' },
+    ];
+    for (let i = 0; i <= currentMonth; i++) {
+      const net = monthly[i].encaissements - monthly[i].decaissements;
+      waterfall.push({
+        label: MONTHS_FR[i].substring(0, 3),
+        value: Math.round(net),
+        invisible: Math.max(0, Math.round(waterfall[waterfall.length - 1].invisible + (waterfall[waterfall.length - 1].value > 0 ? waterfall[waterfall.length - 1].value : 0) + (net < 0 ? net : 0))),
+        type: net >= 0 ? 'positive' : 'negative',
+      });
+    }
+    waterfall.push({ label: 'Position', value: Math.round(position), invisible: 0, type: 'total' });
+
+    // Cash flow par tiers (top 10)
+    const byThirdParty = {};
+    for (const e of entries) {
+      const key = e.third_party || e.piece_label || 'Autres';
+      if (!byThirdParty[key]) byThirdParty[key] = Array.from({ length: 12 }, () => 0);
+      if (!e.date) continue;
+      const m = new Date(e.date).getMonth();
+      byThirdParty[key][m] += (parseFloat(e.debit) || 0) - (parseFloat(e.credit) || 0);
+    }
+
+    const cashFlow = Object.entries(byThirdParty)
+      .map(([label, months]) => ({
+        key: label,
+        label,
+        months: months.map(v => Math.round(v * 100) / 100),
+        lines: [],
+      }))
+      .sort((a, b) => {
+        const totalA = a.months.reduce((s, v) => s + Math.abs(v), 0);
+        const totalB = b.months.reduce((s, v) => s + Math.abs(v), 0);
+        return totalB - totalA;
+      })
+      .slice(0, 20);
+
+    res.json({
+      kpis: {
+        position: Math.round(position * 100) / 100,
+        encaissements: Math.round(totalEncaissements * 100) / 100,
+        decaissements: Math.round(totalDecaissements * 100) / 100,
+        variation: Math.round((totalEncaissements - totalDecaissements) * 100) / 100,
+        position_trend: prevPosition !== 0 ? Math.round((position - prevPosition) / Math.abs(prevPosition) * 100) : 0,
+      },
+      monthly,
+      waterfall,
+      cash_flow: cashFlow,
+    });
+  } catch (err) {
+    console.error('[FINANCE] Erreur trésorerie :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
 // GL ENTRIES (READ)
 // ══════════════════════════════════════════
 

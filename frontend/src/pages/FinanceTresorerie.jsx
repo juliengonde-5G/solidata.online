@@ -34,7 +34,7 @@ export default function FinanceTresorerie() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get(`/finance/gl/${year}`, { params: { account: '512' } });
+      const res = await api.get(`/finance/gl/${year}/tresorerie`);
       setData(res.data);
     } catch (err) {
       console.error('Erreur chargement tresorerie:', err);
