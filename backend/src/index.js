@@ -300,6 +300,13 @@ async function initOnStartup() {
         await migrateExutoires();
         logger.info('Migration Exutoires vérifiée');
       } catch (e) { logger.warn('Migration Exutoires warning', { error: e.message }); }
+
+      // Migration module Finance (idempotent)
+      try {
+        const { migrateFinance } = require('./scripts/migrate-finance');
+        await migrateFinance();
+        logger.info('Migration Finance vérifiée');
+      } catch (e) { logger.warn('Migration Finance warning', { error: e.message }); }
     }
 
     // Seed CAV si la table est vide
