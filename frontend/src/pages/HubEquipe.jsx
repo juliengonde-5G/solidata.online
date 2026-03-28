@@ -21,15 +21,24 @@ export default function HubEquipe() {
       const employees = Array.isArray(employeesRes.data) ? employeesRes.data : (employeesRes.data?.employees || []);
       const insertions = Array.isArray(insertionRes.data) ? insertionRes.data : (insertionRes.data?.diagnostics || []);
       const activeInsertions = insertions.filter(i => i.statut === 'actif' || i.status === 'active' || !i.date_sortie);
+      // Calculer la progression moyenne des parcours insertion
+      let progressionMoyenne = '—';
+      if (insertions.length > 0) {
+        const total = insertions.reduce((sum, ins) => {
+          const p = ins.progression ?? ins.progress ?? 0;
+          return sum + (typeof p === 'number' ? p : 0);
+        }, 0);
+        progressionMoyenne = `${Math.round(total / insertions.length)}%`;
+      }
       setStats({
         collaborateurs: employees.length,
         heuresMois: '—',
         parcoursActifs: activeInsertions.length || insertions.length,
-        competences: '—',
+        progressionInsertion: progressionMoyenne,
       });
     } catch (err) {
       console.error('Erreur chargement stats équipe:', err);
-      setStats({ collaborateurs: 0, heuresMois: '—', parcoursActifs: 0, competences: '—' });
+      setStats({ collaborateurs: 0, heuresMois: '—', parcoursActifs: 0, progressionInsertion: '—' });
     }
     setLoading(false);
   };
@@ -38,7 +47,7 @@ export default function HubEquipe() {
     { title: 'Collaborateurs actifs', value: loading ? '—' : (stats?.collaborateurs ?? 0).toLocaleString('fr-FR'), icon: IconTeam, accent: 'primary' },
     { title: 'Heures ce mois', value: loading ? '—' : stats?.heuresMois, icon: IconClock, accent: 'slate' },
     { title: 'Parcours insertion actifs', value: loading ? '—' : (stats?.parcoursActifs ?? 0).toLocaleString('fr-FR'), icon: IconHeart, accent: 'primary' },
-    { title: 'Compétences validées', value: loading ? '—' : stats?.competences, icon: IconStar, accent: 'amber' },
+    { title: 'Progression insertion', value: loading ? '—' : stats?.progressionInsertion, icon: IconStar, accent: 'amber' },
   ];
 
   const cards = [

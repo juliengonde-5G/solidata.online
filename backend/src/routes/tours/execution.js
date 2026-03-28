@@ -182,10 +182,9 @@ module.exports = function createExecutionRouter(upload) {
 
       if (result.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
 
-      // Remettre le véhicule en available si terminé
+      // Actions post-tournée si terminé
       if (status === 'completed' || status === 'cancelled') {
         const tour = result.rows[0];
-        await pool.query("UPDATE vehicles SET status = 'available' WHERE id = $1", [tour.vehicle_id]);
 
         // Mettre à jour le tonnage dans l'historique si complété
         if (status === 'completed' && tour.total_weight_kg > 0) {

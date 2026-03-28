@@ -281,6 +281,24 @@ const uploadVehicleDoc = multer({
   }
 })();
 
+// GET /api/vehicles/available — Liste des véhicules disponibles (endpoint public pour login mobile)
+router.get('/available', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT v.id, v.registration, v.name, v.status,
+             CONCAT(e.first_name, ' ', e.last_name) as driver_name
+      FROM vehicles v
+      LEFT JOIN employees e ON e.id = v.assigned_driver_id
+      WHERE v.status = 'available'
+      ORDER BY v.name, v.registration
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur available:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 router.use(authenticate);
 router.use(autoLogActivity('vehicle'));
 

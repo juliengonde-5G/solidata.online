@@ -60,11 +60,12 @@ export default function ReportingRH() {
         </div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <KPICard label="Collaborateurs actifs" value={totalEmployees} icon="🏢" color="text-purple-600" />
           <KPICard label="Equipes" value={teams.length} icon="👥" color="text-blue-600" />
           <KPICard label="Candidatures totales" value={candidates.length} icon="📋" color="text-orange-600" />
           <KPICard label="Recrutes" value={candidateStatuses['recruited'] || 0} icon="✅" color="text-solidata-green" />
+          <KPICard label="Absentéisme" value="—" icon="📊" color="text-red-600" />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

@@ -8,7 +8,7 @@ const express = require('express');
 const router = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
 const pool = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -462,6 +462,45 @@ router.get('/suggestions', authenticate, async (req, res) => {
   }
 
   res.json({ suggestions: baseSuggestions.slice(0, 8) });
+});
+
+// GET /api/chat/alerts/cav-uncollected — CAV non ramassés alors que prévus en tournée
+router.get('/alerts/cav-uncollected', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT tc.cav_id, c.name as cav_name, c.commune, t.id as tour_id, t.date,
+             v.registration as vehicle
+      FROM tour_cav tc
+      JOIN tours t ON t.id = tc.tour_id
+      JOIN cav c ON c.id = tc.cav_id
+      LEFT JOIN vehicles v ON v.id = t.vehicle_id
+      WHERE t.date = CURRENT_DATE
+        AND t.status IN ('completed', 'cancelled')
+        AND tc.status != 'collected'
+      ORDER BY c.commune, c.name
+    `);
+    res.json({ alerts: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[ALERTS] Erreur CAV non ramassés:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/chat/alerts/cav-full — CAV avec taux remplissage > 80%
+router.get('/alerts/cav-full', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, commune, address, avg_fill_rate,
+             nb_containers, status
+      FROM cav
+      WHERE status = 'active' AND avg_fill_rate >= 80
+      ORDER BY avg_fill_rate DESC
+    `);
+    res.json({ alerts: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[ALERTS] Erreur CAV pleins:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 module.exports = router;

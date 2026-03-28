@@ -104,10 +104,12 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [kpis, setKpis] = useState(null);
+  const [objectifs, setObjectifs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadDashboard();
+    if (user?.role === 'ADMIN') loadObjectifs();
   }, []);
 
   const loadDashboard = async () => {
@@ -118,6 +120,15 @@ export default function Dashboard() {
       console.error('Erreur chargement dashboard:', err);
     }
     setLoading(false);
+  };
+
+  const loadObjectifs = async () => {
+    try {
+      const res = await api.get('/dashboard/objectifs');
+      setObjectifs(res.data || []);
+    } catch (err) {
+      console.error('Erreur chargement objectifs:', err);
+    }
   };
 
   const getKpiValue = (card) => {
@@ -217,6 +228,7 @@ export default function Dashboard() {
             unit="kg"
             icon={IconTruck}
             color="teal"
+            trend={kpis?.collecte?.trend_7j}
           />
           <KpiTile
             label="Trié ce mois"
@@ -224,6 +236,7 @@ export default function Dashboard() {
             unit="kg"
             icon={IconSort}
             color="emerald"
+            trend={kpis?.production?.trend_7j}
           />
           <KpiTile
             label="Collaborateurs"
@@ -231,6 +244,7 @@ export default function Dashboard() {
             unit="actifs"
             icon={IconTeam}
             color="blue"
+            trend={null}
           />
           <KpiTile
             label="Alertes"
@@ -238,8 +252,24 @@ export default function Dashboard() {
             unit=""
             icon={IconAlert}
             color={alertes.length > 0 ? 'amber' : 'slate'}
+            trend={null}
           />
         </div>
+
+        {/* Objectifs vs Réalisé (jauges) — ADMIN uniquement */}
+        {user?.role === 'ADMIN' && objectifs.length > 0 && (
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+              <IconTarget className="w-5 h-5 text-slate-400" />
+              Objectifs vs Réalisé
+            </h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {objectifs.map((obj) => (
+                <GaugeCard key={obj.id} objectif={obj} />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Grille des modules */}
         <div>
@@ -369,10 +399,47 @@ function getQuickActions(role) {
 }
 
 // ══════════════════════════════════════════
+// Sparkline component
+// ══════════════════════════════════════════
+
+function Sparkline({ data, color }) {
+  if (!data || data.length < 2) return null;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const w = 120, h = 28, pad = 2;
+  const points = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - 2 * pad);
+    const y = h - pad - ((v - min) / range) * (h - 2 * pad);
+    return `${x},${y}`;
+  }).join(' ');
+
+  const strokeColor = {
+    teal: '#0D9488', emerald: '#059669', blue: '#2563EB',
+    amber: '#D97706', slate: '#64748B', red: '#DC2626',
+  }[color] || '#0D9488';
+
+  const lastVal = data[data.length - 1];
+  const prevVal = data[data.length - 2];
+  const isUp = lastVal >= prevVal;
+
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <svg width={w} height={h} className="flex-shrink-0">
+        <polyline points={points} fill="none" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />
+      </svg>
+      <span className={`text-xs font-medium ${isUp ? 'text-emerald-600' : 'text-red-500'}`}>
+        {isUp ? '\u2191' : '\u2193'}
+      </span>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
 // KPI Tile component
 // ══════════════════════════════════════════
 
-function KpiTile({ label, value, unit, icon: Icon, color }) {
+function KpiTile({ label, value, unit, icon: Icon, color, trend }) {
   const colorStyles = {
     teal: 'bg-teal-50 text-teal-600',
     emerald: 'bg-emerald-50 text-emerald-600',
@@ -394,6 +461,52 @@ function KpiTile({ label, value, unit, icon: Icon, color }) {
         <span className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">{value}</span>
         {unit && <span className="text-xs text-slate-400">{unit}</span>}
       </div>
+      {trend && trend.length > 1 && <Sparkline data={trend} color={color} />}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
+// Gauge Card — Jauge circulaire objectif vs réalisé
+// ══════════════════════════════════════════
+
+function GaugeCard({ objectif }) {
+  const { indicateur, unite, periode, valeur_cible, realise, pourcentage } = objectif;
+  const radius = 36;
+  const stroke = 6;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (pourcentage / 100) * circumference;
+
+  const gaugeColor = pourcentage >= 80 ? '#10b981' : pourcentage >= 50 ? '#f59e0b' : '#ef4444';
+  const periodLabel = { mensuel: 'Mois', trimestriel: 'Trim.', annuel: 'Année' }[periode] || periode;
+
+  const fmtVal = (v) => {
+    if (v >= 1000) return `${(v / 1000).toFixed(1)}t`;
+    return v.toLocaleString('fr-FR');
+  };
+
+  return (
+    <div className="card-modern p-4 flex flex-col items-center">
+      <div className="relative w-20 h-20 mb-2">
+        <svg className="w-20 h-20 -rotate-90" viewBox="0 0 80 80">
+          <circle cx="40" cy="40" r={radius} fill="none" stroke="#e2e8f0" strokeWidth={stroke} />
+          <circle
+            cx="40" cy="40" r={radius} fill="none"
+            stroke={gaugeColor} strokeWidth={stroke}
+            strokeDasharray={circumference} strokeDashoffset={offset}
+            strokeLinecap="round"
+            style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-lg font-bold text-slate-800">{pourcentage}%</span>
+        </div>
+      </div>
+      <p className="text-xs font-medium text-slate-700 text-center leading-tight mb-1">{indicateur}</p>
+      <p className="text-xs text-slate-500">
+        {fmtVal(realise)} / {fmtVal(valeur_cible)} {unite}
+      </p>
+      <span className="mt-1 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">{periodLabel}</span>
     </div>
   );
 }
@@ -446,4 +559,7 @@ function IconAlert({ className }) {
 }
 function IconInfo({ className }) {
   return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeWidth={1.8} /><path strokeLinecap="round" strokeWidth={1.8} d="M12 16v-4m0-4h.01" /></svg>;
+}
+function IconTarget({ className }) {
+  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeWidth={1.8} /><circle cx="12" cy="12" r="6" strokeWidth={1.8} /><circle cx="12" cy="12" r="2" strokeWidth={1.8} /></svg>;
 }

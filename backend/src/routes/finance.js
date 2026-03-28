@@ -405,14 +405,14 @@ router.get('/gl/:year/pl', async (req, res) => {
     for (const e of entries) if (e.analytical_code) centresSet.add(e.analytical_code);
     const centres = [...centresSet].sort().map(c => ({ code: c, label: c }));
 
-    // Grouper par "category" (table analytique "Types de dépenses / revenus")
+    // Grouper par code analytique (centre de coût)
     // Sous-lignes = par compte comptable
     const groupMap = {};
     for (const e of entries) {
       const acct = e.account || '';
       const cls = acct.charAt(0);
-      // Le groupe est la catégorie analytique (Types de dépenses / revenus)
-      const key = e.category || e.family_category || `Classe ${cls}`;
+      // Le groupe est le code analytique (centre de coût : Collecte, Tri, etc.)
+      const key = e.analytical_code || 'Non affecté';
       if (!groupMap[key]) {
         groupMap[key] = { key, label: key, class: cls, months: Array.from({ length: 12 }, () => 0), total: 0, lines: {} };
       }
@@ -671,10 +671,10 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     const MONTHS_FR = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
 
     // Toutes les écritures des comptes 512 (banque/trésorerie)
-    // Inclure category (Types de dépenses / revenus) pour le détail par catégorie
+    // Inclure analytical_code pour le regroupement par centre de coût
     const r = await pool.query(`
       SELECT g.date, g.account, g.account_label, g.third_party, g.piece_label, g.line_label,
-             g.debit, g.credit, g.journal, g.category, g.family_category
+             g.debit, g.credit, g.journal, g.category, g.family_category, g.analytical_code
       FROM financial_gl_entries g
       JOIN financial_exercises e ON g.exercise_id = e.id
       WHERE e.year = $1 AND g.account LIKE '512%'
@@ -726,10 +726,10 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     }
     waterfall.push({ label: 'Position', value: Math.round(position), invisible: 0, type: 'total' });
 
-    // Flux par catégorie analytique (Types de dépenses / revenus)
+    // Flux par code analytique (centre de coût)
     const byCategory = {};
     for (const e of entries) {
-      const key = e.category || e.family_category || e.third_party || 'Autres';
+      const key = e.analytical_code || 'Non affecté';
       if (!byCategory[key]) byCategory[key] = Array.from({ length: 12 }, () => 0);
       if (!e.date) continue;
       const m = new Date(e.date).getMonth();
@@ -1340,15 +1340,23 @@ router.get('/controls/:year', async (req, res) => {
 
     // ── Contrôle 6 : Codes analytiques P&L
     const pctNoAnal = plTotal > 0 ? noAnalytical / plTotal : 0;
-    checks.push({ id: 'codes_analytiques', name: 'Codes analytiques P&L', status: noAnalytical === 0 ? 'ok' : pctNoAnal < 0.1 ? 'warning' : 'error',
+    checks.push({ id: 'codes_analytiques', name: 'Codes analytiques P&L', status: noAnalytical === 0 ? 'ok' : 'warning',
       desc: noAnalytical === 0 ? 'Toutes les ecritures P&L ont un code analytique' : noAnalytical + ' / ' + plTotal + ' ecritures P&L sans code analytique (' + (pctNoAnal * 100).toFixed(1) + '%)',
       explanation: 'Le code analytique affecte chaque ecriture a un centre de cout (Collecte, Tri, Frais Generaux). Sans affectation, le calcul du cout complet par activite et la repartition des frais generaux sont impossibles.',
       action: noAnalytical > 0 ? 'Affectez un code analytique (centre de cout) dans Pennylane pour chaque ecriture de charge et de produit.' : undefined,
       values: { noAnalytical, plTotal, nbAnalytiques: parseInt(d.nb_analytiques) || 0 } });
 
-    // ── Contrôle 7 : Résultat
-    const produits = totalCredit;
-    const charges = totalDebit;
+    // ── Contrôle 7 : Résultat d'exploitation (classe 6 et 7 uniquement)
+    const plResult = await pool.query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN account LIKE '7%' THEN credit - debit ELSE 0 END), 0) as produits,
+        COALESCE(SUM(CASE WHEN account LIKE '6%' THEN debit - credit ELSE 0 END), 0) as charges
+      FROM financial_gl_entries g
+      JOIN financial_exercises e ON g.exercise_id = e.id
+      WHERE e.year = $1 AND (g.account LIKE '6%' OR g.account LIKE '7%')
+    `, [year]);
+    const produits = parseFloat(plResult.rows[0]?.produits) || 0;
+    const charges = parseFloat(plResult.rows[0]?.charges) || 0;
     const resultat = produits - charges;
     checks.push({ id: 'resultat', name: 'Resultat d\'exploitation', status: resultat >= 0 ? 'ok' : 'error',
       desc: resultat >= 0
