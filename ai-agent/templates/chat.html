@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#2D8C4E">
+    <meta name="description" content="SolidataBot — Assistant IA Solidarité Textiles">
+    <title>SolidataBot 🤖</title>
+    <link rel="stylesheet" href="/static/chat.css">
+</head>
+<body>
+    <!-- Skip link accessibilité -->
+    <a href="#chat-input" class="skip-link" aria-label="Aller au champ de message">Aller au chat</a>
+
+    <!-- Header -->
+    <header class="chat-header" role="banner">
+        <div class="header-left">
+            <div class="bot-avatar" aria-hidden="true">🤖</div>
+            <div>
+                <h1>SolidataBot</h1>
+                <span class="status-dot" aria-label="En ligne"></span>
+                <span class="status-text">En ligne</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <button id="btn-theme" class="icon-btn" aria-label="Changer de thème" title="Thème sombre/clair">
+                🌙
+            </button>
+            <button id="btn-clear" class="icon-btn" aria-label="Effacer la conversation" title="Effacer">
+                🗑️
+            </button>
+        </div>
+    </header>
+
+    <!-- Messages zone -->
+    <main id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Historique des messages">
+        <!-- Welcome message -->
+        <div class="message bot-message" role="article">
+            <div class="message-avatar" aria-hidden="true">🤖</div>
+            <div class="message-bubble">
+                <p>Salut ! 👋 Je suis <strong>SolidataBot</strong>, ton assistant Solidarité Textiles.</p>
+                <p>Je peux t'aider avec :</p>
+                <div class="quick-actions" role="group" aria-label="Actions rapides">
+                    <button class="quick-btn" data-msg="Quel est le stock actuel ?" aria-label="Voir le stock">📦 Stock</button>
+                    <button class="quick-btn" data-msg="Quel est mon planning cette semaine ?" aria-label="Voir le planning">📅 Planning</button>
+                    <button class="quick-btn" data-msg="Statistiques de collecte du jour" aria-label="Voir les collectes">🚛 Collecte</button>
+                    <button class="quick-btn" data-msg="Combien d'heures cette semaine ?" aria-label="Voir mes heures">⏰ Heures</button>
+                    <button class="quick-btn" data-msg="Liste des CAV actifs" aria-label="Voir les CAV">📍 CAV</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Typing indicator -->
+    <div id="typing-indicator" class="typing-indicator" hidden aria-hidden="true">
+        <div class="message-avatar" aria-hidden="true">🤖</div>
+        <div class="typing-dots">
+            <span></span><span></span><span></span>
+        </div>
+    </div>
+
+    <!-- Input zone -->
+    <footer class="chat-input-area" role="form" aria-label="Envoyer un message">
+        <div class="input-wrapper">
+            <label for="chat-input" class="sr-only">Ton message</label>
+            <textarea
+                id="chat-input"
+                class="chat-input"
+                placeholder="Écris ton message..."
+                rows="1"
+                maxlength="500"
+                aria-label="Ton message"
+                autocomplete="off"
+            ></textarea>
+            <div class="input-actions">
+                <button id="btn-mic" class="icon-btn mic-btn" aria-label="Dicter un message" title="Micro">
+                    🎤
+                </button>
+                <button id="btn-send" class="icon-btn send-btn" aria-label="Envoyer" title="Envoyer" disabled>
+                    ➤
+                </button>
+            </div>
+        </div>
+        <div id="mic-status" class="mic-status" hidden aria-live="assertive">
+            <span class="mic-pulse"></span> Écoute en cours...
+            <button id="btn-mic-stop" class="icon-btn" aria-label="Arrêter l'écoute">⏹️</button>
+        </div>
+    </footer>
+
+    <!-- TTS audio element -->
+    <div id="tts-controls" class="tts-controls" hidden>
+        <button id="btn-tts-stop" class="icon-btn" aria-label="Arrêter la lecture vocale">🔇 Stop</button>
+    </div>
+
+    <script src="/static/chat.js"></script>
+</body>
+</html>
