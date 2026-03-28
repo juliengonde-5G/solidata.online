@@ -25,7 +25,8 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={<Navigate to="/start" />} />
+          <Route path="/start" element={<Login />} />
           <Route path="/vehicle-select" element={<VehicleSelect />} />
           <Route path="/checklist" element={<Checklist />} />
           <Route path="/tour-map" element={<TourMap />} />
@@ -36,7 +37,7 @@ function App() {
           <Route path="/return-centre" element={<ReturnCentre />} />
           <Route path="/weigh-in" element={<WeighIn />} />
           <Route path="/tour-summary" element={<TourSummary />} />
-          <Route path="*" element={<Navigate to="/login" />} />
+          <Route path="*" element={<Navigate to="/start" />} />
         </Routes>
         <BatteryAlert />
         <SolidataBot />
