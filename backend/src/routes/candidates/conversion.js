@@ -65,6 +65,32 @@ router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, re
       [id, 'hired', 'converted', `Converti en employé #${employee.rows[0].id}`, req.user.id]
     );
 
+    // Créer automatiquement le diagnostic insertion initial (parcours bénéficiaire)
+    const empId = employee.rows[0].id;
+    try {
+      await client.query(
+        `INSERT INTO insertion_diagnostics (employee_id, date_entree, statut,
+         mobilite, sante, finances, famille, linguistique, administratif, numerique,
+         created_by)
+         VALUES ($1, $2, 'actif', 3, 3, 3, 3, 3, 3, 3, $3)
+         ON CONFLICT (employee_id) DO NOTHING`,
+        [empId, contract_start || new Date().toISOString().split('T')[0], req.user.id]
+      );
+      // Créer les jalons M1, M6, M12
+      const startDate = new Date(contract_start || Date.now());
+      for (const [label, months] of [['M1', 1], ['M6', 6], ['M12', 12]]) {
+        const milestoneDate = new Date(startDate);
+        milestoneDate.setMonth(milestoneDate.getMonth() + months);
+        await client.query(
+          `INSERT INTO insertion_milestones (employee_id, label, date_prevue, statut)
+           VALUES ($1, $2, $3, 'a_planifier') ON CONFLICT DO NOTHING`,
+          [empId, label, milestoneDate.toISOString().split('T')[0]]
+        );
+      }
+    } catch (insErr) {
+      console.warn('[CANDIDATES] Insertion auto-diagnostic skipped:', insErr.message);
+    }
+
     await client.query('COMMIT');
 
     res.status(201).json({

@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { startAutoSync, cacheReferenceData } from './services/sync';
 import Login from './pages/Login';
+import BatteryAlert from './components/BatteryAlert';
+import SolidataBot from './components/SolidataBot';
 import VehicleSelect from './pages/VehicleSelect';
 import Checklist from './pages/Checklist';
 import TourMap from './pages/TourMap';
@@ -23,6 +25,12 @@ function ProtectedRoute({ children }) {
   );
   if (!user) return <Navigate to="/login" />;
   return children;
+}
+
+function SolidataBotWrapper() {
+  const { user } = useAuth();
+  if (!user) return null;
+  return <SolidataBot />;
 }
 
 function App() {
@@ -48,6 +56,8 @@ function App() {
           <Route path="/tour-summary" element={<ProtectedRoute><TourSummary /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
+        <BatteryAlert />
+        <SolidataBotWrapper />
       </AuthProvider>
     </BrowserRouter>
   );

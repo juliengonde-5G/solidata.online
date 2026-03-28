@@ -217,6 +217,7 @@ export default function Dashboard() {
             unit="kg"
             icon={IconTruck}
             color="teal"
+            trend={kpis?.collecte?.trend_7j}
           />
           <KpiTile
             label="Trié ce mois"
@@ -224,6 +225,7 @@ export default function Dashboard() {
             unit="kg"
             icon={IconSort}
             color="emerald"
+            trend={kpis?.production?.trend_7j}
           />
           <KpiTile
             label="Collaborateurs"
@@ -231,6 +233,7 @@ export default function Dashboard() {
             unit="actifs"
             icon={IconTeam}
             color="blue"
+            trend={null}
           />
           <KpiTile
             label="Alertes"
@@ -238,6 +241,7 @@ export default function Dashboard() {
             unit=""
             icon={IconAlert}
             color={alertes.length > 0 ? 'amber' : 'slate'}
+            trend={null}
           />
         </div>
 
@@ -369,10 +373,47 @@ function getQuickActions(role) {
 }
 
 // ══════════════════════════════════════════
+// Sparkline component
+// ══════════════════════════════════════════
+
+function Sparkline({ data, color }) {
+  if (!data || data.length < 2) return null;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const w = 120, h = 28, pad = 2;
+  const points = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - 2 * pad);
+    const y = h - pad - ((v - min) / range) * (h - 2 * pad);
+    return `${x},${y}`;
+  }).join(' ');
+
+  const strokeColor = {
+    teal: '#0D9488', emerald: '#059669', blue: '#2563EB',
+    amber: '#D97706', slate: '#64748B', red: '#DC2626',
+  }[color] || '#0D9488';
+
+  const lastVal = data[data.length - 1];
+  const prevVal = data[data.length - 2];
+  const isUp = lastVal >= prevVal;
+
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <svg width={w} height={h} className="flex-shrink-0">
+        <polyline points={points} fill="none" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />
+      </svg>
+      <span className={`text-xs font-medium ${isUp ? 'text-emerald-600' : 'text-red-500'}`}>
+        {isUp ? '\u2191' : '\u2193'}
+      </span>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
 // KPI Tile component
 // ══════════════════════════════════════════
 
-function KpiTile({ label, value, unit, icon: Icon, color }) {
+function KpiTile({ label, value, unit, icon: Icon, color, trend }) {
   const colorStyles = {
     teal: 'bg-teal-50 text-teal-600',
     emerald: 'bg-emerald-50 text-emerald-600',
@@ -394,6 +435,7 @@ function KpiTile({ label, value, unit, icon: Icon, color }) {
         <span className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">{value}</span>
         {unit && <span className="text-xs text-slate-400">{unit}</span>}
       </div>
+      {trend && trend.length > 1 && <Sparkline data={trend} color={color} />}
     </div>
   );
 }

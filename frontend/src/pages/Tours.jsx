@@ -241,7 +241,9 @@ export default function Tours() {
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => setWizardStep(1)} className="flex-1 border rounded-lg py-2 text-sm">Retour</button>
-                    <button onClick={() => setWizardStep(3)} disabled={!wizForm.vehicle_id} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm disabled:opacity-50">Suivant</button>
+                    <button onClick={generateTour} disabled={!wizForm.vehicle_id || generating} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm disabled:opacity-50">
+                      {generating ? 'Génération...' : 'Générer la tournée'}
+                    </button>
                   </div>
                 </div>
               )}

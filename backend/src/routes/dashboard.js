@@ -268,6 +268,26 @@ router.get('/kpis', async (req, res) => {
     const activiteLimitee = activiteRecente.slice(0, 10);
 
     // ══════════════════════════════════════════
+    // Tendances 7 jours (sparklines)
+    // ══════════════════════════════════════════
+    let trendCollecte = [], trendProduction = [];
+    try {
+      const trendC = await pool.query(
+        `SELECT date, COALESCE(SUM(total_weight_kg), 0)::int as val
+         FROM tours WHERE date >= CURRENT_DATE - INTERVAL '7 days' AND status = 'completed'
+         GROUP BY date ORDER BY date`
+      );
+      trendCollecte = trendC.rows.map(r => r.val);
+
+      const trendP = await pool.query(
+        `SELECT date, COALESCE(SUM(poids_kg), 0)::int as val
+         FROM stock_movements WHERE type = 'sortie' AND date >= CURRENT_DATE - INTERVAL '7 days'
+         GROUP BY date ORDER BY date`
+      );
+      trendProduction = trendP.rows.map(r => r.val);
+    } catch (e) { /* trends optionnels */ }
+
+    // ══════════════════════════════════════════
     // Réponse JSON
     // ══════════════════════════════════════════
     const stockTotalKg = parseFloat(stockTotal.rows[0].total) || 0;
@@ -278,11 +298,13 @@ router.get('/kpis', async (req, res) => {
         tours_aujourdhui: parseInt(toursAujourdhui.rows[0].count),
         tours_en_cours: nbToursEnCours,
         cav_actifs: parseInt(cavActifs.rows[0].count),
+        trend_7j: trendCollecte.length >= 2 ? trendCollecte : null,
       },
       production: {
         kg_trie_mois: Math.round(parseFloat(kgTrieMois.rows[0].total) || 0),
         kg_trie_aujourdhui: Math.round(parseFloat(kgTrieAujourdhui.rows[0].total) || 0),
         taux_valorisation: tauxValorisation,
+        trend_7j: trendProduction.length >= 2 ? trendProduction : null,
       },
       rh: {
         employes_actifs: parseInt(employesActifs.rows[0].count),

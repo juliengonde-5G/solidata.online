@@ -24,6 +24,76 @@ function parseExpiry(str) {
   return val * 1000;
 }
 
+// POST /api/auth/driver-start — Mode chauffeur : démarrage par véhicule (sans identifiant)
+router.post('/driver-start', async (req, res) => {
+  try {
+    const { vehicle_id, driver_name } = req.body;
+    if (!vehicle_id) return res.status(400).json({ error: 'Véhicule requis' });
+
+    // Chercher le véhicule et son chauffeur assigné
+    const vRes = await pool.query(
+      `SELECT v.id, v.registration, v.name, v.assigned_driver_id,
+              e.id as emp_id, e.first_name, e.last_name, e.user_id
+       FROM vehicles v
+       LEFT JOIN employees e ON e.id = v.assigned_driver_id
+       WHERE v.id = $1`, [vehicle_id]
+    );
+    if (vRes.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    const vehicle = vRes.rows[0];
+    let userId, employeeId, firstName, lastName;
+
+    if (vehicle.user_id) {
+      // Véhicule a un chauffeur assigné avec compte user
+      userId = vehicle.user_id;
+      employeeId = vehicle.emp_id;
+      firstName = vehicle.first_name;
+      lastName = vehicle.last_name;
+    } else if (vehicle.emp_id) {
+      // Chauffeur assigné mais sans user_id → créer un token générique
+      employeeId = vehicle.emp_id;
+      firstName = vehicle.first_name;
+      lastName = vehicle.last_name;
+      // Utiliser un user_id générique pour le token
+      const genericUser = await pool.query("SELECT id FROM users WHERE username = 'chauffeur' LIMIT 1");
+      userId = genericUser.rows[0]?.id || 1;
+    } else {
+      // Pas de chauffeur assigné → utiliser le compte chauffeur générique
+      const genericUser = await pool.query("SELECT id FROM users WHERE username = 'chauffeur' LIMIT 1");
+      if (genericUser.rows.length === 0) {
+        return res.status(400).json({ error: 'Aucun chauffeur assigné à ce véhicule. Contactez un admin.' });
+      }
+      userId = genericUser.rows[0].id;
+      firstName = driver_name || 'Chauffeur';
+      lastName = vehicle.registration;
+      employeeId = null;
+    }
+
+    const token = jwt.sign(
+      { id: userId, userId, role: 'COLLABORATEUR', username: `driver_${vehicle_id}` },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    res.json({
+      token,
+      refreshToken: null,
+      user: {
+        id: userId,
+        employee_id: employeeId,
+        first_name: firstName,
+        last_name: lastName,
+        role: 'COLLABORATEUR',
+        vehicle_id: vehicle.id,
+        vehicle_registration: vehicle.registration,
+      }
+    });
+  } catch (err) {
+    console.error('[AUTH] Erreur driver-start:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // POST /api/auth/login
 router.post('/login', [
   body('username').notEmpty().withMessage('Nom d\'utilisateur requis'),
