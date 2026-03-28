@@ -330,4 +330,100 @@ router.get('/kpis', async (req, res) => {
   }
 });
 
+// GET /api/dashboard/objectifs — Objectifs vs réalisé (jauges)
+// Retourne les objectifs du mois/trimestre/année en cours avec le réalisé calculé
+router.get('/objectifs', async (req, res) => {
+  try {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const trimestre = Math.ceil(month / 3);
+    const today = now.toISOString().split('T')[0];
+    const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
+    const trimestreStart = `${year}-${String((trimestre - 1) * 3 + 1).padStart(2, '0')}-01`;
+    const yearStart = `${year}-01-01`;
+
+    // Récupérer les objectifs pertinents (mois en cours, trimestre en cours, année)
+    const objResult = await pool.query(`
+      SELECT * FROM periodic_objectives
+      WHERE annee = $1
+        AND (
+          (periode = 'mensuel' AND mois = $2)
+          OR (periode = 'trimestriel' AND trimestre = $3)
+          OR (periode = 'annuel')
+        )
+      ORDER BY domaine, indicateur
+    `, [year, month, trimestre]);
+
+    const objectifs = [];
+
+    for (const obj of objResult.rows) {
+      let realise = 0;
+      const dateDebut = obj.periode === 'mensuel' ? monthStart
+        : obj.periode === 'trimestriel' ? trimestreStart
+        : yearStart;
+
+      // Calculer le réalisé selon le domaine et l'indicateur
+      if (obj.domaine === 'collecte' && obj.indicateur.toLowerCase().includes('tonnage')) {
+        const r = await pool.query(
+          `SELECT COALESCE(SUM(total_weight_kg), 0) as total
+           FROM tours WHERE date >= $1 AND status = 'completed'`,
+          [dateDebut]
+        );
+        realise = parseFloat(r.rows[0].total) || 0;
+
+      } else if (obj.domaine === 'tri' || obj.domaine === 'production') {
+        // Par poste de travail si l'indicateur contient le nom du poste
+        const indicLower = obj.indicateur.toLowerCase();
+        if (indicLower.includes('crackage') || indicLower.includes('tri fin') || indicLower.includes('catégorisation') || indicLower.includes('conditionnement')) {
+          // Chercher dans operation_executions par poste
+          const posteSearch = indicLower.includes('crackage') ? '%crack%'
+            : indicLower.includes('tri fin') ? '%tri fin%'
+            : indicLower.includes('catégorisation') ? '%catégor%'
+            : '%condition%';
+          try {
+            const r = await pool.query(
+              `SELECT COALESCE(SUM(oe.quantity_kg), 0) as total
+               FROM operation_executions oe
+               JOIN operations_tri ot ON ot.id = oe.operation_id
+               WHERE oe.date >= $1 AND LOWER(ot.name) LIKE $2`,
+              [dateDebut, posteSearch]
+            );
+            realise = parseFloat(r.rows[0].total) || 0;
+          } catch { /* table peut ne pas exister */ }
+        } else {
+          // Tonnage trié global
+          const r = await pool.query(
+            `SELECT COALESCE(SUM(kg_entree), 0) as total
+             FROM production_daily WHERE date >= $1`,
+            [dateDebut]
+          );
+          realise = parseFloat(r.rows[0].total) || 0;
+        }
+      }
+
+      const pct = obj.valeur_cible > 0 ? Math.min(Math.round((realise / obj.valeur_cible) * 100), 100) : 0;
+
+      objectifs.push({
+        id: obj.id,
+        domaine: obj.domaine,
+        indicateur: obj.indicateur,
+        unite: obj.unite,
+        periode: obj.periode,
+        mois: obj.mois,
+        trimestre: obj.trimestre,
+        valeur_cible: obj.valeur_cible,
+        realise: Math.round(realise),
+        pourcentage: pct,
+        commentaire: obj.commentaire,
+      });
+    }
+
+    res.json(objectifs);
+  } catch (err) {
+    console.error('[DASHBOARD] Erreur objectifs :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

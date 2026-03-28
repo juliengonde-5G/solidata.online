@@ -103,7 +103,7 @@ export default function FinancePL() {
 
         {/* Tableau P&L */}
         <div className="card-modern p-6">
-          <h3 className="text-base font-semibold text-slate-800 mb-4">Detail par famille comptable</h3>
+          <h3 className="text-base font-semibold text-slate-800 mb-4">Detail par affectation analytique</h3>
 
           {loading ? (
             <div className="flex items-center justify-center py-16"><LoadingSpinner /></div>
