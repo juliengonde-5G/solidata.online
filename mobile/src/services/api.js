@@ -32,7 +32,6 @@ api.interceptors.response.use(
         } catch {
           localStorage.removeItem('mobile_token');
           localStorage.removeItem('mobile_refresh_token');
-          window.location.href = '/login';
         }
       }
     }
