@@ -8,25 +8,20 @@ export default function Login() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
-  const { driverStart, user } = useAuth();
+  const { driverStart } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (user) { navigate('/vehicle-select'); return; }
     loadVehicles();
-  }, [user]);
+  }, []);
 
   const loadVehicles = async () => {
     try {
-      const res = await api.get('/vehicles/available');
-      setVehicles(res.data || []);
-    } catch (err) {
-      // Fallback: charger sans auth (endpoint public)
-      try {
-        const res = await fetch('/api/vehicles/available');
-        const data = await res.json();
-        setVehicles(data || []);
-      } catch { setError('Impossible de charger les véhicules'); }
+      const res = await fetch('/api/vehicles/available');
+      const data = await res.json();
+      setVehicles(data || []);
+    } catch {
+      setError('Impossible de charger les véhicules');
     }
     setLoading(false);
   };
@@ -35,13 +30,17 @@ export default function Login() {
     if (starting) return;
     setStarting(true);
     setError('');
+    // Stocker le véhicule sélectionné pour les pages suivantes
+    localStorage.setItem('selected_vehicle_id', vehicle.id);
+    localStorage.setItem('selected_vehicle_reg', vehicle.registration || vehicle.registration_number);
     try {
+      // Tenter l'auth silencieuse (non bloquant)
       await driverStart(vehicle.id);
-      navigate('/vehicle-select');
-    } catch (err) {
-      setError(err.response?.data?.error || 'Erreur de connexion');
+    } catch {
+      // Continuer sans auth — accès libre
     }
     setStarting(false);
+    navigate('/vehicle-select');
   };
 
   return (
