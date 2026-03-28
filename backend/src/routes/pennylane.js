@@ -122,7 +122,7 @@ async function fetchAllPages(path, apiKey, params = {}) {
     }
     // Pennylane v2 renvoie les données dans un champ selon l'endpoint
     const items = Array.isArray(result.data) ? result.data
-      : result.data?.items || result.data?.ledger_entries || result.data?.transactions || result.data?.ledger_accounts || result.data?.data || [];
+      : result.data?.items || result.data?.ledger_entries || result.data?.ledger_entry_lines || result.data?.transactions || result.data?.ledger_accounts || result.data?.data || [];
     allItems.push(...items);
     // Pagination par curseur : continuer si has_more + next_cursor
     if (result.data?.has_more && result.data?.next_cursor) {
@@ -412,81 +412,26 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       [req.user.id]
     );
 
-    // Récupérer les écritures Pennylane filtrées par année
+    // Récupérer les LIGNES comptables Pennylane filtrées par année
+    // IMPORTANT : Pennylane v2 sépare les entrées (headers) des lignes (détails)
+    // L'endpoint /ledger_entry_lines retourne directement les lignes avec comptes et montants
     const year = parseInt(req.body.year) || new Date().getFullYear();
     const filter = JSON.stringify([
       { field: 'date', operator: 'gteq', value: `${year}-01-01` },
       { field: 'date', operator: 'lteq', value: `${year}-12-31` },
     ]);
 
-    // Pennylane v2 : /ledger_entries retourne les écritures (headers)
-    // Les lignes comptables (avec comptes et montants) sont dans /ledger_entries/:id
-    // ou via le paramètre include=line_items
-    // Stratégie : essayer d'abord avec include, sinon récupérer ligne par ligne
-
-    // Essai 1 : fetchAllPages avec include=line_items
-    let entries = await fetchAllPages('/ledger_entries', apiKey, { filter, include: 'line_items' });
-
-    // Vérifier si les lignes sont incluses dans la réponse
-    const firstEntry = entries[0] || {};
-    const hasLines = firstEntry.line_items || firstEntry.lines || firstEntry.grouped_lines;
-
-    let allLines = [];
-
-    if (hasLines) {
-      // Les lignes sont incluses directement dans chaque entrée
-      for (const entry of entries) {
-        const lines = entry.line_items || entry.lines || entry.grouped_lines || [];
-        for (const line of lines) {
-          allLines.push({ ...line, _entry: entry });
-        }
-      }
-      console.log('[PENNYLANE] Lignes incluses dans les entrées :', allLines.length);
-    } else {
-      // Les lignes ne sont pas incluses — récupérer chaque entrée individuellement
-      console.log('[PENNYLANE] Pas de lignes incluses, récupération individuelle de', entries.length, 'entrées...');
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i];
-        try {
-          const detail = await pennylaneRequest('GET', `/ledger_entries/${entry.id}`, apiKey);
-          if (detail.status === 200) {
-            const entryData = detail.data?.ledger_entry || detail.data;
-            const lines = entryData?.line_items || entryData?.lines || entryData?.grouped_lines || [];
-            if (lines.length > 0) {
-              for (const line of lines) {
-                allLines.push({ ...line, _entry: { ...entry, ...entryData } });
-              }
-            } else {
-              // Pas de sous-lignes : l'entrée elle-même est une ligne
-              allLines.push({ ...entryData, _entry: entry });
-            }
-          }
-        } catch (e) {
-          console.error('[PENNYLANE] Erreur récupération entrée', entry.id, ':', e.message);
-        }
-        // Rate limit Pennylane : 5 req/s
-        if (i % 5 === 4) await new Promise(r => setTimeout(r, 1100));
-      }
-      console.log('[PENNYLANE] Lignes récupérées individuellement :', allLines.length);
-    }
-
-    // Si toujours aucune ligne avec compte, les entrées elles-mêmes sont les lignes
-    if (allLines.length === 0 && entries.length > 0) {
-      allLines = entries;
-      console.log('[PENNYLANE] Fallback : utilisation des entrées brutes comme lignes');
-    }
+    const allLines = await fetchAllPages('/ledger_entry_lines', apiKey, { filter });
 
     // Capturer la structure brute pour diagnostic
-    const sampleRaw = entries.length > 0 ? entries[0] : null;
-    const rawKeys = sampleRaw ? Object.keys(sampleRaw) : [];
     const sampleLine = allLines.length > 0 ? allLines[0] : null;
     const lineKeys = sampleLine ? Object.keys(sampleLine) : [];
 
-    console.log('[PENNYLANE] Structure première entrée GL :', JSON.stringify(sampleRaw, null, 2));
-    if (sampleLine && sampleLine !== sampleRaw) {
+    console.log('[PENNYLANE] Total lignes GL récupérées :', allLines.length);
+    if (sampleLine) {
       console.log('[PENNYLANE] Structure première ligne GL :', JSON.stringify(sampleLine, null, 2));
+      console.log('[PENNYLANE] Clés disponibles :', lineKeys.join(', '));
     }
-    console.log('[PENNYLANE] Total entrées:', entries.length, '/ Total lignes:', allLines.length);
 
     await client.query('BEGIN');
 
@@ -514,53 +459,38 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       let paramIdx = 1;
 
       for (const line of batch) {
-        // La ligne peut avoir un _entry parent avec date, journal, label
-        const parentEntry = line._entry || {};
-        const entryDate = line.date || parentEntry.date || null;
+        const entryDate = line.date || null;
 
-        // Montants : chercher dans tous les formats possibles
-        let debit = 0, credit = 0;
-        if (line.debit != null && line.credit != null) {
-          debit = parseFloat(line.debit) || 0;
-          credit = parseFloat(line.credit) || 0;
-        } else if (line.debit_amount != null || line.credit_amount != null) {
-          debit = parseFloat(line.debit_amount) || 0;
-          credit = parseFloat(line.credit_amount) || 0;
-        } else if (line.amount != null || line.currency_amount != null) {
-          const amount = parseFloat(line.currency_amount ?? line.amount) || 0;
-          if (amount >= 0) { debit = amount; } else { credit = Math.abs(amount); }
-        }
+        // Pennylane v2 ledger_entry_lines : debit et credit sont des strings ("1000.00")
+        const debit = parseFloat(line.debit) || 0;
+        const credit = parseFloat(line.credit) || 0;
         const balance = debit - credit;
 
-        // Numéro de compte : chercher dans tous les formats possibles
-        const accountNumber = line.account_number || line.account
-          || line.plan_item_number
-          || (line.plan_item && (line.plan_item.number || line.plan_item.account_number))
-          || null;
-        const accountLabel = line.account_name || line.account_label
-          || (line.plan_item && (line.plan_item.label || line.plan_item.name))
-          || null;
+        // Pennylane v2 avec X-Use-2026-API-Changes : ledger_account est un objet { id, number, url }
+        // Sans ce header : ledger_account_id est un entier
+        const accountNumber = (line.ledger_account && line.ledger_account.number)
+          || line.plan_item_number || line.account_number || line.account || null;
+        const accountLabel = (line.ledger_account && (line.ledger_account.label || line.ledger_account.name))
+          || line.account_name || line.account_label || null;
 
-        // Journal : depuis la ligne ou l'entrée parent
-        const journal = line.journal_code || line.journal
-          || (typeof line.journal === 'object' && line.journal?.code)
-          || (typeof parentEntry.journal === 'object' && parentEntry.journal?.code)
-          || parentEntry.journal_code || null;
+        // Journal : peut être un objet ou un string
+        const journal = (typeof line.journal === 'object' && line.journal?.code)
+          || line.journal_code || line.journal || null;
 
         placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
         values.push(
           exerciseId,
-          line.id ? String(line.id) : (parentEntry.id ? String(parentEntry.id) : null),
+          line.id ? String(line.id) : null,
           entryDate,
           journal,
           accountNumber,
           accountLabel,
-          line.label || parentEntry.label || null,
-          line.line_label || line.description || line.wording || null,
-          line.invoice_number || line.document_number || parentEntry.invoice_number || null,
-          line.third_party || line.customer_name || line.supplier_name || line.third_party_name || null,
+          line.label || null,
+          line.document_label || line.description || null,
+          line.invoice_number || line.document_number || null,
+          line.third_party || line.third_party_name || line.thirdparty_name || null,
           line.analytical_reference || line.analytical_code || null,
-          line.currency || parentEntry.currency || 'EUR',
+          line.currency || 'EUR',
           debit,
           credit,
           balance,
@@ -611,13 +541,9 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       year,
       diagnostic: {
         en_base: diagData,
-        total_entrees_pennylane: entries.length,
-        total_lignes_extraites: allLines.length,
-        lignes_incluses_dans_entree: hasLines ? true : false,
-        cles_entree: rawKeys,
+        total_lignes_pennylane: allLines.length,
         cles_ligne: lineKeys,
-        exemple_entree: sampleRaw,
-        exemple_ligne: sampleLine !== sampleRaw ? sampleLine : null,
+        exemple_ligne: sampleLine,
       },
     });
   } catch (err) {
