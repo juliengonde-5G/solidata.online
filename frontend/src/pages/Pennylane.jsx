@@ -86,11 +86,14 @@ export default function Pennylane() {
     setSyncing(false);
   };
 
+  const [glDiag, setGlDiag] = useState(null);
+
   const syncGL = async () => {
     setSyncingGL(true);
+    setGlDiag(null);
     try {
       const res = await api.post('/pennylane/sync/gl');
-      alert(res.data.message);
+      setGlDiag(res.data);
       loadAll();
     } catch (err) {
       alert(err.response?.data?.error || 'Erreur import GL analytique');
@@ -281,6 +284,34 @@ export default function Pennylane() {
               <p className={`text-sm font-medium ${testResult.connected ? 'text-green-700' : 'text-red-700'}`}>
                 {testResult.connected ? `Connexion reussie — ${testResult.company || testResult.message}` : `Echec — ${testResult.error}`}
               </p>
+            </div>
+          )}
+
+          {/* GL Diagnostic */}
+          {glDiag && (
+            <div className="mt-4 p-4 rounded-lg bg-slate-50 border border-slate-200 space-y-3">
+              <p className="text-sm font-medium text-slate-800">{glDiag.message}</p>
+              {glDiag.diagnostic && (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white rounded p-2"><span className="text-slate-500">Lignes en base</span><p className="font-bold">{glDiag.diagnostic.en_base?.total || 0}</p></div>
+                    <div className="bg-white rounded p-2"><span className="text-slate-500">Total Debit</span><p className="font-bold">{formatAmount(glDiag.diagnostic.en_base?.sum_debit)}</p></div>
+                    <div className="bg-white rounded p-2"><span className="text-slate-500">Total Credit</span><p className="font-bold">{formatAmount(glDiag.diagnostic.en_base?.sum_credit)}</p></div>
+                    <div className="bg-white rounded p-2"><span className="text-slate-500">Montants a 0</span><p className="font-bold text-red-600">{glDiag.diagnostic.en_base?.zero_amounts || 0}</p></div>
+                    <div className="bg-white rounded p-2"><span className="text-slate-500">Classe 6 (charges)</span><p className="font-bold">{glDiag.diagnostic.en_base?.class6 || 0}</p></div>
+                    <div className="bg-white rounded p-2"><span className="text-slate-500">Classe 7 (produits)</span><p className="font-bold">{glDiag.diagnostic.en_base?.class7 || 0}</p></div>
+                    <div className="bg-white rounded p-2"><span className="text-slate-500">Sans compte</span><p className="font-bold text-red-600">{glDiag.diagnostic.en_base?.no_account || 0}</p></div>
+                  </div>
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-slate-500 hover:text-slate-700">Voir structure brute Pennylane</summary>
+                    <pre className="mt-2 bg-white p-3 rounded border overflow-x-auto text-[10px] leading-relaxed">
+                      {JSON.stringify(glDiag.diagnostic.exemple_brut, null, 2)}
+                    </pre>
+                    <p className="mt-1 text-slate-400">Cles disponibles : {(glDiag.diagnostic.cles_pennylane || []).join(', ')}</p>
+                  </details>
+                </>
+              )}
+              <button onClick={() => setGlDiag(null)} className="text-xs text-slate-400 hover:text-slate-600 underline">Fermer</button>
             </div>
           )}
         </div>

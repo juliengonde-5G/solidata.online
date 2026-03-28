@@ -420,6 +420,10 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     ]);
     const entries = await fetchAllPages('/ledger_entries', apiKey, { filter });
 
+    // Capturer la structure brute de la première entrée pour diagnostic
+    const sampleRaw = entries.length > 0 ? entries[0] : null;
+    const rawKeys = sampleRaw ? Object.keys(sampleRaw) : [];
+
     // Log la structure de la première entrée pour diagnostiquer le mapping
     if (entries.length > 0) {
       console.log('[PENNYLANE] Structure première entrée GL :', JSON.stringify(entries[0], null, 2));
@@ -525,11 +529,45 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
 
+    // Diagnostic : vérifier ce qui a été inséré
+    const diag = await pool.query(`
+      SELECT COUNT(*) as total,
+        ROUND(SUM(debit)::numeric, 2) as sum_debit,
+        ROUND(SUM(credit)::numeric, 2) as sum_credit,
+        COUNT(CASE WHEN account LIKE '6%' THEN 1 END) as class6,
+        COUNT(CASE WHEN account LIKE '7%' THEN 1 END) as class7,
+        COUNT(CASE WHEN account IS NULL OR account = '' THEN 1 END) as no_account,
+        COUNT(CASE WHEN debit = 0 AND credit = 0 THEN 1 END) as zero_amounts
+      FROM financial_gl_entries WHERE exercise_id = $1 AND source = 'api'
+    `, [exerciseId]);
+
+    const diagData = diag.rows[0] || {};
+
     res.json({
       message: `Import GL terminé : ${inserted} écriture(s) importée(s) pour l'exercice ${year}`,
       synced: inserted,
       exercise_id: exerciseId,
       year,
+      diagnostic: {
+        en_base: diagData,
+        cles_pennylane: rawKeys,
+        exemple_brut: sampleRaw ? {
+          id: sampleRaw.id,
+          date: sampleRaw.date,
+          debit: sampleRaw.debit,
+          credit: sampleRaw.credit,
+          amount: sampleRaw.amount,
+          currency_amount: sampleRaw.currency_amount,
+          debit_amount: sampleRaw.debit_amount,
+          credit_amount: sampleRaw.credit_amount,
+          account_number: sampleRaw.account_number,
+          account: sampleRaw.account,
+          plan_item: sampleRaw.plan_item,
+          journal: sampleRaw.journal,
+          journal_code: sampleRaw.journal_code,
+          label: sampleRaw.label,
+        } : null,
+      },
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
