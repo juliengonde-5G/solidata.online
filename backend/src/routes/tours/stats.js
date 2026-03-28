@@ -452,4 +452,54 @@ router.get('/predictive/cav-correlations', authorize('ADMIN'), async (req, res) 
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// ANALYSE IA — Endpoints utilisant Claude pour l'analyse prédictive
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/tours/predictive/ia/synthese — Synthèse hebdomadaire IA
+router.get('/predictive/ia/synthese', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { analyseHebdomadaire } = require('../../services/predictive-ai');
+    const result = await analyseHebdomadaire();
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur synthèse IA :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur analyse IA' });
+  }
+});
+
+// GET /api/tours/predictive/ia/ajustements — Recommandations d'ajustement des facteurs
+router.get('/predictive/ia/ajustements', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { recommanderAjustements } = require('../../services/predictive-ai');
+    const result = await recommanderAjustements();
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur ajustements IA :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur analyse IA' });
+  }
+});
+
+// GET /api/tours/predictive/ia/prediction/:cavId — Prédiction enrichie IA pour un CAV
+router.get('/predictive/ia/prediction/:cavId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { predictionEnrichie } = require('../../services/predictive-ai');
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const result = await predictionEnrichie(parseInt(req.params.cavId), date);
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur prédiction enrichie IA :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur prédiction IA' });
+  }
+});
+
 module.exports = router;

@@ -498,6 +498,10 @@ export default function InsertionParcours() {
   const [freinsDefinitions, setFreinsDefinitions] = useState(null);
 
   const [loadError, setLoadError] = useState(null);
+  const [iaAnalyse, setIaAnalyse] = useState(null);
+  const [iaEntretien, setIaEntretien] = useState(null);
+  const [iaCohorte, setIaCohorte] = useState(null);
+  const [iaLoading, setIaLoading] = useState(false);
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -829,13 +833,130 @@ export default function InsertionParcours() {
 
                 {/* Tab: Recommandations IA */}
                 {activeTab === 'ai' && (
-                  <div className="bg-white rounded-lg border p-4">
-                    <h3 className="font-semibold text-gray-800 mb-4">Recommandations IA pour le CIP</h3>
-                    <AIRecommendationsPanel recommendations={analysis.ai_recommendations} />
-                    {(!analysis.ai_recommendations ||
-                      (!analysis.ai_recommendations.alertes?.length && !analysis.ai_recommendations.propositions?.length && !analysis.ai_recommendations.accompagnement?.length)) && (
-                      <p className="text-sm text-gray-400 text-center py-4">Pas de recommandation pour le moment. Completez le diagnostic et les bilans.</p>
-                    )}
+                  <div className="space-y-4">
+                    <div className="bg-white rounded-lg border p-4">
+                      <h3 className="font-semibold text-gray-800 mb-4">Recommandations algorithmiques</h3>
+                      <AIRecommendationsPanel recommendations={analysis.ai_recommendations} />
+                      {(!analysis.ai_recommendations ||
+                        (!analysis.ai_recommendations.alertes?.length && !analysis.ai_recommendations.propositions?.length && !analysis.ai_recommendations.accompagnement?.length)) && (
+                        <p className="text-sm text-gray-400 text-center py-4">Pas de recommandation pour le moment. Completez le diagnostic et les bilans.</p>
+                      )}
+                    </div>
+
+                    {/* Analyse IA Claude */}
+                    <div className="bg-white rounded-lg border p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-semibold text-gray-800">Analyse IA approfondie (Claude)</h3>
+                        <div className="flex gap-2">
+                          <button onClick={async () => {
+                            setIaLoading(true);
+                            try {
+                              const res = await api.get(`/insertion/ia/profil/${selectedEmployee.id}`);
+                              setIaAnalyse(res.data);
+                            } catch (err) { setIaAnalyse({ synthese: err.response?.data?.error || 'Erreur' }); }
+                            setIaLoading(false);
+                          }} disabled={iaLoading}
+                            className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
+                            {iaLoading ? 'Analyse...' : 'Analyser le profil'}
+                          </button>
+                          <button onClick={async () => {
+                            setIaLoading(true);
+                            try {
+                              const nextMilestone = analysis.milestones?.find(m => m.status !== 'realise');
+                              const mType = nextMilestone?.milestone_type || 'Bilan M+3';
+                              const res = await api.get(`/insertion/ia/entretien/${selectedEmployee.id}?type=${encodeURIComponent(mType)}`);
+                              setIaEntretien(res.data);
+                            } catch (err) { setIaEntretien({ intro_conseillee: err.response?.data?.error || 'Erreur' }); }
+                            setIaLoading(false);
+                          }} disabled={iaLoading}
+                            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
+                            Preparer entretien
+                          </button>
+                        </div>
+                      </div>
+
+                      {iaAnalyse && (
+                        <div className="bg-violet-50 rounded-xl border border-violet-200 p-4 mb-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-semibold text-violet-800 text-sm">Analyse profil</h4>
+                            {iaAnalyse.score_progression != null && (
+                              <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                                iaAnalyse.score_progression >= 60 ? 'bg-emerald-100 text-emerald-700' :
+                                iaAnalyse.score_progression >= 30 ? 'bg-amber-100 text-amber-700' :
+                                'bg-red-100 text-red-700'
+                              }`}>Progression : {iaAnalyse.score_progression}%</span>
+                            )}
+                          </div>
+                          {iaAnalyse.synthese && <p className="text-sm text-slate-700">{iaAnalyse.synthese}</p>}
+                          {iaAnalyse.pcm_adaptation && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                              <div className="bg-white rounded-lg p-2 border"><span className="font-semibold text-violet-700">Communication :</span> {iaAnalyse.pcm_adaptation.communication}</div>
+                              <div className="bg-white rounded-lg p-2 border"><span className="font-semibold text-violet-700">Management :</span> {iaAnalyse.pcm_adaptation.management}</div>
+                            </div>
+                          )}
+                          {iaAnalyse.risque_decrochage && (
+                            <div className={`text-xs rounded-lg p-2 border ${
+                              iaAnalyse.risque_decrochage.niveau === 'eleve' ? 'bg-red-50 border-red-200 text-red-700' :
+                              iaAnalyse.risque_decrochage.niveau === 'moyen' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                              'bg-green-50 border-green-200 text-green-700'
+                            }`}>
+                              Risque decrochage : <strong>{iaAnalyse.risque_decrochage.niveau}</strong>
+                              {iaAnalyse.risque_decrochage.facteurs?.length > 0 && ` — ${iaAnalyse.risque_decrochage.facteurs.join(', ')}`}
+                            </div>
+                          )}
+                          {iaAnalyse.plan_action_propose?.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-violet-700 mb-1">Plan d'action propose</p>
+                              <div className="space-y-1">
+                                {iaAnalyse.plan_action_propose.map((a, i) => (
+                                  <div key={i} className="text-xs bg-white rounded p-2 border flex justify-between">
+                                    <span>{a.action}</span>
+                                    <span className="text-gray-400 ml-2">{a.echeance}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {iaAnalyse.prochaine_etape && (
+                            <div className="text-xs bg-teal-50 rounded-lg p-2 border border-teal-200 text-teal-800">
+                              <strong>Prochaine etape :</strong> {iaAnalyse.prochaine_etape}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {iaEntretien && (
+                        <div className="bg-blue-50 rounded-xl border border-blue-200 p-4 space-y-3">
+                          <h4 className="font-semibold text-blue-800 text-sm">Guide d'entretien</h4>
+                          {iaEntretien.intro_conseillee && (
+                            <div className="text-xs bg-white rounded-lg p-2 border">
+                              <span className="font-semibold text-blue-700">Introduction :</span> {iaEntretien.intro_conseillee}
+                            </div>
+                          )}
+                          {iaEntretien.questions_cles?.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-blue-700 mb-1">Questions cles</p>
+                              <div className="space-y-1">
+                                {iaEntretien.questions_cles.map((q, i) => (
+                                  <div key={i} className="text-xs bg-white rounded p-2 border">
+                                    <p className="font-medium text-gray-800">{q.question}</p>
+                                    {q.conseil_pcm && <p className="text-gray-400 mt-0.5 italic">{q.conseil_pcm}</p>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {iaEntretien.conclusion_conseillee && (
+                            <div className="text-xs bg-white rounded-lg p-2 border">
+                              <span className="font-semibold text-blue-700">Conclusion :</span> {iaEntretien.conclusion_conseillee}
+                            </div>
+                          )}
+                          {iaEntretien.duree_estimee && (
+                            <p className="text-[10px] text-blue-500">Duree estimee : {iaEntretien.duree_estimee}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </>

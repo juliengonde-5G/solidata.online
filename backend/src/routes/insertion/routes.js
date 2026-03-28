@@ -656,4 +656,54 @@ router.get('/:employeeId', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// ANALYSE IA — Endpoints utilisant Claude pour l'insertion
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/insertion/ia/profil/:employeeId — Analyse approfondie IA du profil
+router.get('/ia/profil/:employeeId', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { analyseProfilComplet } = require('../../services/insertion-ai');
+    const result = await analyseProfilComplet(parseInt(req.params.employeeId));
+    res.json(result);
+  } catch (err) {
+    console.error('[INSERTION] Erreur analyse IA profil :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur analyse IA' });
+  }
+});
+
+// GET /api/insertion/ia/entretien/:employeeId — Guide d'entretien adapté PCM
+router.get('/ia/entretien/:employeeId', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { preparerEntretien } = require('../../services/insertion-ai');
+    const milestoneType = req.query.type || 'Bilan M+3';
+    const result = await preparerEntretien(parseInt(req.params.employeeId), milestoneType);
+    res.json(result);
+  } catch (err) {
+    console.error('[INSERTION] Erreur entretien IA :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur analyse IA' });
+  }
+});
+
+// GET /api/insertion/ia/cohorte — Bilan global de la cohorte en insertion
+router.get('/ia/cohorte', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { bilanCohorte } = require('../../services/insertion-ai');
+    const result = await bilanCohorte();
+    res.json(result);
+  } catch (err) {
+    console.error('[INSERTION] Erreur bilan cohorte IA :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur analyse IA' });
+  }
+});
+
 module.exports = router;

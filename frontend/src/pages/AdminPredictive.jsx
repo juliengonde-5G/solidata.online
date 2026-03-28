@@ -33,6 +33,12 @@ export default function AdminPredictive() {
   const [weatherPreview, setWeatherPreview] = useState(null);
   const [weatherDate, setWeatherDate] = useState(new Date().toISOString().split('T')[0]);
 
+  // IA Claude — Analyse prédictive
+  const [iaSynthese, setIaSynthese] = useState(null);
+  const [iaAjustements, setIaAjustements] = useState(null);
+  const [iaLoading, setIaLoading] = useState(false);
+  const [iaError, setIaError] = useState('');
+
   // IA Auto-discovery
   const [autoStats, setAutoStats] = useState(null);
   const [predictions, setPredictions] = useState([]);
@@ -41,6 +47,42 @@ export default function AdminPredictive() {
   const [sources, setSources] = useState([]);
 
   useEffect(() => { loadConfig(); loadEvents(); loadAutoStats(); loadSources(); }, []);
+
+  const loadIaSynthese = async () => {
+    setIaLoading(true);
+    setIaError('');
+    try {
+      const res = await api.get('/tours/predictive/ia/synthese');
+      setIaSynthese(res.data);
+    } catch (err) {
+      setIaError(err.response?.data?.error || 'Erreur analyse IA');
+    }
+    setIaLoading(false);
+  };
+
+  const loadIaAjustements = async () => {
+    setIaLoading(true);
+    setIaError('');
+    try {
+      const res = await api.get('/tours/predictive/ia/ajustements');
+      setIaAjustements(res.data);
+    } catch (err) {
+      setIaError(err.response?.data?.error || 'Erreur analyse IA');
+    }
+    setIaLoading(false);
+  };
+
+  const appliquerAjustements = () => {
+    if (!iaAjustements) return;
+    const newConfig = { ...config };
+    if (iaAjustements.facteurs_saisonniers_proposes?.length === 12) {
+      newConfig.seasonal = iaAjustements.facteurs_saisonniers_proposes;
+    }
+    if (iaAjustements.facteurs_jours_proposes?.length === 7) {
+      newConfig.dayOfWeek = iaAjustements.facteurs_jours_proposes;
+    }
+    setConfig(newConfig);
+  };
 
   const loadConfig = async () => {
     try {
@@ -444,6 +486,88 @@ export default function AdminPredictive() {
               </div>
             </div>
           )}
+        </Section>
+
+        {/* Analyse IA Claude */}
+        <Section title="Analyse IA (Claude)" desc="Synthèse automatique et recommandations d'ajustement basées sur l'historique">
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <button onClick={loadIaSynthese} disabled={iaLoading}
+                className="px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                {iaLoading ? 'Analyse en cours...' : 'Synthèse hebdomadaire'}
+              </button>
+              <button onClick={loadIaAjustements} disabled={iaLoading}
+                className="px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 disabled:opacity-50 transition-colors">
+                {iaLoading ? 'Analyse en cours...' : 'Recommander ajustements'}
+              </button>
+            </div>
+
+            {iaError && (
+              <div className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-200">{iaError}</div>
+            )}
+
+            {iaSynthese && (
+              <div className="bg-violet-50 rounded-xl border border-violet-200 p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-violet-800 text-sm">Synthèse IA</h4>
+                  {iaSynthese.score_global != null && (
+                    <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                      iaSynthese.score_global >= 70 ? 'bg-emerald-100 text-emerald-700' :
+                      iaSynthese.score_global >= 40 ? 'bg-amber-100 text-amber-700' :
+                      'bg-red-100 text-red-700'
+                    }`}>Score : {iaSynthese.score_global}/100</span>
+                  )}
+                </div>
+                {iaSynthese.resume && <p className="text-sm text-slate-700">{iaSynthese.resume}</p>}
+                {iaSynthese.tendances?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-violet-700 mb-1">Tendances</p>
+                    <ul className="text-xs text-slate-600 space-y-1">
+                      {iaSynthese.tendances.map((t, i) => <li key={i} className="flex gap-1.5"><span className="text-violet-400">-</span>{t}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {iaSynthese.anomalies?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-red-600 mb-1">Anomalies détectées</p>
+                    <ul className="text-xs text-slate-600 space-y-1">
+                      {iaSynthese.anomalies.map((a, i) => <li key={i} className="flex gap-1.5"><span className="text-red-400">!</span>{a}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {iaSynthese.recommandations?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-teal-700 mb-1">Recommandations</p>
+                    <ul className="text-xs text-slate-600 space-y-1">
+                      {iaSynthese.recommandations.map((r, i) => <li key={i} className="flex gap-1.5"><span className="text-teal-500">→</span>{r}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {iaAjustements && (
+              <div className="bg-teal-50 rounded-xl border border-teal-200 p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-teal-800 text-sm">Ajustements recommandés</h4>
+                  {iaAjustements.confiance != null && (
+                    <span className="text-xs text-teal-600">Confiance : {Math.round(iaAjustements.confiance * 100)}%</span>
+                  )}
+                </div>
+                {iaAjustements.message && <p className="text-sm text-slate-700">{iaAjustements.message}</p>}
+                {iaAjustements.justifications?.length > 0 && (
+                  <ul className="text-xs text-slate-600 space-y-1">
+                    {iaAjustements.justifications.map((j, i) => <li key={i} className="flex gap-1.5"><span className="text-teal-500">→</span>{j}</li>)}
+                  </ul>
+                )}
+                <button onClick={appliquerAjustements}
+                  className="mt-2 px-4 py-2 rounded-lg bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 transition-colors">
+                  Appliquer les facteurs recommandés
+                </button>
+                <p className="text-[10px] text-slate-400">Les facteurs seront appliqués dans le formulaire ci-dessous. Enregistrez ensuite pour valider.</p>
+              </div>
+            )}
+          </div>
         </Section>
 
         {/* Facteurs saisonniers */}
