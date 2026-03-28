@@ -151,6 +151,9 @@ app.use('/api/pointage', require('./routes/pointage'));
 // Module Finance : Tableau de bord financier (GL Pennylane, budget, KPIs)
 app.use('/api/finance', require('./routes/finance'));
 
+// SolidataBot : Agent conversationnel IA (Claude API)
+app.use('/api/chat', require('./routes/chat'));
+
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 

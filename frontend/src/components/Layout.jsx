@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import SolidataBot from './SolidataBot';
 
 // ══════════════════════════════════════════
 // MENU CONFIG — Charte bleu pétrole, icônes plates
@@ -284,6 +285,9 @@ export default function Layout({ children }) {
           {children}
         </div>
       </main>
+
+      {/* SolidataBot — Agent IA conversationnel */}
+      <SolidataBot />
     </div>
   );
 }

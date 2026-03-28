@@ -68,6 +68,8 @@ services:
       NODE_ENV: production
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       OPENAGENDA_API_KEY: ${OPENAGENDA_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-20250514}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CENTRE_TRI_LAT: 49.4231
