@@ -28,7 +28,7 @@ export default function FinanceBilan() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get(`/finance/gl/${year}`, { params: { view: 'bilan' } });
+      const res = await api.get(`/finance/gl/${year}/bilan`);
       setData(res.data);
     } catch (err) {
       console.error('Erreur chargement bilan:', err);

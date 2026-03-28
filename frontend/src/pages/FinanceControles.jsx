@@ -25,7 +25,7 @@ export default function FinanceControles() {
   const loadChecks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get(`/finance/controles/${year}`);
+      const res = await api.get(`/finance/controls/${year}`);
       setChecks(res.data?.checks || res.data || []);
     } catch (err) {
       console.error('Erreur chargement controles:', err);

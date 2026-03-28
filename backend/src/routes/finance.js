@@ -319,6 +319,295 @@ router.post('/import/budget', upload.single('file'), async (req, res) => {
 });
 
 // ══════════════════════════════════════════
+// P&L — Compte de résultat structuré
+// ══════════════════════════════════════════
+
+router.get('/gl/:year/pl', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+    const { centre } = req.query;
+
+    // Récupérer toutes les écritures classe 6 et 7
+    let query = `SELECT g.account, g.account_label, g.family_category, g.category, g.analytical_code,
+                        g.debit, g.credit, g.date
+                 FROM financial_gl_entries g
+                 JOIN financial_exercises e ON g.exercise_id = e.id
+                 WHERE e.year = $1 AND (g.account LIKE '6%' OR g.account LIKE '7%')`;
+    const params = [year];
+    if (centre && centre !== 'all') {
+      params.push(centre);
+      query += ` AND g.analytical_code = $${params.length}`;
+    }
+    const r = await pool.query(query, params);
+    const entries = r.rows;
+
+    // Calculer KPIs
+    let totalProduits = 0, totalCharges = 0;
+    for (const e of entries) {
+      if ((e.account || '').startsWith('7')) totalProduits += (parseFloat(e.credit) || 0) - (parseFloat(e.debit) || 0);
+      if ((e.account || '').startsWith('6')) totalCharges += (parseFloat(e.debit) || 0) - (parseFloat(e.credit) || 0);
+    }
+
+    // Centres analytiques distincts
+    const centresSet = new Set();
+    for (const e of entries) if (e.analytical_code) centresSet.add(e.analytical_code);
+    const centres = [...centresSet].sort().map(c => ({ code: c, label: c }));
+
+    // Grouper par catégorie (family_category ou premier chiffre + libellé)
+    const groupMap = {};
+    for (const e of entries) {
+      const acct = e.account || '';
+      const cls = acct.charAt(0);
+      const key = e.family_category || e.category || `Classe ${cls}`;
+      if (!groupMap[key]) {
+        groupMap[key] = { key, label: key, class: cls, months: Array.from({ length: 12 }, () => 0), total: 0, lines: {} };
+      }
+      const amount = cls === '7' ? (parseFloat(e.credit) || 0) - (parseFloat(e.debit) || 0) : (parseFloat(e.debit) || 0) - (parseFloat(e.credit) || 0);
+      groupMap[key].total += amount;
+      if (e.date) {
+        const m = new Date(e.date).getMonth();
+        groupMap[key].months[m] += amount;
+      }
+      // Sous-lignes par compte
+      const lineKey = `${acct} - ${e.account_label || ''}`;
+      if (!groupMap[key].lines[lineKey]) {
+        groupMap[key].lines[lineKey] = { label: lineKey, months: Array.from({ length: 12 }, () => 0), total: 0 };
+      }
+      groupMap[key].lines[lineKey].total += amount;
+      if (e.date) {
+        const m = new Date(e.date).getMonth();
+        groupMap[key].lines[lineKey].months[m] += amount;
+      }
+    }
+
+    // Budget par catégorie
+    const budgets = await pool.query(`
+      SELECT b.category, b.month, b.amount FROM financial_budgets b
+      JOIN financial_exercises e ON b.exercise_id = e.id WHERE e.year = $1
+    `, [year]);
+    const budgetMap = {};
+    for (const b of budgets.rows) {
+      if (!budgetMap[b.category]) budgetMap[b.category] = 0;
+      budgetMap[b.category] += parseFloat(b.amount) || 0;
+    }
+
+    const groups = Object.values(groupMap)
+      .map(g => ({
+        key: g.key,
+        label: g.label,
+        class: g.class,
+        type: g.class === '7' ? 'revenue' : 'expense',
+        months: g.months.map(v => Math.round(v * 100) / 100),
+        total: Math.round(g.total * 100) / 100,
+        budget: budgetMap[g.key] || 0,
+        ecart: Math.round(((budgetMap[g.key] || 0) - g.total) * 100) / 100,
+        lines: Object.values(g.lines).map(l => ({
+          ...l,
+          months: l.months.map(v => Math.round(v * 100) / 100),
+          total: Math.round(l.total * 100) / 100,
+          budget: 0,
+          ecart: 0,
+        })).sort((a, b) => Math.abs(b.total) - Math.abs(a.total)),
+      }))
+      .sort((a, b) => a.class.localeCompare(b.class) || Math.abs(b.total) - Math.abs(a.total));
+
+    // Totaux résultat par mois
+    const totalMonths = Array.from({ length: 12 }, () => 0);
+    for (const g of groups) {
+      for (let i = 0; i < 12; i++) {
+        totalMonths[i] += g.class === '7' ? g.months[i] : -g.months[i];
+      }
+    }
+    const totalBudget = Object.values(budgetMap).reduce((s, v) => s + v, 0);
+
+    res.json({
+      kpis: {
+        produits: Math.round(totalProduits * 100) / 100,
+        charges: Math.round(totalCharges * 100) / 100,
+        resultat: Math.round((totalProduits - totalCharges) * 100) / 100,
+      },
+      centres,
+      groups,
+      totals: {
+        months: totalMonths.map(v => Math.round(v * 100) / 100),
+        total: Math.round((totalProduits - totalCharges) * 100) / 100,
+        budget: totalBudget,
+        ecart: Math.round((totalBudget - (totalProduits - totalCharges)) * 100) / 100,
+      },
+    });
+  } catch (err) {
+    console.error('[FINANCE] Erreur P&L :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// BILAN — Bilan simplifié, SIG, ratios
+// ══════════════════════════════════════════
+
+router.get('/gl/:year/bilan', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+
+    // Tous les comptes, aggrégés par classe et sous-classe
+    const r = await pool.query(`
+      SELECT SUBSTRING(g.account, 1, 2) as sub, SUBSTRING(g.account, 1, 1) as cls,
+             SUM(g.debit) as total_debit, SUM(g.credit) as total_credit,
+             SUM(g.debit - g.credit) as solde
+      FROM financial_gl_entries g
+      JOIN financial_exercises e ON g.exercise_id = e.id
+      WHERE e.year = $1
+      GROUP BY SUBSTRING(g.account, 1, 2), SUBSTRING(g.account, 1, 1)
+      ORDER BY sub
+    `, [year]);
+
+    // Même chose pour N-1
+    const rn1 = await pool.query(`
+      SELECT SUBSTRING(g.account, 1, 2) as sub, SUBSTRING(g.account, 1, 1) as cls,
+             SUM(g.debit - g.credit) as solde
+      FROM financial_gl_entries g
+      JOIN financial_exercises e ON g.exercise_id = e.id
+      WHERE e.year = $1
+      GROUP BY SUBSTRING(g.account, 1, 2), SUBSTRING(g.account, 1, 1)
+    `, [year - 1]);
+
+    const n1Map = {};
+    for (const row of rn1.rows) n1Map[row.sub] = parseFloat(row.solde) || 0;
+
+    // Agréger par sous-classe
+    const subs = {};
+    for (const row of r.rows) {
+      subs[row.sub] = parseFloat(row.solde) || 0;
+    }
+
+    const s = (prefix) => {
+      let total = 0;
+      for (const [k, v] of Object.entries(subs)) if (k.startsWith(prefix)) total += v;
+      return total;
+    };
+    const sn1 = (prefix) => {
+      let total = 0;
+      for (const [k, v] of Object.entries(n1Map)) if (k.startsWith(prefix)) total += v;
+      return total;
+    };
+
+    // Résultat
+    const produits = -(s('7'));  // classe 7 est créditrice
+    const charges = s('6');      // classe 6 est débitrice
+    const resultat = produits - charges;
+    const produitsN1 = -(sn1('7'));
+    const chargesN1 = sn1('6');
+    const resultatN1 = produitsN1 - chargesN1;
+
+    // Actif
+    const immobilisations = s('2');
+    const stocks = s('3');
+    const clients = s('41');
+    const autresCreances = s('4') - s('41') - s('40') - s('43');
+    const tresorerie = s('5');
+    const totalActif = immobilisations + stocks + clients + Math.max(0, autresCreances) + tresorerie;
+
+    // Passif
+    const capitaux = -(s('1'));  // classe 1 créditrice
+    const fournisseurs = -(s('40'));
+    const social = -(s('43'));
+    const autresDettes = -(s('4') - s('41') - s('40') - s('43'));
+    const totalPassif = capitaux + fournisseurs + social + Math.max(0, autresDettes) + resultat;
+
+    // N-1
+    const immobilisationsN1 = sn1('2');
+    const totalActifN1 = immobilisationsN1 + sn1('3') + sn1('41') + sn1('5');
+    const capitauxN1 = -(sn1('1'));
+
+    // SIG
+    const sig = [
+      { label: 'Produits d\'exploitation (cl. 7)', n: Math.round(produits), n1: Math.round(produitsN1), highlight: false },
+      { label: 'Charges d\'exploitation (cl. 6)', n: -Math.round(charges), n1: -Math.round(chargesN1), highlight: false },
+      { label: 'RESULTAT D\'EXPLOITATION', n: Math.round(resultat), n1: Math.round(resultatN1), highlight: true,
+        variation: resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null },
+      { label: 'Produits financiers', n: Math.round(-(s('76'))), n1: Math.round(-(sn1('76'))), highlight: false },
+      { label: 'Charges financieres', n: -Math.round(s('66')), n1: -Math.round(sn1('66')), highlight: false },
+      { label: 'RESULTAT NET', n: Math.round(resultat), n1: Math.round(resultatN1), highlight: true,
+        variation: resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null },
+    ];
+
+    // Actif/Passif
+    const rd = (v) => Math.round(v * 100) / 100;
+    const actifRows = [
+      { label: 'ACTIF IMMOBILISE', n: rd(immobilisations), n1: rd(immobilisationsN1), bold: true },
+      { label: 'Immobilisations', n: rd(immobilisations), n1: rd(immobilisationsN1), indent: true },
+      { label: 'ACTIF CIRCULANT', n: rd(stocks + clients + Math.max(0, autresCreances)), n1: rd(sn1('3') + sn1('41')), bold: true },
+      { label: 'Stocks', n: rd(stocks), n1: rd(sn1('3')), indent: true },
+      { label: 'Clients', n: rd(clients), n1: rd(sn1('41')), indent: true },
+      { label: 'TRESORERIE ACTIVE', n: rd(Math.max(0, tresorerie)), n1: rd(Math.max(0, sn1('5'))), bold: true },
+      { label: 'TOTAL ACTIF', n: rd(totalActif), n1: rd(totalActifN1), bold: true },
+    ];
+
+    const passifRows = [
+      { label: 'CAPITAUX PROPRES', n: rd(capitaux), n1: rd(capitauxN1), bold: true },
+      { label: 'Resultat de l\'exercice', n: rd(resultat), n1: rd(resultatN1), indent: true },
+      { label: 'DETTES', n: rd(fournisseurs + social + Math.max(0, autresDettes)), n1: rd(-(sn1('40')) - sn1('43')), bold: true },
+      { label: 'Fournisseurs', n: rd(fournisseurs), n1: rd(-(sn1('40'))), indent: true },
+      { label: 'Dettes sociales et fiscales', n: rd(social), n1: rd(-(sn1('43'))), indent: true },
+      { label: 'TRESORERIE PASSIVE', n: rd(Math.max(0, -tresorerie)), n1: rd(Math.max(0, -sn1('5'))), bold: true },
+      { label: 'TOTAL PASSIF', n: rd(totalPassif), n1: rd(totalActifN1), bold: true },
+    ];
+
+    // Ratios
+    const bfr = clients - fournisseurs - social;
+    const ratios = [
+      { label: 'Marge nette', value: produits > 0 ? resultat / produits * 100 : 0, unit: '%',
+        status: resultat / (produits || 1) > 0.05 ? 'good' : resultat >= 0 ? 'warning' : 'bad', benchmark: '> 5%' },
+      { label: 'Ratio de liquidite', value: totalActif > 0 ? (stocks + clients + tresorerie) / (fournisseurs + social || 1) : 0, unit: '',
+        status: (stocks + clients + tresorerie) / (fournisseurs + social || 1) > 1 ? 'good' : 'bad', benchmark: '> 1' },
+      { label: 'BFR en jours de CA', value: produits > 0 ? bfr / produits * 365 : 0, unit: 'jours',
+        status: bfr / (produits || 1) * 365 < 60 ? 'good' : bfr / (produits || 1) * 365 < 90 ? 'warning' : 'bad', benchmark: '< 60 j' },
+      { label: 'Autonomie financiere', value: totalPassif > 0 ? capitaux / totalPassif * 100 : 0, unit: '%',
+        status: capitaux / (totalPassif || 1) > 0.3 ? 'good' : capitaux / (totalPassif || 1) > 0.15 ? 'warning' : 'bad', benchmark: '> 30%' },
+    ];
+
+    // Seuil de rentabilité (simplifié)
+    const chargesVariables = s('60') + s('61') + s('62'); // achats, services ext
+    const chargesFixes = charges - chargesVariables;
+    const mcv = produits > 0 ? (produits - chargesVariables) / produits * 100 : 0;
+    const caSeuil = mcv > 0 ? chargesFixes / (mcv / 100) : 0;
+
+    const breakeven = {
+      ca_seuil: Math.round(caSeuil),
+      charges_fixes: Math.round(chargesFixes),
+      charges_variables: Math.round(chargesVariables),
+      marge_cv: Math.round(mcv * 10) / 10,
+      marge_securite: caSeuil > 0 ? Math.round((produits - caSeuil) / caSeuil * 100 * 10) / 10 : 0,
+      date_atteinte: (() => {
+        if (produits <= 0 || caSeuil <= 0) return null;
+        const monthNum = Math.ceil(caSeuil / (produits / 12));
+        if (monthNum > 12) return null;
+        return `${year}-${String(monthNum).padStart(2, '0')}-28`;
+      })(),
+    };
+
+    res.json({
+      kpis: {
+        total_actif: rd(totalActif),
+        capitaux_propres: rd(capitaux),
+        resultat_net: rd(resultat),
+        actif_variation: totalActifN1 !== 0 ? Math.round((totalActif - totalActifN1) / Math.abs(totalActifN1) * 100 * 10) / 10 : null,
+        cp_variation: capitauxN1 !== 0 ? Math.round((capitaux - capitauxN1) / Math.abs(capitauxN1) * 100 * 10) / 10 : null,
+        resultat_variation: resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null,
+      },
+      sig,
+      actif: actifRows,
+      passif: passifRows,
+      ratios,
+      breakeven,
+    });
+  } catch (err) {
+    console.error('[FINANCE] Erreur bilan :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
 // TRESORERIE — Données structurées pour la page trésorerie
 // ══════════════════════════════════════════
 
@@ -668,15 +957,47 @@ router.get('/kpis/:year', async (req, res) => {
 
     res.json({
       produits, charges, resultat: produits - charges,
+      // Aliases attendus par Finance.jsx (dashboard)
+      ca_ytd: produits, charges_ytd: charges,
+      marge_globale: produits > 0 ? ((produits - charges) / produits * 100) : 0,
       tresorerie, bfr, clients, fournisseurs, social,
       coutTonneCollecte, coutTonneTri,
+      cout_tonne_collecte: coutTonneCollecte, cout_tonne_trie: coutTonneTri,
       tonnesCollectees, tonnesAuTri,
       chargesCollecte, chargesTri, chargesFG,
       fgCollecte, fgTri, transfertInterne,
       coutCompletCollecte, coutCompletTri,
       centres: centreMap,
-      monthly: monthly.rows,
-      marge: produits - charges
+      monthly: monthly.rows.map(m => ({
+        ...m,
+        produits: parseFloat(m.produits) || 0,
+        charges: parseFloat(m.charges) || 0,
+        tresorerie: parseFloat(m.tresorerie) || 0,
+        ca: parseFloat(m.produits) || 0,
+        resultat: (parseFloat(m.produits) || 0) - (parseFloat(m.charges) || 0),
+      })),
+      // Evolution trésorerie (solde cumulé par mois)
+      tresorerie_evolution: (() => {
+        const monthlyArr = Array.from({ length: 12 }, () => ({ solde: 0 }));
+        let cumul = 0;
+        for (const m of monthly.rows) {
+          const idx = parseInt(m.month);
+          const net = (parseFloat(m.tresorerie) || 0);
+          cumul += net;
+          if (idx >= 0 && idx < 12) monthlyArr[idx].solde = Math.round(cumul * 100) / 100;
+        }
+        return monthlyArr;
+      })(),
+      marge: produits - charges,
+      // Alertes automatiques
+      alertes: (() => {
+        const a = [];
+        if (produits - charges < 0) a.push({ type: 'error', message: `Resultat negatif : ${Math.round(produits - charges).toLocaleString()} EUR` });
+        if (tresorerie < 0) a.push({ type: 'error', message: `Tresorerie negative : ${Math.round(tresorerie).toLocaleString()} EUR` });
+        if (bfr > produits * 0.3 && produits > 0) a.push({ type: 'warning', message: `BFR eleve (${Math.round(bfr / produits * 100)}% du CA)` });
+        if (charges > 0 && produits > 0 && (produits - charges) / produits < 0.05) a.push({ type: 'warning', message: 'Marge inferieure a 5%' });
+        return a;
+      })(),
     });
   } catch (err) {
     console.error('[FINANCE] Erreur KPIs :', err);
@@ -710,27 +1031,27 @@ router.get('/controls/:year', async (req, res) => {
     const totalCredit = parseFloat(d.total_credit) || 0;
     const ecart = Math.abs(totalDebit - totalCredit);
 
-    checks.push({ id: 'equilibre', name: 'Equilibre debit/credit', status: ecart < 1 ? 'green' : ecart < 100 ? 'orange' : 'red',
+    checks.push({ id: 'equilibre', name: 'Equilibre debit/credit', status: ecart < 1 ? 'ok' : ecart < 100 ? 'warning' : 'error',
       desc: ecart < 1 ? 'Parfait equilibre' : 'Ecart: ' + ecart.toFixed(2) + ' EUR',
       values: { debit: totalDebit, credit: totalCredit, ecart } });
 
     const noFamily = parseInt(d.no_family) || 0;
     const pctNoFamily = total > 0 ? noFamily / total : 0;
-    checks.push({ id: 'nofamily', name: 'Lignes sans famille analytique', status: noFamily === 0 ? 'green' : pctNoFamily < 0.05 ? 'orange' : 'red',
+    checks.push({ id: 'nofamily', name: 'Lignes sans famille analytique', status: noFamily === 0 ? 'ok' : pctNoFamily < 0.05 ? 'warning' : 'error',
       desc: noFamily + ' / ' + total + ' lignes (' + (pctNoFamily * 100).toFixed(1) + '%)', values: { count: noFamily, total } });
 
     const noAnalytical = parseInt(d.no_analytical) || 0;
     const plTotal = parseInt(d.pl_total) || 0;
     const pctNoAnal = plTotal > 0 ? noAnalytical / plTotal : 0;
-    checks.push({ id: 'noanalytics', name: 'Lignes P&L sans code analytique', status: noAnalytical === 0 ? 'green' : pctNoAnal < 0.05 ? 'orange' : 'red',
+    checks.push({ id: 'noanalytics', name: 'Lignes P&L sans code analytique', status: noAnalytical === 0 ? 'ok' : pctNoAnal < 0.05 ? 'warning' : 'error',
       desc: noAnalytical + ' / ' + plTotal + ' ecritures P&L', values: { count: noAnalytical, total: plTotal } });
 
     const budgetCheck = await pool.query(`SELECT COUNT(*) as c FROM financial_budgets b JOIN financial_exercises e ON b.exercise_id = e.id WHERE e.year = $1`, [year]);
     const budgetCount = parseInt(budgetCheck.rows[0].c) || 0;
-    checks.push({ id: 'budget', name: 'Budget charge', status: budgetCount > 0 ? 'green' : 'orange',
+    checks.push({ id: 'budget', name: 'Budget charge', status: budgetCount > 0 ? 'ok' : 'warning',
       desc: budgetCount > 0 ? budgetCount + ' postes' : 'Aucun budget', values: { count: budgetCount } });
 
-    checks.push({ id: 'resultat', name: 'Resultat P&L', status: (totalCredit - totalDebit) >= 0 ? 'green' : 'red',
+    checks.push({ id: 'resultat', name: 'Resultat P&L', status: (totalCredit - totalDebit) >= 0 ? 'ok' : 'error',
       desc: 'Produits - Charges', values: { produits: totalCredit, charges: totalDebit, resultat: totalCredit - totalDebit } });
 
     res.json(checks);

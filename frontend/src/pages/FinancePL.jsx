@@ -31,9 +31,9 @@ export default function FinancePL() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { class: '6,7' };
+      const params = {};
       if (centre !== 'all') params.centre = centre;
-      const res = await api.get(`/finance/gl/${year}`, { params });
+      const res = await api.get(`/finance/gl/${year}/pl`, { params });
       setData(res.data);
     } catch (err) {
       console.error('Erreur chargement P&L:', err);
