@@ -8,6 +8,7 @@ import api from '../services/api';
 const MAX_MSG_LENGTH = 500;
 
 export default function SolidataBot() {
+  const hasToken = !!localStorage.getItem('mobile_token');
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -170,6 +171,8 @@ export default function SolidataBot() {
   const formatTime = (d) => new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
   // ── Render ────────────────────────────────────────────────────────────
+  if (!hasToken) return null;
+
   return (
     <>
       {/* ── Floating button (bulle) ── */}
