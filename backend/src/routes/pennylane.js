@@ -418,18 +418,75 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       { field: 'date', operator: 'gteq', value: `${year}-01-01` },
       { field: 'date', operator: 'lteq', value: `${year}-12-31` },
     ]);
-    const entries = await fetchAllPages('/ledger_entries', apiKey, { filter });
 
-    // Capturer la structure brute de la première entrée pour diagnostic
+    // Pennylane v2 : /ledger_entries retourne les écritures (headers)
+    // Les lignes comptables (avec comptes et montants) sont dans /ledger_entries/:id
+    // ou via le paramètre include=line_items
+    // Stratégie : essayer d'abord avec include, sinon récupérer ligne par ligne
+
+    // Essai 1 : fetchAllPages avec include=line_items
+    let entries = await fetchAllPages('/ledger_entries', apiKey, { filter, include: 'line_items' });
+
+    // Vérifier si les lignes sont incluses dans la réponse
+    const firstEntry = entries[0] || {};
+    const hasLines = firstEntry.line_items || firstEntry.lines || firstEntry.grouped_lines;
+
+    let allLines = [];
+
+    if (hasLines) {
+      // Les lignes sont incluses directement dans chaque entrée
+      for (const entry of entries) {
+        const lines = entry.line_items || entry.lines || entry.grouped_lines || [];
+        for (const line of lines) {
+          allLines.push({ ...line, _entry: entry });
+        }
+      }
+      console.log('[PENNYLANE] Lignes incluses dans les entrées :', allLines.length);
+    } else {
+      // Les lignes ne sont pas incluses — récupérer chaque entrée individuellement
+      console.log('[PENNYLANE] Pas de lignes incluses, récupération individuelle de', entries.length, 'entrées...');
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        try {
+          const detail = await pennylaneRequest('GET', `/ledger_entries/${entry.id}`, apiKey);
+          if (detail.status === 200) {
+            const entryData = detail.data?.ledger_entry || detail.data;
+            const lines = entryData?.line_items || entryData?.lines || entryData?.grouped_lines || [];
+            if (lines.length > 0) {
+              for (const line of lines) {
+                allLines.push({ ...line, _entry: { ...entry, ...entryData } });
+              }
+            } else {
+              // Pas de sous-lignes : l'entrée elle-même est une ligne
+              allLines.push({ ...entryData, _entry: entry });
+            }
+          }
+        } catch (e) {
+          console.error('[PENNYLANE] Erreur récupération entrée', entry.id, ':', e.message);
+        }
+        // Rate limit Pennylane : 5 req/s
+        if (i % 5 === 4) await new Promise(r => setTimeout(r, 1100));
+      }
+      console.log('[PENNYLANE] Lignes récupérées individuellement :', allLines.length);
+    }
+
+    // Si toujours aucune ligne avec compte, les entrées elles-mêmes sont les lignes
+    if (allLines.length === 0 && entries.length > 0) {
+      allLines = entries;
+      console.log('[PENNYLANE] Fallback : utilisation des entrées brutes comme lignes');
+    }
+
+    // Capturer la structure brute pour diagnostic
     const sampleRaw = entries.length > 0 ? entries[0] : null;
     const rawKeys = sampleRaw ? Object.keys(sampleRaw) : [];
+    const sampleLine = allLines.length > 0 ? allLines[0] : null;
+    const lineKeys = sampleLine ? Object.keys(sampleLine) : [];
 
-    // Log la structure de la première entrée pour diagnostiquer le mapping
-    if (entries.length > 0) {
-      console.log('[PENNYLANE] Structure première entrée GL :', JSON.stringify(entries[0], null, 2));
-      console.log('[PENNYLANE] Clés disponibles :', Object.keys(entries[0]).join(', '));
+    console.log('[PENNYLANE] Structure première entrée GL :', JSON.stringify(sampleRaw, null, 2));
+    if (sampleLine && sampleLine !== sampleRaw) {
+      console.log('[PENNYLANE] Structure première ligne GL :', JSON.stringify(sampleLine, null, 2));
     }
-    console.log('[PENNYLANE] Total entrées récupérées :', entries.length);
+    console.log('[PENNYLANE] Total entrées:', entries.length, '/ Total lignes:', allLines.length);
 
     await client.query('BEGIN');
 
@@ -450,60 +507,64 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     // Insérer par batch de 500
     let inserted = 0;
     const batchSize = 500;
-    for (let i = 0; i < entries.length; i += batchSize) {
-      const batch = entries.slice(i, i + batchSize);
+    for (let i = 0; i < allLines.length; i += batchSize) {
+      const batch = allLines.slice(i, i + batchSize);
       const values = [];
       const placeholders = [];
       let paramIdx = 1;
 
-      for (const entry of batch) {
-        const entryDate = entry.date || entry.lettering_date || null;
+      for (const line of batch) {
+        // La ligne peut avoir un _entry parent avec date, journal, label
+        const parentEntry = line._entry || {};
+        const entryDate = line.date || parentEntry.date || null;
 
-        // Pennylane v2 : les montants peuvent être dans différents formats
+        // Montants : chercher dans tous les formats possibles
         let debit = 0, credit = 0;
-        if (entry.debit != null && entry.credit != null) {
-          debit = parseFloat(entry.debit) || 0;
-          credit = parseFloat(entry.credit) || 0;
-        } else if (entry.debit_amount != null || entry.credit_amount != null) {
-          debit = parseFloat(entry.debit_amount) || 0;
-          credit = parseFloat(entry.credit_amount) || 0;
-        } else if (entry.amount != null || entry.currency_amount != null) {
-          // Montant unique : positif = débit, négatif = crédit
-          const amount = parseFloat(entry.currency_amount ?? entry.amount) || 0;
+        if (line.debit != null && line.credit != null) {
+          debit = parseFloat(line.debit) || 0;
+          credit = parseFloat(line.credit) || 0;
+        } else if (line.debit_amount != null || line.credit_amount != null) {
+          debit = parseFloat(line.debit_amount) || 0;
+          credit = parseFloat(line.credit_amount) || 0;
+        } else if (line.amount != null || line.currency_amount != null) {
+          const amount = parseFloat(line.currency_amount ?? line.amount) || 0;
           if (amount >= 0) { debit = amount; } else { credit = Math.abs(amount); }
         }
         const balance = debit - credit;
 
-        // Pennylane v2 : le numéro de compte peut être dans plan_item ou account
-        const accountNumber = entry.account_number || entry.account
-          || (entry.plan_item && (entry.plan_item.number || entry.plan_item.account_number))
+        // Numéro de compte : chercher dans tous les formats possibles
+        const accountNumber = line.account_number || line.account
+          || line.plan_item_number
+          || (line.plan_item && (line.plan_item.number || line.plan_item.account_number))
           || null;
-        const accountLabel = entry.account_name || entry.account_label
-          || (entry.plan_item && (entry.plan_item.label || entry.plan_item.name))
+        const accountLabel = line.account_name || line.account_label
+          || (line.plan_item && (line.plan_item.label || line.plan_item.name))
           || null;
-        const journalCode = entry.journal_code || entry.journal
-          || (typeof entry.journal === 'object' && entry.journal?.code)
-          || null;
+
+        // Journal : depuis la ligne ou l'entrée parent
+        const journal = line.journal_code || line.journal
+          || (typeof line.journal === 'object' && line.journal?.code)
+          || (typeof parentEntry.journal === 'object' && parentEntry.journal?.code)
+          || parentEntry.journal_code || null;
 
         placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
         values.push(
           exerciseId,
-          entry.id ? String(entry.id) : null,
+          line.id ? String(line.id) : (parentEntry.id ? String(parentEntry.id) : null),
           entryDate,
-          journalCode,
+          journal,
           accountNumber,
           accountLabel,
-          entry.label || entry.piece_label || null,
-          entry.line_label || entry.description || entry.wording || null,
-          entry.invoice_number || entry.document_number || null,
-          entry.third_party || entry.customer_name || entry.supplier_name
-            || (entry.third_party_name) || null,
-          entry.analytical_reference || entry.analytical_code || null,
-          entry.currency || 'EUR',
+          line.label || parentEntry.label || null,
+          line.line_label || line.description || line.wording || null,
+          line.invoice_number || line.document_number || parentEntry.invoice_number || null,
+          line.third_party || line.customer_name || line.supplier_name || line.third_party_name || null,
+          line.analytical_reference || line.analytical_code || null,
+          line.currency || parentEntry.currency || 'EUR',
           debit,
           credit,
           balance,
-          entry.due_date || null,
+          line.due_date || null,
           'api'
         );
       }
@@ -550,23 +611,13 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       year,
       diagnostic: {
         en_base: diagData,
-        cles_pennylane: rawKeys,
-        exemple_brut: sampleRaw ? {
-          id: sampleRaw.id,
-          date: sampleRaw.date,
-          debit: sampleRaw.debit,
-          credit: sampleRaw.credit,
-          amount: sampleRaw.amount,
-          currency_amount: sampleRaw.currency_amount,
-          debit_amount: sampleRaw.debit_amount,
-          credit_amount: sampleRaw.credit_amount,
-          account_number: sampleRaw.account_number,
-          account: sampleRaw.account,
-          plan_item: sampleRaw.plan_item,
-          journal: sampleRaw.journal,
-          journal_code: sampleRaw.journal_code,
-          label: sampleRaw.label,
-        } : null,
+        total_entrees_pennylane: entries.length,
+        total_lignes_extraites: allLines.length,
+        lignes_incluses_dans_entree: hasLines ? true : false,
+        cles_entree: rawKeys,
+        cles_ligne: lineKeys,
+        exemple_entree: sampleRaw,
+        exemple_ligne: sampleLine !== sampleRaw ? sampleLine : null,
       },
     });
   } catch (err) {
