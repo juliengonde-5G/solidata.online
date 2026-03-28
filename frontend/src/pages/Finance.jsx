@@ -36,8 +36,9 @@ const fmtPct = (v) => {
 const SUB_PAGES = [
   { path: '/pennylane', label: 'Pennylane', description: 'Synchroniser GL, transactions, balances', icon: IconUpload, color: 'blue' },
   { path: '/finance/operations', label: 'Donnees Operationnelles', description: 'Volumes, couts, marges par centre', icon: IconCalc, color: 'emerald' },
+  { path: '/finance/rentabilite', label: 'Rentabilite Matiere', description: 'Cout complet collecte / tri, PV moyen, marge par qualite', icon: IconChart, color: 'teal' },
   { path: '/finance/tresorerie', label: 'Tresorerie', description: 'Position, encaissements, decaissements', icon: IconBank, color: 'teal' },
-  { path: '/finance/pl', label: 'Compte de Resultat', description: 'P&L par centre, budget vs reel', icon: IconPL, color: 'amber' },
+  { path: '/finance/pl', label: 'Compte de Resultat', description: 'P&L par centre analytique', icon: IconPL, color: 'amber' },
   { path: '/finance/bilan', label: 'Bilan & Ratios', description: 'Actif, passif, SIG, seuil de rentabilite', icon: IconBalance, color: 'purple' },
   { path: '/finance/controles', label: 'Controles', description: 'Verifications automatiques', icon: IconShield, color: 'rose' },
 ];

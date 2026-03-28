@@ -378,6 +378,8 @@ router.get('/gl/:year/pl', async (req, res) => {
     const { centre } = req.query;
 
     // Récupérer toutes les écritures classe 6 et 7
+    // Centre = analytical_code (table analytique "Analyse comptable" de Pennylane)
+    // Groupes = category (table analytique "Types de dépenses / revenus")
     let query = `SELECT g.account, g.account_label, g.family_category, g.category, g.analytical_code,
                         g.debit, g.credit, g.date
                  FROM financial_gl_entries g
@@ -391,24 +393,26 @@ router.get('/gl/:year/pl', async (req, res) => {
     const r = await pool.query(query, params);
     const entries = r.rows;
 
-    // Calculer KPIs
+    // KPIs
     let totalProduits = 0, totalCharges = 0;
     for (const e of entries) {
       if ((e.account || '').startsWith('7')) totalProduits += (parseFloat(e.credit) || 0) - (parseFloat(e.debit) || 0);
       if ((e.account || '').startsWith('6')) totalCharges += (parseFloat(e.debit) || 0) - (parseFloat(e.credit) || 0);
     }
 
-    // Centres analytiques distincts
+    // Centres analytiques distincts (analytical_code = table "Analyse comptable")
     const centresSet = new Set();
     for (const e of entries) if (e.analytical_code) centresSet.add(e.analytical_code);
     const centres = [...centresSet].sort().map(c => ({ code: c, label: c }));
 
-    // Grouper par catégorie (family_category ou premier chiffre + libellé)
+    // Grouper par "category" (table analytique "Types de dépenses / revenus")
+    // Sous-lignes = par compte comptable
     const groupMap = {};
     for (const e of entries) {
       const acct = e.account || '';
       const cls = acct.charAt(0);
-      const key = e.family_category || e.category || `Classe ${cls}`;
+      // Le groupe est la catégorie analytique (Types de dépenses / revenus)
+      const key = e.category || e.family_category || `Classe ${cls}`;
       if (!groupMap[key]) {
         groupMap[key] = { key, label: key, class: cls, months: Array.from({ length: 12 }, () => 0), total: 0, lines: {} };
       }
@@ -418,8 +422,8 @@ router.get('/gl/:year/pl', async (req, res) => {
         const m = new Date(e.date).getMonth();
         groupMap[key].months[m] += amount;
       }
-      // Sous-lignes par compte
-      const lineKey = `${acct} - ${e.account_label || ''}`;
+      // Sous-lignes par compte comptable
+      const lineKey = e.account_label || acct;
       if (!groupMap[key].lines[lineKey]) {
         groupMap[key].lines[lineKey] = { label: lineKey, months: Array.from({ length: 12 }, () => 0), total: 0 };
       }
@@ -667,9 +671,10 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     const MONTHS_FR = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
 
     // Toutes les écritures des comptes 512 (banque/trésorerie)
+    // Inclure category (Types de dépenses / revenus) pour le détail par catégorie
     const r = await pool.query(`
       SELECT g.date, g.account, g.account_label, g.third_party, g.piece_label, g.line_label,
-             g.debit, g.credit, g.journal
+             g.debit, g.credit, g.journal, g.category, g.family_category
       FROM financial_gl_entries g
       JOIN financial_exercises e ON g.exercise_id = e.id
       WHERE e.year = $1 AND g.account LIKE '512%'
@@ -721,17 +726,17 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     }
     waterfall.push({ label: 'Position', value: Math.round(position), invisible: 0, type: 'total' });
 
-    // Cash flow par tiers (top 10)
-    const byThirdParty = {};
+    // Flux par catégorie analytique (Types de dépenses / revenus)
+    const byCategory = {};
     for (const e of entries) {
-      const key = e.third_party || e.piece_label || 'Autres';
-      if (!byThirdParty[key]) byThirdParty[key] = Array.from({ length: 12 }, () => 0);
+      const key = e.category || e.family_category || e.third_party || 'Autres';
+      if (!byCategory[key]) byCategory[key] = Array.from({ length: 12 }, () => 0);
       if (!e.date) continue;
       const m = new Date(e.date).getMonth();
-      byThirdParty[key][m] += (parseFloat(e.debit) || 0) - (parseFloat(e.credit) || 0);
+      byCategory[key][m] += (parseFloat(e.debit) || 0) - (parseFloat(e.credit) || 0);
     }
 
-    const cashFlow = Object.entries(byThirdParty)
+    const cashFlow = Object.entries(byCategory)
       .map(([label, months]) => ({
         key: label,
         label,
@@ -1056,6 +1061,189 @@ router.get('/kpis/:year', async (req, res) => {
 });
 
 // ══════════════════════════════════════════
+// RENTABILITE MATIERE — Coût complet Collecte → Tri → Qualités
+// ══════════════════════════════════════════
+
+router.get('/rentabilite/:year', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+
+    // 1. Charges et produits par centre analytique
+    const gl = await pool.query(`
+      SELECT g.analytical_code as centre,
+        SUM(CASE WHEN g.account LIKE '6%' THEN g.debit - g.credit ELSE 0 END) as charges,
+        SUM(CASE WHEN g.account LIKE '7%' THEN g.credit - g.debit ELSE 0 END) as produits
+      FROM financial_gl_entries g
+      JOIN financial_exercises e ON g.exercise_id = e.id
+      WHERE e.year = $1 AND g.analytical_code IS NOT NULL AND g.analytical_code != ''
+      GROUP BY g.analytical_code
+    `, [year]);
+
+    const centreMap = {};
+    for (const r of gl.rows) centreMap[r.centre] = { charges: parseFloat(r.charges) || 0, produits: parseFloat(r.produits) || 0 };
+
+    // 2. Frais généraux (sans centre ou centre FG)
+    const fgResult = await pool.query(`
+      SELECT SUM(CASE WHEN g.account LIKE '6%' THEN g.debit - g.credit ELSE 0 END) as charges
+      FROM financial_gl_entries g
+      JOIN financial_exercises e ON g.exercise_id = e.id
+      WHERE e.year = $1 AND (g.analytical_code IS NULL OR g.analytical_code = '' OR g.analytical_code ILIKE '%frais%' OR g.analytical_code ILIKE '%FG%' OR g.analytical_code ILIKE '%generaux%')
+            AND g.account LIKE '6%'
+    `, [year]);
+    const chargesFG = parseFloat(fgResult.rows[0]?.charges) || 0;
+
+    // 3. Volumes depuis les données opérationnelles ou les tours
+    const opsResult = await pool.query(`
+      SELECT field_id, SUM(value) as total
+      FROM financial_operational_data o
+      JOIN financial_exercises e ON o.exercise_id = e.id
+      WHERE e.year = $1
+      GROUP BY field_id
+    `, [year]);
+    const opsMap = {};
+    for (const r of opsResult.rows) opsMap[r.field_id] = parseFloat(r.total) || 0;
+
+    // Fallback volumes depuis les tours si pas de données opérationnelles
+    let tonnesCollectees = opsMap.tonnes_collectees || 0;
+    let tonnesAuTri = opsMap.tonnes_au_tri || 0;
+
+    if (tonnesCollectees === 0) {
+      const toursResult = await pool.query(`
+        SELECT SUM(total_weight_kg) / 1000.0 as tonnes
+        FROM tours WHERE EXTRACT(YEAR FROM date) = $1 AND status = 'completed'
+      `, [year]);
+      tonnesCollectees = parseFloat(toursResult.rows[0]?.tonnes) || 0;
+    }
+    if (tonnesAuTri === 0) {
+      const prodResult = await pool.query(`
+        SELECT SUM(entree_ligne_kg) / 1000.0 as tonnes
+        FROM production_daily WHERE EXTRACT(YEAR FROM date) = $1
+      `, [year]);
+      tonnesAuTri = parseFloat(prodResult.rows[0]?.tonnes) || 0;
+    }
+
+    // 4. Produits finis par qualité (expéditions)
+    const qualites = await pool.query(`
+      SELECT e.destination as qualite, SUM(e.poids_kg) / 1000.0 as tonnes,
+             SUM(e.montant_ht) as ca_ht
+      FROM expeditions e
+      WHERE EXTRACT(YEAR FROM e.date_expedition) = $1 AND e.status != 'cancelled'
+      GROUP BY e.destination
+    `, [year]).catch(() => ({ rows: [] }));
+
+    // Fallback : flux sortants stock
+    let qualiteData = qualites.rows;
+    if (qualiteData.length === 0) {
+      const flux = await pool.query(`
+        SELECT m.name as qualite, SUM(sm.poids_kg) / 1000.0 as tonnes
+        FROM stock_movements sm
+        JOIN matieres m ON sm.matiere_id = m.id
+        WHERE sm.type = 'sortie' AND EXTRACT(YEAR FROM sm.date) = $1
+        GROUP BY m.name
+      `, [year]).catch(() => ({ rows: [] }));
+      qualiteData = flux.rows;
+    }
+
+    // 5. Calcul coût complet
+    // Identifier le centre collecte et tri (recherche flexible)
+    const findCentre = (keywords) => {
+      for (const [k, v] of Object.entries(centreMap)) {
+        for (const kw of keywords) {
+          if (k.toLowerCase().includes(kw.toLowerCase())) return { name: k, ...v };
+        }
+      }
+      return null;
+    };
+
+    const centreCollecte = findCentre(['collecte', 'collect', 'original']) || { name: 'Collecte', charges: 0, produits: 0 };
+    const centreTri = findCentre(['tri', 'recyclage', '2nde main', 'seconde main']) || { name: 'Tri', charges: 0, produits: 0 };
+
+    // Ratio de répartition FG
+    const ratioTri = tonnesCollectees > 0 ? tonnesAuTri / tonnesCollectees : 0.5;
+    const fgCollecte = chargesFG * (1 - ratioTri);
+    const fgTri = chargesFG * ratioTri;
+
+    // Coûts complets
+    const coutCompletCollecte = centreCollecte.charges + fgCollecte;
+    const coutTonneCollecte = tonnesCollectees > 0 ? coutCompletCollecte / tonnesCollectees : 0;
+
+    const transfertInterne = coutTonneCollecte * tonnesAuTri;
+    const coutCompletTri = centreTri.charges + fgTri + transfertInterne;
+    const coutTonneTri = tonnesAuTri > 0 ? coutCompletTri / tonnesAuTri : 0;
+
+    // 6. Rentabilité par qualité
+    const totalTonnesExpediees = qualiteData.reduce((s, q) => s + (parseFloat(q.tonnes) || 0), 0);
+    const qualiteAnalyse = qualiteData.map(q => {
+      const tonnes = parseFloat(q.tonnes) || 0;
+      const caHt = parseFloat(q.ca_ht) || 0;
+      const pvMoyen = tonnes > 0 ? caHt / tonnes : 0;
+      const coutComplet = coutTonneTri; // même coût complet tri pour toutes les qualités
+      const marge = pvMoyen - coutComplet;
+      const margePct = pvMoyen > 0 ? marge / pvMoyen * 100 : 0;
+      return {
+        qualite: q.qualite || 'Non classé',
+        tonnes: Math.round(tonnes * 10) / 10,
+        ca_ht: Math.round(caHt),
+        pv_moyen: Math.round(pvMoyen),
+        cout_complet: Math.round(coutComplet),
+        marge: Math.round(marge),
+        marge_pct: Math.round(margePct * 10) / 10,
+      };
+    }).sort((a, b) => b.ca_ht - a.ca_ht);
+
+    // Totaux
+    const totalCA = qualiteAnalyse.reduce((s, q) => s + q.ca_ht, 0);
+    const totalMarge = qualiteAnalyse.reduce((s, q) => s + q.marge * q.tonnes, 0);
+
+    const rd = v => Math.round(v * 100) / 100;
+
+    res.json({
+      collecte: {
+        centre: centreCollecte.name,
+        charges_directes: rd(centreCollecte.charges),
+        fg_alloues: rd(fgCollecte),
+        cout_complet: rd(coutCompletCollecte),
+        tonnes: rd(tonnesCollectees),
+        cout_tonne: rd(coutTonneCollecte),
+        produits: rd(centreCollecte.produits),
+        marge: rd(centreCollecte.produits - coutCompletCollecte),
+      },
+      tri: {
+        centre: centreTri.name,
+        charges_directes: rd(centreTri.charges),
+        fg_alloues: rd(fgTri),
+        transfert_interne: rd(transfertInterne),
+        cout_complet: rd(coutCompletTri),
+        tonnes: rd(tonnesAuTri),
+        cout_tonne: rd(coutTonneTri),
+        produits: rd(centreTri.produits),
+        marge: rd(centreTri.produits - coutCompletTri),
+      },
+      frais_generaux: {
+        total: rd(chargesFG),
+        alloue_collecte: rd(fgCollecte),
+        alloue_tri: rd(fgTri),
+        ratio_tri: rd(ratioTri * 100),
+      },
+      qualites: qualiteAnalyse,
+      totaux: {
+        tonnes_collectees: rd(tonnesCollectees),
+        tonnes_au_tri: rd(tonnesAuTri),
+        tonnes_expediees: rd(totalTonnesExpediees),
+        ca_total: rd(totalCA),
+        marge_totale: rd(totalMarge),
+        cout_tonne_collecte: rd(coutTonneCollecte),
+        cout_tonne_tri: rd(coutTonneTri),
+      },
+      centres_disponibles: Object.keys(centreMap),
+    });
+  } catch (err) {
+    console.error('[FINANCE] Erreur rentabilité :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
 // CONTROLS
 // ══════════════════════════════════════════
 
@@ -1066,10 +1254,15 @@ router.get('/controls/:year', async (req, res) => {
 
     const gl = await pool.query(`
       SELECT COUNT(*) as total,
-        SUM(debit) as total_debit, SUM(credit) as total_credit,
-        SUM(CASE WHEN family_category IS NULL OR family_category = '' THEN 1 ELSE 0 END) as no_family,
-        SUM(CASE WHEN (account LIKE '6%' OR account LIKE '7%') AND (analytical_code IS NULL OR analytical_code = '') THEN 1 ELSE 0 END) as no_analytical,
-        SUM(CASE WHEN account LIKE '6%' OR account LIKE '7%' THEN 1 ELSE 0 END) as pl_total
+        ROUND(SUM(debit)::numeric, 2) as total_debit,
+        ROUND(SUM(credit)::numeric, 2) as total_credit,
+        COUNT(CASE WHEN family_category IS NULL OR family_category = '' THEN 1 END) as no_family,
+        COUNT(CASE WHEN (account LIKE '6%' OR account LIKE '7%') AND (analytical_code IS NULL OR analytical_code = '') THEN 1 END) as no_analytical,
+        COUNT(CASE WHEN account LIKE '6%' OR account LIKE '7%' THEN 1 END) as pl_total,
+        COUNT(CASE WHEN account IS NULL OR account = '' THEN 1 END) as no_account,
+        COUNT(CASE WHEN debit = 0 AND credit = 0 THEN 1 END) as zero_amounts,
+        COUNT(DISTINCT family_category) as nb_families,
+        COUNT(DISTINCT analytical_code) as nb_analytiques
       FROM financial_gl_entries g
       JOIN financial_exercises e ON g.exercise_id = e.id
       WHERE e.year = $1
@@ -1080,29 +1273,91 @@ router.get('/controls/:year', async (req, res) => {
     const totalDebit = parseFloat(d.total_debit) || 0;
     const totalCredit = parseFloat(d.total_credit) || 0;
     const ecart = Math.abs(totalDebit - totalCredit);
-
-    checks.push({ id: 'equilibre', name: 'Equilibre debit/credit', status: ecart < 1 ? 'ok' : ecart < 100 ? 'warning' : 'error',
-      desc: ecart < 1 ? 'Parfait equilibre' : 'Ecart: ' + ecart.toFixed(2) + ' EUR',
-      values: { debit: totalDebit, credit: totalCredit, ecart } });
-
+    const noAccount = parseInt(d.no_account) || 0;
+    const zeroAmounts = parseInt(d.zero_amounts) || 0;
     const noFamily = parseInt(d.no_family) || 0;
-    const pctNoFamily = total > 0 ? noFamily / total : 0;
-    checks.push({ id: 'nofamily', name: 'Lignes sans famille analytique', status: noFamily === 0 ? 'ok' : pctNoFamily < 0.05 ? 'warning' : 'error',
-      desc: noFamily + ' / ' + total + ' lignes (' + (pctNoFamily * 100).toFixed(1) + '%)', values: { count: noFamily, total } });
-
     const noAnalytical = parseInt(d.no_analytical) || 0;
     const plTotal = parseInt(d.pl_total) || 0;
+
+    // ── Contrôle 1 : Import GL
+    if (total === 0) {
+      checks.push({ id: 'import', name: 'Import Grand Livre', status: 'error',
+        desc: 'Aucune ecriture importee. Synchronisez le GL depuis Pennylane pour alimenter les tableaux de bord.',
+        explanation: 'Le Grand Livre analytique est la source de toutes les analyses financieres. Sans donnees, aucun calcul de cout complet, de marge ou de tresorerie ne peut etre effectue.',
+        action: 'Allez dans Pennylane > GL Analytique pour lancer la synchronisation.',
+        values: { total } });
+    } else {
+      checks.push({ id: 'import', name: 'Import Grand Livre', status: 'ok',
+        desc: total + ' ecritures importees',
+        explanation: 'Le GL est bien alimente. Les calculs de couts et marges peuvent etre effectues.',
+        values: { total } });
+    }
+
+    // ── Contrôle 2 : Qualité des comptes
+    if (noAccount > 0) {
+      const pct = (noAccount / total * 100).toFixed(1);
+      checks.push({ id: 'comptes', name: 'Numeros de compte', status: noAccount === total ? 'error' : 'warning',
+        desc: noAccount + ' / ' + total + ' ecritures sans numero de compte (' + pct + '%)',
+        explanation: 'Les ecritures sans numero de compte ne peuvent pas etre classees en charges (classe 6), produits (classe 7) ou tresorerie (classe 5). Cela fausse le P&L et le bilan. Verifiez le mapping entre Pennylane et Solidata.',
+        action: 'Verifiez dans Pennylane que chaque ecriture est bien affectee a un compte du plan comptable.',
+        values: { noAccount, total } });
+    } else {
+      checks.push({ id: 'comptes', name: 'Numeros de compte', status: 'ok',
+        desc: 'Toutes les ecritures ont un numero de compte',
+        explanation: 'Chaque ecriture est affectee a un compte du plan comptable, permettant la classification automatique en charges, produits et tresorerie.',
+        values: { total } });
+    }
+
+    // ── Contrôle 3 : Montants
+    if (zeroAmounts > 0 && zeroAmounts > total * 0.1) {
+      const pct = (zeroAmounts / total * 100).toFixed(1);
+      checks.push({ id: 'montants', name: 'Montants debit/credit', status: zeroAmounts === total ? 'error' : 'warning',
+        desc: zeroAmounts + ' ecritures a montant nul (' + pct + '%)',
+        explanation: 'Des ecritures sans montant n\'apportent aucune valeur aux calculs. Si toutes les ecritures sont a zero, le probleme vient probablement du mapping de l\'import Pennylane (champs debit/credit non reconnus).',
+        action: 'Relancez l\'import GL depuis Pennylane et verifiez le diagnostic.',
+        values: { zeroAmounts, total } });
+    } else {
+      checks.push({ id: 'montants', name: 'Montants debit/credit', status: 'ok',
+        desc: 'Montants correctement renseignes',
+        values: { totalDebit, totalCredit } });
+    }
+
+    // ── Contrôle 4 : Équilibre comptable
+    checks.push({ id: 'equilibre', name: 'Equilibre comptable', status: ecart < 1 ? 'ok' : ecart < 100 ? 'warning' : 'error',
+      desc: ecart < 1 ? 'Parfait equilibre (ecart < 1 EUR)' : 'Ecart de ' + ecart.toFixed(2) + ' EUR',
+      explanation: ecart < 1
+        ? 'Le total des debits est egal au total des credits. Le GL est comptablement equilibre.'
+        : 'En comptabilite en partie double, le total des debits doit etre egal au total des credits. Un ecart significatif indique des ecritures manquantes ou incorrectes.',
+      values: { debit: totalDebit, credit: totalCredit, ecart } });
+
+    // ── Contrôle 5 : Affectation analytique
+    const pctNoFamily = total > 0 ? noFamily / total : 0;
+    checks.push({ id: 'analytique', name: 'Affectation analytique (famille)', status: noFamily === 0 ? 'ok' : pctNoFamily < 0.1 ? 'warning' : 'error',
+      desc: noFamily === 0 ? 'Toutes les ecritures ont une famille analytique' : noFamily + ' / ' + total + ' ecritures sans famille (' + (pctNoFamily * 100).toFixed(1) + '%)',
+      explanation: 'La famille analytique (ex: "Analyse comptable", "Types de depenses / revenus") est la dimension qui permet de ventiler les charges et produits par centre de cout. Sans elle, l\'analyse P&L par centre est incomplete.',
+      action: noFamily > 0 ? 'Completez l\'affectation analytique dans Pennylane pour les ecritures de charges et produits.' : undefined,
+      values: { noFamily, total, nbFamilies: parseInt(d.nb_families) || 0 } });
+
+    // ── Contrôle 6 : Codes analytiques P&L
     const pctNoAnal = plTotal > 0 ? noAnalytical / plTotal : 0;
-    checks.push({ id: 'noanalytics', name: 'Lignes P&L sans code analytique', status: noAnalytical === 0 ? 'ok' : pctNoAnal < 0.05 ? 'warning' : 'error',
-      desc: noAnalytical + ' / ' + plTotal + ' ecritures P&L', values: { count: noAnalytical, total: plTotal } });
+    checks.push({ id: 'codes_analytiques', name: 'Codes analytiques P&L', status: noAnalytical === 0 ? 'ok' : pctNoAnal < 0.1 ? 'warning' : 'error',
+      desc: noAnalytical === 0 ? 'Toutes les ecritures P&L ont un code analytique' : noAnalytical + ' / ' + plTotal + ' ecritures P&L sans code analytique (' + (pctNoAnal * 100).toFixed(1) + '%)',
+      explanation: 'Le code analytique affecte chaque ecriture a un centre de cout (Collecte, Tri, Frais Generaux). Sans affectation, le calcul du cout complet par activite et la repartition des frais generaux sont impossibles.',
+      action: noAnalytical > 0 ? 'Affectez un code analytique (centre de cout) dans Pennylane pour chaque ecriture de charge et de produit.' : undefined,
+      values: { noAnalytical, plTotal, nbAnalytiques: parseInt(d.nb_analytiques) || 0 } });
 
-    const budgetCheck = await pool.query(`SELECT COUNT(*) as c FROM financial_budgets b JOIN financial_exercises e ON b.exercise_id = e.id WHERE e.year = $1`, [year]);
-    const budgetCount = parseInt(budgetCheck.rows[0].c) || 0;
-    checks.push({ id: 'budget', name: 'Budget charge', status: budgetCount > 0 ? 'ok' : 'warning',
-      desc: budgetCount > 0 ? budgetCount + ' postes' : 'Aucun budget', values: { count: budgetCount } });
-
-    checks.push({ id: 'resultat', name: 'Resultat P&L', status: (totalCredit - totalDebit) >= 0 ? 'ok' : 'error',
-      desc: 'Produits - Charges', values: { produits: totalCredit, charges: totalDebit, resultat: totalCredit - totalDebit } });
+    // ── Contrôle 7 : Résultat
+    const produits = totalCredit;
+    const charges = totalDebit;
+    const resultat = produits - charges;
+    checks.push({ id: 'resultat', name: 'Resultat d\'exploitation', status: resultat >= 0 ? 'ok' : 'error',
+      desc: resultat >= 0
+        ? 'Resultat positif : ' + Math.round(resultat).toLocaleString('fr-FR') + ' EUR'
+        : 'Resultat negatif : ' + Math.round(resultat).toLocaleString('fr-FR') + ' EUR',
+      explanation: resultat >= 0
+        ? 'L\'activite degage un resultat positif. La structure couvre ses charges par ses produits.'
+        : 'L\'activite est deficitaire. Les charges depassent les produits. Analysez le P&L par centre pour identifier les postes de surcout.',
+      values: { produits, charges, resultat } });
 
     res.json(checks);
   } catch (err) {

@@ -143,37 +143,32 @@ export default function FinanceControles() {
             <p className="text-slate-500 text-sm">Aucun controle disponible. Cliquez sur Actualiser pour lancer les verifications.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-4">
             {checks.map((check, i) => {
               const config = STATUS_CONFIG[check.status] || STATUS_CONFIG.ok;
               const StatusIcon = config.icon;
 
               return (
                 <div
-                  key={check.key || i}
-                  className={`rounded-xl border p-5 ${config.bg} ${config.border} transition-all hover:shadow-sm`}
+                  key={check.id || i}
+                  className={`rounded-xl border p-5 ${config.bg} ${config.border} transition-all`}
                 >
-                  <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <span className={`w-2.5 h-2.5 rounded-full ${config.dot}`} />
-                      <span className={`text-xs font-semibold uppercase tracking-wider ${config.text}`}>
-                        {config.label}
-                      </span>
+                      <StatusIcon className={`w-5 h-5 ${config.text}`} />
+                      <h4 className="font-semibold text-slate-800 text-sm">{check.name || check.label}</h4>
                     </div>
-                    <StatusIcon className={`w-5 h-5 ${config.text}`} />
+                    <span className={`text-xs font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full ${config.bg} ${config.text}`}>
+                      {config.label}
+                    </span>
                   </div>
-                  <h4 className="font-semibold text-slate-800 mb-1 text-sm">{check.label}</h4>
-                  <p className="text-xs text-slate-600 leading-relaxed">{check.detail}</p>
-                  {check.value != null && (
-                    <p className={`text-lg font-bold mt-2 ${config.text}`}>
-                      {typeof check.value === 'number'
-                        ? Number(check.value).toLocaleString('fr-FR')
-                        : check.value}
-                    </p>
+                  <p className={`text-sm font-medium mb-2 ${config.text}`}>{check.desc || check.detail}</p>
+                  {check.explanation && (
+                    <p className="text-xs text-slate-600 leading-relaxed mb-2">{check.explanation}</p>
                   )}
-                  {check.last_check && (
-                    <p className="text-xs text-slate-400 mt-2">
-                      Verifie le {new Date(check.last_check).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  {check.action && (
+                    <p className="text-xs font-medium text-slate-700 bg-white/60 rounded-lg px-3 py-2 border border-slate-200">
+                      Action : {check.action}
                     </p>
                   )}
                 </div>

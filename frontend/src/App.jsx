@@ -52,6 +52,7 @@ import ActivityLog from './pages/ActivityLog';
 import Finance from './pages/Finance';
 import FinanceImport from './pages/FinanceImport';
 import FinanceOperations from './pages/FinanceOperations';
+import FinanceRentabilite from './pages/FinanceRentabilite';
 import FinanceTresorerie from './pages/FinanceTresorerie';
 import FinancePL from './pages/FinancePL';
 import FinanceBilan from './pages/FinanceBilan';
@@ -146,6 +147,7 @@ function App() {
             <Route path="/finance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Finance /></ProtectedRoute>} />
             <Route path="/finance/import" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceImport /></ProtectedRoute>} />
             <Route path="/finance/operations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceOperations /></ProtectedRoute>} />
+            <Route path="/finance/rentabilite" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceRentabilite /></ProtectedRoute>} />
             <Route path="/finance/tresorerie" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceTresorerie /></ProtectedRoute>} />
             <Route path="/finance/pl" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinancePL /></ProtectedRoute>} />
             <Route path="/finance/bilan" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceBilan /></ProtectedRoute>} />
