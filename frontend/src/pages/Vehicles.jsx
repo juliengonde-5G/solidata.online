@@ -40,7 +40,7 @@ const emptyForm = {
   registration: '', name: '', brand: '', model: '', type: 'utilitaire',
   max_capacity_kg: 3500, tare_weight_kg: '', current_km: 0,
   next_maintenance: '', insurance_expiry: '', team_id: '', status: 'available',
-  assigned_driver_id: '',
+  vehicle_type: 'generic',
 };
 
 export default function Vehicles() {
@@ -70,9 +70,9 @@ export default function Vehicles() {
   const [docForm, setDocForm] = useState({ doc_type: 'autre', title: '', expiry_date: '', notes: '' });
   const [docFile, setDocFile] = useState(null);
 
-  const [employees, setEmployees] = useState([]);
+  const [maintenanceProfiles, setMaintenanceProfiles] = useState([]);
 
-  useEffect(() => { loadVehicles(); loadEmployees(); }, []);
+  useEffect(() => { loadVehicles(); loadMaintenanceProfiles(); }, []);
   useEffect(() => { if (activeTab === 'maintenance') loadMaintenance(); }, [activeTab]);
 
   const loadVehicles = async () => {
@@ -83,10 +83,10 @@ export default function Vehicles() {
     setLoading(false);
   };
 
-  const loadEmployees = async () => {
+  const loadMaintenanceProfiles = async () => {
     try {
-      const res = await api.get('/employees');
-      setEmployees(res.data);
+      const res = await api.get('/vehicles/maintenance/profiles-db');
+      setMaintenanceProfiles(res.data);
     } catch (err) { console.error(err); }
   };
 
@@ -169,7 +169,7 @@ export default function Vehicles() {
       current_km: v.current_km || 0, next_maintenance: v.next_maintenance ? v.next_maintenance.split('T')[0] : '',
       insurance_expiry: v.insurance_expiry ? v.insurance_expiry.split('T')[0] : '',
       team_id: v.team_id || '', status: v.status || 'available',
-      assigned_driver_id: v.assigned_driver_id || '',
+      vehicle_type: v.vehicle_type || 'generic',
     });
     setShowForm(true);
   };
@@ -177,20 +177,11 @@ export default function Vehicles() {
   const saveVehicle = async (e) => {
     e.preventDefault();
     try {
-      const { assigned_driver_id, ...rest } = form;
-      const payload = { ...rest, tare_weight_kg: rest.tare_weight_kg ? parseFloat(rest.tare_weight_kg) : null };
-      let vehicleId = editingId;
+      const payload = { ...form, tare_weight_kg: form.tare_weight_kg ? parseFloat(form.tare_weight_kg) : null };
       if (editingId) {
         await api.put(`/vehicles/${editingId}`, payload);
       } else {
-        const res = await api.post('/vehicles', payload);
-        vehicleId = res.data.id;
-      }
-      // Affecter le chauffeur (lien véhicule-chauffeur)
-      if (vehicleId) {
-        await api.put(`/vehicles/${vehicleId}/assign-driver`, {
-          employee_id: assigned_driver_id ? parseInt(assigned_driver_id) : null,
-        });
+        await api.post('/vehicles', payload);
       }
       setShowForm(false);
       loadVehicles();
@@ -281,7 +272,7 @@ export default function Vehicles() {
                   <p><span className="text-gray-400">Kilométrage :</span> {(v.current_km || 0).toLocaleString('fr-FR')} km</p>
                   {v.next_maintenance && <p><span className="text-gray-400">Proch. maintenance :</span> {new Date(v.next_maintenance).toLocaleDateString('fr-FR')}</p>}
                   {v.insurance_expiry && <p><span className="text-gray-400">Assurance :</span> {new Date(v.insurance_expiry).toLocaleDateString('fr-FR')}</p>}
-                  {v.assigned_driver_name && v.assigned_driver_name.trim() && <p><span className="text-gray-400">Chauffeur :</span> <span className="font-medium text-solidata-green">{v.assigned_driver_name}</span></p>}
+                  {v.vehicle_type && v.vehicle_type !== 'generic' && <p><span className="text-gray-400">Profil :</span> <span className="font-medium text-solidata-green">{v.vehicle_type}</span></p>}
                 </div>
               </div>
             ))}
@@ -352,11 +343,12 @@ export default function Vehicles() {
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                 <div><span className="text-gray-400 text-xs">Capacité max</span><p className="font-medium">{selectedVehicle.max_capacity_kg} kg</p></div>
                 <div><span className="text-gray-400 text-xs">Poids à vide (tare)</span><p className="font-medium">{selectedVehicle.tare_weight_kg ? `${selectedVehicle.tare_weight_kg} kg` : '—'}</p></div>
                 <div><span className="text-gray-400 text-xs">Charge utile</span><p className="font-medium">{selectedVehicle.tare_weight_kg ? `${Math.round(selectedVehicle.max_capacity_kg - selectedVehicle.tare_weight_kg)} kg` : '—'}</p></div>
                 <div><span className="text-gray-400 text-xs">Assurance</span><p className="font-medium">{selectedVehicle.insurance_expiry ? new Date(selectedVehicle.insurance_expiry).toLocaleDateString('fr-FR') : '—'}</p></div>
+                <div><span className="text-gray-400 text-xs">Plan constructeur</span><p className="font-medium">{selectedVehicle.vehicle_type && selectedVehicle.vehicle_type !== 'generic' ? selectedVehicle.vehicle_type : <span className="text-orange-500">Non configuré</span>}</p></div>
               </div>
             </div>
 
@@ -402,11 +394,19 @@ export default function Vehicles() {
                   </table>
                 </div>
               ) : (
-                <p className="text-gray-400 text-sm">
+                <div className="text-sm text-gray-400">
                   {schedule?.profile_name
-                    ? `Profil "${schedule.profile_name}" — aucune opération définie.`
-                    : 'Aucun profil de maintenance configuré. Configurez le type de véhicule dans l\'onglet Maintenance.'}
-                </p>
+                    ? <p>Profil "{schedule.profile_name}" — aucune opération définie.</p>
+                    : (
+                      <div className="flex items-center gap-3 p-4 bg-orange-50 border border-orange-200 rounded-lg text-orange-700">
+                        <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+                        <div>
+                          <p className="font-medium">Aucun plan d'entretien constructeur associé</p>
+                          <p className="text-xs mt-0.5">Modifiez ce véhicule et sélectionnez un plan constructeur pour afficher la grille d'entretien.</p>
+                        </div>
+                      </div>
+                    )}
+                </div>
               )}
             </div>
 
@@ -553,13 +553,14 @@ export default function Vehicles() {
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500">Chauffeur attitré</label>
-                  <select value={form.assigned_driver_id} onChange={e => setForm({ ...form, assigned_driver_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                    <option value="">— Aucun —</option>
-                    {employees.map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
+                  <label className="text-xs text-gray-500">Plan d'entretien constructeur</label>
+                  <select value={form.vehicle_type} onChange={e => setForm({ ...form, vehicle_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                    <option value="generic">— Aucun profil —</option>
+                    {maintenanceProfiles.map(p => (
+                      <option key={p.id} value={p.vehicle_type}>{p.brand} {p.model} ({p.vehicle_type})</option>
                     ))}
                   </select>
+                  <p className="text-[10px] text-gray-400 mt-1">Associe la grille d'entretien du constructeur au véhicule</p>
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
