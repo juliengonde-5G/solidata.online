@@ -554,28 +554,6 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
-// POST /api/cav/:id/regenerate-qr
-router.post('/:id/regenerate-qr', authorize('ADMIN'), async (req, res) => {
-  try {
-    const qrData = `SOLIDATA-CAV-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-    const qrDir = path.join(__dirname, '..', '..', 'uploads', 'qrcodes');
-    if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
-    const qrFilename = `qr_${qrData}.png`;
-    const qrPath = path.join(qrDir, qrFilename);
-    await QRCode.toFile(qrPath, qrData, { width: 300, margin: 2 });
-
-    await pool.query(
-      'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2, updated_at = NOW() WHERE id = $3',
-      [qrData, `/uploads/qrcodes/${qrFilename}`, req.params.id]
-    );
-
-    res.json({ message: 'QR code régénéré', qrData, qrImagePath: `/uploads/qrcodes/${qrFilename}` });
-  } catch (err) {
-    console.error('[CAV] Erreur QR :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
 // GET /api/cav/:id/history — Historique tonnage
 router.get('/:id/history', async (req, res) => {
   try {

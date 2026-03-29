@@ -259,8 +259,18 @@ async function generateSheets(options = {}) {
         let qrData = cav.qr_code_data;
         if (!qrData) {
           qrData = `SOLIDATA-CAV-${cav.id}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-          // Mettre à jour en BDD
-          await pool.query('UPDATE cav SET qr_code_data = $1 WHERE id = $2', [qrData, cav.id]);
+          // Sauvegarder l'image QR sur disque
+          const qrDir = path.join(__dirname, '..', '..', 'uploads', 'qrcodes');
+          if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
+          const qrFilename = `qr_${qrData}.png`;
+          const qrFilePath = path.join(qrDir, qrFilename);
+          await QRCode.toFile(qrFilePath, qrData, { width: 300, margin: 2, color: { dark: '#1A202C', light: '#FFFFFF' } });
+          // Mettre à jour en BDD (data + chemin image)
+          await pool.query(
+            'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2, updated_at = NOW() WHERE id = $3',
+            [qrData, `/uploads/qrcodes/${qrFilename}`, cav.id]
+          );
+          console.log(`[QR-SHEETS] QR généré et sauvegardé pour CAV #${cav.id}`);
         }
 
         const qrBuffer = await generateQRBuffer(qrData, 600); // Haute résolution pour impression

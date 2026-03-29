@@ -36,6 +36,8 @@ export default function AdminCAV() {
   const [alert, setAlert] = useState(null);
   const [mapPos, setMapPos] = useState(null);
   const [qrGenerating, setQrGenerating] = useState(false);
+  const [qrPreview, setQrPreview] = useState(null);
+  const [sheetDownloading, setSheetDownloading] = useState(null);
 
   const loadCAVs = useCallback(async () => {
     try {
@@ -149,12 +151,44 @@ export default function AdminCAV() {
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `QR_CAV_${cav.name.replace(/\s+/g, '_')}.png`;
+      a.download = `QR_CAV_${cav.id}_${(cav.commune || '').replace(/\s+/g, '_')}.png`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
       showAlert('QR code non disponible', 'error');
     }
+  };
+
+  const openQRPreview = async (cav) => {
+    try {
+      const res = await api.get(`/cav/${cav.id}/qr-code`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      setQrPreview({ cav, imageUrl: url });
+    } catch (err) {
+      showAlert('QR code non disponible', 'error');
+    }
+  };
+
+  const closeQRPreview = () => {
+    if (qrPreview?.imageUrl) URL.revokeObjectURL(qrPreview.imageUrl);
+    setQrPreview(null);
+  };
+
+  const downloadSheet = async (format) => {
+    setSheetDownloading(format);
+    try {
+      const res = await api.get(`/cav/qr-sheets/${format}`, { responseType: 'blob', timeout: 120000 });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `SOLIDATA_QR_CAV_${format}_${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showAlert(`Planche ${format} téléchargée`);
+    } catch (err) {
+      showAlert(`Erreur téléchargement planche ${format}`, 'error');
+    }
+    setSheetDownloading(null);
   };
 
   const cavWithoutQR = cavList.filter(c => !c.qr_code_data).length;
@@ -177,13 +211,21 @@ export default function AdminCAV() {
             <h1 className="text-2xl font-bold text-solidata-dark">Gestion des CAV</h1>
             <p className="text-gray-500">Conteneurs d'Apport Volontaire — {cavList.length} enregistré(s)</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {cavWithoutQR > 0 && (
               <button onClick={generateMissingQR} disabled={qrGenerating}
                 className="border border-amber-300 bg-amber-50 text-amber-700 rounded-lg px-4 py-2 text-sm hover:bg-amber-100 disabled:opacity-50">
                 {qrGenerating ? 'Génération...' : `Générer ${cavWithoutQR} QR manquant(s)`}
               </button>
             )}
+            <button onClick={() => downloadSheet('A7')} disabled={!!sheetDownloading}
+              className="border border-solidata-green text-solidata-green rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
+              {sheetDownloading === 'A7' ? 'Génération...' : 'Planche QR (A7)'}
+            </button>
+            <button onClick={() => downloadSheet('A8')} disabled={!!sheetDownloading}
+              className="border border-solidata-green text-solidata-green rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
+              {sheetDownloading === 'A8' ? 'Génération...' : 'Planche QR (A8)'}
+            </button>
             <button onClick={openCreate} className="bg-solidata-green text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700">
               + Nouveau CAV
             </button>
@@ -240,9 +282,18 @@ export default function AdminCAV() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       {cav.qr_code_data ? (
-                        <button onClick={() => downloadQR(cav)} className="text-solidata-green hover:underline text-xs" title="Télécharger">
-                          Télécharger
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button onClick={() => openQRPreview(cav)}
+                            className="inline-flex items-center gap-1 bg-green-50 text-solidata-green border border-green-200 rounded px-2 py-1 text-xs hover:bg-green-100"
+                            title="Voir le QR code">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            Voir
+                          </button>
+                          <button onClick={() => downloadQR(cav)}
+                            className="text-gray-400 hover:text-solidata-green text-xs" title="Télécharger PNG">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-amber-500 text-xs">Non généré</span>
                       )}
@@ -270,6 +321,46 @@ export default function AdminCAV() {
             </table>
           )}
         </div>
+
+        {/* Modal QR Preview */}
+        {qrPreview && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closeQRPreview}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+              <div className="p-6 text-center">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-bold text-solidata-dark">QR Code — CAV #{qrPreview.cav.id}</h2>
+                  <button onClick={closeQRPreview} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+
+                <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                  <img src={qrPreview.imageUrl} alt={`QR CAV ${qrPreview.cav.id}`} className="mx-auto w-48 h-48 object-contain" />
+                </div>
+
+                <div className="text-left space-y-1 mb-4 text-sm">
+                  <p><span className="text-gray-500">Commune :</span> <span className="font-medium">{qrPreview.cav.commune || '—'}</span></p>
+                  <p><span className="text-gray-500">Adresse :</span> <span className="font-medium">{qrPreview.cav.address || '—'}</span></p>
+                  <p><span className="text-gray-500">Conteneurs :</span> <span className="font-medium">{qrPreview.cav.nb_containers || 1}</span></p>
+                  <p className="text-xs text-gray-400 font-mono mt-2 break-all">{qrPreview.cav.qr_code_data}</p>
+                </div>
+
+                <p className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2 mb-4">
+                  Ce QR code est définitif et ne peut pas être modifié.
+                </p>
+
+                <div className="flex gap-2">
+                  <button onClick={() => { downloadQR(qrPreview.cav); }}
+                    className="flex-1 bg-solidata-green text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700">
+                    Télécharger PNG
+                  </button>
+                  <button onClick={closeQRPreview}
+                    className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
+                    Fermer
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal Création / Édition */}
         {showModal && (

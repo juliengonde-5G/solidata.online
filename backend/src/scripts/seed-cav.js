@@ -149,6 +149,21 @@ async function seedCAV(externalPool) {
     console.log(`[SEED-CAV] Lecture KML: ${kmlPath}`);
     cavs = parseKML(kmlPath);
     console.log(`[SEED-CAV] ${cavs.length} CAV trouvés dans le KML (avec GPS)`);
+
+    // Vérifier que le KML est complet (contient la balise fermante)
+    const kmlContent = fs.readFileSync(kmlPath, 'utf-8');
+    if (!kmlContent.includes('</Document>')) {
+      console.warn(`[SEED-CAV] ATTENTION: KML tronqué (pas de </Document>), ${cavs.length} CAV seulement`);
+      // Tenter l'ancien KML en fallback
+      const fallback = findFile('Carte des PAV au 28-02-2026.kml');
+      if (fallback && fallback !== kmlPath) {
+        const fallbackCavs = parseKML(fallback);
+        if (fallbackCavs.length > cavs.length) {
+          console.log(`[SEED-CAV] Fallback vers ${fallback}: ${fallbackCavs.length} CAV`);
+          cavs = fallbackCavs;
+        }
+      }
+    }
   }
 
   // Merge with Excel data if available (for postal codes and extra CAV)
