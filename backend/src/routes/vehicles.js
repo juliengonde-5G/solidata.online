@@ -345,12 +345,12 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
   body('registration').notEmpty().withMessage('Immatriculation requise'),
 ], validate, async (req, res) => {
   try {
-    const { registration, name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, current_km, next_maintenance, insurance_expiry } = req.body;
+    const { registration, name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, current_km, next_maintenance, insurance_expiry, vehicle_type } = req.body;
 
     const result = await pool.query(
-      `INSERT INTO vehicles (registration, name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, current_km, next_maintenance, insurance_expiry)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [registration.toUpperCase(), name, brand, model, type || 'utilitaire', max_capacity_kg || 3500, tare_weight_kg, team_id, current_km || 0, next_maintenance || null, insurance_expiry || null]
+      `INSERT INTO vehicles (registration, name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, current_km, next_maintenance, insurance_expiry, vehicle_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+      [registration.toUpperCase(), name, brand, model, type || 'utilitaire', max_capacity_kg || 3500, tare_weight_kg, team_id, current_km || 0, next_maintenance || null, insurance_expiry || null, vehicle_type || 'generic']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -363,16 +363,17 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
 // PUT /api/vehicles/:id
 router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, status, current_km, next_maintenance, insurance_expiry } = req.body;
+    const { name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, status, current_km, next_maintenance, insurance_expiry, vehicle_type } = req.body;
     const result = await pool.query(
       `UPDATE vehicles SET
        name = COALESCE($1, name), brand = COALESCE($2, brand), model = COALESCE($3, model),
        type = COALESCE($4, type), max_capacity_kg = COALESCE($5, max_capacity_kg),
        tare_weight_kg = COALESCE($6, tare_weight_kg), team_id = COALESCE($7, team_id),
        status = COALESCE($8, status), current_km = COALESCE($9, current_km),
-       next_maintenance = $10, insurance_expiry = $11, updated_at = NOW()
-       WHERE id = $12 RETURNING *`,
-      [name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, status, current_km, next_maintenance || null, insurance_expiry || null, req.params.id]
+       next_maintenance = $10, insurance_expiry = $11, vehicle_type = COALESCE($12, vehicle_type),
+       updated_at = NOW()
+       WHERE id = $13 RETURNING *`,
+      [name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, status, current_km, next_maintenance || null, insurance_expiry || null, vehicle_type, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
     res.json(result.rows[0]);
