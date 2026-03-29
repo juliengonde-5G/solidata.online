@@ -45,10 +45,11 @@ export default function TourMap() {
 
   const loadTour = async () => {
     try {
-      const res = await api.get(`/tours/${tourId}`);
-      setTour(res.data);
-      setCavs(res.data.cavs || []);
-      const visitedCount = (res.data.cavs || []).filter(c => c.status === 'collected').length;
+      const res = await fetch(`/api/tours/${tourId}/public`);
+      const data = await res.json();
+      setTour(data);
+      setCavs(data.cavs || []);
+      const visitedCount = (data.cavs || []).filter(c => c.status === 'collected').length;
       setCurrentCavIndex(visitedCount);
     } catch (err) { console.error(err); }
   };

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
 import { vibrateTap, vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
 
@@ -28,8 +27,9 @@ export default function Checklist() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await api.get(`/tours/${tourId}`);
-        setTour(res.data);
+        const res = await fetch(`/api/tours/${tourId}/public`);
+        const data = await res.json();
+        setTour(data);
       } catch (e) {}
     };
     if (tourId) load();
@@ -41,14 +41,18 @@ export default function Checklist() {
 
   const submit = async () => {
     try {
-      await api.post(`/tours/${tourId}/checklist`, {
-        vehicle_id: tour?.vehicle_id,
-        employee_id: tour?.driver_employee_id,
-        exterior_ok: allChecked,
-        fuel_level: '1/2',
-        km_start: parseInt(kmStart, 10) || 0,
+      // Sauvegarder la checklist et démarrer la tournée (endpoints publics)
+      await fetch(`/api/tours/${tourId}/checklist-public`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vehicle_id: tour?.vehicle_id,
+          exterior_ok: allChecked,
+          fuel_level: '1/2',
+          km_start: parseInt(kmStart, 10) || 0,
+        }),
       });
-      await api.put(`/tours/${tourId}/status`, { status: 'in_progress' });
+      await fetch(`/api/tours/${tourId}/start-public`, { method: 'PUT' });
       vibrateSuccess();
       navigate('/tour-map');
     } catch (err) { vibrateError(); console.error(err); }
@@ -58,7 +62,7 @@ export default function Checklist() {
     <MobileShell
       title="Checklist départ"
       subtitle={`Tournée #${tourId} — ${checkedCount}/${CHECKLIST_ITEMS.length} vérifiés`}
-      onBack={() => navigate('/vehicle-select')}
+      onBack={() => navigate('/start')}
     >
       <div className="mb-4">
         <TourStepBar currentPath="/checklist" />
