@@ -2143,6 +2143,7 @@ async function initDatabase() {
       { col: 'next_maintenance', def: "DATE" },
       { col: 'insurance_expiry', def: "DATE" },
       { col: 'assigned_driver_id', def: "INTEGER REFERENCES employees(id) ON DELETE SET NULL" },
+      { col: 'vehicle_type', def: "VARCHAR(100) DEFAULT 'generic'" },
     ];
     for (const m of vehicleMigrations) {
       await client.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS ${m.col} ${m.def}`);
