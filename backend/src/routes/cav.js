@@ -262,6 +262,29 @@ router.post('/scan-qr', [
   }
 });
 
+// GET /api/cav/qr-sheets/:format — Télécharger la planche PDF des QR codes (A7 ou A8)
+router.get('/qr-sheets/:format', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const format = (req.params.format || 'A7').toUpperCase();
+    if (!['A7', 'A8'].includes(format)) {
+      return res.status(400).json({ error: 'Format invalide. Utilisez A7 ou A8.' });
+    }
+
+    const { generateSheets } = require('../scripts/generate-qr-sheets');
+    const outputPath = await generateSheets({ format });
+
+    res.download(outputPath, `SOLIDATA_QR_CAV_${format}_${new Date().toISOString().slice(0, 10)}.pdf`, (err) => {
+      if (err) {
+        console.error('[CAV] Erreur téléchargement planche QR :', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' });
+      }
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur génération planche QR :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/cav/:id/scans — Historique des scans QR d'un CAV
 router.get('/:id/scans', async (req, res) => {
   try {
@@ -527,28 +550,6 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[CAV] Erreur modification :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// POST /api/cav/:id/regenerate-qr
-router.post('/:id/regenerate-qr', authorize('ADMIN'), async (req, res) => {
-  try {
-    const qrData = `SOLIDATA-CAV-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-    const qrDir = path.join(__dirname, '..', '..', 'uploads', 'qrcodes');
-    if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
-    const qrFilename = `qr_${qrData}.png`;
-    const qrPath = path.join(qrDir, qrFilename);
-    await QRCode.toFile(qrPath, qrData, { width: 300, margin: 2 });
-
-    await pool.query(
-      'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2, updated_at = NOW() WHERE id = $3',
-      [qrData, `/uploads/qrcodes/${qrFilename}`, req.params.id]
-    );
-
-    res.json({ message: 'QR code régénéré', qrData, qrImagePath: `/uploads/qrcodes/${qrFilename}` });
-  } catch (err) {
-    console.error('[CAV] Erreur QR :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
