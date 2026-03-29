@@ -281,16 +281,18 @@ const uploadVehicleDoc = multer({
   }
 })();
 
-// GET /api/vehicles/available — Liste des véhicules disponibles (endpoint public pour login mobile)
+// GET /api/vehicles/available — Liste des véhicules pour le mobile (tous sauf hors service)
 router.get('/available', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT v.id, v.registration, v.name, v.status,
-             CONCAT(e.first_name, ' ', e.last_name) as driver_name
+             CONCAT(e.first_name, ' ', e.last_name) as driver_name,
+             t.id as tour_id, t.status as tour_status
       FROM vehicles v
       LEFT JOIN employees e ON e.id = v.assigned_driver_id
-      WHERE v.status = 'available'
-      ORDER BY v.name, v.registration
+      LEFT JOIN tours t ON t.vehicle_id = v.id AND t.date = CURRENT_DATE AND t.status IN ('planned', 'in_progress')
+      WHERE v.status != 'out_of_service'
+      ORDER BY t.id DESC NULLS LAST, v.name, v.registration
     `);
     res.json(result.rows);
   } catch (err) {
