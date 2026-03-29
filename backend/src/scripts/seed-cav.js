@@ -138,7 +138,9 @@ async function seedCAV(externalPool) {
   const db = externalPool || pool;
 
   // Load KML (primary source with GPS)
-  const kmlPath = findFile('Carte des PAV au 28-02-2026.kml');
+  // Chercher le KML le plus récent d'abord
+  const kmlPath = findFile('Carte des PAV au 29-03-2026.kml')
+    || findFile('Carte des PAV au 28-02-2026.kml');
   const xlsPath = findFile('tournee.xlsx');
 
   let cavs = [];

@@ -262,6 +262,29 @@ router.post('/scan-qr', [
   }
 });
 
+// GET /api/cav/qr-sheets/:format — Télécharger la planche PDF des QR codes (A7 ou A8)
+router.get('/qr-sheets/:format', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const format = (req.params.format || 'A7').toUpperCase();
+    if (!['A7', 'A8'].includes(format)) {
+      return res.status(400).json({ error: 'Format invalide. Utilisez A7 ou A8.' });
+    }
+
+    const { generateSheets } = require('../scripts/generate-qr-sheets');
+    const outputPath = await generateSheets({ format });
+
+    res.download(outputPath, `SOLIDATA_QR_CAV_${format}_${new Date().toISOString().slice(0, 10)}.pdf`, (err) => {
+      if (err) {
+        console.error('[CAV] Erreur téléchargement planche QR :', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' });
+      }
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur génération planche QR :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/cav/:id/scans — Historique des scans QR d'un CAV
 router.get('/:id/scans', async (req, res) => {
   try {
