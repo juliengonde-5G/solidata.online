@@ -40,7 +40,7 @@ const emptyForm = {
   registration: '', name: '', brand: '', model: '', type: 'utilitaire',
   max_capacity_kg: 3500, tare_weight_kg: '', current_km: 0,
   next_maintenance: '', insurance_expiry: '', team_id: '', status: 'available',
-  vehicle_type: 'generic',
+  vehicle_type: 'generic', engine: '', year: '',
 };
 
 export default function Vehicles() {
@@ -71,6 +71,8 @@ export default function Vehicles() {
   const [docFile, setDocFile] = useState(null);
 
   const [maintenanceProfiles, setMaintenanceProfiles] = useState([]);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
+  const [generatedPlan, setGeneratedPlan] = useState(null);
 
   useEffect(() => { loadVehicles(); loadMaintenanceProfiles(); }, []);
   useEffect(() => { if (activeTab === 'maintenance') loadMaintenance(); }, [activeTab]);
@@ -88,6 +90,34 @@ export default function Vehicles() {
       const res = await api.get('/vehicles/maintenance/profiles-db');
       setMaintenanceProfiles(res.data);
     } catch (err) { console.error(err); }
+  };
+
+  const generateMaintenancePlan = async () => {
+    if (!form.brand || !form.model) {
+      alert('Renseignez la marque et le modèle du véhicule avant de générer le plan.');
+      return;
+    }
+    setGeneratingPlan(true);
+    setGeneratedPlan(null);
+    try {
+      const res = await api.post('/vehicles/maintenance/generate-plan', {
+        brand: form.brand,
+        model: form.model,
+        year: form.year || undefined,
+        engine: form.engine || undefined,
+        vehicle_id: editingId || undefined,
+      });
+      setGeneratedPlan(res.data.plan);
+      setForm(f => ({ ...f, vehicle_type: res.data.vehicle_type }));
+      loadMaintenanceProfiles();
+      if (editingId && selectedVehicle) {
+        loadSchedule(editingId);
+      }
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Erreur lors de la génération';
+      alert(msg);
+    }
+    setGeneratingPlan(false);
   };
 
   const loadMaintenance = async () => {
@@ -157,6 +187,7 @@ export default function Vehicles() {
   const openCreate = () => {
     setEditingId(null);
     setForm({ ...emptyForm });
+    setGeneratedPlan(null);
     setShowForm(true);
   };
 
@@ -170,7 +201,9 @@ export default function Vehicles() {
       insurance_expiry: v.insurance_expiry ? v.insurance_expiry.split('T')[0] : '',
       team_id: v.team_id || '', status: v.status || 'available',
       vehicle_type: v.vehicle_type || 'generic',
+      engine: '', year: '',
     });
+    setGeneratedPlan(null);
     setShowForm(true);
   };
 
@@ -552,15 +585,65 @@ export default function Vehicles() {
                     <input type="date" value={form.insurance_expiry} onChange={e => setForm({ ...form, insurance_expiry: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
                   </div>
                 </div>
-                <div>
-                  <label className="text-xs text-gray-500">Plan d'entretien constructeur</label>
-                  <select value={form.vehicle_type} onChange={e => setForm({ ...form, vehicle_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                    <option value="generic">— Aucun profil —</option>
-                    {maintenanceProfiles.map(p => (
-                      <option key={p.id} value={p.vehicle_type}>{p.brand} {p.model} ({p.vehicle_type})</option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] text-gray-400 mt-1">Associe la grille d'entretien du constructeur au véhicule</p>
+                {/* Plan d'entretien constructeur */}
+                <div className="border rounded-lg p-3 bg-gray-50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Plan d'entretien constructeur</label>
+                    {form.vehicle_type && form.vehicle_type !== 'generic' && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{form.vehicle_type}</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-gray-400">Motorisation (optionnel)</label>
+                      <input placeholder="ex: 2.3 dCi 150ch" value={form.engine} onChange={e => setForm({ ...form, engine: e.target.value })} className="w-full border rounded-lg px-3 py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-400">Année (optionnel)</label>
+                      <input placeholder="ex: 2022" value={form.year} onChange={e => setForm({ ...form, year: e.target.value })} className="w-full border rounded-lg px-3 py-1.5 text-sm" />
+                    </div>
+                  </div>
+                  {maintenanceProfiles.length > 0 && (
+                    <div>
+                      <label className="text-[10px] text-gray-400">Profil existant</label>
+                      <select value={form.vehicle_type} onChange={e => setForm({ ...form, vehicle_type: e.target.value })} className="w-full border rounded-lg px-3 py-1.5 text-sm">
+                        <option value="generic">— Sélectionner un profil existant —</option>
+                        {maintenanceProfiles.map(p => (
+                          <option key={p.id} value={p.vehicle_type}>{p.brand} {p.model}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={generateMaintenancePlan}
+                    disabled={generatingPlan || !form.brand || !form.model}
+                    className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    {generatingPlan ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                        Recherche du plan constructeur...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                        Rechercher le plan via IA
+                      </>
+                    )}
+                  </button>
+                  <p className="text-[10px] text-gray-400">L'IA recherche les préconisations constructeur pour ce véhicule et crée le plan d'entretien automatiquement.</p>
+                  {generatedPlan && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-800">
+                      <p className="font-medium mb-1">Plan "{generatedPlan.vehicle_type}" généré avec {generatedPlan.items?.length || 0} opérations</p>
+                      <ul className="space-y-0.5 text-green-700">
+                        {(generatedPlan.items || []).slice(0, 5).map((item, i) => (
+                          <li key={i}>• {item.label_fr} — {item.interval_km ? `${item.interval_km.toLocaleString('fr-FR')} km` : ''} {item.interval_months ? `/ ${item.interval_months} mois` : ''}</li>
+                        ))}
+                        {(generatedPlan.items || []).length > 5 && <li className="text-green-600">... et {generatedPlan.items.length - 5} autres opérations</li>}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
