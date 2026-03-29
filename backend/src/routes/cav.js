@@ -1,12 +1,35 @@
 const express = require('express');
 const router = express.Router();
 const QRCode = require('qrcode');
+const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+
+// Multer pour upload photo CAV
+const cavPhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', '..', 'uploads', 'cav-photos');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `cav_${req.params.id}_${Date.now()}${ext}`);
+  },
+});
+const uploadCavPhoto = multer({
+  storage: cavPhotoStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext));
+  },
+});
 
 router.use(authenticate);
 
@@ -281,6 +304,51 @@ router.get('/qr-sheets/:format', authorize('ADMIN', 'MANAGER'), async (req, res)
     });
   } catch (err) {
     console.error('[CAV] Erreur génération planche QR :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/cav/:id/photo — Upload photo d'un CAV
+router.post('/:id/photo', authorize('ADMIN', 'MANAGER'), uploadCavPhoto.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucune photo fournie (jpg, png, webp, max 10 Mo)' });
+
+    // Supprimer l'ancienne photo si elle existe
+    const old = await pool.query('SELECT photo_path FROM cav WHERE id = $1', [req.params.id]);
+    if (old.rows.length > 0 && old.rows[0].photo_path) {
+      const oldPath = path.join(__dirname, '..', '..', old.rows[0].photo_path);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    const photoPath = `/uploads/cav-photos/${req.file.filename}`;
+    const result = await pool.query(
+      'UPDATE cav SET photo_path = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [photoPath, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[CAV] Erreur upload photo :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/cav/:id/photo — Supprimer la photo d'un CAV
+router.delete('/:id/photo', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const old = await pool.query('SELECT photo_path FROM cav WHERE id = $1', [req.params.id]);
+    if (old.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+
+    if (old.rows[0].photo_path) {
+      const oldPath = path.join(__dirname, '..', '..', old.rows[0].photo_path);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    await pool.query('UPDATE cav SET photo_path = NULL, updated_at = NOW() WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Photo supprimée' });
+  } catch (err) {
+    console.error('[CAV] Erreur suppression photo :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
@@ -36,8 +36,11 @@ export default function AdminCAV() {
   const [alert, setAlert] = useState(null);
   const [mapPos, setMapPos] = useState(null);
   const [qrGenerating, setQrGenerating] = useState(false);
-  const [qrPreview, setQrPreview] = useState(null);
   const [sheetDownloading, setSheetDownloading] = useState(null);
+  const [detailCav, setDetailCav] = useState(null);
+  const [detailQrUrl, setDetailQrUrl] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef(null);
 
   const loadCAVs = useCallback(async () => {
     try {
@@ -73,6 +76,23 @@ export default function AdminCAV() {
     });
     setMapPos(cav.latitude && cav.longitude ? [cav.latitude, cav.longitude] : null);
     setShowModal(true);
+  };
+
+  const openDetail = async (cav) => {
+    setDetailCav(cav);
+    setDetailQrUrl(null);
+    if (cav.qr_code_data) {
+      try {
+        const res = await api.get(`/cav/${cav.id}/qr-code`, { responseType: 'blob' });
+        setDetailQrUrl(URL.createObjectURL(res.data));
+      } catch (err) { /* pas de QR */ }
+    }
+  };
+
+  const closeDetail = () => {
+    if (detailQrUrl) URL.revokeObjectURL(detailQrUrl);
+    setDetailCav(null);
+    setDetailQrUrl(null);
   };
 
   const handleMapPick = ([lat, lng]) => {
@@ -117,6 +137,7 @@ export default function AdminCAV() {
       await api.put(`/cav/${cav.id}`, { status: newStatus, unavailable_reason: reason || undefined });
       showAlert(`CAV ${newStatus === 'active' ? 'activé' : 'désactivé'}`);
       loadCAVs();
+      if (detailCav?.id === cav.id) setDetailCav({ ...detailCav, status: newStatus });
     } catch (err) {
       showAlert('Erreur lors du changement de statut', 'error');
     }
@@ -127,6 +148,7 @@ export default function AdminCAV() {
     try {
       await api.delete(`/cav/${cav.id}`);
       showAlert('CAV supprimé');
+      if (detailCav?.id === cav.id) closeDetail();
       loadCAVs();
     } catch (err) {
       showAlert('Erreur lors de la suppression', 'error');
@@ -159,21 +181,6 @@ export default function AdminCAV() {
     }
   };
 
-  const openQRPreview = async (cav) => {
-    try {
-      const res = await api.get(`/cav/${cav.id}/qr-code`, { responseType: 'blob' });
-      const url = URL.createObjectURL(res.data);
-      setQrPreview({ cav, imageUrl: url });
-    } catch (err) {
-      showAlert('QR code non disponible', 'error');
-    }
-  };
-
-  const closeQRPreview = () => {
-    if (qrPreview?.imageUrl) URL.revokeObjectURL(qrPreview.imageUrl);
-    setQrPreview(null);
-  };
-
   const downloadSheet = async (format) => {
     setSheetDownloading(format);
     try {
@@ -189,6 +196,38 @@ export default function AdminCAV() {
       showAlert(`Erreur téléchargement planche ${format}`, 'error');
     }
     setSheetDownloading(null);
+  };
+
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !detailCav) return;
+    setUploadingPhoto(true);
+    try {
+      const formData = new FormData();
+      formData.append('photo', file);
+      const res = await api.post(`/cav/${detailCav.id}/photo`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setDetailCav(res.data);
+      showAlert('Photo enregistrée');
+      loadCAVs();
+    } catch (err) {
+      showAlert('Erreur upload photo', 'error');
+    }
+    setUploadingPhoto(false);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
+  const deletePhoto = async () => {
+    if (!detailCav) return;
+    try {
+      await api.delete(`/cav/${detailCav.id}/photo`);
+      setDetailCav({ ...detailCav, photo_path: null });
+      showAlert('Photo supprimée');
+      loadCAVs();
+    } catch (err) {
+      showAlert('Erreur suppression photo', 'error');
+    }
   };
 
   const cavWithoutQR = cavList.filter(c => !c.qr_code_data).length;
@@ -248,119 +287,222 @@ export default function AdminCAV() {
           </select>
         </div>
 
-        {/* Table */}
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-          {loading ? (
-            <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-solidata-green" /></div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
-                <tr>
-                  <th className="px-4 py-3">Nom</th>
-                  <th className="px-4 py-3">Commune</th>
-                  <th className="px-4 py-3">Adresse</th>
-                  <th className="px-4 py-3 text-center">Conteneurs</th>
-                  <th className="px-4 py-3 text-center">GPS</th>
-                  <th className="px-4 py-3 text-center">QR Code</th>
-                  <th className="px-4 py-3 text-center">Statut</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {cavList.map(cav => (
-                  <tr key={cav.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium">{cav.name}</td>
-                    <td className="px-4 py-3 text-gray-500">{cav.commune || '—'}</td>
-                    <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{cav.address || '—'}</td>
-                    <td className="px-4 py-3 text-center">{cav.nb_containers || 1}</td>
-                    <td className="px-4 py-3 text-center">
-                      {cav.latitude && cav.longitude ? (
-                        <span className="text-green-600 text-xs font-mono">{Number(cav.latitude).toFixed(4)}, {Number(cav.longitude).toFixed(4)}</span>
-                      ) : (
-                        <span className="text-red-400 text-xs">Manquant</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {cav.qr_code_data ? (
-                        <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => openQRPreview(cav)}
-                            className="inline-flex items-center gap-1 bg-green-50 text-solidata-green border border-green-200 rounded px-2 py-1 text-xs hover:bg-green-100"
-                            title="Voir le QR code">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                            Voir
-                          </button>
-                          <button onClick={() => downloadQR(cav)}
-                            className="text-gray-400 hover:text-solidata-green text-xs" title="Télécharger PNG">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-amber-500 text-xs">Non généré</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button onClick={() => toggleStatus(cav)}
-                        className={`px-2 py-1 rounded-full text-xs font-medium cursor-pointer ${
-                          cav.status === 'active' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'
-                        }`}>
-                        {cav.status === 'active' ? 'Actif' : 'Indisponible'}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => openEdit(cav)} className="text-blue-600 hover:text-blue-800 text-xs">Modifier</button>
-                        <button onClick={() => deleteCav(cav)} className="text-red-500 hover:text-red-700 text-xs">Supprimer</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {cavList.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Aucun CAV trouvé</td></tr>
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
+        {/* Layout : Table + Fiche détail */}
+        <div className={`grid gap-6 ${detailCav ? 'grid-cols-1 lg:grid-cols-5' : 'grid-cols-1'}`}>
 
-        {/* Modal QR Preview */}
-        {qrPreview && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closeQRPreview}>
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
-              <div className="p-6 text-center">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-bold text-solidata-dark">QR Code — CAV #{qrPreview.cav.id}</h2>
-                  <button onClick={closeQRPreview} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+          {/* Table */}
+          <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${detailCav ? 'lg:col-span-3' : ''}`}>
+            {loading ? (
+              <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-solidata-green" /></div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
+                    <tr>
+                      <th className="px-4 py-3">Nom</th>
+                      <th className="px-4 py-3">Commune</th>
+                      <th className="px-4 py-3 text-center">Cont.</th>
+                      <th className="px-4 py-3 text-center">QR</th>
+                      <th className="px-4 py-3 text-center">Statut</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {cavList.map(cav => (
+                      <tr key={cav.id}
+                        className={`hover:bg-gray-50 cursor-pointer ${detailCav?.id === cav.id ? 'bg-green-50 border-l-4 border-l-solidata-green' : ''}`}
+                        onClick={() => openDetail(cav)}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-solidata-dark">{cav.commune || '—'}</div>
+                          <div className="text-xs text-gray-400 truncate max-w-[200px]">{cav.address || '—'}</div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{cav.commune || '—'}</td>
+                        <td className="px-4 py-3 text-center">{cav.nb_containers || 1}</td>
+                        <td className="px-4 py-3 text-center">
+                          {cav.qr_code_data ? (
+                            <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" title="QR généré" />
+                          ) : (
+                            <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-400" title="QR manquant" />
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            cav.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                          }`}>
+                            {cav.status === 'active' ? 'Actif' : 'Inactif'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                          <div className="flex gap-2 justify-end">
+                            <button onClick={() => openEdit(cav)} className="text-blue-600 hover:text-blue-800 text-xs">Modifier</button>
+                            <button onClick={() => toggleStatus(cav)} className="text-amber-600 hover:text-amber-800 text-xs">
+                              {cav.status === 'active' ? 'Désactiver' : 'Activer'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {cavList.length === 0 && (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Aucun CAV trouvé</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Fiche détail CAV */}
+          {detailCav && (
+            <div className="lg:col-span-2 space-y-4">
+              {/* Card principale */}
+              <div className="bg-white rounded-xl shadow-sm border p-5">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-solidata-dark">CAV #{detailCav.id}</h2>
+                    <p className="text-sm text-solidata-green font-medium">{detailCav.commune}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      detailCav.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {detailCav.status === 'active' ? 'Actif' : 'Inactif'}
+                    </span>
+                    <button onClick={closeDetail} className="text-gray-400 hover:text-gray-600 text-lg">&times;</button>
+                  </div>
                 </div>
 
-                <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                  <img src={qrPreview.imageUrl} alt={`QR CAV ${qrPreview.cav.id}`} className="mx-auto w-48 h-48 object-contain" />
+                <div className="space-y-2 text-sm mb-4">
+                  <div className="flex gap-2">
+                    <span className="text-gray-400 w-24 shrink-0">Adresse</span>
+                    <span className="text-gray-700">{detailCav.address || '—'}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="text-gray-400 w-24 shrink-0">Conteneurs</span>
+                    <span className="text-gray-700">{detailCav.nb_containers || 1}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="text-gray-400 w-24 shrink-0">GPS</span>
+                    <span className="text-gray-700 font-mono text-xs">
+                      {detailCav.latitude && detailCav.longitude
+                        ? `${Number(detailCav.latitude).toFixed(6)}, ${Number(detailCav.longitude).toFixed(6)}`
+                        : 'Non renseigné'}
+                    </span>
+                  </div>
+                  {detailCav.unavailable_reason && (
+                    <div className="flex gap-2">
+                      <span className="text-gray-400 w-24 shrink-0">Raison</span>
+                      <span className="text-red-600">{detailCav.unavailable_reason}</span>
+                    </div>
+                  )}
                 </div>
 
-                <div className="text-left space-y-1 mb-4 text-sm">
-                  <p><span className="text-gray-500">Commune :</span> <span className="font-medium">{qrPreview.cav.commune || '—'}</span></p>
-                  <p><span className="text-gray-500">Adresse :</span> <span className="font-medium">{qrPreview.cav.address || '—'}</span></p>
-                  <p><span className="text-gray-500">Conteneurs :</span> <span className="font-medium">{qrPreview.cav.nb_containers || 1}</span></p>
-                  <p className="text-xs text-gray-400 font-mono mt-2 break-all">{qrPreview.cav.qr_code_data}</p>
-                </div>
-
-                <p className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2 mb-4">
-                  Ce QR code est définitif et ne peut pas être modifié.
-                </p>
-
-                <div className="flex gap-2">
-                  <button onClick={() => { downloadQR(qrPreview.cav); }}
-                    className="flex-1 bg-solidata-green text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700">
-                    Télécharger PNG
+                {/* Actions */}
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={() => openEdit(detailCav)}
+                    className="bg-blue-50 text-blue-700 border border-blue-200 rounded-lg px-3 py-1.5 text-xs hover:bg-blue-100">
+                    Modifier
                   </button>
-                  <button onClick={closeQRPreview}
-                    className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
-                    Fermer
+                  <button onClick={() => toggleStatus(detailCav)}
+                    className={`rounded-lg px-3 py-1.5 text-xs border ${
+                      detailCav.status === 'active'
+                        ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                        : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+                    }`}>
+                    {detailCav.status === 'active' ? 'Désactiver' : 'Réactiver'}
+                  </button>
+                  <button onClick={() => deleteCav(detailCav)}
+                    className="bg-red-50 text-red-700 border border-red-200 rounded-lg px-3 py-1.5 text-xs hover:bg-red-100">
+                    Supprimer
                   </button>
                 </div>
               </div>
+
+              {/* Carte GPS */}
+              {detailCav.latitude && detailCav.longitude && (
+                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                  <div className="px-4 py-2 bg-gray-50 border-b">
+                    <h3 className="text-xs font-medium text-gray-500 uppercase">Localisation</h3>
+                  </div>
+                  <div style={{ height: '200px' }}>
+                    <MapContainer
+                      key={`detail-${detailCav.id}`}
+                      center={[detailCav.latitude, detailCav.longitude]}
+                      zoom={15}
+                      style={{ height: '100%', width: '100%' }}
+                      scrollWheelZoom={false}
+                    >
+                      <TileLayer
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      />
+                      <Marker position={[detailCav.latitude, detailCav.longitude]} />
+                    </MapContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* Photo CAV */}
+              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                <div className="px-4 py-2 bg-gray-50 border-b flex items-center justify-between">
+                  <h3 className="text-xs font-medium text-gray-500 uppercase">Photo du CAV</h3>
+                  {detailCav.photo_path && (
+                    <button onClick={deletePhoto} className="text-red-400 hover:text-red-600 text-xs">Supprimer</button>
+                  )}
+                </div>
+                <div className="p-4">
+                  {detailCav.photo_path ? (
+                    <img
+                      src={`/api${detailCav.photo_path}`}
+                      alt={`Photo CAV ${detailCav.id}`}
+                      className="w-full h-48 object-cover rounded-lg"
+                    />
+                  ) : (
+                    <div className="w-full h-32 bg-gray-100 rounded-lg flex flex-col items-center justify-center text-gray-400">
+                      <svg className="w-8 h-8 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span className="text-xs">Aucune photo</span>
+                    </div>
+                  )}
+                  <input type="file" ref={photoInputRef} accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+                  <button onClick={() => photoInputRef.current?.click()} disabled={uploadingPhoto}
+                    className="mt-3 w-full border border-gray-300 text-gray-600 rounded-lg px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50">
+                    {uploadingPhoto ? 'Envoi en cours...' : detailCav.photo_path ? 'Changer la photo' : 'Ajouter une photo'}
+                  </button>
+                </div>
+              </div>
+
+              {/* QR Code */}
+              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                <div className="px-4 py-2 bg-gray-50 border-b">
+                  <h3 className="text-xs font-medium text-gray-500 uppercase">QR Code</h3>
+                </div>
+                <div className="p-4 text-center">
+                  {detailQrUrl ? (
+                    <>
+                      <img src={detailQrUrl} alt={`QR CAV ${detailCav.id}`} className="mx-auto w-36 h-36 object-contain mb-2" />
+                      <p className="text-xs text-gray-400 font-mono break-all mb-3">{detailCav.qr_code_data}</p>
+                      <button onClick={() => downloadQR(detailCav)}
+                        className="bg-solidata-green text-white rounded-lg px-4 py-2 text-xs hover:bg-green-700 w-full">
+                        Télécharger PNG
+                      </button>
+                      <p className="text-xs text-amber-600 mt-2">QR code définitif — ne peut pas être modifié</p>
+                    </>
+                  ) : detailCav.qr_code_data ? (
+                    <p className="text-xs text-gray-400">Chargement...</p>
+                  ) : (
+                    <div className="text-center py-4">
+                      <p className="text-amber-500 text-sm mb-2">QR code non généré</p>
+                      <p className="text-xs text-gray-400">Utilisez le bouton "Générer QR manquants" en haut de page</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Modal Création / Édition */}
         {showModal && (
@@ -377,12 +519,12 @@ export default function AdminCAV() {
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Nom *</label>
                       <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                        className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="Ex: CAV Rouen Centre" />
+                        className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="Ex: ROUEN - 10 rue..." />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Commune</label>
                       <input value={form.commune} onChange={e => setForm(f => ({ ...f, commune: e.target.value }))}
-                        className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="Ex: Rouen" />
+                        className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="Ex: ROUEN" />
                     </div>
                   </div>
 
