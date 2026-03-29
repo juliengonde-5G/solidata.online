@@ -285,14 +285,16 @@ const uploadVehicleDoc = multer({
 router.get('/available', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT v.id, v.registration, v.name, v.status,
+      SELECT DISTINCT ON (v.id) v.id, v.registration, v.name, v.status,
              CONCAT(e.first_name, ' ', e.last_name) as driver_name,
              t.id as tour_id, t.status as tour_status
       FROM vehicles v
       LEFT JOIN employees e ON e.id = v.assigned_driver_id
-      LEFT JOIN tours t ON t.vehicle_id = v.id AND t.date = CURRENT_DATE AND t.status IN ('planned', 'in_progress')
+      LEFT JOIN tours t ON t.vehicle_id = v.id
+        AND t.date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Paris')::date
+        AND t.status IN ('planned', 'in_progress')
       WHERE v.status != 'out_of_service'
-      ORDER BY t.id DESC NULLS LAST, v.name, v.registration
+      ORDER BY v.id, t.id DESC NULLS LAST
     `);
     res.json(result.rows);
   } catch (err) {
