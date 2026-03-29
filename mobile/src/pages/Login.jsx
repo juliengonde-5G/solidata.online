@@ -1,14 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import api from '../services/api';
 
 export default function Login() {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
-  const { driverStart } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -30,17 +27,27 @@ export default function Login() {
     if (starting) return;
     setStarting(true);
     setError('');
-    // Stocker le véhicule sélectionné pour les pages suivantes
+
+    // Stocker le véhicule sélectionné
     localStorage.setItem('selected_vehicle_id', vehicle.id);
-    localStorage.setItem('selected_vehicle_reg', vehicle.registration || vehicle.registration_number);
+    localStorage.setItem('selected_vehicle_reg', vehicle.registration);
+
     try {
-      // Tenter l'auth silencieuse (non bloquant)
-      await driverStart(vehicle.id);
+      // Chercher la tournée du jour pour ce véhicule
+      const res = await fetch(`/api/tours/vehicle/${vehicle.id}/today`);
+      const data = await res.json();
+
+      if (data.tour) {
+        localStorage.setItem('current_tour_id', data.tour.id);
+        navigate('/checklist');
+      } else {
+        setError('Aucune tournée planifiée pour ce véhicule aujourd\'hui.');
+        setStarting(false);
+      }
     } catch {
-      // Continuer sans auth — accès libre
+      setError('Erreur lors de la recherche de la tournée.');
+      setStarting(false);
     }
-    setStarting(false);
-    navigate('/vehicle-select');
   };
 
   return (
@@ -51,7 +58,7 @@ export default function Login() {
           <span className="text-[var(--color-primary)] text-3xl font-bold">S</span>
         </div>
         <h1 className="text-white text-2xl font-bold tracking-tight">SOLIDATA</h1>
-        <p className="text-white/80 text-sm mt-1">Choisis ton vehicule pour demarrer</p>
+        <p className="text-white/80 text-sm mt-1">Choisis ton véhicule pour démarrer</p>
       </div>
 
       {error && (
@@ -66,12 +73,12 @@ export default function Login() {
       {loading ? (
         <div className="flex flex-col items-center justify-center py-16 text-white/80">
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-white border-t-transparent mb-3" />
-          <span className="text-sm">Chargement des vehicules...</span>
+          <span className="text-sm">Chargement des véhicules...</span>
         </div>
       ) : vehicles.length === 0 ? (
         <div className="card-mobile p-8 text-center">
           <div className="text-4xl mb-3">🚛</div>
-          <p className="font-medium text-gray-700">Aucun vehicule disponible</p>
+          <p className="font-medium text-gray-700">Aucun véhicule disponible</p>
           <p className="text-sm text-gray-500 mt-1">Contactez votre responsable</p>
           <button onClick={loadVehicles} className="mt-4 text-sm text-[var(--color-primary)] font-medium">
             Recharger
@@ -93,8 +100,10 @@ export default function Login() {
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-gray-900 text-lg">{v.registration}</p>
                   {v.name && <p className="text-sm text-gray-600">{v.name}</p>}
-                  {v.driver_name && (
-                    <p className="text-xs text-gray-400 mt-0.5">Chauffeur : {v.driver_name}</p>
+                  {v.tour_id && (
+                    <p className="text-xs mt-0.5">
+                      <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Tournée planifiée</span>
+                    </p>
                   )}
                 </div>
                 <svg className="w-5 h-5 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
