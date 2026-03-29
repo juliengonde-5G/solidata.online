@@ -1503,6 +1503,14 @@ async function initDatabase() {
     console.log('[INIT-DB] Migration CAV (unique name + fill rate columns) ✓');
 
     // ══════════════════════════════════════════
+    // MIGRATION : CAV photo
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS photo_path VARCHAR(500);
+    `);
+    console.log('[INIT-DB] Migration CAV photo ✓');
+
+    // ══════════════════════════════════════════
     // MIGRATION : FKs manquantes + indexes performance
     // ══════════════════════════════════════════
     // FK users.team_id -> teams(id)
