@@ -1234,4 +1234,148 @@ router.delete('/:id/documents/:docId', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// POST /api/vehicles/maintenance/generate-plan — Génération IA du plan d'entretien constructeur
+// ══════════════════════════════════════════════════════════════════════════
+const Anthropic = require('@anthropic-ai/sdk');
+
+router.post('/maintenance/generate-plan', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const { brand, model, year, engine, vehicle_id } = req.body;
+  if (!brand || !model) {
+    return res.status(400).json({ error: 'Marque et modèle requis' });
+  }
+
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) {
+    return res.status(503).json({ error: 'Clé API Anthropic non configurée' });
+  }
+
+  try {
+    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+
+    const prompt = `Tu es un expert en maintenance de véhicules utilitaires et poids lourds.
+Génère le plan d'entretien constructeur pour ce véhicule :
+- Marque : ${brand}
+- Modèle : ${model}
+${year ? `- Année : ${year}` : ''}
+${engine ? `- Motorisation : ${engine}` : ''}
+
+Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de commentaires) avec cette structure exacte :
+{
+  "vehicle_type": "Marque Modèle Motorisation",
+  "brand": "Marque",
+  "model": "Modèle complet",
+  "engine_code": "code moteur si connu",
+  "timing_system": "courroie" ou "chaine",
+  "adblue_equipped": true/false,
+  "revision_km": intervalle révision en km,
+  "revision_months": intervalle révision en mois,
+  "items": [
+    {
+      "item_code": "code_court_unique",
+      "label_fr": "Libellé en français",
+      "interval_km": intervalle en km (null si non applicable),
+      "interval_months": intervalle en mois (null si non applicable),
+      "interval_note": "note complémentaire éventuelle",
+      "estimated_cost_eur": coût estimé en euros,
+      "sort_order": numéro d'ordre
+    }
+  ]
+}
+
+Inclus toutes les opérations d'entretien standard : vidange, filtres (huile, air, carburant, habitacle), distribution, liquide de frein, plaquettes, liquide de refroidissement, boîte de vitesses, pneus, contrôle technique, AdBlue si applicable, courroie accessoires, etc.
+Base-toi sur les préconisations constructeur officielles.`;
+
+    const response = await client.messages.create({
+      model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
+
+    // Parser le JSON depuis la réponse Claude
+    let plan;
+    try {
+      // Nettoyer d'éventuels backticks markdown
+      const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      plan = JSON.parse(cleaned);
+    } catch (parseErr) {
+      console.error('[VEHICLES] Erreur parsing réponse IA:', text.substring(0, 500));
+      return res.status(500).json({ error: 'Réponse IA invalide', raw: text.substring(0, 500) });
+    }
+
+    // Valider la structure minimale
+    if (!plan.vehicle_type || !plan.items || !Array.isArray(plan.items)) {
+      return res.status(500).json({ error: 'Structure du plan invalide', plan });
+    }
+
+    // Sauvegarder le profil en base (upsert sur vehicle_type)
+    const existing = await pool.query(
+      'SELECT id FROM vehicle_maintenance_profiles WHERE vehicle_type = $1',
+      [plan.vehicle_type]
+    );
+
+    let profileId;
+    if (existing.rows.length > 0) {
+      profileId = existing.rows[0].id;
+      await pool.query(
+        `UPDATE vehicle_maintenance_profiles SET
+         brand = $1, model = $2, engine_code = $3, timing_system = $4,
+         adblue_equipped = $5, revision_km = $6, revision_months = $7, source = 'ia-claude'
+         WHERE id = $8`,
+        [plan.brand, plan.model, plan.engine_code || null, plan.timing_system || 'courroie',
+         plan.adblue_equipped !== false, plan.revision_km || 30000, plan.revision_months || 24, profileId]
+      );
+      // Remplacer les items
+      await pool.query('DELETE FROM vehicle_maintenance_profile_items WHERE profile_id = $1', [profileId]);
+    } else {
+      const insertResult = await pool.query(
+        `INSERT INTO vehicle_maintenance_profiles (vehicle_type, brand, model, engine_code, timing_system, adblue_equipped, revision_km, revision_months, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ia-claude') RETURNING id`,
+        [plan.vehicle_type, plan.brand, plan.model, plan.engine_code || null,
+         plan.timing_system || 'courroie', plan.adblue_equipped !== false,
+         plan.revision_km || 30000, plan.revision_months || 24]
+      );
+      profileId = insertResult.rows[0].id;
+    }
+
+    // Insérer les items
+    for (const item of plan.items) {
+      await pool.query(
+        `INSERT INTO vehicle_maintenance_profile_items (profile_id, item_code, label_fr, interval_km, interval_months, interval_note, estimated_cost_eur, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [profileId, item.item_code, item.label_fr, item.interval_km || null,
+         item.interval_months || null, item.interval_note || null,
+         item.estimated_cost_eur || null, item.sort_order || 0]
+      );
+    }
+
+    // Associer au véhicule si vehicle_id fourni
+    if (vehicle_id) {
+      await pool.query(
+        'UPDATE vehicles SET vehicle_type = $1 WHERE id = $2',
+        [plan.vehicle_type, vehicle_id]
+      );
+    }
+
+    // Recharger le profil complet
+    const items = await pool.query(
+      'SELECT * FROM vehicle_maintenance_profile_items WHERE profile_id = $1 ORDER BY sort_order',
+      [profileId]
+    );
+
+    res.json({
+      message: 'Plan d\'entretien généré par IA et sauvegardé',
+      profile_id: profileId,
+      vehicle_type: plan.vehicle_type,
+      plan: { ...plan, id: profileId, items: items.rows },
+    });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur génération plan IA:', err);
+    if (err.status === 401) return res.status(503).json({ error: 'Clé API Anthropic invalide' });
+    res.status(500).json({ error: 'Erreur lors de la génération du plan d\'entretien' });
+  }
+});
+
 module.exports = router;
