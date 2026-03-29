@@ -254,17 +254,9 @@ async function seedCAV(externalPool) {
   try {
     await client.query('BEGIN');
 
-    // Clear existing CAV for clean import if no history
+    // Toujours mode upsert — ne jamais supprimer les CAV existants (FK: tour_cav, cav_qr_scans, tonnage_history...)
     const existing = await client.query('SELECT COUNT(*) FROM cav');
-    if (parseInt(existing.rows[0].count) > 0) {
-      const hasHistory = await client.query('SELECT COUNT(*) FROM tonnage_history');
-      if (parseInt(hasHistory.rows[0].count) === 0) {
-        await client.query('DELETE FROM cav');
-        console.log('[SEED-CAV] Table CAV vidée pour réimport propre');
-      } else {
-        console.log('[SEED-CAV] Données existantes conservées (tonnage_history non vide), mode upsert');
-      }
-    }
+    console.log(`[SEED-CAV] ${existing.rows[0].count} CAV existants en base, mode upsert`);
 
     let inserted = 0;
     let updated = 0;
