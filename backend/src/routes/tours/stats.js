@@ -69,7 +69,7 @@ router.get('/reporting/anomalies', async (req, res) => {
 
     // Tours complétées sans poids
     const noWeight = await pool.query(`
-      SELECT id, date, driver_id FROM tours
+      SELECT id, date, driver_employee_id FROM tours
       WHERE status = 'completed' AND (total_weight_kg IS NULL OR total_weight_kg = 0)
       AND date >= NOW() - INTERVAL '30 days'
       ORDER BY date DESC LIMIT 20

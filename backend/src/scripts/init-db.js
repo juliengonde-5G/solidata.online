@@ -2066,7 +2066,7 @@ async function initDatabase() {
         COUNT(*) as nb_tours,
         ROUND(SUM(total_weight_kg)::numeric, 1) as total_kg,
         ROUND(AVG(total_weight_kg)::numeric, 1) as avg_kg_tour,
-        COUNT(DISTINCT driver_id) as nb_chauffeurs
+        COUNT(DISTINCT driver_employee_id) as nb_chauffeurs
       FROM tours
       WHERE status = 'completed'
       GROUP BY TO_CHAR(date, 'YYYY-MM')
