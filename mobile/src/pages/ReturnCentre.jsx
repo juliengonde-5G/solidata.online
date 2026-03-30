@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
 
 export default function ReturnCentre() {
@@ -13,7 +12,15 @@ export default function ReturnCentre() {
   const submit = async () => {
     setLoading(true);
     try {
-      await api.put(`/tours/${tourId}/checklist/end`, { km_end: parseInt(kmEnd, 10) || 0 });
+      await fetch(`/api/tours/${tourId}/status-public`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'returning',
+          km_end: parseInt(kmEnd, 10) || 0,
+          notes,
+        }),
+      });
       navigate('/weigh-in');
     } catch (err) { console.error(err); }
     setLoading(false);

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
 import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
 
@@ -25,20 +24,37 @@ export default function FillLevel() {
     if (fillLevel === null) return;
     setLoading(true);
     try {
-      const tourRes = await api.get(`/tours/${tourId}`);
-      const cavs = tourRes.data.cavs || [];
-      const currentIndex = cavs.findIndex(c => c.status !== 'collected');
-      if (currentIndex >= 0) {
-        const cav = cavs[currentIndex];
-        await api.put(`/tours/${tourId}/cav/${cav.cav_id}`, {
-          status: 'collected',
-          fill_level: fillLevel,
-          qr_scanned: true,
-          notes: anomaly ? `${anomaly}${notes ? ': ' + notes : ''}` : notes,
+      // Load tour to find the correct CAV
+      const tourRes = await fetch(`/api/tours/${tourId}/public`);
+      const tourData = await tourRes.json();
+      const cavs = tourData.cavs || [];
+
+      // Use selected_cav_id from QRScanner/QRUnavailable if available, otherwise fallback to first non-collected
+      const selectedCavId = localStorage.getItem('selected_cav_id');
+      let cav = null;
+      if (selectedCavId) {
+        cav = cavs.find(c => String(c.cav_id) === String(selectedCavId) || String(c.id) === String(selectedCavId));
+      }
+      if (!cav) {
+        cav = cavs.find(c => c.status !== 'collected');
+      }
+
+      if (cav) {
+        const cavId = cav.cav_id || cav.id;
+        await fetch(`/api/tours/${tourId}/cav/${cavId}/collect-public`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: 'collected',
+            fill_level: fillLevel,
+            qr_scanned: true,
+            notes: anomaly ? `${anomaly}${notes ? ': ' + notes : ''}` : notes,
+          }),
         });
       }
       vibrateSuccess();
       localStorage.removeItem('scanned_qr');
+      localStorage.removeItem('selected_cav_id');
       navigate('/tour-map');
     } catch (err) { vibrateError(); console.error(err); }
     setLoading(false);

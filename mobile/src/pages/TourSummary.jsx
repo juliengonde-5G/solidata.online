@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
 
 export default function TourSummary() {
   const [tour, setTour] = useState(null);
@@ -11,8 +10,9 @@ export default function TourSummary() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await api.get(`/tours/${tourId}`);
-        setTour(res.data);
+        const res = await fetch(`/api/tours/${tourId}/summary-public`);
+        const data = await res.json();
+        setTour(data);
       } catch (err) { console.error(err); }
       setLoading(false);
     };

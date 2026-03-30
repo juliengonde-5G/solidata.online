@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
 import MobileShell from '../components/MobileShell';
 
 const REASONS = [
@@ -21,8 +20,9 @@ export default function QRUnavailable() {
   useEffect(() => {
     const loadTourCavs = async () => {
       try {
-        const res = await api.get(`/tours/${tourId}`);
-        const cavs = (res.data.cavs || []).filter(c => c.status !== 'collected');
+        const res = await fetch(`/api/tours/${tourId}/public`);
+        const data = await res.json();
+        const cavs = (data.cavs || []).filter(c => c.status !== 'collected');
         setTourCavs(cavs);
       } catch (err) { console.error(err); }
     };
