@@ -137,21 +137,25 @@
 | # | Bug | Page | Severite | Description |
 |---|-----|------|----------|-------------|
 | RH1 | PCM token en URL | PCMTest.jsx | **CRITIQUE** | Token session PCM en parametre URL — expose dans historique, logs, referrer |
-| RH2 | Conversion candidat fragile | Candidates | **GRAVE** | Conversion en employe via API sans verification doublons |
-| RH3 | Insertion jalons statiques | InsertionParcours.jsx | **MOYEN** | Jalons M1/M6/M12 hardcodes — pas adaptable a des durees CDDI differentes |
-| RH4 | Planning sans validation chevauchement | PlanningHebdo.jsx | **MOYEN** | Pas de detection si employe planifie sur 2 postes simultanement |
-| RH5 | CDDI 24 mois non verifie | Employees.jsx | **MOYEN** | Pas d'alerte automatique si contrat CDDI depasse 24 mois reglementaires |
-| RH6 | Reporting RH donnees brutes | ReportingRH.jsx | **MINEUR** | Stats affichees sans contexte (pas de comparaison N-1, pas de tendance) |
+| RH2 | Pas de contract_end au recrutement | conversion.js | **CRITIQUE** | Conversion candidat->employe ne definit pas de date fin contrat — CDD apparait comme CDI |
+| RH3 | CDDI 24 mois non verifie | employees.js | **CRITIQUE** | Aucune validation `contract_end - contract_start <= 24 mois` pour CDD/CDDI — risque reglementaire |
+| RH4 | Statuts reporting incoherents | ReportingRH.jsx | **CRITIQUE** | Utilise 'screening'/'trial'/'recruited' jamais dans le kanban (received/interview/hired/rejected) — KPI "Recruites" = toujours 0 |
+| RH5 | teams.member_count jamais mis a jour | ReportingRH.jsx | **CRITIQUE** | Colonne statique jamais calculee — effectifs par equipe = 0 |
+| RH6 | insertion_status vs statut | insertion/routes.js + conversion.js | **GRAVE** | Deux noms de colonne differents pour le meme concept — donnees divergent |
+| RH7 | Milestone type incoherent | InsertionParcours.jsx vs conversion.js | **GRAVE** | Frontend compare 'Bilan M1', backend cree 'M1' — jalons ne matchent pas |
+| RH8 | Diagnostic insertion silencieux | conversion.js | **GRAVE** | Try/catch ignore erreurs creation diagnostic — employes en parcours sans diagnostic |
+| RH9 | Planning sans validation chevauchement | PlanningHebdo.jsx | **MOYEN** | Pas de detection si employe planifie sur 2 postes simultanement |
+| RH10 | Position orpheline candidat | Candidates.jsx | **MOYEN** | Si position supprimee, fiche candidat plante (pos?.title sans fallback) |
 
 ### Resume bugs par severite
 
 | Severite | Nombre | Personas impactees |
 |----------|--------|-------------------|
-| CRITIQUE | 7 | Chauffeur (4), Logistique (1), RH (1), Securite (1) |
-| GRAVE | 9 | Chauffeur (2), Logistique (3), Operations (3), RH (1) |
+| CRITIQUE | 11 | Chauffeur (4), Logistique (1), RH (5), Securite (1) |
+| GRAVE | 11 | Chauffeur (2), Logistique (3), Operations (3), RH (3) |
 | MOYEN | 11 | Tous profils |
-| MINEUR | 4 | Logistique (1), Operations (2), RH (1) |
-| **TOTAL** | **31** | |
+| MINEUR | 3 | Logistique (1), Operations (2) |
+| **TOTAL** | **36** | |
 
 ---
 
@@ -243,11 +247,21 @@
 | 6 | Corriger wizard Tours.jsx — chauffeur step 3 integre dans creation | Frontend | 1h |
 | 7 | Securiser endpoints /public avec rate limiting + HMAC IDs | Backend | 2h |
 
+### P0bis — CRITIQUE REGLEMENTAIRE (a corriger immediatement)
+
+| # | Action | Module | Effort |
+|---|--------|--------|--------|
+| 8 | Ajouter validation CDD/CDDI <= 24 mois (contract_end - contract_start) | Backend | 1h |
+| 9 | Ajouter contract_end obligatoire a la conversion candidat->employe | Backend | 1h |
+| 10 | Reconcilier statuts candidat kanban (4 statuts) avec reporting RH | Frontend | 2h |
+| 11 | Calculer teams.member_count via COUNT(*) SQL au lieu de colonne statique | Backend | 30min |
+| 12 | Reconcilier insertion_status vs statut dans insertion/conversion | Backend | 2h |
+
 ### P1 — IMPORTANT (cette semaine)
 
 | # | Action | Module | Effort |
 |---|--------|--------|--------|
-| 8 | Supprimer fallbacks JWT_SECRET et DB_PASSWORD | Backend | 30min |
+| 13 | Supprimer fallbacks JWT_SECRET et DB_PASSWORD | Backend | 30min |
 | 9 | Migrer tokens localStorage vers httpOnly cookies | Full-stack | 4h |
 | 10 | Fix capacite vehicule defaut 3500 en edition (Vehicles.jsx) | Frontend | 30min |
 | 11 | Fix commandes multi-types prix (ExutoiresCommandes.jsx) | Frontend | 1h |
@@ -278,8 +292,8 @@
 - **Documentation CLAUDE.md** : A jour et coherente avec le code
 
 ### Points d'attention
-- **7 bugs CRITIQUES** a corriger avant tout deploiement (3 SQL injection, 4 bugs mobile)
-- **9 bugs GRAVES** impactant l'experience utilisateur
+- **11 bugs CRITIQUES** a corriger avant tout deploiement (3 SQL injection, 4 bugs mobile, 4 bugs RH/reglementaire)
+- **11 bugs GRAVES** impactant l'experience utilisateur
 - **7 branches obsoletes** a nettoyer
 - **Mobile** : Le module le plus fragile (offline absent, GPS non gere, IDs manquants)
 - **Documentation applicative** : A mettre a jour pour les nouveaux modules
