@@ -420,7 +420,16 @@ router.post('/', authenticate, async (req, res) => {
     const sessionId = session_id || `u${userId}_${Date.now().toString(36)}`;
     const userCtx = { userId, role: req.user.role, username: req.user.username };
 
+    const startTime = Date.now();
     const reply = await chatWithClaude(userMessage, sessionId, userCtx);
+    const responseTimeMs = Date.now() - startTime;
+
+    // Logger dans chatbot_history
+    pool.query(
+      `INSERT INTO chatbot_history (user_id, username, session_id, user_message, bot_reply, response_time_ms)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [userId, req.user.username, sessionId, userMessage, reply, responseTimeMs]
+    ).catch(err => console.error('[SolidataBot] Log error:', err.message));
 
     res.json({ reply, session_id: sessionId, timestamp: new Date().toISOString() });
   } catch (err) {
@@ -499,6 +508,59 @@ router.get('/alerts/cav-full', authenticate, authorize('ADMIN', 'MANAGER'), asyn
     res.json({ alerts: result.rows, count: result.rows.length });
   } catch (err) {
     console.error('[ALERTS] Erreur CAV pleins:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/chat/history — Historique des conversations SolidataBot (ADMIN)
+router.get('/history', authenticate, authorize('ADMIN'), async (req, res) => {
+  try {
+    const { user_id, limit: lim, offset: off } = req.query;
+    let query = `SELECT ch.*, u.first_name, u.last_name, u.role
+                 FROM chatbot_history ch
+                 LEFT JOIN users u ON ch.user_id = u.id
+                 WHERE 1=1`;
+    const params = [];
+    if (user_id) { params.push(user_id); query += ` AND ch.user_id = $${params.length}`; }
+    query += ' ORDER BY ch.created_at DESC';
+    params.push(parseInt(lim) || 100);
+    query += ` LIMIT $${params.length}`;
+    params.push(parseInt(off) || 0);
+    query += ` OFFSET $${params.length}`;
+
+    const result = await pool.query(query, params);
+
+    let countQuery = 'SELECT COUNT(*) as count FROM chatbot_history WHERE 1=1';
+    const countParams = [];
+    if (user_id) { countParams.push(user_id); countQuery += ` AND user_id = $${countParams.length}`; }
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({ rows: result.rows, total: parseInt(countResult.rows[0].count) });
+  } catch (err) {
+    console.error('[CHAT] Erreur history :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/chat/history/stats — Stats d'utilisation SolidataBot
+router.get('/history/stats', authenticate, authorize('ADMIN'), async (req, res) => {
+  try {
+    const [total, today, byUser, avgTime] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM chatbot_history'),
+      pool.query("SELECT COUNT(*) as count FROM chatbot_history WHERE created_at::date = CURRENT_DATE"),
+      pool.query(`SELECT ch.user_id, u.first_name, u.last_name, COUNT(*) as count
+                  FROM chatbot_history ch LEFT JOIN users u ON ch.user_id = u.id
+                  GROUP BY ch.user_id, u.first_name, u.last_name ORDER BY count DESC LIMIT 10`),
+      pool.query('SELECT AVG(response_time_ms) as avg_ms FROM chatbot_history WHERE response_time_ms IS NOT NULL'),
+    ]);
+    res.json({
+      total: parseInt(total.rows[0].count),
+      today: parseInt(today.rows[0].count),
+      by_user: byUser.rows,
+      avg_response_ms: Math.round(parseFloat(avgTime.rows[0].avg_ms) || 0),
+    });
+  } catch (err) {
+    console.error('[CHAT] Erreur history stats :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

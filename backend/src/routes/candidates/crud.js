@@ -5,10 +5,13 @@ const { authorize } = require('../../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { getSkillPatterns, parseCVFile, extractFromCV } = require('./cv-engine');
+const { autoLogActivity } = require('../../middleware/activity-logger');
 
 // ══════════════════════════════════════════
 // ROUTES CANDIDATES (liste, kanban, création, stats)
 // ══════════════════════════════════════════
+
+router.use(autoLogActivity('candidate'));
 
 // GET /api/candidates — Liste avec filtres
 router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {

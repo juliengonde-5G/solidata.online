@@ -7,6 +7,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { autoLogActivity } = require('../middleware/activity-logger');
 
 // Upload photo
 const photoStorage = multer.diskStorage({
@@ -22,6 +23,7 @@ const photoStorage = multer.diskStorage({
 const upload = multer({ storage: photoStorage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 router.use(authenticate);
+router.use(autoLogActivity('employee'));
 
 // GET /api/employees
 router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {

@@ -4,8 +4,10 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { autoLogActivity } = require('../middleware/activity-logger');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(autoLogActivity('client_exutoire'));
 
 // GET /api/clients-exutoires
 router.get('/', async (req, res) => {

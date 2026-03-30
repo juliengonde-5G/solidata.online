@@ -10,8 +10,11 @@ const { body, param } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const CryptoJS = require('crypto-js');
 const { FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, analyzeInsertion, buildTimeline } = require('./engine');
+const { autoLogActivity } = require('../../middleware/activity-logger');
 
 const PCM_KEY = process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
+
+router.use(autoLogActivity('insertion'));
 
 // GET /api/insertion — Vue d'ensemble de tous les employés actifs
 // IMPORTANT: doit etre AVANT /:employeeId pour ne pas etre intercepte

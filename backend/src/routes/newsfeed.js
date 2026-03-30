@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { autoLogActivity } = require('../middleware/activity-logger');
 
 // Auto-create table
 (async () => {
@@ -31,6 +32,7 @@ const { validate } = require('../middleware/validate');
 })();
 
 router.use(authenticate);
+router.use(autoLogActivity('newsfeed'));
 
 // GET /api/news — Liste des articles
 router.get('/', async (req, res) => {

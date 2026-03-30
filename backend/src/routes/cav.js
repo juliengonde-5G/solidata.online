@@ -8,6 +8,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { autoLogActivity } = require('../middleware/activity-logger');
 
 // Multer pour upload photo CAV
 const cavPhotoStorage = multer.diskStorage({
@@ -32,6 +33,7 @@ const uploadCavPhoto = multer({
 });
 
 router.use(authenticate);
+router.use(autoLogActivity('cav'));
 
 // GET /api/cav — Liste avec filtres
 router.get('/', async (req, res) => {

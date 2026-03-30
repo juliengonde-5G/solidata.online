@@ -6,8 +6,10 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const { autoLogActivity } = require('../middleware/activity-logger');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(autoLogActivity('finance'));
 
 // ══════════════════════════════════════════
 // HELPERS
