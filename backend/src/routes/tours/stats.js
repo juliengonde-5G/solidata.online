@@ -43,7 +43,8 @@ router.get('/reporting/kpis', async (req, res) => {
         COALESCE(AVG(t.total_weight_kg), 0) as avg_kg_par_tour,
         COUNT(CASE WHEN t.status = 'completed' THEN 1 END) as tours_completees
       FROM tours t
-      JOIN users u ON t.driver_id = u.id
+      LEFT JOIN employees e ON t.driver_employee_id = e.id
+      LEFT JOIN users u ON e.user_id = u.id
       WHERE t.date BETWEEN $1 AND $2
       GROUP BY u.id, u.first_name, u.last_name
       ORDER BY total_kg DESC

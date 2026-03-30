@@ -2223,6 +2223,22 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_chatbot_history_created ON chatbot_history(created_at DESC)');
     console.log('[INIT-DB] Table chatbot_history créée ✓');
 
+    // Table temps de collecte réels par CAV (appris via GPS)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_collection_times (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER REFERENCES cav(id),
+        tour_id INTEGER,
+        vehicle_id INTEGER,
+        arrived_at TIMESTAMP,
+        departed_at TIMESTAMP,
+        duration_seconds INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_collection_times_cav ON cav_collection_times(cav_id)');
+    console.log('[INIT-DB] Table cav_collection_times créée ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

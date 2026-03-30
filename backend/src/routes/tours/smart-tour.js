@@ -1,11 +1,28 @@
 const pool = require('../../config/database');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG, getContextForDate, getLocalEventsForDate } = require('./context');
-const { haversineDistance, nearestNeighborTSP, twoOptImprove } = require('./geo');
+const { haversineDistance, nearestNeighborTSP, twoOptImprove, osrmRouteSegment, osrmOptimizedTrip } = require('./geo');
 const { predictFillRate, getSchoolVacationStatus, getScoringConfig } = require('./predictions');
 
 // ══════════════════════════════════════════════════════════════
-// ALGORITHME DE TOURNÉE INTELLIGENTE
+// ALGORITHME DE TOURNÉE INTELLIGENTE v2
 // ══════════════════════════════════════════════════════════════
+
+// Récupérer le temps moyen de collecte appris pour un CAV
+async function getLearnedTimePerCav(cavId, defaultTime) {
+  try {
+    const result = await pool.query(
+      `SELECT AVG(duration_seconds) as avg_duration, COUNT(*) as count
+       FROM cav_collection_times
+       WHERE cav_id = $1 AND duration_seconds > 0 AND duration_seconds < 3600`,
+      [cavId]
+    );
+    if (result.rows[0] && parseInt(result.rows[0].count) >= 3) {
+      return Math.round(parseFloat(result.rows[0].avg_duration) / 60); // secondes → minutes
+    }
+  } catch (_) { /* table pas encore créée, pas grave */ }
+  return defaultTime;
+}
+
 async function generateIntelligentTour(vehicleId, date) {
   const SCORING_CONFIG = getScoringConfig();
 
@@ -53,10 +70,12 @@ async function generateIntelligentTour(vehicleId, date) {
   // 5. Trier par score décroissant
   scoredCavs.sort((a, b) => b.score - a.score);
 
-  // 6. Selectionner les CAV avec contrainte 7h max + retour centre toutes les 2t
+  // 6. Sélectionner les CAV avec contrainte capacité véhicule
   const maxCapacity = vehicle.max_capacity_kg * 0.95;
   const maxDailyMinutes = (SCORING_CONFIG.maxDailyHours || 7) * 60;
   const returnThresholdKg = SCORING_CONFIG.returnEveryKg || 2000;
+  const lunchBreakMinutes = SCORING_CONFIG.lunchBreakMinutes || 30;
+  const lunchAfterHours = SCORING_CONFIG.lunchAfterHours || 4;
   let estimatedWeight = 0;
   const selectedCavs = [];
   let urgentCount = 0;
@@ -71,14 +90,26 @@ async function generateIntelligentTour(vehicleId, date) {
     if (estimatedWeight >= maxCapacity) break;
   }
 
-  if (selectedCavs.length === 0) throw new Error('Aucun CAV selectionne — verifiez la capacite du vehicule et les donnees de remplissage.');
+  if (selectedCavs.length === 0) throw new Error('Aucun CAV sélectionné — vérifiez la capacité du véhicule et les données de remplissage.');
 
-  // 7. Optimiser la route (TSP + 2-opt)
-  let optimizedRoute = nearestNeighborTSP(selectedCavs, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-  optimizedRoute = twoOptImprove(optimizedRoute, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  // 7. Optimiser la route via OSRM (ou fallback TSP local)
+  let optimizedRoute;
+  let routingMethod = 'osrm_trip';
 
-  // 8. Calculer distance et duree avec retours intermediaires au centre de tri
-  // Toutes les 2t chargees, le camion doit revenir au centre de tri
+  const osrmResult = await osrmOptimizedTrip(selectedCavs, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  if (osrmResult && osrmResult.orderedPoints) {
+    optimizedRoute = osrmResult.orderedPoints;
+  } else {
+    // Fallback : TSP nearest neighbor + 2-opt (Haversine)
+    routingMethod = 'haversine_tsp_2opt';
+    optimizedRoute = nearestNeighborTSP(selectedCavs, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+    optimizedRoute = twoOptImprove(optimizedRoute, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  }
+
+  // 8. Calculer distance et durée avec :
+  //    - OSRM pour les segments (distances réelles par la route)
+  //    - Retours intermédiaires au centre toutes les 2t
+  //    - Pause déjeuner après 4h de travail
   const dateStr = typeof date === 'string' ? date : new Date(date).toISOString().split('T')[0];
   const context = await getContextForDate(dateStr);
 
@@ -86,20 +117,38 @@ async function generateIntelligentTour(vehicleId, date) {
   let totalDuration = 0;
   let currentLoad = 0;
   let nbRetours = 0;
+  let lunchTaken = false;
   let lastLat = CENTRE_TRI_LAT, lastLng = CENTRE_TRI_LNG;
   const routeWithReturns = [];
 
   for (let i = 0; i < optimizedRoute.length; i++) {
     const cav = optimizedRoute[i];
     const cavWeight = cav.prediction?.factors?.avgWeight || 50;
-    const distToCav = haversineDistance(lastLat, lastLng, cav.latitude, cav.longitude);
 
-    // Verifier si on doit retourner au centre avant (seuil 2t)
+    // ── Pause déjeuner : après lunchAfterHours heures de travail ──
+    if (!lunchTaken && totalDuration >= lunchAfterHours * 60) {
+      // Retour au centre pour le déjeuner
+      const lunchReturn = await osrmRouteSegment(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+      totalDistance += lunchReturn.distance_km;
+      totalDuration += lunchReturn.duration_min + lunchBreakMinutes;
+      // Repartir du centre après le déjeuner
+      lastLat = CENTRE_TRI_LAT;
+      lastLng = CENTRE_TRI_LNG;
+      lunchTaken = true;
+      routeWithReturns.push({ type: 'pause_dejeuner', after_cav_index: i - 1, duration_min: lunchBreakMinutes });
+      // Si on a aussi de la charge, on décharge en même temps
+      if (currentLoad > 0) {
+        totalDuration += 15; // déchargement pendant la pause
+        currentLoad = 0;
+        nbRetours++;
+      }
+    }
+
+    // ── Vérifier si retour centre nécessaire (seuil 2t) ──
     if (currentLoad + cavWeight > returnThresholdKg && currentLoad > 0) {
-      // Retour au centre de tri
-      const distRetour = haversineDistance(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-      totalDistance += distRetour;
-      totalDuration += Math.round((distRetour / SCORING_CONFIG.avgSpeed) * 60) + 15; // 15min dechargement
+      const retour = await osrmRouteSegment(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+      totalDistance += retour.distance_km;
+      totalDuration += retour.duration_min + 15; // 15min déchargement
       lastLat = CENTRE_TRI_LAT;
       lastLng = CENTRE_TRI_LNG;
       currentLoad = 0;
@@ -107,18 +156,25 @@ async function generateIntelligentTour(vehicleId, date) {
       routeWithReturns.push({ type: 'retour_centre', after_cav_index: i - 1 });
     }
 
-    // Aller au CAV
-    const dist = haversineDistance(lastLat, lastLng, cav.latitude, cav.longitude);
-    totalDistance += dist;
-    totalDuration += Math.round((dist / SCORING_CONFIG.avgSpeed) * 60) + SCORING_CONFIG.timePerCav;
+    // ── Aller au CAV (OSRM distance réelle) ──
+    const segment = await osrmRouteSegment(lastLat, lastLng, cav.latitude, cav.longitude);
+    const timePerCav = await getLearnedTimePerCav(cav.id, SCORING_CONFIG.timePerCav || 10);
+
+    totalDistance += segment.distance_km;
+    totalDuration += segment.duration_min + timePerCav;
     currentLoad += cavWeight;
     lastLat = cav.latitude;
     lastLng = cav.longitude;
 
-    // Verifier contrainte 7h
-    const durationWithReturn = totalDuration + Math.round((haversineDistance(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG) / SCORING_CONFIG.avgSpeed) * 60);
-    if (durationWithReturn > maxDailyMinutes) {
-      // Tronquer la tournee ici
+    // Stocker le temps de collecte appris pour l'explication
+    cav._learnedTimePerCav = timePerCav;
+
+    // ── Vérifier contrainte durée max (7h + pause déjeuner) ──
+    const returnSegment = await osrmRouteSegment(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+    const totalWithReturn = totalDuration + returnSegment.duration_min;
+    // Budget total = heures de travail + pause déjeuner (la pause ne compte pas dans le travail productif)
+    const totalBudget = maxDailyMinutes + (lunchTaken ? lunchBreakMinutes : 0);
+    if (totalWithReturn > totalBudget) {
       optimizedRoute = optimizedRoute.slice(0, i + 1);
       estimatedWeight = optimizedRoute.reduce((s, c) => s + (c.prediction?.factors?.avgWeight || 50), 0);
       break;
@@ -126,18 +182,19 @@ async function generateIntelligentTour(vehicleId, date) {
   }
 
   // Retour final au centre
-  const distRetourFinal = haversineDistance(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-  totalDistance += distRetourFinal;
-  totalDuration += Math.round((distRetourFinal / SCORING_CONFIG.avgSpeed) * 60);
+  const retourFinal = await osrmRouteSegment(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  totalDistance += retourFinal.distance_km;
+  totalDuration += retourFinal.duration_min;
 
-  const estimatedDuration = Math.round(totalDuration * context.durationFactor * context.trafficFactor);
+  // Appliquer les facteurs de contexte (trafic, météo)
+  const estimatedDuration = Math.round(totalDuration * context.trafficFactor);
 
-  // 9. Récupérer événements locaux actifs pour l'explication
+  // 9. Récupérer événements locaux pour l'explication
   const localEvents = await getLocalEventsForDate(dateStr);
 
-  // 10. Générer l'explication IA
+  // 10. Générer l'explication
   const vacationStatus = getSchoolVacationStatus(dateStr);
-  const explanation = generateAIExplanation(optimizedRoute, totalDistance, estimatedDuration, estimatedWeight, urgentCount, vehicle, context, localEvents, vacationStatus);
+  const explanation = generateAIExplanation(optimizedRoute, totalDistance, estimatedDuration, estimatedWeight, urgentCount, vehicle, context, localEvents, vacationStatus, routingMethod, lunchTaken, nbRetours, lunchBreakMinutes);
 
   return {
     vehicle,
@@ -154,6 +211,7 @@ async function generateIntelligentTour(vehicleId, date) {
       score: cav.score,
       estimated_weight: cav.prediction.factors?.avgWeight || 50,
       nb_containers: cav.nb_containers,
+      learned_time_min: cav._learnedTimePerCav,
     })),
     stats: {
       totalCavs: optimizedRoute.length,
@@ -166,24 +224,36 @@ async function generateIntelligentTour(vehicleId, date) {
       nbRetourscentre: nbRetours,
       maxDailyHours: SCORING_CONFIG.maxDailyHours || 7,
       returnEveryKg: returnThresholdKg,
+      routingMethod,
+      lunchBreakIncluded: lunchTaken,
     },
     explanation,
   };
 }
 
-function generateAIExplanation(route, distance, duration, weight, urgentCount, vehicle, context, localEvents, vacationStatus) {
+function generateAIExplanation(route, distance, duration, weight, urgentCount, vehicle, context, localEvents, vacationStatus, routingMethod, lunchTaken, nbRetours, lunchBreakMinutes) {
   const SCORING_CONFIG = getScoringConfig();
   const lines = [];
-  lines.push(`Tournee intelligente generee pour ${vehicle.name || vehicle.registration}`);
-  lines.push(`\n${route.length} points de collecte selectionnes parmi les CAV actifs`);
-  lines.push(`Distance totale estimee : ${Math.round(distance * 10) / 10} km`);
-  lines.push(`Duree estimee : ${Math.floor(duration / 60)}h${String(duration % 60).padStart(2, '0')} (max ${SCORING_CONFIG.maxDailyHours || 7}h/jour)`);
-  lines.push(`Poids estime : ${Math.round(weight)} kg / ${vehicle.max_capacity_kg} kg (${Math.round(weight / vehicle.max_capacity_kg * 100)}%)`);
-  lines.push(`Retours centre de tri prevus : toutes les ${(SCORING_CONFIG.returnEveryKg || 2000) / 1000}t chargees`);
+  lines.push(`Tournée intelligente générée pour ${vehicle.name || vehicle.registration}`);
+  lines.push(`\n${route.length} points de collecte sélectionnés parmi les CAV actifs`);
+  lines.push(`Distance totale estimée : ${Math.round(distance * 10) / 10} km (distances routières ${routingMethod === 'osrm_trip' ? 'OSRM' : 'Haversine'})`);
+
+  const durH = Math.floor(duration / 60);
+  const durM = String(duration % 60).padStart(2, '0');
+  lines.push(`Durée estimée : ${durH}h${durM} (max ${SCORING_CONFIG.maxDailyHours || 7}h/jour + pause déjeuner)`);
+  lines.push(`Poids estimé : ${Math.round(weight)} kg / ${vehicle.max_capacity_kg} kg (${Math.round(weight / vehicle.max_capacity_kg * 100)}%)`);
+  lines.push(`Retours centre de tri : ${nbRetours} (seuil ${(SCORING_CONFIG.returnEveryKg || 2000) / 1000}t)`);
+
+  if (lunchTaken) {
+    lines.push(`\n🍽️ Pause déjeuner : ${lunchBreakMinutes} min (retour centre après ${SCORING_CONFIG.lunchAfterHours || 4}h)`);
+  }
 
   if (urgentCount > 0) {
-    lines.push(`\n${urgentCount} CAV urgents (remplissage >= 80%)`);
+    lines.push(`\n⚠️ ${urgentCount} CAV urgents (remplissage >= 80%)`);
   }
+
+  // Routing method
+  lines.push(`\n🗺️ Méthode de routage : ${routingMethod === 'osrm_trip' ? 'OSRM (distances routières réelles + optimisation TSP)' : 'Haversine + TSP nearest neighbor + 2-opt (fallback)'}`);
 
   // Météo
   if (context && context.weatherLabel) {
@@ -208,13 +278,16 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
     });
   }
 
-  lines.push(`\n🔬 Méthode : Prédiction de remplissage (historique 180j + saisonnalité + météo + vacances scolaires + événements locaux + tendance) + TSP 2-opt`);
+  lines.push(`\n🔬 Prédiction : historique 180j + saisonnalité + météo + vacances scolaires + événements locaux + tendance + feedback ML V2`);
 
   const topCavs = route.slice(0, 3);
   if (topCavs.length > 0) {
     lines.push(`\n🏆 Priorités :`);
     topCavs.forEach((cav, i) => {
       let detail = `  ${i + 1}. ${cav.name} — remplissage estimé ${cav.prediction.fill}% (confiance ${Math.round(cav.prediction.confidence * 100)}%)`;
+      if (cav._learnedTimePerCav && cav._learnedTimePerCav !== (SCORING_CONFIG.timePerCav || 10)) {
+        detail += ` ⏱️${cav._learnedTimePerCav}min`;
+      }
       if (cav.prediction.contextUsed?.weekendSunny) detail += ' ☀️';
       if (cav.prediction.contextUsed?.eventBonus) detail += ` 📍x${cav.prediction.contextUsed.eventBonus}`;
       if (cav.prediction.contextUsed?.vacationStatus) detail += ` 🎒`;
