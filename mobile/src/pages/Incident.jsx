@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
 import { vibrateTap, vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
 
@@ -23,14 +22,19 @@ export default function Incident() {
     if (!type) return;
     setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append('type', type);
-      formData.append('description', description);
-      formData.append('cav_id', '');
-      formData.append('vehicle_id', '');
-      formData.append('employee_id', '');
+      const vehicleId = localStorage.getItem('selected_vehicle_id');
+      const cavId = localStorage.getItem('selected_cav_id');
 
-      await api.post(`/tours/${tourId}/incidents`, formData);
+      await fetch(`/api/tours/${tourId}/incident-public`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type,
+          description,
+          cav_id: cavId ? parseInt(cavId) : null,
+          vehicle_id: vehicleId ? parseInt(vehicleId) : null,
+        }),
+      });
       vibrateSuccess();
       navigate('/tour-map');
     } catch (err) { vibrateError(); console.error(err); }

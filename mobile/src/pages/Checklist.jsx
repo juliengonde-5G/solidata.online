@@ -50,6 +50,7 @@ export default function Checklist() {
           exterior_ok: allChecked,
           fuel_level: '1/2',
           km_start: parseInt(kmStart, 10) || 0,
+          notes,
         }),
       });
       await fetch(`/api/tours/${tourId}/start-public`, { method: 'PUT' });
