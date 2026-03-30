@@ -2187,6 +2187,42 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_action ON user_activity_log(action)');
     console.log('[INIT-DB] Table user_activity_log créée ✓');
 
+    // Table sessions utilisateurs
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        token_hash VARCHAR(64),
+        ip_address VARCHAR(50),
+        user_agent TEXT,
+        started_at TIMESTAMP DEFAULT NOW(),
+        last_activity TIMESTAMP DEFAULT NOW(),
+        ended_at TIMESTAMP,
+        is_active BOOLEAN DEFAULT true
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_user_sessions_active ON user_sessions(is_active) WHERE is_active = true');
+    console.log('[INIT-DB] Table user_sessions créée ✓');
+
+    // Table historique SolidataBot
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS chatbot_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        username VARCHAR(100),
+        session_id VARCHAR(100),
+        user_message TEXT NOT NULL,
+        bot_reply TEXT,
+        tokens_used INTEGER,
+        response_time_ms INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_chatbot_history_user ON chatbot_history(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_chatbot_history_created ON chatbot_history(created_at DESC)');
+    console.log('[INIT-DB] Table chatbot_history créée ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

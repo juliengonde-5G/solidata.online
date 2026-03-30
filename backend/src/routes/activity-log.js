@@ -65,4 +65,79 @@ router.get('/stats', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// GET /api/activity-log/connections — Historique des connexions/déconnexions
+router.get('/connections', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { user_id, limit: lim, offset: off } = req.query;
+    let query = `SELECT al.*, u.first_name, u.last_name, u.role
+                 FROM user_activity_log al
+                 LEFT JOIN users u ON al.user_id = u.id
+                 WHERE al.action IN ('login', 'logout', 'password_change', 'login_failed')`;
+    const params = [];
+
+    if (user_id) { params.push(user_id); query += ` AND al.user_id = $${params.length}`; }
+
+    query += ' ORDER BY al.created_at DESC';
+    params.push(parseInt(lim) || 100);
+    query += ` LIMIT $${params.length}`;
+    params.push(parseInt(off) || 0);
+    query += ` OFFSET $${params.length}`;
+
+    const result = await pool.query(query, params);
+
+    let countQuery = `SELECT COUNT(*) as count FROM user_activity_log
+                      WHERE action IN ('login', 'logout', 'password_change', 'login_failed')`;
+    const countParams = [];
+    if (user_id) { countParams.push(user_id); countQuery += ` AND user_id = $${countParams.length}`; }
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({ rows: result.rows, total: parseInt(countResult.rows[0].count) });
+  } catch (err) {
+    console.error('[ACTIVITY-LOG] Erreur connections :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/activity-log/sessions — Sessions actives et historique
+router.get('/sessions', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { active_only } = req.query;
+    let query = `SELECT s.*, u.username, u.first_name, u.last_name, u.role
+                 FROM user_sessions s
+                 LEFT JOIN users u ON s.user_id = u.id`;
+    if (active_only === 'true') {
+      query += ' WHERE s.is_active = true';
+    }
+    query += ' ORDER BY s.last_activity DESC LIMIT 200';
+
+    const result = await pool.query(query);
+
+    // Compteur sessions actives
+    const activeCount = await pool.query('SELECT COUNT(*) as count FROM user_sessions WHERE is_active = true');
+
+    res.json({
+      rows: result.rows,
+      active_count: parseInt(activeCount.rows[0].count),
+    });
+  } catch (err) {
+    console.error('[ACTIVITY-LOG] Erreur sessions :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/activity-log/sessions/:id — Forcer la déconnexion d'une session
+router.delete('/sessions/:id', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'UPDATE user_sessions SET is_active = false, ended_at = NOW() WHERE id = $1 RETURNING *',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Session non trouvée' });
+    res.json({ message: 'Session fermée', session: result.rows[0] });
+  } catch (err) {
+    console.error('[ACTIVITY-LOG] Erreur delete session :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { autoLogActivity } = require('../middleware/activity-logger');
 
 // ══════════════════════════════════════════
 // CONSTANTES
@@ -169,6 +170,7 @@ async function calculateAndInsertWorkHours(employeeId, date) {
 // ROUTES PROTÉGÉES — Interface web Solidata
 // ══════════════════════════════════════════
 router.use(authenticate);
+router.use(autoLogActivity('pointage'));
 
 // GET /api/pointage/events — Liste des événements de pointage
 router.get('/events', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {

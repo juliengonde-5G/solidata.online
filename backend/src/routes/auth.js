@@ -140,6 +140,14 @@ router.post('/login', [
     // Logger la connexion
     logActivity({ userId: user.id, username: user.username, action: 'login', ip: req.ip });
 
+    // Créer la session
+    const tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex').substring(0, 64);
+    await pool.query(
+      `INSERT INTO user_sessions (user_id, token_hash, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4)`,
+      [user.id, tokenHash, req.ip, req.get('user-agent') || null]
+    );
+
     // Set refresh token as HttpOnly cookie
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
@@ -210,6 +218,14 @@ router.post('/refresh', async (req, res) => {
       [row.user_id, newRefreshToken, expiresAt]
     );
 
+    // Mettre à jour la session
+    const newTokenHash = crypto.createHash('sha256').update(newAccessToken).digest('hex').substring(0, 64);
+    await pool.query(
+      `UPDATE user_sessions SET token_hash = $1, last_activity = NOW()
+       WHERE user_id = $2 AND is_active = true`,
+      [newTokenHash, row.user_id]
+    );
+
     // Set new refresh token as HttpOnly cookie
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
@@ -230,6 +246,13 @@ router.post('/refresh', async (req, res) => {
 router.post('/logout', authenticate, async (req, res) => {
   try {
     await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [req.user.id]);
+
+    // Fermer les sessions actives
+    await pool.query(
+      'UPDATE user_sessions SET is_active = false, ended_at = NOW() WHERE user_id = $1 AND is_active = true',
+      [req.user.id]
+    );
+    logActivity({ userId: req.user.id, username: req.user.username, action: 'logout', ip: req.ip });
 
     // Clear the refreshToken cookie
     res.clearCookie('refreshToken', {
@@ -286,6 +309,8 @@ router.put('/password', authenticate, [
 
     const hash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, req.user.id]);
+
+    logActivity({ userId: req.user.id, username: req.user.username, action: 'password_change', ip: req.ip });
 
     res.json({ message: 'Mot de passe modifié avec succès' });
   } catch (err) {
