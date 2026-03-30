@@ -236,7 +236,9 @@ io.on('connection', (socket) => {
     logger.debug(`Socket ${socket.id} rejoint tour-${tourId}`);
   });
 
-  // Position GPS du chauffeur
+  // Position GPS du chauffeur — avec détection proximité CAV pour historiser le temps de collecte
+  const cavProximity = new Map(); // clé: `${tourId}-${cavId}`, valeur: { arrivedAt }
+
   socket.on('gps-update', async (data) => {
     const { tourId, vehicleId, latitude, longitude, speed } = data;
     try {
@@ -248,10 +250,54 @@ io.on('connection', (socket) => {
       io.to(`tour-${tourId}`).emit('vehicle-position', {
         tourId, vehicleId, latitude, longitude, speed, timestamp: new Date(),
       });
+
+      // ── Détection proximité CAV pour mesurer le temps de collecte réel ──
+      if (tourId && latitude && longitude) {
+        try {
+          const tourCavs = await pool.query(
+            `SELECT tc.cav_id, c.latitude as cav_lat, c.longitude as cav_lng
+             FROM tour_cav tc JOIN cav c ON tc.cav_id = c.id
+             WHERE tc.tour_id = $1 AND c.latitude IS NOT NULL`,
+            [tourId]
+          );
+          const PROXIMITY_RADIUS = 0.1; // 100m en km
+          for (const tc of tourCavs.rows) {
+            const dist = haversineDistanceSimple(latitude, longitude, parseFloat(tc.cav_lat), parseFloat(tc.cav_lng));
+            const key = `${tourId}-${tc.cav_id}`;
+            if (dist <= PROXIMITY_RADIUS) {
+              // Arrivée près du CAV
+              if (!cavProximity.has(key)) {
+                cavProximity.set(key, { arrivedAt: new Date() });
+              }
+            } else if (cavProximity.has(key)) {
+              // Départ du CAV — enregistrer le temps de collecte
+              const entry = cavProximity.get(key);
+              const duration = Math.round((Date.now() - entry.arrivedAt.getTime()) / 1000);
+              if (duration > 30 && duration < 3600) { // entre 30s et 1h
+                pool.query(
+                  `INSERT INTO cav_collection_times (cav_id, tour_id, vehicle_id, arrived_at, departed_at, duration_seconds)
+                   VALUES ($1, $2, $3, $4, NOW(), $5)`,
+                  [tc.cav_id, tourId, vehicleId, entry.arrivedAt, duration]
+                ).catch(err => logger.error('Erreur enregistrement temps collecte:', err.message));
+              }
+              cavProximity.delete(key);
+            }
+          }
+        } catch (_) { /* table pas encore créée, pas grave */ }
+      }
     } catch (err) {
       logger.error('Erreur GPS Socket.IO', { error: err.message });
     }
   });
+
+  // Fonction haversine simplifiée pour la détection de proximité (en km)
+  function haversineDistanceSimple(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
 
   // Mise à jour statut CAV collecté
   socket.on('cav-collected', (data) => {

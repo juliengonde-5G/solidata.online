@@ -89,6 +89,9 @@ let SCORING_CONFIG = {
   summerVacationFactor: 1.0,     // été (neutre, déjà dans facteurs saisonniers)
   preVacationBonus: 1.05,        // semaine avant (léger surcroît de tri)
   postVacationBonus: 1.05,       // semaine après (retour, vidage)
+  lunchBreakMinutes: 30,         // durée pause déjeuner (minutes)
+  lunchAfterHours: 4,            // déclencher la pause après N heures de travail
+  cavProximityRadius: 100,       // rayon en mètres pour détecter arrivée/départ GPS d'un CAV
 };
 
 function isHoliday(dateStr) {
