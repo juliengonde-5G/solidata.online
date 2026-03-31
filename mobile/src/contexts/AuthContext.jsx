@@ -34,6 +34,14 @@ export function AuthProvider({ children }) {
     return res.data;
   };
 
+  const driverStart = async (vehicleId) => {
+    const res = await api.post('/auth/driver-start', { vehicle_id: vehicleId });
+    localStorage.setItem('mobile_token', res.data.token);
+    if (res.data.refreshToken) localStorage.setItem('mobile_refresh_token', res.data.refreshToken);
+    setUser(res.data.user);
+    return res.data;
+  };
+
   const logout = () => {
     localStorage.removeItem('mobile_token');
     localStorage.removeItem('mobile_refresh_token');
@@ -41,7 +49,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, driverStart, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

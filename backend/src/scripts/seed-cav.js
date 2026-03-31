@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
- * SOLIDATA — Import des CAV depuis KML (GPS) + tournee.xlsx (metadata)
+ * SOLIDATA — Import des CAV depuis CSV / KML / Excel
  * Usage: node src/scripts/seed-cav.js
  *
- * Primary source: KML file with precise GPS coordinates for all CAV
- * Secondary source: tournee.xlsx for additional metadata (postal code, etc.)
+ * Sources (par priorité) :
+ *   1. CSV (listeCAV290326.csv) — source complète 209 CAV avec métadonnées
+ *   2. KML — coordonnées GPS
+ *   3. Excel (tournee.xlsx) — métadonnées complémentaires
  */
 const XLSX = require('xlsx');
 const path = require('path');
@@ -21,14 +23,98 @@ function findFile(filename) {
 }
 
 /**
+ * Parse CSV file (semicolon-separated, UTF-8 with BOM)
+ * Colonnes: PAV;Adresse;Complément d'adresse;Code postal;Ville;Latitude;Longitude;
+ *           Communauté de communes;Surface;Reference Eco TLC;Entité détentrice
+ */
+function parseCSV(filePath) {
+  let content = fs.readFileSync(filePath, 'utf-8');
+  // Remove BOM
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
+
+  const lines = content.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return [];
+
+  const cavs = [];
+  for (let i = 1; i < lines.length; i++) {
+    // Handle quoted fields with semicolons inside
+    const fields = parseCSVLine(lines[i], ';');
+    if (fields.length < 5) continue;
+
+    const name = (fields[0] || '').trim();
+    const address = (fields[1] || '').trim();
+    const complement = (fields[2] || '').trim();
+    const postalCode = (fields[3] || '').trim();
+    const ville = (fields[4] || '').trim();
+    const lat = parseFloat(fields[5]);
+    const lng = parseFloat(fields[6]);
+    const communaute = (fields[7] || '').trim();
+    const surface = (fields[8] || '').trim();
+    const refEcoTLC = (fields[9] || '').trim();
+    const entite = (fields[10] || '').trim();
+
+    if (!name) continue;
+
+    // Extraire la commune du nom (format: "COMMUNE - Adresse (Détail)")
+    const dashIdx = name.indexOf(' - ');
+    const commune = dashIdx > 0 ? name.substring(0, dashIdx).trim() : ville;
+
+    // Adresse complète
+    const fullAddress = [address, complement].filter(Boolean).join(', ');
+
+    cavs.push({
+      name,
+      address: fullAddress || address,
+      commune: commune || ville,
+      postalCode,
+      latitude: isNaN(lat) ? null : lat,
+      longitude: isNaN(lng) ? null : lng,
+      nb_containers: 1,
+      communaute,
+      surface,
+      refEcoTLC,
+      entite,
+    });
+  }
+
+  return cavs;
+}
+
+/**
+ * Parse a CSV line respecting quoted fields
+ */
+function parseCSVLine(line, sep) {
+  const fields = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === sep && !inQuotes) {
+      fields.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  fields.push(current);
+  return fields;
+}
+
+/**
  * Parse KML file to extract CAV placemarks
- * Format: COMMUNE - Address (Detail)\n\nN CAV\n\nTournées info\n\nFill rate
  */
 function parseKML(filePath) {
-  const xml = require('fs').readFileSync(filePath, 'utf-8'); // Sync OK: startup-only script
+  const xml = fs.readFileSync(filePath, 'utf-8');
   const cavs = [];
 
-  // Match each Placemark block
   const placemarkRegex = /<Placemark>\s*<description><!\[CDATA\[(.*?)\]\]><\/description>.*?<Point><coordinates>([\d.,\-]+)<\/coordinates><\/Point>\s*<\/Placemark>/gs;
 
   let match;
@@ -38,10 +124,7 @@ function parseKML(filePath) {
     const lng = parseFloat(coords[0]);
     const lat = parseFloat(coords[1]);
 
-    // Parse description: "COMMUNE - Address (Detail)\n\nN CAV\n\n..."
     const lines = desc.split('\n').filter(l => l.trim());
-
-    // First line: "COMMUNE - Address (Detail)"
     const firstLine = lines[0] || '';
     const dashIdx = firstLine.indexOf(' - ');
     let commune = '';
@@ -51,43 +134,14 @@ function parseKML(filePath) {
       address = firstLine.substring(dashIdx + 3).trim();
     }
 
-    // Name = "COMMUNE - Address" (the full first line)
     const name = firstLine;
 
-    // Extract nb_containers from "N CAV" line
     let nbContainers = 1;
     const cavLine = lines.find(l => /^\d+\s+CAV$/i.test(l.trim()));
-    if (cavLine) {
-      nbContainers = parseInt(cavLine.trim()) || 1;
-    }
-
-    // Extract fill rate from "Taux de remplissage moyen XX%"
-    let fillRate = null;
-    const fillLine = lines.find(l => /taux de remplissage/i.test(l));
-    if (fillLine) {
-      const pct = fillLine.match(/(\d+)%/);
-      if (pct) fillRate = parseInt(pct[1]);
-    }
-
-    // Extract tour count from "Présent sur N tournée(s)"
-    let tourCount = null;
-    const tourLine = lines.find(l => /pr.sent sur/i.test(l));
-    if (tourLine) {
-      const n = tourLine.match(/(\d+)\s+tourn/);
-      if (n) tourCount = parseInt(n[1]);
-    }
+    if (cavLine) nbContainers = parseInt(cavLine.trim()) || 1;
 
     if (!isNaN(lat) && !isNaN(lng)) {
-      cavs.push({
-        name,
-        address,
-        commune,
-        latitude: lat,
-        longitude: lng,
-        nb_containers: nbContainers,
-        fill_rate: fillRate,
-        tour_count: tourCount,
-      });
+      cavs.push({ name, address, commune, latitude: lat, longitude: lng, nb_containers: nbContainers });
     }
   }
 
@@ -95,7 +149,7 @@ function parseKML(filePath) {
 }
 
 /**
- * Parse Excel file for additional CAV data (postal codes, etc.)
+ * Parse Excel file for additional CAV data
  */
 function parseExcel(filePath) {
   const wb = XLSX.readFile(filePath);
@@ -117,9 +171,7 @@ function parseExcel(filePath) {
     const lat = parseFloat(row[16]);
     const lng = parseFloat(row[17]);
 
-    const fullAddress = [address, complement, postalCode, commune]
-      .filter(Boolean)
-      .join(', ');
+    const fullAddress = [address, complement, postalCode, commune].filter(Boolean).join(', ');
 
     cavs.push({
       name,
@@ -137,36 +189,56 @@ function parseExcel(filePath) {
 async function seedCAV(externalPool) {
   const db = externalPool || pool;
 
-  // Load KML (primary source with GPS)
-  const kmlPath = findFile('Carte des PAV au 28-02-2026.kml');
+  // Source 1: CSV (prioritaire — fichier complet 209 CAV)
+  const csvPath = findFile('listeCAV290326.csv');
+  // Source 2: KML
+  const kmlPath = findFile('Carte des PAV au 29-03-2026.kml')
+    || findFile('Carte des PAV au 28-02-2026.kml');
+  // Source 3: Excel
   const xlsPath = findFile('tournee.xlsx');
 
   let cavs = [];
 
-  if (kmlPath) {
-    console.log(`[SEED-CAV] Lecture KML: ${kmlPath}`);
-    cavs = parseKML(kmlPath);
-    console.log(`[SEED-CAV] ${cavs.length} CAV trouvés dans le KML (avec GPS)`);
+  // CSV est la source prioritaire
+  if (csvPath) {
+    console.log(`[SEED-CAV] Lecture CSV: ${csvPath}`);
+    cavs = parseCSV(csvPath);
+    console.log(`[SEED-CAV] ${cavs.length} CAV trouvés dans le CSV`);
   }
 
-  // Merge with Excel data if available (for postal codes and extra CAV)
+  // Compléter avec KML si le CSV n'a pas été trouvé ou est vide
+  if (cavs.length === 0 && kmlPath) {
+    console.log(`[SEED-CAV] Lecture KML: ${kmlPath}`);
+    cavs = parseKML(kmlPath);
+    console.log(`[SEED-CAV] ${cavs.length} CAV trouvés dans le KML`);
+
+    // Vérifier que le KML est complet
+    const kmlContent = fs.readFileSync(kmlPath, 'utf-8');
+    if (!kmlContent.includes('</Document>')) {
+      console.warn(`[SEED-CAV] ATTENTION: KML tronqué (pas de </Document>), ${cavs.length} CAV seulement`);
+      const fallback = findFile('Carte des PAV au 28-02-2026.kml');
+      if (fallback && fallback !== kmlPath) {
+        const fallbackCavs = parseKML(fallback);
+        if (fallbackCavs.length > cavs.length) {
+          console.log(`[SEED-CAV] Fallback vers ${fallback}: ${fallbackCavs.length} CAV`);
+          cavs = fallbackCavs;
+        }
+      }
+    }
+  }
+
+  // Merge avec Excel si disponible
   if (xlsPath) {
     console.log(`[SEED-CAV] Lecture Excel: ${xlsPath}`);
     const xlsCavs = parseExcel(xlsPath);
     console.log(`[SEED-CAV] ${xlsCavs.length} CAV trouvés dans l'Excel`);
 
-    // Add Excel-only CAVs that aren't in the KML
-    const kmlNames = new Set(cavs.map(c => c.name.toLowerCase()));
+    const existingNames = new Set(cavs.map(c => c.name.toLowerCase()));
     let added = 0;
     for (const xc of xlsCavs) {
-      // Try matching by commune + partial address
-      const exists = cavs.find(kc =>
-        kc.commune.toLowerCase() === xc.commune.toLowerCase() &&
-        (kc.address.toLowerCase().includes(xc.address.split(',')[0]?.toLowerCase() || '___') ||
-         xc.name.toLowerCase().includes(kc.commune.toLowerCase()))
-      );
-      if (!exists && !kmlNames.has(xc.name.toLowerCase())) {
+      if (!existingNames.has(xc.name.toLowerCase())) {
         cavs.push(xc);
+        existingNames.add(xc.name.toLowerCase());
         added++;
       }
     }
@@ -174,7 +246,7 @@ async function seedCAV(externalPool) {
   }
 
   if (cavs.length === 0) {
-    console.log('[SEED-CAV] Aucun fichier source trouvé (KML ou Excel), skip');
+    console.log('[SEED-CAV] Aucun fichier source trouvé (CSV, KML ou Excel), skip');
     return;
   }
 
@@ -182,18 +254,9 @@ async function seedCAV(externalPool) {
   try {
     await client.query('BEGIN');
 
-    // Clear existing CAV for clean import
+    // Toujours mode upsert — ne jamais supprimer les CAV existants (FK: tour_cav, cav_qr_scans, tonnage_history...)
     const existing = await client.query('SELECT COUNT(*) FROM cav');
-    if (parseInt(existing.rows[0].count) > 0) {
-      // Check if tonnage_history references exist
-      const hasHistory = await client.query('SELECT COUNT(*) FROM tonnage_history');
-      if (parseInt(hasHistory.rows[0].count) === 0) {
-        await client.query('DELETE FROM cav');
-        console.log('[SEED-CAV] Table CAV vidée pour réimport propre');
-      } else {
-        console.log('[SEED-CAV] Données existantes conservées (tonnage_history non vide), mode upsert');
-      }
-    }
+    console.log(`[SEED-CAV] ${existing.rows[0].count} CAV existants en base, mode upsert`);
 
     let inserted = 0;
     let updated = 0;
@@ -201,29 +264,35 @@ async function seedCAV(externalPool) {
 
     for (const cav of cavs) {
       // Check if exists by name
-      const exists = await client.query(
-        'SELECT id FROM cav WHERE name = $1',
-        [cav.name]
-      );
+      const exists = await client.query('SELECT id FROM cav WHERE name = $1', [cav.name]);
 
-      const geomExpr = cav.latitude != null && cav.longitude != null
-        ? `ST_SetSRID(ST_MakePoint($5, $4), 4326)`
-        : 'NULL';
+      const hasGPS = cav.latitude != null && cav.longitude != null;
+      const geomExpr = hasGPS ? `ST_SetSRID(ST_MakePoint($5, $4), 4326)` : 'NULL';
 
       if (exists.rows.length > 0) {
-        // Update with GPS coordinates if we have them and the existing record doesn't
-        if (cav.latitude != null && cav.longitude != null) {
+        // Update existing record
+        if (hasGPS) {
           await client.query(
             `UPDATE cav SET latitude = $1, longitude = $2,
              geom = ST_SetSRID(ST_MakePoint($2, $1), 4326),
              address = COALESCE(NULLIF($3, ''), address),
-             commune = COALESCE(NULLIF($4, ''), commune)
+             commune = COALESCE(NULLIF($4, ''), commune),
+             updated_at = NOW()
              WHERE id = $5`,
             [cav.latitude, cav.longitude, cav.address, cav.commune, exists.rows[0].id]
           );
           updated++;
         } else {
-          skipped++;
+          // Update address/commune even without GPS
+          await client.query(
+            `UPDATE cav SET
+             address = COALESCE(NULLIF($1, ''), address),
+             commune = COALESCE(NULLIF($2, ''), commune),
+             updated_at = NOW()
+             WHERE id = $3`,
+            [cav.address, cav.commune, exists.rows[0].id]
+          );
+          updated++;
         }
         continue;
       }
@@ -231,14 +300,7 @@ async function seedCAV(externalPool) {
       await client.query(
         `INSERT INTO cav (name, address, commune, latitude, longitude, geom, nb_containers, status)
          VALUES ($1, $2, $3, $4, $5, ${geomExpr}, $6, 'active')`,
-        [
-          cav.name,
-          cav.address,
-          cav.commune,
-          cav.latitude,
-          cav.longitude,
-          cav.nb_containers,
-        ]
+        [cav.name, cav.address, cav.commune, cav.latitude, cav.longitude, cav.nb_containers]
       );
       inserted++;
     }

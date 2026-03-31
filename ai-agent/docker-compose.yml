@@ -1,0 +1,78 @@
+# SolidataBot — Agent IA Docker Compose
+# Usage : docker compose up -d
+# S'intègre avec le docker-compose principal de Solidata (même réseau)
+
+services:
+  solidatabot:
+    build: .
+    container_name: solidatabot
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    environment:
+      - FLASK_ENV=production
+      - DB_HOST=solidata-db
+      - DB_PORT=5432
+      - DB_NAME=solidata
+      - DB_USER=${DB_USER:-solidata_user}
+      - DB_PASSWORD=${DB_PASSWORD:-solidata_pass}
+      - REDIS_URL=redis://solidata-redis:6379/1
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - JWT_SECRET=${JWT_SECRET:-solidata-jwt-secret}
+      - SECRET_KEY=${SECRET_KEY:-solidata-agent-secret}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-20250514}
+      - RATE_LIMIT_PER_MIN=20
+    depends_on:
+      solidata-db:
+        condition: service_healthy
+      solidata-redis:
+        condition: service_started
+    networks:
+      - solidata-net
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Base de données (si lancé standalone, sinon utiliser le compose principal) ──
+  solidata-db:
+    image: postgis/postgis:15-3.4
+    container_name: solidata-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: solidata
+      POSTGRES_USER: ${DB_USER:-solidata_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-solidata_pass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-solidata_user} -d solidata"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - solidata-net
+
+  # ── Redis ──
+  solidata-redis:
+    image: redis:7-alpine
+    container_name: solidata-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - solidata-net
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+
+volumes:
+  pgdata:
+
+networks:
+  solidata-net:
+    name: solidata-net
+    driver: bridge

@@ -43,7 +43,8 @@ router.get('/reporting/kpis', async (req, res) => {
         COALESCE(AVG(t.total_weight_kg), 0) as avg_kg_par_tour,
         COUNT(CASE WHEN t.status = 'completed' THEN 1 END) as tours_completees
       FROM tours t
-      JOIN users u ON t.driver_id = u.id
+      LEFT JOIN employees e ON t.driver_employee_id = e.id
+      LEFT JOIN users u ON e.user_id = u.id
       WHERE t.date BETWEEN $1 AND $2
       GROUP BY u.id, u.first_name, u.last_name
       ORDER BY total_kg DESC
@@ -68,7 +69,7 @@ router.get('/reporting/anomalies', async (req, res) => {
 
     // Tours complétées sans poids
     const noWeight = await pool.query(`
-      SELECT id, date, driver_id FROM tours
+      SELECT id, date, driver_employee_id FROM tours
       WHERE status = 'completed' AND (total_weight_kg IS NULL OR total_weight_kg = 0)
       AND date >= NOW() - INTERVAL '30 days'
       ORDER BY date DESC LIMIT 20
@@ -449,6 +450,56 @@ router.get('/predictive/cav-correlations', authorize('ADMIN'), async (req, res) 
   } catch (err) {
     console.error('[TOURS] Erreur corrélations :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// ANALYSE IA — Endpoints utilisant Claude pour l'analyse prédictive
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/tours/predictive/ia/synthese — Synthèse hebdomadaire IA
+router.get('/predictive/ia/synthese', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { analyseHebdomadaire } = require('../../services/predictive-ai');
+    const result = await analyseHebdomadaire();
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur synthèse IA :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur analyse IA' });
+  }
+});
+
+// GET /api/tours/predictive/ia/ajustements — Recommandations d'ajustement des facteurs
+router.get('/predictive/ia/ajustements', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { recommanderAjustements } = require('../../services/predictive-ai');
+    const result = await recommanderAjustements();
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur ajustements IA :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur analyse IA' });
+  }
+});
+
+// GET /api/tours/predictive/ia/prediction/:cavId — Prédiction enrichie IA pour un CAV
+router.get('/predictive/ia/prediction/:cavId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { predictionEnrichie } = require('../../services/predictive-ai');
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const result = await predictionEnrichie(parseInt(req.params.cavId), date);
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur prédiction enrichie IA :', err);
+    if (err.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'Service IA non configuré' });
+    }
+    res.status(500).json({ error: 'Erreur prédiction IA' });
   }
 });
 

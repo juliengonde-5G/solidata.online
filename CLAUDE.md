@@ -55,29 +55,35 @@ solidata.online/
 │   ├── index.js              # Entry point Express + Socket.IO + auto-init DB
 │   ├── config/database.js    # Pool PostgreSQL
 │   ├── middleware/auth.js     # authenticate() + authorize(...roles)
-│   ├── routes/               # 36 fichiers de routes API
+│   ├── routes/               # 61 fichiers de routes API
+│   ├── services/             # predictive-ai.js, insertion-ai.js, ml-model.js
 │   └── scripts/              # init-db.js, seed-*.js, migrate-*.js
 ├── frontend/src/
-│   ├── App.jsx               # Routeur (44 pages, ProtectedRoute)
+│   ├── App.jsx               # Routeur (62 pages, ProtectedRoute)
 │   ├── contexts/AuthContext.jsx  # Auth state + token refresh
 │   ├── services/api.js       # Axios instance + interceptors
 │   ├── components/Layout.jsx # Sidebar + navigation role-based
-│   └── pages/                # 44 pages React
+│   └── pages/                # 62 pages React
 ├── mobile/src/
 │   ├── App.jsx               # Routeur mobile (11 pages)
 │   ├── services/haptic.js    # Vibration feedback
 │   └── pages/                # Parcours chauffeur-collecteur
+├── ai-agent/
+│   ├── app.py                # SolidataBot — agent IA conversationnel (Flask + Claude API)
+│   ├── Dockerfile            # Conteneur Python pour l'agent IA
+│   └── static/               # Interface chat (HTML/CSS/JS)
 ├── deploy/
 │   ├── scripts/              # deploy.sh, init-server.sh, backup.sh, health-check.sh
 │   └── nginx/                # Config reverse proxy SSL
+├── rapports/                 # Rapports quotidiens automatisés
 ├── docker-compose.yml        # Dev
-├── docker-compose.prod.yml   # Production (7 services + limits mémoire)
+├── docker-compose.prod.yml   # Production (8 services + limits mémoire)
 └── docs/                     # Documentation complète
 ```
 
 ---
 
-## 5. MODULES FONCTIONNELS (21 modules)
+## 5. MODULES FONCTIONNELS (25 modules)
 
 ### Modules core
 | # | Module | Routes API | Pages Web | Description |
@@ -107,6 +113,10 @@ solidata.online/
 | 19 | Admin DB | admin-db | AdminDB | Backup/restore, VACUUM, purge, statistiques |
 | 20 | Fil d'actualités | newsfeed | NewsFeed | Articles catégorisés, épinglage |
 | 21 | Référentiels | referentiels | Referentiels | Associations, exutoires, catalogue produits, conteneurs |
+| 22 | Finance | finance | Finance*, FinancePL, FinanceBilan, FinanceTresorerie, FinanceControles, FinanceRentabilite, FinanceOperations | P&L analytique, bilan, trésorerie, contrôle de gestion, rentabilité matière |
+| 23 | Pennylane | pennylane | Pennylane | Synchronisation comptable, Grand Livre, balances, factures |
+| 24 | SolidataBot | chat | — (widget flottant) | Chat IA conversationnel Claude, contexte ERP, analyse insertion/prédictif |
+| 25 | Pointage | pointage | Pointage | Gestion des pointages employés |
 
 ---
 
@@ -135,6 +145,7 @@ solidata.online/
 **Grille tarifaire** : grille_tarifaire
 **RGPD** : rgpd_registre, rgpd_consents, rgpd_audit_log
 **Objectifs** : periodic_objectives
+**Finance** : financial_exercises, financial_periods, financial_entries, pennylane_config, pennylane_sync_log
 **Notifications** : notification_triggers
 **Historique** : historique_mensuel
 
@@ -291,6 +302,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | `docs/FORMATION_MANAGER_CHAINE_TRI.md` | Formation manager chaîne de tri (pas-à-pas) | Formation |
 | `docs/FORMATION_MANAGER_RH_INSERTION.md` | Formation manager RH & insertion | Formation |
 | `docs/PROPOSITIONS_AMELIORATION.md` | Propositions d'amélioration UX/accessibilité | Évolution |
+| `rapports/rapport-quotidien-*.md` | Rapports quotidiens automatisés (branches, sécurité, tests personas) | Ops/QA |
 
 ---
 

@@ -8,11 +8,18 @@ const { validate } = require('../../middleware/validate');
 module.exports = function createExecutionRouter(upload) {
   // GET /api/tours/my — Vehicules et tournees du jour (mobile)
   // Retourne toutes les tournees du jour (planned + in_progress) + vehicules disponibles
+  // Marque is_assigned_vehicle=true si le véhicule est affecté au chauffeur connecté
   router.get('/my', async (req, res) => {
     try {
+      // Récupérer l'employee_id du chauffeur connecté
+      const userId = req.user.id;
+      const empRes = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
+      const myEmployeeId = empRes.rows.length > 0 ? empRes.rows[0].id : null;
+
       // 1. Toutes les tournees du jour (pas de filtre par chauffeur)
       const toursResult = await pool.query(`
         SELECT t.*, v.registration, v.name as vehicle_name,
+         v.assigned_driver_id,
          CONCAT(e.first_name, ' ', e.last_name) as driver_name,
          COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id)) as nb_cav,
          (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count,
@@ -25,8 +32,14 @@ module.exports = function createExecutionRouter(upload) {
         ORDER BY t.status = 'in_progress' DESC, t.date ASC, t.created_at DESC
       `);
 
+      // Ajouter le flag is_assigned_vehicle
+      const tours = toursResult.rows.map(t => ({
+        ...t,
+        is_assigned_vehicle: myEmployeeId && t.assigned_driver_id === myEmployeeId,
+      }));
+
       // 2. Vehicules disponibles sans tournee du jour
-      const vehicleIdsInTours = toursResult.rows
+      const vehicleIdsInTours = tours
         .filter(t => t.vehicle_id)
         .map(t => t.vehicle_id);
 
@@ -40,6 +53,7 @@ module.exports = function createExecutionRouter(upload) {
         }
         const vRes = await pool.query(`
           SELECT v.id as vehicle_id, v.registration, v.name as vehicle_name, NULL as vehicle_type,
+            v.assigned_driver_id,
             NULL::int as id, 'planned' as status, CURRENT_DATE as date,
             NULL::int as driver_employee_id, NULL as driver_name,
             0 as nb_cav, 0 as collected_count, true as is_free_vehicle
@@ -48,12 +62,19 @@ module.exports = function createExecutionRouter(upload) {
             ${vExclude}
           ORDER BY v.name, v.registration
         `, vParams);
-        freeVehicles = vRes.rows;
+        freeVehicles = vRes.rows.map(v => ({
+          ...v,
+          is_assigned_vehicle: myEmployeeId && v.assigned_driver_id === myEmployeeId,
+        }));
       } catch (err) {
         console.error('[TOURS] Erreur véhicules libres:', err.message);
       }
 
-      res.json([...toursResult.rows, ...freeVehicles]);
+      // Trier : véhicule affecté au chauffeur en premier
+      const all = [...tours, ...freeVehicles];
+      all.sort((a, b) => (b.is_assigned_vehicle ? 1 : 0) - (a.is_assigned_vehicle ? 1 : 0));
+
+      res.json(all);
     } catch (err) {
       console.error('[TOURS] Erreur /my :', err);
       res.status(500).json({ error: 'Erreur serveur' });
@@ -161,10 +182,9 @@ module.exports = function createExecutionRouter(upload) {
 
       if (result.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
 
-      // Remettre le véhicule en available si terminé
+      // Actions post-tournée si terminé
       if (status === 'completed' || status === 'cancelled') {
         const tour = result.rows[0];
-        await pool.query("UPDATE vehicles SET status = 'available' WHERE id = $1", [tour.vehicle_id]);
 
         // Mettre à jour le tonnage dans l'historique si complété
         if (status === 'completed' && tour.total_weight_kg > 0) {

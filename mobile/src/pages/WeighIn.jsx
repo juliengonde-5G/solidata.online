@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
 import { vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
 
@@ -17,8 +16,14 @@ export default function WeighIn() {
   const submit = async () => {
     setLoading(true);
     try {
-      await api.post(`/tours/${tourId}/weigh`, {
-        weight_kg: netWeight,
+      await fetch(`/api/tours/${tourId}/weigh-public`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          weight_kg: netWeight,
+          tare_kg: parseFloat(tareWeight) || 0,
+          is_intermediate: isIntermediate,
+        }),
       });
       if (isIntermediate) {
         // Retour intermédiaire : enregistrer la pesée puis reprendre la collecte
@@ -26,7 +31,11 @@ export default function WeighIn() {
         vibrateSuccess();
         navigate('/tour-map');
       } else {
-        await api.put(`/tours/${tourId}/status`, { status: 'completed' });
+        await fetch(`/api/tours/${tourId}/status-public`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'completed' }),
+        });
         vibrateSuccess();
         navigate('/tour-summary');
       }

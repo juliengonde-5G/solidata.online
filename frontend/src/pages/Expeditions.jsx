@@ -46,7 +46,7 @@ export default function Expeditions() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-solidata-dark">Expéditions</h1>
-            <p className="text-gray-500">Suivi des expéditions vers exutoires</p>
+            <p className="text-gray-500">Suivi des expéditions et livraisons</p>
           </div>
           <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
             + Nouvelle expédition
@@ -72,7 +72,7 @@ export default function Expeditions() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Exutoire</th>
+                <th className="text-left p-3 text-xs font-semibold text-gray-500">Destinataire</th>
                 <th className="text-left p-3 text-xs font-semibold text-gray-500">Poids (kg)</th>
                 <th className="text-left p-3 text-xs font-semibold text-gray-500">Palettes</th>
                 <th className="text-left p-3 text-xs font-semibold text-gray-500">Transporteur</th>
@@ -104,7 +104,7 @@ export default function Expeditions() {
               <h2 className="text-lg font-bold mb-4">Nouvelle expédition</h2>
               <div className="space-y-3">
                 <select value={form.exutoire_id} onChange={e => setForm({ ...form, exutoire_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
-                  <option value="">Exutoire *</option>
+                  <option value="">Destinataire *</option>
                   {exutoires.map(ex => <option key={ex.id} value={ex.id}>{ex.nom}</option>)}
                 </select>
                 <input type="date" value={form.date_expedition} onChange={e => setForm({ ...form, date_expedition: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />

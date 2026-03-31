@@ -1503,6 +1503,14 @@ async function initDatabase() {
     console.log('[INIT-DB] Migration CAV (unique name + fill rate columns) ✓');
 
     // ══════════════════════════════════════════
+    // MIGRATION : CAV photo
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS photo_path VARCHAR(500);
+    `);
+    console.log('[INIT-DB] Migration CAV photo ✓');
+
+    // ══════════════════════════════════════════
     // MIGRATION : FKs manquantes + indexes performance
     // ══════════════════════════════════════════
     // FK users.team_id -> teams(id)
@@ -2058,7 +2066,7 @@ async function initDatabase() {
         COUNT(*) as nb_tours,
         ROUND(SUM(total_weight_kg)::numeric, 1) as total_kg,
         ROUND(AVG(total_weight_kg)::numeric, 1) as avg_kg_tour,
-        COUNT(DISTINCT driver_id) as nb_chauffeurs
+        COUNT(DISTINCT driver_employee_id) as nb_chauffeurs
       FROM tours
       WHERE status = 'completed'
       GROUP BY TO_CHAR(date, 'YYYY-MM')
@@ -2134,6 +2142,8 @@ async function initDatabase() {
       { col: 'tare_weight_kg', def: "DOUBLE PRECISION" },
       { col: 'next_maintenance', def: "DATE" },
       { col: 'insurance_expiry', def: "DATE" },
+      { col: 'assigned_driver_id', def: "INTEGER REFERENCES employees(id) ON DELETE SET NULL" },
+      { col: 'vehicle_type', def: "VARCHAR(100) DEFAULT 'generic'" },
     ];
     for (const m of vehicleMigrations) {
       await client.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS ${m.col} ${m.def}`);
@@ -2176,6 +2186,58 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_user ON user_activity_log(user_id)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_activity_log_action ON user_activity_log(action)');
     console.log('[INIT-DB] Table user_activity_log créée ✓');
+
+    // Table sessions utilisateurs
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        token_hash VARCHAR(64),
+        ip_address VARCHAR(50),
+        user_agent TEXT,
+        started_at TIMESTAMP DEFAULT NOW(),
+        last_activity TIMESTAMP DEFAULT NOW(),
+        ended_at TIMESTAMP,
+        is_active BOOLEAN DEFAULT true
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_user_sessions_active ON user_sessions(is_active) WHERE is_active = true');
+    console.log('[INIT-DB] Table user_sessions créée ✓');
+
+    // Table historique SolidataBot
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS chatbot_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        username VARCHAR(100),
+        session_id VARCHAR(100),
+        user_message TEXT NOT NULL,
+        bot_reply TEXT,
+        tokens_used INTEGER,
+        response_time_ms INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_chatbot_history_user ON chatbot_history(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_chatbot_history_created ON chatbot_history(created_at DESC)');
+    console.log('[INIT-DB] Table chatbot_history créée ✓');
+
+    // Table temps de collecte réels par CAV (appris via GPS)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_collection_times (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER REFERENCES cav(id),
+        tour_id INTEGER,
+        vehicle_id INTEGER,
+        arrived_at TIMESTAMP,
+        departed_at TIMESTAMP,
+        duration_seconds INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_cav_collection_times_cav ON cav_collection_times(cav_id)');
+    console.log('[INIT-DB] Table cav_collection_times créée ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');

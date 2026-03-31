@@ -24,6 +24,76 @@ function parseExpiry(str) {
   return val * 1000;
 }
 
+// POST /api/auth/driver-start — Mode chauffeur : démarrage par véhicule (sans identifiant)
+router.post('/driver-start', async (req, res) => {
+  try {
+    const { vehicle_id, driver_name } = req.body;
+    if (!vehicle_id) return res.status(400).json({ error: 'Véhicule requis' });
+
+    // Chercher le véhicule et son chauffeur assigné
+    const vRes = await pool.query(
+      `SELECT v.id, v.registration, v.name, v.assigned_driver_id,
+              e.id as emp_id, e.first_name, e.last_name, e.user_id
+       FROM vehicles v
+       LEFT JOIN employees e ON e.id = v.assigned_driver_id
+       WHERE v.id = $1`, [vehicle_id]
+    );
+    if (vRes.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    const vehicle = vRes.rows[0];
+    let userId, employeeId, firstName, lastName;
+
+    if (vehicle.user_id) {
+      // Véhicule a un chauffeur assigné avec compte user
+      userId = vehicle.user_id;
+      employeeId = vehicle.emp_id;
+      firstName = vehicle.first_name;
+      lastName = vehicle.last_name;
+    } else if (vehicle.emp_id) {
+      // Chauffeur assigné mais sans user_id → créer un token générique
+      employeeId = vehicle.emp_id;
+      firstName = vehicle.first_name;
+      lastName = vehicle.last_name;
+      // Utiliser un user_id générique pour le token
+      const genericUser = await pool.query("SELECT id FROM users WHERE username = 'chauffeur' LIMIT 1");
+      userId = genericUser.rows[0]?.id || 1;
+    } else {
+      // Pas de chauffeur assigné → utiliser le compte chauffeur générique
+      const genericUser = await pool.query("SELECT id FROM users WHERE username = 'chauffeur' LIMIT 1");
+      if (genericUser.rows.length === 0) {
+        return res.status(400).json({ error: 'Aucun chauffeur assigné à ce véhicule. Contactez un admin.' });
+      }
+      userId = genericUser.rows[0].id;
+      firstName = driver_name || 'Chauffeur';
+      lastName = vehicle.registration;
+      employeeId = null;
+    }
+
+    const token = jwt.sign(
+      { id: userId, userId, role: 'COLLABORATEUR', username: `driver_${vehicle_id}` },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    res.json({
+      token,
+      refreshToken: null,
+      user: {
+        id: userId,
+        employee_id: employeeId,
+        first_name: firstName,
+        last_name: lastName,
+        role: 'COLLABORATEUR',
+        vehicle_id: vehicle.id,
+        vehicle_registration: vehicle.registration,
+      }
+    });
+  } catch (err) {
+    console.error('[AUTH] Erreur driver-start:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // POST /api/auth/login
 router.post('/login', [
   body('username').notEmpty().withMessage('Nom d\'utilisateur requis'),
@@ -69,6 +139,14 @@ router.post('/login', [
 
     // Logger la connexion
     logActivity({ userId: user.id, username: user.username, action: 'login', ip: req.ip });
+
+    // Créer la session
+    const tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex').substring(0, 64);
+    await pool.query(
+      `INSERT INTO user_sessions (user_id, token_hash, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4)`,
+      [user.id, tokenHash, req.ip, req.get('user-agent') || null]
+    );
 
     // Set refresh token as HttpOnly cookie
     res.cookie('refreshToken', refreshToken, {
@@ -140,6 +218,14 @@ router.post('/refresh', async (req, res) => {
       [row.user_id, newRefreshToken, expiresAt]
     );
 
+    // Mettre à jour la session
+    const newTokenHash = crypto.createHash('sha256').update(newAccessToken).digest('hex').substring(0, 64);
+    await pool.query(
+      `UPDATE user_sessions SET token_hash = $1, last_activity = NOW()
+       WHERE user_id = $2 AND is_active = true`,
+      [newTokenHash, row.user_id]
+    );
+
     // Set new refresh token as HttpOnly cookie
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
@@ -160,6 +246,13 @@ router.post('/refresh', async (req, res) => {
 router.post('/logout', authenticate, async (req, res) => {
   try {
     await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [req.user.id]);
+
+    // Fermer les sessions actives
+    await pool.query(
+      'UPDATE user_sessions SET is_active = false, ended_at = NOW() WHERE user_id = $1 AND is_active = true',
+      [req.user.id]
+    );
+    logActivity({ userId: req.user.id, username: req.user.username, action: 'logout', ip: req.ip });
 
     // Clear the refreshToken cookie
     res.clearCookie('refreshToken', {
@@ -216,6 +309,8 @@ router.put('/password', authenticate, [
 
     const hash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, req.user.id]);
+
+    logActivity({ userId: req.user.id, username: req.user.username, action: 'password_change', ip: req.ip });
 
     res.json({ message: 'Mot de passe modifié avec succès' });
   } catch (err) {

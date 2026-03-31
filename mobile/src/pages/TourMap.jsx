@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import io from 'socket.io-client';
-import api from '../services/api';
 import 'leaflet/dist/leaflet.css';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -30,6 +29,8 @@ export default function TourMap() {
   const [myPosition, setMyPosition] = useState(null);
   const socketRef = useRef(null);
   const watchRef = useRef(null);
+  const intervalRef = useRef(null);
+  const positionRef = useRef(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
 
@@ -38,6 +39,7 @@ export default function TourMap() {
     startGPS();
     connectSocket();
     return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
       if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current);
       if (socketRef.current) socketRef.current.disconnect();
     };
@@ -45,10 +47,11 @@ export default function TourMap() {
 
   const loadTour = async () => {
     try {
-      const res = await api.get(`/tours/${tourId}`);
-      setTour(res.data);
-      setCavs(res.data.cavs || []);
-      const visitedCount = (res.data.cavs || []).filter(c => c.status === 'collected').length;
+      const res = await fetch(`/api/tours/${tourId}/public`);
+      const data = await res.json();
+      setTour(data);
+      setCavs(data.cavs || []);
+      const visitedCount = (data.cavs || []).filter(c => c.status === 'collected').length;
       setCurrentCavIndex(visitedCount);
     } catch (err) { console.error(err); }
   };
@@ -56,7 +59,11 @@ export default function TourMap() {
   const startGPS = () => {
     if ('geolocation' in navigator) {
       watchRef.current = navigator.geolocation.watchPosition(
-        (pos) => setMyPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        (pos) => {
+          const newPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setMyPosition(newPos);
+          positionRef.current = newPos;
+        },
         () => {},
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
       );
@@ -64,17 +71,18 @@ export default function TourMap() {
   };
 
   const connectSocket = () => {
-    const token = localStorage.getItem('mobile_token');
-    const socket = io(window.location.origin, { auth: { token } });
+    const vehicleId = localStorage.getItem('selected_vehicle_id');
+    const socket = io(window.location.origin, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
     // Send GPS position every 10 seconds
-    setInterval(() => {
-      if (myPosition && socketRef.current) {
+    intervalRef.current = setInterval(() => {
+      if (positionRef.current && socketRef.current) {
         socketRef.current.emit('gps:position', {
           tour_id: parseInt(tourId),
-          latitude: myPosition.lat,
-          longitude: myPosition.lng,
+          vehicle_id: parseInt(vehicleId) || null,
+          latitude: positionRef.current.lat,
+          longitude: positionRef.current.lng,
           speed: 0,
         });
       }
@@ -91,6 +99,10 @@ export default function TourMap() {
     // Retour intermédiaire : pesée partielle puis reprise de la collecte
     localStorage.setItem('intermediate_return', 'true');
     navigate('/weigh-in');
+  };
+
+  const openNavigation = (lat, lng) => {
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
   };
 
   const currentCAV = cavs[currentCavIndex];
@@ -179,6 +191,16 @@ export default function TourMap() {
             </div>
           </div>
           <div className="flex gap-3">
+            {currentCAV.latitude && currentCAV.longitude && (
+              <button
+                type="button"
+                aria-label="Naviguer vers le CAV"
+                onClick={() => openNavigation(currentCAV.latitude, currentCAV.longitude)}
+                className="touch-target flex items-center justify-center bg-blue-500 text-white rounded-2xl px-4 font-semibold"
+              >
+                Naviguer
+              </button>
+            )}
             <button type="button" onClick={goToCAV} className="flex-1 btn-primary-mobile py-3 text-base">
               Scanner QR Code
             </button>

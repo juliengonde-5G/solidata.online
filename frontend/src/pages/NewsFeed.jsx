@@ -20,6 +20,7 @@ export default function NewsFeed() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
+  const [expandedArticle, setExpandedArticle] = useState(null);
   const [form, setForm] = useState({ category: 'metier', title: '', summary: '', content: '', source_url: '', source_name: '', tags: [], is_pinned: false });
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'RH';
@@ -108,8 +109,12 @@ export default function NewsFeed() {
               <p className="text-gray-400">Aucun article pour le moment</p>
               {isAdmin && <p className="text-sm text-gray-300 mt-1">Cliquez sur "Publier" pour ajouter du contenu</p>}
             </div>
-          ) : articles.map(article => (
-            <div key={article.id} className={`bg-white rounded-xl shadow-sm border p-5 ${article.is_pinned ? 'border-l-4 border-l-amber-400' : ''}`}>
+          ) : articles.map(article => {
+            const isExpanded = expandedArticle === article.id;
+            const hasFullContent = article.content && article.content.length > 0;
+            const hasMore = hasFullContent || article.source_url;
+            return (
+            <div key={article.id} className={`bg-white rounded-xl shadow-sm border p-5 transition-all ${article.is_pinned ? 'border-l-4 border-l-amber-400' : ''}`}>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
@@ -120,21 +125,62 @@ export default function NewsFeed() {
                       {article.category === 'metier' ? 'FILIERE' : 'LOCAL'}
                     </span>
                     <span className="text-xs text-gray-400">{formatDate(article.created_at)}</span>
+                    {article.author_name && <span className="text-xs text-gray-400">• {article.author_name}</span>}
                   </div>
                   <h3 className="text-lg font-semibold text-gray-800 mb-1">{article.title}</h3>
-                  {article.summary && <p className="text-sm text-gray-600 mb-2">{article.summary}</p>}
-                  {article.content && <p className="text-sm text-gray-500 whitespace-pre-wrap">{article.content}</p>}
+                  {article.summary && <p className="text-sm text-gray-600 mb-2 leading-relaxed">{article.summary}</p>}
+
+                  {/* Contenu complet : affiché si article expandé */}
+                  {isExpanded && (
+                    <div className="mt-3 p-4 bg-gray-50 rounded-lg border">
+                      {hasFullContent && (
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{article.content}</p>
+                      )}
+                      {article.source_url && (
+                        <div className={`${hasFullContent ? 'mt-4 pt-3 border-t border-gray-200' : ''}`}>
+                          <a href={article.source_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100 transition">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            Lire sur {article.source_name || 'la source'}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Bouton Lire l'article complet / Réduire */}
+                  <div className="flex items-center gap-3 mt-3">
+                    {hasMore && (
+                      <button
+                        onClick={() => setExpandedArticle(isExpanded ? null : article.id)}
+                        className="text-sm text-solidata-green hover:text-solidata-green/80 font-medium flex items-center gap-1 transition"
+                      >
+                        {isExpanded ? (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                            Reduire
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                            {hasFullContent ? 'Lire l\'article complet' : 'Voir la source'}
+                          </>
+                        )}
+                      </button>
+                    )}
+                    {!isExpanded && article.source_url && (
+                      <span className="text-xs text-gray-400 flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                        {article.source_name || 'Source externe'}
+                      </span>
+                    )}
+                  </div>
+
                   {article.tags?.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-3">
                       {article.tags.map(tag => (
                         <span key={tag} className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-[10px]">#{tag}</span>
                       ))}
                     </div>
-                  )}
-                  {article.source_url && (
-                    <a href={article.source_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline mt-2 inline-block">
-                      Source : {article.source_name || article.source_url}
-                    </a>
                   )}
                 </div>
                 {isAdmin && (
@@ -149,7 +195,8 @@ export default function NewsFeed() {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

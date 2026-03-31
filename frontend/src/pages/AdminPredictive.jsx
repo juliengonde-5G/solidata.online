@@ -33,7 +33,56 @@ export default function AdminPredictive() {
   const [weatherPreview, setWeatherPreview] = useState(null);
   const [weatherDate, setWeatherDate] = useState(new Date().toISOString().split('T')[0]);
 
-  useEffect(() => { loadConfig(); loadEvents(); }, []);
+  // IA Claude — Analyse prédictive
+  const [iaSynthese, setIaSynthese] = useState(null);
+  const [iaAjustements, setIaAjustements] = useState(null);
+  const [iaLoading, setIaLoading] = useState(false);
+  const [iaError, setIaError] = useState('');
+
+  // IA Auto-discovery
+  const [autoStats, setAutoStats] = useState(null);
+  const [predictions, setPredictions] = useState([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryResult, setDiscoveryResult] = useState(null);
+  const [sources, setSources] = useState([]);
+
+  useEffect(() => { loadConfig(); loadEvents(); loadAutoStats(); loadSources(); }, []);
+
+  const loadIaSynthese = async () => {
+    setIaLoading(true);
+    setIaError('');
+    try {
+      const res = await api.get('/tours/predictive/ia/synthese');
+      setIaSynthese(res.data);
+    } catch (err) {
+      setIaError(err.response?.data?.error || 'Erreur analyse IA');
+    }
+    setIaLoading(false);
+  };
+
+  const loadIaAjustements = async () => {
+    setIaLoading(true);
+    setIaError('');
+    try {
+      const res = await api.get('/tours/predictive/ia/ajustements');
+      setIaAjustements(res.data);
+    } catch (err) {
+      setIaError(err.response?.data?.error || 'Erreur analyse IA');
+    }
+    setIaLoading(false);
+  };
+
+  const appliquerAjustements = () => {
+    if (!iaAjustements) return;
+    const newConfig = { ...config };
+    if (iaAjustements.facteurs_saisonniers_proposes?.length === 12) {
+      newConfig.seasonal = iaAjustements.facteurs_saisonniers_proposes;
+    }
+    if (iaAjustements.facteurs_jours_proposes?.length === 7) {
+      newConfig.dayOfWeek = iaAjustements.facteurs_jours_proposes;
+    }
+    setConfig(newConfig);
+  };
 
   const loadConfig = async () => {
     try {
@@ -48,6 +97,38 @@ export default function AdminPredictive() {
       const res = await api.get('/tours/events');
       setEvents(res.data);
     } catch (err) { console.error(err); }
+  };
+
+  const loadAutoStats = async () => {
+    try {
+      const [statsRes, predRes] = await Promise.all([
+        api.get('/tours/events-auto/stats').catch(() => ({ data: null })),
+        api.get('/tours/events-auto/predictions?weeks=6').catch(() => ({ data: [] })),
+      ]);
+      setAutoStats(statsRes.data);
+      setPredictions(predRes.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const loadSources = async () => {
+    try {
+      const res = await api.get('/tours/events-auto/sources');
+      setSources(res.data);
+    } catch (err) { console.error(err); }
+  };
+
+  const runAutoDiscovery = async () => {
+    setDiscovering(true);
+    setDiscoveryResult(null);
+    try {
+      const res = await api.post('/tours/events-auto/discover', { months_ahead: 3 });
+      setDiscoveryResult(res.data);
+      loadEvents();
+      loadAutoStats();
+    } catch (err) {
+      setDiscoveryResult({ error: err.response?.data?.error || 'Erreur' });
+    }
+    setDiscovering(false);
   };
 
   const loadWeatherPreview = async () => {
@@ -259,6 +340,234 @@ export default function AdminPredictive() {
           {events.length === 0 && (
             <p className="text-xs text-gray-300 italic">Aucun événement enregistré</p>
           )}
+        </Section>
+
+        {/* ══════════ DÉCOUVERTE AUTOMATIQUE IA ══════════ */}
+        <Section title="Decouverte automatique IA" desc="Recherche multi-sources dans les agendas publics et analyse predictive saisonniere">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
+            <div className="bg-indigo-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-indigo-700">{autoStats?.total_events || 0}</p>
+              <p className="text-xs text-indigo-500">Evenements actifs</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-green-700">{autoStats?.upcoming_events || 0}</p>
+              <p className="text-xs text-green-500">A venir</p>
+            </div>
+            <div className="bg-purple-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-purple-700">{autoStats?.predicted_by_ia || 0}</p>
+              <p className="text-xs text-purple-500">Generes par IA</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-amber-700">x{autoStats?.avg_bonus_factor || '1.00'}</p>
+              <p className="text-xs text-amber-500">Impact moyen</p>
+            </div>
+          </div>
+
+          {/* Sources de données */}
+          {sources.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Sources de donnees</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {sources.map(src => {
+                  const isActive = src.key_configured;
+                  const needsKey = src.requires_key && !src.key_configured;
+                  return (
+                    <div key={src.id} className={`flex items-center gap-2 p-2.5 rounded-lg border text-sm ${isActive ? 'bg-green-50 border-green-200' : needsKey ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isActive ? 'bg-green-500' : needsKey ? 'bg-amber-400' : 'bg-gray-400'}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-gray-700 truncate">{src.name}</p>
+                        <p className="text-[10px] text-gray-400">{isActive ? src.coverage : needsKey ? `Cle API requise (${src.env_var})` : 'Inactive'}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Répartition par source */}
+          {autoStats?.by_source && Object.keys(autoStats.by_source).length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Repartition par source</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(autoStats.by_source).map(([source, count]) => (
+                  <span key={source} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs border border-indigo-200">
+                    <span className="font-bold">{count}</span>
+                    <span>{source}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              onClick={runAutoDiscovery}
+              disabled={discovering}
+              className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              {discovering ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  Recherche multi-sources en cours...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                  Lancer la decouverte automatique (3 mois)
+                </>
+              )}
+            </button>
+            <p className="text-xs text-gray-400">Interroge OpenAgenda, Open Data Rouen, Seine-Maritime et genere des predictions saisonnieres IA</p>
+          </div>
+
+          {discoveryResult && (
+            <div className={`p-4 rounded-lg mb-4 ${discoveryResult.error ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
+              <p className={`text-sm font-medium ${discoveryResult.error ? 'text-red-700' : 'text-green-700'}`}>
+                {discoveryResult.error || discoveryResult.message}
+              </p>
+              {discoveryResult.by_source && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {Object.entries(discoveryResult.by_source).map(([source, count]) => (
+                    <span key={source} className="text-xs px-2 py-0.5 bg-white/60 rounded">
+                      {source}: <strong>{count}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Predictions impact par semaine */}
+          {predictions.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Previsions d'impact sur la collecte</h3>
+              <div className="space-y-2">
+                {predictions.map((pred, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 border">
+                    <div className="flex-shrink-0 w-20">
+                      <p className="text-xs font-bold text-gray-600">{pred.week_label}</p>
+                      <p className="text-[10px] text-gray-400">{new Date(pred.week_start).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</p>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                          pred.combined_impact_factor > 1.1 ? 'bg-green-100 text-green-700' :
+                          pred.combined_impact_factor < 0.95 ? 'bg-orange-100 text-orange-700' :
+                          'bg-gray-100 text-gray-600'
+                        }`}>
+                          {pred.estimated_volume_change}
+                        </span>
+                        <span className="text-xs text-gray-400">{pred.events_count} evenement(s)</span>
+                        <span className="text-[10px] text-gray-300">{pred.seasonal_context}</span>
+                      </div>
+                      {pred.events.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {pred.events.slice(0, 3).map(ev => (
+                            <span key={ev.id} className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded">
+                              {ev.nom.length > 30 ? ev.nom.substring(0, 30) + '...' : ev.nom}
+                            </span>
+                          ))}
+                          {pred.events.length > 3 && <span className="text-[10px] text-gray-400">+{pred.events.length - 3} autres</span>}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-shrink-0">
+                      <div className="w-16 bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${pred.brocante_probability >= 0.7 ? 'bg-green-500' : pred.brocante_probability >= 0.4 ? 'bg-amber-400' : 'bg-gray-400'}`}
+                          style={{ width: `${Math.round(pred.brocante_probability * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-gray-400 text-center mt-0.5">{Math.round(pred.brocante_probability * 100)}%</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Section>
+
+        {/* Analyse IA Claude */}
+        <Section title="Analyse IA (Claude)" desc="Synthèse automatique et recommandations d'ajustement basées sur l'historique">
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <button onClick={loadIaSynthese} disabled={iaLoading}
+                className="px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                {iaLoading ? 'Analyse en cours...' : 'Synthèse hebdomadaire'}
+              </button>
+              <button onClick={loadIaAjustements} disabled={iaLoading}
+                className="px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 disabled:opacity-50 transition-colors">
+                {iaLoading ? 'Analyse en cours...' : 'Recommander ajustements'}
+              </button>
+            </div>
+
+            {iaError && (
+              <div className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-200">{iaError}</div>
+            )}
+
+            {iaSynthese && (
+              <div className="bg-violet-50 rounded-xl border border-violet-200 p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-violet-800 text-sm">Synthèse IA</h4>
+                  {iaSynthese.score_global != null && (
+                    <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                      iaSynthese.score_global >= 70 ? 'bg-emerald-100 text-emerald-700' :
+                      iaSynthese.score_global >= 40 ? 'bg-amber-100 text-amber-700' :
+                      'bg-red-100 text-red-700'
+                    }`}>Score : {iaSynthese.score_global}/100</span>
+                  )}
+                </div>
+                {iaSynthese.resume && <p className="text-sm text-slate-700">{iaSynthese.resume}</p>}
+                {iaSynthese.tendances?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-violet-700 mb-1">Tendances</p>
+                    <ul className="text-xs text-slate-600 space-y-1">
+                      {iaSynthese.tendances.map((t, i) => <li key={i} className="flex gap-1.5"><span className="text-violet-400">-</span>{t}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {iaSynthese.anomalies?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-red-600 mb-1">Anomalies détectées</p>
+                    <ul className="text-xs text-slate-600 space-y-1">
+                      {iaSynthese.anomalies.map((a, i) => <li key={i} className="flex gap-1.5"><span className="text-red-400">!</span>{a}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {iaSynthese.recommandations?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-teal-700 mb-1">Recommandations</p>
+                    <ul className="text-xs text-slate-600 space-y-1">
+                      {iaSynthese.recommandations.map((r, i) => <li key={i} className="flex gap-1.5"><span className="text-teal-500">→</span>{r}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {iaAjustements && (
+              <div className="bg-teal-50 rounded-xl border border-teal-200 p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-teal-800 text-sm">Ajustements recommandés</h4>
+                  {iaAjustements.confiance != null && (
+                    <span className="text-xs text-teal-600">Confiance : {Math.round(iaAjustements.confiance * 100)}%</span>
+                  )}
+                </div>
+                {iaAjustements.message && <p className="text-sm text-slate-700">{iaAjustements.message}</p>}
+                {iaAjustements.justifications?.length > 0 && (
+                  <ul className="text-xs text-slate-600 space-y-1">
+                    {iaAjustements.justifications.map((j, i) => <li key={i} className="flex gap-1.5"><span className="text-teal-500">→</span>{j}</li>)}
+                  </ul>
+                )}
+                <button onClick={appliquerAjustements}
+                  className="mt-2 px-4 py-2 rounded-lg bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 transition-colors">
+                  Appliquer les facteurs recommandés
+                </button>
+                <p className="text-[10px] text-slate-400">Les facteurs seront appliqués dans le formulaire ci-dessous. Enregistrez ensuite pour valider.</p>
+              </div>
+            )}
+          </div>
         </Section>
 
         {/* Facteurs saisonniers */}
