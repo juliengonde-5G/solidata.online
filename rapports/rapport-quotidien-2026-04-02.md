@@ -136,7 +136,7 @@
 | 3 | Liste tournees du jour | OK | `TourMap.jsx` -> `GET /api/tours/today/:vehicleId` |
 | 4 | Scan QR code CAV | OK | `QRScanner.jsx` integre `html5-qrcode`, `POST /api/cav/scan-qr` |
 | 5 | Pesee / saisie poids | OK | `WeighIn.jsx` -> `POST /api/tours/:id/cav/:cavId/weight` |
-| 6 | GPS temps reel | OK | Socket.IO `gps-update` emit toutes les 10s via `navigator.geolocation` |
+| 6 | GPS temps reel | **BUG BLOQUANT** | Mismatch Socket.IO : mobile emet `gps:position` (TourMap.jsx:81), backend ecoute `gps-update` (index.js:242). Positions GPS jamais recues |
 | 7 | Checklist vehicule | OK | `Checklist.jsx` presente et fonctionnelle |
 | 8 | Signalement indisponibilite CAV | OK | `QRUnavailable.jsx` pour signaler CAV inaccessible |
 | 9 | Retour centre de tri | OK | `ReturnCentre.jsx` avec pesee retour |
@@ -146,9 +146,10 @@
 
 | # | Severite | Page | Description |
 |---|----------|------|-------------|
-| C1 | **Mineur** | `VehicleSelect.jsx` | Pas de feedback si aucun vehicule disponible — l'ecran reste vide sans message explicatif |
-| C2 | **Mineur** | `QRScanner.jsx` | Le scanner ne gere pas le cas ou la camera est refusee par l'utilisateur — pas de message d'erreur clair |
-| C3 | **Cosmetique** | `TourMap.jsx` | La carte Leaflet peut deborder sur mobile en mode paysage (pas de max-height) |
+| C1 | **BLOQUANT** | `TourMap.jsx:81` / `index.js:242` | Mismatch Socket.IO : mobile emet `gps:position`, backend ecoute `gps-update`. **Aucune position GPS n'est recue**. Impact : suivi temps reel, detection proximite CAV, LiveVehicles tous inoperationnels |
+| C2 | **Mineur** | `VehicleSelect.jsx` | Pas de feedback si aucun vehicule disponible — l'ecran reste vide sans message explicatif |
+| C3 | **Mineur** | `QRScanner.jsx` | Le scanner ne gere pas le cas ou la camera est refusee par l'utilisateur — pas de message d'erreur clair |
+| C4 | **Cosmetique** | `TourMap.jsx` | La carte Leaflet peut deborder sur mobile en mode paysage (pas de max-height) |
 
 ### 4.2 Persona : Responsable Logistique
 
@@ -157,7 +158,7 @@
 | 1 | Dashboard collecte | OK | `HubCollecte.jsx` avec KPIs, `Dashboard.jsx` avec indicateurs |
 | 2 | Gestion CAV | OK | `AdminCAV.jsx` (fiche detaillee, photo, GPS, QR), `CAVMap.jsx` |
 | 3 | Creation tournees | OK | `Tours.jsx` + `GET/POST /api/tours/smart` (algo v2 OSRM) |
-| 4 | Suivi GPS temps reel | OK | `LiveVehicles.jsx` avec Leaflet + Socket.IO |
+| 4 | Suivi GPS temps reel | **BUG** | `LiveVehicles.jsx` avec Leaflet + Socket.IO — **inoperationnel** a cause du mismatch Socket.IO (voir bug C1) |
 | 5 | Gestion vehicules | OK | `Vehicles.jsx` + `VehicleMaintenance.jsx` |
 | 6 | Expeditions | OK | `Expeditions.jsx` + routes CRUD completes |
 | 7 | Module exutoires | OK | 7 pages (Commandes, Preparation, Gantt, Facturation, Calendrier, Clients, Tarifs) |
@@ -300,9 +301,10 @@
 
 | # | Action | Responsable | Impact |
 |---|--------|-------------|--------|
-| 1 | Executer `npm audit fix` sur backend et frontend (socket.io-parser) | Dev | Securite — 4 vuln HAUTE |
-| 2 | Mettre a jour `@anthropic-ai/sdk` >= 0.81.0 | Dev | Securite — sandbox escape |
-| 3 | Supprimer les 7 branches distantes obsoletes | Chef de projet | Hygiene repo |
+| 1 | **FIXER MISMATCH SOCKET.IO** : `gps:position` (TourMap.jsx:81) → `gps-update` (index.js:242) | Dev | **BLOQUANT** — GPS temps reel inoperationnel |
+| 2 | Executer `npm audit fix` sur backend et frontend (socket.io-parser) | Dev | Securite — 4 vuln HAUTE |
+| 3 | Mettre a jour `@anthropic-ai/sdk` >= 0.81.0 | Dev | Securite — sandbox escape |
+| 4 | Supprimer les 7 branches distantes obsoletes | Chef de projet | Hygiene repo |
 
 ### Court terme (P1)
 
@@ -329,14 +331,14 @@
 | Critere | Note | Evolution |
 |---------|:----:|:---------:|
 | **Securite** | 7.5/10 | = (stable vs 31/03, headers a ajouter) |
-| **Stabilite code** | 8/10 | +0.5 (periode calme, pas de regression) |
+| **Stabilite code** | 7/10 | -1 (bug bloquant Socket.IO decouvert) |
 | **Couverture fonctionnelle** | 9/10 | = (25 modules complets) |
 | **Qualite UX** | 7/10 | = (bugs mineurs identifies) |
 | **Hygiene repo** | 5/10 | = (7 branches obsoletes non nettoyees) |
 | **Documentation** | 8/10 | = (complete et a jour) |
-| **Note globale** | **7.4/10** | = (stable) |
+| **Note globale** | **7.2/10** | -0.2 (bug bloquant GPS) |
 
-> **Conclusion** : Le projet est dans un etat stable. La priorite immediate est le nettoyage des dependances npm (4 vulnerabilites HAUTE) et la suppression des branches obsoletes. Les 15 bugs identifies sont majoritairement mineurs ou cosmetiques. La prochaine etape de developpement devrait se concentrer sur les corrections de securite (P0/P1) avant d'ajouter de nouvelles fonctionnalites.
+> **Conclusion** : Un **bug bloquant** a ete decouvert : le mismatch Socket.IO entre le mobile (`gps:position`) et le backend (`gps-update`) rend le suivi GPS temps reel totalement inoperationnel. C'est la priorite #1 absolue. Ensuite : nettoyage npm (4 vuln HAUTE), suppression des 7 branches obsoletes. Au total, 16 bugs identifies dont 1 bloquant, 3 majeurs, 8 mineurs, 4 cosmetiques.
 
 ---
 
