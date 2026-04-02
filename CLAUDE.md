@@ -318,6 +318,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | 25-29 mars 2026 | 1.3.0 | Module Finance (7 pages, Pennylane sync), SolidataBot IA (chat Claude), maintenance véhicules avancée, IA prédictive collecte + insertion, dashboard amélioré, pointage, auth mobile simplifiée, 29 commits, +12 497 lignes |
 | 30 mars 2026 | 1.3.1 | AdminCAV enrichi (fiche détaillée, photo, carte GPS, planches QR), QR codes CAV (génération, planches PDF, import 209 CAV), plan entretien constructeur IA, mobile sans auth (flux véhicule→tournée simplifié), 19 commits. Audit sécurité : 3 injections SQL identifiées, 31 bugs recensés (7 critiques). 7 branches obsolètes identifiées pour nettoyage |
 | 31 mars 2026 | 1.3.2 | Algorithme tournée v2 (OSRM + pause déjeuner + GPS), système suivi logs admin, script QR codes manquants, fix driver_id→driver_employee_id, 5 commits. Audit complet : 19 vulnérabilités sécurité (5 critiques), 25 bugs personas (4 critiques). Note globale 6.7/10 |
+| 2 avril 2026 | 1.3.2 | Revue de projet : 7 branches obsolètes identifiées (toutes déjà intégrées dans main), audit sécurité (note 7.5/10, 6 points d'amélioration), audit npm (7 vulnérabilités dont 4 HAUTE), tests 4 personas (15 bugs identifiés dont 3 majeurs), 184 commits total. Période stable, aucun nouveau module |
 
 ---
 
