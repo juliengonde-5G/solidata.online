@@ -213,11 +213,13 @@
 
 | # | Severite | Page | Description |
 |---|----------|------|-------------|
-| R1 | **Majeur** | `InsertionParcours.jsx` | Le radar 7 freins ne recalcule pas automatiquement quand un jalon est valide — il faut recharger la page pour voir la mise a jour |
-| R2 | **Mineur** | `Employees.jsx` | Le champ "date de fin de contrat" accepte des dates dans le passe sans avertissement pour un nouveau contrat |
-| R3 | **Mineur** | `WorkHours.jsx` | Pas de calcul automatique du total heures par semaine — l'utilisateur doit compter manuellement |
-| R4 | **Mineur** | `Candidates.jsx` | Le drag & drop Kanban ne fonctionne qu'avec les boutons de changement de statut, pas en glisser-deposer reel |
-| R5 | **Cosmetique** | `PlanningHebdo.jsx` | Les noms des filieres sont tronques sur ecrans < 1280px |
+| R1 | **Majeur** | `employees.js:175,280,359` / `production.js:21,53,57` | Bug date fin de mois : `month + '-31'` utilise comme borne superieure. PostgreSQL convertit `2026-02-31` en `2026-03-03` → **donnees de mars incluses dans les requetes de fevrier** |
+| R2 | **Majeur** | `pointage.js` / `employees.js` | Deux sources d'heures non synchronisees : `pointage_events` (badgeuse) et `work_hours` (saisie RH). Pas de lien automatique entre les deux |
+| R3 | **Majeur** | `PlanningHebdo.jsx` / `planning-hebdo.js` | Aucune validation des competences (permis B, CACES) avant affectation d'un employe a un poste — risque non-conformite |
+| R4 | **Mineur** | `pcm.js` | Pas d'endpoint export PDF des resultats PCM — feature metier attendue par le RH |
+| R5 | **Mineur** | `ReportingRH.jsx` | KPIs strategiques manquants : absenteisme, turnover, taux d'insertion, evolution freins |
+| R6 | **Mineur** | `Candidates.jsx` | Migration statuts incompletes : anciens statuts `preselected`/`test` acceptes en BDD mais convertis a la volee en frontend |
+| R7 | **Cosmetique** | `PlanningHebdo.jsx` | Les noms des filieres sont tronques sur ecrans < 1280px |
 
 ---
 
@@ -346,8 +348,9 @@
 > 2. **Production KPI** : noms de champs frontend/backend incompatibles — 4 KPI Cards vides
 > 3. **Produits Finis** : noms de champs `barcode`/`code_barre` — creation impossible
 >
-> Au total : **18 bugs identifies** dont **3 bloquants**, 4 majeurs, 7 mineurs, 4 cosmetiques.
-> Priorite absolue : corriger les 3 bloquants avant tout deploiement.
+> Au total : **20 bugs identifies** dont **3 bloquants**, 7 majeurs, 6 mineurs, 4 cosmetiques.
+> Priorite absolue : corriger les 3 bloquants puis les 7 majeurs avant tout deploiement.
+> Bug transverse notable : `month + '-31'` pour bornes de dates (employees, production) → debordement en fevrier.
 
 ---
 
