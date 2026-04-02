@@ -189,10 +189,11 @@
 
 | # | Severite | Page | Description |
 |---|----------|------|-------------|
-| O1 | **Majeur** | `ChaineTri.jsx` | Les operations de tri n'ont pas de validation de coherence poids entrant vs poids sortant — possible d'enregistrer plus de sorties que d'entrees sans alerte |
-| O2 | **Mineur** | `ProduitsFinis.jsx` | Le scan code-barres via `GET /api/produits-finis/scan/:codeBarre` retourne 404 si le produit n'existe pas, mais le frontend n'affiche pas de message "Produit non trouve" |
-| O3 | **Mineur** | `Stock.jsx` | Pas de filtrage par date sur l'historique des mouvements — la liste peut devenir tres longue |
-| O4 | **Cosmetique** | `Production.jsx` | Le format des KPIs productivite (kg/h) n'est pas arrondi — affiche parfois 6 decimales |
+| O1 | **BLOQUANT** | `Production.jsx:65-68` / `production.js:66` | Frontend lit `dashboard.total_month_t` mais backend retourne `{ summary: { total_mois_t } }`. **4 KPI Cards affichent 0/undefined**. Double probleme : noms anglais vs francais + niveau d'imbrication (dashboard.X vs dashboard.summary.X) |
+| O2 | **BLOQUANT** | `ProduitsFinis.jsx:13` / `produits-finis.js:55` | Frontend envoie `barcode`/`produit_catalogue_id`, backend attend `code_barre`/`catalogue_id`. **Creation de produits finis systematiquement en echec** (validation express-validator echoue) |
+| O3 | **Majeur** | `ProduitsFinis.jsx:97` / `produits-finis.js:14` | Frontend affiche `p.barcode` et `p.produit_nom` mais backend retourne `pf.code_barre` sans alias. Colonnes affichent "—" |
+| O4 | **Majeur** | `ChaineTri.jsx` | Les operations de tri n'ont pas de validation de coherence poids entrant vs poids sortant |
+| O5 | **Mineur** | `Stock.jsx` | Pas de filtrage par date sur l'historique des mouvements — la liste peut devenir tres longue |
 
 ### 4.4 Persona : Responsable RH
 
@@ -302,9 +303,11 @@
 | # | Action | Responsable | Impact |
 |---|--------|-------------|--------|
 | 1 | **FIXER MISMATCH SOCKET.IO** : `gps:position` (TourMap.jsx:81) → `gps-update` (index.js:242) | Dev | **BLOQUANT** — GPS temps reel inoperationnel |
-| 2 | Executer `npm audit fix` sur backend et frontend (socket.io-parser) | Dev | Securite — 4 vuln HAUTE |
-| 3 | Mettre a jour `@anthropic-ai/sdk` >= 0.81.0 | Dev | Securite — sandbox escape |
-| 4 | Supprimer les 7 branches distantes obsoletes | Chef de projet | Hygiene repo |
+| 2 | **FIXER PRODUCTION KPI** : noms de champs frontend/backend incompatibles (Production.jsx:65-68 vs production.js:66) | Dev | **BLOQUANT** — 4 KPI Cards vides |
+| 3 | **FIXER PRODUITS FINIS** : noms de champs `barcode`→`code_barre`, `produit_catalogue_id`→`catalogue_id` (ProduitsFinis.jsx:13 vs produits-finis.js:55) | Dev | **BLOQUANT** — creation produits finis impossible |
+| 4 | Executer `npm audit fix` sur backend et frontend (socket.io-parser) | Dev | Securite — 4 vuln HAUTE |
+| 5 | Mettre a jour `@anthropic-ai/sdk` >= 0.81.0 | Dev | Securite — sandbox escape |
+| 6 | Supprimer les 7 branches distantes obsoletes | Chef de projet | Hygiene repo |
 
 ### Court terme (P1)
 
@@ -331,14 +334,20 @@
 | Critere | Note | Evolution |
 |---------|:----:|:---------:|
 | **Securite** | 7.5/10 | = (stable vs 31/03, headers a ajouter) |
-| **Stabilite code** | 7/10 | -1 (bug bloquant Socket.IO decouvert) |
+| **Stabilite code** | 6/10 | -2 (3 bugs bloquants decouverts : Socket.IO, Production KPI, Produits Finis) |
 | **Couverture fonctionnelle** | 9/10 | = (25 modules complets) |
 | **Qualite UX** | 7/10 | = (bugs mineurs identifies) |
 | **Hygiene repo** | 5/10 | = (7 branches obsoletes non nettoyees) |
 | **Documentation** | 8/10 | = (complete et a jour) |
-| **Note globale** | **7.2/10** | -0.2 (bug bloquant GPS) |
+| **Note globale** | **6.8/10** | -0.6 (3 bugs bloquants) |
 
-> **Conclusion** : Un **bug bloquant** a ete decouvert : le mismatch Socket.IO entre le mobile (`gps:position`) et le backend (`gps-update`) rend le suivi GPS temps reel totalement inoperationnel. C'est la priorite #1 absolue. Ensuite : nettoyage npm (4 vuln HAUTE), suppression des 7 branches obsoletes. Au total, 16 bugs identifies dont 1 bloquant, 3 majeurs, 8 mineurs, 4 cosmetiques.
+> **Conclusion** : **3 bugs bloquants** decouverts :
+> 1. **Socket.IO GPS** : mismatch `gps:position` vs `gps-update` — suivi temps reel inoperationnel
+> 2. **Production KPI** : noms de champs frontend/backend incompatibles — 4 KPI Cards vides
+> 3. **Produits Finis** : noms de champs `barcode`/`code_barre` — creation impossible
+>
+> Au total : **18 bugs identifies** dont **3 bloquants**, 4 majeurs, 7 mineurs, 4 cosmetiques.
+> Priorite absolue : corriger les 3 bloquants avant tout deploiement.
 
 ---
 
