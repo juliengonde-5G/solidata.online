@@ -319,6 +319,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | 30 mars 2026 | 1.3.1 | AdminCAV enrichi (fiche détaillée, photo, carte GPS, planches QR), QR codes CAV (génération, planches PDF, import 209 CAV), plan entretien constructeur IA, mobile sans auth (flux véhicule→tournée simplifié), 19 commits. Audit sécurité : 3 injections SQL identifiées, 31 bugs recensés (7 critiques). 7 branches obsolètes identifiées pour nettoyage |
 | 31 mars 2026 | 1.3.2 | Algorithme tournée v2 (OSRM + pause déjeuner + GPS), système suivi logs admin, script QR codes manquants, fix driver_id→driver_employee_id, 5 commits. Audit complet : 19 vulnérabilités sécurité (5 critiques), 25 bugs personas (4 critiques). Note globale 6.7/10 |
 | 2 avril 2026 | 1.3.2 | Revue de projet : 7 branches obsolètes (toutes intégrées dans main), audit sécurité (7.5/10), audit npm (7 vuln dont 4 HAUTE), tests 4 personas (18 bugs dont 3 BLOQUANTS : mismatch Socket.IO GPS, Production KPI noms champs, ProduitsFinis noms champs). Note globale 6.8/10. 184 commits |
+| 3 avril 2026 | 1.3.2 | Audit quotidien : repo propre (1 branche, 7 obsolètes nettoyées), audit sécurité (18 vuln dont 3 critiques : injection shell admin-db, mots de passe par défaut), tests 4 personas élargi (43 bugs dont 6 BLOQUANTS : Socket.IO GPS, ProduitsFinis champs, Production KPI, TourSummary structure, Expeditions champs). 4 bugs bloquants récurrents non corrigés. Note globale 6.5/10. 180 commits |
 
 ---
 
