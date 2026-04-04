@@ -179,31 +179,47 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 ### 3.4 Persona Responsable RH / Insertion
 
+**Resultat analyse approfondie : 15 bugs identifies (3 BLOQUANTS, 7 MAJEURS, 5 MINEURS)**
+
 | # | Severite | Fichier:Ligne | Description | Recurrent |
 |---|----------|---------------|-------------|-----------|
-| R1 | MAJEUR | `backend/insertion/index.js:48` | Pattern dangereux `${col} ${type}` dans ALTER TABLE. Bien que les valeurs soient hardcodees, ce pattern pourrait etre copie avec des valeurs dynamiques. | Oui |
-| R2 | MAJEUR | `frontend/PlanningHebdo.jsx` | Verification necessaire que les endpoints planning retournent les bons champs (employe, equipe, filiere, horaires). | A verifier |
-| R3 | MINEUR | `frontend/Candidates.jsx` | Le Kanban utilise des colonnes hardcodees (Recus/Entretien/Recrutes/Refuses). Verifier la coherence avec les statuts en base. | A verifier |
-| R4 | MINEUR | `frontend/InsertionParcours.jsx` | Le radar 7 freins necessite des donnees de diagnostic insertion. Si le diagnostic n'est pas rempli, le radar s'affiche vide sans message explicatif. | Connu |
+| R1 | **BLOQUANT** | `frontend/WorkHours.jsx:27,34,42,50` | **Module Heures entierement casse** : le frontend appelle `GET /api/employees/{id}/hours/...` mais le backend expose `GET /api/employees/work-hours/...`. Toutes les routes sont incompatibles. | NOUVEAU |
+| R2 | **BLOQUANT** | `frontend/WorkHours.jsx:12,110-112` vs `backend/employees.js:296-320` | **Champs incompatibles** : frontend envoie `start_time, end_time, break_minutes` — backend attend `hours_worked, overtime_hours`. Creation impossible. | NOUVEAU |
+| R3 | **BLOQUANT** | `frontend/WorkHours.jsx:119,126` vs `backend/employees.js:327` | Frontend teste `h.validated` (boolean) — backend stocke `validated_by` (integer). Toutes les heures apparaissent "En attente" meme validees. | NOUVEAU |
+| R4 | MAJEUR | `frontend/Employees.jsx:246,279` vs `backend/employees.js:32` | `emp.position_name` inexistant — pas de JOIN sur table `positions`. Poste affiche "---". | NOUVEAU |
+| R5 | MAJEUR | `frontend/Skills.jsx:40` | Matrice competences utilise `emp.candidate_id || emp.id` pour charger les skills. Employes sans candidature : donnees erronees ou 404. | NOUVEAU |
+| R6 | MAJEUR | `backend/planning-hebdo.js:8` | Planning restreint a `ADMIN, MANAGER` — le role `RH` est exclu. Le Resp RH ne peut pas acceder au planning. | NOUVEAU |
+| R7 | MAJEUR | `frontend/Employees.jsx:5-6` | `CONTRACT_LABELS` ne contient pas `CDDI` (contrat fondamental en SIAE). Les CDDI affichent la valeur brute. | NOUVEAU |
+| R8 | MAJEUR | Documentation CLAUDE.md | Doc indique "3 jalons M1/M6/M12" mais le code a 5 types : Diagnostic accueil, Bilan M+3, M+6, M+10, Bilan Sortie. | NOUVEAU |
+| R9 | MAJEUR | `backend/employees.js:208` | `is_provisional !== false` : toute entree schedule sans le champ explicitement a `false` sera marquee provisoire. | NOUVEAU |
+| R10 | MAJEUR | `frontend/WorkHours.jsx:56-57` vs `backend/employees.js:349-352` | Types d'heures incompatibles : frontend `conge/maladie` vs backend `holiday/sick`. Summary mensuel fausse. | NOUVEAU |
+| R11 | MINEUR | `backend/candidates/individual.js:241` | Route history protegee `ADMIN/RH` mais pas `MANAGER`. Incoherence avec la vue kanban (ADMIN/RH/MANAGER). | NOUVEAU |
+| R12 | MINEUR | `frontend/Employees.jsx:104,111` | Envoie `position` (texte) au lieu de `position_id` (FK). Incoherence avec la table `positions`. | NOUVEAU |
+| R13 | MINEUR | `backend/pointage.js:104` | Badgeage auto n'insere pas `source`. Colonne NULL pour les badgeages auto, filtrage par source peu fiable. | NOUVEAU |
+| R14 | MINEUR | `backend/insertion/routes.js` | Pas de `authorize()` par route — un MANAGER peut modifier des parcours insertion (devrait etre reserve RH/CIP). | NOUVEAU |
+| R15 | MINEUR | `backend/pcm.js:566` | Alerte RPS trop stricte : exige que TOUTES les reponses stress soient du meme type. Sous-detection des RPS. | NOUVEAU |
 
 ### Resume des bugs
 
 | Severite | Nombre | Dont recurrents | Dont nouveaux |
 |----------|--------|-----------------|---------------|
-| **BLOQUANT** | 7 | 4 | 3 (dashboard crash x3) |
-| **MAJEUR** | 10 | 3 | 7 |
-| **MINEUR** | 8 | 3 | 5 |
-| **Total** | 25 | 10 | 15 |
+| **BLOQUANT** | 10 | 4 | 6 (dashboard x3, WorkHours x3) |
+| **MAJEUR** | 17 | 3 | 14 |
+| **MINEUR** | 13 | 3 | 10 |
+| **Total** | 40 | 10 | 30 |
 
-**Bugs bloquants** :
+**Bugs bloquants (10)** :
 - **4 recurrents** (depuis 02/04) : Socket.IO GPS mismatch x2, ProduitsFinis champs x2
-- **3 nouveaux** : Dashboard backend crash (colonnes `kg_entree`, `quantity`, `reference` inexistantes dans les requetes SQL de `dashboard.js`)
+- **3 nouveaux Dashboard** : colonnes SQL inexistantes `kg_entree`, `quantity`, `reference` dans `dashboard.js`
+- **3 nouveaux WorkHours** : routes incompatibles, champs incompatibles, validation cassee — **module entierement non-fonctionnel**
 
 **Modules les plus impactes** :
-1. **Dashboard** (`dashboard.js`) : 3 bugs bloquants — le dashboard est entierement casse
-2. **ProduitsFinis** : 4 bugs majeurs — creation impossible, affichage casse
-3. **Production** : 1 bloquant + 2 mineurs — KPIs a zero
-4. **ChaineTri** : 2 bugs — nb_postes, code mort
+1. **WorkHours** : 3 bugs bloquants + 1 majeur — module entierement casse (routes, champs, types, validation)
+2. **Dashboard** (`dashboard.js`) : 3 bugs bloquants — le dashboard est entierement casse
+3. **ProduitsFinis** : 4 bugs majeurs — creation impossible, affichage casse
+4. **Employees** : 3 bugs majeurs — position_name, CDDI, position/position_id
+5. **Production** : 1 bloquant + 2 mineurs — KPIs a zero
+6. **Planning** : 1 majeur — role RH exclu
 
 ---
 
@@ -297,20 +313,22 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 | **P2** | **Corriger mismatch Socket.IO GPS** : renommer `gps:position` en `gps-update` dans `mobile/src/pages/TourMap.jsx:81` OU l'inverse dans `backend/src/index.js:242` | Debloque suivi GPS temps reel + LiveVehicles | 5 min |
 | **P3** | **Corriger ProduitsFinis** : champs `produit_nom`→`produit`, `is_shipped`→`date_sortie !== null`, `barcode`→`code_barre`, `produit_catalogue_id`→`catalogue_id`, summary `count`→`nb_produits` | Debloque creation + affichage produits finis | 20 min |
 | **P4** | **Corriger Production KPIs** : aligner noms de champs frontend (`total_month_t`, `avg_productivite`) avec backend (`summary.total_mois_t`, `summary.productivite_moyenne`) | Debloque KPIs production | 15 min |
+| **P5** | **Corriger module WorkHours** : refaire les routes frontend (`/employees/{id}/hours` → `/employees/work-hours`), aligner les champs (`start_time/end_time` → `hours_worked`), les types (`conge/maladie` → `holiday/sick`), et le champ validation (`validated` → `validated_by`) | Debloque tout le module heures de travail | 1h |
 
 ### IMPORTANTES (Securite — planifier cette semaine)
 
 | # | Action | Impact | Effort |
 |---|--------|--------|--------|
-| **P5** | **Securiser admin-db.js** : remplacer `execSync` par `spawn()` avec tableau d'arguments | Elimine injection shell critique x2 | 30 min |
-| **P6** | **Ajouter `fileFilter` MIME** sur tous les uploads (tours, employees, finance) | Empeche upload de fichiers malveillants | 30 min |
-| **P7** | **Proteger `/uploads`** : ajouter middleware auth ou token signe pour l'acces aux fichiers | Empeche acces public aux uploads | 30 min |
-| **P8** | **Ajouter auth legere aux routes `-public`** : token vehicule ou cle temporaire | Protege les 10 routes tournees publiques | 1h |
-| **P9** | **Lancer `npm audit fix`** : corrige 5 des 7 vulnerabilites npm | Reduit surface d'attaque | 5 min |
-| **P10** | **Supprimer les 7 branches obsoletes** du remote | Proprete du repo | 5 min |
-| **P11** | **Corriger dashboard objectifs** (`dashboard.js:388-389`) : `quantity_kg`→`poids_entree_kg`, `date`→`started_at`, `name`→`nom` | Debloque objectifs tri | 15 min |
-| **P12** | **Remplacer `xlsx`** par `exceljs` pour eliminer les 2 vuln HIGH sans fix | Elimine 2 vulnerabilites | 2h |
-| **P13** | **Supprimer cle PCM hardcodee** (`'solidata-pcm-encryption-key'`) et exiger variable d'environnement | Protege les donnees PCM chiffrees | 15 min |
+| **P6** | **Securiser admin-db.js** : remplacer `execSync` par `spawn()` avec tableau d'arguments | Elimine injection shell critique x2 | 30 min |
+| **P7** | **Ajouter `fileFilter` MIME** sur tous les uploads (tours, employees, finance) | Empeche upload de fichiers malveillants | 30 min |
+| **P8** | **Proteger `/uploads`** : ajouter middleware auth ou token signe pour l'acces aux fichiers | Empeche acces public aux uploads | 30 min |
+| **P9** | **Ajouter auth legere aux routes `-public`** : token vehicule ou cle temporaire | Protege les 10 routes tournees publiques | 1h |
+| **P10** | **Lancer `npm audit fix`** : corrige 5 des 7 vulnerabilites npm | Reduit surface d'attaque | 5 min |
+| **P11** | **Ajouter role RH au planning** (`planning-hebdo.js:8`) : `authorize('ADMIN', 'MANAGER', 'RH')` | Debloque planning pour le RH | 2 min |
+| **P12** | **Supprimer les 7 branches obsoletes** du remote | Proprete du repo | 5 min |
+| **P13** | **Corriger dashboard objectifs** (`dashboard.js:388-389`) : `quantity_kg`→`poids_entree_kg`, `date`→`started_at`, `name`→`nom` | Debloque objectifs tri | 15 min |
+| **P14** | **Remplacer `xlsx`** par `exceljs` pour eliminer les 2 vuln HIGH sans fix | Elimine 2 vulnerabilites | 2h |
+| **P15** | **Supprimer cle PCM hardcodee** (`'solidata-pcm-encryption-key'`) et exiger variable d'environnement | Protege les donnees PCM chiffrees | 15 min |
 
 ### SOUHAITEES (Moyen terme)
 
@@ -328,17 +346,17 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 | Indicateur | Valeur | Tendance |
 |------------|--------|----------|
 | **Note securite** | 5.5/10 | -1.5 (analyse approfondie : uploads, routes publiques, CSP) |
-| **Note qualite code** | 6.5/10 | -0.5 (dashboard casse) |
-| **Note fonctionnelle** | 5.8/10 | -0.7 (3 bloquants nouveaux) |
-| **Note globale** | 5.9/10 | -0.9 |
-| **Bugs bloquants** | 7 | Hausse (+3 dashboard) |
-| **Bugs totaux** | 25 | Hausse (analyse approfondie) |
+| **Note qualite code** | 5.5/10 | -1.5 (dashboard + WorkHours casses) |
+| **Note fonctionnelle** | 5.0/10 | -1.5 (10 bloquants, 2 modules entierement casses) |
+| **Note globale** | 5.3/10 | -1.5 |
+| **Bugs bloquants** | 10 | Hausse (+3 dashboard, +3 WorkHours) |
+| **Bugs totaux** | 40 | Hausse (analyses approfondies 4 personas) |
 | **Branches a nettoyer** | 7 | 7 nouvelles depuis nettoyage 03/04 |
 | **Vulnerabilites npm** | 7 (5 HIGH) | Stable |
 
-**Constat principal** : L'analyse approfondie du Responsable Operations revele que le **Dashboard principal est entierement casse** (3 colonnes SQL inexistantes dans `dashboard.js`). Combine aux 4 bugs bloquants recurrents depuis le 02/04 (GPS + ProduitsFinis), cela porte le total a **7 bugs bloquants**. Le module ProduitsFinis est egalement inutilisable (creation impossible + affichage casse). Aucun des bugs bloquants signales depuis 3 jours n'a ete corrige.
+**Constat principal** : Les analyses approfondies des 4 personas revelent un etat plus degrade que les audits precedents. **3 modules sont entierement casses** : Dashboard (colonnes SQL inexistantes), WorkHours (routes + champs + validation incompatibles), ProduitsFinis (creation + affichage). Le total atteint **10 bugs bloquants** et **40 bugs** toutes severites. Les 4 bugs recurrents depuis le 02/04 n'ont toujours pas ete corriges.
 
-**Recommandation** : Prioriser les corrections P1 a P4 (~70 minutes de travail total) pour eliminer les 7 bugs bloquants. Le dashboard (P1) est la priorite absolue car il impacte tous les utilisateurs.
+**Recommandation** : Prioriser les corrections P1 a P5 pour eliminer les 10 bugs bloquants. Le dashboard (P1) et le module WorkHours (nouveau P5) sont les priorites absolues.
 
 ---
 
