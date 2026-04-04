@@ -62,62 +62,77 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 ## 2. AUDIT DE SECURITE
 
-### Note globale : 6.8/10 (baisse de 0.2 vs 03/04 en raison des branches non nettoyees et bugs recurrents non corriges)
+### Note globale : 5.5/10 (baisse significative vs 7.0 au 03/04 — analyse approfondie revele des failles supplementaires)
 
 ### 2.1 Vulnerabilites detectees
 
-#### CRITIQUES (3)
+#### CRITIQUES (2)
 
 | # | Type | Fichier:Ligne | Description | Statut |
 |---|------|---------------|-------------|--------|
 | S1 | Injection shell | `admin-db.js:74` | `execSync(pg_dump "${dbUrl}")` — Si DATABASE_URL contient des metacaracteres shell, injection possible. Route protegee ADMIN mais risque reel. | RECURRENT (depuis 31/03) |
-| S2 | Injection SQL | `insertion/index.js:48` | `ALTER TABLE ... ${col} ${type}` — template literal dans SQL. Les valeurs sont hardcodees (l.50-60), risque faible en pratique mais pattern dangereux. | RECURRENT |
-| S3 | Injection SQL | `chat.js:337` | `SELECT COUNT(*) FROM cav ${where}` — la variable `where` construite dynamiquement. | RECURRENT |
+| S2 | Injection shell | `admin-db.js:128` | `execSync(psql "${dbUrl}" < "${filepath}")` — Meme probleme pour la restauration. `filepath` protege par `path.basename()` mais `dbUrl` non sanitise. | RECURRENT |
 
-#### HAUTES (5)
+#### HAUTES (8)
 
-| # | Type | Fichier | Description | Statut |
-|---|------|---------|-------------|--------|
-| S4 | npm vuln | `xlsx` | 2 vulnerabilites HAUTE (Prototype Pollution + ReDoS), pas de fix disponible | RECURRENT |
-| S5 | npm vuln | `socket.io-parser` | 1 vulnerabilite HAUTE, fix dispo via `npm audit fix` | RECURRENT |
-| S6 | npm vuln | `engine.io` | 1 vulnerabilite HAUTE | RECURRENT |
-| S7 | npm vuln | `braces` | 1 vulnerabilite HAUTE | RECURRENT |
-| S8 | Socket.IO | `index.js:242` | Pas de validation des donnees GPS recues (latitude, longitude, speed) — un client malveillant peut envoyer des donnees arbitraires | RECURRENT |
+| # | Type | Fichier:Ligne | Description | Statut |
+|---|------|---------------|-------------|--------|
+| S3 | Routes sans auth | `routes/tours/index.js:35-304` | **10 routes `-public`** sans aucune authentification : demarrer tournee, collecter CAV, enregistrer pesees, changer statuts. N'importe qui peut manipuler les donnees de tournee. | NOUVEAU |
+| S4 | Upload sans validation | `routes/tours/index.js:20` | Upload photos incidents : pas de `fileFilter`. Tout type de fichier accepte (executables, scripts...). | NOUVEAU |
+| S5 | Upload sans validation | `routes/employees.js:23` | Upload photos employes : pas de `fileFilter`. Meme probleme. | NOUVEAU |
+| S6 | Upload sans validation | `routes/finance.js:8` | Upload fichiers Excel : pas de `fileFilter`, limite 50 MB (!). | NOUVEAU |
+| S7 | Uploads publics | `index.js:88` | `app.use('/uploads', express.static(uploadsDir))` — Le repertoire uploads est accessible publiquement sans authentification. | NOUVEAU |
+| S8 | npm vuln | `xlsx` | 2 vulnerabilites HAUTE (Prototype Pollution + ReDoS), lib abandonnee, pas de fix disponible. | RECURRENT |
+| S9 | npm vuln | `socket.io-parser` + `lodash` + `path-to-regexp` + `picomatch` | 3 vulnerabilites HAUTE, fix dispo via `npm audit fix`. | RECURRENT |
+| S10 | Cle chiffrement PCM | `routes/insertion/routes.js:15`, `routes/pcm.js:611` | Fallback `'solidata-pcm-encryption-key'` hardcode. Pas de protection en production : si `JWT_SECRET` non defini, la cle par defaut est utilisee silencieusement. | NOUVEAU |
 
-#### MODEREES (2)
+#### MODEREES (6)
 
-| # | Type | Fichier | Description |
-|---|------|---------|-------------|
-| S9 | npm vuln | `@anthropic-ai/sdk` | Memory Tool Path Validation sandbox escape (GHSA-5474-4w2j-mq4c), fix dispo v0.82.0 |
-| S10 | npm vuln | `brace-expansion` | Zero-step sequence hang + memory exhaustion |
+| # | Type | Fichier:Ligne | Description | Statut |
+|---|------|---------------|-------------|--------|
+| S11 | CSP permissive | `index.js:56` | `'unsafe-inline'` et `'unsafe-eval'` autorises dans `scriptSrc`. Reduit fortement la protection XSS. | NOUVEAU |
+| S12 | Routes sans role | `routes/chat.js:402,445` | Chat IA accessible a tout role — un COLLABORATEUR peut interroger des donnees sensibles. | NOUVEAU |
+| S13 | Routes sans role | `routes/dashboard.js:6+` | Dashboard KPIs accessibles a tout role authentifie. | NOUVEAU |
+| S14 | Socket.IO | `index.js:242` | Pas de validation des donnees GPS recues (latitude, longitude, speed). | RECURRENT |
+| S15 | npm vuln | `@anthropic-ai/sdk` | Sandbox escape (GHSA-5474), fix dispo v0.82.0. | RECURRENT |
+| S16 | npm vuln | `brace-expansion` | DoS via zero-step sequence. | RECURRENT |
+
+#### BASSES (4)
+
+| # | Type | Fichier:Ligne | Description |
+|---|------|---------------|-------------|
+| S17 | SQL anti-pattern | `routes/exports.js:248` | `${parseInt(year)}` interpole dans SQL. Risque nul (NaN produit erreur) mais non conforme. |
+| S18 | SQL anti-pattern | `routes/admin-db.js:197` | Interpolation noms de table/colonne controlees par whitelist. Pattern dangereux mais valeurs sures. |
+| S19 | SQL anti-pattern | `routes/reporting.js:132,141` | `${grouping}` interpole — valeur derivee de 2 options codees en dur. |
+| S20 | Rate limiting | routes `-public` | Pas de rate limiting specifique sur les 10 routes publiques tournees. Le global 1000/15min est insuffisant. |
 
 ### 2.2 Points forts confirmes
 
 | Aspect | Statut | Detail |
 |--------|--------|--------|
 | **Authentification JWT** | OK | Access token 8h + refresh token 7j, bcrypt passwords |
-| **Middleware auth** | OK | `router.use(authenticate)` sur toutes les routes sensibles |
-| **Autorisation par role** | OK | 5 roles, `authorize()` sur routes sensibles |
-| **SQL parametrise** | OK (95%) | Utilisation systematique de `$1, $2...` sauf exceptions notees |
-| **Rate limiting** | OK | Nginx `limit_req` sur `/api/` et `/api/auth/login` |
-| **Helmet** | OK | Headers de securite actifs (`helmet()` configure) |
+| **Middleware auth** | OK (90%) | `router.use(authenticate)` sur la majorite des routes, sauf `-public` |
+| **SQL parametrise** | OK (95%) | Utilisation systematique de `$1, $2...` pour les inputs utilisateur |
+| **Rate limiting auth** | OK | 30 req/15min sur `/api/auth` contre brute-force |
 | **CORS** | OK | Origines explicitement listees |
 | **HTTPS** | OK | Let's Encrypt SSL, HSTS actif |
-| **Chiffrement PCM** | OK | AES-256 via crypto-js pour donnees sensibles |
+| **Path traversal** | OK | `path.basename()` utilise dans admin-db |
+| **JWT fallback dev** | OK | `process.exit(1)` en production si secret non defini |
 
 ### 2.3 Resume npm audit
 
 ```
 7 vulnerabilites (2 moderate, 5 high)
-- xlsx : 2 HIGH (pas de fix dispo — envisager remplacement par SheetJS/exceljs)
+- xlsx : 2 HIGH (lib abandonnee, pas de fix — remplacer par exceljs)
 - socket.io-parser : 1 HIGH (fix dispo)
-- engine.io : 1 HIGH (fix dispo)
-- braces : 1 HIGH (fix dispo)
-- @anthropic-ai/sdk : 1 MODERATE (fix dispo v0.82.0)
-- brace-expansion : 1 MODERATE (fix dispo)
+- lodash : 1 HIGH (Prototype Pollution, fix dispo)
+- path-to-regexp : 1 HIGH (ReDoS, fix dispo)
+- picomatch : 1 HIGH (Method Injection, fix dispo)
+- @anthropic-ai/sdk : 1 MODERATE (sandbox escape, fix v0.82.0)
+- brace-expansion : 1 MODERATE (DoS, fix dispo)
 ```
 
-**Action** : `npm audit fix` corrigerait 4 des 7 vulnerabilites. Les 2 de `xlsx` necessitent un remplacement de librairie.
+**Action** : `npm audit fix` corrigerait 5 des 7 vulnerabilites. Les 2 de `xlsx` necessitent un remplacement de librairie par `exceljs`.
 
 ---
 
@@ -287,11 +302,15 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 | # | Action | Impact | Effort |
 |---|--------|--------|--------|
-| **P5** | **Securiser admin-db.js** : remplacer `execSync` par un appel docker pg_dump parametre sans interpolation shell | Elimine injection shell critique | 30 min |
-| **P6** | **Lancer `npm audit fix`** : corrige 4 des 7 vulnerabilites npm | Reduit surface d'attaque | 5 min |
-| **P7** | **Supprimer les 7 branches obsoletes** du remote | Proprete du repo | 5 min |
-| **P8** | **Corriger dashboard objectifs** (`dashboard.js:388-389`) : `quantity_kg`→`poids_entree_kg`, `date`→`started_at`, `name`→`nom` | Debloque objectifs tri | 15 min |
-| **P9** | **Evaluer remplacement de `xlsx`** par `exceljs` ou `SheetJS` pour eliminer les 2 vuln HIGH sans fix | Elimine 2 vulnerabilites | 2h |
+| **P5** | **Securiser admin-db.js** : remplacer `execSync` par `spawn()` avec tableau d'arguments | Elimine injection shell critique x2 | 30 min |
+| **P6** | **Ajouter `fileFilter` MIME** sur tous les uploads (tours, employees, finance) | Empeche upload de fichiers malveillants | 30 min |
+| **P7** | **Proteger `/uploads`** : ajouter middleware auth ou token signe pour l'acces aux fichiers | Empeche acces public aux uploads | 30 min |
+| **P8** | **Ajouter auth legere aux routes `-public`** : token vehicule ou cle temporaire | Protege les 10 routes tournees publiques | 1h |
+| **P9** | **Lancer `npm audit fix`** : corrige 5 des 7 vulnerabilites npm | Reduit surface d'attaque | 5 min |
+| **P10** | **Supprimer les 7 branches obsoletes** du remote | Proprete du repo | 5 min |
+| **P11** | **Corriger dashboard objectifs** (`dashboard.js:388-389`) : `quantity_kg`→`poids_entree_kg`, `date`→`started_at`, `name`→`nom` | Debloque objectifs tri | 15 min |
+| **P12** | **Remplacer `xlsx`** par `exceljs` pour eliminer les 2 vuln HIGH sans fix | Elimine 2 vulnerabilites | 2h |
+| **P13** | **Supprimer cle PCM hardcodee** (`'solidata-pcm-encryption-key'`) et exiger variable d'environnement | Protege les donnees PCM chiffrees | 15 min |
 
 ### SOUHAITEES (Moyen terme)
 
@@ -308,10 +327,10 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 | Indicateur | Valeur | Tendance |
 |------------|--------|----------|
-| **Note securite** | 6.8/10 | -0.2 |
+| **Note securite** | 5.5/10 | -1.5 (analyse approfondie : uploads, routes publiques, CSP) |
 | **Note qualite code** | 6.5/10 | -0.5 (dashboard casse) |
 | **Note fonctionnelle** | 5.8/10 | -0.7 (3 bloquants nouveaux) |
-| **Note globale** | 6.4/10 | -0.4 |
+| **Note globale** | 5.9/10 | -0.9 |
 | **Bugs bloquants** | 7 | Hausse (+3 dashboard) |
 | **Bugs totaux** | 25 | Hausse (analyse approfondie) |
 | **Branches a nettoyer** | 7 | 7 nouvelles depuis nettoyage 03/04 |
