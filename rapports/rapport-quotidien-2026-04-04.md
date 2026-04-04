@@ -165,11 +165,54 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 ### 3.2 Persona Responsable Logistique
 
+**Resultat analyse approfondie : 20 bugs identifies (4 BLOQUANTS, 12 MAJEURS, 4 MINEURS)**
+
+**Modules Expeditions et Commandes Exutoires sont casses.**
+
+#### Expeditions (4 bugs — module entierement casse)
+
 | # | Severite | Fichier:Ligne | Description | Recurrent |
 |---|----------|---------------|-------------|-----------|
-| L1 | **BLOQUANT** | `mobile/TourMap.jsx:81` vs `backend/index.js:242` | Meme bug GPS que C1 — le suivi LiveVehicles ne recoit pas les positions des chauffeurs. | Oui |
-| L2 | MAJEUR | `frontend/Expeditions.jsx:60` | Affiche `s.exutoire_nom || s.month` dans les stats, mais le backend retourne `exutoire` (pas `exutoire_nom`) dans le resume par exutoire (routes/expeditions.js:72). | A verifier |
-| L3 | MINEUR | `frontend/LiveVehicles.jsx` | Depend du flux Socket.IO GPS qui est casse (voir C1). Aucune position ne s'affichera en temps reel. | Oui |
+| L1 | **BLOQUANT** | `frontend/Expeditions.jsx:35` vs `backend/expeditions.js:41` | **Creation impossible** : frontend n'envoie pas `categorie_sortante_id` (requis par validation). Toute creation echoue 400. | NOUVEAU |
+| L2 | **BLOQUANT** | `frontend/Expeditions.jsx:11-14` vs `backend/expeditions.js:39-46` | **Mismatch complet des champs** : `date_expedition`→`date`, `poids_total_kg`→`poids_kg`, `nb_palettes`→`nb_conteneurs`, `transporteur`→inexistant. | NOUVEAU |
+| L3 | MAJEUR | `frontend/Expeditions.jsx:85-86` | Affichage lit `exp.date_expedition` et `exp.poids_total_kg` — backend retourne `date` et `poids_kg`. Colonnes undefined. | NOUVEAU |
+| L4 | MAJEUR | `frontend/Expeditions.jsx:61` | Summary lit `s.exutoire_nom` — backend retourne `exutoire`. Noms non affiches. | Oui |
+
+#### LiveVehicles (2 bugs — suivi GPS inoperant)
+
+| # | Severite | Fichier:Ligne | Description | Recurrent |
+|---|----------|---------------|-------------|-----------|
+| L5 | **BLOQUANT** | `frontend/LiveVehicles.jsx:50` vs `backend/index.js:250` | Frontend ecoute `gps:update` — backend emet `vehicle-position`. Carte toujours vide. | NOUVEAU |
+| L6 | MAJEUR | `frontend/LiveVehicles.jsx:145` | Affiche `tour.nb_cav_visited` — backend retourne `collected_count`. Toujours "0/X". | NOUVEAU |
+
+#### Commandes Exutoires (7 bugs — workflow 8 statuts bloque)
+
+| # | Severite | Fichier:Ligne | Description | Recurrent |
+|---|----------|---------------|-------------|-----------|
+| L7 | **BLOQUANT** | `frontend/ExutoiresCommandes.jsx:13` vs `backend/commandes-exutoires.js:39-48` | **Statut `chargee` invalide** : le frontend definit ce statut mais le backend `STATUTS_VALIDES` ne l'inclut pas. Transition impossible, workflow bloque. | NOUVEAU |
+| L8 | MAJEUR | `frontend/ExutoiresCommandes.jsx:367` | Lit `cmd.client_nom` — backend retourne `raison_sociale`. Nom client non affiche. | NOUVEAU |
+| L9 | MAJEUR | `frontend/ExutoiresCommandes.jsx:609-629` | Lit `showDetail.pesee` — backend retourne `controle_pesee`. Infos pesee jamais affichees. | NOUVEAU |
+| L10 | MAJEUR | `frontend/ExutoiresCommandes.jsx:591-604` | Lit `preparation.date/tonnage` — backend utilise `date_livraison_remorque/pesee_interne`. Affiche "---". | NOUVEAU |
+| L11 | MAJEUR | `frontend/ExutoiresCommandes.jsx:80-85` | Parametre `search` ignore par le backend. Recherche par nom ne filtre rien. | NOUVEAU |
+| L12 | MAJEUR | `frontend/ExutoiresCommandes.jsx:46` vs `backend/commandes-exutoires.js:93-111` | Stats KPI : frontend attend `stats.actives/tonnage_prevu/ca_previsionnel` — backend retourne `count_by_statut/total_tonnage_prevu/total_ca_prevu`. 4 cartes KPI a zero. | NOUVEAU |
+| L13 | MINEUR | `frontend/ExutoiresCommandes.jsx:375` | Bouton annuler visible pour statuts `expediee/pesee_recue/facturee` mais backend les refuse. Erreur 400 silencieuse. | NOUVEAU |
+
+#### Tournees (5 bugs)
+
+| # | Severite | Fichier:Ligne | Description | Recurrent |
+|---|----------|---------------|-------------|-----------|
+| L14 | MAJEUR | `frontend/Tours.jsx:243-246` | **Wizard saute l'etape 3** (selection chauffeur). Etape 2→4 directement. Chauffeur jamais affecte. | NOUVEAU |
+| L15 | MAJEUR | `frontend/Tours.jsx:39` | Appelle `?available=true` — backend ignore ce parametre. Tous les vehicules retournes (y compris hors service). | NOUVEAU |
+| L16 | MAJEUR | `frontend/Tours.jsx:54` vs `backend/tours/crud.js:190-196` | Mode standard : `standard_route_id` requis mais jamais envoye. Creation standard echoue 400. | NOUVEAU |
+| L17 | MAJEUR | `frontend/Tours.jsx:318` | Lit `selectedTour.driver_name` — backend retourne `driver_first_name/driver_last_name`. Chauffeur affiche "---". | NOUVEAU |
+| L18 | MINEUR | `frontend/Tours.jsx:236` | Lit `v.capacity_kg` — backend retourne `max_capacity_kg`. Capacite undefined. | NOUVEAU |
+
+#### Vehicules et CAV (2 bugs)
+
+| # | Severite | Fichier:Ligne | Description | Recurrent |
+|---|----------|---------------|-------------|-----------|
+| L19 | MINEUR | `backend/vehicles.js:285,332` | Route `/available` definie 2 fois. Code mort (2e definition inaccessible). | Deja note (C5) |
+| L20 | MINEUR | `frontend/CAVMap.jsx:87` | Taux remplissage peut depasser 100% (plafond 120%). Affichage "115%" confus. | NOUVEAU |
 
 ### 3.3 Persona Responsable Operations (Tri/Production)
 
@@ -216,29 +259,35 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 | R14 | MINEUR | `backend/insertion/routes.js` | Pas de `authorize()` par route — un MANAGER peut modifier des parcours insertion (devrait etre reserve RH/CIP). | NOUVEAU |
 | R15 | MINEUR | `backend/pcm.js:566` | Alerte RPS trop stricte : exige que TOUTES les reponses stress soient du meme type. Sous-detection des RPS. | NOUVEAU |
 
-### Resume des bugs
+### Resume des bugs — BILAN FINAL 4 PERSONAS
 
 | Severite | Nombre | Dont recurrents | Dont nouveaux |
 |----------|--------|-----------------|---------------|
-| **BLOQUANT** | 14 | 4 | 10 (dashboard x3, WorkHours x3, mobile x4) |
-| **MAJEUR** | 24 | 3 | 21 |
-| **MINEUR** | 18 | 3 | 15 |
-| **Total** | 56 | 10 | 46 |
+| **BLOQUANT** | 18 | 4 | 14 |
+| **MAJEUR** | 36 | 3 | 33 |
+| **MINEUR** | 22 | 3 | 19 |
+| **Total** | **76** | 10 | **66** |
 
-**Bugs bloquants (14)** :
+**Bugs bloquants (18)** :
 - **4 recurrents** (depuis 02/04) : Socket.IO GPS mismatch x2, ProduitsFinis champs x2
 - **3 nouveaux Dashboard** : colonnes SQL inexistantes `kg_entree`, `quantity`, `reference`
-- **3 nouveaux WorkHours** : routes, champs, validation incompatibles — module entierement casse
-- **4 nouveaux Mobile Chauffeur** : status `returning` viole CHECK DB, TourSummary structure cassee, km_end ignore, GPS mismatch — **workflow chauffeur fondamentalement casse**
+- **3 nouveaux WorkHours** : routes, champs, validation incompatibles
+- **4 nouveaux Mobile Chauffeur** : CHECK constraint `returning`, TourSummary structure, km_end perdu, GPS
+- **2 nouveaux Expeditions** : creation impossible (champs incompatibles, `categorie_sortante_id` manquant)
+- **1 nouveau LiveVehicles** : evenement Socket.IO `gps:update` vs `vehicle-position`
+- **1 nouveau Commandes Exutoires** : statut `chargee` invalide, workflow 8 statuts bloque
 
-**Modules les plus impactes** :
-1. **Mobile Chauffeur** : 4 bugs bloquants + 7 majeurs — workflow fondamentalement casse (retour centre impossible, resume vide, donnees perdues)
-2. **WorkHours** : 3 bugs bloquants + 1 majeur — module entierement casse
-3. **Dashboard** (`dashboard.js`) : 3 bugs bloquants — dashboard inaccessible
-4. **ProduitsFinis** : 4 bugs majeurs — creation impossible, affichage casse
-5. **Employees** : 3 bugs majeurs — position_name, CDDI, position/position_id
-6. **Production** : 1 bloquant + 2 mineurs — KPIs a zero
-7. **Planning** : 1 majeur — role RH exclu
+**Modules les plus impactes (par gravite)** :
+1. **Mobile Chauffeur** : 4 bloquants + 7 majeurs — workflow fondamentalement casse
+2. **Expeditions** : 2 bloquants + 2 majeurs — module entierement casse
+3. **WorkHours** : 3 bloquants + 1 majeur — module entierement casse
+4. **Dashboard** : 3 bloquants — dashboard inaccessible
+5. **Commandes Exutoires** : 1 bloquant + 5 majeurs — workflow bloque
+6. **ProduitsFinis** : 4 majeurs — creation impossible, affichage casse
+7. **Tours (wizard)** : 4 majeurs — wizard saute etape chauffeur, mode standard casse
+8. **Employees** : 3 majeurs — position_name, CDDI, position/position_id
+9. **Production** : 1 bloquant + 2 mineurs — KPIs a zero
+10. **LiveVehicles** : 1 bloquant + 1 majeur — carte vide
 
 ---
 
@@ -314,9 +363,9 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 | Metrique | Valeur | Tendance |
 |----------|--------|----------|
-| Bugs bloquants ouverts | 7 | Hausse (+3 nouveaux dashboard) |
-| Bugs majeurs ouverts | 10 | Hausse (+7 nouveaux) |
-| Bugs totaux ouverts | 25 | Hausse vs 14 initial (analyse approfondie Resp Operations) |
+| Bugs bloquants ouverts | 18 | Hausse massive (+14 nouveaux) |
+| Bugs majeurs ouverts | 36 | Hausse massive (+33 nouveaux) |
+| Bugs totaux ouverts | 76 | Hausse massive (analyse approfondie 4 personas) |
 | Vulnerabilites securite critiques | 3 | Stable |
 | Branches obsoletes | 7 | Hausse (recrees depuis nettoyage du 03/04) |
 
@@ -336,6 +385,9 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 | **P5b** | **Corriger CHECK constraint tours** : ajouter `returning` a la contrainte CHECK de la table `tours` (`ALTER TABLE tours DROP CONSTRAINT ...; ALTER TABLE tours ADD CONSTRAINT ... CHECK (status IN ('planned','in_progress','paused','returning','completed','cancelled'))`) | Debloque le retour centre des chauffeurs | 5 min |
 | **P5c** | **Corriger TourSummary mobile** : adapter `TourSummary.jsx` pour lire `data.tour.*` et `data.stats.*` au lieu de `data.*`. Corriger navigation fin de tournee vers `/start` (pas `/vehicle-select`) | Debloque le resume de tournee | 15 min |
 | **P5d** | **Corriger route `status-public`** : destructurer `km_end` et `notes` + ajouter les side effects post-completion (tonnage_history, stock_movements) | Donnees de tournee sauvegardees correctement | 30 min |
+| **P5e** | **Corriger module Expeditions** : aligner les champs frontend (`date_expedition`→`date`, `poids_total_kg`→`poids_kg`, `nb_palettes`→`nb_conteneurs`) + ajouter `categorie_sortante_id` au formulaire | Debloque creation expeditions | 30 min |
+| **P5f** | **Corriger workflow Commandes Exutoires** : ajouter `chargee` a `STATUTS_VALIDES` dans `commandes-exutoires.js` | Debloque le workflow 8 statuts | 5 min |
+| **P5g** | **Corriger LiveVehicles Socket.IO** : frontend ecoute `gps:update` → remplacer par `vehicle-position` (evenement emis par le backend) | Debloque carte suivi temps reel | 5 min |
 
 ### IMPORTANTES (Securite — planifier cette semaine)
 
@@ -368,19 +420,29 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 | Indicateur | Valeur | Tendance |
 |------------|--------|----------|
 | **Note securite** | 5.5/10 | -1.5 (analyse approfondie : uploads, routes publiques, CSP) |
-| **Note qualite code** | 5.0/10 | -2.0 (dashboard + WorkHours + mobile casses) |
-| **Note fonctionnelle** | 4.5/10 | -2.0 (14 bloquants, 3 modules entierement casses) |
-| **Note globale** | 5.0/10 | -1.8 |
-| **Bugs bloquants** | 14 | Hausse (+3 dashboard, +3 WorkHours, +4 mobile) |
-| **Bugs totaux** | 56 | Hausse (analyses approfondies 4 personas) |
+| **Note qualite code** | 4.5/10 | -2.5 (6 modules casses ou dysfonctionnels) |
+| **Note fonctionnelle** | 4.0/10 | -2.5 (18 bloquants, 5 modules entierement casses) |
+| **Note globale** | 4.7/10 | -2.1 |
+| **Bugs bloquants** | 18 | Hausse massive (+14 nouveaux) |
+| **Bugs totaux** | 76 | Hausse massive (analyses approfondies 4 personas) |
 | **Branches a nettoyer** | 7 | 7 nouvelles depuis nettoyage 03/04 |
 | **Vulnerabilites npm** | 7 (5 HIGH) | Stable |
 
-**Constat principal** : L'audit le plus approfondi jamais realise sur SOLIDATA revele un etat significativement plus degrade que les estimations precedentes. **4 modules sont casses ou fondamentalement dysfonctionnels** : Dashboard (SQL crash), WorkHours (routes+champs incompatibles), Mobile Chauffeur (CHECK constraint, structure reponse, donnees perdues), ProduitsFinis (creation+affichage). Le total atteint **14 bugs bloquants** et **56 bugs** toutes severites. Les 4 bugs recurrents depuis le 02/04 n'ont toujours pas ete corriges.
+**Constat principal** : L'audit le plus approfondi jamais realise sur SOLIDATA revele un etat **beaucoup plus degrade** que toutes les estimations precedentes. **6 modules sont casses ou fondamentalement dysfonctionnels** : Dashboard (SQL crash), WorkHours (routes+champs incompatibles), Mobile Chauffeur (CHECK constraint, structure reponse, donnees perdues), ProduitsFinis (creation+affichage), Expeditions (champs completement differents), Commandes Exutoires (workflow bloque par statut invalide). Le total atteint **18 bugs bloquants** et **76 bugs** toutes severites. Les 4 bugs recurrents depuis le 02/04 n'ont toujours pas ete corriges.
 
-**Fait critique** : Le statut `returning` envoye par le mobile viole la contrainte CHECK de la table `tours` — le chauffeur est **physiquement bloque** apres sa collecte, incapable de terminer sa tournee.
+**Faits critiques** :
+- Le statut `returning` envoye par le mobile viole la contrainte CHECK de la table `tours` — le chauffeur est **physiquement bloque** apres sa collecte
+- Le module Expeditions a un **mismatch complet** de noms de champs entre frontend et backend — aucune creation possible
+- Le workflow Commandes Exutoires est **bloque** par le statut `chargee` non reconnu par le backend
+- Le module WorkHours est **100% non-fonctionnel** — routes, champs, types et validation incompatibles
 
-**Recommandation** : Sprint correctif urgent de 4-5h pour corriger les 14 bugs bloquants (P1 a P5 + nouveau P-mobile). Le mobile chauffeur et le dashboard sont les priorites absolues car ils impactent les operations quotidiennes.
+**Recommandation** : Sprint correctif urgent de 6-8h pour corriger les 18 bugs bloquants. Priorites :
+1. Dashboard (impact tous utilisateurs) — 30 min
+2. Mobile chauffeur (operations quotidiennes) — 1h
+3. Expeditions (operations logistiques) — 30 min
+4. Commandes Exutoires (workflow) — 10 min
+5. WorkHours (module RH) — 1h
+6. ProduitsFinis + Production — 30 min
 
 ---
 
