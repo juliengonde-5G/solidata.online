@@ -141,12 +141,26 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 ### 3.3 Persona Responsable Operations (Tri/Production)
 
+**Resultat analyse approfondie : 16 bugs identifies (4 BLOQUANTS, 7 MAJEURS, 5 MINEURS)**
+
 | # | Severite | Fichier:Ligne | Description | Recurrent |
 |---|----------|---------------|-------------|-----------|
-| O1 | **BLOQUANT** | `frontend/ProduitsFinis.jsx:98` | Utilise `p.produit_nom` mais le backend retourne `produit` (pas `produit_nom`). Le nom du produit s'affiche comme "—" (tiret). | Oui (depuis 03/04) |
-| O2 | **BLOQUANT** | `frontend/ProduitsFinis.jsx:112` | Utilise `p.is_shipped` mais ce champ n'existe pas dans la table `produits_finis`. Le backend utilise `date_sortie` pour determiner le statut. Tous les produits s'affichent comme "En stock". | Oui (depuis 03/04) |
-| O3 | MAJEUR | `frontend/Production.jsx:66` | Affiche `dashboard.avg_productivite` et `dashboard.avg_effectif` qui proviennent du endpoint KPI. Verifier que le backend calcule et retourne bien ces champs agreges. | Oui |
-| O4 | MINEUR | `backend/produits-finis.js:14` | La requete SELECT utilise `pf.*` ce qui retourne tous les champs de la table mais pas de colonne calculee `is_shipped` ou `produit_nom`. | Lie a O1/O2 |
+| O1 | **BLOQUANT** | `backend/dashboard.js:64,69,82` | **Dashboard crash** : requetes SQL sur colonne `kg_entree` inexistante dans `production_daily`. Les vrais champs sont `entree_ligne_kg` et `entree_recyclage_r3_kg`. Le dashboard est entierement inaccessible. | NOUVEAU |
+| O2 | **BLOQUANT** | `backend/dashboard.js:113,168` | **Dashboard crash** : requetes SQL sur colonne `quantity` inexistante dans `stock_movements`. Le vrai champ est `poids_kg`. | NOUVEAU |
+| O3 | **BLOQUANT** | `backend/dashboard.js:168` | **Dashboard crash** : requete SQL sur colonne `reference` inexistante dans `stock_movements`. | NOUVEAU |
+| O4 | **BLOQUANT** | `frontend/Production.jsx:65-68` vs `backend/production.js:43-48` | **Production KPIs a zero** : le frontend attend `dashboard.total_month_t`, `dashboard.avg_productivite`, `dashboard.nb_jours`, `dashboard.avg_effectif` — le backend retourne `summary.total_mois_t`, `summary.productivite_moyenne`, etc. Noms de champs completement differents. | Oui (depuis 02/04) |
+| O5 | MAJEUR | `frontend/ProduitsFinis.jsx:98` | `p.produit_nom` inexistant, backend retourne `produit` (pas `produit_nom`). Colonne affiche "—". | Oui (depuis 03/04) |
+| O6 | MAJEUR | `frontend/ProduitsFinis.jsx:112` | `p.is_shipped` inexistant, backend utilise `date_sortie`. Tous les produits affichent "En stock". | Oui (depuis 03/04) |
+| O7 | MAJEUR | `frontend/ProduitsFinis.jsx:12-14` vs `backend/produits-finis.js:55-56` | Frontend envoie `barcode` + `produit_catalogue_id`, backend attend `code_barre` + `catalogue_id`. **Creation produit fini impossible** (erreur 400). | NOUVEAU |
+| O8 | MAJEUR | `frontend/ProduitsFinis.jsx:69,73` vs `backend/produits-finis.js:40` | Frontend lit `s.count`, `s.total_kg`. Backend retourne `nb_produits`, `poids_total_kg`. Synthese affiche "0". | NOUVEAU |
+| O9 | MAJEUR | `frontend/ChaineTri.jsx:109` vs `backend/tri.js:17-22` | Frontend affiche `chain.nb_postes`. Backend ne retourne que `nb_operations`. Nombre de postes toujours "0". | NOUVEAU |
+| O10 | MAJEUR | `backend/dashboard.js:388-389` | Objectifs tri/production : requete sur `oe.quantity_kg`, `oe.date`, `ot.name` inexistants. Vrais champs : `poids_entree_kg`, `started_at`, `nom`. | NOUVEAU |
+| O11 | MAJEUR | `frontend/ReportingCollecte.jsx:57` | Arrondi tonnage imprecis : `Math.round(tonnage / 100) / 10` — 450kg affiche 0.4t au lieu de 0.45t. | NOUVEAU |
+| O12 | MINEUR | `frontend/Production.jsx:11-15` | Formulaire ne transmet pas `effectif_theorique`. La colonne sera toujours vide. | NOUVEAU |
+| O13 | MINEUR | `frontend/Stock.jsx:29` | Code defensif `s.solde_kg || s.stock_kg` — `stock_kg` n'existe pas (code mort). | NOUVEAU |
+| O14 | MINEUR | `frontend/Stock.jsx:158` | `m.poids_kg || m.quantity_kg` — `quantity_kg` n'existe pas (code mort). | NOUVEAU |
+| O15 | MINEUR | `backend/production.js:104` | Default `objectif_entree_r3_kg || 1300` cote backend vs 500 cote frontend. Incoherence. | NOUVEAU |
+| O16 | MINEUR | `frontend/ChaineTri.jsx:131` | `op.numero ?? op.ordre` — `ordre` n'existe pas (code mort). | NOUVEAU |
 
 ### 3.4 Persona Responsable RH / Insertion
 
@@ -159,14 +173,22 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 ### Resume des bugs
 
-| Severite | Nombre | Dont recurrents |
-|----------|--------|-----------------|
-| **BLOQUANT** | 4 | 4 (tous) |
-| **MAJEUR** | 5 | 4 |
-| **MINEUR** | 5 | 3 |
-| **Total** | 14 | 11 |
+| Severite | Nombre | Dont recurrents | Dont nouveaux |
+|----------|--------|-----------------|---------------|
+| **BLOQUANT** | 7 | 4 | 3 (dashboard crash x3) |
+| **MAJEUR** | 10 | 3 | 7 |
+| **MINEUR** | 8 | 3 | 5 |
+| **Total** | 25 | 10 | 15 |
 
-**Bugs bloquants non corriges depuis le rapport precedent : 4** (Socket.IO GPS x2, ProduitsFinis champs x2)
+**Bugs bloquants** :
+- **4 recurrents** (depuis 02/04) : Socket.IO GPS mismatch x2, ProduitsFinis champs x2
+- **3 nouveaux** : Dashboard backend crash (colonnes `kg_entree`, `quantity`, `reference` inexistantes dans les requetes SQL de `dashboard.js`)
+
+**Modules les plus impactes** :
+1. **Dashboard** (`dashboard.js`) : 3 bugs bloquants — le dashboard est entierement casse
+2. **ProduitsFinis** : 4 bugs majeurs — creation impossible, affichage casse
+3. **Production** : 1 bloquant + 2 mineurs — KPIs a zero
+4. **ChaineTri** : 2 bugs — nb_postes, code mort
 
 ---
 
@@ -242,9 +264,9 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 | Metrique | Valeur | Tendance |
 |----------|--------|----------|
-| Bugs bloquants ouverts | 4 | Stable (meme 4 depuis 02/04) |
-| Bugs majeurs ouverts | 5 | Stable |
-| Bugs totaux ouverts | 14 | Baisse vs 43 au 03/04 (perimetre de test restreint) |
+| Bugs bloquants ouverts | 7 | Hausse (+3 nouveaux dashboard) |
+| Bugs majeurs ouverts | 10 | Hausse (+7 nouveaux) |
+| Bugs totaux ouverts | 25 | Hausse vs 14 initial (analyse approfondie Resp Operations) |
 | Vulnerabilites securite critiques | 3 | Stable |
 | Branches obsoletes | 7 | Hausse (recrees depuis nettoyage du 03/04) |
 
@@ -256,17 +278,20 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 | # | Action | Impact | Effort |
 |---|--------|--------|--------|
-| **P1** | **Corriger mismatch Socket.IO GPS** : renommer `gps:position` en `gps-update` dans `mobile/src/pages/TourMap.jsx:81` OU l'inverse dans `backend/src/index.js:242` | Debloque suivi GPS temps reel + LiveVehicles | 5 min |
-| **P2** | **Corriger ProduitsFinis champs** : remplacer `p.produit_nom` par `p.produit` et `p.is_shipped` par `p.date_sortie !== null` dans `frontend/src/pages/ProduitsFinis.jsx` | Debloque affichage produits finis | 10 min |
+| **P1** | **Corriger dashboard.js** : remplacer `kg_entree` par `entree_ligne_kg + entree_recyclage_r3_kg`, `quantity` par `poids_kg`, `reference` par un champ existant | Debloque le dashboard complet | 30 min |
+| **P2** | **Corriger mismatch Socket.IO GPS** : renommer `gps:position` en `gps-update` dans `mobile/src/pages/TourMap.jsx:81` OU l'inverse dans `backend/src/index.js:242` | Debloque suivi GPS temps reel + LiveVehicles | 5 min |
+| **P3** | **Corriger ProduitsFinis** : champs `produit_nom`→`produit`, `is_shipped`→`date_sortie !== null`, `barcode`→`code_barre`, `produit_catalogue_id`→`catalogue_id`, summary `count`→`nb_produits` | Debloque creation + affichage produits finis | 20 min |
+| **P4** | **Corriger Production KPIs** : aligner noms de champs frontend (`total_month_t`, `avg_productivite`) avec backend (`summary.total_mois_t`, `summary.productivite_moyenne`) | Debloque KPIs production | 15 min |
 
 ### IMPORTANTES (Securite — planifier cette semaine)
 
 | # | Action | Impact | Effort |
 |---|--------|--------|--------|
-| **P3** | **Securiser admin-db.js** : remplacer `execSync` par un appel docker pg_dump parametre sans interpolation shell | Elimine injection shell critique | 30 min |
-| **P4** | **Lancer `npm audit fix`** : corrige 4 des 7 vulnerabilites npm | Reduit surface d'attaque | 5 min |
-| **P5** | **Supprimer les 7 branches obsoletes** du remote | Proprete du repo | 5 min |
-| **P6** | **Evaluer remplacement de `xlsx`** par `exceljs` ou `SheetJS` pour eliminer les 2 vuln HIGH sans fix | Elimine 2 vulnerabilites | 2h |
+| **P5** | **Securiser admin-db.js** : remplacer `execSync` par un appel docker pg_dump parametre sans interpolation shell | Elimine injection shell critique | 30 min |
+| **P6** | **Lancer `npm audit fix`** : corrige 4 des 7 vulnerabilites npm | Reduit surface d'attaque | 5 min |
+| **P7** | **Supprimer les 7 branches obsoletes** du remote | Proprete du repo | 5 min |
+| **P8** | **Corriger dashboard objectifs** (`dashboard.js:388-389`) : `quantity_kg`→`poids_entree_kg`, `date`→`started_at`, `name`→`nom` | Debloque objectifs tri | 15 min |
+| **P9** | **Evaluer remplacement de `xlsx`** par `exceljs` ou `SheetJS` pour eliminer les 2 vuln HIGH sans fix | Elimine 2 vulnerabilites | 2h |
 
 ### SOUHAITEES (Moyen terme)
 
@@ -284,16 +309,17 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 | Indicateur | Valeur | Tendance |
 |------------|--------|----------|
 | **Note securite** | 6.8/10 | -0.2 |
-| **Note qualite code** | 7.0/10 | Stable |
-| **Note fonctionnelle** | 6.5/10 | Stable |
-| **Note globale** | 6.8/10 | Stable |
-| **Bugs bloquants** | 4 | Stable (recurrents depuis 02/04) |
+| **Note qualite code** | 6.5/10 | -0.5 (dashboard casse) |
+| **Note fonctionnelle** | 5.8/10 | -0.7 (3 bloquants nouveaux) |
+| **Note globale** | 6.4/10 | -0.4 |
+| **Bugs bloquants** | 7 | Hausse (+3 dashboard) |
+| **Bugs totaux** | 25 | Hausse (analyse approfondie) |
 | **Branches a nettoyer** | 7 | 7 nouvelles depuis nettoyage 03/04 |
 | **Vulnerabilites npm** | 7 (5 HIGH) | Stable |
 
-**Constat principal** : Les 4 bugs bloquants identifies le 02/04 persistent depuis 3 jours sans correction. Le mismatch Socket.IO GPS est une correction de 5 minutes qui debloque 2 fonctionnalites critiques (suivi GPS chauffeurs + LiveVehicles). Les 7 branches distantes recreees sont toutes obsoletes et necessitent un nettoyage.
+**Constat principal** : L'analyse approfondie du Responsable Operations revele que le **Dashboard principal est entierement casse** (3 colonnes SQL inexistantes dans `dashboard.js`). Combine aux 4 bugs bloquants recurrents depuis le 02/04 (GPS + ProduitsFinis), cela porte le total a **7 bugs bloquants**. Le module ProduitsFinis est egalement inutilisable (creation impossible + affichage casse). Aucun des bugs bloquants signales depuis 3 jours n'a ete corrige.
 
-**Recommandation** : Prioriser les corrections P1 et P2 (15 minutes de travail total) pour eliminer les 4 bugs bloquants avant tout autre developpement.
+**Recommandation** : Prioriser les corrections P1 a P4 (~70 minutes de travail total) pour eliminer les 7 bugs bloquants. Le dashboard (P1) est la priorite absolue car il impacte tous les utilisateurs.
 
 ---
 
