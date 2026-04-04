@@ -140,11 +140,28 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 ### 3.1 Persona Chauffeur-Collecteur (Mobile)
 
+**Resultat analyse approfondie : 16 bugs identifies (4 BLOQUANTS, 7 MAJEURS, 5 MINEURS)**
+
+**Le workflow mobile chauffeur est fondamentalement casse.**
+
 | # | Severite | Fichier:Ligne | Description | Recurrent |
 |---|----------|---------------|-------------|-----------|
-| C1 | **BLOQUANT** | `mobile/TourMap.jsx:81` vs `backend/index.js:242` | **Mismatch Socket.IO GPS** : le mobile emet `gps:position` mais le backend ecoute `gps-update`. Le suivi GPS temps reel ne fonctionne pas. | Oui (depuis 02/04) |
-| C2 | MAJEUR | `mobile/TourSummary.jsx:38` | Utilise `tour?.total_weight_kg` qui depend de l'endpoint tour summary. Si le backend ne calcule pas ce champ correctement, la valeur est 0. | Oui |
-| C3 | MINEUR | `mobile/pages/` | Pas de gestion hors-ligne (offline). Si perte de connexion pendant une tournee, les donnees de collecte sont perdues. | Connu |
+| C1 | **BLOQUANT** | `mobile/TourMap.jsx:81` vs `backend/index.js:242` | **Mismatch Socket.IO GPS** : mobile emet `gps:position`, backend ecoute `gps-update`. GPS jamais sauvegarde. | Oui (depuis 02/04) |
+| C2 | **BLOQUANT** | `mobile/ReturnCentre.jsx:19` vs `init-db.js:424` | **Status `returning` viole CHECK constraint** : la table tours n'accepte que `planned/in_progress/paused/completed/cancelled`. Le retour centre provoque une erreur 500. Chauffeur bloque. | NOUVEAU |
+| C3 | **BLOQUANT** | `mobile/TourSummary.jsx:14-41` vs `backend/tours/index.js:287-298` | **Structure reponse incompatible** : frontend attend `tour.cavs`, `tour.total_weight_kg` — backend retourne `{tour: {...}, stats: {...}}`. Page resume entierement vide. | NOUVEAU |
+| C4 | **BLOQUANT** | `mobile/ReturnCentre.jsx:15-21` vs `backend/tours/index.js:217` | **`km_end` et `notes` ignores** : la route `status-public` ne destructure que `{status}`. Km arrivee et notes perdus. | NOUVEAU |
+| C5 | MAJEUR | `backend/vehicles.js:285,332` | Route `/available` definie 2 fois (publique + authentifiee). La 2e est du code mort. La 1re retourne des vehicules non-disponibles. | NOUVEAU |
+| C6 | MAJEUR | `mobile/services/sync.js:23,54,86` | **3 endpoints inexistants** : `/tours/:id/scan` (devrait etre `scan-public`), `/tours/:id/weights` (devrait etre `weigh-public`), `/tours/gps-batch` (n'existe pas). Donnees offline perdues. | NOUVEAU |
+| C7 | MAJEUR | `backend/tours/index.js:214-252` | **Route `status-public` sans side effects** : pas de tonnage_history, stock_movements, ML feedback apres completion. Stock jamais mis a jour via mobile. | NOUVEAU |
+| C8 | MAJEUR | `mobile/QRScanner.jsx:25-32` | **QR scan jamais persiste** : resultat stocke en localStorage, `POST /scan-public` jamais appele. Table `cav_qr_scans` toujours vide. | NOUVEAU |
+| C9 | MAJEUR | `backend/tours/index.js:101` | **`ON CONFLICT DO NOTHING` sans contrainte UNIQUE** sur `tour_id` dans `vehicle_checklists`. Doublons de checklist possibles. | NOUVEAU |
+| C10 | MAJEUR | `mobile/Checklist.jsx:48-49` vs `backend/tours/index.js:98` | Champ `notes` envoye par le frontend mais ignore par le backend (pas destructure, pas de colonne). | NOUVEAU |
+| C11 | MAJEUR | `mobile/TourSummary.jsx:23-24` | Apres fin de tournee, navigue vers `/vehicle-select` qui appelle une route authentifiee. En mode sans auth : erreur 401, chauffeur bloque. | NOUVEAU |
+| C12 | MINEUR | `mobile/FillLevel.jsx:7-12` vs `TourSummary.jsx:87` | Echelle fill_level 0-4 affichee comme "/5". "Plein" affiche "4/5". | NOUVEAU |
+| C13 | MINEUR | `mobile/TourMap.jsx:161,185` | `cav.nom` toujours undefined, fallback `cav.cav_name` fonctionne. Code mort. | NOUVEAU |
+| C14 | MINEUR | `mobile/TourMap.jsx:82-86` vs `backend/index.js:243` | Meme si event GPS corrige : champs `tour_id/vehicle_id` (snake_case) vs `tourId/vehicleId` (camelCase). GPS stocke avec NULLs. | NOUVEAU |
+| C15 | MINEUR | `mobile/WeighIn.jsx:20-25` vs `backend/tours/index.js:173` | `tare_kg` et `is_intermediate` envoyes mais ignores (pas destructures, pas de colonnes). | NOUVEAU |
+| C16 | MINEUR | `mobile/Incident.jsx:21` vs `backend/tours/index.js:199` | `description` requise par backend mais optionnelle dans l'UI. Erreur 400 sans feedback utilisateur. | NOUVEAU |
 
 ### 3.2 Persona Responsable Logistique
 
@@ -203,23 +220,25 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 
 | Severite | Nombre | Dont recurrents | Dont nouveaux |
 |----------|--------|-----------------|---------------|
-| **BLOQUANT** | 10 | 4 | 6 (dashboard x3, WorkHours x3) |
-| **MAJEUR** | 17 | 3 | 14 |
-| **MINEUR** | 13 | 3 | 10 |
-| **Total** | 40 | 10 | 30 |
+| **BLOQUANT** | 14 | 4 | 10 (dashboard x3, WorkHours x3, mobile x4) |
+| **MAJEUR** | 24 | 3 | 21 |
+| **MINEUR** | 18 | 3 | 15 |
+| **Total** | 56 | 10 | 46 |
 
-**Bugs bloquants (10)** :
+**Bugs bloquants (14)** :
 - **4 recurrents** (depuis 02/04) : Socket.IO GPS mismatch x2, ProduitsFinis champs x2
-- **3 nouveaux Dashboard** : colonnes SQL inexistantes `kg_entree`, `quantity`, `reference` dans `dashboard.js`
-- **3 nouveaux WorkHours** : routes incompatibles, champs incompatibles, validation cassee — **module entierement non-fonctionnel**
+- **3 nouveaux Dashboard** : colonnes SQL inexistantes `kg_entree`, `quantity`, `reference`
+- **3 nouveaux WorkHours** : routes, champs, validation incompatibles — module entierement casse
+- **4 nouveaux Mobile Chauffeur** : status `returning` viole CHECK DB, TourSummary structure cassee, km_end ignore, GPS mismatch — **workflow chauffeur fondamentalement casse**
 
 **Modules les plus impactes** :
-1. **WorkHours** : 3 bugs bloquants + 1 majeur — module entierement casse (routes, champs, types, validation)
-2. **Dashboard** (`dashboard.js`) : 3 bugs bloquants — le dashboard est entierement casse
-3. **ProduitsFinis** : 4 bugs majeurs — creation impossible, affichage casse
-4. **Employees** : 3 bugs majeurs — position_name, CDDI, position/position_id
-5. **Production** : 1 bloquant + 2 mineurs — KPIs a zero
-6. **Planning** : 1 majeur — role RH exclu
+1. **Mobile Chauffeur** : 4 bugs bloquants + 7 majeurs — workflow fondamentalement casse (retour centre impossible, resume vide, donnees perdues)
+2. **WorkHours** : 3 bugs bloquants + 1 majeur — module entierement casse
+3. **Dashboard** (`dashboard.js`) : 3 bugs bloquants — dashboard inaccessible
+4. **ProduitsFinis** : 4 bugs majeurs — creation impossible, affichage casse
+5. **Employees** : 3 bugs majeurs — position_name, CDDI, position/position_id
+6. **Production** : 1 bloquant + 2 mineurs — KPIs a zero
+7. **Planning** : 1 majeur — role RH exclu
 
 ---
 
@@ -314,6 +333,9 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 | **P3** | **Corriger ProduitsFinis** : champs `produit_nom`→`produit`, `is_shipped`→`date_sortie !== null`, `barcode`→`code_barre`, `produit_catalogue_id`→`catalogue_id`, summary `count`→`nb_produits` | Debloque creation + affichage produits finis | 20 min |
 | **P4** | **Corriger Production KPIs** : aligner noms de champs frontend (`total_month_t`, `avg_productivite`) avec backend (`summary.total_mois_t`, `summary.productivite_moyenne`) | Debloque KPIs production | 15 min |
 | **P5** | **Corriger module WorkHours** : refaire les routes frontend (`/employees/{id}/hours` → `/employees/work-hours`), aligner les champs (`start_time/end_time` → `hours_worked`), les types (`conge/maladie` → `holiday/sick`), et le champ validation (`validated` → `validated_by`) | Debloque tout le module heures de travail | 1h |
+| **P5b** | **Corriger CHECK constraint tours** : ajouter `returning` a la contrainte CHECK de la table `tours` (`ALTER TABLE tours DROP CONSTRAINT ...; ALTER TABLE tours ADD CONSTRAINT ... CHECK (status IN ('planned','in_progress','paused','returning','completed','cancelled'))`) | Debloque le retour centre des chauffeurs | 5 min |
+| **P5c** | **Corriger TourSummary mobile** : adapter `TourSummary.jsx` pour lire `data.tour.*` et `data.stats.*` au lieu de `data.*`. Corriger navigation fin de tournee vers `/start` (pas `/vehicle-select`) | Debloque le resume de tournee | 15 min |
+| **P5d** | **Corriger route `status-public`** : destructurer `km_end` et `notes` + ajouter les side effects post-completion (tonnage_history, stock_movements) | Donnees de tournee sauvegardees correctement | 30 min |
 
 ### IMPORTANTES (Securite — planifier cette semaine)
 
@@ -346,17 +368,19 @@ Les 7 branches representent d'anciens travaux dont le contenu est **integralemen
 | Indicateur | Valeur | Tendance |
 |------------|--------|----------|
 | **Note securite** | 5.5/10 | -1.5 (analyse approfondie : uploads, routes publiques, CSP) |
-| **Note qualite code** | 5.5/10 | -1.5 (dashboard + WorkHours casses) |
-| **Note fonctionnelle** | 5.0/10 | -1.5 (10 bloquants, 2 modules entierement casses) |
-| **Note globale** | 5.3/10 | -1.5 |
-| **Bugs bloquants** | 10 | Hausse (+3 dashboard, +3 WorkHours) |
-| **Bugs totaux** | 40 | Hausse (analyses approfondies 4 personas) |
+| **Note qualite code** | 5.0/10 | -2.0 (dashboard + WorkHours + mobile casses) |
+| **Note fonctionnelle** | 4.5/10 | -2.0 (14 bloquants, 3 modules entierement casses) |
+| **Note globale** | 5.0/10 | -1.8 |
+| **Bugs bloquants** | 14 | Hausse (+3 dashboard, +3 WorkHours, +4 mobile) |
+| **Bugs totaux** | 56 | Hausse (analyses approfondies 4 personas) |
 | **Branches a nettoyer** | 7 | 7 nouvelles depuis nettoyage 03/04 |
 | **Vulnerabilites npm** | 7 (5 HIGH) | Stable |
 
-**Constat principal** : Les analyses approfondies des 4 personas revelent un etat plus degrade que les audits precedents. **3 modules sont entierement casses** : Dashboard (colonnes SQL inexistantes), WorkHours (routes + champs + validation incompatibles), ProduitsFinis (creation + affichage). Le total atteint **10 bugs bloquants** et **40 bugs** toutes severites. Les 4 bugs recurrents depuis le 02/04 n'ont toujours pas ete corriges.
+**Constat principal** : L'audit le plus approfondi jamais realise sur SOLIDATA revele un etat significativement plus degrade que les estimations precedentes. **4 modules sont casses ou fondamentalement dysfonctionnels** : Dashboard (SQL crash), WorkHours (routes+champs incompatibles), Mobile Chauffeur (CHECK constraint, structure reponse, donnees perdues), ProduitsFinis (creation+affichage). Le total atteint **14 bugs bloquants** et **56 bugs** toutes severites. Les 4 bugs recurrents depuis le 02/04 n'ont toujours pas ete corriges.
 
-**Recommandation** : Prioriser les corrections P1 a P5 pour eliminer les 10 bugs bloquants. Le dashboard (P1) et le module WorkHours (nouveau P5) sont les priorites absolues.
+**Fait critique** : Le statut `returning` envoye par le mobile viole la contrainte CHECK de la table `tours` — le chauffeur est **physiquement bloque** apres sa collecte, incapable de terminer sa tournee.
+
+**Recommandation** : Sprint correctif urgent de 4-5h pour corriger les 14 bugs bloquants (P1 a P5 + nouveau P-mobile). Le mobile chauffeur et le dashboard sont les priorites absolues car ils impactent les operations quotidiennes.
 
 ---
 
