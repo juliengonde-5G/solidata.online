@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { DataTable } from '../components';
+import { Brain } from 'lucide-react';
 import api from '../services/api';
 
 const TYPE_COLORS = {
@@ -236,49 +238,32 @@ export default function PersonalityMatrix() {
         </div>
 
         {view === 'list' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Candidat</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Base</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Phase</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Alerte RPS</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                  <th className="p-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {profiles.map(p => (
-                  <tr key={p.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 font-medium text-sm">{p.first_name} {p.last_name}</td>
-                    <td className="p-3">
-                      <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: TYPE_COLORS[p.base_type] }}>
-                        {p.base_type}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: TYPE_COLORS[p.phase_type] }}>
-                        {p.phase_type}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      {p.risk_alert && <span className="text-red-500 text-xs font-bold">Alerte</span>}
-                    </td>
-                    <td className="p-3 text-xs text-gray-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</td>
-                    <td className="p-3">
-                      <button onClick={() => loadProfile(p.candidate_id)} className="text-primary text-xs font-medium hover:underline">
-                        Voir profil
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {profiles.length === 0 && (
-                  <tr><td colSpan="6" className="p-8 text-center text-gray-400">Aucun profil PCM genere</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              { key: 'name', label: 'Candidat', sortable: true, render: (p) => <span className="font-medium">{p.first_name} {p.last_name}</span> },
+              { key: 'base_type', label: 'Base', render: (p) => (
+                <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: TYPE_COLORS[p.base_type] }}>
+                  {p.base_type}
+                </span>
+              )},
+              { key: 'phase_type', label: 'Phase', render: (p) => (
+                <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: TYPE_COLORS[p.phase_type] }}>
+                  {p.phase_type}
+                </span>
+              )},
+              { key: 'risk_alert', label: 'Alerte RPS', render: (p) => p.risk_alert && <span className="text-red-500 text-xs font-bold">Alerte</span> },
+              { key: 'created_at', label: 'Date', sortable: true, render: (p) => <span className="text-xs text-gray-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</span> },
+              { key: 'actions', label: '', render: (p) => (
+                <button onClick={() => loadProfile(p.candidate_id)} className="text-primary text-xs font-medium hover:underline">
+                  Voir profil
+                </button>
+              )},
+            ]}
+            data={profiles}
+            loading={false}
+            emptyIcon={Brain}
+            emptyMessage="Aucun profil PCM genere"
+          />
         )}
 
         {view === 'types' && (

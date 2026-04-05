@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, DataTable } from '../components';
+import { Scale, FileText } from 'lucide-react';
 import api from '../services/api';
 
 const STATUTS_PESEE = {
@@ -262,7 +263,7 @@ export default function ExutoiresFacturation() {
 
             {/* Action button */}
             <div className="flex justify-end mb-4">
-              <button onClick={openControleForm} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
+              <button onClick={openControleForm} className="btn-primary text-sm">
                 + Nouveau contrôle
               </button>
             </div>
@@ -329,7 +330,7 @@ export default function ExutoiresFacturation() {
           <>
             {/* Action button */}
             <div className="flex justify-end mb-4">
-              <button onClick={openFactureForm} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
+              <button onClick={openFactureForm} className="btn-primary text-sm">
                 + Uploader une facture
               </button>
             </div>
@@ -470,7 +471,7 @@ export default function ExutoiresFacturation() {
                 <button type="button" onClick={() => setShowControleForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
                   Annuler
                 </button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">
+                <button type="submit" className="flex-1 btn-primary text-sm">
                   Créer
                 </button>
               </div>
@@ -515,7 +516,7 @@ export default function ExutoiresFacturation() {
                 <button type="button" onClick={() => setShowFactureForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
                   Annuler
                 </button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">
+                <button type="submit" className="flex-1 btn-primary text-sm">
                   Uploader
                 </button>
               </div>
@@ -624,7 +625,7 @@ export default function ExutoiresFacturation() {
                 <button
                   type="button"
                   onClick={submitOcrCorrection}
-                  className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium"
+                  className="flex-1 btn-primary text-sm"
                 >
                   Corriger & Valider
                 </button>

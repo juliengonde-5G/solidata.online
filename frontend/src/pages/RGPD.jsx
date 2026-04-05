@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { DataTable } from '../components';
+import { Shield, ScrollText } from 'lucide-react';
 import api from '../services/api';
 
 export default function RGPD() {
@@ -74,6 +76,27 @@ export default function RGPD() {
 
   const BASES = ['consentement', 'contrat', 'obligation_legale', 'interet_legitime', 'mission_publique', 'interet_vital'];
 
+  const registreColumns = [
+    { key: 'nom_traitement', label: 'Traitement', sortable: true, render: (r) => <span className="font-medium">{r.nom_traitement}</span> },
+    { key: 'finalite', label: 'Finalité', render: (r) => <span className="text-gray-600">{r.finalite}</span> },
+    { key: 'base_legale', label: 'Base légale', render: (r) => <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs">{r.base_legale}</span> },
+    { key: 'duree_conservation', label: 'Durée conservation', render: (r) => r.duree_conservation || '—' },
+    { key: 'is_active', label: 'Statut', render: (r) => (
+      <span className={`px-2 py-0.5 rounded-full text-xs ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+        {r.is_active ? 'Actif' : 'Inactif'}
+      </span>
+    )},
+  ];
+
+  const auditColumns = [
+    { key: 'created_at', label: 'Date', sortable: true, render: (a) => <span className="text-gray-500">{new Date(a.created_at).toLocaleString('fr-FR')}</span> },
+    { key: 'user_name', label: 'Utilisateur', render: (a) => `${a.first_name} ${a.last_name}` },
+    { key: 'action', label: 'Action', render: (a) => <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs font-medium">{a.action}</span> },
+    { key: 'entity_type', label: 'Type' },
+    { key: 'entity_id', label: 'ID' },
+    { key: 'details', label: 'Détails', render: (a) => <span className="text-gray-500 text-xs max-w-xs truncate block">{a.details ? JSON.stringify(a.details) : '—'}</span> },
+  ];
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -83,7 +106,7 @@ export default function RGPD() {
             <p className="text-sm text-gray-500">Gestion de la protection des données personnelles</p>
           </div>
           {tab === 'registre' && (
-            <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90">
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
               Nouveau traitement
             </button>
           )}
@@ -108,31 +131,13 @@ export default function RGPD() {
         ) : (
           <>
             {tab === 'registre' && (
-              <div className="bg-white rounded-xl border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                    <tr>
-                      <th className="px-4 py-3 text-left">Traitement</th>
-                      <th className="px-4 py-3 text-left">Finalité</th>
-                      <th className="px-4 py-3 text-left">Base légale</th>
-                      <th className="px-4 py-3 text-left">Durée conservation</th>
-                      <th className="px-4 py-3 text-left">Statut</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {registre.map(r => (
-                      <tr key={r.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium">{r.nom_traitement}</td>
-                        <td className="px-4 py-3 text-gray-600">{r.finalite}</td>
-                        <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs">{r.base_legale}</span></td>
-                        <td className="px-4 py-3">{r.duree_conservation || '—'}</td>
-                        <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{r.is_active ? 'Actif' : 'Inactif'}</span></td>
-                      </tr>
-                    ))}
-                    {registre.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Aucun traitement enregistré</td></tr>}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={registreColumns}
+                data={registre}
+                loading={false}
+                emptyIcon={Shield}
+                emptyMessage="Aucun traitement enregistré"
+              />
             )}
 
             {tab === 'droits' && (
@@ -167,33 +172,14 @@ export default function RGPD() {
             )}
 
             {tab === 'audit' && (
-              <div className="bg-white rounded-xl border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                    <tr>
-                      <th className="px-4 py-3 text-left">Date</th>
-                      <th className="px-4 py-3 text-left">Utilisateur</th>
-                      <th className="px-4 py-3 text-left">Action</th>
-                      <th className="px-4 py-3 text-left">Type</th>
-                      <th className="px-4 py-3 text-left">ID</th>
-                      <th className="px-4 py-3 text-left">Détails</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {audit.map(a => (
-                      <tr key={a.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-gray-500">{new Date(a.created_at).toLocaleString('fr-FR')}</td>
-                        <td className="px-4 py-3">{a.first_name} {a.last_name}</td>
-                        <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs font-medium">{a.action}</span></td>
-                        <td className="px-4 py-3">{a.entity_type}</td>
-                        <td className="px-4 py-3">{a.entity_id}</td>
-                        <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{a.details ? JSON.stringify(a.details) : '—'}</td>
-                      </tr>
-                    ))}
-                    {audit.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Aucune entrée</td></tr>}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={auditColumns}
+                data={audit}
+                loading={false}
+                emptyIcon={ScrollText}
+                emptyMessage="Aucune entrée"
+                dense
+              />
             )}
           </>
         )}
@@ -216,7 +202,7 @@ export default function RGPD() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Créer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
           </div>

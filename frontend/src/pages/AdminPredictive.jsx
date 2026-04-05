@@ -498,7 +498,7 @@ export default function AdminPredictive() {
                 {iaLoading ? 'Analyse en cours...' : 'Synthèse hebdomadaire'}
               </button>
               <button onClick={loadIaAjustements} disabled={iaLoading}
-                className="px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 disabled:opacity-50 transition-colors">
+                className="btn-primary text-sm">
                 {iaLoading ? 'Analyse en cours...' : 'Recommander ajustements'}
               </button>
             </div>
@@ -562,7 +562,7 @@ export default function AdminPredictive() {
                   </ul>
                 )}
                 <button onClick={appliquerAjustements}
-                  className="mt-2 px-4 py-2 rounded-lg bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 transition-colors">
+                  className="mt-2 btn-primary text-xs">
                   Appliquer les facteurs recommandés
                 </button>
                 <p className="text-[10px] text-slate-400">Les facteurs seront appliqués dans le formulaire ci-dessous. Enregistrez ensuite pour valider.</p>
@@ -794,7 +794,7 @@ export default function AdminPredictive() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Créer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
           </div>

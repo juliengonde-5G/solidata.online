@@ -310,26 +310,54 @@ case "${ACTION}" in
     log "=== MISE À JOUR SOLIDATA ==="
 
     # Backup avant update
-    log "Sauvegarde base de données..."
+    log "Étape 1/6 — Sauvegarde base de données..."
     bash deploy/scripts/backup.sh
 
     # Pull dernières modifications
-    log "Récupération du code..."
+    log "Étape 2/6 — Récupération du code..."
     git pull origin main
 
-    # Rebuild sans cache pour prendre en compte le nouveau code (évite que le frontend reste en cache)
-    log "Reconstruction des images (sans cache)..."
-    docker compose -f ${COMPOSE_FILE} build --no-cache
+    # Rebuild séquentiel sans cache (économise le disque sur DEV1-S)
+    log "Étape 3/6 — Reconstruction des images (sans cache)..."
+    log "  Build backend..."
+    docker compose -f ${COMPOSE_FILE} build --no-cache backend
+    docker image prune -f 2>/dev/null || true
+    log "  Build frontend..."
+    docker compose -f ${COMPOSE_FILE} build --no-cache frontend
+    docker image prune -f 2>/dev/null || true
+    log "  Build mobile..."
+    docker compose -f ${COMPOSE_FILE} build --no-cache mobile
+    docker image prune -f 2>/dev/null || true
 
-    log "Redémarrage des services..."
+    log "Étape 4/6 — Redémarrage des services..."
     docker compose -f ${COMPOSE_FILE} up -d
 
-    # Cleanup
-    log "Nettoyage images obsolètes..."
+    # Migrations base de données
+    log "Étape 5/6 — Migrations base de données..."
+    sleep 5
+    if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/init-db.js 2>/dev/null; then
+        log "init-db.js exécuté (tables + migrations)."
+    else
+        warn "init-db.js a échoué. Vérifiez les logs : docker compose -f ${COMPOSE_FILE} logs backend"
+    fi
+
+    # Cleanup + Health check
+    log "Étape 6/6 — Nettoyage et vérification..."
     docker image prune -f
+
+    # Health check
+    sleep 3
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://localhost/api/health 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ]; then
+        log "Health check API : OK (HTTP 200)"
+    else
+        warn "Health check API : HTTP ${HTTP_CODE} — vérifiez les logs backend"
+    fi
 
     log "=== MISE À JOUR TERMINÉE ==="
     docker compose -f ${COMPOSE_FILE} ps
+    log "Espace disque :"
+    df -h /
     ;;
 
   # ===============================

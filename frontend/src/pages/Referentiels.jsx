@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, DataTable } from '../components';
+import { Building2, Truck } from 'lucide-react';
 import api from '../services/api';
 
 export default function Referentiels() {
@@ -61,7 +62,7 @@ export default function Referentiels() {
             <p className="text-gray-500">Données de référence</p>
           </div>
           {view !== 'conteneurs' && (
-            <button onClick={() => { setForm({}); setShowForm(true); }} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
+            <button onClick={() => { setForm({}); setShowForm(true); }} className="btn-primary text-sm">
               + Ajouter
             </button>
           )}
@@ -78,60 +79,39 @@ export default function Referentiels() {
 
         {/* Associations */}
         {view === 'associations' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Nom</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Type</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Commune</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Contact</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {associations.map(a => (
-                  <tr key={a.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 text-sm font-medium">{a.nom}</td>
-                    <td className="p-3 text-sm text-gray-500">{a.type || '—'}</td>
-                    <td className="p-3 text-sm">{a.commune || '—'}</td>
-                    <td className="p-3 text-sm text-gray-500">{a.contact_nom || '—'} {a.contact_tel ? `(${a.contact_tel})` : ''}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${a.is_active !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {a.is_active !== false ? 'Actif' : 'Inactif'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              { key: 'nom', label: 'Nom', sortable: true, render: (a) => <span className="font-medium">{a.nom}</span> },
+              { key: 'type', label: 'Type', render: (a) => <span className="text-gray-500">{a.type || '—'}</span> },
+              { key: 'commune', label: 'Commune', sortable: true, render: (a) => a.commune || '—' },
+              { key: 'contact', label: 'Contact', render: (a) => <span className="text-gray-500">{a.contact_nom || '—'} {a.contact_tel ? `(${a.contact_tel})` : ''}</span> },
+              { key: 'is_active', label: 'Statut', render: (a) => (
+                <span className={`px-2 py-1 rounded text-xs font-medium ${a.is_active !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {a.is_active !== false ? 'Actif' : 'Inactif'}
+                </span>
+              )},
+            ]}
+            data={associations}
+            loading={false}
+            emptyIcon={Building2}
+            emptyMessage="Aucune association"
+          />
         )}
 
         {/* Débouchés */}
         {view === 'exutoires' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Nom</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Type</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Adresse</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Contact</th>
-                </tr>
-              </thead>
-              <tbody>
-                {exutoires.map(e => (
-                  <tr key={e.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 text-sm font-medium">{e.nom}</td>
-                    <td className="p-3 text-sm text-gray-500">{e.type || '—'}</td>
-                    <td className="p-3 text-sm">{e.adresse || '—'}</td>
-                    <td className="p-3 text-sm text-gray-500">{e.contact_nom || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              { key: 'nom', label: 'Nom', sortable: true, render: (e) => <span className="font-medium">{e.nom}</span> },
+              { key: 'type', label: 'Type', render: (e) => <span className="text-gray-500">{e.type || '—'}</span> },
+              { key: 'adresse', label: 'Adresse', render: (e) => e.adresse || '—' },
+              { key: 'contact_nom', label: 'Contact', render: (e) => <span className="text-gray-500">{e.contact_nom || '—'}</span> },
+            ]}
+            data={exutoires}
+            loading={false}
+            emptyIcon={Truck}
+            emptyMessage="Aucun débouché"
+          />
         )}
 
         {/* Catalogue */}
@@ -215,7 +195,7 @@ export default function Referentiels() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Créer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
           </div>

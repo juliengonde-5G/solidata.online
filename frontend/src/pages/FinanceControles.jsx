@@ -103,7 +103,7 @@ export default function FinanceControles() {
               </button>
               <button
                 onClick={handleExport}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 transition-colors"
+                className="btn-primary text-sm"
               >
                 <IconDownload className="w-4 h-4" />
                 Exporter

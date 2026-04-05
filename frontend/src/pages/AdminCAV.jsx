@@ -266,7 +266,7 @@ export default function AdminCAV() {
               className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
               {sheetDownloading === 'A8' ? 'Génération...' : 'Planche QR (A8)'}
             </button>
-            <button onClick={openCreate} className="bg-primary text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700">
+            <button onClick={openCreate} className="btn-primary text-sm">
               + Nouveau CAV
             </button>
           </div>
@@ -583,7 +583,7 @@ export default function AdminCAV() {
                     Annuler
                   </button>
                   <button onClick={handleSave} disabled={saving}
-                    className="bg-primary text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700 disabled:opacity-50">
+                    className="btn-primary text-sm">
                     {saving ? 'Enregistrement...' : editCav ? 'Enregistrer' : 'Créer le CAV'}
                   </button>
                 </div>

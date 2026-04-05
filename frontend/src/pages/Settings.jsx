@@ -513,7 +513,7 @@ export default function Settings() {
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <button type="button" onClick={() => setShowTemplateForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-                <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium">Creer</button>
+                <button type="submit" className="btn-primary text-sm">Creer</button>
               </div>
             </form>
           </div>
@@ -584,7 +584,7 @@ export default function Settings() {
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <button type="button" onClick={() => setShowTriggerForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-                <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium">Creer</button>
+                <button type="submit" className="btn-primary text-sm">Creer</button>
               </div>
             </form>
           </div>
@@ -676,7 +676,7 @@ export default function Settings() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Creer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Creer</button>
               </div>
             </form>
           </div>
@@ -698,7 +698,7 @@ export default function Settings() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowTemplateForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Créer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
           </div>

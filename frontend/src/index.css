@@ -77,6 +77,55 @@
   .btn-primary:active:not(:disabled) {
     transform: scale(0.98);
   }
+  .btn-primary:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  /* Bouton secondaire (outline) */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center font-medium rounded-button px-4 py-2.5 transition-all;
+    @apply border text-sm;
+    border-color: var(--color-border);
+    color: var(--color-text);
+    background: var(--color-surface);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--color-bg-subtle);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+  }
+  .btn-secondary:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+  .btn-secondary:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  /* Bouton danger */
+  .btn-danger {
+    @apply inline-flex items-center justify-center font-medium rounded-button px-4 py-2.5 transition-all;
+    @apply bg-red-600 text-white text-sm;
+  }
+  .btn-danger:hover:not(:disabled) {
+    @apply bg-red-700;
+    box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+  }
+  .btn-danger:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+  .btn-danger:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  /* Bouton ghost (texte seul) */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center font-medium rounded-button px-3 py-2 transition-all text-sm;
+    color: var(--color-text-muted);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--color-bg-subtle);
+    color: var(--color-text);
+  }
 
   /* Input cohérent */
   .input-modern {

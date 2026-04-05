@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { DataTable } from '../components';
+import { Clock } from 'lucide-react';
 import api from '../services/api';
 
 export default function WorkHours() {
@@ -56,6 +58,27 @@ export default function WorkHours() {
   const TYPE_LABELS = { normal: 'Normal', overtime: 'Heures sup.', absence: 'Absence', conge: 'Congé', maladie: 'Maladie' };
   const TYPE_COLORS = { normal: 'bg-blue-50 text-blue-700', overtime: 'bg-orange-50 text-orange-700', absence: 'bg-red-50 text-red-700', conge: 'bg-green-50 text-green-700', maladie: 'bg-yellow-50 text-yellow-700' };
 
+  const hoursColumns = [
+    { key: 'date', label: 'Date', sortable: true, render: (h) => <span className="font-medium">{new Date(h.date).toLocaleDateString('fr-FR')}</span> },
+    { key: 'start_time', label: 'Début', render: (h) => h.start_time || '—' },
+    { key: 'end_time', label: 'Fin', render: (h) => h.end_time || '—' },
+    { key: 'break_minutes', label: 'Pause', render: (h) => <span className="text-gray-500">{h.break_minutes}min</span> },
+    { key: 'type', label: 'Type', render: (h) => (
+      <span className={`px-2 py-1 rounded text-xs font-medium ${TYPE_COLORS[h.type] || 'bg-gray-50'}`}>
+        {TYPE_LABELS[h.type] || h.type}
+      </span>
+    )},
+    { key: 'validated', label: 'Validé', render: (h) => h.validated
+      ? <span className="text-green-600 text-xs font-medium">Validé</span>
+      : <span className="text-orange-500 text-xs font-medium">En attente</span>
+    },
+    { key: 'actions', label: '', render: (h) => !h.validated && (
+      <button onClick={() => validateHours(h.id)} className="text-primary text-xs font-medium hover:underline">
+        Valider
+      </button>
+    )},
+  ];
+
   return (
     <Layout>
       <div className="p-6">
@@ -64,7 +87,7 @@ export default function WorkHours() {
             <h1 className="text-2xl font-bold text-slate-800">Heures de travail</h1>
             <p className="text-gray-500">Suivi et validation des heures</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
+          <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
             + Saisir des heures
           </button>
         </div>
@@ -90,53 +113,14 @@ export default function WorkHours() {
 
         {/* Hours Table */}
         {selectedEmployee && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Début</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Fin</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Pause</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Type</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Validé</th>
-                  <th className="p-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {hours.map(h => (
-                  <tr key={h.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 text-sm font-medium">{new Date(h.date).toLocaleDateString('fr-FR')}</td>
-                    <td className="p-3 text-sm">{h.start_time || '—'}</td>
-                    <td className="p-3 text-sm">{h.end_time || '—'}</td>
-                    <td className="p-3 text-sm text-gray-500">{h.break_minutes}min</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${TYPE_COLORS[h.type] || 'bg-gray-50'}`}>
-                        {TYPE_LABELS[h.type] || h.type}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      {h.validated ? (
-                        <span className="text-green-600 text-xs font-medium">Validé</span>
-                      ) : (
-                        <span className="text-orange-500 text-xs font-medium">En attente</span>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      {!h.validated && (
-                        <button onClick={() => validateHours(h.id)} className="text-primary text-xs font-medium hover:underline">
-                          Valider
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {hours.length === 0 && (
-                  <tr><td colSpan="7" className="p-8 text-center text-gray-400">Aucune heure saisie pour cette période</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={hoursColumns}
+            data={hours}
+            loading={false}
+            emptyIcon={Clock}
+            emptyMessage="Aucune heure saisie pour cette période"
+            dense
+          />
         )}
 
         {!selectedEmployee && (
@@ -176,7 +160,7 @@ export default function WorkHours() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Enregistrer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Enregistrer</button>
               </div>
             </form>
           </div>

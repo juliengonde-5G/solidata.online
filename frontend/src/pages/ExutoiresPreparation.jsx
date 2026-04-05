@@ -210,7 +210,7 @@ export default function ExutoiresPreparation() {
             <h1 className="text-2xl font-bold text-slate-800">Préparation & Chargement</h1>
             <p className="text-gray-500 text-sm">Gestion des préparations et chargements</p>
           </div>
-          <button onClick={openCreate} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
+          <button onClick={openCreate} className="btn-primary text-sm">
             + Nouvelle préparation
           </button>
         </div>
@@ -562,7 +562,7 @@ export default function ExutoiresPreparation() {
 
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">
+                <button type="submit" className="flex-1 btn-primary text-sm">
                   {editing ? 'Enregistrer' : 'Créer'}
                 </button>
               </div>
@@ -604,7 +604,7 @@ export default function ExutoiresPreparation() {
                   type="button"
                   onClick={submitPesee}
                   disabled={!peseeValue}
-                  className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+                  className="flex-1 btn-primary text-sm"
                 >
                   Valider
                 </button>

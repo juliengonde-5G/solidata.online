@@ -180,7 +180,7 @@ export default function PlanningHebdo() {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={confirmerSemaine} disabled={confirming || provisoires === 0}
-              className="bg-primary text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700 disabled:opacity-50">
+              className="btn-primary text-sm">
               {confirming ? 'Confirmation...' : `Confirmer (${provisoires})`}
             </button>
           </div>

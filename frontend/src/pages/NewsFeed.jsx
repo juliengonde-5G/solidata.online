@@ -236,7 +236,7 @@ export default function NewsFeed() {
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-              <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium">Publier</button>
+              <button type="submit" className="btn-primary text-sm">Publier</button>
             </div>
           </form>
         </div>

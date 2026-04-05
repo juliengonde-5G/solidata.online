@@ -83,7 +83,7 @@ export default function FillRateMap() {
             <h1 className="text-2xl font-bold text-slate-800">Taux de remplissage CAV</h1>
             <p className="text-gray-500 text-sm">Estimation en temps réel et prévisions</p>
           </div>
-          <button onClick={loadData} className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/90">
+          <button onClick={loadData} className="btn-primary text-sm">
             Actualiser
           </button>
         </div>

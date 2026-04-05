@@ -266,7 +266,7 @@ export default function CollectionProposals() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => createTourFromProposal(p.vehicle_id, daily.drivers?.[0]?.id)}
-                        className="bg-primary text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-teal-700"
+                        className="btn-primary text-sm"
                       >
                         Créer cette tournée
                       </button>
@@ -367,7 +367,7 @@ export default function CollectionProposals() {
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <button onClick={() => setContextEdit(null)} className="px-4 py-2 rounded-lg border text-sm">Annuler</button>
-                <button onClick={saveContext} disabled={savingContext} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">Enregistrer</button>
+                <button onClick={saveContext} disabled={savingContext} className="btn-primary text-sm">Enregistrer</button>
               </div>
             </div>
           </div>

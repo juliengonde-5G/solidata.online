@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, DataTable } from '../components';
+import { Users } from 'lucide-react';
 import api from '../services/api';
 
 const CONTRACT_LABELS = {
@@ -199,7 +200,7 @@ export default function Employees() {
             <h1 className="text-2xl font-bold text-slate-800">Collaborateurs</h1>
             <p className="text-gray-500">{employees.length} collaborateur{employees.length > 1 ? 's' : ''}</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
+          <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
             + Nouveau collaborateur
           </button>
         </div>
@@ -217,53 +218,39 @@ export default function Employees() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Collaborateur</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Équipe</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Poste</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Contrat</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Heures/sem</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-              </tr>
-            </thead>
-            <tbody>
-              {employees.map(emp => (
-                <tr key={emp.id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => openDetail(emp)}>
-                  <td className="p-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">
-                        {emp.first_name?.[0]}{emp.last_name?.[0]}
-                      </div>
-                      <div>
-                        <p className="font-medium text-sm">{emp.first_name} {emp.last_name}</p>
-                        {emp.email && <p className="text-xs text-gray-400">{emp.email}</p>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-3 text-sm">{emp.team_name || '—'}</td>
-                  <td className="p-3 text-sm">{emp.position_name || '—'}</td>
-                  <td className="p-3">
-                    <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
-                      {CONTRACT_LABELS[emp.contract_type] || emp.contract_type || '—'}
-                    </span>
-                  </td>
-                  <td className="p-3 text-sm">{emp.weekly_hours || 35}h</td>
-                  <td className="p-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${emp.is_active !== false ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                      {emp.is_active !== false ? 'Actif' : 'Inactif'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {employees.length === 0 && (
-                <tr><td colSpan="6" className="p-8 text-center text-gray-400">Aucun collaborateur</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={[
+            { key: 'name', label: 'Collaborateur', sortable: true, render: (emp) => (
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">
+                  {emp.first_name?.[0]}{emp.last_name?.[0]}
+                </div>
+                <div>
+                  <p className="font-medium text-sm">{emp.first_name} {emp.last_name}</p>
+                  {emp.email && <p className="text-xs text-gray-400">{emp.email}</p>}
+                </div>
+              </div>
+            )},
+            { key: 'team_name', label: 'Équipe', sortable: true, render: (emp) => emp.team_name || '—' },
+            { key: 'position_name', label: 'Poste', sortable: true, render: (emp) => emp.position_name || '—' },
+            { key: 'contract_type', label: 'Contrat', render: (emp) => (
+              <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
+                {CONTRACT_LABELS[emp.contract_type] || emp.contract_type || '—'}
+              </span>
+            )},
+            { key: 'weekly_hours', label: 'Heures/sem', render: (emp) => `${emp.weekly_hours || 35}h` },
+            { key: 'is_active', label: 'Statut', render: (emp) => (
+              <span className={`px-2 py-1 rounded text-xs font-medium ${emp.is_active !== false ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                {emp.is_active !== false ? 'Actif' : 'Inactif'}
+              </span>
+            )},
+          ]}
+          data={employees}
+          loading={false}
+          onRowClick={openDetail}
+          emptyIcon={Users}
+          emptyMessage="Aucun collaborateur"
+        />
 
         {/* Detail Panel */}
         {selected && (
@@ -333,7 +320,7 @@ export default function Employees() {
                           <input type="file" accept="image/*" onChange={e => e.target.files[0] && handlePhotoUpload(selected.id, e.target.files[0])} className="text-xs" />
                         </div>
                         <p className="text-xs text-gray-400 mt-2">En mode modification, le prénom et le nom sont obligatoires pour enregistrer.</p>
-                        <button type="button" onClick={() => { setEditingEmployee(true); setEditError(''); }} className="mt-2 w-full bg-primary text-white rounded-lg py-2 text-sm font-medium hover:bg-primary/90">
+                        <button type="button" onClick={() => { setEditingEmployee(true); setEditError(''); }} className="mt-2 w-full btn-primary text-sm">
                           Modifier
                         </button>
                       </>
@@ -406,7 +393,7 @@ export default function Employees() {
                         </div>
                         <div className="flex gap-2 mt-4">
                           <button type="button" onClick={() => setEditingEmployee(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                          <button type="submit" form="employee-edit-form" disabled={saving} onClick={e => e.stopPropagation()} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">
+                          <button type="submit" form="employee-edit-form" disabled={saving} onClick={e => e.stopPropagation()} className="flex-1 btn-primary text-sm">
                             {saving ? 'Enregistrement…' : 'Enregistrer'}
                           </button>
                         </div>
@@ -418,7 +405,7 @@ export default function Employees() {
                 {/* Contracts tab */}
                 {detailTab === 'contracts' && (
                   <div className="space-y-4">
-                    <button onClick={() => setShowContractForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700">
+                    <button onClick={() => setShowContractForm(true)} className="btn-primary text-sm">
                       + Nouveau contrat
                     </button>
 
@@ -472,7 +459,7 @@ export default function Employees() {
                         </div>
                         <div className="flex gap-2">
                           <button type="button" onClick={() => setShowContractForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                          <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Ajouter</button>
+                          <button type="submit" className="flex-1 btn-primary text-sm">Ajouter</button>
                         </div>
                       </form>
                     )}
@@ -607,7 +594,7 @@ export default function Employees() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Créer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
           </div>

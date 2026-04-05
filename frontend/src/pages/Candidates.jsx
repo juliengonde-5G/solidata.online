@@ -399,7 +399,7 @@ export default function Candidates() {
               )}
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Créer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
           </Modal>
@@ -426,7 +426,7 @@ export default function Candidates() {
                   <input placeholder="Mois" value={posForm.month} onChange={e => setPosForm({...posForm, month: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" />
                   <input placeholder="Places" value={posForm.slots_open} onChange={e => setPosForm({...posForm, slots_open: parseInt(e.target.value) || 1})} className="border rounded-lg px-3 py-2 text-sm" type="number" />
                 </div>
-                <button type="submit" className="w-full bg-primary text-white rounded-lg py-2 text-sm font-medium">Ajouter</button>
+                <button type="submit" className="w-full btn-primary text-sm">Ajouter</button>
               </form>
             </div>
           </Modal>
@@ -469,7 +469,7 @@ function InfoView({ s, skills, positions, onMove, onConvert }) {
       </div>
       {s.status === 'hired' && !s.employee_id && (
         <div className="pt-3">
-          <button onClick={() => onConvert && onConvert(s)} className="w-full bg-primary text-white rounded-lg py-2 text-sm font-medium hover:bg-primary/90 flex items-center justify-center gap-2">
+          <button onClick={() => onConvert && onConvert(s)} className="w-full btn-primary text-sm flex items-center justify-center gap-2">
             <span>Créer un employé</span>
           </button>
         </div>
@@ -598,7 +598,7 @@ function EditForm({ ef, set, save, cancel, positions }) {
       <div><span className="text-gray-500 text-xs">Commentaire général</span><textarea value={ef.comment} onChange={e => u('comment', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} /></div>
       <div className="flex gap-2 mt-4">
         <button onClick={cancel} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-        <button onClick={save} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Enregistrer</button>
+        <button onClick={save} className="flex-1 btn-primary text-sm">Enregistrer</button>
       </div>
     </div>
   );
@@ -827,7 +827,7 @@ function InterviewFormView({ candidateId, data, onSaved }) {
 
       <div className="flex gap-2 pt-3">
         {data && <button onClick={() => setEditing(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>}
-        <button onClick={save} disabled={saving} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+        <button onClick={save} disabled={saving} className="flex-1 btn-primary text-sm">
           {saving ? 'Enregistrement...' : 'Enregistrer l\'entretien'}
         </button>
       </div>
@@ -931,7 +931,7 @@ function MiseEnSituationView({ candidateId, data, onSaved }) {
 
         <div className="flex gap-2 pt-2">
           <button onClick={() => setActiveType(null)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-          <button onClick={save} disabled={saving} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+          <button onClick={save} disabled={saving} className="flex-1 btn-primary text-sm">
             {saving ? 'Enregistrement...' : 'Enregistrer'}
           </button>
         </div>

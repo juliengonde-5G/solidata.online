@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, DataTable } from '../components';
+import { MapPin, Coins } from 'lucide-react';
 import api from '../services/api';
 
 export default function Refashion() {
@@ -109,75 +110,47 @@ export default function Refashion() {
         )}
 
         {view === 'communes' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Commune</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Code INSEE</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Population</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Nb CAV</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Convention</th>
-                </tr>
-              </thead>
-              <tbody>
-                {communes.map(c => (
-                  <tr key={c.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 text-sm font-medium">{c.nom}</td>
-                    <td className="p-3 text-sm text-gray-500">{c.code_insee}</td>
-                    <td className="p-3 text-sm">{c.population?.toLocaleString('fr-FR') || '—'}</td>
-                    <td className="p-3 text-sm">{c.nb_cav || 0}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${c.has_convention ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {c.has_convention ? 'Active' : 'Non'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {communes.length === 0 && (
-                  <tr><td colSpan="5" className="p-8 text-center text-gray-400">Aucune commune</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              { key: 'nom', label: 'Commune', sortable: true, render: (c) => <span className="font-medium">{c.nom}</span> },
+              { key: 'code_insee', label: 'Code INSEE', render: (c) => <span className="text-gray-500">{c.code_insee}</span> },
+              { key: 'population', label: 'Population', sortable: true, render: (c) => c.population?.toLocaleString('fr-FR') || '—' },
+              { key: 'nb_cav', label: 'Nb CAV', sortable: true, render: (c) => c.nb_cav || 0 },
+              { key: 'has_convention', label: 'Convention', render: (c) => (
+                <span className={`px-2 py-1 rounded text-xs font-medium ${c.has_convention ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {c.has_convention ? 'Active' : 'Non'}
+                </span>
+              )},
+            ]}
+            data={communes}
+            loading={false}
+            emptyIcon={MapPin}
+            emptyMessage="Aucune commune"
+          />
         )}
 
         {view === 'subventions' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Année</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Trimestre</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Montant (€)</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Date versement</th>
-                </tr>
-              </thead>
-              <tbody>
-                {subventions.map(s => (
-                  <tr key={s.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 text-sm">{s.year}</td>
-                    <td className="p-3 text-sm">Q{s.quarter}</td>
-                    <td className="p-3 text-sm font-medium text-primary">{parseFloat(s.montant || 0).toLocaleString('fr-FR')}€</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        s.status === 'paid' ? 'bg-green-100 text-green-700' :
-                        s.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-gray-100 text-gray-500'
-                      }`}>
-                        {s.status === 'paid' ? 'Versé' : s.status === 'pending' ? 'En attente' : s.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-sm text-gray-500">{s.date_versement ? new Date(s.date_versement).toLocaleDateString('fr-FR') : '—'}</td>
-                  </tr>
-                ))}
-                {subventions.length === 0 && (
-                  <tr><td colSpan="5" className="p-8 text-center text-gray-400">Aucune subvention</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              { key: 'year', label: 'Année', sortable: true },
+              { key: 'quarter', label: 'Trimestre', render: (s) => `Q${s.quarter}` },
+              { key: 'montant', label: 'Montant (€)', sortable: true, render: (s) => <span className="font-medium text-primary">{parseFloat(s.montant || 0).toLocaleString('fr-FR')}€</span> },
+              { key: 'status', label: 'Statut', render: (s) => (
+                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                  s.status === 'paid' ? 'bg-green-100 text-green-700' :
+                  s.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-gray-100 text-gray-500'
+                }`}>
+                  {s.status === 'paid' ? 'Versé' : s.status === 'pending' ? 'En attente' : s.status}
+                </span>
+              )},
+              { key: 'date_versement', label: 'Date versement', render: (s) => <span className="text-gray-500">{s.date_versement ? new Date(s.date_versement).toLocaleDateString('fr-FR') : '—'}</span> },
+            ]}
+            data={subventions}
+            loading={false}
+            emptyIcon={Coins}
+            emptyMessage="Aucune subvention"
+          />
         )}
       </div>
     </Layout>
