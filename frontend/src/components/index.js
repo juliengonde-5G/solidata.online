@@ -8,3 +8,4 @@ export { default as ModuleCard } from './ModuleCard';
 export { default as EmptyState } from './EmptyState';
 export { default as LoadingSpinner } from './LoadingSpinner';
 export { default as ConfirmDialog } from './ConfirmDialog';
+export { default as LoadingOverlay } from './LoadingOverlay';
