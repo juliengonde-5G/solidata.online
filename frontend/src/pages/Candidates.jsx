@@ -273,7 +273,7 @@ export default function Candidates() {
               </div>
             )}
             <button onClick={() => setShowPositionModal(true)} className="text-sm border border-gray-300 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-50">Postes ({positions.length})</button>
-            <button onClick={() => setShowAddModal(true)} className="text-sm bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 font-medium">+ Candidat</button>
+            <button onClick={() => setShowAddModal(true)} className="btn-primary text-sm">+ Candidat</button>
           </div>
         </div>
 
@@ -351,7 +351,7 @@ export default function Candidates() {
                   <span className={`inline-block text-xs text-white px-2 py-0.5 rounded mt-1 ${STATUS_COLORS[selected.status]?.badge}`}>{STATUS_LABELS[selected.status]}</span>
                 </div>
                 <div className="flex gap-1">
-                  {!editing && <button onClick={() => openEdit(selected)} className="text-xs bg-primary text-white px-3 py-1.5 rounded-lg">Modifier</button>}
+                  {!editing && <button onClick={() => openEdit(selected)} className="btn-primary text-xs">Modifier</button>}
                   <button onClick={() => deleteCandidate(selected.id)} className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg">Suppr.</button>
                   <button onClick={() => { setSelected(null); setEditing(false); }} className="text-gray-400 hover:text-gray-600 text-xl ml-2">&times;</button>
                 </div>
@@ -664,7 +664,7 @@ function InterviewFormView({ candidateId, data, onSaved }) {
       <div className="space-y-4 text-sm">
         <div className="flex justify-between items-center">
           <h3 className="font-bold text-base">Trame d'entretien</h3>
-          <button onClick={() => setEditing(true)} className="text-xs bg-primary text-white px-3 py-1.5 rounded-lg">Modifier</button>
+          <button onClick={() => setEditing(true)} className="btn-primary text-xs">Modifier</button>
         </div>
         {data.evaluation_globale && (
           <div className={`px-3 py-2 rounded-lg font-medium text-sm ${data.evaluation_globale === 'favorable' ? 'bg-green-50 text-green-700' : data.evaluation_globale === 'reserve' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'}`}>

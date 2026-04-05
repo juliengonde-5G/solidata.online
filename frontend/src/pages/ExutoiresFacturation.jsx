@@ -269,59 +269,30 @@ export default function ExutoiresFacturation() {
             </div>
 
             {/* Table */}
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Commande</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Client</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Type</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Pesée interne (t)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Pesée client (t)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Écart (t)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Écart (%)</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {controles.map(ctrl => {
-                    const statut = STATUTS_PESEE[ctrl.statut] || { label: ctrl.statut, color: 'bg-gray-100 text-gray-700' };
-                    return (
-                      <tr key={ctrl.id} className="border-t hover:bg-gray-50">
-                        <td className="p-3 text-sm font-medium font-mono">{ctrl.commande_reference || `#${ctrl.commande_id}`}</td>
-                        <td className="p-3 text-sm">{ctrl.client_nom || '—'}</td>
-                        <td className="p-3 text-sm">{ctrl.type_produit || '—'}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatTonnage(ctrl.pesee_interne)}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatTonnage(ctrl.pesee_client)}</td>
-                        <td className={`p-3 text-sm text-right font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatTonnage(ctrl.ecart)}</td>
-                        <td className={`p-3 text-sm text-right font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatPercent(ctrl.ecart_pct)}</td>
-                        <td className="p-3">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>
-                            {statut.label}
-                          </span>
-                        </td>
-                        <td className="p-3 text-sm">{formatDate(ctrl.date_reception_ticket)}</td>
-                        <td className="p-3">
-                          {ctrl.statut !== 'valide' && (
-                            <button
-                              onClick={() => validerControle(ctrl.id)}
-                              className="text-primary hover:underline text-sm font-medium"
-                            >
-                              Valider
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {controles.length === 0 && (
-                    <tr><td colSpan="10" className="p-8 text-center text-gray-400">Aucun contrôle de pesée</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={[
+                { key: 'commande_reference', label: 'Commande', render: (ctrl) => <span className="font-medium font-mono">{ctrl.commande_reference || `#${ctrl.commande_id}`}</span> },
+                { key: 'client_nom', label: 'Client', render: (ctrl) => ctrl.client_nom || '—' },
+                { key: 'type_produit', label: 'Type', render: (ctrl) => ctrl.type_produit || '—' },
+                { key: 'pesee_interne', label: 'Pesée interne (t)', align: 'right', render: (ctrl) => <span className="font-mono">{formatTonnage(ctrl.pesee_interne)}</span> },
+                { key: 'pesee_client', label: 'Pesée client (t)', align: 'right', render: (ctrl) => <span className="font-mono">{formatTonnage(ctrl.pesee_client)}</span> },
+                { key: 'ecart', label: 'Écart (t)', align: 'right', render: (ctrl) => <span className={`font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatTonnage(ctrl.ecart)}</span> },
+                { key: 'ecart_pct', label: 'Écart (%)', align: 'right', render: (ctrl) => <span className={`font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatPercent(ctrl.ecart_pct)}</span> },
+                { key: 'statut', label: 'Statut', render: (ctrl) => {
+                  const statut = STATUTS_PESEE[ctrl.statut] || { label: ctrl.statut, color: 'bg-gray-100 text-gray-700' };
+                  return <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>{statut.label}</span>;
+                }},
+                { key: 'date_reception_ticket', label: 'Date', render: (ctrl) => formatDate(ctrl.date_reception_ticket) },
+                { key: 'actions', label: 'Actions', render: (ctrl) => ctrl.statut !== 'valide' && (
+                  <button onClick={() => validerControle(ctrl.id)} className="text-primary hover:underline text-sm font-medium">Valider</button>
+                )},
+              ]}
+              data={controles}
+              loading={false}
+              emptyIcon={Scale}
+              emptyMessage="Aucun contrôle de pesée"
+              dense
+            />
           </>
         )}
 
@@ -336,70 +307,40 @@ export default function ExutoiresFacturation() {
             </div>
 
             {/* Table */}
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Commande</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Client</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Date OCR</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Tonnage OCR</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Montant OCR (€)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Montant attendu (€)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Écart (€)</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {factures.map(fac => {
-                    const statut = STATUTS_FACTURE[fac.statut] || { label: fac.statut, color: 'bg-gray-100 text-gray-700' };
-                    const ecartMontant = (fac.ocr_montant != null && fac.montant_attendu != null)
-                      ? parseFloat(fac.ocr_montant) - parseFloat(fac.montant_attendu)
-                      : null;
-                    return (
-                      <tr key={fac.id} className="border-t hover:bg-gray-50">
-                        <td className="p-3 text-sm font-medium font-mono">{fac.commande_reference || `#${fac.commande_id}`}</td>
-                        <td className="p-3 text-sm">{fac.client_nom || '—'}</td>
-                        <td className="p-3 text-sm">{formatDate(fac.ocr_date)}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatTonnage(fac.ocr_tonnage)}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatAmount(fac.ocr_montant)}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatAmount(fac.montant_attendu)}</td>
-                        <td className={`p-3 text-sm text-right font-mono ${ecartMontant != null && Math.abs(ecartMontant) > 0.01 ? 'text-red-600 font-semibold' : 'text-green-600'}`}>
-                          {ecartMontant != null ? ecartMontant.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €' : '—'}
-                        </td>
-                        <td className="p-3">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>
-                            {statut.label}
-                          </span>
-                        </td>
-                        <td className="p-3">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => openOcrModal(fac)}
-                              className="text-blue-600 hover:underline text-sm font-medium"
-                            >
-                              Corriger
-                            </button>
-                            {fac.statut !== 'validee' && (
-                              <button
-                                onClick={() => validerFacture(fac.id)}
-                                className="text-primary hover:underline text-sm font-medium"
-                              >
-                                Valider
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {factures.length === 0 && (
-                    <tr><td colSpan="9" className="p-8 text-center text-gray-400">Aucune facture logistique</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={[
+                { key: 'commande_reference', label: 'Commande', render: (fac) => <span className="font-medium font-mono">{fac.commande_reference || `#${fac.commande_id}`}</span> },
+                { key: 'client_nom', label: 'Client', render: (fac) => fac.client_nom || '—' },
+                { key: 'ocr_date', label: 'Date OCR', render: (fac) => formatDate(fac.ocr_date) },
+                { key: 'ocr_tonnage', label: 'Tonnage OCR', align: 'right', render: (fac) => <span className="font-mono">{formatTonnage(fac.ocr_tonnage)}</span> },
+                { key: 'ocr_montant', label: 'Montant OCR (€)', align: 'right', render: (fac) => <span className="font-mono">{formatAmount(fac.ocr_montant)}</span> },
+                { key: 'montant_attendu', label: 'Montant attendu (€)', align: 'right', render: (fac) => <span className="font-mono">{formatAmount(fac.montant_attendu)}</span> },
+                { key: 'ecart', label: 'Écart (€)', align: 'right', render: (fac) => {
+                  const ecartMontant = (fac.ocr_montant != null && fac.montant_attendu != null)
+                    ? parseFloat(fac.ocr_montant) - parseFloat(fac.montant_attendu) : null;
+                  return <span className={`font-mono ${ecartMontant != null && Math.abs(ecartMontant) > 0.01 ? 'text-red-600 font-semibold' : 'text-green-600'}`}>
+                    {ecartMontant != null ? ecartMontant.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €' : '—'}
+                  </span>;
+                }},
+                { key: 'statut', label: 'Statut', render: (fac) => {
+                  const statut = STATUTS_FACTURE[fac.statut] || { label: fac.statut, color: 'bg-gray-100 text-gray-700' };
+                  return <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>{statut.label}</span>;
+                }},
+                { key: 'actions', label: 'Actions', render: (fac) => (
+                  <div className="flex gap-2">
+                    <button onClick={() => openOcrModal(fac)} className="text-blue-600 hover:underline text-sm font-medium">Corriger</button>
+                    {fac.statut !== 'validee' && (
+                      <button onClick={() => validerFacture(fac.id)} className="text-primary hover:underline text-sm font-medium">Valider</button>
+                    )}
+                  </div>
+                )},
+              ]}
+              data={factures}
+              loading={false}
+              emptyIcon={FileText}
+              emptyMessage="Aucune facture logistique"
+              dense
+            />
           </>
         )}
 

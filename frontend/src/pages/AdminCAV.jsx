@@ -486,7 +486,7 @@ export default function AdminCAV() {
                       <img src={detailQrUrl} alt={`QR CAV ${detailCav.id}`} className="mx-auto w-36 h-36 object-contain mb-2" />
                       <p className="text-xs text-gray-400 font-mono break-all mb-3">{detailCav.qr_code_data}</p>
                       <button onClick={() => downloadQR(detailCav)}
-                        className="bg-primary text-white rounded-lg px-4 py-2 text-xs hover:bg-green-700 w-full">
+                        className="btn-primary text-xs w-full">
                         Télécharger PNG
                       </button>
                       <p className="text-xs text-amber-600 mt-2">QR code définitif — ne peut pas être modifié</p>

@@ -526,7 +526,7 @@ export default function Settings() {
               <h2 className="font-semibold">Declencheurs automatiques</h2>
               <p className="text-xs text-gray-400 mt-0.5">Definir quand envoyer automatiquement un email ou SMS</p>
             </div>
-            <button onClick={() => setShowTriggerForm(true)} className="bg-primary text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-primary/90">+ Declencheur</button>
+            <button onClick={() => setShowTriggerForm(true)} className="btn-primary text-xs">+ Declencheur</button>
           </div>
           <div className="divide-y">
             {triggers.length === 0 ? (
@@ -601,7 +601,7 @@ export default function Settings() {
               <button onClick={() => setObjAnnee(objAnnee - 1)} className="text-gray-400 hover:text-gray-600 px-1">&lt;</button>
               <span className="font-bold text-sm">{objAnnee}</span>
               <button onClick={() => setObjAnnee(objAnnee + 1)} className="text-gray-400 hover:text-gray-600 px-1">&gt;</button>
-              <button onClick={() => setShowObjForm(true)} className="ml-3 bg-primary text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-primary/90">+ Objectif</button>
+              <button onClick={() => setShowObjForm(true)} className="ml-3 btn-primary text-xs">+ Objectif</button>
             </div>
           </div>
           {objectives.length === 0 ? (
