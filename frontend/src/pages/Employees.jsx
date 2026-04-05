@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const CONTRACT_LABELS = {
@@ -188,17 +189,17 @@ export default function Employees() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des employés..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Collaborateurs</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Collaborateurs</h1>
             <p className="text-gray-500">{employees.length} collaborateur{employees.length > 1 ? 's' : ''}</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+          <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
             + Nouveau collaborateur
           </button>
         </div>
@@ -233,7 +234,7 @@ export default function Employees() {
                 <tr key={emp.id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => openDetail(emp)}>
                   <td className="p-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-solidata-green/20 text-solidata-green flex items-center justify-center text-xs font-bold">
+                      <div className="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">
                         {emp.first_name?.[0]}{emp.last_name?.[0]}
                       </div>
                       <div>
@@ -271,7 +272,7 @@ export default function Employees() {
               {/* Header */}
               <div className="sticky top-0 bg-white border-b px-5 py-3 z-10 flex justify-between items-center">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-solidata-green to-emerald-600 text-white flex items-center justify-center text-lg font-bold">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-emerald-600 text-white flex items-center justify-center text-lg font-bold">
                     {selected.first_name?.[0]}{selected.last_name?.[0]}
                   </div>
                   <div>
@@ -292,7 +293,7 @@ export default function Employees() {
                 ].map(t => (
                   <button key={t.key} onClick={() => setDetailTab(t.key)}
                     className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
-                      detailTab === t.key ? 'border-solidata-green text-solidata-green' : 'border-transparent text-gray-500'
+                      detailTab === t.key ? 'border-primary text-primary' : 'border-transparent text-gray-500'
                     }`}>
                     {t.label}
                   </button>
@@ -321,7 +322,7 @@ export default function Employees() {
                         {candidateData?.cv_file_path && (
                           <div className="mt-3">
                             <label className="text-xs text-gray-500 block mb-1">CV du candidat</label>
-                            <a href={`/api/candidates/${selected.candidate_id}/download-cv`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-solidata-green hover:underline font-medium">
+                            <a href={`/api/candidates/${selected.candidate_id}/download-cv`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline font-medium">
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                               Telecharger le CV
                             </a>
@@ -332,7 +333,7 @@ export default function Employees() {
                           <input type="file" accept="image/*" onChange={e => e.target.files[0] && handlePhotoUpload(selected.id, e.target.files[0])} className="text-xs" />
                         </div>
                         <p className="text-xs text-gray-400 mt-2">En mode modification, le prénom et le nom sont obligatoires pour enregistrer.</p>
-                        <button type="button" onClick={() => { setEditingEmployee(true); setEditError(''); }} className="mt-2 w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90">
+                        <button type="button" onClick={() => { setEditingEmployee(true); setEditError(''); }} className="mt-2 w-full bg-primary text-white rounded-lg py-2 text-sm font-medium hover:bg-primary/90">
                           Modifier
                         </button>
                       </>
@@ -405,7 +406,7 @@ export default function Employees() {
                         </div>
                         <div className="flex gap-2 mt-4">
                           <button type="button" onClick={() => setEditingEmployee(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                          <button type="submit" form="employee-edit-form" disabled={saving} onClick={e => e.stopPropagation()} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90 disabled:opacity-50 disabled:cursor-not-allowed">
+                          <button type="submit" form="employee-edit-form" disabled={saving} onClick={e => e.stopPropagation()} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">
                             {saving ? 'Enregistrement…' : 'Enregistrer'}
                           </button>
                         </div>
@@ -417,7 +418,7 @@ export default function Employees() {
                 {/* Contracts tab */}
                 {detailTab === 'contracts' && (
                   <div className="space-y-4">
-                    <button onClick={() => setShowContractForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-solidata-green-dark">
+                    <button onClick={() => setShowContractForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700">
                       + Nouveau contrat
                     </button>
 
@@ -471,7 +472,7 @@ export default function Employees() {
                         </div>
                         <div className="flex gap-2">
                           <button type="button" onClick={() => setShowContractForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                          <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Ajouter</button>
+                          <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Ajouter</button>
                         </div>
                       </form>
                     )}
@@ -479,16 +480,16 @@ export default function Employees() {
                     {/* Contracts list */}
                     <div className="space-y-2">
                       {contracts.map(c => (
-                        <div key={c.id} className={`border rounded-xl p-4 text-sm ${c.is_current ? 'border-solidata-green bg-solidata-green/5' : 'border-gray-200'}`}>
+                        <div key={c.id} className={`border rounded-xl p-4 text-sm ${c.is_current ? 'border-primary bg-primary/5' : 'border-gray-200'}`}>
                           <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-2">
-                              <span className={`px-2 py-0.5 rounded text-xs font-bold ${c.is_current ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}>
+                              <span className={`px-2 py-0.5 rounded text-xs font-bold ${c.is_current ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
                                 {CONTRACT_LABELS[c.contract_type] || c.contract_type}
                               </span>
                               <span className={`text-xs px-2 py-0.5 rounded ${c.origin === 'embauche' ? 'bg-blue-50 text-blue-600' : 'bg-yellow-50 text-yellow-600'}`}>
                                 {c.origin === 'embauche' ? 'Embauche' : 'Renouvellement'}
                               </span>
-                              {c.is_current && <span className="text-xs text-solidata-green font-medium">En cours</span>}
+                              {c.is_current && <span className="text-xs text-primary font-medium">En cours</span>}
                             </div>
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
@@ -606,7 +607,7 @@ export default function Employees() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Créer</button>
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Créer</button>
               </div>
             </form>
           </div>

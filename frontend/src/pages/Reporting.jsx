@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -25,14 +26,14 @@ export default function Reporting() {
     setLoading(false);
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Reporting</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Reporting</h1>
             <p className="text-gray-500">Tableau de bord et indicateurs</p>
           </div>
           <select value={period} onChange={e => setPeriod(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
@@ -46,7 +47,7 @@ export default function Reporting() {
         {/* KPI Cards */}
         {dashboard && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <KPICard label="Tonnage collecté" value={`${dashboard.collecte_tonnage?.toFixed(1) || 0}t`} icon="♻️" color="text-solidata-green" />
+            <KPICard label="Tonnage collecté" value={`${dashboard.collecte_tonnage?.toFixed(1) || 0}t`} icon="♻️" color="text-primary" />
             <KPICard label="CO₂ économisé" value={`${dashboard.co2_saved?.toFixed(0) || 0} kg`} icon="🌿" color="text-green-600" />
             <KPICard label="Candidatures" value={dashboard.candidates_count || 0} icon="👥" color="text-blue-600" />
             <KPICard label="Collaborateurs" value={dashboard.employees_count || 0} icon="🏢" color="text-purple-600" />

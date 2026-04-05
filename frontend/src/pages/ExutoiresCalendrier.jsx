@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -260,10 +261,7 @@ export default function ExutoiresCalendrier() {
             </div>
 
             {loading ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-                <span className="ml-3 text-gray-500">Chargement...</span>
-              </div>
+              <LoadingSpinner size="lg" message="Chargement du calendrier..." />
             ) : viewMode === 'mensuel' ? (
               /* Monthly calendar grid */
               <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">

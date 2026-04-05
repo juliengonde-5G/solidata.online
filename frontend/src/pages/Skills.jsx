@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const SKILL_CATEGORIES = {
@@ -54,21 +55,21 @@ export default function Skills() {
     return acc;
   }, {});
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des compétences..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Compétences</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Compétences</h1>
             <p className="text-gray-500">Matrice des compétences — {employees.length} collaborateurs</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setView('matrix')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'matrix' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>
+            <button onClick={() => setView('matrix')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'matrix' ? 'bg-primary text-white' : 'bg-gray-100'}`}>
               Matrice
             </button>
-            <button onClick={() => setView('bySkill')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'bySkill' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>
+            <button onClick={() => setView('bySkill')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'bySkill' ? 'bg-primary text-white' : 'bg-gray-100'}`}>
               Par compétence
             </button>
           </div>
@@ -79,7 +80,7 @@ export default function Skills() {
             {Object.entries(SKILL_CATEGORIES).map(([key, cat]) => (
               <div
                 key={key}
-                className={`bg-white rounded-xl shadow-sm border p-4 cursor-pointer hover:shadow-md transition ${selectedSkill === key ? 'ring-2 ring-solidata-green' : ''}`}
+                className={`bg-white rounded-xl shadow-sm border p-4 cursor-pointer hover:shadow-md transition ${selectedSkill === key ? 'ring-2 ring-primary' : ''}`}
                 onClick={() => setSelectedSkill(selectedSkill === key ? null : key)}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -128,7 +129,7 @@ export default function Skills() {
                       return (
                         <td key={key} className="p-2 text-center">
                           {hasSkill ? (
-                            <span className="inline-block w-5 h-5 rounded-full bg-solidata-green text-white text-[10px] leading-5">✓</span>
+                            <span className="inline-block w-5 h-5 rounded-full bg-primary text-white text-[10px] leading-5">✓</span>
                           ) : (
                             <span className="inline-block w-5 h-5 rounded-full bg-gray-100 text-gray-300 text-[10px] leading-5">—</span>
                           )}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -70,18 +71,18 @@ export default function NewsFeed() {
 
   const formatDate = (d) => new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des actualités..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6 max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Fil d'actualite</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Fil d'actualite</h1>
             <p className="text-gray-500 text-sm">Veille reglementaire, actualite filiere textile et nouvelles locales</p>
           </div>
           {isAdmin && (
-            <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-solidata-green/90">
+            <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-primary/90">
               + Publier
             </button>
           )}
@@ -152,7 +153,7 @@ export default function NewsFeed() {
                     {hasMore && (
                       <button
                         onClick={() => setExpandedArticle(isExpanded ? null : article.id)}
-                        className="text-sm text-solidata-green hover:text-solidata-green/80 font-medium flex items-center gap-1 transition"
+                        className="text-sm text-primary hover:text-primary/80 font-medium flex items-center gap-1 transition"
                       >
                         {isExpanded ? (
                           <>
@@ -221,7 +222,7 @@ export default function NewsFeed() {
                 <div className="flex flex-wrap gap-1">
                   {TAG_SUGGESTIONS.map(tag => (
                     <button key={tag} type="button" onClick={() => toggleTag(tag)}
-                      className={`px-2 py-1 rounded text-xs transition ${form.tags.includes(tag) ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                      className={`px-2 py-1 rounded text-xs transition ${form.tags.includes(tag) ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
                       #{tag}
                     </button>
                   ))}
@@ -235,7 +236,7 @@ export default function NewsFeed() {
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-              <button type="submit" className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm font-medium">Publier</button>
+              <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium">Publier</button>
             </div>
           </form>
         </div>

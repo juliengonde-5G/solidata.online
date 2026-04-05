@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const LIEUX = {
@@ -198,7 +199,7 @@ export default function ExutoiresPreparation() {
     return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des préparations..." /></Layout>;
 
   return (
     <Layout>
@@ -206,10 +207,10 @@ export default function ExutoiresPreparation() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Préparation & Chargement</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Préparation & Chargement</h1>
             <p className="text-gray-500 text-sm">Gestion des préparations et chargements</p>
           </div>
-          <button onClick={openCreate} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+          <button onClick={openCreate} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
             + Nouvelle préparation
           </button>
         </div>
@@ -263,7 +264,7 @@ export default function ExutoiresPreparation() {
                 {/* Status badge */}
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-solidata-dark truncate">
+                    <p className="text-sm font-bold text-slate-800 truncate">
                       {prep.commande_reference || `CMD-${prep.commande_id}`}
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">
@@ -316,7 +317,7 @@ export default function ExutoiresPreparation() {
                       <span
                         key={i}
                         title={nom}
-                        className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-solidata-green/10 text-solidata-green text-xs font-bold"
+                        className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold"
                       >
                         {getInitials(nom)}
                       </span>
@@ -328,7 +329,7 @@ export default function ExutoiresPreparation() {
                 {prep.pesee_interne != null && (
                   <div className="text-sm">
                     <span className="text-gray-500">Pesée interne :</span>{' '}
-                    <span className="font-semibold text-solidata-dark">{prep.pesee_interne} t</span>
+                    <span className="font-semibold text-slate-800">{prep.pesee_interne} t</span>
                   </div>
                 )}
 
@@ -407,7 +408,7 @@ export default function ExutoiresPreparation() {
                     <>
                       <button
                         onClick={() => openEdit(prep)}
-                        className="text-gray-400 hover:text-solidata-green p-1"
+                        className="text-gray-400 hover:text-primary p-1"
                         title="Modifier"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -535,7 +536,7 @@ export default function ExutoiresPreparation() {
                           type="checkbox"
                           checked={form.collaborateurs.includes(emp.id)}
                           onChange={() => toggleCollaborateur(emp.id)}
-                          className="rounded border-gray-300 text-solidata-green focus:ring-solidata-green"
+                          className="rounded border-gray-300 text-primary focus:ring-primary"
                         />
                         <span>{emp.prenom} {emp.nom}</span>
                       </label>
@@ -561,7 +562,7 @@ export default function ExutoiresPreparation() {
 
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">
                   {editing ? 'Enregistrer' : 'Créer'}
                 </button>
               </div>
@@ -603,7 +604,7 @@ export default function ExutoiresPreparation() {
                   type="button"
                   onClick={submitPesee}
                   disabled={!peseeValue}
-                  className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+                  className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
                 >
                   Valider
                 </button>

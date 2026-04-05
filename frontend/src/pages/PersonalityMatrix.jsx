@@ -226,12 +226,12 @@ export default function PersonalityMatrix() {
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Matrice PCM</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Matrice PCM</h1>
             <p className="text-gray-500">Process Communication Model — 6 types de personnalite</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>Profils</button>
-            <button onClick={() => setView('types')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'types' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>Types PCM</button>
+            <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Profils</button>
+            <button onClick={() => setView('types')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'types' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Types PCM</button>
           </div>
         </div>
 
@@ -267,7 +267,7 @@ export default function PersonalityMatrix() {
                     </td>
                     <td className="p-3 text-xs text-gray-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</td>
                     <td className="p-3">
-                      <button onClick={() => loadProfile(p.candidate_id)} className="text-solidata-green text-xs font-medium hover:underline">
+                      <button onClick={() => loadProfile(p.candidate_id)} className="text-primary text-xs font-medium hover:underline">
                         Voir profil
                       </button>
                     </td>
@@ -309,11 +309,11 @@ export default function PersonalityMatrix() {
         {view === 'profile' && selectedProfile && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <button onClick={() => setView('list')} className="text-solidata-green text-sm hover:underline">← Retour a la liste</button>
+              <button onClick={() => setView('list')} className="text-primary text-sm hover:underline">← Retour a la liste</button>
               <div className="flex gap-2">
                 <button
                   onClick={handleExportResults}
-                  className="px-3 py-1.5 rounded-lg text-sm bg-solidata-green text-white hover:opacity-90 flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-lg text-sm bg-primary text-white hover:opacity-90 flex items-center gap-1.5"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                   Export resultats
@@ -373,7 +373,7 @@ export default function PersonalityMatrix() {
             {/* Comportements principaux selon le profil */}
             {selectedProfile.report.comportementsPrincipaux && (
               <div className="bg-white rounded-xl shadow-sm border p-6">
-                <h3 className="font-semibold text-solidata-dark mb-4">Comportements principaux</h3>
+                <h3 className="font-semibold text-slate-800 mb-4">Comportements principaux</h3>
                 <div className="grid grid-cols-1 md:grid-cols-1 gap-4 space-y-3">
                   <div>
                     <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Avec les autres</h4>

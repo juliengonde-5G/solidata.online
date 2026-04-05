@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
@@ -67,14 +68,14 @@ export default function LiveVehicles() {
 
   const center = [49.4231, 1.0993];
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des véhicules..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Suivi en direct</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Suivi en direct</h1>
             <p className="text-gray-500">{activeTours.length} tournée{activeTours.length > 1 ? 's' : ''} en cours</p>
           </div>
           <div className="flex items-center gap-2">

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Plus } from 'lucide-react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -107,7 +109,7 @@ export default function ExutoiresTarifs() {
     return c ? c.raison_sociale : `Client #${clientId}`;
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des tarifs..." /></Layout>;
 
   return (
     <Layout>
@@ -115,17 +117,18 @@ export default function ExutoiresTarifs() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Grille Tarifaire Logistique</h1>
-            <p className="text-gray-500">Gestion des prix de référence et négociés</p>
+            <h1 className="text-2xl font-bold text-slate-800">Grille Tarifaire Logistique</h1>
+            <p className="text-slate-500">Gestion des prix de référence et négociés</p>
           </div>
-          <button onClick={openCreate} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
-            + Nouveau tarif
+          <button onClick={openCreate} className="btn-primary text-sm">
+            <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+            Nouveau tarif
           </button>
         </div>
 
         {/* Prix de référence */}
         <div className="mb-8">
-          <h2 className="text-lg font-semibold text-solidata-dark mb-4">Prix de référence</h2>
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">Prix de référence</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {Object.keys(TYPES_PRODUIT).map(type => {
               const tarif = prixReference.find(t => t.type_produit === type);
@@ -146,12 +149,12 @@ export default function ExutoiresTarifs() {
                       <div className={`text-2xl font-bold ${colors.text}`}>
                         {parseFloat(tarif.prix_reference_tonne).toFixed(2)} <span className="text-sm font-normal">€/t</span>
                       </div>
-                      <div className="text-xs text-gray-500 mt-2">
+                      <div className="text-xs text-slate-500 mt-2">
                         Depuis le {new Date(tarif.date_debut).toLocaleDateString('fr-FR')}
                       </div>
                     </>
                   ) : (
-                    <div className="text-sm text-gray-400 italic">Non défini</div>
+                    <div className="text-sm text-slate-400 italic">Non défini</div>
                   )}
                 </div>
               );
@@ -161,29 +164,29 @@ export default function ExutoiresTarifs() {
 
         {/* Prix négociés par client */}
         <div>
-          <h2 className="text-lg font-semibold text-solidata-dark mb-4">Prix négociés par client</h2>
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">Prix négociés par client</h2>
           <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
+              <thead className="bg-slate-50 border-b">
                 <tr>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Client</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Type produit</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">Prix (€/t)</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Date début</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Date fin</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Client</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Type produit</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Prix (€/t)</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Date début</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Date fin</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {prixNegocies.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400">Aucun prix négocié</td>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-400">Aucun prix négocié</td>
                   </tr>
                 ) : (
                   prixNegocies.map(t => {
                     const colors = TYPE_COLORS[t.type_produit] || {};
                     return (
-                      <tr key={t.id} className="hover:bg-gray-50">
+                      <tr key={t.id} className="hover:bg-slate-50">
                         <td className="px-4 py-3 font-medium">{getClientName(t.client_id)}</td>
                         <td className="px-4 py-3">
                           <span className={`text-xs font-semibold px-2 py-1 rounded-full ${colors.badge}`}>
@@ -193,14 +196,14 @@ export default function ExutoiresTarifs() {
                         <td className="px-4 py-3 text-right font-mono font-medium">
                           {parseFloat(t.prix_reference_tonne).toFixed(2)}
                         </td>
-                        <td className="px-4 py-3 text-gray-600">
+                        <td className="px-4 py-3 text-slate-600">
                           {new Date(t.date_debut).toLocaleDateString('fr-FR')}
                         </td>
-                        <td className="px-4 py-3 text-gray-600">
+                        <td className="px-4 py-3 text-slate-600">
                           {t.date_fin ? new Date(t.date_fin).toLocaleDateString('fr-FR') : '—'}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <button onClick={() => openEdit(t)} className="text-solidata-green hover:underline text-sm mr-3">
+                          <button onClick={() => openEdit(t)} className="text-primary hover:underline text-sm mr-3">
                             Modifier
                           </button>
                           <button onClick={() => handleDelete(t.id)} className="text-red-500 hover:underline text-sm">
@@ -220,17 +223,17 @@ export default function ExutoiresTarifs() {
         {showModal && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-              <h2 className="text-lg font-bold text-solidata-dark mb-4">
+              <h2 className="text-lg font-bold text-slate-800 mb-4">
                 {editing ? 'Modifier le tarif' : 'Nouveau tarif'}
               </h2>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Type de produit</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Type de produit</label>
                   <select
                     value={form.type_produit}
                     onChange={e => setForm({ ...form, type_produit: e.target.value })}
                     required
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solidata-green focus:border-solidata-green"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
                   >
                     <option value="">Sélectionner...</option>
                     {Object.entries(TYPES_PRODUIT).map(([key, label]) => (
@@ -240,24 +243,24 @@ export default function ExutoiresTarifs() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Prix (€/tonne)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Prix (€/tonne)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={form.prix_reference_tonne}
                     onChange={e => setForm({ ...form, prix_reference_tonne: e.target.value })}
                     required
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solidata-green focus:border-solidata-green"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
                     placeholder="0.00"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Client</label>
                   <select
                     value={form.client_id}
                     onChange={e => setForm({ ...form, client_id: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solidata-green focus:border-solidata-green"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
                   >
                     <option value="">Prix de référence (aucun client)</option>
                     {clients.map(c => (
@@ -267,23 +270,23 @@ export default function ExutoiresTarifs() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date début</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date début</label>
                   <input
                     type="date"
                     value={form.date_debut}
                     onChange={e => setForm({ ...form, date_debut: e.target.value })}
                     required
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solidata-green focus:border-solidata-green"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date fin <span className="text-gray-400">(optionnel)</span></label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date fin <span className="text-slate-400">(optionnel)</span></label>
                   <input
                     type="date"
                     value={form.date_fin}
                     onChange={e => setForm({ ...form, date_fin: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solidata-green focus:border-solidata-green"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
                   />
                 </div>
 
@@ -291,13 +294,13 @@ export default function ExutoiresTarifs() {
                   <button
                     type="button"
                     onClick={() => { setShowModal(false); resetForm(); }}
-                    className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                    className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800"
                   >
                     Annuler
                   </button>
                   <button
                     type="submit"
-                    className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium"
+                    className="btn-primary text-sm"
                   >
                     {editing ? 'Enregistrer' : 'Créer'}
                   </button>

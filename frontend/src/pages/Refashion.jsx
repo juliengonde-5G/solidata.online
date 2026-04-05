@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 export default function Refashion() {
@@ -34,23 +35,23 @@ export default function Refashion() {
     for (let q = 4; q >= 1; q--) quarters.push(`${y}-Q${q}`);
   }
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Refashion</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Refashion</h1>
             <p className="text-gray-500">DPAV trimestriel, communes et subventions</p>
           </div>
           <div className="flex gap-2">
             <select value={quarter} onChange={e => setQuarter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
               {quarters.map(q => <option key={q} value={q}>{q}</option>)}
             </select>
-            <button onClick={() => setView('dpav')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'dpav' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>DPAV</button>
-            <button onClick={() => setView('communes')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'communes' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>Communes</button>
-            <button onClick={() => setView('subventions')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'subventions' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>Subventions</button>
+            <button onClick={() => setView('dpav')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'dpav' ? 'bg-primary text-white' : 'bg-gray-100'}`}>DPAV</button>
+            <button onClick={() => setView('communes')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'communes' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Communes</button>
+            <button onClick={() => setView('subventions')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'subventions' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Subventions</button>
           </div>
         </div>
 
@@ -66,11 +67,11 @@ export default function Refashion() {
             </div>
 
             {/* Total */}
-            <div className="bg-solidata-green/10 border border-solidata-green/30 rounded-xl p-6">
+            <div className="bg-primary/10 border border-primary/30 rounded-xl p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">Total subvention estimée — {quarter}</p>
-                  <p className="text-3xl font-bold text-solidata-green">{(dpav.total_subvention || 0).toLocaleString('fr-FR')} €</p>
+                  <p className="text-3xl font-bold text-primary">{(dpav.total_subvention || 0).toLocaleString('fr-FR')} €</p>
                 </div>
                 <div className="text-right text-sm text-gray-500">
                   <p>Tonnage total : {(dpav.total_t || 0).toFixed(1)}t</p>
@@ -97,7 +98,7 @@ export default function Refashion() {
                         <td className="p-3 text-sm font-medium">{d.categorie}</td>
                         <td className="p-3 text-sm">{d.tonnage?.toFixed(2)}</td>
                         <td className="p-3 text-sm text-gray-500">{d.taux}€</td>
-                        <td className="p-3 text-sm font-medium text-solidata-green">{d.subvention?.toLocaleString('fr-FR')}€</td>
+                        <td className="p-3 text-sm font-medium text-primary">{d.subvention?.toLocaleString('fr-FR')}€</td>
                       </tr>
                     ))}
                   </tbody>
@@ -158,7 +159,7 @@ export default function Refashion() {
                   <tr key={s.id} className="border-t hover:bg-gray-50">
                     <td className="p-3 text-sm">{s.year}</td>
                     <td className="p-3 text-sm">Q{s.quarter}</td>
-                    <td className="p-3 text-sm font-medium text-solidata-green">{parseFloat(s.montant || 0).toLocaleString('fr-FR')}€</td>
+                    <td className="p-3 text-sm font-medium text-primary">{parseFloat(s.montant || 0).toLocaleString('fr-FR')}€</td>
                     <td className="p-3">
                       <span className={`px-2 py-1 rounded text-xs font-medium ${
                         s.status === 'paid' ? 'bg-green-100 text-green-700' :

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const TARIF_TYPES = [
@@ -221,7 +222,7 @@ export default function Settings() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des paramètres..." /></Layout>;
 
   // Group tarifs by type
   const tarifsByType = {};
@@ -234,14 +235,14 @@ export default function Settings() {
     <Layout>
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-solidata-dark">Paramètres</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Paramètres</h1>
           <p className="text-gray-500">Configuration de l'application</p>
         </div>
 
         {/* État du système */}
         {health && (
           <div className="bg-white rounded-xl shadow-sm border p-6 mb-8">
-            <h2 className="font-semibold text-solidata-dark mb-4">État du système</h2>
+            <h2 className="font-semibold text-slate-800 mb-4">État du système</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatusItem label="API" active={health.status === 'ok'} />
               <StatusItem label="Base de données" active={health.database?.connected} />
@@ -262,7 +263,7 @@ export default function Settings() {
                 <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               </div>
               <div>
-                <h2 className="font-semibold text-solidata-dark">Connexion Pennylane</h2>
+                <h2 className="font-semibold text-slate-800">Connexion Pennylane</h2>
                 <p className="text-xs text-gray-400">Comptabilite — synchronisation factures</p>
               </div>
             </div>
@@ -364,7 +365,7 @@ export default function Settings() {
                 ) : (
                   <div className="flex items-center gap-3">
                     <span className="text-sm text-gray-600 font-mono bg-gray-50 px-2 py-1 rounded">{s.value}</span>
-                    <button onClick={() => setEditSetting(s.key)} className="text-solidata-green text-xs hover:underline">Modifier</button>
+                    <button onClick={() => setEditSetting(s.key)} className="text-primary text-xs hover:underline">Modifier</button>
                   </div>
                 )}
               </div>
@@ -398,7 +399,7 @@ export default function Settings() {
                       {tt.parClient && <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] rounded">par client</span>}
                       {tt.parTrimestre && <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] rounded">par trimestre</span>}
                     </div>
-                    <button onClick={() => openTarifEdit(tt.key)} className="text-solidata-green text-xs font-medium hover:underline">+ Ajouter</button>
+                    <button onClick={() => openTarifEdit(tt.key)} className="text-primary text-xs font-medium hover:underline">+ Ajouter</button>
                   </div>
 
                   {rows.length > 0 ? (
@@ -456,7 +457,7 @@ export default function Settings() {
                         <label className="text-[10px] text-gray-500 block mb-0.5">Prix €/tonne</label>
                         <input type="number" step="0.01" min="0" value={tarifForm.prix_tonne} onChange={e => setTarifForm({ ...tarifForm, prix_tonne: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required placeholder="0.00" />
                       </div>
-                      <button type="submit" className="bg-solidata-green text-white rounded px-3 py-1.5 text-sm">OK</button>
+                      <button type="submit" className="bg-primary text-white rounded px-3 py-1.5 text-sm">OK</button>
                       <button type="button" onClick={() => setEditTarif(null)} className="text-gray-400 text-sm px-2 py-1.5">Annuler</button>
                     </form>
                   )}
@@ -470,7 +471,7 @@ export default function Settings() {
         <div className="bg-white rounded-xl shadow-sm border">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <h2 className="font-semibold">Modèles de messages</h2>
-            <button onClick={() => setShowTemplateForm(true)} className="text-solidata-green text-sm font-medium hover:underline">+ Ajouter</button>
+            <button onClick={() => setShowTemplateForm(true)} className="text-primary text-sm font-medium hover:underline">+ Ajouter</button>
           </div>
           <div className="divide-y">
             {templates.map(t => (
@@ -512,7 +513,7 @@ export default function Settings() {
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <button type="button" onClick={() => setShowTemplateForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-                <button type="submit" className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm font-medium">Creer</button>
+                <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium">Creer</button>
               </div>
             </form>
           </div>
@@ -525,7 +526,7 @@ export default function Settings() {
               <h2 className="font-semibold">Declencheurs automatiques</h2>
               <p className="text-xs text-gray-400 mt-0.5">Definir quand envoyer automatiquement un email ou SMS</p>
             </div>
-            <button onClick={() => setShowTriggerForm(true)} className="bg-solidata-green text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-solidata-green/90">+ Declencheur</button>
+            <button onClick={() => setShowTriggerForm(true)} className="bg-primary text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-primary/90">+ Declencheur</button>
           </div>
           <div className="divide-y">
             {triggers.length === 0 ? (
@@ -583,7 +584,7 @@ export default function Settings() {
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <button type="button" onClick={() => setShowTriggerForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-                <button type="submit" className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm font-medium">Creer</button>
+                <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium">Creer</button>
               </div>
             </form>
           </div>
@@ -600,7 +601,7 @@ export default function Settings() {
               <button onClick={() => setObjAnnee(objAnnee - 1)} className="text-gray-400 hover:text-gray-600 px-1">&lt;</button>
               <span className="font-bold text-sm">{objAnnee}</span>
               <button onClick={() => setObjAnnee(objAnnee + 1)} className="text-gray-400 hover:text-gray-600 px-1">&gt;</button>
-              <button onClick={() => setShowObjForm(true)} className="ml-3 bg-solidata-green text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-solidata-green/90">+ Objectif</button>
+              <button onClick={() => setShowObjForm(true)} className="ml-3 bg-primary text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-primary/90">+ Objectif</button>
             </div>
           </div>
           {objectives.length === 0 ? (
@@ -622,7 +623,7 @@ export default function Settings() {
                               {obj.periode === 'mensuel' && obj.mois ? `Mois ${obj.mois}` : obj.periode === 'trimestriel' && obj.trimestre ? `T${obj.trimestre}` : obj.periode}
                             </span>
                           </div>
-                          <span className="font-bold text-sm text-solidata-green mr-3">{obj.valeur_cible} {obj.unite}</span>
+                          <span className="font-bold text-sm text-primary mr-3">{obj.valeur_cible} {obj.unite}</span>
                           <button onClick={() => deleteObjective(obj.id)} className="text-red-400 hover:text-red-600 text-xs">Suppr.</button>
                         </div>
                       ))}
@@ -675,7 +676,7 @@ export default function Settings() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Creer</button>
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Creer</button>
               </div>
             </form>
           </div>
@@ -697,7 +698,7 @@ export default function Settings() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowTemplateForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Créer</button>
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Créer</button>
               </div>
             </form>
           </div>

@@ -83,7 +83,7 @@ export default function RGPD() {
             <p className="text-sm text-gray-500">Gestion de la protection des données personnelles</p>
           </div>
           {tab === 'registre' && (
-            <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-solidata-green/90">
+            <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90">
               Nouveau traitement
             </button>
           )}
@@ -104,7 +104,7 @@ export default function RGPD() {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-solidata-green" /></div>
+          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
         ) : (
           <>
             {tab === 'registre' && (
@@ -216,7 +216,7 @@ export default function RGPD() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Créer</button>
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Créer</button>
               </div>
             </form>
           </div>

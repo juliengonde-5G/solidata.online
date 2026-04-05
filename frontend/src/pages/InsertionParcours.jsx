@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const URGENCY_COLORS = {
@@ -602,7 +603,7 @@ export default function InsertionParcours() {
             )}
 
             {selectedEmployee && loading && (
-              <div className="bg-white rounded-lg border p-8 text-center text-gray-400">Chargement...</div>
+              <LoadingSpinner size="lg" message="Chargement des parcours..." />
             )}
 
             {selectedEmployee && !loading && analysis && (

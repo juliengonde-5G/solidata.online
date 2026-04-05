@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const FILIERE_COLORS = {
@@ -166,7 +167,7 @@ export default function PlanningHebdo() {
 
   const weekLabel = `${formatDateShort(dates[0])} — ${formatDateShort(dates[5])}`;
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement du planning..." /></Layout>;
 
   return (
     <Layout>
@@ -174,12 +175,12 @@ export default function PlanningHebdo() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-solidata-dark">Planning hebdomadaire</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Planning hebdomadaire</h1>
             <p className="text-sm text-gray-500">Affectation des salaries par poste et filiere</p>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={confirmerSemaine} disabled={confirming || provisoires === 0}
-              className="bg-solidata-green text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700 disabled:opacity-50">
+              className="bg-primary text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700 disabled:opacity-50">
               {confirming ? 'Confirmation...' : `Confirmer (${provisoires})`}
             </button>
           </div>
@@ -350,8 +351,8 @@ export default function PlanningHebdo() {
             <div className="p-2">
               {pickerLoading ? (
                 <div className="py-8 text-center text-gray-400">
-                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-solidata-green border-t-transparent mx-auto mb-2" />
-                  Chargement...
+                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent mx-auto mb-2" />
+                  Chargement du planning...
                 </div>
               ) : availableEmps.length === 0 ? (
                 <div className="py-8 text-center text-gray-400 text-sm">
@@ -370,7 +371,7 @@ export default function PlanningHebdo() {
                           : 'hover:bg-gray-50 active:bg-gray-100'
                       }`}
                     >
-                      <div className="w-8 h-8 rounded-full bg-solidata-green/10 text-solidata-green flex items-center justify-center text-xs font-bold flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
                         {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
                       </div>
                       <div className="flex-1 min-w-0">

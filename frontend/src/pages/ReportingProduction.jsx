@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 export default function ReportingProduction() {
@@ -18,7 +19,7 @@ export default function ReportingProduction() {
     setLoading(false);
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement..." /></Layout>;
 
   const summary = dashboard?.summary || {};
   const daily = dashboard?.daily || [];
@@ -31,7 +32,7 @@ export default function ReportingProduction() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Reporting Production</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Reporting Production</h1>
             <p className="text-gray-500">KPI de production et tri</p>
           </div>
           <input
@@ -44,13 +45,13 @@ export default function ReportingProduction() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <KPICard label="Total mois" value={`${summary.total_mois_t || 0} t`} icon="🏭" color="text-solidata-green" />
+          <KPICard label="Total mois" value={`${summary.total_mois_t || 0} t`} icon="🏭" color="text-primary" />
           <KPICard label="Objectif mensuel" value={`${objectif} t`} icon="🎯" color="text-blue-600" />
           <KPICard
             label="Atteinte objectif"
             value={`${atteinte}%`}
             icon={atteinte >= 100 ? '✅' : '⚠️'}
-            color={atteinte >= 100 ? 'text-solidata-green' : atteinte >= 80 ? 'text-orange-500' : 'text-red-500'}
+            color={atteinte >= 100 ? 'text-primary' : atteinte >= 80 ? 'text-orange-500' : 'text-red-500'}
           />
           <KPICard label="Productivite moy." value={`${summary.productivite_moyenne || 0} kg/pers`} icon="📊" color="text-purple-600" />
         </div>
@@ -58,7 +59,7 @@ export default function ReportingProduction() {
         {/* Summary table */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           <div className="bg-white rounded-xl shadow-sm border p-4">
-            <h3 className="font-semibold text-solidata-dark mb-3">Resume du mois</h3>
+            <h3 className="font-semibold text-slate-800 mb-3">Resume du mois</h3>
             <table className="w-full text-sm">
               <tbody>
                 <tr className="border-b">
@@ -87,7 +88,7 @@ export default function ReportingProduction() {
 
           {/* Progress toward target */}
           <div className="bg-white rounded-xl shadow-sm border p-4">
-            <h3 className="font-semibold text-solidata-dark mb-3">Progression vers objectif</h3>
+            <h3 className="font-semibold text-slate-800 mb-3">Progression vers objectif</h3>
             <div className="flex flex-col items-center justify-center h-full gap-4 py-4">
               <div className="relative w-40 h-40">
                 <svg className="w-40 h-40 transform -rotate-90" viewBox="0 0 120 120">
@@ -106,7 +107,7 @@ export default function ReportingProduction() {
                 </div>
               </div>
               <div className="text-center text-sm text-gray-600">
-                <p><span className="font-semibold text-solidata-dark">{summary.total_mois_t || 0} t</span> / {objectif} t</p>
+                <p><span className="font-semibold text-slate-800">{summary.total_mois_t || 0} t</span> / {objectif} t</p>
               </div>
             </div>
           </div>
@@ -115,7 +116,7 @@ export default function ReportingProduction() {
         {/* Daily KPI table */}
         <div className="bg-white rounded-xl shadow-sm border">
           <div className="p-4 border-b">
-            <h3 className="font-semibold text-solidata-dark">Detail journalier</h3>
+            <h3 className="font-semibold text-slate-800">Detail journalier</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -142,15 +143,15 @@ export default function ReportingProduction() {
                       <tr key={i} className="border-t hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium">{new Date(row.date).toLocaleDateString('fr-FR')}</td>
                         <td className="px-4 py-3 text-right">{row.effectif_reel}</td>
-                        <td className={`px-4 py-3 text-right font-semibold ${ligneOk ? 'text-solidata-green' : 'text-red-500'}`}>
+                        <td className={`px-4 py-3 text-right font-semibold ${ligneOk ? 'text-primary' : 'text-red-500'}`}>
                           {Number(row.entree_ligne_kg).toLocaleString('fr-FR')}
                         </td>
                         <td className="px-4 py-3 text-right text-gray-400">{Number(row.objectif_entree_ligne_kg).toLocaleString('fr-FR')}</td>
-                        <td className={`px-4 py-3 text-right font-semibold ${r3Ok ? 'text-solidata-green' : 'text-red-500'}`}>
+                        <td className={`px-4 py-3 text-right font-semibold ${r3Ok ? 'text-primary' : 'text-red-500'}`}>
                           {Number(row.entree_recyclage_r3_kg).toLocaleString('fr-FR')}
                         </td>
                         <td className="px-4 py-3 text-right text-gray-400">{Number(row.objectif_entree_r3_kg).toLocaleString('fr-FR')}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-solidata-green">{row.total_jour_t}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-primary">{row.total_jour_t}</td>
                         <td className="px-4 py-3 text-right">{row.productivite_kg_per} kg/pers</td>
                       </tr>
                     );
@@ -166,7 +167,7 @@ export default function ReportingProduction() {
                     <td className="px-4 py-3 text-right">-</td>
                     <td className="px-4 py-3 text-right">{Number(summary.total_entree_r3_kg || 0).toLocaleString('fr-FR')}</td>
                     <td className="px-4 py-3 text-right">-</td>
-                    <td className="px-4 py-3 text-right text-solidata-green">{summary.total_mois_t} t</td>
+                    <td className="px-4 py-3 text-right text-primary">{summary.total_mois_t} t</td>
                     <td className="px-4 py-3 text-right">{summary.productivite_moyenne} kg/pers</td>
                   </tr>
                 </tfoot>

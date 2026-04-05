@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 export default function Referentiels() {
@@ -42,7 +43,7 @@ export default function Referentiels() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des référentiels..." /></Layout>;
 
   const tabs = [
     { key: 'associations', label: 'Associations', count: associations.length },
@@ -56,11 +57,11 @@ export default function Referentiels() {
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Référentiels</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Référentiels</h1>
             <p className="text-gray-500">Données de référence</p>
           </div>
           {view !== 'conteneurs' && (
-            <button onClick={() => { setForm({}); setShowForm(true); }} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+            <button onClick={() => { setForm({}); setShowForm(true); }} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
               + Ajouter
             </button>
           )}
@@ -69,7 +70,7 @@ export default function Referentiels() {
         {/* Tabs */}
         <div className="flex gap-2 mb-6">
           {tabs.map(t => (
-            <button key={t.key} onClick={() => setView(t.key)} className={`px-3 py-1.5 rounded-lg text-sm ${view === t.key ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>
+            <button key={t.key} onClick={() => setView(t.key)} className={`px-3 py-1.5 rounded-lg text-sm ${view === t.key ? 'bg-primary text-white' : 'bg-gray-100'}`}>
               {t.label} ({t.count})
             </button>
           ))}
@@ -214,7 +215,7 @@ export default function Referentiels() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Créer</button>
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Créer</button>
               </div>
             </form>
           </div>

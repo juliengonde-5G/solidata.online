@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Factory, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
+import { DataTable } from '../components';
 import api from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
@@ -43,18 +45,39 @@ export default function Production() {
     total: d.total_jour_t || 0,
   }));
 
+  const columns = [
+    { key: 'date', label: 'Date', sortable: true, render: (d) => <span className="font-medium">{new Date(d.date).toLocaleDateString('fr-FR')}</span> },
+    { key: 'effectif_reel', label: 'Effectif', sortable: true },
+    {
+      key: 'entree_ligne_kg',
+      label: 'Entrée Ligne (kg)',
+      sortable: true,
+      render: (d) => (
+        <span className={d.entree_ligne_kg >= d.objectif_entree_ligne_kg ? 'text-green-600 font-medium' : 'text-red-500'}>
+          {d.entree_ligne_kg}
+        </span>
+      ),
+    },
+    { key: 'objectif_entree_ligne_kg', label: 'Obj. Ligne', render: (d) => <span className="text-slate-400">{d.objectif_entree_ligne_kg}</span> },
+    { key: 'entree_recyclage_r3_kg', label: 'Entrée R3 (kg)', sortable: true },
+    { key: 'total_jour_t', label: 'Total (t)', sortable: true, render: (d) => <span className="font-medium">{d.total_jour_t?.toFixed(2)}</span> },
+    { key: 'productivite', label: 'Productivité', sortable: true, render: (d) => `${d.productivite_kg_per?.toFixed(0)} kg/p` },
+    { key: 'encadrant', label: 'Encadrant', render: (d) => <span className="text-slate-500">{d.encadrant || '—'}</span> },
+  ];
+
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Production</h1>
-            <p className="text-gray-500">Suivi quotidien — KPI de production</p>
+            <h1 className="text-2xl font-bold text-slate-800">Production</h1>
+            <p className="text-slate-500">Suivi quotidien — KPI de production</p>
           </div>
           <div className="flex gap-2">
             <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-            <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
-              + Saisie du jour
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+              <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+              Saisie du jour
             </button>
           </div>
         </div>
@@ -62,7 +85,7 @@ export default function Production() {
         {/* Dashboard KPIs */}
         {dashboard && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <KPICard label="Total mois (t)" value={dashboard.total_month_t?.toFixed(1) || '0'} target={dashboard.objectif_mensuel_t} color="text-solidata-green" />
+            <KPICard label="Total mois (t)" value={dashboard.total_month_t?.toFixed(1) || '0'} target={dashboard.objectif_mensuel_t} color="text-primary" />
             <KPICard label="Moy. productivité" value={`${dashboard.avg_productivite?.toFixed(0) || '0'} kg/pers`} color="text-blue-600" />
             <KPICard label="Jours saisis" value={dashboard.nb_jours || 0} color="text-purple-600" />
             <KPICard label="Effectif moyen" value={dashboard.avg_effectif?.toFixed(1) || '0'} color="text-orange-600" />
@@ -70,7 +93,7 @@ export default function Production() {
         )}
 
         {/* Chart */}
-        <div className="bg-white rounded-xl shadow-sm border p-4 mb-6">
+        <div className="card-modern p-4 mb-6">
           <h3 className="font-semibold mb-3">Entrées quotidiennes (kg)</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={chartData}>
@@ -86,43 +109,14 @@ export default function Production() {
         </div>
 
         {/* Data Table */}
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Effectif</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Entrée Ligne (kg)</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Obj. Ligne</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Entrée R3 (kg)</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Total (t)</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Productivité</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Encadrant</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map(d => (
-                <tr key={d.id} className="border-t hover:bg-gray-50">
-                  <td className="p-3 text-sm font-medium">{new Date(d.date).toLocaleDateString('fr-FR')}</td>
-                  <td className="p-3 text-sm">{d.effectif_reel}</td>
-                  <td className="p-3 text-sm">
-                    <span className={d.entree_ligne_kg >= d.objectif_entree_ligne_kg ? 'text-green-600 font-medium' : 'text-red-500'}>
-                      {d.entree_ligne_kg}
-                    </span>
-                  </td>
-                  <td className="p-3 text-sm text-gray-400">{d.objectif_entree_ligne_kg}</td>
-                  <td className="p-3 text-sm">{d.entree_recyclage_r3_kg}</td>
-                  <td className="p-3 text-sm font-medium">{d.total_jour_t?.toFixed(2)}</td>
-                  <td className="p-3 text-sm">{d.productivite_kg_per?.toFixed(0)} kg/p</td>
-                  <td className="p-3 text-sm text-gray-500">{d.encadrant || '—'}</td>
-                </tr>
-              ))}
-              {data.length === 0 && (
-                <tr><td colSpan="8" className="p-8 text-center text-gray-400">Aucune donnée pour ce mois</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={columns}
+          data={data}
+          loading={false}
+          emptyIcon={Factory}
+          emptyMessage="Aucune donnée pour ce mois"
+          dense
+        />
 
         {/* Form */}
         {showForm && (
@@ -144,7 +138,7 @@ export default function Production() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Enregistrer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Enregistrer</button>
               </div>
             </form>
           </div>
@@ -156,10 +150,10 @@ export default function Production() {
 
 function KPICard({ label, value, target, color }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-4">
-      <p className="text-xs text-gray-500">{label}</p>
+    <div className="card-modern p-4">
+      <p className="text-xs text-slate-500">{label}</p>
       <p className={`text-2xl font-bold ${color}`}>{value}</p>
-      {target && <p className="text-xs text-gray-400">Objectif : {target}t</p>}
+      {target && <p className="text-xs text-slate-400">Objectif : {target}t</p>}
     </div>
   );
 }

@@ -82,19 +82,19 @@ export default function CollectionProposals() {
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Propositions de collecte</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Propositions de collecte</h1>
             <p className="text-gray-500">Prédictions journalières et hebdomadaires — météo, trafic, apprentissage continu</p>
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => setView('daily')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'daily' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-700'}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'daily' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'}`}
             >
               Jour
             </button>
             <button
               onClick={() => setView('weekly')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'weekly' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-700'}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'weekly' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'}`}
             >
               Semaine
             </button>
@@ -126,7 +126,7 @@ export default function CollectionProposals() {
 
         {loading && (
           <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-10 w-10 border-2 border-solidata-green border-t-transparent" />
+            <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary border-t-transparent" />
           </div>
         )}
 
@@ -139,7 +139,7 @@ export default function CollectionProposals() {
                   <h3 className="font-semibold text-gray-700">Références du calcul prédictif</h3>
                   <button
                     onClick={() => setContextEdit({ date, weather_factor: daily.context?.weatherFactor ?? 1, traffic_factor: daily.context?.trafficFactor ?? 1, duration_factor: daily.context?.durationFactor ?? 1, notes: '' })}
-                    className="text-solidata-green text-xs font-medium hover:underline"
+                    className="text-primary text-xs font-medium hover:underline"
                   >
                     Modifier le contexte
                   </button>
@@ -266,7 +266,7 @@ export default function CollectionProposals() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => createTourFromProposal(p.vehicle_id, daily.drivers?.[0]?.id)}
-                        className="bg-solidata-green text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-solidata-green-dark"
+                        className="bg-primary text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-teal-700"
                       >
                         Créer cette tournée
                       </button>
@@ -367,7 +367,7 @@ export default function CollectionProposals() {
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <button onClick={() => setContextEdit(null)} className="px-4 py-2 rounded-lg border text-sm">Annuler</button>
-                <button onClick={saveContext} disabled={savingContext} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">Enregistrer</button>
+                <button onClick={saveContext} disabled={savingContext} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">Enregistrer</button>
               </div>
             </div>
           </div>

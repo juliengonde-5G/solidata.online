@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Route, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
+import { DataTable, LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const STATUS_LABELS = { planned: 'Planifiée', in_progress: 'En cours', completed: 'Terminée', cancelled: 'Annulée' };
@@ -76,42 +78,85 @@ export default function Tours() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des tournées..." /></Layout>;
+
+  const columns = [
+    { key: 'date', label: 'Date', sortable: true, render: (t) => <span className="font-medium">{new Date(t.date).toLocaleDateString('fr-FR')}</span> },
+    { key: 'vehicle', label: 'Véhicule', sortable: true, render: (t) => t.registration || t.vehicle_registration || '—' },
+    { key: 'driver', label: 'Chauffeur', sortable: true, render: (t) => t.driver_name || [t.driver_first_name, t.driver_last_name].filter(Boolean).join(' ') || '—' },
+    {
+      key: 'mode',
+      label: 'Mode',
+      sortable: true,
+      render: (t) => (
+        <span className={`px-2 py-1 rounded text-xs font-medium ${t.mode === 'intelligent' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-700'}`}>
+          {MODE_LABELS[t.mode] || t.mode}
+        </span>
+      ),
+    },
+    { key: 'nb_cav', label: 'CAV', sortable: true, render: (t) => t.nb_cav || 0 },
+    { key: 'total_weight_kg', label: 'Poids (kg)', sortable: true, render: (t) => <span className="font-medium">{t.total_weight_kg || 0}</span> },
+    {
+      key: 'status',
+      label: 'Statut',
+      sortable: true,
+      render: (t) => (
+        <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[t.status] || ''}`}>
+          {STATUS_LABELS[t.status] || t.status}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '',
+      render: (t) => (
+        <div className="flex gap-2">
+          <button onClick={() => loadTourDetail(t.id)} className="text-primary text-xs font-medium hover:underline">Détails</button>
+          {t.status === 'planned' && (
+            <button onClick={() => updateStatus(t.id, 'in_progress')} className="text-orange-500 text-xs font-medium hover:underline">Démarrer</button>
+          )}
+          {t.status === 'in_progress' && (
+            <button onClick={() => updateStatus(t.id, 'completed')} className="text-green-500 text-xs font-medium hover:underline">Terminer</button>
+          )}
+        </div>
+      ),
+    },
+  ];
 
   return (
     <Layout>
       <div className="p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-solidata-dark">Tournées de collecte</h1>
-            <p className="text-gray-500 text-sm">Planification et suivi des tournées</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Tournées de collecte</h1>
+            <p className="text-slate-500 text-sm">Planification et suivi des tournées</p>
           </div>
           <button onClick={openWizard} className="btn-primary text-sm font-medium w-full sm:w-auto">
-            + Nouvelle tournée
+            <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+            Nouvelle tournée
           </button>
         </div>
 
-        {/* Tours List — Cards on mobile, Table on desktop */}
         {/* Mobile cards */}
         <div className="lg:hidden space-y-3">
           {tours.length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">Aucune tournée</div>
+            <div className="card-modern p-8 text-center text-slate-400">Aucune tournée</div>
           ) : tours.map(t => (
-            <div key={t.id} className="bg-white rounded-xl shadow-sm border p-4" onClick={() => loadTourDetail(t.id)}>
+            <div key={t.id} className="card-modern p-4" onClick={() => loadTourDetail(t.id)}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-bold">{new Date(t.date).toLocaleDateString('fr-FR')}</span>
                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[t.status] || ''}`}>
                   {STATUS_LABELS[t.status] || t.status}
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-gray-700 mb-1">
+              <div className="flex items-center gap-2 text-sm text-slate-700 mb-1">
                 <span className="font-medium">{t.registration || t.vehicle_registration || '—'}</span>
                 {t.mode === 'intelligent' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700">IA</span>}
               </div>
-              <p className="text-xs text-gray-500 mb-2">{t.driver_name || [t.driver_first_name, t.driver_last_name].filter(Boolean).join(' ') || 'Pas de chauffeur'}</p>
-              <div className="flex items-center justify-between text-xs text-gray-500">
+              <p className="text-xs text-slate-500 mb-2">{t.driver_name || [t.driver_first_name, t.driver_last_name].filter(Boolean).join(' ') || 'Pas de chauffeur'}</p>
+              <div className="flex items-center justify-between text-xs text-slate-500">
                 <span>{t.nb_cav || 0} CAV</span>
-                <span className="font-medium text-gray-700">{t.total_weight_kg || 0} kg</span>
+                <span className="font-medium text-slate-700">{t.total_weight_kg || 0} kg</span>
               </div>
               <div className="flex gap-2 mt-3 pt-3 border-t">
                 {t.status === 'planned' && (
@@ -120,63 +165,21 @@ export default function Tours() {
                 {t.status === 'in_progress' && (
                   <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'completed'); }} className="flex-1 text-center py-2 rounded-lg bg-green-50 text-green-600 text-xs font-medium">Terminer</button>
                 )}
-                <button onClick={(e) => { e.stopPropagation(); loadTourDetail(t.id); }} className="flex-1 text-center py-2 rounded-lg bg-gray-50 text-solidata-green text-xs font-medium">Détails</button>
+                <button onClick={(e) => { e.stopPropagation(); loadTourDetail(t.id); }} className="flex-1 text-center py-2 rounded-lg bg-slate-50 text-primary text-xs font-medium">Détails</button>
               </div>
             </div>
           ))}
         </div>
 
         {/* Desktop table */}
-        <div className="hidden lg:block bg-white rounded-xl shadow-sm border overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Véhicule</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Chauffeur</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Mode</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">CAV</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Poids (kg)</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-                <th className="p-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {tours.map(t => (
-                <tr key={t.id} className="border-t hover:bg-gray-50">
-                  <td className="p-3 text-sm font-medium">{new Date(t.date).toLocaleDateString('fr-FR')}</td>
-                  <td className="p-3 text-sm">{t.registration || t.vehicle_registration || '—'}</td>
-                  <td className="p-3 text-sm">{t.driver_name || [t.driver_first_name, t.driver_last_name].filter(Boolean).join(' ') || '—'}</td>
-                  <td className="p-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${t.mode === 'intelligent' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`}>
-                      {MODE_LABELS[t.mode] || t.mode}
-                    </span>
-                  </td>
-                  <td className="p-3 text-sm">{t.nb_cav || 0}</td>
-                  <td className="p-3 text-sm font-medium">{t.total_weight_kg || 0}</td>
-                  <td className="p-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[t.status] || ''}`}>
-                      {STATUS_LABELS[t.status] || t.status}
-                    </span>
-                  </td>
-                  <td className="p-3">
-                    <div className="flex gap-2">
-                      <button onClick={() => loadTourDetail(t.id)} className="text-solidata-green text-xs font-medium hover:underline">Détails</button>
-                      {t.status === 'planned' && (
-                        <button onClick={() => updateStatus(t.id, 'in_progress')} className="text-orange-500 text-xs font-medium hover:underline">Démarrer</button>
-                      )}
-                      {t.status === 'in_progress' && (
-                        <button onClick={() => updateStatus(t.id, 'completed')} className="text-green-500 text-xs font-medium hover:underline">Terminer</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {tours.length === 0 && (
-                <tr><td colSpan="8" className="p-8 text-center text-gray-400">Aucune tournée</td></tr>
-              )}
-            </tbody>
-          </table>
+        <div className="hidden lg:block">
+          <DataTable
+            columns={columns}
+            data={tours}
+            loading={false}
+            emptyIcon={Route}
+            emptyMessage="Aucune tournée"
+          />
         </div>
 
         {/* Wizard Modal */}
@@ -185,13 +188,13 @@ export default function Tours() {
             <div className="bg-white rounded-t-xl sm:rounded-xl p-5 sm:p-6 w-full sm:w-[520px] shadow-xl max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Nouvelle tournée — Étape {wizardStep}/4</h2>
-                <button onClick={() => setShowWizard(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                <button onClick={() => setShowWizard(false)} className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
               </div>
 
               {/* Progress */}
               <div className="flex gap-1 mb-6">
                 {[1, 2, 3, 4].map(s => (
-                  <div key={s} className={`h-1.5 flex-1 rounded ${s <= wizardStep ? 'bg-solidata-green' : 'bg-gray-200'}`} />
+                  <div key={s} className={`h-1.5 flex-1 rounded ${s <= wizardStep ? 'bg-primary' : 'bg-slate-200'}`} />
                 ))}
               </div>
 
@@ -200,26 +203,26 @@ export default function Tours() {
                 <div className="space-y-4">
                   <h3 className="font-semibold">Date et mode de génération</h3>
                   <div>
-                    <label className="text-xs text-gray-500">Date de tournée</label>
+                    <label className="text-xs text-slate-500">Date de tournée</label>
                     <input type="date" value={wizForm.date} onChange={e => setWizForm({ ...wizForm, date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs text-gray-500">Mode de génération</label>
+                    <label className="text-xs text-slate-500">Mode de génération</label>
                     {[
                       { key: 'intelligent', label: 'IA Intelligente', desc: 'Optimisation par prédiction de remplissage, TSP + 2-opt' },
                       { key: 'standard', label: 'Standard', desc: 'Tous les CAV triés par distance' },
                       { key: 'manual', label: 'Manuel', desc: 'Sélection manuelle des CAV' },
                     ].map(m => (
-                      <label key={m.key} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${wizForm.mode === m.key ? 'border-solidata-green bg-solidata-green/5' : ''}`}>
+                      <label key={m.key} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${wizForm.mode === m.key ? 'border-primary bg-primary/5' : ''}`}>
                         <input type="radio" name="mode" value={m.key} checked={wizForm.mode === m.key} onChange={() => setWizForm({ ...wizForm, mode: m.key })} className="mt-1" />
                         <div>
                           <p className="font-medium text-sm">{m.label}</p>
-                          <p className="text-xs text-gray-500">{m.desc}</p>
+                          <p className="text-xs text-slate-500">{m.desc}</p>
                         </div>
                       </label>
                     ))}
                   </div>
-                  <button onClick={() => setWizardStep(2)} className="w-full bg-solidata-green text-white rounded-lg py-2 text-sm">Suivant</button>
+                  <button onClick={() => setWizardStep(2)} className="w-full btn-primary text-sm">Suivant</button>
                 </div>
               )}
 
@@ -229,19 +232,19 @@ export default function Tours() {
                   <h3 className="font-semibold">Véhicule</h3>
                   <div className="space-y-2">
                     {vehicles.map(v => (
-                      <label key={v.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${wizForm.vehicle_id === String(v.id) ? 'border-solidata-green bg-solidata-green/5' : ''}`}>
+                      <label key={v.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${wizForm.vehicle_id === String(v.id) ? 'border-primary bg-primary/5' : ''}`}>
                         <input type="radio" name="vehicle" value={v.id} checked={wizForm.vehicle_id === String(v.id)} onChange={() => setWizForm({ ...wizForm, vehicle_id: String(v.id) })} />
                         <div>
                           <p className="font-medium text-sm">{v.registration} — {v.brand} {v.model}</p>
-                          <p className="text-xs text-gray-500">Capacité : {v.capacity_kg} kg | Type : {v.type}</p>
+                          <p className="text-xs text-slate-500">Capacité : {v.capacity_kg} kg | Type : {v.type}</p>
                         </div>
                       </label>
                     ))}
-                    {vehicles.length === 0 && <p className="text-gray-400 text-sm">Aucun véhicule disponible</p>}
+                    {vehicles.length === 0 && <p className="text-slate-400 text-sm">Aucun véhicule disponible</p>}
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => setWizardStep(1)} className="flex-1 border rounded-lg py-2 text-sm">Retour</button>
-                    <button onClick={generateTour} disabled={!wizForm.vehicle_id || generating} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm disabled:opacity-50">
+                    <button onClick={generateTour} disabled={!wizForm.vehicle_id || generating} className="flex-1 btn-primary text-sm disabled:opacity-50">
                       {generating ? 'Génération...' : 'Générer la tournée'}
                     </button>
                   </div>
@@ -258,7 +261,7 @@ export default function Tours() {
                   </select>
                   <div className="flex gap-2">
                     <button onClick={() => setWizardStep(2)} className="flex-1 border rounded-lg py-2 text-sm">Retour</button>
-                    <button onClick={generateTour} disabled={generating} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm disabled:opacity-50">
+                    <button onClick={generateTour} disabled={generating} className="flex-1 btn-primary text-sm disabled:opacity-50">
                       {generating ? 'Génération...' : 'Générer la tournée'}
                     </button>
                   </div>
@@ -271,10 +274,10 @@ export default function Tours() {
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                     <h3 className="font-semibold text-green-700 mb-2">Tournée générée avec succès</h3>
                     <div className="text-sm space-y-1">
-                      <p><span className="text-gray-500">ID :</span> #{generatedTour.tour?.id || generatedTour.id}</p>
-                      <p><span className="text-gray-500">CAV planifiés :</span> {generatedTour.stats?.totalCavs || generatedTour.tour?.nb_cav || '—'}</p>
-                      <p><span className="text-gray-500">Distance estimée :</span> {generatedTour.stats?.totalDistance || generatedTour.tour?.estimated_distance_km || '—'} km</p>
-                      <p><span className="text-gray-500">Durée estimée :</span> {generatedTour.stats?.estimatedDuration || generatedTour.tour?.estimated_duration_min || '—'} min</p>
+                      <p><span className="text-slate-500">ID :</span> #{generatedTour.tour?.id || generatedTour.id}</p>
+                      <p><span className="text-slate-500">CAV planifiés :</span> {generatedTour.stats?.totalCavs || generatedTour.tour?.nb_cav || '—'}</p>
+                      <p><span className="text-slate-500">Distance estimée :</span> {generatedTour.stats?.totalDistance || generatedTour.tour?.estimated_distance_km || '—'} km</p>
+                      <p><span className="text-slate-500">Durée estimée :</span> {generatedTour.stats?.estimatedDuration || generatedTour.tour?.estimated_duration_min || '—'} min</p>
                     </div>
                   </div>
                   {generatedTour.explanation && (
@@ -288,16 +291,16 @@ export default function Tours() {
                       <h4 className="font-semibold text-sm mb-2">Points de collecte</h4>
                       <div className="space-y-1 max-h-48 overflow-y-auto">
                         {(generatedTour.cavs || generatedTour.cavList).map((c, i) => (
-                          <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 rounded p-2">
-                            <span className="w-5 h-5 rounded-full bg-solidata-green text-white flex items-center justify-center text-[10px] font-bold">{c.position || i + 1}</span>
+                          <div key={i} className="flex items-center gap-2 text-xs bg-slate-50 rounded p-2">
+                            <span className="w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center text-[10px] font-bold">{c.position || i + 1}</span>
                             <span className="flex-1">{c.name || c.nom || c.cav_name}</span>
-                            <span className="text-gray-400">{c.predicted_fill ? `${Math.round(c.predicted_fill)}%` : ''}</span>
+                            <span className="text-slate-400">{c.predicted_fill ? `${Math.round(c.predicted_fill)}%` : ''}</span>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
-                  <button onClick={() => setShowWizard(false)} className="w-full bg-solidata-green text-white rounded-lg py-2 text-sm">Fermer</button>
+                  <button onClick={() => setShowWizard(false)} className="w-full btn-primary text-sm">Fermer</button>
                 </div>
               )}
             </div>
@@ -310,7 +313,7 @@ export default function Tours() {
             <div className="bg-white w-full sm:w-[480px] h-full overflow-y-auto shadow-xl p-4 sm:p-6" onClick={e => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Détail tournée #{selectedTour.id}</h2>
-                <button onClick={() => setSelectedTour(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                <button onClick={() => setSelectedTour(null)} className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
               </div>
               <div className="space-y-3 text-sm">
                 <Field label="Date" value={selectedTour.date ? new Date(selectedTour.date).toLocaleDateString('fr-FR') : '—'} />
@@ -327,12 +330,12 @@ export default function Tours() {
                   <h3 className="font-semibold mb-2">Points de collecte ({selectedTour.cavs.length})</h3>
                   <div className="space-y-2">
                     {selectedTour.cavs.map((c, i) => (
-                      <div key={i} className="bg-gray-50 rounded-lg p-3 text-xs">
+                      <div key={i} className="bg-slate-50 rounded-lg p-3 text-xs">
                         <div className="flex items-center gap-2">
-                          <span className="w-5 h-5 rounded-full bg-solidata-green text-white flex items-center justify-center text-[10px] font-bold">{c.ordre || i + 1}</span>
+                          <span className="w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center text-[10px] font-bold">{c.ordre || i + 1}</span>
                           <span className="font-medium">{c.nom || c.cav_name}</span>
                         </div>
-                        {c.collected_weight_kg && <p className="mt-1 text-gray-500">Collecté : {c.collected_weight_kg} kg</p>}
+                        {c.collected_weight_kg && <p className="mt-1 text-slate-500">Collecté : {c.collected_weight_kg} kg</p>}
                       </div>
                     ))}
                   </div>
@@ -349,7 +352,7 @@ export default function Tours() {
 function Field({ label, value }) {
   return (
     <div>
-      <span className="text-gray-500 text-xs">{label}</span>
+      <span className="text-slate-500 text-xs">{label}</span>
       <p className="font-medium">{value || '—'}</p>
     </div>
   );

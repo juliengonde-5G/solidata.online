@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const ACTION_LABELS = {
@@ -151,7 +152,7 @@ export default function ActivityLog() {
     <Layout>
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-solidata-dark">Journal d'activité</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Journal d'activité</h1>
           <p className="text-gray-500">Suivi des actions, connexions et sessions utilisateurs</p>
         </div>
 
@@ -245,7 +246,7 @@ export default function ActivityLog() {
 
         {/* Contenu par onglet */}
         {loading ? (
-          <div className="bg-white rounded-xl shadow-sm border p-12 text-center text-gray-400">Chargement...</div>
+          <LoadingSpinner size="lg" message="Chargement des logs..." />
         ) : tab === 'chatbot' ? (
           /* SolidataBot History */
           <div className="space-y-4">

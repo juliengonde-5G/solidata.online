@@ -106,7 +106,7 @@ export default function AdminDB() {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-solidata-green" /></div>
+          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
         ) : (
           <>
             {tab === 'info' && info && (
@@ -141,7 +141,7 @@ export default function AdminDB() {
 
             {tab === 'backups' && (
               <div className="space-y-4">
-                <button onClick={createBackup} disabled={actionLoading} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-solidata-green/90 disabled:opacity-50">
+                <button onClick={createBackup} disabled={actionLoading} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
                   {actionLoading ? 'Sauvegarde en cours...' : 'Créer une sauvegarde'}
                 </button>
                 <div className="bg-white rounded-xl border overflow-hidden">
@@ -173,7 +173,7 @@ export default function AdminDB() {
                 <div className="bg-white rounded-xl border p-5">
                   <h3 className="font-semibold mb-3">Optimisation</h3>
                   <p className="text-sm text-gray-500 mb-3">VACUUM ANALYZE permet de récupérer l'espace disque et mettre à jour les statistiques du planificateur de requêtes.</p>
-                  <button onClick={runVacuum} disabled={actionLoading} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-solidata-green/90 disabled:opacity-50">
+                  <button onClick={runVacuum} disabled={actionLoading} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
                     {actionLoading ? 'Optimisation en cours...' : 'Lancer VACUUM ANALYZE'}
                   </button>
                 </div>

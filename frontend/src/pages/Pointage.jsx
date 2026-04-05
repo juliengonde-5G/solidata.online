@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const TABS = ['daily', 'badges', 'manual', 'alerts', 'log', 'monthly'];
@@ -122,7 +123,7 @@ export default function Pointage() {
     <Layout>
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-solidata-dark">Pointage</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Pointage</h1>
           <p className="text-gray-500">Gestion des badgeages et suivi des heures</p>
         </div>
 
@@ -130,7 +131,7 @@ export default function Pointage() {
         <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 overflow-x-auto">
           {TABS.map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${tab === t ? 'bg-white shadow text-solidata-dark' : 'text-gray-500 hover:text-gray-700'}`}>
+              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${tab === t ? 'bg-white shadow text-slate-800' : 'text-gray-500 hover:text-gray-700'}`}>
               {TAB_LABELS[t]}
             </button>
           ))}
@@ -141,11 +142,11 @@ export default function Pointage() {
           <div>
             <div className="flex items-center gap-3 mb-4">
               <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={loadDaily} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Actualiser</button>
+              <button onClick={loadDaily} className="bg-primary text-white px-4 py-2 rounded-lg text-sm hover:bg-teal-700">Actualiser</button>
             </div>
 
             {loading ? (
-              <div className="text-center py-8 text-gray-400">Chargement...</div>
+              <LoadingSpinner size="lg" message="Chargement des pointages..." />
             ) : (
               <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
                 <table className="w-full text-sm">
@@ -208,7 +209,7 @@ export default function Pointage() {
                 </select>
                 <input type="text" placeholder="Libellé (optionnel)" value={badgeForm.label}
                   onChange={e => setBadgeForm({ ...badgeForm, label: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
-                <button type="submit" className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Enregistrer</button>
+                <button type="submit" className="bg-primary text-white px-4 py-2 rounded-lg text-sm hover:bg-teal-700">Enregistrer</button>
               </div>
               {badgeMsg && <p className={`mt-2 text-sm ${badgeMsg.startsWith('Erreur') ? 'text-red-600' : 'text-green-600'}`}>{badgeMsg}</p>}
             </form>
@@ -311,7 +312,7 @@ export default function Pointage() {
                   <input type="text" value={manualForm.notes} onChange={e => setManualForm({ ...manualForm, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Motif de la saisie manuelle..." />
                 </div>
 
-                <button type="submit" className="bg-solidata-green text-white px-6 py-2 rounded-lg text-sm hover:bg-solidata-green-dark font-medium">Enregistrer</button>
+                <button type="submit" className="bg-primary text-white px-6 py-2 rounded-lg text-sm hover:bg-teal-700 font-medium">Enregistrer</button>
                 {manualMsg && <p className={`text-sm ${manualMsg.startsWith('Erreur') ? 'text-red-600' : 'text-green-600'}`}>{manualMsg}</p>}
               </form>
             </div>
@@ -323,7 +324,7 @@ export default function Pointage() {
           <div>
             <div className="flex items-center gap-3 mb-4">
               <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={loadAlerts} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Actualiser</button>
+              <button onClick={loadAlerts} className="bg-primary text-white px-4 py-2 rounded-lg text-sm hover:bg-teal-700">Actualiser</button>
             </div>
 
             {alerts.length === 0 ? (
@@ -365,7 +366,7 @@ export default function Pointage() {
           <div>
             <div className="flex items-center gap-3 mb-4">
               <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={loadLog} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Actualiser</button>
+              <button onClick={loadLog} className="bg-primary text-white px-4 py-2 rounded-lg text-sm hover:bg-teal-700">Actualiser</button>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
@@ -416,7 +417,7 @@ export default function Pointage() {
           <div>
             <div className="flex items-center gap-3 mb-4">
               <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={loadMonthly} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Actualiser</button>
+              <button onClick={loadMonthly} className="bg-primary text-white px-4 py-2 rounded-lg text-sm hover:bg-teal-700">Actualiser</button>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border overflow-hidden">

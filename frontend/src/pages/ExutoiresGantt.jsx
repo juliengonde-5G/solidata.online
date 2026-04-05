@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const LIEUX = {
@@ -594,7 +595,7 @@ export default function ExutoiresGantt() {
 
           {/* Counter */}
           <span className="ml-auto text-sm text-gray-500">
-            {loading ? 'Chargement...' : `${totalItems} pr\u00e9paration${totalItems > 1 ? 's' : ''}`}
+            {loading ? 'Chargement du Gantt...' : `${totalItems} pr\u00e9paration${totalItems > 1 ? 's' : ''}`}
           </span>
         </div>
 

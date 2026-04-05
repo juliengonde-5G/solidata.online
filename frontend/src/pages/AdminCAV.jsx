@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -247,7 +248,7 @@ export default function AdminCAV() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Gestion des CAV</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Gestion des CAV</h1>
             <p className="text-gray-500">Conteneurs d'Apport Volontaire — {cavList.length} enregistré(s)</p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -258,14 +259,14 @@ export default function AdminCAV() {
               </button>
             )}
             <button onClick={() => downloadSheet('A7')} disabled={!!sheetDownloading}
-              className="border border-solidata-green text-solidata-green rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
+              className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
               {sheetDownloading === 'A7' ? 'Génération...' : 'Planche QR (A7)'}
             </button>
             <button onClick={() => downloadSheet('A8')} disabled={!!sheetDownloading}
-              className="border border-solidata-green text-solidata-green rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
+              className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
               {sheetDownloading === 'A8' ? 'Génération...' : 'Planche QR (A8)'}
             </button>
-            <button onClick={openCreate} className="bg-solidata-green text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700">
+            <button onClick={openCreate} className="bg-primary text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700">
               + Nouveau CAV
             </button>
           </div>
@@ -293,7 +294,7 @@ export default function AdminCAV() {
           {/* Table */}
           <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${detailCav ? 'lg:col-span-3' : ''}`}>
             {loading ? (
-              <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-solidata-green" /></div>
+              <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -310,11 +311,11 @@ export default function AdminCAV() {
                   <tbody className="divide-y">
                     {cavList.map(cav => (
                       <tr key={cav.id}
-                        className={`hover:bg-gray-50 cursor-pointer ${detailCav?.id === cav.id ? 'bg-green-50 border-l-4 border-l-solidata-green' : ''}`}
+                        className={`hover:bg-gray-50 cursor-pointer ${detailCav?.id === cav.id ? 'bg-green-50 border-l-4 border-l-primary' : ''}`}
                         onClick={() => openDetail(cav)}
                       >
                         <td className="px-4 py-3">
-                          <div className="font-medium text-solidata-dark">{cav.commune || '—'}</div>
+                          <div className="font-medium text-slate-800">{cav.commune || '—'}</div>
                           <div className="text-xs text-gray-400 truncate max-w-[200px]">{cav.address || '—'}</div>
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">{cav.commune || '—'}</td>
@@ -359,8 +360,8 @@ export default function AdminCAV() {
               <div className="bg-white rounded-xl shadow-sm border p-5">
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <h2 className="text-lg font-bold text-solidata-dark">CAV #{detailCav.id}</h2>
-                    <p className="text-sm text-solidata-green font-medium">{detailCav.commune}</p>
+                    <h2 className="text-lg font-bold text-slate-800">CAV #{detailCav.id}</h2>
+                    <p className="text-sm text-primary font-medium">{detailCav.commune}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -485,7 +486,7 @@ export default function AdminCAV() {
                       <img src={detailQrUrl} alt={`QR CAV ${detailCav.id}`} className="mx-auto w-36 h-36 object-contain mb-2" />
                       <p className="text-xs text-gray-400 font-mono break-all mb-3">{detailCav.qr_code_data}</p>
                       <button onClick={() => downloadQR(detailCav)}
-                        className="bg-solidata-green text-white rounded-lg px-4 py-2 text-xs hover:bg-green-700 w-full">
+                        className="bg-primary text-white rounded-lg px-4 py-2 text-xs hover:bg-green-700 w-full">
                         Télécharger PNG
                       </button>
                       <p className="text-xs text-amber-600 mt-2">QR code définitif — ne peut pas être modifié</p>
@@ -582,7 +583,7 @@ export default function AdminCAV() {
                     Annuler
                   </button>
                   <button onClick={handleSave} disabled={saving}
-                    className="bg-solidata-green text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700 disabled:opacity-50">
+                    className="bg-primary text-white rounded-lg px-4 py-2 text-sm hover:bg-green-700 disabled:opacity-50">
                     {saving ? 'Enregistrement...' : editCav ? 'Enregistrer' : 'Créer le CAV'}
                   </button>
                 </div>

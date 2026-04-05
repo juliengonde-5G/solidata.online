@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 export default function ReportingCollecte() {
@@ -32,7 +33,7 @@ export default function ReportingCollecte() {
     setLoading(false);
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement..." /></Layout>;
 
   return (
     <Layout>
@@ -40,7 +41,7 @@ export default function ReportingCollecte() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Reporting Collecte</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Reporting Collecte</h1>
             <p className="text-gray-500">Tonnages, tournees et indicateurs de collecte</p>
           </div>
           <select value={period} onChange={e => setPeriod(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
@@ -54,7 +55,7 @@ export default function ReportingCollecte() {
         {/* KPI Cards */}
         {dashboard && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <KPICard label="Tonnage collecte" value={`${dashboard.collecte?.tonnage_t || 0} t`} icon="♻️" color="text-solidata-green" />
+            <KPICard label="Tonnage collecte" value={`${dashboard.collecte?.tonnage_t || 0} t`} icon="♻️" color="text-primary" />
             <KPICard label="CO2 evite" value={`${dashboard.collecte?.co2_evite_kg || 0} kg`} icon="🌿" color="text-green-600" />
             <KPICard label="Tours realisees" value={dashboard.tours?.completed || 0} icon="🚛" color="text-orange-600" />
             <KPICard label="CAV actifs" value={dashboard.cav?.actifs || 0} icon="📍" color="text-teal-600" />
@@ -64,7 +65,7 @@ export default function ReportingCollecte() {
         {/* Collecte table by period */}
         <div className="bg-white rounded-xl shadow-sm border mb-6">
           <div className="p-4 border-b">
-            <h3 className="font-semibold text-solidata-dark">Collecte par periode</h3>
+            <h3 className="font-semibold text-slate-800">Collecte par periode</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -84,7 +85,7 @@ export default function ReportingCollecte() {
                     <tr key={i} className="border-t hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{row.periode}</td>
                       <td className="px-4 py-3 text-right">{row.nb_tours}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-solidata-green">{Number(row.total_kg).toLocaleString('fr-FR')}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-primary">{Number(row.total_kg).toLocaleString('fr-FR')}</td>
                       <td className="px-4 py-3 text-right">{Number(row.avg_kg).toLocaleString('fr-FR')}</td>
                     </tr>
                   ))
@@ -95,7 +96,7 @@ export default function ReportingCollecte() {
                   <tr className="border-t-2 bg-gray-50 font-semibold">
                     <td className="px-4 py-3">Total</td>
                     <td className="px-4 py-3 text-right">{collecteData.reduce((s, r) => s + parseInt(r.nb_tours || 0), 0)}</td>
-                    <td className="px-4 py-3 text-right text-solidata-green">
+                    <td className="px-4 py-3 text-right text-primary">
                       {collecteData.reduce((s, r) => s + parseFloat(r.total_kg || 0), 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}
                     </td>
                     <td className="px-4 py-3 text-right">-</td>
@@ -110,7 +111,7 @@ export default function ReportingCollecte() {
         {dashboard && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl shadow-sm border p-4">
-              <h3 className="font-semibold text-solidata-dark mb-3">Resume des tournees</h3>
+              <h3 className="font-semibold text-slate-800 mb-3">Resume des tournees</h3>
               <table className="w-full text-sm">
                 <tbody>
                   <tr className="border-b">
@@ -119,7 +120,7 @@ export default function ReportingCollecte() {
                   </tr>
                   <tr className="border-b">
                     <td className="py-2 text-gray-600">Completees</td>
-                    <td className="py-2 text-right font-semibold text-solidata-green">{dashboard.tours?.completed || 0}</td>
+                    <td className="py-2 text-right font-semibold text-primary">{dashboard.tours?.completed || 0}</td>
                   </tr>
                   <tr className="border-b">
                     <td className="py-2 text-gray-600">Taux de completion</td>
@@ -134,7 +135,7 @@ export default function ReportingCollecte() {
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border p-4">
-              <h3 className="font-semibold text-solidata-dark mb-3">CAV</h3>
+              <h3 className="font-semibold text-slate-800 mb-3">CAV</h3>
               <table className="w-full text-sm">
                 <tbody>
                   <tr className="border-b">
@@ -143,7 +144,7 @@ export default function ReportingCollecte() {
                   </tr>
                   <tr className="border-b">
                     <td className="py-2 text-gray-600">CAV actifs</td>
-                    <td className="py-2 text-right font-semibold text-solidata-green">{dashboard.cav?.actifs || 0}</td>
+                    <td className="py-2 text-right font-semibold text-primary">{dashboard.cav?.actifs || 0}</td>
                   </tr>
                   <tr className="border-b">
                     <td className="py-2 text-gray-600">Tonnage total collecte</td>

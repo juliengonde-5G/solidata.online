@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Wrench } from 'lucide-react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const STATUS_COLORS = { ok: 'bg-green-100 text-green-700', bientot: 'bg-yellow-100 text-yellow-700', depasse: 'bg-red-100 text-red-700' };
@@ -69,7 +71,7 @@ export default function VehicleMaintenance() {
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
   const formatCost = (c) => c ? `${parseFloat(c).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €` : '—';
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la maintenance..." /></Layout>;
 
   return (
     <Layout>
@@ -95,7 +97,7 @@ export default function VehicleMaintenance() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-500">{profiles.length} profil(s) constructeur en base</p>
-              <button onClick={() => setShowProfileForm(true)} className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700">
+              <button onClick={() => setShowProfileForm(true)} className="btn-primary text-sm">
                 + Ajouter un profil
               </button>
             </div>
@@ -238,7 +240,7 @@ export default function VehicleMaintenance() {
             {!selectedVehicle ? (
               <div className="bg-white rounded-xl border p-8 text-center">
                 <p className="text-slate-400 mb-4">Sélectionnez un véhicule dans l'onglet "État flotte"</p>
-                <button onClick={() => setTab('flotte')} className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm">Voir la flotte</button>
+                <button onClick={() => setTab('flotte')} className="btn-primary text-sm">Voir la flotte</button>
               </div>
             ) : (
               <>
@@ -395,7 +397,7 @@ export default function VehicleMaintenance() {
               </div>
               <div className="flex gap-2 mt-6">
                 <button type="button" onClick={() => setShowProfileForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-teal-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-teal-700">Créer</button>
+                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
           </div>

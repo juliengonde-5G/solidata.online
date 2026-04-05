@@ -245,7 +245,7 @@ export default function Candidates() {
   const onDragLeaveCol = (e, s) => { if (e.currentTarget.contains(e.relatedTarget)) return; if (dragOver === s) setDragOver(null); };
   const onDropCol = (e, s) => { e.preventDefault(); setDragOver(null); const id = parseInt(e.dataTransfer.getData('text/plain')); if (id) moveCandidate(id, s); setDraggedId(null); };
 
-  if (loading) return <Layout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-solidata-green" /></div></Layout>;
+  if (loading) return <Layout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" /></div></Layout>;
 
   return (
     <Layout>
@@ -253,11 +253,11 @@ export default function Candidates() {
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-4 gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Recrutement</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Recrutement</h1>
             <div className="flex gap-1 mt-1">
               {[['kanban', 'Kanban'], ['plan', 'Plan de recrutement']].map(([k, label]) => (
                 <button key={k} onClick={() => setPageTab(k)}
-                  className={`text-xs px-3 py-1 rounded-full font-medium transition ${pageTab === k ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                  className={`text-xs px-3 py-1 rounded-full font-medium transition ${pageTab === k ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
                   {label}
                 </button>
               ))}
@@ -273,7 +273,7 @@ export default function Candidates() {
               </div>
             )}
             <button onClick={() => setShowPositionModal(true)} className="text-sm border border-gray-300 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-50">Postes ({positions.length})</button>
-            <button onClick={() => setShowAddModal(true)} className="text-sm bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark font-medium">+ Candidat</button>
+            <button onClick={() => setShowAddModal(true)} className="text-sm bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 font-medium">+ Candidat</button>
           </div>
         </div>
 
@@ -282,7 +282,7 @@ export default function Candidates() {
         {pageTab === 'kanban' && <>
         {/* CV Drop Zone */}
         <div
-          className={`mb-4 border-2 border-dashed rounded-xl p-4 text-center transition-all cursor-pointer ${cvDragActive ? 'border-solidata-green bg-solidata-green/10' : 'border-gray-300 bg-gray-50 hover:border-solidata-green/50'}`}
+          className={`mb-4 border-2 border-dashed rounded-xl p-4 text-center transition-all cursor-pointer ${cvDragActive ? 'border-primary bg-primary/10' : 'border-gray-300 bg-gray-50 hover:border-primary/50'}`}
           onDragOver={(e) => { e.preventDefault(); setCvDragActive(true); }}
           onDragLeave={() => setCvDragActive(false)}
           onDrop={(e) => { e.preventDefault(); setCvDragActive(false); handleCVUpload(e.dataTransfer.files[0]); }}
@@ -290,8 +290,8 @@ export default function Candidates() {
         >
           <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" className="hidden" onChange={(e) => handleCVUpload(e.target.files[0])} />
           {uploading
-            ? <div className="flex items-center justify-center gap-2 text-solidata-green"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-solidata-green" /><span className="text-sm font-medium">Analyse du CV en cours...</span></div>
-            : <p className="text-sm text-gray-500"><span className="font-medium text-solidata-green">Glissez un CV ici</span> ou cliquez pour importer (PDF, Word, Image)</p>
+            ? <div className="flex items-center justify-center gap-2 text-primary"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary" /><span className="text-sm font-medium">Analyse du CV en cours...</span></div>
+            : <p className="text-sm text-gray-500"><span className="font-medium text-primary">Glissez un CV ici</span> ou cliquez pour importer (PDF, Word, Image)</p>
           }
         </div>
 
@@ -324,7 +324,7 @@ export default function Candidates() {
                   {items.map(c => (
                     <div key={c.id} draggable onDragStart={(e) => onDragStart(e, c.id)} onDragEnd={onDragEnd} onClick={() => loadDetails(c)}
                       className={`bg-white rounded-lg p-3 shadow-sm cursor-grab hover:shadow-md transition border active:cursor-grabbing ${draggedId === c.id ? 'opacity-30 scale-95' : ''}`}>
-                      <p className="font-medium text-sm text-solidata-dark truncate">{c.first_name || '?'} {c.last_name || '?'}</p>
+                      <p className="font-medium text-sm text-slate-800 truncate">{c.first_name || '?'} {c.last_name || '?'}</p>
                       {c.email && <p className="text-xs text-gray-500 mt-0.5 truncate">{c.email}</p>}
                       {c.phone && <p className="text-xs text-gray-400">{c.phone}</p>}
                       <div className="flex flex-wrap gap-1 mt-2">
@@ -351,7 +351,7 @@ export default function Candidates() {
                   <span className={`inline-block text-xs text-white px-2 py-0.5 rounded mt-1 ${STATUS_COLORS[selected.status]?.badge}`}>{STATUS_LABELS[selected.status]}</span>
                 </div>
                 <div className="flex gap-1">
-                  {!editing && <button onClick={() => openEdit(selected)} className="text-xs bg-solidata-green text-white px-3 py-1.5 rounded-lg">Modifier</button>}
+                  {!editing && <button onClick={() => openEdit(selected)} className="text-xs bg-primary text-white px-3 py-1.5 rounded-lg">Modifier</button>}
                   <button onClick={() => deleteCandidate(selected.id)} className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg">Suppr.</button>
                   <button onClick={() => { setSelected(null); setEditing(false); }} className="text-gray-400 hover:text-gray-600 text-xl ml-2">&times;</button>
                 </div>
@@ -359,7 +359,7 @@ export default function Candidates() {
               <div className="flex border-b px-5 overflow-x-auto">
                 {(TABS_BY_STATUS[selected.status] || ['info', 'history']).map(t => (
                   <button key={t} onClick={() => setDetailTab(t)}
-                    className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition whitespace-nowrap ${detailTab === t ? 'border-solidata-green text-solidata-green' : 'border-transparent text-gray-500'}`}>
+                    className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition whitespace-nowrap ${detailTab === t ? 'border-primary text-primary' : 'border-transparent text-gray-500'}`}>
                     {TAB_LABELS[t]}
                   </button>
                 ))}
@@ -399,7 +399,7 @@ export default function Candidates() {
               )}
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Créer</button>
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Créer</button>
               </div>
             </form>
           </Modal>
@@ -426,7 +426,7 @@ export default function Candidates() {
                   <input placeholder="Mois" value={posForm.month} onChange={e => setPosForm({...posForm, month: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" />
                   <input placeholder="Places" value={posForm.slots_open} onChange={e => setPosForm({...posForm, slots_open: parseInt(e.target.value) || 1})} className="border rounded-lg px-3 py-2 text-sm" type="number" />
                 </div>
-                <button type="submit" className="w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Ajouter</button>
+                <button type="submit" className="w-full bg-primary text-white rounded-lg py-2 text-sm font-medium">Ajouter</button>
               </form>
             </div>
           </Modal>
@@ -469,7 +469,7 @@ function InfoView({ s, skills, positions, onMove, onConvert }) {
       </div>
       {s.status === 'hired' && !s.employee_id && (
         <div className="pt-3">
-          <button onClick={() => onConvert && onConvert(s)} className="w-full bg-solidata-green text-white rounded-lg py-2 text-sm font-medium hover:bg-solidata-green/90 flex items-center justify-center gap-2">
+          <button onClick={() => onConvert && onConvert(s)} className="w-full bg-primary text-white rounded-lg py-2 text-sm font-medium hover:bg-primary/90 flex items-center justify-center gap-2">
             <span>Créer un employé</span>
           </button>
         </div>
@@ -479,7 +479,7 @@ function InfoView({ s, skills, positions, onMove, onConvert }) {
           <div className="flex flex-wrap gap-1">{skills.map(sk => <Tag key={sk.skill_name} text={sk.skill_name.replace(/_/g, ' ')} c={sk.status === 'confirmed' ? 'green' : 'orange'} />)}</div>
         </div>
       )}
-      {s.cv_file_path && <a href={s.cv_file_path} target="_blank" rel="noopener noreferrer" className="text-solidata-green hover:underline text-sm font-medium block pt-2">Voir le CV</a>}
+      {s.cv_file_path && <a href={s.cv_file_path} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline text-sm font-medium block pt-2">Voir le CV</a>}
       {(s.interviewer_name || s.appointment_date) && (
         <div className="pt-2 border-t">
           <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Entretien</p>
@@ -507,7 +507,7 @@ function HistoryView({ history }) {
     <div className="space-y-3">
       {history.map(h => (
         <div key={h.id} className="flex gap-3 items-start">
-          <div className="w-2 h-2 rounded-full bg-solidata-green mt-1.5 flex-shrink-0" />
+          <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
           <div className="text-sm">
             <p className="font-medium">{h.from_status ? `${STATUS_LABELS[h.from_status] || h.from_status} → ` : ''}{STATUS_LABELS[h.to_status] || h.to_status}</p>
             {h.comment && <p className="text-gray-500 text-xs">{h.comment}</p>}
@@ -598,7 +598,7 @@ function EditForm({ ef, set, save, cancel, positions }) {
       <div><span className="text-gray-500 text-xs">Commentaire général</span><textarea value={ef.comment} onChange={e => u('comment', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} /></div>
       <div className="flex gap-2 mt-4">
         <button onClick={cancel} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-        <button onClick={save} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">Enregistrer</button>
+        <button onClick={save} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">Enregistrer</button>
       </div>
     </div>
   );
@@ -664,7 +664,7 @@ function InterviewFormView({ candidateId, data, onSaved }) {
       <div className="space-y-4 text-sm">
         <div className="flex justify-between items-center">
           <h3 className="font-bold text-base">Trame d'entretien</h3>
-          <button onClick={() => setEditing(true)} className="text-xs bg-solidata-green text-white px-3 py-1.5 rounded-lg">Modifier</button>
+          <button onClick={() => setEditing(true)} className="text-xs bg-primary text-white px-3 py-1.5 rounded-lg">Modifier</button>
         </div>
         {data.evaluation_globale && (
           <div className={`px-3 py-2 rounded-lg font-medium text-sm ${data.evaluation_globale === 'favorable' ? 'bg-green-50 text-green-700' : data.evaluation_globale === 'reserve' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'}`}>
@@ -827,7 +827,7 @@ function InterviewFormView({ candidateId, data, onSaved }) {
 
       <div className="flex gap-2 pt-3">
         {data && <button onClick={() => setEditing(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>}
-        <button onClick={save} disabled={saving} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+        <button onClick={save} disabled={saving} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
           {saving ? 'Enregistrement...' : 'Enregistrer l\'entretien'}
         </button>
       </div>
@@ -894,12 +894,12 @@ function MiseEnSituationView({ candidateId, data, onSaved }) {
             <div key={c.key}>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-medium text-gray-600">{c.label}</span>
-                <span className="text-xs font-bold text-solidata-green">{form[c.key]}/5</span>
+                <span className="text-xs font-bold text-primary">{form[c.key]}/5</span>
               </div>
               <div className="flex gap-1">
                 {[1, 2, 3, 4, 5].map(v => (
                   <button key={v} onClick={() => setForm(prev => ({ ...prev, [c.key]: v }))}
-                    className={`flex-1 py-1.5 rounded text-xs font-medium transition ${form[c.key] >= v ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>
+                    className={`flex-1 py-1.5 rounded text-xs font-medium transition ${form[c.key] >= v ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>
                     {v}
                   </button>
                 ))}
@@ -931,7 +931,7 @@ function MiseEnSituationView({ candidateId, data, onSaved }) {
 
         <div className="flex gap-2 pt-2">
           <button onClick={() => setActiveType(null)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-          <button onClick={save} disabled={saving} className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+          <button onClick={save} disabled={saving} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
             {saving ? 'Enregistrement...' : 'Enregistrer'}
           </button>
         </div>
@@ -1038,7 +1038,7 @@ function DocumentsView({ candidateId, delivered, onDelivered }) {
                   <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200">PDF</a>
                   {doc.key === 'livret_accueil' && <button onClick={viewLivret} className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200">{showLivret ? 'Masquer' : 'Lire'}</button>}
                   {!del && (
-                    <button onClick={() => deliverDoc(doc.key, 'remise_main')} disabled={delivering === doc.key} className="text-xs bg-solidata-green text-white px-2 py-1 rounded hover:bg-solidata-green/80 disabled:opacity-50">
+                    <button onClick={() => deliverDoc(doc.key, 'remise_main')} disabled={delivering === doc.key} className="text-xs bg-primary text-white px-2 py-1 rounded hover:bg-primary/80 disabled:opacity-50">
                       {delivering === doc.key ? '...' : 'Remettre'}
                     </button>
                   )}
@@ -1051,7 +1051,7 @@ function DocumentsView({ candidateId, delivered, onDelivered }) {
 
       {showLivret && livretContent && (
         <div className="border rounded-xl p-4 bg-white space-y-4 max-h-[50vh] overflow-y-auto">
-          <h4 className="font-bold text-lg text-center text-solidata-green">{livretContent.title}</h4>
+          <h4 className="font-bold text-lg text-center text-primary">{livretContent.title}</h4>
           {livretContent.sections.map((s, i) => (
             <div key={i} className="border-t pt-3">
               <h5 className="font-semibold text-sm mb-1">{s.title}</h5>
@@ -1118,7 +1118,7 @@ function RecruitmentPlanView({ positions }) {
     return `${names[parseInt(mo) - 1]} ${y}`;
   };
 
-  if (loading) return <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-solidata-green" /></div>;
+  if (loading) return <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
 
   const totalNeeded = (month) => positions.reduce((sum, p) => sum + getSlots(p.id, month), 0);
   const totalHired = (month) => positions.reduce((sum, p) => sum + getHired(p.id, month), 0);
@@ -1132,7 +1132,7 @@ function RecruitmentPlanView({ positions }) {
               <th className="text-left px-4 py-3 font-semibold text-gray-700 sticky left-0 bg-gray-50 min-w-[180px]">Poste</th>
               {months.map(m => (
                 <th key={m} className="px-3 py-3 text-center font-medium text-gray-600 min-w-[90px]">
-                  <span className={m === selectedMonth ? 'text-solidata-green font-bold' : ''}>{formatMonth(m)}</span>
+                  <span className={m === selectedMonth ? 'text-primary font-bold' : ''}>{formatMonth(m)}</span>
                 </th>
               ))}
               <th className="px-4 py-3 text-center font-semibold text-gray-700 min-w-[80px]">Total</th>
@@ -1156,7 +1156,7 @@ function RecruitmentPlanView({ positions }) {
                         <div className="flex flex-col items-center gap-0.5">
                           <input type="number" min="0" value={needed}
                             onChange={e => updateSlots(pos.id, m, e.target.value)}
-                            className="w-14 text-center border rounded px-1 py-1 text-sm focus:ring-1 focus:ring-solidata-green focus:border-solidata-green" />
+                            className="w-14 text-center border rounded px-1 py-1 text-sm focus:ring-1 focus:ring-primary focus:border-primary" />
                           {needed > 0 && (
                             <span className={`text-[10px] font-medium ${hired >= needed ? 'text-green-600' : 'text-orange-500'}`}>
                               {hired}/{needed}
@@ -1183,7 +1183,7 @@ function RecruitmentPlanView({ positions }) {
                   </span>
                 </td>
               ))}
-              <td className="px-4 py-3 text-center text-solidata-green">
+              <td className="px-4 py-3 text-center text-primary">
                 {months.reduce((s, m) => s + totalHired(m), 0)}/{months.reduce((s, m) => s + totalNeeded(m), 0)}
               </td>
             </tr>
@@ -1210,7 +1210,7 @@ function Section({ title, children }) {
 function CB({ label, checked, onChange, multi }) {
   return (
     <button onClick={onChange}
-      className={`text-xs px-2.5 py-1.5 rounded-lg border transition ${checked ? 'bg-solidata-green text-white border-solidata-green' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>
+      className={`text-xs px-2.5 py-1.5 rounded-lg border transition ${checked ? 'bg-primary text-white border-primary' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>
       {multi && checked && '+ '}{label}
     </button>
   );

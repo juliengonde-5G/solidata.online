@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const STATUTS_PESEE = {
@@ -199,7 +200,7 @@ export default function ExutoiresFacturation() {
     en_attente: controles.filter(c => c.statut !== 'valide').length,
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la facturation..." /></Layout>;
 
   return (
     <Layout>
@@ -207,7 +208,7 @@ export default function ExutoiresFacturation() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Facturation & Contrôles</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Facturation & Contrôles</h1>
             <p className="text-gray-500 text-sm">Contrôles de pesée et gestion des factures logistiques</p>
           </div>
         </div>
@@ -218,7 +219,7 @@ export default function ExutoiresFacturation() {
             onClick={() => setActiveTab('pesee')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === 'pesee'
-                ? 'bg-white text-solidata-dark shadow-sm'
+                ? 'bg-white text-slate-800 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -228,7 +229,7 @@ export default function ExutoiresFacturation() {
             onClick={() => setActiveTab('factures')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === 'factures'
-                ? 'bg-white text-solidata-dark shadow-sm'
+                ? 'bg-white text-slate-800 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -261,7 +262,7 @@ export default function ExutoiresFacturation() {
 
             {/* Action button */}
             <div className="flex justify-end mb-4">
-              <button onClick={openControleForm} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+              <button onClick={openControleForm} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
                 + Nouveau contrôle
               </button>
             </div>
@@ -305,7 +306,7 @@ export default function ExutoiresFacturation() {
                           {ctrl.statut !== 'valide' && (
                             <button
                               onClick={() => validerControle(ctrl.id)}
-                              className="text-solidata-green hover:underline text-sm font-medium"
+                              className="text-primary hover:underline text-sm font-medium"
                             >
                               Valider
                             </button>
@@ -328,7 +329,7 @@ export default function ExutoiresFacturation() {
           <>
             {/* Action button */}
             <div className="flex justify-end mb-4">
-              <button onClick={openFactureForm} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+              <button onClick={openFactureForm} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
                 + Uploader une facture
               </button>
             </div>
@@ -382,7 +383,7 @@ export default function ExutoiresFacturation() {
                             {fac.statut !== 'validee' && (
                               <button
                                 onClick={() => validerFacture(fac.id)}
-                                className="text-solidata-green hover:underline text-sm font-medium"
+                                className="text-primary hover:underline text-sm font-medium"
                               >
                                 Valider
                               </button>
@@ -405,7 +406,7 @@ export default function ExutoiresFacturation() {
         {showControleForm && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowControleForm(false)}>
             <form onSubmit={submitControle} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4 text-solidata-dark">Nouveau contrôle de pesée</h2>
+              <h2 className="text-lg font-bold mb-4 text-slate-800">Nouveau contrôle de pesée</h2>
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-gray-500">Commande *</label>
@@ -469,7 +470,7 @@ export default function ExutoiresFacturation() {
                 <button type="button" onClick={() => setShowControleForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
                   Annuler
                 </button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">
                   Créer
                 </button>
               </div>
@@ -481,7 +482,7 @@ export default function ExutoiresFacturation() {
         {showFactureForm && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowFactureForm(false)}>
             <form onSubmit={submitFacture} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4 text-solidata-dark">Uploader une facture</h2>
+              <h2 className="text-lg font-bold mb-4 text-slate-800">Uploader une facture</h2>
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-gray-500">Commande *</label>
@@ -514,7 +515,7 @@ export default function ExutoiresFacturation() {
                 <button type="button" onClick={() => setShowFactureForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
                   Annuler
                 </button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium">
                   Uploader
                 </button>
               </div>
@@ -526,7 +527,7 @@ export default function ExutoiresFacturation() {
         {showOcrModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowOcrModal(null); setConcordance(null); }}>
             <div className="bg-white rounded-xl p-6 w-[560px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-2 text-solidata-dark">Correction OCR & Concordance</h2>
+              <h2 className="text-lg font-bold mb-2 text-slate-800">Correction OCR & Concordance</h2>
               <p className="text-sm text-gray-500 mb-4">
                 Vérifiez et corrigez les valeurs extraites de la facture{' '}
                 <span className="font-medium text-gray-700">{showOcrModal.commande_reference || `#${showOcrModal.commande_id}`}</span>
@@ -623,7 +624,7 @@ export default function ExutoiresFacturation() {
                 <button
                   type="button"
                   onClick={submitOcrCorrection}
-                  className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium"
+                  className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-medium"
                 >
                   Corriger & Valider
                 </button>

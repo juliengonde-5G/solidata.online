@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
@@ -62,14 +63,14 @@ export default function CAVMap() {
   // Centre Rouen
   const center = [49.4231, 1.0993];
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la carte..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Carte des CAV</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Carte des CAV</h1>
             <p className="text-gray-500">{filtered.length} Conteneurs d'Apport Volontaire</p>
             <p className="text-xs text-amber-600 italic mt-1">Taux de remplissage estimé par calcul algorithmique (remis à zéro après chaque collecte)</p>
           </div>
@@ -133,7 +134,7 @@ export default function CAVMap() {
           <div className="space-y-3 max-h-[70vh] overflow-y-auto">
             {selectedCav ? (
               <div className="bg-white rounded-xl shadow-sm border p-4">
-                <button onClick={() => setSelectedCav(null)} className="text-solidata-green text-xs hover:underline mb-2">← Retour</button>
+                <button onClick={() => setSelectedCav(null)} className="text-primary text-xs hover:underline mb-2">← Retour</button>
                 <h3 className="font-bold text-lg mb-2">{selectedCav.name}</h3>
                 <div className="space-y-2 text-sm">
                   <p><span className="text-gray-500">Commune :</span> {selectedCav.commune}</p>

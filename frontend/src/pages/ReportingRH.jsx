@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 export default function ReportingRH() {
@@ -25,7 +26,7 @@ export default function ReportingRH() {
     setLoading(false);
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement..." /></Layout>;
 
   // Compute stats
   const totalEmployees = employees.length;
@@ -55,7 +56,7 @@ export default function ReportingRH() {
       <div className="p-6">
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-solidata-dark">Reporting RH</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Reporting RH</h1>
           <p className="text-gray-500">Effectifs, recrutement et indicateurs RH</p>
         </div>
 
@@ -64,7 +65,7 @@ export default function ReportingRH() {
           <KPICard label="Collaborateurs actifs" value={totalEmployees} icon="🏢" color="text-purple-600" />
           <KPICard label="Equipes" value={teams.length} icon="👥" color="text-blue-600" />
           <KPICard label="Candidatures totales" value={candidates.length} icon="📋" color="text-orange-600" />
-          <KPICard label="Recrutes" value={candidateStatuses['recruited'] || 0} icon="✅" color="text-solidata-green" />
+          <KPICard label="Recrutes" value={candidateStatuses['recruited'] || 0} icon="✅" color="text-primary" />
           <KPICard label="Absentéisme" value="—" icon="📊" color="text-red-600" />
         </div>
 
@@ -72,7 +73,7 @@ export default function ReportingRH() {
           {/* Employees by team */}
           <div className="bg-white rounded-xl shadow-sm border">
             <div className="p-4 border-b">
-              <h3 className="font-semibold text-solidata-dark">Effectifs par equipe</h3>
+              <h3 className="font-semibold text-slate-800">Effectifs par equipe</h3>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -114,7 +115,7 @@ export default function ReportingRH() {
           {/* Candidate pipeline */}
           <div className="bg-white rounded-xl shadow-sm border">
             <div className="p-4 border-b">
-              <h3 className="font-semibold text-solidata-dark">Pipeline de recrutement</h3>
+              <h3 className="font-semibold text-slate-800">Pipeline de recrutement</h3>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -162,7 +163,7 @@ export default function ReportingRH() {
 
         {/* Candidate funnel visual */}
         <div className="bg-white rounded-xl shadow-sm border p-4">
-          <h3 className="font-semibold text-solidata-dark mb-4">Entonnoir de recrutement</h3>
+          <h3 className="font-semibold text-slate-800 mb-4">Entonnoir de recrutement</h3>
           <div className="space-y-2">
             {['received', 'screening', 'interview', 'trial', 'recruited'].map((status) => {
               const count = candidateStatuses[status] || 0;
@@ -209,7 +210,7 @@ function getFunnelColor(status) {
     screening: 'bg-yellow-400',
     interview: 'bg-purple-400',
     trial: 'bg-orange-400',
-    recruited: 'bg-solidata-green',
+    recruited: 'bg-primary',
   };
   return colors[status] || 'bg-gray-400';
 }

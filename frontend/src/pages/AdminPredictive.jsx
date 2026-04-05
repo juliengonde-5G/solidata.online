@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
@@ -209,7 +210,7 @@ export default function AdminPredictive() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement..." /></Layout>;
   if (!config) return <Layout><div className="p-6 text-red-500">Erreur de chargement</div></Layout>;
 
   // Séparer événements à venir et passés
@@ -222,13 +223,13 @@ export default function AdminPredictive() {
       <div className="p-6 max-w-5xl">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Moteur prédictif</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Moteur prédictif</h1>
             <p className="text-gray-500">Variables et paramètres de l'algorithme d'optimisation des tournées</p>
           </div>
           <button
             onClick={save}
             disabled={saving}
-            className={`px-5 py-2.5 rounded-lg text-white font-medium transition ${saved ? 'bg-green-500' : 'bg-solidata-green hover:bg-solidata-green/90'}`}
+            className={`px-5 py-2.5 rounded-lg text-white font-medium transition ${saved ? 'bg-green-500' : 'bg-primary hover:bg-primary/90'}`}
           >
             {saving ? 'Sauvegarde...' : saved ? 'Sauvegardé !' : 'Sauvegarder'}
           </button>
@@ -310,7 +311,7 @@ export default function AdminPredictive() {
             <p className="text-xs text-gray-500">
               Un événement à proximité d'un CAV augmente la prédiction de remplissage (x{config.scoring.localEventBonus || 1.2} par défaut).
             </p>
-            <button onClick={() => setShowEventForm(true)} className="text-solidata-green text-sm font-medium hover:underline">+ Nouvel événement</button>
+            <button onClick={() => setShowEventForm(true)} className="text-primary text-sm font-medium hover:underline">+ Nouvel événement</button>
           </div>
 
           {upcomingEvents.length > 0 && (
@@ -793,7 +794,7 @@ export default function AdminPredictive() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Créer</button>
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Créer</button>
               </div>
             </form>
           </div>
@@ -837,7 +838,7 @@ function EventRow({ evt, onDelete, past }) {
 function Section({ title, desc, children }) {
   return (
     <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
-      <h2 className="text-lg font-semibold text-solidata-dark mb-1">{title}</h2>
+      <h2 className="text-lg font-semibold text-slate-800 mb-1">{title}</h2>
       {desc && <p className="text-xs text-gray-400 mb-4">{desc}</p>}
       {children}
     </div>

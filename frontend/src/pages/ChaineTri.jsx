@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import DiagrammeFluxTri from '../components/DiagrammeFluxTri';
 
@@ -53,32 +54,32 @@ export default function ChaineTri() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la chaîne de tri..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Chaînes de tri</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Chaînes de tri</h1>
             <p className="text-gray-500">Flux de tri, postes de travail et débouchés</p>
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => setVue('diagramme')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'diagramme' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'diagramme' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
             >
               Diagramme des flux
             </button>
             <button
               onClick={() => setVue('chaines')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'chaines' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'chaines' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
             >
               Chaînes & catégories
             </button>
             <button
               onClick={() => setVue('production')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'production' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'production' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
             >
               Production & Effectifs
             </button>
@@ -108,7 +109,7 @@ export default function ChaineTri() {
               <div className="text-xs text-gray-500 mb-3">
                 {chain.nb_operations || 0} opérations · {chain.nb_postes || 0} postes
               </div>
-              <button onClick={() => loadChainDetail(chain.id)} className="text-solidata-green text-sm font-medium hover:underline">
+              <button onClick={() => loadChainDetail(chain.id)} className="text-primary text-sm font-medium hover:underline">
                 Voir les opérations →
               </button>
             </div>
@@ -125,9 +126,9 @@ export default function ChaineTri() {
             <div className="flex gap-4 overflow-x-auto pb-4">
               {selectedChain.operations?.map((op, i) => (
                 <div key={op.id} className="flex items-center gap-2">
-                  <div className="bg-solidata-green/10 border border-solidata-green/30 rounded-xl p-4 min-w-[200px]">
+                  <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 min-w-[200px]">
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="w-6 h-6 rounded-full bg-solidata-green text-white flex items-center justify-center text-xs font-bold">{op.numero ?? op.ordre}</span>
+                      <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">{op.numero ?? op.ordre}</span>
                       <h4 className="font-semibold text-sm">{op.nom}</h4>
                     </div>
                     {op.description && <p className="text-xs text-gray-500">{op.description}</p>}
@@ -144,7 +145,7 @@ export default function ChaineTri() {
 
         {/* Categories sortantes */}
         <div>
-          <h2 className="text-xl font-bold text-solidata-dark mb-4">Catégories sortantes</h2>
+          <h2 className="text-xl font-bold text-slate-800 mb-4">Catégories sortantes</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {categories.map(cat => (
               <div key={cat.id} className="bg-white rounded-lg shadow-sm border p-4 flex items-center gap-3">
@@ -185,7 +186,7 @@ export default function ChaineTri() {
                 <div className="grid grid-cols-4 gap-4 mb-6">
                   <div className="bg-white rounded-xl shadow-sm border p-4">
                     <p className="text-xs text-gray-500 font-medium">Effectif moyen / jour</p>
-                    <p className="text-2xl font-bold text-solidata-dark">{avgEffectif}</p>
+                    <p className="text-2xl font-bold text-slate-800">{avgEffectif}</p>
                   </div>
                   <div className="bg-white rounded-xl shadow-sm border p-4">
                     <p className="text-xs text-gray-500 font-medium">Total entrée (kg)</p>
@@ -225,7 +226,7 @@ export default function ChaineTri() {
                       return (
                         <div key={i} className="flex flex-col items-center" style={{ width: 36 }}>
                           {/* Effectif badge on top */}
-                          <span className={`text-[10px] font-bold mb-1 ${(day.effectif_reel || 0) < (day.effectif_theorique || 0) ? 'text-red-500' : 'text-solidata-dark'}`}>
+                          <span className={`text-[10px] font-bold mb-1 ${(day.effectif_reel || 0) < (day.effectif_theorique || 0) ? 'text-red-500' : 'text-slate-800'}`}>
                             {day.effectif_reel || 0}
                           </span>
                           {/* Stacked bar */}
@@ -243,7 +244,7 @@ export default function ChaineTri() {
                   <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-400 rounded" /> Chaîne Qualité (ligne)</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 bg-amber-400 rounded" /> Recyclage Exclusif (R3)</span>
-                    <span className="flex items-center gap-1"><span className="text-[10px] font-bold text-solidata-dark">N</span> = effectif réel</span>
+                    <span className="flex items-center gap-1"><span className="text-[10px] font-bold text-slate-800">N</span> = effectif réel</span>
                   </div>
                 </div>
               )}

@@ -61,10 +61,10 @@ export default function WorkHours() {
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Heures de travail</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Heures de travail</h1>
             <p className="text-gray-500">Suivi et validation des heures</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+          <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm font-medium">
             + Saisir des heures
           </button>
         </div>
@@ -81,7 +81,7 @@ export default function WorkHours() {
         {/* Summary Cards */}
         {summary && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <SummaryCard label="Total heures" value={`${summary.total_hours || 0}h`} color="text-solidata-green" />
+            <SummaryCard label="Total heures" value={`${summary.total_hours || 0}h`} color="text-primary" />
             <SummaryCard label="Jours travaillés" value={summary.days_worked || 0} color="text-blue-600" />
             <SummaryCard label="Heures sup." value={`${summary.overtime_hours || 0}h`} color="text-orange-600" />
             <SummaryCard label="Absences" value={`${summary.absence_days || 0}j`} color="text-red-600" />
@@ -124,7 +124,7 @@ export default function WorkHours() {
                     </td>
                     <td className="p-3">
                       {!h.validated && (
-                        <button onClick={() => validateHours(h.id)} className="text-solidata-green text-xs font-medium hover:underline">
+                        <button onClick={() => validateHours(h.id)} className="text-primary text-xs font-medium hover:underline">
                           Valider
                         </button>
                       )}
@@ -176,7 +176,7 @@ export default function WorkHours() {
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Enregistrer</button>
+                <button type="submit" className="flex-1 bg-primary text-white rounded-lg py-2 text-sm">Enregistrer</button>
               </div>
             </form>
           </div>

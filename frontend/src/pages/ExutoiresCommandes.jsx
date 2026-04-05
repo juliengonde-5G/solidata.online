@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Plus } from 'lucide-react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -206,7 +208,7 @@ export default function ExutoiresCommandes() {
   const formatPrice = (v) => v != null ? parseFloat(v).toFixed(2) : '—';
   const formatTonnage = (v) => v != null ? parseFloat(v).toFixed(3) : '—';
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des commandes..." /></Layout>;
 
   return (
     <Layout>
@@ -214,10 +216,10 @@ export default function ExutoiresCommandes() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Commandes Logistiques</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Commandes Logistiques</h1>
             <p className="text-gray-500">Gestion des commandes et expéditions</p>
           </div>
-          <button onClick={openCreate} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+          <button onClick={openCreate} className="btn-primary text-sm">
             + Nouvelle commande
           </button>
         </div>
@@ -226,7 +228,7 @@ export default function ExutoiresCommandes() {
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-sm border p-4">
             <p className="text-xs text-gray-500 font-medium">Commandes actives</p>
-            <p className="text-2xl font-bold text-solidata-dark">{stats.actives || 0}</p>
+            <p className="text-2xl font-bold text-slate-800">{stats.actives || 0}</p>
           </div>
           <div className="bg-white rounded-xl shadow-sm border p-4">
             <p className="text-xs text-gray-500 font-medium">Tonnage prévu</p>
@@ -265,16 +267,16 @@ export default function ExutoiresCommandes() {
                     onClick={() => setFilterStatut(filterStatut === step.key ? '' : step.key)}
                     className={`flex flex-col items-center px-3 py-2 rounded-lg transition-all min-w-[80px] ${
                       filterStatut === step.key
-                        ? 'ring-2 ring-solidata-green bg-solidata-green/10'
+                        ? 'ring-2 ring-primary bg-primary/10'
                         : hasItems ? 'hover:bg-gray-50' : 'opacity-40'
                     }`}
                   >
                     <span className="text-lg mb-1">{step.icon}</span>
-                    <span className={`text-lg font-bold ${hasItems ? 'text-solidata-dark' : 'text-gray-300'}`}>{count}</span>
+                    <span className={`text-lg font-bold ${hasItems ? 'text-slate-800' : 'text-gray-300'}`}>{count}</span>
                     <span className="text-[10px] text-gray-500 leading-tight text-center">{statusInfo.label}</span>
                   </button>
                   {i < arr.length - 1 && (
-                    <div className={`text-gray-300 mx-0.5 ${count > 0 ? 'text-solidata-green' : ''}`}>→</div>
+                    <div className={`text-gray-300 mx-0.5 ${count > 0 ? 'text-primary' : ''}`}>→</div>
                   )}
                 </div>
               );
@@ -380,7 +382,7 @@ export default function ExutoiresCommandes() {
                     </td>
                     <td className="p-3">
                       <div className="flex gap-2">
-                        <button onClick={() => openDetail(cmd)} className="text-solidata-green hover:underline text-sm font-medium">
+                        <button onClick={() => openDetail(cmd)} className="text-primary hover:underline text-sm font-medium">
                           Voir
                         </button>
                         {canEdit && (
@@ -409,7 +411,7 @@ export default function ExutoiresCommandes() {
         {showForm && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowForm(false); setEditing(null); }}>
             <form onSubmit={handleSubmit} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4 text-solidata-dark">
+              <h2 className="text-lg font-bold mb-4 text-slate-800">
                 {editing ? 'Modifier la commande' : 'Nouvelle commande logistique'}
               </h2>
               <div className="space-y-3">
@@ -431,12 +433,12 @@ export default function ExutoiresCommandes() {
                   <label className="text-xs text-gray-500">Types de produit * <span className="text-gray-400">(plusieurs possibles)</span></label>
                   <div className="mt-1 grid grid-cols-2 gap-2">
                     {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
-                      <label key={k} className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${form.type_produit.includes(k) ? 'bg-solidata-green/10 border-solidata-green' : 'hover:bg-gray-50'}`}>
+                      <label key={k} className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${form.type_produit.includes(k) ? 'bg-primary/10 border-primary' : 'hover:bg-gray-50'}`}>
                         <input
                           type="checkbox"
                           checked={form.type_produit.includes(k)}
                           onChange={() => handleTypeToggle(k)}
-                          className="accent-solidata-green"
+                          className="accent-primary"
                         />
                         {v}
                       </label>
@@ -514,7 +516,7 @@ export default function ExutoiresCommandes() {
                 <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="flex-1 border rounded-lg py-2 text-sm">
                   Annuler
                 </button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">
+                <button type="submit" className="flex-1 btn-primary text-sm">
                   {editing ? 'Enregistrer' : 'Créer'}
                 </button>
               </div>
@@ -527,7 +529,7 @@ export default function ExutoiresCommandes() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDetail(null)}>
             <div className="bg-white rounded-xl p-6 w-[600px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-solidata-dark">
+                <h2 className="text-lg font-bold text-slate-800">
                   Commande {showDetail.reference || `#${showDetail.id}`}
                 </h2>
                 <span className={`px-2 py-1 rounded text-xs font-medium ${(STATUTS[showDetail.statut] || {}).color || 'bg-gray-100 text-gray-700'}`}>
@@ -657,7 +659,7 @@ export default function ExutoiresCommandes() {
                 {STATUS_TRANSITIONS[showDetail.statut] && (
                   <button
                     onClick={() => handleStatusChange(showDetail, STATUS_TRANSITIONS[showDetail.statut].next)}
-                    className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium"
+                    className="flex-1 btn-primary text-sm"
                   >
                     {STATUS_TRANSITIONS[showDetail.statut].action}
                   </button>
