@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Warehouse, Plus, ArrowDownUp } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge } from '../components';
 import api from '../services/api';
 
 export default function Stock() {
@@ -108,11 +108,7 @@ export default function Stock() {
       key: 'type',
       label: 'Type',
       sortable: true,
-      render: (m) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${m.type === 'entree' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-          {m.type === 'entree' ? 'Entrée' : 'Sortie'}
-        </span>
-      ),
+      render: (m) => <StatusBadge status={m.type} size="sm" />,
     },
     { key: 'poids_kg', label: 'Quantité (kg)', sortable: true, render: (m) => <span className="font-medium">{m.poids_kg || m.quantity_kg}</span> },
     { key: 'source', label: 'Source', render: (m) => <span className="text-slate-500">{m.origine || m.destination || '—'}</span> },
@@ -175,7 +171,7 @@ export default function Stock() {
                 <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
                 Inventaire partiel
               </button>
-              <button onClick={() => createInventory('complet')} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center">
+              <button onClick={() => createInventory('complet')} className="btn-primary text-sm">
                 <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
                 Inventaire complet
               </button>

@@ -111,7 +111,7 @@ export default function RGPD() {
             </button>
           )}
           {tab === 'droits' && (
-            <button onClick={handlePurge} className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-600">
+            <button onClick={handlePurge} className="btn-danger text-sm">
               Purge auto (24 mois)
             </button>
           )}
@@ -158,8 +158,8 @@ export default function RGPD() {
                       <input type="number" value={searchEntity.id} onChange={e => setSearchEntity({ ...searchEntity, id: e.target.value })}
                         placeholder="ID" className="border rounded-lg px-3 py-2 text-sm w-24" />
                     </div>
-                    <button onClick={handleExport} className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-600">Exporter les données</button>
-                    <button onClick={handleAnonymize} className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-600">Anonymiser</button>
+                    <button onClick={handleExport} className="btn-primary text-sm">Exporter les données</button>
+                    <button onClick={handleAnonymize} className="btn-danger text-sm">Anonymiser</button>
                   </div>
                 </div>
                 {exportData && (

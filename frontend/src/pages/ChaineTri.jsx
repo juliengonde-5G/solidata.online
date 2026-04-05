@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Factory } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge } from '../components';
 import api from '../services/api';
 import DiagrammeFluxTri from '../components/DiagrammeFluxTri';
 
@@ -101,9 +102,7 @@ export default function ChaineTri() {
             <div key={chain.id} className="bg-white rounded-xl shadow-sm border p-5">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-bold text-lg">{chain.nom}</h3>
-                <span className={`px-2 py-1 rounded text-xs font-medium ${chain.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                  {chain.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <StatusBadge status={chain.is_active ? 'active' : 'inactive'} size="sm" />
               </div>
               {chain.description && <p className="text-sm text-gray-500 mb-3">{chain.description}</p>}
               <div className="text-xs text-gray-500 mb-3">
@@ -251,44 +250,43 @@ export default function ChaineTri() {
             </div>
 
             {/* Daily detail table */}
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                    <th className="text-center p-3 text-xs font-semibold text-gray-500">Effectif théo.</th>
-                    <th className="text-center p-3 text-xs font-semibold text-gray-500">Effectif réel</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Entrée ligne (kg)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Entrée R3 (kg)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Total jour (t)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Productivité (kg/pers)</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Encadrant</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {prodData.map((day, i) => {
-                    const effDiff = (day.effectif_reel || 0) - (day.effectif_theorique || 0);
-                    return (
-                      <tr key={i} className="border-t hover:bg-gray-50">
-                        <td className="p-3 font-medium">{new Date(day.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
-                        <td className="p-3 text-center">{day.effectif_theorique || '—'}</td>
-                        <td className={`p-3 text-center font-medium ${effDiff < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          {day.effectif_reel || '—'}
-                        </td>
-                        <td className="p-3 text-right font-mono">{(day.entree_ligne_kg || 0).toLocaleString('fr-FR')}</td>
-                        <td className="p-3 text-right font-mono">{(day.entree_recyclage_r3_kg || 0).toLocaleString('fr-FR')}</td>
-                        <td className="p-3 text-right font-mono font-medium">{day.total_jour_t ? parseFloat(day.total_jour_t).toFixed(3) : '—'}</td>
-                        <td className="p-3 text-right font-mono">{day.productivite_kg_per ? Math.round(day.productivite_kg_per) : '—'}</td>
-                        <td className="p-3 text-sm text-gray-600">{day.encadrant || '—'}</td>
-                      </tr>
-                    );
-                  })}
-                  {prodData.length === 0 && (
-                    <tr><td colSpan="8" className="p-8 text-center text-gray-400">Aucune donnée pour ce mois</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            {(() => {
+              const prodColumns = [
+                { key: 'date', label: 'Date', sortable: true, render: (day) => (
+                  <span className="font-medium">{new Date(day.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                )},
+                { key: 'effectif_theorique', label: 'Effectif théo.', align: 'center', render: (day) => day.effectif_theorique || '—' },
+                { key: 'effectif_reel', label: 'Effectif réel', align: 'center', render: (day) => {
+                  const effDiff = (day.effectif_reel || 0) - (day.effectif_theorique || 0);
+                  return <span className={`font-medium ${effDiff < 0 ? 'text-red-600' : 'text-green-600'}`}>{day.effectif_reel || '—'}</span>;
+                }},
+                { key: 'entree_ligne_kg', label: 'Entrée ligne (kg)', align: 'right', sortable: true, render: (day) => (
+                  <span className="font-mono">{(day.entree_ligne_kg || 0).toLocaleString('fr-FR')}</span>
+                )},
+                { key: 'entree_recyclage_r3_kg', label: 'Entrée R3 (kg)', align: 'right', sortable: true, render: (day) => (
+                  <span className="font-mono">{(day.entree_recyclage_r3_kg || 0).toLocaleString('fr-FR')}</span>
+                )},
+                { key: 'total_jour_t', label: 'Total jour (t)', align: 'right', sortable: true, render: (day) => (
+                  <span className="font-mono font-medium">{day.total_jour_t ? parseFloat(day.total_jour_t).toFixed(3) : '—'}</span>
+                )},
+                { key: 'productivite_kg_per', label: 'Productivité (kg/pers)', align: 'right', sortable: true, render: (day) => (
+                  <span className="font-mono">{day.productivite_kg_per ? Math.round(day.productivite_kg_per) : '—'}</span>
+                )},
+                { key: 'encadrant', label: 'Encadrant', render: (day) => (
+                  <span className="text-gray-600">{day.encadrant || '—'}</span>
+                )},
+              ];
+              return (
+                <DataTable
+                  columns={prodColumns}
+                  data={prodData}
+                  loading={false}
+                  emptyIcon={Factory}
+                  emptyMessage="Aucune donnée pour ce mois"
+                  dense
+                />
+              );
+            })()}
           </div>
         )}
       </div>

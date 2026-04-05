@@ -5,7 +5,6 @@ import { DataTable, StatusBadge, LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const ROLE_LABELS = { ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines', COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité' };
-const ROLE_COLORS = { ADMIN: 'bg-red-100 text-red-700', MANAGER: 'bg-purple-100 text-purple-700', RH: 'bg-blue-100 text-blue-700', COLLABORATEUR: 'bg-green-100 text-green-700', AUTORITE: 'bg-yellow-100 text-yellow-700' };
 
 export default function Users() {
   const [users, setUsers] = useState([]);
@@ -64,21 +63,13 @@ export default function Users() {
       key: 'role',
       label: 'Rôle',
       sortable: true,
-      render: (u) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${ROLE_COLORS[u.role] || ''}`}>
-          {ROLE_LABELS[u.role] || u.role}
-        </span>
-      ),
+      render: (u) => <StatusBadge status={u.role} size="sm" />,
     },
     {
       key: 'is_active',
       label: 'Statut',
       sortable: true,
-      render: (u) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${u.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-          {u.is_active ? 'Actif' : 'Désactivé'}
-        </span>
-      ),
+      render: (u) => <StatusBadge status={u.is_active ? 'active' : 'inactive'} size="sm" />,
     },
     {
       key: 'last_login',

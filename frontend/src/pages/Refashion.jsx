@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge } from '../components';
 import { MapPin, Coins } from 'lucide-react';
 import api from '../services/api';
 
@@ -117,9 +117,7 @@ export default function Refashion() {
               { key: 'population', label: 'Population', sortable: true, render: (c) => c.population?.toLocaleString('fr-FR') || '—' },
               { key: 'nb_cav', label: 'Nb CAV', sortable: true, render: (c) => c.nb_cav || 0 },
               { key: 'has_convention', label: 'Convention', render: (c) => (
-                <span className={`px-2 py-1 rounded text-xs font-medium ${c.has_convention ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {c.has_convention ? 'Active' : 'Non'}
-                </span>
+                <StatusBadge status={c.has_convention ? 'active' : 'inactive'} size="sm" label={c.has_convention ? 'Active' : 'Non'} />
               )},
             ]}
             data={communes}
@@ -136,13 +134,7 @@ export default function Refashion() {
               { key: 'quarter', label: 'Trimestre', render: (s) => `Q${s.quarter}` },
               { key: 'montant', label: 'Montant (€)', sortable: true, render: (s) => <span className="font-medium text-primary">{parseFloat(s.montant || 0).toLocaleString('fr-FR')}€</span> },
               { key: 'status', label: 'Statut', render: (s) => (
-                <span className={`px-2 py-1 rounded text-xs font-medium ${
-                  s.status === 'paid' ? 'bg-green-100 text-green-700' :
-                  s.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-gray-100 text-gray-500'
-                }`}>
-                  {s.status === 'paid' ? 'Versé' : s.status === 'pending' ? 'En attente' : s.status}
-                </span>
+                <StatusBadge status={s.status} size="sm" label={s.status === 'paid' ? 'Verse' : undefined} />
               )},
               { key: 'date_versement', label: 'Date versement', render: (s) => <span className="text-gray-500">{s.date_versement ? new Date(s.date_versement).toLocaleDateString('fr-FR') : '—'}</span> },
             ]}

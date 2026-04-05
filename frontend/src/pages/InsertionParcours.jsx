@@ -416,7 +416,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
             <option value="moyenne">Moyenne</option>
             <option value="basse">Basse</option>
           </select>
-          <button onClick={handleAddAction} className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">+</button>
+          <button onClick={handleAddAction} className="btn-primary text-xs">+</button>
         </div>
       </div>
 
@@ -625,7 +625,7 @@ export default function InsertionParcours() {
                     </div>
                   </div>
                   <button onClick={initializeMilestones}
-                    className="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600">
+                    className="btn-primary text-sm">
                     Initialiser jalons
                   </button>
                 </div>

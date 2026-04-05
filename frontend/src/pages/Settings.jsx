@@ -457,7 +457,7 @@ export default function Settings() {
                         <label className="text-[10px] text-gray-500 block mb-0.5">Prix €/tonne</label>
                         <input type="number" step="0.01" min="0" value={tarifForm.prix_tonne} onChange={e => setTarifForm({ ...tarifForm, prix_tonne: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required placeholder="0.00" />
                       </div>
-                      <button type="submit" className="bg-primary text-white rounded px-3 py-1.5 text-sm">OK</button>
+                      <button type="submit" className="btn-primary text-sm">OK</button>
                       <button type="button" onClick={() => setEditTarif(null)} className="text-gray-400 text-sm px-2 py-1.5">Annuler</button>
                     </form>
                   )}

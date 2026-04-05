@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge } from '../components';
 import { Users } from 'lucide-react';
 import api from '../services/api';
 
@@ -239,11 +239,7 @@ export default function Employees() {
               </span>
             )},
             { key: 'weekly_hours', label: 'Heures/sem', render: (emp) => `${emp.weekly_hours || 35}h` },
-            { key: 'is_active', label: 'Statut', render: (emp) => (
-              <span className={`px-2 py-1 rounded text-xs font-medium ${emp.is_active !== false ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                {emp.is_active !== false ? 'Actif' : 'Inactif'}
-              </span>
-            )},
+            { key: 'is_active', label: 'Statut', render: (emp) => <StatusBadge status={emp.is_active !== false ? 'active' : 'inactive'} size="sm" /> },
           ]}
           data={employees}
           loading={false}

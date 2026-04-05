@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { BookOpen } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, DataTable } from '../components';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -380,49 +381,39 @@ export default function Pennylane() {
         {/* Historique des syncs */}
         <div className="bg-white rounded-xl shadow-sm border p-6">
           <h2 className="font-bold text-slate-800 mb-4">Historique des synchronisations</h2>
-          {history.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-6">Aucune synchronisation effectuee</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-slate-500 uppercase bg-slate-50">
-                    <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Type</th>
-                    <th className="px-3 py-2">Direction</th>
-                    <th className="px-3 py-2">Statut</th>
-                    <th className="px-3 py-2">Enregistrements</th>
-                    <th className="px-3 py-2">Par</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map(h => (
-                    <tr key={h.id} className="border-t">
-                      <td className="px-3 py-2.5">{formatDate(h.started_at)}</td>
-                      <td className="px-3 py-2.5 capitalize">{h.sync_type}</td>
-                      <td className="px-3 py-2.5">
-                        <span className={`px-2 py-0.5 rounded text-xs ${h.direction === 'push' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                          {h.direction === 'push' ? 'Solidata → PL' : 'PL → Solidata'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          h.status === 'completed' ? 'bg-green-100 text-green-700' :
-                          h.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' :
-                          h.status === 'partial' ? 'bg-orange-100 text-orange-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
-                          {h.status === 'completed' ? 'OK' : h.status === 'in_progress' ? 'En cours' : h.status === 'partial' ? 'Partiel' : 'Erreur'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">{h.records_count}</td>
-                      <td className="px-3 py-2.5 text-slate-500">{h.user_name || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {(() => {
+            const historyColumns = [
+              { key: 'started_at', label: 'Date', sortable: true, render: (h) => formatDate(h.started_at) },
+              { key: 'sync_type', label: 'Type', render: (h) => <span className="capitalize">{h.sync_type}</span> },
+              { key: 'direction', label: 'Direction', render: (h) => (
+                <span className={`px-2 py-0.5 rounded text-xs ${h.direction === 'push' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                  {h.direction === 'push' ? 'Solidata → PL' : 'PL → Solidata'}
+                </span>
+              )},
+              { key: 'status', label: 'Statut', render: (h) => (
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                  h.status === 'completed' ? 'bg-green-100 text-green-700' :
+                  h.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' :
+                  h.status === 'partial' ? 'bg-orange-100 text-orange-700' :
+                  'bg-red-100 text-red-700'
+                }`}>
+                  {h.status === 'completed' ? 'OK' : h.status === 'in_progress' ? 'En cours' : h.status === 'partial' ? 'Partiel' : 'Erreur'}
+                </span>
+              )},
+              { key: 'records_count', label: 'Enregistrements', sortable: true },
+              { key: 'user_name', label: 'Par', render: (h) => <span className="text-slate-500">{h.user_name || '—'}</span> },
+            ];
+            return (
+              <DataTable
+                columns={historyColumns}
+                data={history}
+                loading={false}
+                emptyIcon={BookOpen}
+                emptyMessage="Aucune synchronisation effectuee"
+                dense
+              />
+            );
+          })()}
         </div>
       </div>
 

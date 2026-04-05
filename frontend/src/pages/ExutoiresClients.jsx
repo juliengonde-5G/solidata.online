@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Building2, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge } from '../components';
 import api from '../services/api';
 
 const TYPE_LABELS = { recycleur: 'Recycleur', negociant: 'Négociant', industriel: 'Industriel', autre: 'Autre' };
-const TYPE_BADGES = { recycleur: 'bg-green-50 text-green-700', negociant: 'bg-blue-50 text-blue-700', industriel: 'bg-orange-50 text-orange-700', autre: 'bg-slate-100 text-slate-600' };
 
 const EMPTY_FORM = {
   raison_sociale: '', siret: '', adresse: '', code_postal: '', ville: '',
@@ -75,7 +74,7 @@ export default function ExutoiresClients() {
     { key: 'ville', label: 'Ville', sortable: true, render: (c) => c.ville || '—' },
     {
       key: 'type_client', label: 'Type', sortable: true,
-      render: (c) => <span className={`px-2 py-1 rounded text-xs font-medium ${TYPE_BADGES[c.type_client] || TYPE_BADGES.autre}`}>{TYPE_LABELS[c.type_client] || c.type_client || '—'}</span>,
+      render: (c) => <StatusBadge status={c.type_client || 'autre'} size="sm" label={TYPE_LABELS[c.type_client] || c.type_client || '—'} />,
     },
     { key: 'contact_nom', label: 'Contact', render: (c) => c.contact_nom || '—' },
     { key: 'contact_email', label: 'Email', render: (c) => c.contact_email || '—' },

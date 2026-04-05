@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Route, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge } from '../components';
 import api from '../services/api';
 
-const STATUS_LABELS = { planned: 'Planifiée', in_progress: 'En cours', completed: 'Terminée', cancelled: 'Annulée' };
-const STATUS_COLORS = { planned: 'bg-blue-100 text-blue-700', in_progress: 'bg-orange-100 text-orange-700', completed: 'bg-green-100 text-green-700', cancelled: 'bg-red-100 text-red-700' };
 const MODE_LABELS = { intelligent: 'IA', standard: 'Standard', manual: 'Manuel' };
+const STATUS_LABELS = { planned: 'Planifiée', in_progress: 'En cours', completed: 'Terminée' };
 
 export default function Tours() {
   const [tours, setTours] = useState([]);
@@ -88,11 +87,7 @@ export default function Tours() {
       key: 'mode',
       label: 'Mode',
       sortable: true,
-      render: (t) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${t.mode === 'intelligent' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-700'}`}>
-          {MODE_LABELS[t.mode] || t.mode}
-        </span>
-      ),
+      render: (t) => <StatusBadge status={t.mode} size="sm" />,
     },
     { key: 'nb_cav', label: 'CAV', sortable: true, render: (t) => t.nb_cav || 0 },
     { key: 'total_weight_kg', label: 'Poids (kg)', sortable: true, render: (t) => <span className="font-medium">{t.total_weight_kg || 0}</span> },
@@ -100,11 +95,7 @@ export default function Tours() {
       key: 'status',
       label: 'Statut',
       sortable: true,
-      render: (t) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[t.status] || ''}`}>
-          {STATUS_LABELS[t.status] || t.status}
-        </span>
-      ),
+      render: (t) => <StatusBadge status={t.status} type="tournee" size="sm" />,
     },
     {
       key: 'actions',
@@ -145,13 +136,11 @@ export default function Tours() {
             <div key={t.id} className="card-modern p-4" onClick={() => loadTourDetail(t.id)}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-bold">{new Date(t.date).toLocaleDateString('fr-FR')}</span>
-                <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[t.status] || ''}`}>
-                  {STATUS_LABELS[t.status] || t.status}
-                </span>
+                <StatusBadge status={t.status} type="tournee" size="sm" />
               </div>
               <div className="flex items-center gap-2 text-sm text-slate-700 mb-1">
                 <span className="font-medium">{t.registration || t.vehicle_registration || '—'}</span>
-                {t.mode === 'intelligent' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700">IA</span>}
+                <StatusBadge status={t.mode} size="sm" />
               </div>
               <p className="text-xs text-slate-500 mb-2">{t.driver_name || [t.driver_first_name, t.driver_last_name].filter(Boolean).join(' ') || 'Pas de chauffeur'}</p>
               <div className="flex items-center justify-between text-xs text-slate-500">

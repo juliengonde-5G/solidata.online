@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Tag } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, DataTable } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -165,58 +165,41 @@ export default function ExutoiresTarifs() {
         {/* Prix négociés par client */}
         <div>
           <h2 className="text-lg font-semibold text-slate-800 mb-4">Prix négociés par client</h2>
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b">
-                <tr>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Client</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Type produit</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">Prix (€/t)</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Date début</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Date fin</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {prixNegocies.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-slate-400">Aucun prix négocié</td>
-                  </tr>
-                ) : (
-                  prixNegocies.map(t => {
-                    const colors = TYPE_COLORS[t.type_produit] || {};
-                    return (
-                      <tr key={t.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-medium">{getClientName(t.client_id)}</td>
-                        <td className="px-4 py-3">
-                          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${colors.badge}`}>
-                            {TYPES_PRODUIT[t.type_produit] || t.type_produit}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono font-medium">
-                          {parseFloat(t.prix_reference_tonne).toFixed(2)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {new Date(t.date_debut).toLocaleDateString('fr-FR')}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {t.date_fin ? new Date(t.date_fin).toLocaleDateString('fr-FR') : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <button onClick={() => openEdit(t)} className="text-primary hover:underline text-sm mr-3">
-                            Modifier
-                          </button>
-                          <button onClick={() => handleDelete(t.id)} className="text-red-500 hover:underline text-sm">
-                            Supprimer
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+          {(() => {
+            const prixNegociesColumns = [
+              { key: 'client_id', label: 'Client', sortable: true, render: (t) => (
+                <span className="font-medium">{getClientName(t.client_id)}</span>
+              )},
+              { key: 'type_produit', label: 'Type produit', sortable: true, render: (t) => {
+                const colors = TYPE_COLORS[t.type_produit] || {};
+                return <span className={`text-xs font-semibold px-2 py-1 rounded-full ${colors.badge}`}>{TYPES_PRODUIT[t.type_produit] || t.type_produit}</span>;
+              }},
+              { key: 'prix_reference_tonne', label: 'Prix (€/t)', align: 'right', sortable: true, render: (t) => (
+                <span className="font-mono font-medium">{parseFloat(t.prix_reference_tonne).toFixed(2)}</span>
+              )},
+              { key: 'date_debut', label: 'Date début', sortable: true, render: (t) => (
+                <span className="text-slate-600">{new Date(t.date_debut).toLocaleDateString('fr-FR')}</span>
+              )},
+              { key: 'date_fin', label: 'Date fin', render: (t) => (
+                <span className="text-slate-600">{t.date_fin ? new Date(t.date_fin).toLocaleDateString('fr-FR') : '—'}</span>
+              )},
+              { key: 'actions', label: 'Actions', align: 'right', render: (t) => (
+                <>
+                  <button onClick={() => openEdit(t)} className="text-primary hover:underline text-sm mr-3">Modifier</button>
+                  <button onClick={() => handleDelete(t.id)} className="text-red-500 hover:underline text-sm">Supprimer</button>
+                </>
+              )},
+            ];
+            return (
+              <DataTable
+                columns={prixNegociesColumns}
+                data={prixNegocies}
+                loading={false}
+                emptyIcon={Tag}
+                emptyMessage="Aucun prix négocié"
+              />
+            );
+          })()}
         </div>
 
         {/* Modal */}

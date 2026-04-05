@@ -1,11 +1,8 @@
 import { useState, useEffect } from 'react';
 import { FileText, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge } from '../components';
 import api from '../services/api';
-
-const STATUS_LABELS = { draft: 'Brouillon', sent: 'Envoyée', paid: 'Payée', overdue: 'En retard', cancelled: 'Annulée' };
-const STATUS_COLORS = { draft: 'bg-slate-100 text-slate-700', sent: 'bg-blue-100 text-blue-700', paid: 'bg-green-100 text-green-700', overdue: 'bg-red-100 text-red-700', cancelled: 'bg-red-50 text-red-500' };
 
 export default function Billing() {
   const [invoices, setInvoices] = useState([]);
@@ -69,11 +66,7 @@ export default function Billing() {
       key: 'status',
       label: 'Statut',
       sortable: true,
-      render: (inv) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[inv.status] || ''}`}>
-          {STATUS_LABELS[inv.status] || inv.status}
-        </span>
-      ),
+      render: (inv) => <StatusBadge status={inv.status} size="sm" />,
     },
     {
       key: 'actions',

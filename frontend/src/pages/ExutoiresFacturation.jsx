@@ -1,22 +1,9 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge } from '../components';
 import { Scale, FileText } from 'lucide-react';
 import api from '../services/api';
 
-const STATUTS_PESEE = {
-  conforme: { label: 'Conforme', color: 'bg-green-100 text-green-700' },
-  ecart_acceptable: { label: 'Écart acceptable', color: 'bg-yellow-100 text-yellow-700' },
-  litige: { label: 'Litige', color: 'bg-red-100 text-red-700' },
-  valide: { label: 'Validé', color: 'bg-blue-100 text-blue-700' },
-};
-
-const STATUTS_FACTURE = {
-  recue: { label: 'Reçue', color: 'bg-gray-100 text-gray-700' },
-  conforme: { label: 'Conforme', color: 'bg-green-100 text-green-700' },
-  ecart: { label: 'Écart', color: 'bg-yellow-100 text-yellow-700' },
-  validee: { label: 'Validée', color: 'bg-blue-100 text-blue-700' },
-};
 
 export default function ExutoiresFacturation() {
   const [activeTab, setActiveTab] = useState('pesee');
@@ -278,10 +265,7 @@ export default function ExutoiresFacturation() {
                 { key: 'pesee_client', label: 'Pesée client (t)', align: 'right', render: (ctrl) => <span className="font-mono">{formatTonnage(ctrl.pesee_client)}</span> },
                 { key: 'ecart', label: 'Écart (t)', align: 'right', render: (ctrl) => <span className={`font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatTonnage(ctrl.ecart)}</span> },
                 { key: 'ecart_pct', label: 'Écart (%)', align: 'right', render: (ctrl) => <span className={`font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatPercent(ctrl.ecart_pct)}</span> },
-                { key: 'statut', label: 'Statut', render: (ctrl) => {
-                  const statut = STATUTS_PESEE[ctrl.statut] || { label: ctrl.statut, color: 'bg-gray-100 text-gray-700' };
-                  return <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>{statut.label}</span>;
-                }},
+                { key: 'statut', label: 'Statut', render: (ctrl) => <StatusBadge status={ctrl.statut} size="sm" /> },
                 { key: 'date_reception_ticket', label: 'Date', render: (ctrl) => formatDate(ctrl.date_reception_ticket) },
                 { key: 'actions', label: 'Actions', render: (ctrl) => ctrl.statut !== 'valide' && (
                   <button onClick={() => validerControle(ctrl.id)} className="text-primary hover:underline text-sm font-medium">Valider</button>
@@ -322,10 +306,7 @@ export default function ExutoiresFacturation() {
                     {ecartMontant != null ? ecartMontant.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €' : '—'}
                   </span>;
                 }},
-                { key: 'statut', label: 'Statut', render: (fac) => {
-                  const statut = STATUTS_FACTURE[fac.statut] || { label: fac.statut, color: 'bg-gray-100 text-gray-700' };
-                  return <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>{statut.label}</span>;
-                }},
+                { key: 'statut', label: 'Statut', render: (fac) => <StatusBadge status={fac.statut} size="sm" /> },
                 { key: 'actions', label: 'Actions', render: (fac) => (
                   <div className="flex gap-2">
                     <button onClick={() => openOcrModal(fac)} className="text-blue-600 hover:underline text-sm font-medium">Corriger</button>

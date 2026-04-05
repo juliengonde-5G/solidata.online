@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge } from '../components';
 import { Building2, Truck } from 'lucide-react';
 import api from '../services/api';
 
@@ -85,11 +85,7 @@ export default function Referentiels() {
               { key: 'type', label: 'Type', render: (a) => <span className="text-gray-500">{a.type || '—'}</span> },
               { key: 'commune', label: 'Commune', sortable: true, render: (a) => a.commune || '—' },
               { key: 'contact', label: 'Contact', render: (a) => <span className="text-gray-500">{a.contact_nom || '—'} {a.contact_tel ? `(${a.contact_tel})` : ''}</span> },
-              { key: 'is_active', label: 'Statut', render: (a) => (
-                <span className={`px-2 py-1 rounded text-xs font-medium ${a.is_active !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                  {a.is_active !== false ? 'Actif' : 'Inactif'}
-                </span>
-              )},
+              { key: 'is_active', label: 'Statut', render: (a) => <StatusBadge status={a.is_active !== false ? 'active' : 'inactive'} size="sm" /> },
             ]}
             data={associations}
             loading={false}

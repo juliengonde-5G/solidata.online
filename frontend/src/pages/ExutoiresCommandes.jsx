@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, ShoppingCart } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -342,70 +342,50 @@ export default function ExutoiresCommandes() {
         </div>
 
         {/* Orders table */}
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Référence</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Client</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Type</th>
-                <th className="text-right p-3 text-xs font-semibold text-gray-500">Tonnage (t)</th>
-                <th className="text-right p-3 text-xs font-semibold text-gray-500">Prix (€/t)</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Fréquence</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-                <th className="text-left p-3 text-xs font-semibold text-gray-500">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {commandes.map(cmd => {
-                const statut = STATUTS[cmd.statut] || { label: cmd.statut, color: 'bg-gray-100 text-gray-700' };
-                const canEdit = ['en_attente', 'confirmee'].includes(cmd.statut);
-                const canCancel = !['cloturee', 'annulee'].includes(cmd.statut);
-                return (
-                  <tr key={cmd.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 text-sm font-medium font-mono">{cmd.reference || `#${cmd.id}`}</td>
-                    <td className="p-3 text-sm">{formatDate(cmd.date_commande)}</td>
-                    <td className="p-3 text-sm">{cmd.client_nom || getClientName(cmd.client_id)}</td>
-                    <td className="p-3 text-sm">
-                      {Array.isArray(cmd.type_produit)
-                        ? cmd.type_produit.map(t => TYPES_PRODUIT[t] || t).join(', ')
-                        : TYPES_PRODUIT[cmd.type_produit] || cmd.type_produit || '—'}
-                    </td>
-                    <td className="p-3 text-sm text-right font-mono">{formatTonnage(cmd.tonnage_prevu)}</td>
-                    <td className="p-3 text-sm text-right font-mono">{formatPrice(cmd.prix_tonne)}</td>
-                    <td className="p-3 text-sm">{FREQUENCES[cmd.frequence] || cmd.frequence || '—'}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>
-                        {statut.label}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <div className="flex gap-2">
-                        <button onClick={() => openDetail(cmd)} className="text-primary hover:underline text-sm font-medium">
-                          Voir
-                        </button>
-                        {canEdit && (
-                          <button onClick={() => openEdit(cmd)} className="text-blue-600 hover:underline text-sm font-medium">
-                            Modifier
-                          </button>
-                        )}
-                        {canCancel && (
-                          <button onClick={() => handleCancel(cmd)} className="text-red-500 hover:underline text-sm font-medium">
-                            Annuler
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {commandes.length === 0 && (
-                <tr><td colSpan="9" className="p-8 text-center text-gray-400">Aucune commande logistique</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        {(() => {
+          const commandeColumns = [
+            { key: 'reference', label: 'Référence', sortable: true, render: (cmd) => (
+              <span className="font-medium font-mono">{cmd.reference || `#${cmd.id}`}</span>
+            )},
+            { key: 'date_commande', label: 'Date', sortable: true, render: (cmd) => formatDate(cmd.date_commande) },
+            { key: 'client_nom', label: 'Client', sortable: true, render: (cmd) => cmd.client_nom || getClientName(cmd.client_id) },
+            { key: 'type_produit', label: 'Type', render: (cmd) => (
+              Array.isArray(cmd.type_produit)
+                ? cmd.type_produit.map(t => TYPES_PRODUIT[t] || t).join(', ')
+                : TYPES_PRODUIT[cmd.type_produit] || cmd.type_produit || '—'
+            )},
+            { key: 'tonnage_prevu', label: 'Tonnage (t)', align: 'right', sortable: true, render: (cmd) => (
+              <span className="font-mono">{formatTonnage(cmd.tonnage_prevu)}</span>
+            )},
+            { key: 'prix_tonne', label: 'Prix (€/t)', align: 'right', sortable: true, render: (cmd) => (
+              <span className="font-mono">{formatPrice(cmd.prix_tonne)}</span>
+            )},
+            { key: 'frequence', label: 'Fréquence', render: (cmd) => FREQUENCES[cmd.frequence] || cmd.frequence || '—' },
+            { key: 'statut', label: 'Statut', render: (cmd) => (
+              <StatusBadge status={cmd.statut} size="sm" label={STATUTS[cmd.statut]?.label} />
+            )},
+            { key: 'actions', label: 'Actions', render: (cmd) => {
+              const canEdit = ['en_attente', 'confirmee'].includes(cmd.statut);
+              const canCancel = !['cloturee', 'annulee'].includes(cmd.statut);
+              return (
+                <div className="flex gap-2">
+                  <button onClick={() => openDetail(cmd)} className="text-primary hover:underline text-sm font-medium">Voir</button>
+                  {canEdit && <button onClick={() => openEdit(cmd)} className="text-blue-600 hover:underline text-sm font-medium">Modifier</button>}
+                  {canCancel && <button onClick={() => handleCancel(cmd)} className="text-red-500 hover:underline text-sm font-medium">Annuler</button>}
+                </div>
+              );
+            }},
+          ];
+          return (
+            <DataTable
+              columns={commandeColumns}
+              data={commandes}
+              loading={false}
+              emptyIcon={ShoppingCart}
+              emptyMessage="Aucune commande logistique"
+            />
+          );
+        })()}
 
         {/* Create/Edit modal form */}
         {showForm && (
@@ -532,9 +512,7 @@ export default function ExutoiresCommandes() {
                 <h2 className="text-lg font-bold text-slate-800">
                   Commande {showDetail.reference || `#${showDetail.id}`}
                 </h2>
-                <span className={`px-2 py-1 rounded text-xs font-medium ${(STATUTS[showDetail.statut] || {}).color || 'bg-gray-100 text-gray-700'}`}>
-                  {(STATUTS[showDetail.statut] || {}).label || showDetail.statut}
-                </span>
+                <StatusBadge status={showDetail.statut} label={STATUTS[showDetail.statut]?.label} />
               </div>
 
               {/* Informations générales */}

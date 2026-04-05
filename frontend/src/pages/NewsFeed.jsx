@@ -82,7 +82,7 @@ export default function NewsFeed() {
             <p className="text-gray-500 text-sm">Veille reglementaire, actualite filiere textile et nouvelles locales</p>
           </div>
           {isAdmin && (
-            <button onClick={() => setShowForm(true)} className="bg-primary text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-primary/90">
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
               + Publier
             </button>
           )}

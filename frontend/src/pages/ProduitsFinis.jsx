@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Package, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge } from '../components';
 import api from '../services/api';
-
-const QUALITE_COLORS = { A: 'bg-green-100 text-green-700', B: 'bg-yellow-100 text-yellow-700', C: 'bg-red-100 text-red-700' };
 
 export default function ProduitsFinis() {
   const [products, setProducts] = useState([]);
@@ -53,22 +51,14 @@ export default function ProduitsFinis() {
       key: 'qualite',
       label: 'Qualité',
       sortable: true,
-      render: (p) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${QUALITE_COLORS[p.qualite] || ''}`}>
-          {p.qualite}
-        </span>
-      ),
+      render: (p) => <StatusBadge status={p.qualite} size="sm" />,
     },
     { key: 'created_at', label: 'Date', sortable: true, render: (p) => <span className="text-xs text-slate-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</span> },
     {
       key: 'is_shipped',
       label: 'Statut',
       sortable: true,
-      render: (p) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${p.is_shipped ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-700'}`}>
-          {p.is_shipped ? 'Expédié' : 'En stock'}
-        </span>
-      ),
+      render: (p) => <StatusBadge status={p.is_shipped ? 'shipped' : 'pending'} size="sm" label={p.is_shipped ? 'Expediee' : 'En stock'} />,
     },
   ];
 

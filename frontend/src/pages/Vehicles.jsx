@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Truck, Plus, Pencil, FileText, Download, Trash2, Lightbulb, AlertTriangle } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, StatusBadge } from '../components';
 import api from '../services/api';
 
-const STATUS_COLORS = { available: 'bg-green-100 text-green-700', in_use: 'bg-blue-100 text-blue-700', maintenance: 'bg-orange-100 text-orange-700', out_of_service: 'bg-red-100 text-red-700' };
-const STATUS_LABELS = { available: 'Disponible', in_use: 'En tournée', maintenance: 'Maintenance', out_of_service: 'Hors service' };
 const EVENT_TYPES = [
   { value: 'entretien', label: 'Entretien / Révision' },
   { value: 'vidange', label: 'Vidange' },
@@ -293,9 +291,7 @@ export default function Vehicles() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[v.status] || ''}`}>
-                      {STATUS_LABELS[v.status] || v.status}
-                    </span>
+                    <StatusBadge status={v.status} size="sm" />
                     <button onClick={(e) => { e.stopPropagation(); openEdit(v); }} className="text-slate-400 hover:text-primary p-1" title="Modifier">
                       <Pencil className="w-4 h-4" strokeWidth={1.8} />
                     </button>
@@ -333,7 +329,7 @@ export default function Vehicles() {
                         <h3 className="font-bold text-sm">{v.name || v.registration}</h3>
                         <p className="text-xs text-slate-400">{v.vehicle_type || 'Type non configuré'} — {(v.current_km || 0).toLocaleString('fr-FR')} km</p>
                       </div>
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[v.status] || ''}`}>{STATUS_LABELS[v.status] || v.status}</span>
+                      <StatusBadge status={v.status} size="sm" />
                     </div>
                     {v.computed_alerts.length > 0 ? (
                       <div className="space-y-1">
@@ -371,9 +367,7 @@ export default function Vehicles() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`px-3 py-1.5 rounded-lg text-sm font-medium ${STATUS_COLORS[selectedVehicle.status] || ''}`}>
-                    {STATUS_LABELS[selectedVehicle.status]}
-                  </span>
+                  <StatusBadge status={selectedVehicle.status} />
                   <button onClick={() => openEdit(selectedVehicle)} className="text-slate-500 hover:text-primary p-2 rounded-lg hover:bg-slate-50" title="Modifier">
                     <Pencil className="w-5 h-5" strokeWidth={1.8} />
                   </button>
@@ -483,7 +477,7 @@ export default function Vehicles() {
             <div className="bg-white rounded-xl shadow-sm border p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold">Documents</h3>
-                <button onClick={() => setShowDocForm(true)} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700">
+                <button onClick={() => setShowDocForm(true)} className="btn-primary text-sm">
                   + Ajouter un document
                 </button>
               </div>
@@ -622,7 +616,7 @@ export default function Vehicles() {
                     type="button"
                     onClick={generateMaintenancePlan}
                     disabled={generatingPlan || !form.brand || !form.model}
-                    className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    className="btn-primary text-sm w-full gap-2"
                   >
                     {generatingPlan ? (
                       <>

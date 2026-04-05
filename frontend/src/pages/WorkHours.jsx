@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { DataTable } from '../components';
+import { DataTable, StatusBadge } from '../components';
 import { Clock } from 'lucide-react';
 import api from '../services/api';
 
@@ -56,7 +56,6 @@ export default function WorkHours() {
   };
 
   const TYPE_LABELS = { normal: 'Normal', overtime: 'Heures sup.', absence: 'Absence', conge: 'Congé', maladie: 'Maladie' };
-  const TYPE_COLORS = { normal: 'bg-blue-50 text-blue-700', overtime: 'bg-orange-50 text-orange-700', absence: 'bg-red-50 text-red-700', conge: 'bg-green-50 text-green-700', maladie: 'bg-yellow-50 text-yellow-700' };
 
   const hoursColumns = [
     { key: 'date', label: 'Date', sortable: true, render: (h) => <span className="font-medium">{new Date(h.date).toLocaleDateString('fr-FR')}</span> },
@@ -64,9 +63,7 @@ export default function WorkHours() {
     { key: 'end_time', label: 'Fin', render: (h) => h.end_time || '—' },
     { key: 'break_minutes', label: 'Pause', render: (h) => <span className="text-gray-500">{h.break_minutes}min</span> },
     { key: 'type', label: 'Type', render: (h) => (
-      <span className={`px-2 py-1 rounded text-xs font-medium ${TYPE_COLORS[h.type] || 'bg-gray-50'}`}>
-        {TYPE_LABELS[h.type] || h.type}
-      </span>
+      <StatusBadge status={h.type} size="sm" label={TYPE_LABELS[h.type]} />
     )},
     { key: 'validated', label: 'Validé', render: (h) => h.validated
       ? <span className="text-green-600 text-xs font-medium">Validé</span>

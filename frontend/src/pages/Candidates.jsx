@@ -352,7 +352,7 @@ export default function Candidates() {
                 </div>
                 <div className="flex gap-1">
                   {!editing && <button onClick={() => openEdit(selected)} className="btn-primary text-xs">Modifier</button>}
-                  <button onClick={() => deleteCandidate(selected.id)} className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg">Suppr.</button>
+                  <button onClick={() => deleteCandidate(selected.id)} className="btn-danger text-xs">Suppr.</button>
                   <button onClick={() => { setSelected(null); setEditing(false); }} className="text-gray-400 hover:text-gray-600 text-xl ml-2">&times;</button>
                 </div>
               </div>
@@ -1038,7 +1038,7 @@ function DocumentsView({ candidateId, delivered, onDelivered }) {
                   <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200">PDF</a>
                   {doc.key === 'livret_accueil' && <button onClick={viewLivret} className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200">{showLivret ? 'Masquer' : 'Lire'}</button>}
                   {!del && (
-                    <button onClick={() => deliverDoc(doc.key, 'remise_main')} disabled={delivering === doc.key} className="text-xs bg-primary text-white px-2 py-1 rounded hover:bg-primary/80 disabled:opacity-50">
+                    <button onClick={() => deliverDoc(doc.key, 'remise_main')} disabled={delivering === doc.key} className="btn-primary text-xs">
                       {delivering === doc.key ? '...' : 'Remettre'}
                     </button>
                   )}
