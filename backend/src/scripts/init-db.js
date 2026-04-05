@@ -2107,7 +2107,7 @@ async function initDatabase() {
       FROM cav c
       LEFT JOIN tour_cav tc ON tc.cav_id = c.id
       LEFT JOIN tours t ON tc.tour_id = t.id AND t.status = 'completed'
-      LEFT JOIN tour_weights tw ON tw.tour_id = t.id AND tw.cav_id = c.id
+      LEFT JOIN tour_weights tw ON tw.tour_id = t.id
       GROUP BY c.id, c.name, c.commune, c.status;
     `);
     await client.query(`
