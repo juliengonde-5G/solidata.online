@@ -15,7 +15,21 @@ export default {
           muted: '#CCFBF1',
           surface: '#F0FDFA',
         },
-        // Alias pour compatibilité
+        // Convention : slate est la palette neutre officielle.
+        // gray est redirigé vers slate pour convergence progressive.
+        gray: {
+          50: '#F8FAFC',   // slate-50
+          100: '#F1F5F9',  // slate-100
+          200: '#E2E8F0',  // slate-200
+          300: '#CBD5E1',  // slate-300
+          400: '#94A3B8',  // slate-400
+          500: '#64748B',  // slate-500
+          600: '#475569',  // slate-600
+          700: '#334155',  // slate-700
+          800: '#1E293B',  // slate-800
+          900: '#0F172A',  // slate-900
+        },
+        // Alias pour compatibilité (à supprimer progressivement)
         'solidata-green': '#0D9488',
         'solidata-green-dark': '#0F766E',
         'solidata-green-light': '#14B8A6',
