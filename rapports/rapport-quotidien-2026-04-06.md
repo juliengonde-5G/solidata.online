@@ -196,19 +196,27 @@ Le script `deploy/scripts/backup.sh` est présent et bien structuré :
 
 ### 4.4 Persona Responsable RH
 
-**Parcours testé** : Candidats → Employés → WorkHours → PCM → Insertion → Pointage
+**Parcours testé** : Candidats → Employés → WorkHours → PCM → Insertion → Pointage → Planning
+
+**Modules fonctionnels** : Recrutement OK, Employés OK, PCM OK, Insertion OK, Pointage OK
+**Module cassé** : WorkHours (100% non-fonctionnel — confirmé)
 
 | # | Sévérité | Bug | Fichier | Impact |
 |---|----------|-----|---------|--------|
-| R1 | **BLOQUANT** | WorkHours — frontend appelle `/employees/{id}/hours` mais backend expose `/employees/work-hours/*` | WorkHours.jsx:27 | Module 100% non-fonctionnel |
-| R2 | **BLOQUANT** | WorkHours — POST/PUT/GET endpoints incompatibles | WorkHours.jsx:42,50 | Saisie/validation impossible |
-| R3 | MAJEUR | Insertion — structure réponse diagnostic peut être undefined | InsertionParcours.jsx:530 | Crash silencieux |
-| R4 | MAJEUR | Candidates — endpoint `/candidates/positions/list` potentiellement absent | Candidates.jsx:67 | Liste postes vide |
-| R5 | MINEUR | PCM — cohérence endpoint `/pcm/profiles` vs `/pcm/sessions` | PersonalityMatrix.jsx:200 | Confusion API |
+| R1 | **BLOQUANT** | WorkHours — routes incompatibles : frontend `/employees/{id}/hours` vs backend `/employees/work-hours/*` | WorkHours.jsx:27,34,42,50 | Module 100% non-fonctionnel, toute requête → 404 |
+| R2 | **BLOQUANT** | WorkHours — schéma données incompatible : frontend envoie `start_time/end_time/break_minutes`, backend attend `hours_worked/overtime_hours` | WorkHours.jsx:12 / employees.js:299 | Même si routes fixées, INSERT échoue (NOT NULL) |
+| R3 | MAJEUR | WorkHours — types énumérés incompatibles : frontend `conge/maladie/overtime` vs BDD CHECK `holiday/sick/training` | WorkHours.jsx:56 / init-db.js:289 | Contrainte CHECK rejetée |
+| R4 | MAJEUR | Candidates — statut `rejected` absent de la contrainte CHECK en BDD | Candidates.jsx:6 / init-db.js:88 | Kanban "Refusés" → erreur SQL |
+| R5 | MINEUR | PCM — types cosmétiques cohérents, pas de bug fonctionnel | PCMTest.jsx / pcm.js | OK |
 | R6 | MINEUR | Pointage — module complet et cohérent avec backend | Pointage.jsx | OK |
-| R7 | MINEUR | PlanningHebdo — à vérifier cohérence champs planning | PlanningHebdo.jsx | Non testé profondeur |
+| R7 | MINEUR | Skills.jsx et PlanningHebdo.jsx — non testés en profondeur | — | À vérifier |
 
 **Total RH : 7 bugs (2 BLOQUANTS, 2 MAJEURS, 3 MINEURS)**
+
+**Détail WorkHours (triple incompatibilité)** :
+- Routes : `/employees/{id}/hours` → 404 (backend expose `/employees/work-hours/list`)
+- Données : `start_time`/`end_time`/`break_minutes` envoyés, mais BDD attend `hours_worked`/`overtime_hours` (NOT NULL)
+- Types : `conge`→`holiday`, `maladie`→`sick`, `overtime`→colonne séparée `overtime_hours`
 
 ---
 
