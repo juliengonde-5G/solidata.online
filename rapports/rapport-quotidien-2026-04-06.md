@@ -138,19 +138,22 @@ Le script `deploy/scripts/backup.sh` est présent et bien structuré :
 
 ### 4.3 Persona Responsable Logistique
 
-**Parcours testé** : CAV → Véhicules → Tournées → LiveVehicles → Expéditions → Exutoires
+**Parcours testé** : CAV → Véhicules → Tournées → LiveVehicles → Expéditions → Exutoires → Préparations → Pesée
 
 | # | Sévérité | Bug | Fichier | Impact |
 |---|----------|-----|---------|--------|
-| L1 | **BLOQUANT** | Vue matérialisée `mv_cav_stats` référence `tour_weights.cav_id` inexistant | init-db.js (vue) | Carte CAV crashe (corrigé commit 67ecade) |
-| L2 | MAJEUR | Expéditions — mismatch champs frontend/backend | Expeditions.jsx | Champs vides/undefined |
-| L3 | MAJEUR | LiveVehicles — dépend du GPS Socket.IO cassé (cf C2) | LiveVehicles.jsx | Aucune position affichée |
-| L4 | MAJEUR | Commandes exutoires — workflow statut `chargée` bloquant | commandes-exutoires.js | Workflow interrompu |
-| L5 | MINEUR | FillRateMap — dépend de `estimated_fill_rate` non calculé | FillRateMap.jsx | Carte vide |
-| L6 | MINEUR | AdminCAV — photo upload sans validation type MIME | cav.js | Fichier arbitraire |
-| L7 | MINEUR | Préparations — tri par défaut incohérent | preparations.js | Ordre confus |
+| L1 | **BLOQUANT** | Expéditions — `date_expedition` vs `date` mismatch, API rejecte POST | Expeditions.jsx:14 / expeditions.js:39 | Création expéditions impossible |
+| L2 | MAJEUR | Commandes exutoires — statut `chargee` absent de `STATUTS_VALIDES` backend | ExutoiresCommandes.jsx:13 / commandes-exutoires.js:39 | Transition workflow bloquée |
+| L3 | MAJEUR | Expéditions — `poids_total_kg` vs `poids_kg` colonne affichage | Expeditions.jsx:52 | Colonne poids vide |
+| L4 | MAJEUR | Tours wizard — `driver_employee_id` jamais rempli en mode intelligent/standard | Tours.jsx:54 / crud.js:153 | Tournées sans chauffeur |
+| L5 | MAJEUR | Contrôles pesée — `pesee_interne` obligatoire backend mais optionnelle en UI | controles-pesee.js:59 / ExutoiresPreparation.jsx:165 | Workflow pesée interrompu |
+| L6 | MAJEUR | FillRateMap — structure réponse `/cav/fill-rate` incompatible (`data.cavs`/`data.stats`) | FillRateMap.jsx:54 | Page FillRateMap cassée |
+| L7 | MAJEUR | ExutoiresPreparation — nomenclature statut `prete` incohérente | ExutoiresPreparation.jsx:15 | Risque d'erreur |
+| L8 | MINEUR | Tours — mode "standard" incomplet, pas d'étape `standard_route_id` | Tours.jsx:210 | Mode non-opérationnel |
+| L9 | MINEUR | Vehicles — conversion `tare_weight_kg` redondante | Vehicles.jsx:213 | Code défensif inutile |
+| L10 | MINEUR | AdminCAV — recherche ILIKE wildcards redondants | cav.js:47 | Performance mineure |
 
-**Total Logistique : 7 bugs (1 BLOQUANT corrigé, 3 MAJEURS, 3 MINEURS)**
+**Total Logistique : 10 bugs (1 BLOQUANT, 6 MAJEURS, 3 MINEURS)**
 
 ### 4.4 Persona Responsable RH
 
@@ -176,10 +179,10 @@ Le script `deploy/scripts/backup.sh` est présent et bien structuré :
 
 | Sévérité | Chauffeur | Opérations | Logistique | RH | **TOTAL** |
 |----------|-----------|------------|------------|-----|-----------|
-| BLOQUANT | 2 | 2 | 1 (corrigé) | 2 | **7 (6 actifs)** |
-| MAJEUR | 6 | 3 | 3 | 2 | **14** |
+| BLOQUANT | 2 | 2 | 1 | 2 | **7** |
+| MAJEUR | 6 | 3 | 6 | 2 | **17** |
 | MINEUR | 6 | 3 | 3 | 3 | **15** |
-| **Total** | **14** | **8** | **7** | **7** | **36** |
+| **Total** | **14** | **8** | **10** | **7** | **39** |
 
 ### Modules cassés (non-fonctionnels)
 
@@ -190,6 +193,8 @@ Le script `deploy/scripts/backup.sh` est présent et bien structuré :
 | **ProduitsFinis** | Mismatch complet champs création + affichage | Opérations |
 | **GPS Temps Réel** | Socket.IO événement incompatible + endpoint manquant | Chauffeur |
 | **LiveVehicles** | Dépend du GPS cassé | Logistique |
+| **Expéditions** | Champ `date_expedition` vs `date` — POST rejeté | Logistique |
+| **FillRateMap** | Structure réponse incompatible | Logistique |
 
 ### Bugs récurrents (présents depuis 02/04)
 
@@ -204,20 +209,20 @@ Le script `deploy/scripts/backup.sh` est présent et bien structuré :
 
 | Indicateur | 04/04 | 06/04 | Tendance |
 |-----------|-------|-------|----------|
-| Bugs totaux | 76 | 36 | Analyse plus ciblée |
-| Bugs BLOQUANTS | 18 | 6 actifs | Vue corrigée (mv_cav_stats) |
+| Bugs totaux | 76 | 39 | Analyse plus ciblée |
+| Bugs BLOQUANTS | 18 | 7 | Vue corrigée (mv_cav_stats) |
 | Score sécurité | 5.5/10 | 5.5/10 | Stable |
 | Vulnérabilités npm | 10 | 10 | Stable |
 | Branches obsolètes | 0 | 0 | Propre |
 | Commits orphelins | 11 | 0 | Réintégrés |
 
-### Note globale : **5.2/10**
+### Note globale : **5.0/10**
 
 Justification :
-- **-2.0** : 5 modules cassés (Dashboard, WorkHours, ProduitsFinis, GPS, LiveVehicles)
-- **-1.5** : 6 bugs bloquants actifs dont 4 récurrents non corrigés
+- **-2.0** : 7 modules cassés (Dashboard, WorkHours, ProduitsFinis, GPS, LiveVehicles, Expéditions, FillRateMap)
+- **-1.5** : 7 bugs bloquants dont 4 récurrents non corrigés
 - **-0.8** : Score sécurité 5.5/10, 10 vulnérabilités npm
-- **-0.5** : 14 bugs majeurs impactant l'expérience utilisateur
+- **-0.7** : 17 bugs majeurs impactant l'expérience utilisateur
 
 ---
 
@@ -231,13 +236,18 @@ Justification :
 3. **WorkHours** : Aligner endpoints frontend (`/employees/{id}/hours`) avec backend (`/employees/work-hours/*`)
 4. **ProduitsFinis** : Aligner noms de champs frontend/backend (`barcode`→`code_barre`, `produit_catalogue_id`→`catalogue_id`)
 5. **GPS Batch** : Créer endpoint `/api/tours/gps-batch` pour sync offline
+6. **Expéditions** : Aligner `date_expedition` → `date` dans le POST
 
 #### P1 — Majeurs
 6. Corriger `km_end` sauvegarde dans vehicle_checklists
 7. Ajouter checklist + incidents dans `/summary-public`
 8. Corriger noms champs Production (`avg_productivite`)
 9. Corriger workflow commandes exutoires (transition `chargée`)
-10. Aligner champs Expeditions frontend/backend
+10. Aligner champs Expeditions (`poids_total_kg` → `poids_kg`)
+11. Ajouter statut `chargee` dans `STATUTS_VALIDES` commandes-exutoires
+12. Corriger structure réponse `/cav/fill-rate` (FillRateMap)
+13. Corriger workflow pesée interne (rendre obligatoire avant statut `prete`)
+14. Compléter wizard Tours (driver_employee_id)
 
 #### P2 — Sécurité
 11. Remplacer `xlsx` par `exceljs`
