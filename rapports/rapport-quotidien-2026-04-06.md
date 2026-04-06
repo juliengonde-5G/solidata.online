@@ -78,19 +78,58 @@ Le script `deploy/scripts/backup.sh` est présent et bien structuré :
 
 **Action urgente** : Remplacer `xlsx` par `exceljs` (déjà en dépendance). Lancer `npm audit fix` dans les deux répertoires.
 
-### 3.2 Audit sécurité code
+### 3.2 Audit sécurité code — 20 vulnérabilités (6 CRITIQUES, 6 HAUTES, 7 MOYENNES, 1 BASSE)
 
-| Catégorie | Sévérité | Findings |
-|-----------|----------|----------|
-| **Mot de passe DB par défaut** | CRITIQUE | `database.js:8` — fallback `'changeme'` en dur |
-| **JWT secret par défaut** | HAUTE | `auth.js:4` — fallback `'change-this-in-production'` (mais protection process.exit en prod) |
-| **Injection shell admin-db** | CRITIQUE | Routes admin-db exécutent des commandes Docker avec inputs utilisateur |
-| **Routes publiques mobile** | HAUTE | Endpoints `/tours/*-public` sans auth — par design, mais surface d'attaque |
-| **CORS** | MOYENNE | À vérifier configuration exacte en production |
-| **Rate limiting login** | MOYENNE | Présent mais à valider les seuils |
-| **Upload fichiers** | BASSE | Multer avec limite 10 Mo, mais pas de validation type MIME strict |
+#### Vulnérabilités CRITIQUES
 
-**Score sécurité global : 5.5/10** (stable par rapport au 04/04)
+| # | Vulnérabilité | Fichier | Ligne | Risque |
+|---|--------------|---------|-------|--------|
+| S1 | **Injection SQL** — template literals colonnes dynamiques | insertion/index.js | 48, 109 | DDL arbitraire via `col`/`type` non échappés |
+| S2 | **Injection Shell** — `execSync` avec password en clair | admin-db.js | 74, 128 | Exécution commande arbitraire via `DATABASE_URL` |
+| S3 | **Auth manquante PCM** — GET/POST publics | pcm.js | 627-723 | Soumission PCM sans auth, falsification profils |
+| S4 | **Mot de passe DB** — fallback `'changeme'` | database.js | 8 | Accès BDD si env non configuré |
+| S5 | **JWT secret** — fallback `'change-this-in-production'` | auth.js | 4 | Protection process.exit OK en prod |
+| S6 | **Credentials CLI** — password visible dans `ps aux` | admin-db.js | 72 | Exfiltration mot de passe BDD |
+
+#### Vulnérabilités HAUTES
+
+| # | Vulnérabilité | Fichier | Ligne | Risque |
+|---|--------------|---------|-------|--------|
+| S7 | Injection SQL secondaire — WHERE dynamique | admin-db.js | 196-198 | Whitelist OK mais interpolation directe |
+| S8 | PUT sans `authorize` — sortie produits finis | produits-finis.js | 96 | Collaborateur peut falsifier sorties |
+| S9 | PCM token sans rate limiting | pcm.js | 731-733 | Brute force access_token possible |
+| S10 | CSP `'unsafe-inline'` + `'unsafe-eval'` | index.js | 52-66 | CSP inutile contre XSS |
+| S11 | Secrets dans logs d'erreur | admin-db.js | 72 | URL avec password loggée si pg_dump échoue |
+| S12 | Endpoints `/tours/*-public` sans auth | tours/index.js | — | Surface d'attaque (par design) |
+
+#### Vulnérabilités MOYENNES
+
+| # | Vulnérabilité | Fichier | Risque |
+|---|--------------|---------|--------|
+| S13 | Rate limiting global trop laxiste (1000/15min) | index.js:72 | Pas de protection brute force |
+| S14 | Rate limiting absent `/admin-db/*`, `/chat/*` | index.js | Endpoints critiques non protégés |
+| S15 | Multer sans validation magic bytes | candidates/index.js:34 | Upload fichier déguisé |
+| S16 | Exposition infos système `/admin-db/info` | admin-db.js:45 | Fingerprinting PostgreSQL |
+| S17 | Validation PCM — pas de check `answer_value` range | pcm.js:723 | Valeurs hors limites acceptées |
+| S18 | Helmet CSP trop permissif | index.js:52 | XSS non bloqué |
+| S19 | CORS OK — whitelist stricte | index.js:67 | Bien implémenté |
+
+#### Score sécurité détaillé
+
+| Catégorie | Score |
+|-----------|-------|
+| Authentification | 2/10 |
+| Autorisation | 4/10 |
+| Injection SQL | 3/10 |
+| Injection Shell | 2/10 |
+| Gestion Secrets | 4/10 |
+| Rate Limiting | 3/10 |
+| Upload Fichiers | 6/10 |
+| CORS | 8/10 |
+| CSP | 3/10 |
+| Dépendances | 8/10 |
+
+**Score sécurité global : 4.5/10** (dégradé vs 5.5 estimé le 04/04, audit plus approfondi)
 
 ---
 
@@ -211,17 +250,17 @@ Le script `deploy/scripts/backup.sh` est présent et bien structuré :
 |-----------|-------|-------|----------|
 | Bugs totaux | 76 | 39 | Analyse plus ciblée |
 | Bugs BLOQUANTS | 18 | 7 | Vue corrigée (mv_cav_stats) |
-| Score sécurité | 5.5/10 | 5.5/10 | Stable |
+| Score sécurité | 5.5/10 | **4.5/10** | Dégradé (audit plus profond) |
 | Vulnérabilités npm | 10 | 10 | Stable |
 | Branches obsolètes | 0 | 0 | Propre |
 | Commits orphelins | 11 | 0 | Réintégrés |
 
-### Note globale : **5.0/10**
+### Note globale : **4.8/10**
 
 Justification :
 - **-2.0** : 7 modules cassés (Dashboard, WorkHours, ProduitsFinis, GPS, LiveVehicles, Expéditions, FillRateMap)
 - **-1.5** : 7 bugs bloquants dont 4 récurrents non corrigés
-- **-0.8** : Score sécurité 5.5/10, 10 vulnérabilités npm
+- **-1.0** : Score sécurité **4.5/10** — 6 vulnérabilités CRITIQUES (injection SQL, shell, auth manquante)
 - **-0.7** : 17 bugs majeurs impactant l'expérience utilisateur
 
 ---
@@ -249,11 +288,15 @@ Justification :
 13. Corriger workflow pesée interne (rendre obligatoire avant statut `prete`)
 14. Compléter wizard Tours (driver_employee_id)
 
-#### P2 — Sécurité
-11. Remplacer `xlsx` par `exceljs`
-12. Lancer `npm audit fix` (backend + frontend)
-13. Auditer injection shell admin-db
-14. Renforcer validation upload fichiers (type MIME)
+#### P2 — Sécurité (score 4.5/10 — 6 vulnérabilités CRITIQUES)
+15. **Injection SQL** : Whitelist colonnes dans `insertion/index.js:48,109` — interdit template literals
+16. **Injection Shell** : Remplacer `execSync(pg_dump "${dbUrl}")` par `spawn()` + PGPASSWORD env var dans admin-db.js
+17. **Auth PCM** : Ajouter `authenticate` sur `GET /questionnaire`, `GET /sessions/:token`, `POST /submit`
+18. **CSP** : Retirer `'unsafe-inline'` et `'unsafe-eval'` de la config Helmet
+19. **Rate limiting** : Ajouter limiter sur `/admin-db/*` (10/h) et `/chat/*` (20/min)
+20. Remplacer `xlsx` par `exceljs`
+21. Lancer `npm audit fix` (backend + frontend)
+22. Ajouter `authorize('ADMIN','MANAGER')` sur `PUT /produits-finis/:id/sortie`
 
 ---
 
