@@ -225,7 +225,7 @@ export default function Tours() {
                     {vehicles.length === 0 && <p className="text-slate-400 text-sm">Aucun véhicule disponible</p>}
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => setWizardStep(1)} className="flex-1 border rounded-lg py-2 text-sm">Retour</button>
+                    <button onClick={() => setWizardStep(1)} className="flex-1 btn-ghost">Retour</button>
                     <button onClick={generateTour} disabled={!wizForm.vehicle_id || generating} className="flex-1 btn-primary text-sm disabled:opacity-50">
                       {generating ? 'Génération...' : 'Générer la tournée'}
                     </button>
@@ -242,7 +242,7 @@ export default function Tours() {
                     {employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}
                   </select>
                   <div className="flex gap-2">
-                    <button onClick={() => setWizardStep(2)} className="flex-1 border rounded-lg py-2 text-sm">Retour</button>
+                    <button onClick={() => setWizardStep(2)} className="flex-1 btn-ghost">Retour</button>
                     <button onClick={generateTour} disabled={generating} className="flex-1 btn-primary text-sm disabled:opacity-50">
                       {generating ? 'Génération...' : 'Générer la tournée'}
                     </button>

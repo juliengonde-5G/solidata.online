@@ -356,6 +356,7 @@ case "${ACTION}" in
 
     log "=== MISE À JOUR TERMINÉE ==="
     docker compose -f ${COMPOSE_FILE} ps
+    log "Version déployée : $(git log -1 --format='%h %s' 2>/dev/null || echo 'inconnue')"
     log "Espace disque :"
     df -h /
     ;;

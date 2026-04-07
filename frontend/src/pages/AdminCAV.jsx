@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -506,15 +506,7 @@ export default function AdminCAV() {
         </div>
 
         {/* Modal Création / Édition */}
-        {showModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-bold">{editCav ? 'Modifier le CAV' : 'Nouveau CAV'}</h2>
-                  <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-                </div>
-
+        <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editCav ? 'Modifier le CAV' : 'Nouveau CAV'} size="lg">
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -579,7 +571,7 @@ export default function AdminCAV() {
                 </div>
 
                 <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
-                  <button onClick={() => setShowModal(false)} className="border rounded-lg px-4 py-2 text-sm hover:bg-gray-50">
+                  <button onClick={() => setShowModal(false)} className="btn-ghost text-sm">
                     Annuler
                   </button>
                   <button onClick={handleSave} disabled={saving}
@@ -587,10 +579,7 @@ export default function AdminCAV() {
                     {saving ? 'Enregistrement...' : editCav ? 'Enregistrer' : 'Créer le CAV'}
                   </button>
                 </div>
-              </div>
-            </div>
-          </div>
-        )}
+        </Modal>
       </div>
     </Layout>
   );
