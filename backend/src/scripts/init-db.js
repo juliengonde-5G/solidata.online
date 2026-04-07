@@ -1308,6 +1308,58 @@ async function initDatabase() {
       `, [chaineRId]);
 
       console.log('[INIT-DB] 2 chaînes de tri créées avec opérations');
+
+      // Postes de travail pour chaque opération (correspondant à la feuille de production Excel)
+      // Récupérer les IDs des opérations
+      const opsResult = await client.query("SELECT id, code FROM operations_tri ORDER BY id");
+      const opsByCode = {};
+      for (const op of opsResult.rows) opsByCode[op.code] = op.id;
+
+      if (opsByCode.CRACK1) {
+        await client.query(`
+          INSERT INTO postes_operation (operation_id, nom, code, est_obligatoire, permet_doublure) VALUES
+            ($1, 'Craquage poste 1', 'CRACK1_P1', true, false),
+            ($1, 'Craquage poste 2', 'CRACK1_P2', true, false)
+        `, [opsByCode.CRACK1]);
+      }
+      if (opsByCode.CRACK2) {
+        await client.query(`
+          INSERT INTO postes_operation (operation_id, nom, code, est_obligatoire, permet_doublure) VALUES
+            ($1, 'Craquage 2 poste 1', 'CRACK2_P1', false, false)
+        `, [opsByCode.CRACK2]);
+      }
+      if (opsByCode.RECYC) {
+        await client.query(`
+          INSERT INTO postes_operation (operation_id, nom, code, est_obligatoire, permet_doublure) VALUES
+            ($1, 'Recyclage R1', 'RECYC_R1', true, false),
+            ($1, 'Recyclage R2', 'RECYC_R2', true, false),
+            ($1, 'Recyclage R3', 'RECYC_R3', true, false),
+            ($1, 'Recyclage R4', 'RECYC_R4', true, false)
+        `, [opsByCode.RECYC]);
+      }
+      if (opsByCode.REEMP) {
+        await client.query(`
+          INSERT INTO postes_operation (operation_id, nom, code, est_obligatoire, permet_doublure) VALUES
+            ($1, 'Réutilisation', 'REEMP_P1', true, true)
+        `, [opsByCode.REEMP]);
+      }
+      if (opsByCode.TRIFIN) {
+        await client.query(`
+          INSERT INTO postes_operation (operation_id, nom, code, est_obligatoire, permet_doublure) VALUES
+            ($1, 'Homme VAK / BTQ', 'TRIFIN_HVAK', false, true),
+            ($1, 'Femme VAK / BTQ', 'TRIFIN_FVAK', false, true),
+            ($1, 'Layette VAK / BTQ', 'TRIFIN_LVAK', false, true),
+            ($1, 'Accessoire', 'TRIFIN_ACC', false, true),
+            ($1, 'Chiffon', 'TRIFIN_CHF', false, true)
+        `, [opsByCode.TRIFIN]);
+      }
+      if (opsByCode.REXCL) {
+        await client.query(`
+          INSERT INTO postes_operation (operation_id, nom, code, est_obligatoire, permet_doublure) VALUES
+            ($1, 'Recyclage exclusif', 'REXCL_P1', true, true)
+        `, [opsByCode.REXCL]);
+      }
+      console.log('[INIT-DB] Postes de travail chaîne de tri créés');
     }
 
     // Templates de messages
@@ -1368,6 +1420,55 @@ async function initDatabase() {
     await client.query(`
       ALTER TABLE tonnage_history ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'manual';
     `);
+
+    // Migration : Postes de travail chaîne de tri (si opérations existent mais postes non créés)
+    try {
+      const postesExist = await client.query("SELECT id FROM postes_operation LIMIT 1");
+      if (postesExist.rows.length === 0) {
+        const opsResult = await client.query("SELECT id, code FROM operations_tri ORDER BY id");
+        if (opsResult.rows.length > 0) {
+          const opsByCode = {};
+          for (const op of opsResult.rows) opsByCode[op.code] = op.id;
+
+          const postes = [];
+          if (opsByCode.CRACK1) postes.push(
+            [opsByCode.CRACK1, 'Craquage poste 1', 'CRACK1_P1', true, false],
+            [opsByCode.CRACK1, 'Craquage poste 2', 'CRACK1_P2', true, false]
+          );
+          if (opsByCode.CRACK2) postes.push(
+            [opsByCode.CRACK2, 'Craquage 2 poste 1', 'CRACK2_P1', false, false]
+          );
+          if (opsByCode.RECYC) postes.push(
+            [opsByCode.RECYC, 'Recyclage R1', 'RECYC_R1', true, false],
+            [opsByCode.RECYC, 'Recyclage R2', 'RECYC_R2', true, false],
+            [opsByCode.RECYC, 'Recyclage R3', 'RECYC_R3', true, false],
+            [opsByCode.RECYC, 'Recyclage R4', 'RECYC_R4', true, false]
+          );
+          if (opsByCode.REEMP) postes.push(
+            [opsByCode.REEMP, 'Réutilisation', 'REEMP_P1', true, true]
+          );
+          if (opsByCode.TRIFIN) postes.push(
+            [opsByCode.TRIFIN, 'Homme VAK / BTQ', 'TRIFIN_HVAK', false, true],
+            [opsByCode.TRIFIN, 'Femme VAK / BTQ', 'TRIFIN_FVAK', false, true],
+            [opsByCode.TRIFIN, 'Layette VAK / BTQ', 'TRIFIN_LVAK', false, true],
+            [opsByCode.TRIFIN, 'Accessoire', 'TRIFIN_ACC', false, true],
+            [opsByCode.TRIFIN, 'Chiffon', 'TRIFIN_CHF', false, true]
+          );
+          if (opsByCode.REXCL) postes.push(
+            [opsByCode.REXCL, 'Recyclage exclusif', 'REXCL_P1', true, true]
+          );
+
+          for (const [opId, nom, code, oblig, doublure] of postes) {
+            await client.query(
+              `INSERT INTO postes_operation (operation_id, nom, code, est_obligatoire, permet_doublure)
+               VALUES ($1, $2, $3, $4, $5) ON CONFLICT (code) DO NOTHING`,
+              [opId, nom, code, oblig, doublure]
+            );
+          }
+          console.log('[INIT-DB] Migration : postes de travail chaîne de tri créés');
+        }
+      }
+    } catch (e) { console.warn('[INIT-DB] Migration postes_operation:', e.message); }
 
     await client.query('COMMIT');
     // ══════════════════════════════════════════
