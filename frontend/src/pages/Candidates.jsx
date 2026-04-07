@@ -35,7 +35,6 @@ const TAB_LABELS = {
 
 export default function Candidates() {
   const navigate = useNavigate();
-  const [pageTab, setPageTab] = useState('kanban');
   const [kanban, setKanban] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -254,15 +253,7 @@ export default function Candidates() {
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-4 gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-slate-800">Recrutement</h1>
-            <div className="flex gap-1 mt-1">
-              {[['kanban', 'Kanban'], ['plan', 'Plan de recrutement']].map(([k, label]) => (
-                <button key={k} onClick={() => setPageTab(k)}
-                  className={`text-xs px-3 py-1 rounded-full font-medium transition ${pageTab === k ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
+            <h1 className="text-2xl font-bold text-slate-800">Candidats</h1>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {stats && (
@@ -278,9 +269,7 @@ export default function Candidates() {
           </div>
         </div>
 
-        {pageTab === 'plan' && <RecruitmentPlanView positions={positions} />}
-
-        {pageTab === 'kanban' && <>
+        {<>
         {/* CV Drop Zone */}
         <div
           className={`mb-4 border-2 border-dashed rounded-xl p-4 text-center transition-all cursor-pointer ${cvDragActive ? 'border-primary bg-primary/10' : 'border-gray-300 bg-gray-50 hover:border-primary/50'}`}
@@ -380,7 +369,7 @@ export default function Candidates() {
           </div>
         )}
 
-        </>}
+        </>
 
         {/* Add Modal */}
         {showAddModal && (
@@ -1047,142 +1036,6 @@ function DocumentsView({ candidateId, delivered, onDelivered }) {
               <p className="text-xs text-gray-600 leading-relaxed">{s.content}</p>
             </div>
           ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════
-// Plan de recrutement mensuel
-// ══════════════════════════════════════════
-function RecruitmentPlanView({ positions }) {
-  const [plan, setPlan] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  });
-  const [months, setMonths] = useState(() => {
-    const arr = [];
-    const now = new Date();
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      arr.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-    return arr;
-  });
-
-  const loadPlan = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.get(`/candidates/recruitment-plan?from=${months[0]}&to=${months[months.length - 1]}`);
-      setPlan(res.data || []);
-    } catch (err) { console.error(err); }
-    setLoading(false);
-  }, [months]);
-
-  useEffect(() => { loadPlan(); }, [loadPlan]);
-
-  const updateSlots = async (positionId, month, slots) => {
-    try {
-      await api.post('/candidates/recruitment-plan', { position_id: positionId, month, slots_needed: Math.max(0, parseInt(slots) || 0) });
-      loadPlan();
-    } catch (err) { console.error(err); }
-  };
-
-  const getSlots = (positionId, month) => {
-    const entry = plan.find(p => p.position_id === positionId && p.month === month);
-    return entry ? entry.slots_needed : 0;
-  };
-
-  const getHired = (positionId, month) => {
-    const entry = plan.find(p => p.position_id === positionId && p.month === month);
-    return entry ? (parseInt(entry.hired_count) || 0) : 0;
-  };
-
-  const formatMonth = (m) => {
-    const [y, mo] = m.split('-');
-    const names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
-    return `${names[parseInt(mo) - 1]} ${y}`;
-  };
-
-  if (loading) return <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
-
-  const totalNeeded = (month) => positions.reduce((sum, p) => sum + getSlots(p.id, month), 0);
-  const totalHired = (month) => positions.reduce((sum, p) => sum + getHired(p.id, month), 0);
-
-  return (
-    <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 border-b">
-              <th className="text-left px-4 py-3 font-semibold text-gray-700 sticky left-0 bg-gray-50 min-w-[180px]">Poste</th>
-              {months.map(m => (
-                <th key={m} className="px-3 py-3 text-center font-medium text-gray-600 min-w-[90px]">
-                  <span className={m === selectedMonth ? 'text-primary font-bold' : ''}>{formatMonth(m)}</span>
-                </th>
-              ))}
-              <th className="px-4 py-3 text-center font-semibold text-gray-700 min-w-[80px]">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {positions.map(pos => {
-              const totalPos = months.reduce((sum, m) => sum + getSlots(pos.id, m), 0);
-              const totalPosHired = months.reduce((sum, m) => sum + getHired(pos.id, m), 0);
-              return (
-                <tr key={pos.id} className="border-b hover:bg-gray-50/50">
-                  <td className="px-4 py-2 font-medium text-gray-800 sticky left-0 bg-white">
-                    {pos.title}
-                    {pos.type && <span className="text-gray-400 text-xs ml-1">({pos.type})</span>}
-                  </td>
-                  {months.map(m => {
-                    const needed = getSlots(pos.id, m);
-                    const hired = getHired(pos.id, m);
-                    return (
-                      <td key={m} className="px-1 py-1 text-center">
-                        <div className="flex flex-col items-center gap-0.5">
-                          <input type="number" min="0" value={needed}
-                            onChange={e => updateSlots(pos.id, m, e.target.value)}
-                            className="w-14 text-center border rounded px-1 py-1 text-sm focus:ring-1 focus:ring-primary focus:border-primary" />
-                          {needed > 0 && (
-                            <span className={`text-[10px] font-medium ${hired >= needed ? 'text-green-600' : 'text-orange-500'}`}>
-                              {hired}/{needed}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    );
-                  })}
-                  <td className="px-4 py-2 text-center font-bold">
-                    <span className={totalPosHired >= totalPos && totalPos > 0 ? 'text-green-600' : 'text-gray-800'}>{totalPosHired}/{totalPos}</span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr className="bg-gray-50 border-t-2 font-bold">
-              <td className="px-4 py-3 sticky left-0 bg-gray-50 text-gray-700">Total</td>
-              {months.map(m => (
-                <td key={m} className="px-3 py-3 text-center">
-                  <span className={totalHired(m) >= totalNeeded(m) && totalNeeded(m) > 0 ? 'text-green-600' : 'text-gray-800'}>
-                    {totalHired(m)}/{totalNeeded(m)}
-                  </span>
-                </td>
-              ))}
-              <td className="px-4 py-3 text-center text-primary">
-                {months.reduce((s, m) => s + totalHired(m), 0)}/{months.reduce((s, m) => s + totalNeeded(m), 0)}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      {positions.length === 0 && (
-        <div className="text-center py-12 text-gray-400">
-          <p>Aucun poste configuré.</p>
-          <p className="text-xs mt-1">Créez des postes depuis l'onglet Kanban pour commencer.</p>
         </div>
       )}
     </div>

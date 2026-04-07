@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UserPlus, Calendar, CheckCircle, Briefcase, Brain } from 'lucide-react';
+import { UserPlus, Calendar, CheckCircle, Briefcase, Brain, ClipboardList } from 'lucide-react';
 import Layout from '../components/Layout';
 import { KpiCard, NavCard } from '../components';
 import api from '../services/api';
@@ -34,6 +34,7 @@ export default function HubRecrutement() {
 
   const cards = [
     { path: '/candidates', title: 'Candidats', desc: 'Kanban de suivi des candidatures et entretiens', icon: UserPlus },
+    { path: '/recruitment-plan', title: 'Plan de recrutement', desc: 'Planification mensuelle des besoins par poste', icon: ClipboardList },
     { path: '/pcm', title: 'Matrice PCM', desc: 'Tests de personnalité Process Communication', icon: Brain },
   ];
 

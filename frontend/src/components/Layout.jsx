@@ -43,6 +43,7 @@ const menuSections = [
     hubPath: '/hub-recrutement',
     items: [
       { path: '/candidates', label: 'Candidats', icon: UserPlus, roles: ['ADMIN', 'RH', 'MANAGER'] },
+      { path: '/recruitment-plan', label: 'Plan de recrutement', icon: ClipboardList, roles: ['ADMIN', 'RH'] },
       { path: '/pcm', label: 'Matrice PCM', icon: Brain, roles: ['ADMIN', 'RH'] },
     ],
   },

@@ -4,6 +4,7 @@ import { ToastProvider } from './components/Toast';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Candidates from './pages/Candidates';
+import RecruitmentPlan from './pages/RecruitmentPlan';
 import PersonalityMatrix from './pages/PersonalityMatrix';
 import Employees from './pages/Employees';
 import WorkHours from './pages/WorkHours';
@@ -96,6 +97,7 @@ function App() {
 
             {/* Recrutement */}
             <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Candidates /></ProtectedRoute>} />
+            <Route path="/recruitment-plan" element={<ProtectedRoute roles={['ADMIN', 'RH']}><RecruitmentPlan /></ProtectedRoute>} />
             <Route path="/pcm" element={<ProtectedRoute roles={['ADMIN', 'RH']}><PersonalityMatrix /></ProtectedRoute>} />
 
             {/* Équipe */}
