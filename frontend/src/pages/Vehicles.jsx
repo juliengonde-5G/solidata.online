@@ -532,16 +532,16 @@ export default function Vehicles() {
             <form onSubmit={saveVehicle} className="bg-white rounded-xl p-6 w-[480px] shadow-xl max-h-[90vh] overflow-y-auto">
               <h2 className="text-lg font-bold mb-4">{editingId ? 'Modifier le véhicule' : 'Nouveau véhicule'}</h2>
               <div className="space-y-3">
-                <input placeholder="Immatriculation *" value={form.registration} onChange={e => setForm({ ...form, registration: e.target.value.toUpperCase() })} className="w-full border rounded-lg px-3 py-2 text-sm" required disabled={!!editingId} />
-                <input placeholder="Nom / Libellé" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input placeholder="Immatriculation *" value={form.registration} onChange={e => setForm({ ...form, registration: e.target.value.toUpperCase() })} className="input-modern" required disabled={!!editingId} />
+                <input placeholder="Nom / Libellé" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-modern" />
                 <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="Marque" value={form.brand} onChange={e => setForm({ ...form, brand: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
-                  <input placeholder="Modèle" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
+                  <input placeholder="Marque" value={form.brand} onChange={e => setForm({ ...form, brand: e.target.value })} className="input-modern" />
+                  <input placeholder="Modèle" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} className="input-modern" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">Type</label>
-                    <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                    <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="input-modern">
                       <option value="camion">Camion</option>
                       <option value="utilitaire">Utilitaire</option>
                       <option value="voiture">Voiture</option>
@@ -550,7 +550,7 @@ export default function Vehicles() {
                   {editingId && (
                     <div>
                       <label className="text-xs text-slate-500">Statut</label>
-                      <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                      <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="input-modern">
                         <option value="available">Disponible</option>
                         <option value="in_use">En tournée</option>
                         <option value="maintenance">Maintenance</option>
@@ -562,25 +562,25 @@ export default function Vehicles() {
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">PTAC / Capacité max (kg)</label>
-                    <input type="number" value={form.max_capacity_kg} onChange={e => setForm({ ...form, max_capacity_kg: parseInt(e.target.value) || 0 })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" value={form.max_capacity_kg} onChange={e => setForm({ ...form, max_capacity_kg: parseInt(e.target.value) || 0 })} className="input-modern" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">Poids à vide (kg)</label>
-                    <input type="number" placeholder="ex: 2100" value={form.tare_weight_kg} onChange={e => setForm({ ...form, tare_weight_kg: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" placeholder="ex: 2100" value={form.tare_weight_kg} onChange={e => setForm({ ...form, tare_weight_kg: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">Kilométrage</label>
-                    <input type="number" value={form.current_km} onChange={e => setForm({ ...form, current_km: parseInt(e.target.value) || 0 })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" value={form.current_km} onChange={e => setForm({ ...form, current_km: parseInt(e.target.value) || 0 })} className="input-modern" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">Prochaine maintenance</label>
-                    <input type="date" value={form.next_maintenance} onChange={e => setForm({ ...form, next_maintenance: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="date" value={form.next_maintenance} onChange={e => setForm({ ...form, next_maintenance: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">Expiration assurance</label>
-                    <input type="date" value={form.insurance_expiry} onChange={e => setForm({ ...form, insurance_expiry: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="date" value={form.insurance_expiry} onChange={e => setForm({ ...form, insurance_expiry: e.target.value })} className="input-modern" />
                   </div>
                 </div>
                 {/* Plan d'entretien constructeur */}
@@ -594,17 +594,17 @@ export default function Vehicles() {
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-[10px] text-slate-400">Motorisation (optionnel)</label>
-                      <input placeholder="ex: 2.3 dCi 150ch" value={form.engine} onChange={e => setForm({ ...form, engine: e.target.value })} className="w-full border rounded-lg px-3 py-1.5 text-sm" />
+                      <input placeholder="ex: 2.3 dCi 150ch" value={form.engine} onChange={e => setForm({ ...form, engine: e.target.value })} className="input-modern" />
                     </div>
                     <div>
                       <label className="text-[10px] text-slate-400">Année (optionnel)</label>
-                      <input placeholder="ex: 2022" value={form.year} onChange={e => setForm({ ...form, year: e.target.value })} className="w-full border rounded-lg px-3 py-1.5 text-sm" />
+                      <input placeholder="ex: 2022" value={form.year} onChange={e => setForm({ ...form, year: e.target.value })} className="input-modern" />
                     </div>
                   </div>
                   {maintenanceProfiles.length > 0 && (
                     <div>
                       <label className="text-[10px] text-slate-400">Profil existant</label>
-                      <select value={form.vehicle_type} onChange={e => setForm({ ...form, vehicle_type: e.target.value })} className="w-full border rounded-lg px-3 py-1.5 text-sm">
+                      <select value={form.vehicle_type} onChange={e => setForm({ ...form, vehicle_type: e.target.value })} className="input-modern">
                         <option value="generic">— Sélectionner un profil existant —</option>
                         {maintenanceProfiles.map(p => (
                           <option key={p.id} value={p.vehicle_type}>{p.brand} {p.model}</option>
@@ -660,26 +660,26 @@ export default function Vehicles() {
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-slate-500">Type de document</label>
-                  <select value={docForm.doc_type} onChange={e => setDocForm({ ...docForm, doc_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                  <select value={docForm.doc_type} onChange={e => setDocForm({ ...docForm, doc_type: e.target.value })} className="input-modern">
                     {DOC_TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-xs text-slate-500">Titre</label>
-                  <input value={docForm.title} onChange={e => setDocForm({ ...docForm, title: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Ex: Carte grise Ducato" />
+                  <input value={docForm.title} onChange={e => setDocForm({ ...docForm, title: e.target.value })} className="input-modern" placeholder="Ex: Carte grise Ducato" />
                 </div>
                 <div>
                   <label className="text-xs text-slate-500">Fichier *</label>
-                  <input type="file" onChange={e => setDocFile(e.target.files[0])} className="w-full border rounded-lg px-3 py-2 text-sm" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" />
+                  <input type="file" onChange={e => setDocFile(e.target.files[0])} className="input-modern" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" />
                   <p className="text-[10px] text-slate-400 mt-1">PDF, images, Word, Excel — max 10 Mo</p>
                 </div>
                 <div>
                   <label className="text-xs text-slate-500">Date d'expiration (optionnel)</label>
-                  <input type="date" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  <input type="date" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} className="input-modern" />
                 </div>
                 <div>
                   <label className="text-xs text-slate-500">Notes</label>
-                  <textarea value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} placeholder="Remarques..." />
+                  <textarea value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} className="input-modern" rows={2} placeholder="Remarques..." />
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
@@ -698,32 +698,32 @@ export default function Vehicles() {
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-slate-500">Type d'événement</label>
-                  <select value={eventForm.event_type} onChange={e => setEventForm({ ...eventForm, event_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                  <select value={eventForm.event_type} onChange={e => setEventForm({ ...eventForm, event_type: e.target.value })} className="input-modern">
                     {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">Date</label>
-                    <input type="date" value={eventForm.event_date} onChange={e => setEventForm({ ...eventForm, event_date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                    <input type="date" value={eventForm.event_date} onChange={e => setEventForm({ ...eventForm, event_date: e.target.value })} className="input-modern" required />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">Kilométrage</label>
-                    <input type="number" placeholder="km" value={eventForm.km_at_event} onChange={e => setEventForm({ ...eventForm, km_at_event: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" placeholder="km" value={eventForm.km_at_event} onChange={e => setEventForm({ ...eventForm, km_at_event: e.target.value })} className="input-modern" />
                   </div>
                 </div>
                 <div>
                   <label className="text-xs text-slate-500">Description</label>
-                  <textarea value={eventForm.description} onChange={e => setEventForm({ ...eventForm, description: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} placeholder="Détails de l'intervention..." />
+                  <textarea value={eventForm.description} onChange={e => setEventForm({ ...eventForm, description: e.target.value })} className="input-modern" rows={2} placeholder="Détails de l'intervention..." />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">Coût (€)</label>
-                    <input type="number" step="0.01" placeholder="0.00" value={eventForm.cost} onChange={e => setEventForm({ ...eventForm, cost: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" step="0.01" placeholder="0.00" value={eventForm.cost} onChange={e => setEventForm({ ...eventForm, cost: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">Réalisé par</label>
-                    <input value={eventForm.performed_by} onChange={e => setEventForm({ ...eventForm, performed_by: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Garage, mécanicien..." />
+                    <input value={eventForm.performed_by} onChange={e => setEventForm({ ...eventForm, performed_by: e.target.value })} className="input-modern" placeholder="Garage, mécanicien..." />
                   </div>
                 </div>
               </div>

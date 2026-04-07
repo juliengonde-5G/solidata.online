@@ -215,7 +215,7 @@ export default function ActivityLog() {
             <select
               value={filters.user_id}
               onChange={e => { setFilters({ ...filters, user_id: e.target.value }); setPage(0); }}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="select-modern w-auto"
             >
               <option value="">Tous les utilisateurs</option>
               {users.map(u => (
@@ -224,7 +224,7 @@ export default function ActivityLog() {
             </select>
             {tab === 'activity' && (
               <>
-                <select value={filters.action} onChange={e => { setFilters({ ...filters, action: e.target.value }); setPage(0); }} className="border rounded-lg px-3 py-2 text-sm">
+                <select value={filters.action} onChange={e => { setFilters({ ...filters, action: e.target.value }); setPage(0); }} className="select-modern w-auto">
                   <option value="">Toutes les actions</option>
                   <option value="login">Connexion</option>
                   <option value="logout">Déconnexion</option>
@@ -233,7 +233,7 @@ export default function ActivityLog() {
                   <option value="delete">Suppression</option>
                   <option value="password_change">Changement MDP</option>
                 </select>
-                <select value={filters.entity_type} onChange={e => { setFilters({ ...filters, entity_type: e.target.value }); setPage(0); }} className="border rounded-lg px-3 py-2 text-sm">
+                <select value={filters.entity_type} onChange={e => { setFilters({ ...filters, entity_type: e.target.value }); setPage(0); }} className="select-modern w-auto">
                   <option value="">Toutes les entités</option>
                   {Object.entries(ENTITY_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
@@ -272,7 +272,7 @@ export default function ActivityLog() {
               <select
                 value={filters.user_id}
                 onChange={e => { setFilters({ ...filters, user_id: e.target.value }); setPage(0); }}
-                className="border rounded-lg px-3 py-2 text-sm"
+                className="select-modern w-auto"
               >
                 <option value="">Tous les utilisateurs</option>
                 {users.map(u => (

@@ -75,7 +75,7 @@ export default function CAVMap() {
             <p className="text-xs text-amber-600 italic mt-1">Taux de remplissage estimé par calcul algorithmique (remis à zéro après chaque collecte)</p>
           </div>
           <div className="flex gap-2 items-center">
-            <select value={filterCommune} onChange={e => setFilterCommune(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+            <select value={filterCommune} onChange={e => setFilterCommune(e.target.value)} className="select-modern w-auto">
               <option value="">Toutes les communes</option>
               {communes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>

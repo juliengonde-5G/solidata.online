@@ -210,8 +210,8 @@ export default function Employees() {
           <input placeholder="Rechercher..." value={filter.search}
             onChange={e => setFilter({ ...filter, search: e.target.value })}
             onKeyDown={e => e.key === 'Enter' && loadData()}
-            className="border rounded-lg px-3 py-2 text-sm w-64" />
-          <select value={filter.team_id} onChange={e => setFilter({ ...filter, team_id: e.target.value })} className="border rounded-lg px-3 py-2 text-sm">
+            className="input-modern w-64" />
+          <select value={filter.team_id} onChange={e => setFilter({ ...filter, team_id: e.target.value })} className="select-modern w-auto">
             <option value="">Toutes les équipes</option>
             {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
@@ -335,52 +335,52 @@ export default function Employees() {
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <label className="text-gray-700 text-xs font-medium">Prénom <span className="text-red-500" aria-hidden="true">*</span></label>
-                            <input ref={firstInputRef} value={editForm.first_name} onChange={e => { setEditForm({ ...editForm, first_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" aria-required="true" />
+                            <input ref={firstInputRef} value={editForm.first_name} onChange={e => { setEditForm({ ...editForm, first_name: e.target.value }); setEditError(''); }} className="input-modern mt-1" placeholder="Obligatoire" aria-required="true" />
                           </div>
                           <div>
                             <label className="text-gray-700 text-xs font-medium">Nom <span className="text-red-500" aria-hidden="true">*</span></label>
-                            <input value={editForm.last_name} onChange={e => { setEditForm({ ...editForm, last_name: e.target.value }); setEditError(''); }} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Obligatoire" aria-required="true" />
+                            <input value={editForm.last_name} onChange={e => { setEditForm({ ...editForm, last_name: e.target.value }); setEditError(''); }} className="input-modern mt-1" placeholder="Obligatoire" aria-required="true" />
                           </div>
                         </div>
                         <div>
                           <label className="text-gray-500 text-xs">Email</label>
-                          <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} className="input-modern mt-1" />
                         </div>
                         <div>
                           <label className="text-gray-500 text-xs">Téléphone</label>
-                          <input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          <input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} className="input-modern mt-1" />
                         </div>
                         <div>
                           <label className="text-gray-500 text-xs">Équipe</label>
-                          <select value={editForm.team_id} onChange={e => setEditForm({ ...editForm, team_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                          <select value={editForm.team_id} onChange={e => setEditForm({ ...editForm, team_id: e.target.value })} className="input-modern mt-1">
                             <option value="">—</option>
                             {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                           </select>
                         </div>
                         <div>
                           <label className="text-gray-500 text-xs">Poste</label>
-                          <input value={editForm.position} onChange={e => setEditForm({ ...editForm, position: e.target.value })} placeholder="Ex: Chauffeur" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                          <input value={editForm.position} onChange={e => setEditForm({ ...editForm, position: e.target.value })} placeholder="Ex: Chauffeur" className="input-modern mt-1" />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <label className="text-gray-500 text-xs">Type de contrat</label>
-                            <select value={editForm.contract_type} onChange={e => setEditForm({ ...editForm, contract_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                            <select value={editForm.contract_type} onChange={e => setEditForm({ ...editForm, contract_type: e.target.value })} className="input-modern mt-1">
                               {Object.entries(CONTRACT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                             </select>
                           </div>
                           <div>
                             <label className="text-gray-500 text-xs">Heures/sem</label>
-                            <input type="number" min="0" step="0.5" value={editForm.weekly_hours} onChange={e => setEditForm({ ...editForm, weekly_hours: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                            <input type="number" min="0" step="0.5" value={editForm.weekly_hours} onChange={e => setEditForm({ ...editForm, weekly_hours: e.target.value })} className="input-modern mt-1" />
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <label className="text-gray-500 text-xs">Début contrat</label>
-                            <input type="date" value={editForm.contract_start} onChange={e => setEditForm({ ...editForm, contract_start: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                            <input type="date" value={editForm.contract_start} onChange={e => setEditForm({ ...editForm, contract_start: e.target.value })} className="input-modern mt-1" />
                           </div>
                           <div>
                             <label className="text-gray-500 text-xs">Fin contrat</label>
-                            <input type="date" value={editForm.contract_end} onChange={e => setEditForm({ ...editForm, contract_end: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                            <input type="date" value={editForm.contract_end} onChange={e => setEditForm({ ...editForm, contract_end: e.target.value })} className="input-modern mt-1" />
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -411,36 +411,36 @@ export default function Employees() {
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <span className="text-gray-500 text-xs">Type *</span>
-                            <select value={contractForm.contract_type} onChange={e => setContractForm({...contractForm, contract_type: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                            <select value={contractForm.contract_type} onChange={e => setContractForm({...contractForm, contract_type: e.target.value})} className="input-modern mt-1">
                               {Object.entries(CONTRACT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                             </select>
                           </div>
                           <div>
                             <span className="text-gray-500 text-xs">Durée (mois)</span>
-                            <input type="number" placeholder="Durée" value={contractForm.duration_months} onChange={e => setContractForm({...contractForm, duration_months: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                            <input type="number" placeholder="Durée" value={contractForm.duration_months} onChange={e => setContractForm({...contractForm, duration_months: e.target.value})} className="input-modern mt-1" />
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <span className="text-gray-500 text-xs">Date début *</span>
-                            <input type="date" value={contractForm.start_date} onChange={e => setContractForm({...contractForm, start_date: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required />
+                            <input type="date" value={contractForm.start_date} onChange={e => setContractForm({...contractForm, start_date: e.target.value})} className="input-modern mt-1" required />
                           </div>
                           <div>
                             <span className="text-gray-500 text-xs">Date fin</span>
-                            <input type="date" value={contractForm.end_date} onChange={e => setContractForm({...contractForm, end_date: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                            <input type="date" value={contractForm.end_date} onChange={e => setContractForm({...contractForm, end_date: e.target.value})} className="input-modern mt-1" />
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <span className="text-gray-500 text-xs">Temps de travail</span>
-                            <select value={contractForm.weekly_hours} onChange={e => setContractForm({...contractForm, weekly_hours: parseInt(e.target.value)})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                            <select value={contractForm.weekly_hours} onChange={e => setContractForm({...contractForm, weekly_hours: parseInt(e.target.value)})} className="input-modern mt-1">
                               <option value={26}>26h/semaine</option>
                               <option value={35}>35h/semaine</option>
                             </select>
                           </div>
                           <div>
                             <span className="text-gray-500 text-xs">Équipe</span>
-                            <select value={contractForm.team_id} onChange={e => setContractForm({...contractForm, team_id: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                            <select value={contractForm.team_id} onChange={e => setContractForm({...contractForm, team_id: e.target.value})} className="input-modern mt-1">
                               <option value="">—</option>
                               {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                             </select>
@@ -448,7 +448,7 @@ export default function Employees() {
                         </div>
                         <div>
                           <span className="text-gray-500 text-xs">Poste</span>
-                          <select value={contractForm.position_id} onChange={e => setContractForm({...contractForm, position_id: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                          <select value={contractForm.position_id} onChange={e => setContractForm({...contractForm, position_id: e.target.value})} className="input-modern mt-1">
                             <option value="">—</option>
                             {positions.map(p => <option key={p.id} value={p.id}>{p.name || p.title}</option>)}
                           </select>
@@ -567,25 +567,25 @@ export default function Employees() {
               <h2 className="text-lg font-bold mb-4">Nouveau collaborateur</h2>
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" required />
-                  <input placeholder="Nom *" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" required />
+                  <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} className="input-modern" required />
+                  <input placeholder="Nom *" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} className="input-modern" required />
                 </div>
-                <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Téléphone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <select value={form.team_id} onChange={e => setForm({ ...form, team_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="input-modern" />
+                <input placeholder="Téléphone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="input-modern" />
+                <select value={form.team_id} onChange={e => setForm({ ...form, team_id: e.target.value })} className="input-modern">
                   <option value="">Équipe</option>
                   {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
-                <select value={form.position_id} onChange={e => setForm({ ...form, position_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                <select value={form.position_id} onChange={e => setForm({ ...form, position_id: e.target.value })} className="input-modern">
                   <option value="">Poste</option>
                   {positions.map(p => <option key={p.id} value={p.id}>{p.name || p.title}</option>)}
                 </select>
-                <select value={form.contract_type} onChange={e => setForm({ ...form, contract_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                <select value={form.contract_type} onChange={e => setForm({ ...form, contract_type: e.target.value })} className="input-modern">
                   {Object.entries(CONTRACT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
                 <div>
                   <label className="text-xs text-gray-500">Date d'embauche</label>
-                  <input type="date" value={form.hire_date} onChange={e => setForm({ ...form, hire_date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  <input type="date" value={form.hire_date} onChange={e => setForm({ ...form, hire_date: e.target.value })} className="input-modern" />
                 </div>
               </div>
               <div className="flex gap-2 mt-4">

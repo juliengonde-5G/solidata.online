@@ -39,7 +39,7 @@ export default function ReportingProduction() {
             type="month"
             value={month}
             onChange={e => setMonth(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm"
+            className="input-modern w-auto"
           />
         </div>
 

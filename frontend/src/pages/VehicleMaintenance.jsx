@@ -357,28 +357,28 @@ export default function VehicleMaintenance() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">Marque *</label>
-                    <input required value={profileForm.brand} onChange={e => setProfileForm({ ...profileForm, brand: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="FIAT" />
+                    <input required value={profileForm.brand} onChange={e => setProfileForm({ ...profileForm, brand: e.target.value })} className="input-modern mt-1" placeholder="FIAT" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">Modèle *</label>
-                    <input required value={profileForm.model} onChange={e => setProfileForm({ ...profileForm, model: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Ducato 2.3 MultiJet" />
+                    <input required value={profileForm.model} onChange={e => setProfileForm({ ...profileForm, model: e.target.value })} className="input-modern mt-1" placeholder="Ducato 2.3 MultiJet" />
                   </div>
                 </div>
                 <div>
                   <label className="text-xs text-slate-500">Code moteur</label>
-                  <input value={profileForm.engine_code} onChange={e => setProfileForm({ ...profileForm, engine_code: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="F1AGL411x" />
+                  <input value={profileForm.engine_code} onChange={e => setProfileForm({ ...profileForm, engine_code: e.target.value })} className="input-modern mt-1" placeholder="F1AGL411x" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">Distribution</label>
-                    <select value={profileForm.timing_system} onChange={e => setProfileForm({ ...profileForm, timing_system: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                    <select value={profileForm.timing_system} onChange={e => setProfileForm({ ...profileForm, timing_system: e.target.value })} className="input-modern mt-1">
                       <option value="courroie">Courroie</option>
                       <option value="chaine">Chaîne</option>
                     </select>
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">AdBlue</label>
-                    <select value={profileForm.adblue_equipped} onChange={e => setProfileForm({ ...profileForm, adblue_equipped: e.target.value === 'true' })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                    <select value={profileForm.adblue_equipped} onChange={e => setProfileForm({ ...profileForm, adblue_equipped: e.target.value === 'true' })} className="input-modern mt-1">
                       <option value="true">Oui</option>
                       <option value="false">Non</option>
                     </select>
@@ -387,11 +387,11 @@ export default function VehicleMaintenance() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">Révision (km)</label>
-                    <input type="number" value={profileForm.revision_km} onChange={e => setProfileForm({ ...profileForm, revision_km: parseInt(e.target.value) || 0 })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                    <input type="number" value={profileForm.revision_km} onChange={e => setProfileForm({ ...profileForm, revision_km: parseInt(e.target.value) || 0 })} className="input-modern mt-1" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">Révision (mois)</label>
-                    <input type="number" value={profileForm.revision_months} onChange={e => setProfileForm({ ...profileForm, revision_months: parseInt(e.target.value) || 0 })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                    <input type="number" value={profileForm.revision_months} onChange={e => setProfileForm({ ...profileForm, revision_months: parseInt(e.target.value) || 0 })} className="input-modern mt-1" />
                   </div>
                 </div>
               </div>

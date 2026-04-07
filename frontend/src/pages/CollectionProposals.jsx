@@ -108,7 +108,7 @@ export default function CollectionProposals() {
               type="date"
               value={date}
               onChange={e => setDate(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern w-auto"
             />
           </div>
         )}
@@ -119,7 +119,7 @@ export default function CollectionProposals() {
               type="date"
               value={weekStart}
               onChange={e => setWeekStart(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern w-auto"
             />
           </div>
         )}
@@ -350,19 +350,19 @@ export default function CollectionProposals() {
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Facteur météo (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.weather_factor} onChange={e => setContextEdit({ ...contextEdit, weather_factor: parseFloat(e.target.value) || 1 })} className="w-full border rounded-lg px-3 py-2" />
+                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.weather_factor} onChange={e => setContextEdit({ ...contextEdit, weather_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Facteur trafic (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.traffic_factor} onChange={e => setContextEdit({ ...contextEdit, traffic_factor: parseFloat(e.target.value) || 1 })} className="w-full border rounded-lg px-3 py-2" />
+                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.traffic_factor} onChange={e => setContextEdit({ ...contextEdit, traffic_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Facteur durée (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.duration_factor} onChange={e => setContextEdit({ ...contextEdit, duration_factor: parseFloat(e.target.value) || 1 })} className="w-full border rounded-lg px-3 py-2" />
+                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.duration_factor} onChange={e => setContextEdit({ ...contextEdit, duration_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Notes</label>
-                  <input type="text" value={contextEdit.notes || ''} onChange={e => setContextEdit({ ...contextEdit, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2" placeholder="Ex. Grève, travaux..." />
+                  <input type="text" value={contextEdit.notes || ''} onChange={e => setContextEdit({ ...contextEdit, notes: e.target.value })} className="input-modern" placeholder="Ex. Grève, travaux..." />
                 </div>
               </div>
               <div className="flex justify-end gap-2 mt-4">

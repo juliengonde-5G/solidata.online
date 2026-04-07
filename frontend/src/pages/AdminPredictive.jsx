@@ -240,11 +240,11 @@ export default function AdminPredictive() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-medium text-gray-500 block mb-1">Latitude</label>
-              <input type="number" step="0.0001" value={config.centreTri.lat} readOnly className="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50" />
+              <input type="number" step="0.0001" value={config.centreTri.lat} readOnly className="input-modern bg-slate-50" />
             </div>
             <div>
               <label className="text-xs font-medium text-gray-500 block mb-1">Longitude</label>
-              <input type="number" step="0.0001" value={config.centreTri.lng} readOnly className="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50" />
+              <input type="number" step="0.0001" value={config.centreTri.lng} readOnly className="input-modern bg-slate-50" />
             </div>
           </div>
           <p className="text-xs text-gray-400 mt-2">Modifiable via les variables d'environnement CENTRE_TRI_LAT / CENTRE_TRI_LNG</p>
@@ -290,7 +290,7 @@ export default function AdminPredictive() {
           <div className="mt-4 border-t pt-4">
             <p className="text-xs font-medium text-gray-500 mb-2">Aperçu météo pour une date</p>
             <div className="flex gap-2 items-end">
-              <input type="date" value={weatherDate} onChange={e => setWeatherDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+              <input type="date" value={weatherDate} onChange={e => setWeatherDate(e.target.value)} className="input-modern w-auto" />
               <button onClick={loadWeatherPreview} className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600">Voir</button>
             </div>
             {weatherPreview && (
@@ -581,7 +581,7 @@ export default function AdminPredictive() {
                   type="number" step="0.05" min="0" max="3"
                   value={val}
                   onChange={e => updateSeasonal(idx, e.target.value)}
-                  className="w-full border rounded px-1 py-1.5 text-sm text-center"
+                  className="input-modern py-1.5 text-center"
                 />
                 <div className="mt-1 h-1 rounded-full" style={{ background: val >= 1 ? '#22c55e' : '#f59e0b', opacity: 0.5 + Math.abs(val - 1) }} />
               </div>
@@ -599,7 +599,7 @@ export default function AdminPredictive() {
                   type="number" step="0.05" min="0" max="3"
                   value={val}
                   onChange={e => updateDayOfWeek(idx, e.target.value)}
-                  className="w-full border rounded px-2 py-2 text-sm text-center"
+                  className="input-modern text-center"
                 />
               </div>
             ))}
@@ -648,7 +648,7 @@ export default function AdminPredictive() {
               type="date"
               value={newHoliday}
               onChange={e => setNewHoliday(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern w-auto"
             />
             <button onClick={addHoliday} className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm hover:bg-amber-600">
               Ajouter
@@ -669,7 +669,7 @@ export default function AdminPredictive() {
                     arr[idx] = { ...arr[idx], name: e.target.value };
                     setConfig({ ...config, schoolVacations: arr });
                   }}
-                  className="border rounded px-2 py-1 text-sm flex-1 min-w-0"
+                  className="input-modern py-1 flex-1 min-w-0"
                   placeholder="Nom"
                 />
                 <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -682,7 +682,7 @@ export default function AdminPredictive() {
                       arr[idx] = { ...arr[idx], start: e.target.value };
                       setConfig({ ...config, schoolVacations: arr });
                     }}
-                    className="border rounded px-2 py-1 text-sm"
+                    className="input-modern py-1 w-auto"
                   />
                   <span>au</span>
                   <input
@@ -693,7 +693,7 @@ export default function AdminPredictive() {
                       arr[idx] = { ...arr[idx], end: e.target.value };
                       setConfig({ ...config, schoolVacations: arr });
                     }}
-                    className="border rounded px-2 py-1 text-sm"
+                    className="input-modern py-1 w-auto"
                   />
                 </div>
                 <button
@@ -760,37 +760,37 @@ export default function AdminPredictive() {
             <form onSubmit={createEvent} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto">
               <h2 className="text-lg font-bold mb-4">Nouvel événement local</h2>
               <div className="space-y-3">
-                <input placeholder="Nom de l'événement *" value={eventForm.nom} onChange={e => setEventForm({ ...eventForm, nom: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <select value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                <input placeholder="Nom de l'événement *" value={eventForm.nom} onChange={e => setEventForm({ ...eventForm, nom: e.target.value })} className="input-modern" required />
+                <select value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} className="input-modern">
                   {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-gray-500 block mb-0.5">Date début *</label>
-                    <input type="date" value={eventForm.date_debut} onChange={e => setEventForm({ ...eventForm, date_debut: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                    <input type="date" value={eventForm.date_debut} onChange={e => setEventForm({ ...eventForm, date_debut: e.target.value })} className="input-modern" required />
                   </div>
                   <div>
                     <label className="text-xs text-gray-500 block mb-0.5">Date fin *</label>
-                    <input type="date" value={eventForm.date_fin} onChange={e => setEventForm({ ...eventForm, date_fin: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                    <input type="date" value={eventForm.date_fin} onChange={e => setEventForm({ ...eventForm, date_fin: e.target.value })} className="input-modern" required />
                   </div>
                 </div>
-                <input placeholder="Adresse" value={eventForm.adresse} onChange={e => setEventForm({ ...eventForm, adresse: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Commune" value={eventForm.commune} onChange={e => setEventForm({ ...eventForm, commune: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input placeholder="Adresse" value={eventForm.adresse} onChange={e => setEventForm({ ...eventForm, adresse: e.target.value })} className="input-modern" />
+                <input placeholder="Commune" value={eventForm.commune} onChange={e => setEventForm({ ...eventForm, commune: e.target.value })} className="input-modern" />
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="number" step="0.0001" placeholder="Latitude" value={eventForm.latitude} onChange={e => setEventForm({ ...eventForm, latitude: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                  <input type="number" step="0.0001" placeholder="Longitude" value={eventForm.longitude} onChange={e => setEventForm({ ...eventForm, longitude: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  <input type="number" step="0.0001" placeholder="Latitude" value={eventForm.latitude} onChange={e => setEventForm({ ...eventForm, latitude: e.target.value })} className="input-modern" />
+                  <input type="number" step="0.0001" placeholder="Longitude" value={eventForm.longitude} onChange={e => setEventForm({ ...eventForm, longitude: e.target.value })} className="input-modern" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-gray-500 block mb-0.5">Rayon d'impact (km)</label>
-                    <input type="number" step="0.5" min="0.5" value={eventForm.rayon_km} onChange={e => setEventForm({ ...eventForm, rayon_km: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" step="0.5" min="0.5" value={eventForm.rayon_km} onChange={e => setEventForm({ ...eventForm, rayon_km: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="text-xs text-gray-500 block mb-0.5">Bonus remplissage (x)</label>
-                    <input type="number" step="0.05" min="1" value={eventForm.bonus_factor} onChange={e => setEventForm({ ...eventForm, bonus_factor: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" step="0.05" min="1" value={eventForm.bonus_factor} onChange={e => setEventForm({ ...eventForm, bonus_factor: e.target.value })} className="input-modern" />
                   </div>
                 </div>
-                <textarea placeholder="Notes (optionnel)" value={eventForm.notes} onChange={e => setEventForm({ ...eventForm, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows="2" />
+                <textarea placeholder="Notes (optionnel)" value={eventForm.notes} onChange={e => setEventForm({ ...eventForm, notes: e.target.value })} className="input-modern" rows="2" />
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
@@ -854,7 +854,7 @@ function ParamInput({ label, value, onChange }) {
         step="any"
         value={value ?? ''}
         onChange={e => onChange(e.target.value)}
-        className="w-full border rounded-lg px-3 py-2 text-sm"
+        className="input-modern"
       />
     </div>
   );

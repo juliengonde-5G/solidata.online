@@ -112,7 +112,7 @@ export default function ExutoiresClients() {
         </div>
 
         <div className="mb-4">
-          <input placeholder="Rechercher par raison sociale, ville ou contact..." value={search} onChange={e => setSearch(e.target.value)} className="border rounded-lg px-3 py-2 text-sm w-80" />
+          <input placeholder="Rechercher par raison sociale, ville ou contact..." value={search} onChange={e => setSearch(e.target.value)} className="input-modern w-80" />
         </div>
 
         <DataTable columns={columns} data={filtered} loading={false} emptyIcon={Building2} emptyMessage="Aucun client logistique" />
@@ -122,18 +122,18 @@ export default function ExutoiresClients() {
             <form onSubmit={handleSubmit} className="bg-white rounded-xl p-6 w-[500px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h2 className="text-lg font-bold mb-4">{editing ? 'Modifier le client' : 'Nouveau client logistique'}</h2>
               <div className="space-y-3">
-                <div><label className="text-xs text-slate-500">Raison sociale *</label><input value={form.raison_sociale} onChange={e => setForm({ ...form, raison_sociale: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required /></div>
-                <div><label className="text-xs text-slate-500">SIRET</label><input value={form.siret} onChange={e => setForm({ ...form, siret: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" /></div>
-                <div><label className="text-xs text-slate-500">Adresse *</label><textarea value={form.adresse} onChange={e => setForm({ ...form, adresse: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} required /></div>
+                <div><label className="text-xs text-slate-500">Raison sociale *</label><input value={form.raison_sociale} onChange={e => setForm({ ...form, raison_sociale: e.target.value })} className="input-modern mt-1" required /></div>
+                <div><label className="text-xs text-slate-500">SIRET</label><input value={form.siret} onChange={e => setForm({ ...form, siret: e.target.value })} className="input-modern mt-1" /></div>
+                <div><label className="text-xs text-slate-500">Adresse *</label><textarea value={form.adresse} onChange={e => setForm({ ...form, adresse: e.target.value })} className="input-modern mt-1" rows={2} required /></div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label className="text-xs text-slate-500">Code postal *</label><input value={form.code_postal} onChange={e => setForm({ ...form, code_postal: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required /></div>
-                  <div><label className="text-xs text-slate-500">Ville *</label><input value={form.ville} onChange={e => setForm({ ...form, ville: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required /></div>
+                  <div><label className="text-xs text-slate-500">Code postal *</label><input value={form.code_postal} onChange={e => setForm({ ...form, code_postal: e.target.value })} className="input-modern mt-1" required /></div>
+                  <div><label className="text-xs text-slate-500">Ville *</label><input value={form.ville} onChange={e => setForm({ ...form, ville: e.target.value })} className="input-modern mt-1" required /></div>
                 </div>
-                <div><label className="text-xs text-slate-500">Nom du contact *</label><input value={form.contact_nom} onChange={e => setForm({ ...form, contact_nom: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required /></div>
-                <div><label className="text-xs text-slate-500">Email du contact *</label><input type="email" value={form.contact_email} onChange={e => setForm({ ...form, contact_email: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" required /></div>
-                <div><label className="text-xs text-slate-500">Téléphone du contact</label><input value={form.contact_telephone} onChange={e => setForm({ ...form, contact_telephone: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" /></div>
+                <div><label className="text-xs text-slate-500">Nom du contact *</label><input value={form.contact_nom} onChange={e => setForm({ ...form, contact_nom: e.target.value })} className="input-modern mt-1" required /></div>
+                <div><label className="text-xs text-slate-500">Email du contact *</label><input type="email" value={form.contact_email} onChange={e => setForm({ ...form, contact_email: e.target.value })} className="input-modern mt-1" required /></div>
+                <div><label className="text-xs text-slate-500">Téléphone du contact</label><input value={form.contact_telephone} onChange={e => setForm({ ...form, contact_telephone: e.target.value })} className="input-modern mt-1" /></div>
                 <div><label className="text-xs text-slate-500">Type de client</label>
-                  <select value={form.type_client} onChange={e => setForm({ ...form, type_client: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                  <select value={form.type_client} onChange={e => setForm({ ...form, type_client: e.target.value })} className="input-modern mt-1">
                     {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>

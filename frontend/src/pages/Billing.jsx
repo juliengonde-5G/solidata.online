@@ -109,16 +109,16 @@ export default function Billing() {
             <form onSubmit={createInvoice} className="bg-white rounded-xl p-6 w-[560px] shadow-xl max-h-[90vh] overflow-y-auto">
               <h2 className="text-lg font-bold mb-4">Nouvelle facture</h2>
               <div className="space-y-3">
-                <input placeholder="Nom du client *" value={form.client_name} onChange={e => setForm({ ...form, client_name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <input placeholder="Adresse du client" value={form.client_address} onChange={e => setForm({ ...form, client_address: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input placeholder="Nom du client *" value={form.client_name} onChange={e => setForm({ ...form, client_name: e.target.value })} className="input-modern" required />
+                <input placeholder="Adresse du client" value={form.client_address} onChange={e => setForm({ ...form, client_address: e.target.value })} className="input-modern" />
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500">Date</label>
-                    <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500">Échéance</label>
-                    <input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} className="input-modern" />
                   </div>
                 </div>
 
@@ -129,9 +129,9 @@ export default function Billing() {
                   </div>
                   {form.lines.map((line, i) => (
                     <div key={i} className="flex gap-2 mb-2">
-                      <input placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} className="flex-1 border rounded-lg px-3 py-2 text-sm" />
-                      <input type="number" placeholder="Qté" value={line.quantity} onChange={e => updateLine(i, 'quantity', parseFloat(e.target.value) || 0)} className="w-16 border rounded-lg px-2 py-2 text-sm" />
-                      <input type="number" step="0.01" placeholder="P.U." value={line.unit_price} onChange={e => updateLine(i, 'unit_price', parseFloat(e.target.value) || 0)} className="w-24 border rounded-lg px-2 py-2 text-sm" />
+                      <input placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} className="input-modern flex-1" />
+                      <input type="number" placeholder="Qté" value={line.quantity} onChange={e => updateLine(i, 'quantity', parseFloat(e.target.value) || 0)} className="input-modern w-16" />
+                      <input type="number" step="0.01" placeholder="P.U." value={line.unit_price} onChange={e => updateLine(i, 'unit_price', parseFloat(e.target.value) || 0)} className="input-modern w-24" />
                       <button type="button" onClick={() => removeLine(i)} className="text-red-400 hover:text-red-600 px-1">&times;</button>
                     </div>
                   ))}

@@ -302,7 +302,7 @@ export default function ExutoiresCommandes() {
           <select
             value={filterStatut}
             onChange={e => setFilterStatut(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm"
+            className="select-modern w-auto"
           >
             <option value="">Tous les statuts</option>
             {Object.entries(STATUTS).map(([k, v]) => (
@@ -312,7 +312,7 @@ export default function ExutoiresCommandes() {
           <select
             value={filterType}
             onChange={e => setFilterType(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm"
+            className="select-modern w-auto"
           >
             <option value="">Tous les types</option>
             {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
@@ -323,21 +323,21 @@ export default function ExutoiresCommandes() {
             type="date"
             value={filterDateFrom}
             onChange={e => setFilterDateFrom(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm"
+            className="input-modern w-auto"
             placeholder="Date début"
           />
           <input
             type="date"
             value={filterDateTo}
             onChange={e => setFilterDateTo(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm"
+            className="input-modern w-auto"
             placeholder="Date fin"
           />
           <input
             placeholder="Rechercher par client..."
             value={filterSearch}
             onChange={e => setFilterSearch(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm w-64"
+            className="input-modern w-64"
           />
         </div>
 
@@ -400,7 +400,7 @@ export default function ExutoiresCommandes() {
                   <select
                     value={form.client_id}
                     onChange={e => handleClientChange(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="select-modern mt-1"
                     required
                   >
                     <option value="">Sélectionner un client...</option>
@@ -431,7 +431,7 @@ export default function ExutoiresCommandes() {
                     type="date"
                     value={form.date_commande}
                     onChange={e => setForm({ ...form, date_commande: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     required
                   />
                 </div>
@@ -442,7 +442,7 @@ export default function ExutoiresCommandes() {
                     step="0.01"
                     value={form.prix_tonne}
                     onChange={e => setForm({ ...form, prix_tonne: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     placeholder="0.00"
                     required
                   />
@@ -454,7 +454,7 @@ export default function ExutoiresCommandes() {
                     step="0.001"
                     value={form.tonnage_prevu}
                     onChange={e => setForm({ ...form, tonnage_prevu: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     placeholder="0.000"
                   />
                 </div>
@@ -463,7 +463,7 @@ export default function ExutoiresCommandes() {
                   <select
                     value={form.frequence}
                     onChange={e => setForm({ ...form, frequence: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="select-modern mt-1"
                     required
                   >
                     {Object.entries(FREQUENCES).map(([k, v]) => (
@@ -478,7 +478,7 @@ export default function ExutoiresCommandes() {
                       type="date"
                       value={form.date_fin_recurrence}
                       onChange={e => setForm({ ...form, date_fin_recurrence: e.target.value })}
-                      className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                      className="input-modern mt-1"
                     />
                   </div>
                 )}
@@ -487,7 +487,7 @@ export default function ExutoiresCommandes() {
                   <textarea
                     value={form.notes}
                     onChange={e => setForm({ ...form, notes: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="textarea-modern mt-1"
                     rows={3}
                   />
                 </div>

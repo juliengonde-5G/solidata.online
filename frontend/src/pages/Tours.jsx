@@ -193,7 +193,7 @@ export default function Tours() {
                   <h3 className="font-semibold">Date et mode de génération</h3>
                   <div>
                     <label className="text-xs text-slate-500">Date de tournée</label>
-                    <input type="date" value={wizForm.date} onChange={e => setWizForm({ ...wizForm, date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="date" value={wizForm.date} onChange={e => setWizForm({ ...wizForm, date: e.target.value })} className="input-modern" />
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs text-slate-500">Mode de génération</label>
@@ -244,7 +244,7 @@ export default function Tours() {
               {wizardStep === 3 && (
                 <div className="space-y-4">
                   <h3 className="font-semibold">Chauffeur</h3>
-                  <select value={wizForm.driver_employee_id} onChange={e => setWizForm({ ...wizForm, driver_employee_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                  <select value={wizForm.driver_employee_id} onChange={e => setWizForm({ ...wizForm, driver_employee_id: e.target.value })} className="select-modern">
                     <option value="">Sélectionner un chauffeur</option>
                     {employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}
                   </select>

@@ -74,7 +74,7 @@ export default function Production() {
             <p className="text-slate-500">Suivi quotidien — KPI de production</p>
           </div>
           <div className="flex gap-2">
-            <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+            <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input-modern w-auto" />
             <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
               <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
               Saisie du jour
@@ -124,17 +124,17 @@ export default function Production() {
             <form onSubmit={createEntry} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
               <h2 className="text-lg font-bold mb-4">Saisie production</h2>
               <div className="space-y-3">
-                <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <input type="number" placeholder="Effectif réel *" value={form.effectif_reel} onChange={e => setForm({ ...form, effectif_reel: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="input-modern" required />
+                <input type="number" placeholder="Effectif réel *" value={form.effectif_reel} onChange={e => setForm({ ...form, effectif_reel: e.target.value })} className="input-modern" required />
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="number" placeholder="Entrée ligne (kg)" value={form.entree_ligne_kg} onChange={e => setForm({ ...form, entree_ligne_kg: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
-                  <input type="number" placeholder="Objectif ligne" value={form.objectif_entree_ligne_kg} onChange={e => setForm({ ...form, objectif_entree_ligne_kg: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
+                  <input type="number" placeholder="Entrée ligne (kg)" value={form.entree_ligne_kg} onChange={e => setForm({ ...form, entree_ligne_kg: e.target.value })} className="input-modern" />
+                  <input type="number" placeholder="Objectif ligne" value={form.objectif_entree_ligne_kg} onChange={e => setForm({ ...form, objectif_entree_ligne_kg: e.target.value })} className="input-modern" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="number" placeholder="Entrée R3 (kg)" value={form.entree_recyclage_r3_kg} onChange={e => setForm({ ...form, entree_recyclage_r3_kg: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
-                  <input type="number" placeholder="Objectif R3" value={form.objectif_entree_r3_kg} onChange={e => setForm({ ...form, objectif_entree_r3_kg: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
+                  <input type="number" placeholder="Entrée R3 (kg)" value={form.entree_recyclage_r3_kg} onChange={e => setForm({ ...form, entree_recyclage_r3_kg: e.target.value })} className="input-modern" />
+                  <input type="number" placeholder="Objectif R3" value={form.objectif_entree_r3_kg} onChange={e => setForm({ ...form, objectif_entree_r3_kg: e.target.value })} className="input-modern" />
                 </div>
-                <input placeholder="Encadrant" value={form.encadrant} onChange={e => setForm({ ...form, encadrant: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input placeholder="Encadrant" value={form.encadrant} onChange={e => setForm({ ...form, encadrant: e.target.value })} className="input-modern" />
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>

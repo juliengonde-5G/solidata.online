@@ -170,7 +170,7 @@ export default function ChaineTri() {
                 type="month"
                 value={prodMonth}
                 onChange={e => setProdMonth(e.target.value)}
-                className="border rounded-lg px-3 py-2 text-sm"
+                className="input-modern w-auto"
               />
               <span className="text-sm text-gray-500">{prodData.length} jours enregistrés</span>
             </div>

@@ -336,7 +336,7 @@ export default function ExutoiresFacturation() {
                   <select
                     value={controleForm.commande_id}
                     onChange={e => setControleForm({ ...controleForm, commande_id: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="select-modern mt-1"
                     required
                   >
                     <option value="">Sélectionner une commande...</option>
@@ -355,7 +355,7 @@ export default function ExutoiresFacturation() {
                     min="0"
                     value={controleForm.pesee_client}
                     onChange={e => setControleForm({ ...controleForm, pesee_client: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     placeholder="0.000"
                     required
                   />
@@ -366,7 +366,7 @@ export default function ExutoiresFacturation() {
                     type="date"
                     value={controleForm.date_reception_ticket}
                     onChange={e => setControleForm({ ...controleForm, date_reception_ticket: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     required
                   />
                 </div>
@@ -376,7 +376,7 @@ export default function ExutoiresFacturation() {
                     type="file"
                     accept=".pdf"
                     onChange={e => setControleForm({ ...controleForm, ticket_pesee: e.target.files[0] || null })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                   />
                 </div>
                 <div>
@@ -384,7 +384,7 @@ export default function ExutoiresFacturation() {
                   <textarea
                     value={controleForm.notes}
                     onChange={e => setControleForm({ ...controleForm, notes: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="textarea-modern mt-1"
                     rows={3}
                   />
                 </div>
@@ -412,7 +412,7 @@ export default function ExutoiresFacturation() {
                   <select
                     value={factureForm.commande_id}
                     onChange={e => setFactureForm({ ...factureForm, commande_id: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="select-modern mt-1"
                     required
                   >
                     <option value="">Sélectionner une commande...</option>
@@ -429,7 +429,7 @@ export default function ExutoiresFacturation() {
                     type="file"
                     accept=".pdf"
                     onChange={e => setFactureForm({ ...factureForm, facture: e.target.files[0] || null })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     required
                   />
                 </div>
@@ -509,7 +509,7 @@ export default function ExutoiresFacturation() {
                     type="date"
                     value={ocrForm.ocr_date}
                     onChange={e => setOcrForm({ ...ocrForm, ocr_date: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                   />
                 </div>
                 <div>
@@ -519,7 +519,7 @@ export default function ExutoiresFacturation() {
                     step="0.001"
                     value={ocrForm.ocr_tonnage}
                     onChange={e => setOcrForm({ ...ocrForm, ocr_tonnage: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     placeholder="0.000"
                   />
                 </div>
@@ -530,7 +530,7 @@ export default function ExutoiresFacturation() {
                     step="0.01"
                     value={ocrForm.ocr_montant}
                     onChange={e => setOcrForm({ ...ocrForm, ocr_montant: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     placeholder="0.00"
                   />
                   {concordance && concordance.montant_attendu != null && ocrForm.ocr_montant && (

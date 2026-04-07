@@ -386,13 +386,13 @@ export default function Candidates() {
           <Modal title="Nouveau candidat" onClose={() => setShowAddModal(false)}>
             <form onSubmit={createCandidate} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({...form, first_name: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" required />
-                <input placeholder="Nom *" value={form.last_name} onChange={e => setForm({...form, last_name: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" required />
+                <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({...form, first_name: e.target.value})} className="input-modern" required />
+                <input placeholder="Nom *" value={form.last_name} onChange={e => setForm({...form, last_name: e.target.value})} className="input-modern" required />
               </div>
-              <input placeholder="Email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" type="email" />
-              <input placeholder="Téléphone" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <input placeholder="Email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="input-modern" type="email" />
+              <input placeholder="Téléphone" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} className="input-modern" />
               {positions.length > 0 && (
-                <select value={form.position_id} onChange={e => setForm({...form, position_id: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm">
+                <select value={form.position_id} onChange={e => setForm({...form, position_id: e.target.value})} className="input-modern">
                   <option value="">Poste (optionnel)</option>
                   {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
                 </select>
@@ -420,11 +420,11 @@ export default function Candidates() {
               ))}
               <form onSubmit={createPosition} className="border-t pt-4 space-y-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase">Ajouter un poste</p>
-                <input placeholder="Intitulé *" value={posForm.title} onChange={e => setPosForm({...posForm, title: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <input placeholder="Intitulé *" value={posForm.title} onChange={e => setPosForm({...posForm, title: e.target.value})} className="input-modern" required />
                 <div className="grid grid-cols-3 gap-2">
-                  <input placeholder="Type" value={posForm.type} onChange={e => setPosForm({...posForm, type: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" />
-                  <input placeholder="Mois" value={posForm.month} onChange={e => setPosForm({...posForm, month: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" />
-                  <input placeholder="Places" value={posForm.slots_open} onChange={e => setPosForm({...posForm, slots_open: parseInt(e.target.value) || 1})} className="border rounded-lg px-3 py-2 text-sm" type="number" />
+                  <input placeholder="Type" value={posForm.type} onChange={e => setPosForm({...posForm, type: e.target.value})} className="input-modern" />
+                  <input placeholder="Mois" value={posForm.month} onChange={e => setPosForm({...posForm, month: e.target.value})} className="input-modern" />
+                  <input placeholder="Places" value={posForm.slots_open} onChange={e => setPosForm({...posForm, slots_open: parseInt(e.target.value) || 1})} className="input-modern" type="number" />
                 </div>
                 <button type="submit" className="w-full btn-primary text-sm">Ajouter</button>
               </form>
@@ -569,7 +569,7 @@ function EditForm({ ef, set, save, cancel, positions }) {
       <EF l="Téléphone" v={ef.phone} o={v => u('phone', v)} />
       {positions.length > 0 && (
         <div><span className="text-gray-500 text-xs">Poste</span>
-          <select value={ef.position_id} onChange={e => u('position_id', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+          <select value={ef.position_id} onChange={e => u('position_id', e.target.value)} className="input-modern mt-1">
             <option value="">— Aucun —</option>
             {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
           </select>
@@ -582,20 +582,20 @@ function EditForm({ ef, set, save, cancel, positions }) {
       <hr />
       <p className="text-xs font-semibold text-gray-600 uppercase">Entretien</p>
       <EF l="Intervieweur" v={ef.interviewer_name} o={v => u('interviewer_name', v)} />
-      <div><span className="text-gray-500 text-xs">Commentaire entretien</span><textarea value={ef.interview_comment} onChange={e => u('interview_comment', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} /></div>
+      <div><span className="text-gray-500 text-xs">Commentaire entretien</span><textarea value={ef.interview_comment} onChange={e => u('interview_comment', e.target.value)} className="input-modern mt-1" rows={2} /></div>
       <EF l="Date RDV" v={ef.appointment_date} o={v => u('appointment_date', v)} t="date" />
       <EF l="Lieu RDV" v={ef.appointment_location} o={v => u('appointment_location', v)} />
       <hr />
       <p className="text-xs font-semibold text-gray-600 uppercase">Test pratique</p>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={ef.practical_test_done} onChange={e => u('practical_test_done', e.target.checked)} /> Test effectué</label>
       <div><span className="text-gray-500 text-xs">Résultat</span>
-        <select value={ef.practical_test_result} onChange={e => u('practical_test_result', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+        <select value={ef.practical_test_result} onChange={e => u('practical_test_result', e.target.value)} className="input-modern mt-1">
           <option value="">—</option><option value="conforme">Conforme</option><option value="faible">Faible</option><option value="recale">Recalé</option>
         </select>
       </div>
-      <div><span className="text-gray-500 text-xs">Commentaire test</span><textarea value={ef.practical_test_comment} onChange={e => u('practical_test_comment', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} /></div>
+      <div><span className="text-gray-500 text-xs">Commentaire test</span><textarea value={ef.practical_test_comment} onChange={e => u('practical_test_comment', e.target.value)} className="input-modern mt-1" rows={2} /></div>
       <hr />
-      <div><span className="text-gray-500 text-xs">Commentaire général</span><textarea value={ef.comment} onChange={e => u('comment', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} /></div>
+      <div><span className="text-gray-500 text-xs">Commentaire général</span><textarea value={ef.comment} onChange={e => u('comment', e.target.value)} className="input-modern mt-1" rows={2} /></div>
       <div className="flex gap-2 mt-4">
         <button onClick={cancel} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
         <button onClick={save} className="flex-1 btn-primary text-sm">Enregistrer</button>
@@ -619,7 +619,7 @@ function Modal({ title, onClose, children, wide }) {
 }
 
 function Field({ l, v }) { return <div><span className="text-gray-500 text-xs">{l}</span><p className="font-medium">{v || '—'}</p></div>; }
-function EF({ l, v, o, t = 'text' }) { return <div><span className="text-gray-500 text-xs">{l}</span><input type={t} value={v} onChange={e => o(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" /></div>; }
+function EF({ l, v, o, t = 'text' }) { return <div><span className="text-gray-500 text-xs">{l}</span><input type={t} value={v} onChange={e => o(e.target.value)} className="input-modern mt-1" /></div>; }
 
 // ══════════════════════════════════════════
 // TRAME ENTRETIEN DE RECRUTEMENT
@@ -910,7 +910,7 @@ function MiseEnSituationView({ candidateId, data, onSaved }) {
 
         <div>
           <span className="text-xs text-gray-500">Durée (minutes)</span>
-          <input type="number" value={form.duree_minutes || ''} onChange={e => setForm(prev => ({ ...prev, duree_minutes: parseInt(e.target.value) || null }))} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+          <input type="number" value={form.duree_minutes || ''} onChange={e => setForm(prev => ({ ...prev, duree_minutes: parseInt(e.target.value) || null }))} className="input-modern mt-1" />
         </div>
 
         <div>
@@ -1220,7 +1220,7 @@ function TA({ l, v, o }) {
   return (
     <div>
       <span className="text-gray-500 text-xs">{l}</span>
-      <textarea value={v} onChange={e => o(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" rows={2} />
+      <textarea value={v} onChange={e => o(e.target.value)} className="input-modern mt-1" rows={2} />
     </div>
   );
 }

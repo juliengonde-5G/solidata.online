@@ -244,7 +244,7 @@ export default function Stock() {
                                     );
                                     setInvDetail({ ...invDetail, items: updated });
                                   }}
-                                  className="w-24 border rounded px-2 py-1 text-sm text-right" />
+                                  className="input-modern w-24 text-right" />
                               ) : (
                                 <span className="text-right block">{parseFloat(item.stock_physique_kg || 0).toFixed(1)}</span>
                               )}
@@ -261,7 +261,7 @@ export default function Stock() {
                                     );
                                     setInvDetail({ ...invDetail, items: updated });
                                   }}
-                                  className="w-full border rounded px-2 py-1 text-sm" placeholder="Notes" />
+                                  className="input-modern" placeholder="Notes" />
                               ) : (
                                 <span className="text-xs text-slate-400">{item.notes || '—'}</span>
                               )}
@@ -294,17 +294,17 @@ export default function Stock() {
             <form onSubmit={createMovement} className="bg-white rounded-xl p-6 w-[400px] shadow-xl">
               <h2 className="text-lg font-bold mb-4">Mouvement de stock</h2>
               <div className="space-y-3">
-                <select value={form.categorie_sortante_id} onChange={e => setForm({ ...form, categorie_sortante_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
+                <select value={form.categorie_sortante_id} onChange={e => setForm({ ...form, categorie_sortante_id: e.target.value })} className="select-modern" required>
                   <option value="">Catégorie *</option>
                   {categories.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
                 </select>
-                <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="select-modern">
                   <option value="entree">Entrée</option>
                   <option value="sortie">Sortie</option>
                 </select>
-                <input type="number" placeholder="Quantité (kg) *" value={form.quantity_kg} onChange={e => setForm({ ...form, quantity_kg: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <input placeholder="Source" value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows="2" />
+                <input type="number" placeholder="Quantité (kg) *" value={form.quantity_kg} onChange={e => setForm({ ...form, quantity_kg: e.target.value })} className="input-modern" required />
+                <input placeholder="Source" value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} className="input-modern" />
+                <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="textarea-modern" rows="2" />
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>

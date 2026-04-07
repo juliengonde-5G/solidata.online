@@ -47,7 +47,7 @@ export default function Refashion() {
             <p className="text-gray-500">DPAV trimestriel, communes et subventions</p>
           </div>
           <div className="flex gap-2">
-            <select value={quarter} onChange={e => setQuarter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+            <select value={quarter} onChange={e => setQuarter(e.target.value)} className="input-modern w-auto">
               {quarters.map(q => <option key={q} value={q}>{q}</option>)}
             </select>
             <button onClick={() => setView('dpav')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'dpav' ? 'bg-primary text-white' : 'bg-gray-100'}`}>DPAV</button>

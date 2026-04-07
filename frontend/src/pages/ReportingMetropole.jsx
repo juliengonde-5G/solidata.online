@@ -49,10 +49,10 @@ export default function ReportingMetropole() {
             <p className="text-sm text-gray-500">Suivi des indicateurs environnementaux et sociaux</p>
           </div>
           <div className="flex gap-2 items-center">
-            <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="border rounded-lg px-3 py-2 text-sm">
+            <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="input-modern w-auto">
               {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
             </select>
-            <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="border rounded-lg px-3 py-2 text-sm">
+            <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="input-modern w-auto">
               {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>

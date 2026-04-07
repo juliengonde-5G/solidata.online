@@ -141,7 +141,7 @@ export default function Pointage() {
         {tab === 'daily' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
               <button onClick={loadDaily} className="btn-primary text-sm">Actualiser</button>
             </div>
 
@@ -202,13 +202,13 @@ export default function Pointage() {
               <h3 className="font-semibold mb-3">Enregistrer un nouveau badge</h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <input type="text" placeholder="UID du badge (ex: A1B2C3D4)" value={badgeForm.badge_uid}
-                  onChange={e => setBadgeForm({ ...badgeForm, badge_uid: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" required />
-                <select value={badgeForm.employee_id} onChange={e => setBadgeForm({ ...badgeForm, employee_id: e.target.value })} className="border rounded-lg px-3 py-2 text-sm">
+                  onChange={e => setBadgeForm({ ...badgeForm, badge_uid: e.target.value })} className="input-modern" required />
+                <select value={badgeForm.employee_id} onChange={e => setBadgeForm({ ...badgeForm, employee_id: e.target.value })} className="select-modern">
                   <option value="">Non affecté</option>
                   {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
                 </select>
                 <input type="text" placeholder="Libellé (optionnel)" value={badgeForm.label}
-                  onChange={e => setBadgeForm({ ...badgeForm, label: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
+                  onChange={e => setBadgeForm({ ...badgeForm, label: e.target.value })} className="input-modern" />
                 <button type="submit" className="btn-primary text-sm">Enregistrer</button>
               </div>
               {badgeMsg && <p className={`mt-2 text-sm ${badgeMsg.startsWith('Erreur') ? 'text-red-600' : 'text-green-600'}`}>{badgeMsg}</p>}
@@ -235,7 +235,7 @@ export default function Pointage() {
                         {badge.employee_id ? (
                           <span className="font-medium">{badge.first_name} {badge.last_name}</span>
                         ) : (
-                          <select onChange={e => e.target.value && handleBadgeAssign(badge.id, e.target.value)} className="border rounded px-2 py-1 text-xs" defaultValue="">
+                          <select onChange={e => e.target.value && handleBadgeAssign(badge.id, e.target.value)} className="select-modern py-1 text-xs" defaultValue="">
                             <option value="">Affecter...</option>
                             {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
                           </select>
@@ -274,42 +274,42 @@ export default function Pointage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Collaborateur</label>
-                    <select value={manualForm.employee_id} onChange={e => setManualForm({ ...manualForm, employee_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
+                    <select value={manualForm.employee_id} onChange={e => setManualForm({ ...manualForm, employee_id: e.target.value })} className="select-modern" required>
                       <option value="">Sélectionner...</option>
                       {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                    <input type="date" value={manualForm.date} onChange={e => setManualForm({ ...manualForm, date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                    <input type="date" value={manualForm.date} onChange={e => setManualForm({ ...manualForm, date: e.target.value })} className="input-modern" required />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Entrée matin</label>
-                    <input type="time" value={manualForm.entry_am} onChange={e => setManualForm({ ...manualForm, entry_am: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={manualForm.entry_am} onChange={e => setManualForm({ ...manualForm, entry_am: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Sortie matin</label>
-                    <input type="time" value={manualForm.exit_am} onChange={e => setManualForm({ ...manualForm, exit_am: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={manualForm.exit_am} onChange={e => setManualForm({ ...manualForm, exit_am: e.target.value })} className="input-modern" />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Entrée après-midi</label>
-                    <input type="time" value={manualForm.entry_pm} onChange={e => setManualForm({ ...manualForm, entry_pm: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={manualForm.entry_pm} onChange={e => setManualForm({ ...manualForm, entry_pm: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Sortie après-midi</label>
-                    <input type="time" value={manualForm.exit_pm} onChange={e => setManualForm({ ...manualForm, exit_pm: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={manualForm.exit_pm} onChange={e => setManualForm({ ...manualForm, exit_pm: e.target.value })} className="input-modern" />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <input type="text" value={manualForm.notes} onChange={e => setManualForm({ ...manualForm, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Motif de la saisie manuelle..." />
+                  <input type="text" value={manualForm.notes} onChange={e => setManualForm({ ...manualForm, notes: e.target.value })} className="input-modern" placeholder="Motif de la saisie manuelle..." />
                 </div>
 
                 <button type="submit" className="btn-primary text-sm">Enregistrer</button>
@@ -323,7 +323,7 @@ export default function Pointage() {
         {tab === 'alerts' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
               <button onClick={loadAlerts} className="btn-primary text-sm">Actualiser</button>
             </div>
 
@@ -365,7 +365,7 @@ export default function Pointage() {
         {tab === 'log' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
               <button onClick={loadLog} className="btn-primary text-sm">Actualiser</button>
             </div>
 
@@ -416,7 +416,7 @@ export default function Pointage() {
         {tab === 'monthly' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+              <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input-modern w-auto" />
               <button onClick={loadMonthly} className="btn-primary text-sm">Actualiser</button>
             </div>
 

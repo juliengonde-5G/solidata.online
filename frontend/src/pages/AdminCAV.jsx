@@ -279,9 +279,9 @@ export default function AdminCAV() {
             placeholder="Rechercher un CAV..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm flex-1 max-w-xs"
+            className="input-modern flex-1 max-w-xs"
           />
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="select-modern w-auto">
             <option value="">Tous les statuts</option>
             <option value="active">Actifs</option>
             <option value="unavailable">Indisponibles</option>
@@ -520,36 +520,36 @@ export default function AdminCAV() {
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Nom *</label>
                       <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                        className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="Ex: ROUEN - 10 rue..." />
+                        className="input-modern" placeholder="Ex: ROUEN - 10 rue..." />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Commune</label>
                       <input value={form.commune} onChange={e => setForm(f => ({ ...f, commune: e.target.value }))}
-                        className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="Ex: ROUEN" />
+                        className="input-modern" placeholder="Ex: ROUEN" />
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Adresse</label>
                     <input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-                      className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="Adresse complète" />
+                      className="input-modern" placeholder="Adresse complète" />
                   </div>
 
                   <div className="grid grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Latitude *</label>
                       <input type="number" step="any" value={form.latitude} onChange={e => setForm(f => ({ ...f, latitude: e.target.value }))}
-                        className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="49.4231" />
+                        className="input-modern" placeholder="49.4231" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Longitude *</label>
                       <input type="number" step="any" value={form.longitude} onChange={e => setForm(f => ({ ...f, longitude: e.target.value }))}
-                        className="border rounded-lg px-3 py-2 text-sm w-full" placeholder="1.0993" />
+                        className="input-modern" placeholder="1.0993" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Nb conteneurs</label>
                       <input type="number" min={1} value={form.nb_containers} onChange={e => setForm(f => ({ ...f, nb_containers: e.target.value }))}
-                        className="border rounded-lg px-3 py-2 text-sm w-full" />
+                        className="input-modern" />
                     </div>
                   </div>
 

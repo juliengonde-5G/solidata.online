@@ -221,7 +221,7 @@ export default function ExutoiresPreparation() {
             <select
               value={filterLieu}
               onChange={e => setFilterLieu(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="select-modern"
             >
               <option value="">Tous les lieux</option>
               {Object.entries(LIEUX).map(([k, v]) => (
@@ -231,7 +231,7 @@ export default function ExutoiresPreparation() {
             <select
               value={filterStatut}
               onChange={e => setFilterStatut(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="select-modern"
             >
               <option value="">Tous les statuts</option>
               {Object.entries(STATUTS_PREP).map(([k, v]) => (
@@ -242,14 +242,14 @@ export default function ExutoiresPreparation() {
               type="date"
               value={filterDateFrom}
               onChange={e => setFilterDateFrom(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern"
               placeholder="Date début"
             />
             <input
               type="date"
               value={filterDateTo}
               onChange={e => setFilterDateTo(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern"
               placeholder="Date fin"
             />
           </div>
@@ -452,7 +452,7 @@ export default function ExutoiresPreparation() {
                   <select
                     value={form.commande_id}
                     onChange={e => handleFormChange('commande_id', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    className="select-modern"
                     required
                   >
                     <option value="">Sélectionner une commande</option>
@@ -472,7 +472,7 @@ export default function ExutoiresPreparation() {
                     placeholder="Nom du transporteur"
                     value={form.transporteur}
                     onChange={e => handleFormChange('transporteur', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    className="input-modern"
                     required
                   />
                 </div>
@@ -485,7 +485,7 @@ export default function ExutoiresPreparation() {
                       type="datetime-local"
                       value={form.date_livraison_remorque}
                       onChange={e => handleFormChange('date_livraison_remorque', e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm"
+                      className="input-modern"
                       required
                     />
                   </div>
@@ -495,7 +495,7 @@ export default function ExutoiresPreparation() {
                       type="datetime-local"
                       value={form.date_expedition}
                       onChange={e => handleFormChange('date_expedition', e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm"
+                      className="input-modern"
                       required
                     />
                   </div>
@@ -507,7 +507,7 @@ export default function ExutoiresPreparation() {
                   <select
                     value={form.lieu_chargement}
                     onChange={e => handleFormChange('lieu_chargement', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    className="select-modern"
                     required
                   >
                     {Object.entries(LIEUX).map(([k, v]) => (
@@ -554,7 +554,7 @@ export default function ExutoiresPreparation() {
                     placeholder="Notes de préparation..."
                     value={form.notes_preparation}
                     onChange={e => handleFormChange('notes_preparation', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    className="textarea-modern"
                     rows="3"
                   />
                 </div>
@@ -588,7 +588,7 @@ export default function ExutoiresPreparation() {
                   placeholder="Ex: 24.500"
                   value={peseeValue}
                   onChange={e => setPeseeValue(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  className="input-modern"
                   autoFocus
                 />
               </div>

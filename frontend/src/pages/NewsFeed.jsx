@@ -207,15 +207,15 @@ export default function NewsFeed() {
           <form onSubmit={createArticle} className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-bold mb-4">Publier un article</h2>
             <div className="space-y-3">
-              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="select-modern">
                 <option value="metier">Filiere & Reglementation</option>
                 <option value="local">Actualite locale</option>
               </select>
-              <input placeholder="Titre *" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-              <textarea placeholder="Resume (2-3 lignes)" value={form.summary} onChange={e => setForm({ ...form, summary: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows={2} />
-              <textarea placeholder="Contenu detaille (optionnel)" value={form.content} onChange={e => setForm({ ...form, content: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows={5} />
-              <input placeholder="URL source (optionnel)" value={form.source_url} onChange={e => setForm({ ...form, source_url: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-              <input placeholder="Nom de la source (optionnel)" value={form.source_name} onChange={e => setForm({ ...form, source_name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <input placeholder="Titre *" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="input-modern" required />
+              <textarea placeholder="Resume (2-3 lignes)" value={form.summary} onChange={e => setForm({ ...form, summary: e.target.value })} className="textarea-modern" rows={2} />
+              <textarea placeholder="Contenu detaille (optionnel)" value={form.content} onChange={e => setForm({ ...form, content: e.target.value })} className="textarea-modern" rows={5} />
+              <input placeholder="URL source (optionnel)" value={form.source_url} onChange={e => setForm({ ...form, source_url: e.target.value })} className="input-modern" />
+              <input placeholder="Nom de la source (optionnel)" value={form.source_name} onChange={e => setForm({ ...form, source_name: e.target.value })} className="input-modern" />
 
               <div>
                 <p className="text-xs text-gray-500 mb-2">Tags :</p>

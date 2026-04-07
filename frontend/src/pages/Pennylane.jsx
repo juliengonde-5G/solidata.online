@@ -430,7 +430,7 @@ export default function Pennylane() {
                   placeholder="pl_api_..."
                   value={configForm.api_key}
                   onChange={e => setConfigForm({ ...configForm, api_key: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                  className="input-modern mt-1"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">Laissez vide pour conserver la cle existante</p>
               </div>
@@ -440,7 +440,7 @@ export default function Pennylane() {
                   placeholder="ex: solidarite-textiles"
                   value={configForm.company_id}
                   onChange={e => setConfigForm({ ...configForm, company_id: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                  className="input-modern mt-1"
                   required
                 />
               </div>

@@ -216,7 +216,7 @@ export default function ExutoiresTarifs() {
                     value={form.type_produit}
                     onChange={e => setForm({ ...form, type_produit: e.target.value })}
                     required
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
+                    className="input-modern"
                   >
                     <option value="">Sélectionner...</option>
                     {Object.entries(TYPES_PRODUIT).map(([key, label]) => (
@@ -233,7 +233,7 @@ export default function ExutoiresTarifs() {
                     value={form.prix_reference_tonne}
                     onChange={e => setForm({ ...form, prix_reference_tonne: e.target.value })}
                     required
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
+                    className="input-modern"
                     placeholder="0.00"
                   />
                 </div>
@@ -243,7 +243,7 @@ export default function ExutoiresTarifs() {
                   <select
                     value={form.client_id}
                     onChange={e => setForm({ ...form, client_id: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
+                    className="input-modern"
                   >
                     <option value="">Prix de référence (aucun client)</option>
                     {clients.map(c => (
@@ -259,7 +259,7 @@ export default function ExutoiresTarifs() {
                     value={form.date_debut}
                     onChange={e => setForm({ ...form, date_debut: e.target.value })}
                     required
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
+                    className="input-modern"
                   />
                 </div>
 
@@ -269,7 +269,7 @@ export default function ExutoiresTarifs() {
                     type="date"
                     value={form.date_fin}
                     onChange={e => setForm({ ...form, date_fin: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
+                    className="input-modern"
                   />
                 </div>
 

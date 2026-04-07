@@ -148,7 +148,7 @@ export default function RGPD() {
                     <div>
                       <label className="text-xs text-gray-500 block mb-1">Type</label>
                       <select value={searchEntity.type} onChange={e => setSearchEntity({ ...searchEntity, type: e.target.value })}
-                        className="border rounded-lg px-3 py-2 text-sm">
+                        className="select-modern w-auto">
                         <option value="candidate">Candidat</option>
                         <option value="employee">Employé</option>
                       </select>
@@ -156,7 +156,7 @@ export default function RGPD() {
                     <div>
                       <label className="text-xs text-gray-500 block mb-1">ID</label>
                       <input type="number" value={searchEntity.id} onChange={e => setSearchEntity({ ...searchEntity, id: e.target.value })}
-                        placeholder="ID" className="border rounded-lg px-3 py-2 text-sm w-24" />
+                        placeholder="ID" className="input-modern w-24" />
                     </div>
                     <button onClick={handleExport} className="btn-primary text-sm">Exporter les données</button>
                     <button onClick={handleAnonymize} className="btn-danger text-sm">Anonymiser</button>
@@ -189,16 +189,16 @@ export default function RGPD() {
             <form onSubmit={addTraitement} className="bg-white rounded-xl p-6 w-[540px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h2 className="text-lg font-bold mb-4">Nouveau traitement</h2>
               <div className="space-y-3">
-                <input placeholder="Nom du traitement *" value={form.nom_traitement} onChange={e => setForm({ ...form, nom_traitement: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <textarea placeholder="Finalité *" value={form.finalite} onChange={e => setForm({ ...form, finalite: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} required />
-                <select value={form.base_legale} onChange={e => setForm({ ...form, base_legale: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                <input placeholder="Nom du traitement *" value={form.nom_traitement} onChange={e => setForm({ ...form, nom_traitement: e.target.value })} className="input-modern" required />
+                <textarea placeholder="Finalité *" value={form.finalite} onChange={e => setForm({ ...form, finalite: e.target.value })} className="textarea-modern" rows={2} required />
+                <select value={form.base_legale} onChange={e => setForm({ ...form, base_legale: e.target.value })} className="select-modern">
                   {BASES.map(b => <option key={b} value={b}>{b.replace(/_/g, ' ')}</option>)}
                 </select>
-                <input placeholder="Catégories de personnes" value={form.categories_personnes} onChange={e => setForm({ ...form, categories_personnes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Catégories de données" value={form.categories_donnees} onChange={e => setForm({ ...form, categories_donnees: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Destinataires" value={form.destinataires} onChange={e => setForm({ ...form, destinataires: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Durée de conservation" value={form.duree_conservation} onChange={e => setForm({ ...form, duree_conservation: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <textarea placeholder="Mesures de sécurité" value={form.mesures_securite} onChange={e => setForm({ ...form, mesures_securite: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} />
+                <input placeholder="Catégories de personnes" value={form.categories_personnes} onChange={e => setForm({ ...form, categories_personnes: e.target.value })} className="input-modern" />
+                <input placeholder="Catégories de données" value={form.categories_donnees} onChange={e => setForm({ ...form, categories_donnees: e.target.value })} className="input-modern" />
+                <input placeholder="Destinataires" value={form.destinataires} onChange={e => setForm({ ...form, destinataires: e.target.value })} className="input-modern" />
+                <input placeholder="Durée de conservation" value={form.duree_conservation} onChange={e => setForm({ ...form, duree_conservation: e.target.value })} className="input-modern" />
+                <textarea placeholder="Mesures de sécurité" value={form.mesures_securite} onChange={e => setForm({ ...form, mesures_securite: e.target.value })} className="textarea-modern" rows={2} />
               </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>

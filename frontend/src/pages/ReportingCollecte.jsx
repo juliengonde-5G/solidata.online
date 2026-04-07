@@ -44,7 +44,7 @@ export default function ReportingCollecte() {
             <h1 className="text-2xl font-bold text-slate-800">Reporting Collecte</h1>
             <p className="text-gray-500">Tonnages, tournees et indicateurs de collecte</p>
           </div>
-          <select value={period} onChange={e => setPeriod(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+          <select value={period} onChange={e => setPeriod(e.target.value)} className="input-modern w-auto">
             <option value="week">Cette semaine</option>
             <option value="month">Ce mois</option>
             <option value="quarter">Ce trimestre</option>

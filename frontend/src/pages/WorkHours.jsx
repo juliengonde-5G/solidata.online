@@ -91,11 +91,11 @@ export default function WorkHours() {
 
         {/* Filtres */}
         <div className="flex gap-3 mb-6">
-          <select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} className="border rounded-lg px-3 py-2 text-sm w-64">
+          <select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} className="select-modern w-auto">
             <option value="">Sélectionner un collaborateur</option>
             {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
           </select>
-          <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input-modern w-auto" />
         </div>
 
         {/* Summary Cards */}
@@ -132,26 +132,26 @@ export default function WorkHours() {
             <form onSubmit={createHours} className="bg-white rounded-xl p-6 w-[400px] shadow-xl">
               <h2 className="text-lg font-bold mb-4">Saisir des heures</h2>
               <div className="space-y-3">
-                <select value={form.employee_id} onChange={e => setForm({ ...form, employee_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
+                <select value={form.employee_id} onChange={e => setForm({ ...form, employee_id: e.target.value })} className="select-modern" required>
                   <option value="">Collaborateur *</option>
                   {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
                 </select>
-                <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="input-modern" required />
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-gray-500">Début</label>
-                    <input type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="text-xs text-gray-500">Fin</label>
-                    <input type="time" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} className="input-modern" />
                   </div>
                 </div>
                 <div>
                   <label className="text-xs text-gray-500">Pause (minutes)</label>
-                  <input type="number" value={form.break_minutes} onChange={e => setForm({ ...form, break_minutes: parseInt(e.target.value) || 0 })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  <input type="number" value={form.break_minutes} onChange={e => setForm({ ...form, break_minutes: parseInt(e.target.value) || 0 })} className="input-modern" />
                 </div>
-                <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="select-modern">
                   {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
