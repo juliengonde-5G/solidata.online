@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
@@ -35,7 +36,11 @@ function formatDateShort(dateStr) {
 }
 
 export default function PlanningHebdo() {
-  const [monday, setMonday] = useState(() => getMonday(new Date()));
+  const [searchParams] = useSearchParams();
+  const [monday, setMonday] = useState(() => {
+    const weekStart = searchParams.get('week_start');
+    return weekStart ? getMonday(new Date(weekStart)) : getMonday(new Date());
+  });
   const [postes, setPostes] = useState([]);
   const [filieres, setFilieres] = useState([]);
   const [planning, setPlanning] = useState(null);

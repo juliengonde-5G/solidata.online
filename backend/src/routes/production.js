@@ -166,13 +166,28 @@ router.post('/', [
 // ══════════════════════════════════════════
 
 // GET /api/production/feuille/:date — Récupérer la feuille complète d'une journée
+// Les affectations opérateurs viennent du planning hebdo (table schedule)
 router.get('/feuille/:date', async (req, res) => {
   try {
     const { date } = req.params;
 
-    const [dailyRes, postesRes, chariotsRes, commentairesRes] = await Promise.all([
+    const [dailyRes, planningRes, chariotsRes, commentairesRes] = await Promise.all([
       pool.query('SELECT * FROM production_daily WHERE date = $1', [date]),
-      pool.query('SELECT * FROM production_postes WHERE production_date = $1 ORDER BY poste, periode', [date]),
+      // Affectations depuis le planning (filière tri = poste_code lié à postes_operation)
+      pool.query(`
+        SELECT s.id, s.employee_id, s.date, s.status, s.poste_code, s.is_provisional,
+               e.first_name, e.last_name,
+               po.nom as poste_nom, po.code as poste_operation_code,
+               op.nom as operation_nom, op.code as operation_code,
+               ch.nom as chaine_nom
+        FROM schedule s
+        JOIN employees e ON s.employee_id = e.id
+        LEFT JOIN postes_operation po ON po.code = s.poste_code
+        LEFT JOIN operations_tri op ON po.operation_id = op.id
+        LEFT JOIN chaines_tri ch ON op.chaine_id = ch.id
+        WHERE s.date = $1 AND s.status = 'work'
+        ORDER BY op.numero, po.nom, e.last_name
+      `, [date]),
       pool.query('SELECT * FROM production_chariots WHERE production_date = $1 ORDER BY ligne, numero', [date]),
       pool.query(`
         SELECT pc.*, u.nom as auteur_nom, u.prenom as auteur_prenom
@@ -183,49 +198,37 @@ router.get('/feuille/:date', async (req, res) => {
       `, [date]),
     ]);
 
+    // Regrouper les affectations par opération/poste
+    const planningByPoste = {};
+    for (const s of planningRes.rows) {
+      const key = s.poste_code || 'non_affecte';
+      if (!planningByPoste[key]) {
+        planningByPoste[key] = {
+          poste_code: s.poste_code,
+          poste_nom: s.poste_nom,
+          operation_nom: s.operation_nom,
+          operation_code: s.operation_code,
+          chaine_nom: s.chaine_nom,
+          employes: [],
+        };
+      }
+      planningByPoste[key].employes.push({
+        employee_id: s.employee_id,
+        first_name: s.first_name,
+        last_name: s.last_name,
+        is_provisional: s.is_provisional,
+      });
+    }
+
     res.json({
       daily: dailyRes.rows[0] || null,
-      postes: postesRes.rows,
+      planning: planningByPoste,
+      planning_list: planningRes.rows,
       chariots: chariotsRes.rows,
       commentaires: commentairesRes.rows,
     });
   } catch (err) {
     console.error('[PRODUCTION] Erreur feuille :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// ══════════════════════════════════════════
-// POSTES OPÉRATEURS
-// ══════════════════════════════════════════
-
-// POST /api/production/postes — Sauvegarder les affectations de postes pour un jour
-router.post('/postes', async (req, res) => {
-  try {
-    const { date, postes } = req.body;
-    if (!date || !Array.isArray(postes)) {
-      return res.status(400).json({ error: 'Date et postes requis' });
-    }
-
-    // Supprimer les anciens postes pour ce jour et réinsérer
-    await pool.query('DELETE FROM production_postes WHERE production_date = $1', [date]);
-
-    for (const p of postes) {
-      if (!p.poste || !p.periode) continue;
-      await pool.query(
-        `INSERT INTO production_postes (production_date, poste, periode, employe_nom, employe_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [date, p.poste, p.periode, p.employe_nom || null, p.employe_id || null]
-      );
-    }
-
-    const result = await pool.query(
-      'SELECT * FROM production_postes WHERE production_date = $1 ORDER BY poste, periode',
-      [date]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('[PRODUCTION] Erreur postes :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

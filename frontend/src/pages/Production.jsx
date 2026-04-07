@@ -1,25 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Factory, Plus, Save, ChevronLeft, ChevronRight, MessageSquare, Trash2, Clock, Users, ClipboardList, BarChart3 } from 'lucide-react';
+import { Factory, Plus, Save, ChevronLeft, ChevronRight, MessageSquare, Trash2, Clock, Users, ClipboardList, BarChart3, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { DataTable, Modal } from '../components';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-
-// Définition des postes de la chaîne de tri (comme dans le fichier Excel)
-const POSTES = [
-  { key: 'craquage', label: 'Craquage', min: 2 },
-  { key: 'recyclage_r1', label: 'Recyclage R1', min: 1 },
-  { key: 'recyclage_r2', label: 'Recyclage R2', min: 1 },
-  { key: 'recyclage_r3', label: 'Recyclage R3', min: 1 },
-  { key: 'recyclage_r4', label: 'Recyclage R4', min: 1 },
-  { key: 'reutilisation', label: 'Réutilisation', min: 1 },
-  { key: 'homme_vak', label: 'Homme VAK / BTQ', min: 0 },
-  { key: 'femme_vak', label: 'Femme VAK / BTQ', min: 0 },
-  { key: 'layette_vak', label: 'Layette VAK / BTQ', min: 0 },
-  { key: 'accessoire', label: 'Accessoire', min: 0 },
-  { key: 'chiffon', label: 'Chiffon', min: 0 },
-];
 
 const LIGNES = [
   { key: 'r1r2', label: 'Entrée ligne R1 & R2' },
@@ -29,7 +15,8 @@ const LIGNES = [
 
 export default function Production() {
   const { user } = useAuth();
-  const [view, setView] = useState('feuille'); // 'feuille' | 'mensuel'
+  const navigate = useNavigate();
+  const [view, setView] = useState('feuille');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [feuille, setFeuille] = useState(null);
@@ -40,7 +27,7 @@ export default function Production() {
   const [newComment, setNewComment] = useState('');
   const [commentType, setCommentType] = useState('general');
 
-  // État de la feuille de production
+  // État de la feuille de production (hors postes — viennent du planning)
   const [form, setForm] = useState({
     encadrant_atelier: '', controleur_tri: '', consigne: '',
     effectif_tri: '', effectif_recuperation: '', effectif_cp: '',
@@ -49,7 +36,6 @@ export default function Production() {
     objectif_recyclage_pct: 70, objectif_reutilisation_pct: 30, objectif_csr_pct: '<10%',
     encadrant: '',
   });
-  const [postes, setPostes] = useState({});
   const [chariots, setChariots] = useState({ r1r2: [], r3: [], r4: [] });
 
   // Charger feuille de production
@@ -58,7 +44,6 @@ export default function Production() {
       const res = await api.get(`/production/feuille/${selectedDate}`);
       setFeuille(res.data);
 
-      // Remplir le formulaire depuis les données existantes
       if (res.data.daily) {
         const d = res.data.daily;
         setForm({
@@ -90,15 +75,6 @@ export default function Production() {
         });
       }
 
-      // Postes opérateurs
-      const postesMap = {};
-      (res.data.postes || []).forEach(p => {
-        const key = `${p.poste}_${p.periode}`;
-        if (!postesMap[key]) postesMap[key] = [];
-        postesMap[key].push(p.employe_nom || '');
-      });
-      setPostes(postesMap);
-
       // Chariots par ligne
       const ch = { r1r2: [], r3: [], r4: [] };
       (res.data.chariots || []).forEach(c => {
@@ -106,7 +82,6 @@ export default function Production() {
           ch[c.ligne].push({ poids_kg: c.poids_kg, heure: c.heure || '' });
         }
       });
-      // S'assurer d'avoir au moins quelques emplacements vides
       Object.keys(ch).forEach(k => {
         while (ch[k].length < 4) ch[k].push({ poids_kg: '', heure: '' });
       });
@@ -133,14 +108,12 @@ export default function Production() {
     else loadMonthly();
   }, [view, loadFeuille, loadMonthly]);
 
-  // Navigation de date
   const changeDate = (delta) => {
     const d = new Date(selectedDate);
     d.setDate(d.getDate() + delta);
     setSelectedDate(d.toISOString().slice(0, 10));
   };
 
-  // Calculer les totaux depuis les chariots
   const getTotalLigne = (ligne) => {
     return chariots[ligne]?.reduce((sum, c) => sum + (parseFloat(c.poids_kg) || 0), 0) || 0;
   };
@@ -151,14 +124,17 @@ export default function Production() {
   const totalGeneral = totalR1R2 + totalR3 + totalR4;
   const effectifTotal = (parseInt(form.effectif_tri) || 0) + (parseInt(form.effectif_recuperation) || 0);
 
-  // Sauvegarder la feuille complète
+  // Nombre d'opérateurs affectés depuis le planning
+  const planningList = feuille?.planning_list || [];
+  const nbAffectes = planningList.length;
+
+  // Sauvegarder la feuille (sans postes — ceux-ci sont gérés dans le planning)
   const saveFeuille = async () => {
     setSaving(true);
     try {
-      // 1. Sauvegarder les données production_daily
       await api.post('/production', {
         date: selectedDate,
-        effectif_reel: effectifTotal,
+        effectif_reel: effectifTotal || nbAffectes,
         entree_ligne_kg: totalR1R2,
         objectif_entree_ligne_kg: form.objectif_entree_ligne_kg,
         entree_recyclage_r3_kg: totalR3,
@@ -184,19 +160,7 @@ export default function Production() {
         resultat_general_ok: totalGeneral >= ((parseFloat(form.objectif_entree_ligne_kg) || 0) + (parseFloat(form.objectif_entree_r3_kg) || 0) + (parseFloat(form.objectif_entree_r4_kg) || 0)),
       });
 
-      // 2. Sauvegarder les postes
-      const postesArray = [];
-      Object.entries(postes).forEach(([key, noms]) => {
-        const [poste, periode] = key.split(/_(?=matin|apres_midi)/);
-        noms.forEach(nom => {
-          if (nom.trim()) {
-            postesArray.push({ poste, periode, employe_nom: nom.trim() });
-          }
-        });
-      });
-      await api.post('/production/postes', { date: selectedDate, postes: postesArray });
-
-      // 3. Sauvegarder les chariots
+      // Sauvegarder les chariots
       const chariotsArray = [];
       Object.entries(chariots).forEach(([ligne, items]) => {
         items.forEach((item, idx) => {
@@ -220,7 +184,6 @@ export default function Production() {
     }
   };
 
-  // Ajouter un commentaire
   const addComment = async () => {
     if (!newComment.trim()) return;
     try {
@@ -235,7 +198,6 @@ export default function Production() {
     } catch (err) { console.error(err); }
   };
 
-  // Supprimer un commentaire
   const deleteComment = async (id) => {
     try {
       await api.delete(`/production/commentaires/${id}`);
@@ -243,36 +205,40 @@ export default function Production() {
     } catch (err) { console.error(err); }
   };
 
-  // Mettre à jour un poste
-  const updatePoste = (posteKey, periode, index, value) => {
-    const key = `${posteKey}_${periode}`;
-    const current = [...(postes[key] || [''])];
-    current[index] = value;
-    setPostes({ ...postes, [key]: current });
-  };
-
-  // Ajouter un opérateur supplémentaire sur un poste
-  const addPosteSlot = (posteKey, periode) => {
-    const key = `${posteKey}_${periode}`;
-    const current = [...(postes[key] || [''])];
-    current.push('');
-    setPostes({ ...postes, [key]: current });
-  };
-
-  // Mettre à jour un chariot
   const updateChariot = (ligne, index, field, value) => {
     const items = [...chariots[ligne]];
     items[index] = { ...items[index], [field]: value };
     setChariots({ ...chariots, [ligne]: items });
   };
 
-  // Ajouter un chariot
   const addChariot = (ligne) => {
     const items = [...chariots[ligne], { poids_kg: '', heure: '' }];
     setChariots({ ...chariots, [ligne]: items });
   };
 
   const formatDate = (d) => new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  // Calculer le lundi de la semaine de la date sélectionnée (pour le lien planning)
+  const getWeekStart = (dateStr) => {
+    const d = new Date(dateStr);
+    const day = d.getDay();
+    d.setDate(d.getDate() - ((day + 6) % 7));
+    return d.toISOString().slice(0, 10);
+  };
+
+  // Regrouper les affectations par opération pour l'affichage
+  const planningByOperation = {};
+  planningList.forEach(s => {
+    const opKey = s.operation_code || s.poste_code || 'autre';
+    if (!planningByOperation[opKey]) {
+      planningByOperation[opKey] = {
+        operation_nom: s.operation_nom || s.poste_code || 'Autre',
+        chaine_nom: s.chaine_nom || '',
+        employes: [],
+      };
+    }
+    planningByOperation[opKey].employes.push(s);
+  });
 
   // ═══════════════════════════════════
   // VUE MENSUELLE (tableau récap)
@@ -329,9 +295,6 @@ export default function Production() {
         </div>
 
         {view === 'feuille' ? (
-          /* ═══════════════════════════════════════════════ */
-          /* VUE FEUILLE DE PRODUCTION                     */
-          /* ═══════════════════════════════════════════════ */
           <div>
             {/* Navigation date */}
             <div className="flex items-center gap-3 mb-4">
@@ -432,6 +395,7 @@ export default function Production() {
                 <p className="text-xs font-semibold text-slate-700 mb-2">
                   <Users className="w-4 h-4 inline mr-1" />
                   Effectif du jour — Total : <span className="text-primary text-sm">{effectifTotal || '—'}</span>
+                  {nbAffectes > 0 && <span className="text-slate-400 ml-2">({nbAffectes} affectés dans le planning)</span>}
                 </p>
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                   {[
@@ -460,52 +424,60 @@ export default function Production() {
               </div>
             </div>
 
-            {/* ══ SECTION CENTRALE : Postes opérateurs + Chariots ══ */}
+            {/* ══ SECTION CENTRALE : Affectations planning + Chariots ══ */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-              {/* Postes opérateurs (gauche) */}
+              {/* Affectations opérateurs (lecture depuis le planning) */}
               <div className="card-modern p-4">
-                <h3 className="text-sm font-bold text-slate-700 mb-3 border-b pb-2">
-                  <Users className="w-4 h-4 inline mr-1 text-amber-600" />
-                  Opérateurs sur table
-                </h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-slate-50">
-                        <th className="text-left p-2 font-semibold text-slate-600">Poste</th>
-                        <th className="text-center p-2 font-semibold text-slate-600">Matin</th>
-                        <th className="text-center p-2 font-semibold text-slate-600">Après-midi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {POSTES.map(({ key, label, min }) => (
-                        <tr key={key} className="border-b border-slate-100 hover:bg-slate-50/50">
-                          <td className="p-2">
-                            <span className="font-medium text-slate-700">{label}</span>
-                            {min > 0 && <span className="text-[10px] text-slate-400 ml-1">(min {min})</span>}
-                          </td>
-                          {['matin', 'apres_midi'].map(periode => {
-                            const slots = postes[`${key}_${periode}`] || [''];
-                            return (
-                              <td key={periode} className="p-1">
-                                {slots.map((nom, i) => (
-                                  <input key={i} value={nom}
-                                    onChange={e => updatePoste(key, periode, i, e.target.value)}
-                                    className="input-modern text-xs mb-0.5 w-full"
-                                    placeholder="Nom opérateur" />
-                                ))}
-                                <button onClick={() => addPosteSlot(key, periode)}
-                                  className="text-[10px] text-primary hover:underline">
-                                  + ajouter
-                                </button>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex items-center justify-between mb-3 border-b pb-2">
+                  <h3 className="text-sm font-bold text-slate-700">
+                    <Users className="w-4 h-4 inline mr-1 text-amber-600" />
+                    Opérateurs sur table
+                    {nbAffectes > 0 && <span className="ml-2 text-xs font-normal text-slate-400">({nbAffectes} personnes)</span>}
+                  </h3>
+                  <button
+                    onClick={() => navigate(`/planning-hebdo?week_start=${getWeekStart(selectedDate)}`)}
+                    className="text-xs text-primary hover:underline flex items-center gap-1"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Modifier dans le planning
+                  </button>
                 </div>
+
+                {Object.keys(planningByOperation).length > 0 ? (
+                  <div className="space-y-2">
+                    {Object.entries(planningByOperation).map(([opCode, op]) => (
+                      <div key={opCode} className="bg-slate-50 rounded-lg p-2 border border-slate-100">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-semibold text-slate-700">{op.operation_nom}</span>
+                          {op.chaine_nom && <span className="text-[10px] text-slate-400">({op.chaine_nom})</span>}
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {op.employes.map((e, i) => (
+                            <span key={i} className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full ${
+                              e.is_provisional
+                                ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                                : 'bg-green-100 text-green-700 border border-green-200'
+                            }`}>
+                              {e.first_name} {e.last_name}
+                              {e.is_provisional && <span className="ml-1 text-[9px]">(prov.)</span>}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-6">
+                    <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="text-xs text-slate-400">Aucune affectation dans le planning pour cette date</p>
+                    <button
+                      onClick={() => navigate(`/planning-hebdo?week_start=${getWeekStart(selectedDate)}`)}
+                      className="text-xs text-primary hover:underline mt-2"
+                    >
+                      Affecter des opérateurs dans le planning
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Chariots / Pesées (droite) */}
@@ -571,10 +543,12 @@ export default function Production() {
                       </div>
                     );
                   })}
-                  {effectifTotal > 0 && (
+                  {(effectifTotal > 0 || nbAffectes > 0) && totalGeneral > 0 && (
                     <div className="flex items-center justify-between p-2 rounded-lg bg-blue-50 border border-blue-200">
                       <span className="text-xs font-medium text-slate-700">Productivité</span>
-                      <span className="text-sm font-bold text-blue-700">{Math.round(totalGeneral / effectifTotal)} kg/personne</span>
+                      <span className="text-sm font-bold text-blue-700">
+                        {Math.round(totalGeneral / (effectifTotal || nbAffectes))} kg/personne
+                      </span>
                     </div>
                   )}
                 </div>
