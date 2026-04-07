@@ -269,7 +269,6 @@ export default function Candidates() {
           </div>
         </div>
 
-        {<>
         {/* CV Drop Zone */}
         <div
           className={`mb-4 border-2 border-dashed rounded-xl p-4 text-center transition-all cursor-pointer ${cvDragActive ? 'border-primary bg-primary/10' : 'border-gray-300 bg-gray-50 hover:border-primary/50'}`}
@@ -368,8 +367,6 @@ export default function Candidates() {
             </div>
           </div>
         )}
-
-        </>
 
         {/* Add Modal */}
         {showAddModal && (
