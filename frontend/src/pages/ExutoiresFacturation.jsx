@@ -1,20 +1,9 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
+import { Scale, FileText } from 'lucide-react';
 import api from '../services/api';
 
-const STATUTS_PESEE = {
-  conforme: { label: 'Conforme', color: 'bg-green-100 text-green-700' },
-  ecart_acceptable: { label: 'Écart acceptable', color: 'bg-yellow-100 text-yellow-700' },
-  litige: { label: 'Litige', color: 'bg-red-100 text-red-700' },
-  valide: { label: 'Validé', color: 'bg-blue-100 text-blue-700' },
-};
-
-const STATUTS_FACTURE = {
-  recue: { label: 'Reçue', color: 'bg-gray-100 text-gray-700' },
-  conforme: { label: 'Conforme', color: 'bg-green-100 text-green-700' },
-  ecart: { label: 'Écart', color: 'bg-yellow-100 text-yellow-700' },
-  validee: { label: 'Validée', color: 'bg-blue-100 text-blue-700' },
-};
 
 export default function ExutoiresFacturation() {
   const [activeTab, setActiveTab] = useState('pesee');
@@ -199,7 +188,7 @@ export default function ExutoiresFacturation() {
     en_attente: controles.filter(c => c.statut !== 'valide').length,
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la facturation..." /></Layout>;
 
   return (
     <Layout>
@@ -207,7 +196,7 @@ export default function ExutoiresFacturation() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Facturation & Contrôles</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Facturation & Contrôles</h1>
             <p className="text-gray-500 text-sm">Contrôles de pesée et gestion des factures logistiques</p>
           </div>
         </div>
@@ -218,7 +207,7 @@ export default function ExutoiresFacturation() {
             onClick={() => setActiveTab('pesee')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === 'pesee'
-                ? 'bg-white text-solidata-dark shadow-sm'
+                ? 'bg-white text-slate-800 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -228,7 +217,7 @@ export default function ExutoiresFacturation() {
             onClick={() => setActiveTab('factures')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === 'factures'
-                ? 'bg-white text-solidata-dark shadow-sm'
+                ? 'bg-white text-slate-800 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -241,19 +230,19 @@ export default function ExutoiresFacturation() {
           <>
             {/* Summary cards */}
             <div className="grid grid-cols-4 gap-4 mb-6">
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <p className="text-xs text-gray-500 font-medium">Conformes</p>
                 <p className="text-2xl font-bold text-green-600">{peseeStats.conformes}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <p className="text-xs text-gray-500 font-medium">Écarts acceptables</p>
                 <p className="text-2xl font-bold text-yellow-600">{peseeStats.ecarts}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <p className="text-xs text-gray-500 font-medium">Litiges</p>
                 <p className="text-2xl font-bold text-red-600">{peseeStats.litiges}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <p className="text-xs text-gray-500 font-medium">En attente validation</p>
                 <p className="text-2xl font-bold text-blue-600">{peseeStats.en_attente}</p>
               </div>
@@ -261,65 +250,33 @@ export default function ExutoiresFacturation() {
 
             {/* Action button */}
             <div className="flex justify-end mb-4">
-              <button onClick={openControleForm} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+              <button onClick={openControleForm} className="btn-primary text-sm">
                 + Nouveau contrôle
               </button>
             </div>
 
             {/* Table */}
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Commande</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Client</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Type</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Pesée interne (t)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Pesée client (t)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Écart (t)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Écart (%)</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {controles.map(ctrl => {
-                    const statut = STATUTS_PESEE[ctrl.statut] || { label: ctrl.statut, color: 'bg-gray-100 text-gray-700' };
-                    return (
-                      <tr key={ctrl.id} className="border-t hover:bg-gray-50">
-                        <td className="p-3 text-sm font-medium font-mono">{ctrl.commande_reference || `#${ctrl.commande_id}`}</td>
-                        <td className="p-3 text-sm">{ctrl.client_nom || '—'}</td>
-                        <td className="p-3 text-sm">{ctrl.type_produit || '—'}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatTonnage(ctrl.pesee_interne)}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatTonnage(ctrl.pesee_client)}</td>
-                        <td className={`p-3 text-sm text-right font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatTonnage(ctrl.ecart)}</td>
-                        <td className={`p-3 text-sm text-right font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatPercent(ctrl.ecart_pct)}</td>
-                        <td className="p-3">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>
-                            {statut.label}
-                          </span>
-                        </td>
-                        <td className="p-3 text-sm">{formatDate(ctrl.date_reception_ticket)}</td>
-                        <td className="p-3">
-                          {ctrl.statut !== 'valide' && (
-                            <button
-                              onClick={() => validerControle(ctrl.id)}
-                              className="text-solidata-green hover:underline text-sm font-medium"
-                            >
-                              Valider
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {controles.length === 0 && (
-                    <tr><td colSpan="10" className="p-8 text-center text-gray-400">Aucun contrôle de pesée</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={[
+                { key: 'commande_reference', label: 'Commande', render: (ctrl) => <span className="font-medium font-mono">{ctrl.commande_reference || `#${ctrl.commande_id}`}</span> },
+                { key: 'client_nom', label: 'Client', render: (ctrl) => ctrl.client_nom || '—' },
+                { key: 'type_produit', label: 'Type', render: (ctrl) => ctrl.type_produit || '—' },
+                { key: 'pesee_interne', label: 'Pesée interne (t)', align: 'right', render: (ctrl) => <span className="font-mono">{formatTonnage(ctrl.pesee_interne)}</span> },
+                { key: 'pesee_client', label: 'Pesée client (t)', align: 'right', render: (ctrl) => <span className="font-mono">{formatTonnage(ctrl.pesee_client)}</span> },
+                { key: 'ecart', label: 'Écart (t)', align: 'right', render: (ctrl) => <span className={`font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatTonnage(ctrl.ecart)}</span> },
+                { key: 'ecart_pct', label: 'Écart (%)', align: 'right', render: (ctrl) => <span className={`font-mono ${ecartColor(ctrl.ecart_pct)}`}>{formatPercent(ctrl.ecart_pct)}</span> },
+                { key: 'statut', label: 'Statut', render: (ctrl) => <StatusBadge status={ctrl.statut} size="sm" /> },
+                { key: 'date_reception_ticket', label: 'Date', render: (ctrl) => formatDate(ctrl.date_reception_ticket) },
+                { key: 'actions', label: 'Actions', render: (ctrl) => ctrl.statut !== 'valide' && (
+                  <button onClick={() => validerControle(ctrl.id)} className="text-primary hover:underline text-sm font-medium">Valider</button>
+                )},
+              ]}
+              data={controles}
+              loading={false}
+              emptyIcon={Scale}
+              emptyMessage="Aucun contrôle de pesée"
+              dense
+            />
           </>
         )}
 
@@ -328,205 +285,165 @@ export default function ExutoiresFacturation() {
           <>
             {/* Action button */}
             <div className="flex justify-end mb-4">
-              <button onClick={openFactureForm} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+              <button onClick={openFactureForm} className="btn-primary text-sm">
                 + Uploader une facture
               </button>
             </div>
 
             {/* Table */}
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Commande</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Client</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Date OCR</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Tonnage OCR</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Montant OCR (€)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Montant attendu (€)</th>
-                    <th className="text-right p-3 text-xs font-semibold text-gray-500">Écart (€)</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Statut</th>
-                    <th className="text-left p-3 text-xs font-semibold text-gray-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {factures.map(fac => {
-                    const statut = STATUTS_FACTURE[fac.statut] || { label: fac.statut, color: 'bg-gray-100 text-gray-700' };
-                    const ecartMontant = (fac.ocr_montant != null && fac.montant_attendu != null)
-                      ? parseFloat(fac.ocr_montant) - parseFloat(fac.montant_attendu)
-                      : null;
-                    return (
-                      <tr key={fac.id} className="border-t hover:bg-gray-50">
-                        <td className="p-3 text-sm font-medium font-mono">{fac.commande_reference || `#${fac.commande_id}`}</td>
-                        <td className="p-3 text-sm">{fac.client_nom || '—'}</td>
-                        <td className="p-3 text-sm">{formatDate(fac.ocr_date)}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatTonnage(fac.ocr_tonnage)}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatAmount(fac.ocr_montant)}</td>
-                        <td className="p-3 text-sm text-right font-mono">{formatAmount(fac.montant_attendu)}</td>
-                        <td className={`p-3 text-sm text-right font-mono ${ecartMontant != null && Math.abs(ecartMontant) > 0.01 ? 'text-red-600 font-semibold' : 'text-green-600'}`}>
-                          {ecartMontant != null ? ecartMontant.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €' : '—'}
-                        </td>
-                        <td className="p-3">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${statut.color}`}>
-                            {statut.label}
-                          </span>
-                        </td>
-                        <td className="p-3">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => openOcrModal(fac)}
-                              className="text-blue-600 hover:underline text-sm font-medium"
-                            >
-                              Corriger
-                            </button>
-                            {fac.statut !== 'validee' && (
-                              <button
-                                onClick={() => validerFacture(fac.id)}
-                                className="text-solidata-green hover:underline text-sm font-medium"
-                              >
-                                Valider
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {factures.length === 0 && (
-                    <tr><td colSpan="9" className="p-8 text-center text-gray-400">Aucune facture logistique</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={[
+                { key: 'commande_reference', label: 'Commande', render: (fac) => <span className="font-medium font-mono">{fac.commande_reference || `#${fac.commande_id}`}</span> },
+                { key: 'client_nom', label: 'Client', render: (fac) => fac.client_nom || '—' },
+                { key: 'ocr_date', label: 'Date OCR', render: (fac) => formatDate(fac.ocr_date) },
+                { key: 'ocr_tonnage', label: 'Tonnage OCR', align: 'right', render: (fac) => <span className="font-mono">{formatTonnage(fac.ocr_tonnage)}</span> },
+                { key: 'ocr_montant', label: 'Montant OCR (€)', align: 'right', render: (fac) => <span className="font-mono">{formatAmount(fac.ocr_montant)}</span> },
+                { key: 'montant_attendu', label: 'Montant attendu (€)', align: 'right', render: (fac) => <span className="font-mono">{formatAmount(fac.montant_attendu)}</span> },
+                { key: 'ecart', label: 'Écart (€)', align: 'right', render: (fac) => {
+                  const ecartMontant = (fac.ocr_montant != null && fac.montant_attendu != null)
+                    ? parseFloat(fac.ocr_montant) - parseFloat(fac.montant_attendu) : null;
+                  return <span className={`font-mono ${ecartMontant != null && Math.abs(ecartMontant) > 0.01 ? 'text-red-600 font-semibold' : 'text-green-600'}`}>
+                    {ecartMontant != null ? ecartMontant.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €' : '—'}
+                  </span>;
+                }},
+                { key: 'statut', label: 'Statut', render: (fac) => <StatusBadge status={fac.statut} size="sm" /> },
+                { key: 'actions', label: 'Actions', render: (fac) => (
+                  <div className="flex gap-2">
+                    <button onClick={() => openOcrModal(fac)} className="text-blue-600 hover:underline text-sm font-medium">Corriger</button>
+                    {fac.statut !== 'validee' && (
+                      <button onClick={() => validerFacture(fac.id)} className="text-primary hover:underline text-sm font-medium">Valider</button>
+                    )}
+                  </div>
+                )},
+              ]}
+              data={factures}
+              loading={false}
+              emptyIcon={FileText}
+              emptyMessage="Aucune facture logistique"
+              dense
+            />
           </>
         )}
 
         {/* ========== MODAL: Nouveau contrôle pesée ========== */}
-        {showControleForm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowControleForm(false)}>
-            <form onSubmit={submitControle} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4 text-solidata-dark">Nouveau contrôle de pesée</h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-500">Commande *</label>
-                  <select
-                    value={controleForm.commande_id}
-                    onChange={e => setControleForm({ ...controleForm, commande_id: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-                    required
-                  >
-                    <option value="">Sélectionner une commande...</option>
-                    {commandesExpediees.map(cmd => (
-                      <option key={cmd.id} value={cmd.id}>
-                        {cmd.reference} — {cmd.client_nom || 'Client'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Pesée client (tonnes) *</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    value={controleForm.pesee_client}
-                    onChange={e => setControleForm({ ...controleForm, pesee_client: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-                    placeholder="0.000"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Date de réception du ticket *</label>
-                  <input
-                    type="date"
-                    value={controleForm.date_reception_ticket}
-                    onChange={e => setControleForm({ ...controleForm, date_reception_ticket: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Ticket de pesée (PDF)</label>
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={e => setControleForm({ ...controleForm, ticket_pesee: e.target.files[0] || null })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Notes</label>
-                  <textarea
-                    value={controleForm.notes}
-                    onChange={e => setControleForm({ ...controleForm, notes: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-                    rows={3}
-                  />
-                </div>
+        <Modal isOpen={showControleForm} onClose={() => setShowControleForm(false)} title="Nouveau contrôle de pesée" size="md">
+          <form onSubmit={submitControle}>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500">Commande *</label>
+                <select
+                  value={controleForm.commande_id}
+                  onChange={e => setControleForm({ ...controleForm, commande_id: e.target.value })}
+                  className="select-modern mt-1"
+                  required
+                >
+                  <option value="">Sélectionner une commande...</option>
+                  {commandesExpediees.map(cmd => (
+                    <option key={cmd.id} value={cmd.id}>
+                      {cmd.reference} — {cmd.client_nom || 'Client'}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowControleForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
-                  Annuler
-                </button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">
-                  Créer
-                </button>
+              <div>
+                <label className="text-xs text-gray-500">Pesée client (tonnes) *</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={controleForm.pesee_client}
+                  onChange={e => setControleForm({ ...controleForm, pesee_client: e.target.value })}
+                  className="input-modern mt-1"
+                  placeholder="0.000"
+                  required
+                />
               </div>
-            </form>
-          </div>
-        )}
+              <div>
+                <label className="text-xs text-gray-500">Date de réception du ticket *</label>
+                <input
+                  type="date"
+                  value={controleForm.date_reception_ticket}
+                  onChange={e => setControleForm({ ...controleForm, date_reception_ticket: e.target.value })}
+                  className="input-modern mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Ticket de pesée (PDF)</label>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={e => setControleForm({ ...controleForm, ticket_pesee: e.target.files[0] || null })}
+                  className="input-modern mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Notes</label>
+                <textarea
+                  value={controleForm.notes}
+                  onChange={e => setControleForm({ ...controleForm, notes: e.target.value })}
+                  className="textarea-modern mt-1"
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowControleForm(false)} className="flex-1 btn-ghost">
+                Annuler
+              </button>
+              <button type="submit" className="flex-1 btn-primary text-sm">
+                Créer
+              </button>
+            </div>
+          </form>
+        </Modal>
 
         {/* ========== MODAL: Upload facture ========== */}
-        {showFactureForm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowFactureForm(false)}>
-            <form onSubmit={submitFacture} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4 text-solidata-dark">Uploader une facture</h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-500">Commande *</label>
-                  <select
-                    value={factureForm.commande_id}
-                    onChange={e => setFactureForm({ ...factureForm, commande_id: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-                    required
-                  >
-                    <option value="">Sélectionner une commande...</option>
-                    {commandesPesee.map(cmd => (
-                      <option key={cmd.id} value={cmd.id}>
-                        {cmd.reference} — {cmd.client_nom || 'Client'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Facture (PDF) *</label>
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={e => setFactureForm({ ...factureForm, facture: e.target.files[0] || null })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-                    required
-                  />
-                </div>
+        <Modal isOpen={showFactureForm} onClose={() => setShowFactureForm(false)} title="Uploader une facture" size="md">
+          <form onSubmit={submitFacture}>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500">Commande *</label>
+                <select
+                  value={factureForm.commande_id}
+                  onChange={e => setFactureForm({ ...factureForm, commande_id: e.target.value })}
+                  className="select-modern mt-1"
+                  required
+                >
+                  <option value="">Sélectionner une commande...</option>
+                  {commandesPesee.map(cmd => (
+                    <option key={cmd.id} value={cmd.id}>
+                      {cmd.reference} — {cmd.client_nom || 'Client'}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowFactureForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
-                  Annuler
-                </button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">
-                  Uploader
-                </button>
+              <div>
+                <label className="text-xs text-gray-500">Facture (PDF) *</label>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={e => setFactureForm({ ...factureForm, facture: e.target.files[0] || null })}
+                  className="input-modern mt-1"
+                  required
+                />
               </div>
-            </form>
-          </div>
-        )}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowFactureForm(false)} className="flex-1 btn-ghost">
+                Annuler
+              </button>
+              <button type="submit" className="flex-1 btn-primary text-sm">
+                Uploader
+              </button>
+            </div>
+          </form>
+        </Modal>
 
         {/* ========== MODAL: Correction OCR + Concordance ========== */}
-        {showOcrModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowOcrModal(null); setConcordance(null); }}>
-            <div className="bg-white rounded-xl p-6 w-[560px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-2 text-solidata-dark">Correction OCR & Concordance</h2>
+        <Modal isOpen={!!showOcrModal} onClose={() => { setShowOcrModal(null); setConcordance(null); }} title="Correction OCR & Concordance" size="lg">
+          {showOcrModal && (
+            <>
               <p className="text-sm text-gray-500 mb-4">
                 Vérifiez et corrigez les valeurs extraites de la facture{' '}
                 <span className="font-medium text-gray-700">{showOcrModal.commande_reference || `#${showOcrModal.commande_id}`}</span>
@@ -585,7 +502,7 @@ export default function ExutoiresFacturation() {
                     type="date"
                     value={ocrForm.ocr_date}
                     onChange={e => setOcrForm({ ...ocrForm, ocr_date: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                   />
                 </div>
                 <div>
@@ -595,7 +512,7 @@ export default function ExutoiresFacturation() {
                     step="0.001"
                     value={ocrForm.ocr_tonnage}
                     onChange={e => setOcrForm({ ...ocrForm, ocr_tonnage: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     placeholder="0.000"
                   />
                 </div>
@@ -606,7 +523,7 @@ export default function ExutoiresFacturation() {
                     step="0.01"
                     value={ocrForm.ocr_montant}
                     onChange={e => setOcrForm({ ...ocrForm, ocr_montant: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    className="input-modern mt-1"
                     placeholder="0.00"
                   />
                   {concordance && concordance.montant_attendu != null && ocrForm.ocr_montant && (
@@ -617,20 +534,20 @@ export default function ExutoiresFacturation() {
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => { setShowOcrModal(null); setConcordance(null); }} className="flex-1 border rounded-lg py-2 text-sm">
+                <button type="button" onClick={() => { setShowOcrModal(null); setConcordance(null); }} className="flex-1 btn-ghost">
                   Annuler
                 </button>
                 <button
                   type="button"
                   onClick={submitOcrCorrection}
-                  className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium"
+                  className="flex-1 btn-primary text-sm"
                 >
                   Corriger & Valider
                 </button>
               </div>
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </Modal>
       </div>
     </Layout>
   );

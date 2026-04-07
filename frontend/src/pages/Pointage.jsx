@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const TABS = ['daily', 'badges', 'manual', 'alerts', 'log', 'monthly'];
@@ -122,7 +123,7 @@ export default function Pointage() {
     <Layout>
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-solidata-dark">Pointage</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Pointage</h1>
           <p className="text-gray-500">Gestion des badgeages et suivi des heures</p>
         </div>
 
@@ -130,7 +131,7 @@ export default function Pointage() {
         <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 overflow-x-auto">
           {TABS.map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${tab === t ? 'bg-white shadow text-solidata-dark' : 'text-gray-500 hover:text-gray-700'}`}>
+              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${tab === t ? 'bg-white shadow text-slate-800' : 'text-gray-500 hover:text-gray-700'}`}>
               {TAB_LABELS[t]}
             </button>
           ))}
@@ -140,14 +141,14 @@ export default function Pointage() {
         {tab === 'daily' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={loadDaily} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Actualiser</button>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
+              <button onClick={loadDaily} className="btn-primary text-sm">Actualiser</button>
             </div>
 
             {loading ? (
-              <div className="text-center py-8 text-gray-400">Chargement...</div>
+              <LoadingSpinner size="lg" message="Chargement des pointages..." />
             ) : (
-              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="card-modern overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
@@ -197,23 +198,23 @@ export default function Pointage() {
         {/* ═══ ONGLET BADGES ═══ */}
         {tab === 'badges' && (
           <div>
-            <form onSubmit={handleBadgeCreate} className="bg-white rounded-xl shadow-sm border p-4 mb-6">
+            <form onSubmit={handleBadgeCreate} className="card-modern p-4 mb-6">
               <h3 className="font-semibold mb-3">Enregistrer un nouveau badge</h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <input type="text" placeholder="UID du badge (ex: A1B2C3D4)" value={badgeForm.badge_uid}
-                  onChange={e => setBadgeForm({ ...badgeForm, badge_uid: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" required />
-                <select value={badgeForm.employee_id} onChange={e => setBadgeForm({ ...badgeForm, employee_id: e.target.value })} className="border rounded-lg px-3 py-2 text-sm">
+                  onChange={e => setBadgeForm({ ...badgeForm, badge_uid: e.target.value })} className="input-modern" required />
+                <select value={badgeForm.employee_id} onChange={e => setBadgeForm({ ...badgeForm, employee_id: e.target.value })} className="select-modern">
                   <option value="">Non affecté</option>
                   {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
                 </select>
                 <input type="text" placeholder="Libellé (optionnel)" value={badgeForm.label}
-                  onChange={e => setBadgeForm({ ...badgeForm, label: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
-                <button type="submit" className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Enregistrer</button>
+                  onChange={e => setBadgeForm({ ...badgeForm, label: e.target.value })} className="input-modern" />
+                <button type="submit" className="btn-primary text-sm">Enregistrer</button>
               </div>
               {badgeMsg && <p className={`mt-2 text-sm ${badgeMsg.startsWith('Erreur') ? 'text-red-600' : 'text-green-600'}`}>{badgeMsg}</p>}
             </form>
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="card-modern overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
@@ -234,7 +235,7 @@ export default function Pointage() {
                         {badge.employee_id ? (
                           <span className="font-medium">{badge.first_name} {badge.last_name}</span>
                         ) : (
-                          <select onChange={e => e.target.value && handleBadgeAssign(badge.id, e.target.value)} className="border rounded px-2 py-1 text-xs" defaultValue="">
+                          <select onChange={e => e.target.value && handleBadgeAssign(badge.id, e.target.value)} className="select-modern py-1 text-xs" defaultValue="">
                             <option value="">Affecter...</option>
                             {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
                           </select>
@@ -265,7 +266,7 @@ export default function Pointage() {
         {/* ═══ ONGLET SAISIE MANUELLE ═══ */}
         {tab === 'manual' && (
           <div className="max-w-2xl">
-            <div className="bg-white rounded-xl shadow-sm border p-6">
+            <div className="card-modern p-6">
               <h3 className="font-semibold mb-4">Saisie manuelle des heures</h3>
               <p className="text-sm text-gray-500 mb-4">Permet au manager de saisir ou corriger les horaires d'un collaborateur.</p>
 
@@ -273,45 +274,45 @@ export default function Pointage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Collaborateur</label>
-                    <select value={manualForm.employee_id} onChange={e => setManualForm({ ...manualForm, employee_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
+                    <select value={manualForm.employee_id} onChange={e => setManualForm({ ...manualForm, employee_id: e.target.value })} className="select-modern" required>
                       <option value="">Sélectionner...</option>
                       {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                    <input type="date" value={manualForm.date} onChange={e => setManualForm({ ...manualForm, date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+                    <input type="date" value={manualForm.date} onChange={e => setManualForm({ ...manualForm, date: e.target.value })} className="input-modern" required />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Entrée matin</label>
-                    <input type="time" value={manualForm.entry_am} onChange={e => setManualForm({ ...manualForm, entry_am: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={manualForm.entry_am} onChange={e => setManualForm({ ...manualForm, entry_am: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Sortie matin</label>
-                    <input type="time" value={manualForm.exit_am} onChange={e => setManualForm({ ...manualForm, exit_am: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={manualForm.exit_am} onChange={e => setManualForm({ ...manualForm, exit_am: e.target.value })} className="input-modern" />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Entrée après-midi</label>
-                    <input type="time" value={manualForm.entry_pm} onChange={e => setManualForm({ ...manualForm, entry_pm: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={manualForm.entry_pm} onChange={e => setManualForm({ ...manualForm, entry_pm: e.target.value })} className="input-modern" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Sortie après-midi</label>
-                    <input type="time" value={manualForm.exit_pm} onChange={e => setManualForm({ ...manualForm, exit_pm: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                    <input type="time" value={manualForm.exit_pm} onChange={e => setManualForm({ ...manualForm, exit_pm: e.target.value })} className="input-modern" />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <input type="text" value={manualForm.notes} onChange={e => setManualForm({ ...manualForm, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Motif de la saisie manuelle..." />
+                  <input type="text" value={manualForm.notes} onChange={e => setManualForm({ ...manualForm, notes: e.target.value })} className="input-modern" placeholder="Motif de la saisie manuelle..." />
                 </div>
 
-                <button type="submit" className="bg-solidata-green text-white px-6 py-2 rounded-lg text-sm hover:bg-solidata-green-dark font-medium">Enregistrer</button>
+                <button type="submit" className="btn-primary text-sm">Enregistrer</button>
                 {manualMsg && <p className={`text-sm ${manualMsg.startsWith('Erreur') ? 'text-red-600' : 'text-green-600'}`}>{manualMsg}</p>}
               </form>
             </div>
@@ -322,8 +323,8 @@ export default function Pointage() {
         {tab === 'alerts' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={loadAlerts} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Actualiser</button>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
+              <button onClick={loadAlerts} className="btn-primary text-sm">Actualiser</button>
             </div>
 
             {alerts.length === 0 ? (
@@ -332,7 +333,7 @@ export default function Pointage() {
                 <p className="text-green-600 text-sm mt-1">Tous les collaborateurs planifiés ont badgé.</p>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="card-modern overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-red-50">
                     <tr>
@@ -364,11 +365,11 @@ export default function Pointage() {
         {tab === 'log' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={loadLog} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Actualiser</button>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
+              <button onClick={loadLog} className="btn-primary text-sm">Actualiser</button>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="card-modern overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
@@ -415,11 +416,11 @@ export default function Pointage() {
         {tab === 'monthly' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={loadMonthly} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm hover:bg-solidata-green-dark">Actualiser</button>
+              <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input-modern w-auto" />
+              <button onClick={loadMonthly} className="btn-primary text-sm">Actualiser</button>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="card-modern overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>

@@ -26,7 +26,7 @@ export default function DiagrammeFluxTri() {
   }, []);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-6 overflow-x-auto">
+    <div className="card-modern p-6 overflow-x-auto">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-solidata-dark">Diagramme des flux de tri</h2>
         <button

@@ -331,7 +331,7 @@ export default function PCMTest() {
       {/* Question */}
       <div className="flex-1 flex flex-col p-4 sm:p-6">
         <div className="max-w-2xl mx-auto w-full flex-1 flex flex-col">
-          <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 flex-1">
+          <div className="card-modern p-5 sm:p-6 flex-1">
             <div className="mb-5">
               <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold text-white mb-3" style={{ backgroundColor: BRAND_GREEN }}>
                 Q{currentQ + 1}

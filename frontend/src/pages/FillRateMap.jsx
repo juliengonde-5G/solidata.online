@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, Cell } from 'recharts';
@@ -57,7 +58,7 @@ export default function FillRateMap() {
     setLoading(false);
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la carte..." /></Layout>;
   if (!data) return <Layout><div className="p-6 text-red-500">Erreur de chargement</div></Layout>;
 
   const filtered = data.cavs.filter(c => {
@@ -79,10 +80,10 @@ export default function FillRateMap() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Taux de remplissage CAV</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Taux de remplissage CAV</h1>
             <p className="text-gray-500 text-sm">Estimation en temps réel et prévisions</p>
           </div>
-          <button onClick={loadData} className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm hover:bg-solidata-green/90">
+          <button onClick={loadData} className="btn-primary text-sm">
             Actualiser
           </button>
         </div>
@@ -90,7 +91,7 @@ export default function FillRateMap() {
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <button onClick={() => setFilter('all')}
-            className={`rounded-xl border p-4 text-left transition ${filter === 'all' ? 'ring-2 ring-solidata-green' : ''}`}>
+            className={`rounded-xl border p-4 text-left transition ${filter === 'all' ? 'ring-2 ring-primary' : ''}`}>
             <p className="text-xs text-gray-500 uppercase font-medium">Total CAV</p>
             <p className="text-3xl font-bold mt-1">{data.stats.total}</p>
           </button>
@@ -113,7 +114,7 @@ export default function FillRateMap() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Carte */}
-          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border overflow-hidden relative" style={{ height: '65vh' }}>
+          <div className="lg:col-span-2 card-modern overflow-hidden relative" style={{ height: '65vh' }}>
             <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
@@ -168,20 +169,20 @@ export default function FillRateMap() {
           <div className="space-y-3">
             {/* Tri */}
             <div className="flex gap-1">
-              <button onClick={() => setSortBy('fill_rate')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${sortBy === 'fill_rate' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}>
+              <button onClick={() => setSortBy('fill_rate')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${sortBy === 'fill_rate' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
                 Par remplissage
               </button>
-              <button onClick={() => setSortBy('days_to_full')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${sortBy === 'days_to_full' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}>
+              <button onClick={() => setSortBy('days_to_full')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${sortBy === 'days_to_full' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
                 Par urgence
               </button>
-              <button onClick={() => setSortBy('name')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${sortBy === 'name' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-600'}`}>
+              <button onClick={() => setSortBy('name')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${sortBy === 'name' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
                 A-Z
               </button>
             </div>
 
             {/* Détail sélectionné */}
             {selectedCav && (
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-bold">{selectedCav.name}</h3>
@@ -235,7 +236,7 @@ export default function FillRateMap() {
                   <h4 className="text-xs font-semibold text-gray-700 mb-2">Activité : historique & prévision</h4>
                   {activityLoading ? (
                     <div className="flex items-center justify-center py-4">
-                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-solidata-green border-t-transparent" />
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary border-t-transparent" />
                     </div>
                   ) : activityData?.jours ? (
                     <div>
@@ -290,7 +291,7 @@ export default function FillRateMap() {
                   key={cav.id}
                   onClick={() => setSelectedCav(cav)}
                   className={`w-full text-left bg-white rounded-lg border p-3 hover:shadow-md transition ${
-                    selectedCav?.id === cav.id ? 'ring-2 ring-solidata-green' : ''
+                    selectedCav?.id === cav.id ? 'ring-2 ring-primary' : ''
                   }`}
                 >
                   <div className="flex items-center justify-between">

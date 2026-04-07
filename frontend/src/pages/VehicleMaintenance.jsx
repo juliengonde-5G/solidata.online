@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Wrench } from 'lucide-react';
 import Layout from '../components/Layout';
+import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 
 const STATUS_COLORS = { ok: 'bg-green-100 text-green-700', bientot: 'bg-yellow-100 text-yellow-700', depasse: 'bg-red-100 text-red-700' };
@@ -69,7 +71,7 @@ export default function VehicleMaintenance() {
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
   const formatCost = (c) => c ? `${parseFloat(c).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €` : '—';
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la maintenance..." /></Layout>;
 
   return (
     <Layout>
@@ -95,7 +97,7 @@ export default function VehicleMaintenance() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-500">{profiles.length} profil(s) constructeur en base</p>
-              <button onClick={() => setShowProfileForm(true)} className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700">
+              <button onClick={() => setShowProfileForm(true)} className="btn-primary text-sm">
                 + Ajouter un profil
               </button>
             </div>
@@ -238,7 +240,7 @@ export default function VehicleMaintenance() {
             {!selectedVehicle ? (
               <div className="bg-white rounded-xl border p-8 text-center">
                 <p className="text-slate-400 mb-4">Sélectionnez un véhicule dans l'onglet "État flotte"</p>
-                <button onClick={() => setTab('flotte')} className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm">Voir la flotte</button>
+                <button onClick={() => setTab('flotte')} className="btn-primary text-sm">Voir la flotte</button>
               </div>
             ) : (
               <>
@@ -338,68 +340,65 @@ export default function VehicleMaintenance() {
         )}
 
         {/* ═══ MODAL NOUVEAU PROFIL ═══ */}
-        {showProfileForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              try {
-                const vehicleType = `${profileForm.brand} ${profileForm.model}`;
-                await api.post('/vehicles/maintenance/profiles-db', { ...profileForm, vehicle_type: vehicleType, items: [] });
-                setShowProfileForm(false);
-                setProfileForm({ vehicle_type: '', brand: '', model: '', engine_code: '', timing_system: 'courroie', adblue_equipped: true, revision_km: 30000, revision_months: 24 });
-                loadAll();
-              } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
-            }} className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau profil constructeur</h2>
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-500">Marque *</label>
-                    <input required value={profileForm.brand} onChange={e => setProfileForm({ ...profileForm, brand: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="FIAT" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">Modèle *</label>
-                    <input required value={profileForm.model} onChange={e => setProfileForm({ ...profileForm, model: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Ducato 2.3 MultiJet" />
-                  </div>
+        <Modal isOpen={showProfileForm} onClose={() => setShowProfileForm(false)} title="Nouveau profil constructeur" size="sm">
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              const vehicleType = `${profileForm.brand} ${profileForm.model}`;
+              await api.post('/vehicles/maintenance/profiles-db', { ...profileForm, vehicle_type: vehicleType, items: [] });
+              setShowProfileForm(false);
+              setProfileForm({ vehicle_type: '', brand: '', model: '', engine_code: '', timing_system: 'courroie', adblue_equipped: true, revision_km: 30000, revision_months: 24 });
+              loadAll();
+            } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
+          }}>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">Marque *</label>
+                  <input required value={profileForm.brand} onChange={e => setProfileForm({ ...profileForm, brand: e.target.value })} className="input-modern mt-1" placeholder="FIAT" />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500">Code moteur</label>
-                  <input value={profileForm.engine_code} onChange={e => setProfileForm({ ...profileForm, engine_code: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="F1AGL411x" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-500">Distribution</label>
-                    <select value={profileForm.timing_system} onChange={e => setProfileForm({ ...profileForm, timing_system: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
-                      <option value="courroie">Courroie</option>
-                      <option value="chaine">Chaîne</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">AdBlue</label>
-                    <select value={profileForm.adblue_equipped} onChange={e => setProfileForm({ ...profileForm, adblue_equipped: e.target.value === 'true' })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
-                      <option value="true">Oui</option>
-                      <option value="false">Non</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-500">Révision (km)</label>
-                    <input type="number" value={profileForm.revision_km} onChange={e => setProfileForm({ ...profileForm, revision_km: parseInt(e.target.value) || 0 })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">Révision (mois)</label>
-                    <input type="number" value={profileForm.revision_months} onChange={e => setProfileForm({ ...profileForm, revision_months: parseInt(e.target.value) || 0 })} className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
-                  </div>
+                  <label className="text-xs text-slate-500">Modèle *</label>
+                  <input required value={profileForm.model} onChange={e => setProfileForm({ ...profileForm, model: e.target.value })} className="input-modern mt-1" placeholder="Ducato 2.3 MultiJet" />
                 </div>
               </div>
-              <div className="flex gap-2 mt-6">
-                <button type="button" onClick={() => setShowProfileForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-teal-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-teal-700">Créer</button>
+              <div>
+                <label className="text-xs text-slate-500">Code moteur</label>
+                <input value={profileForm.engine_code} onChange={e => setProfileForm({ ...profileForm, engine_code: e.target.value })} className="input-modern mt-1" placeholder="F1AGL411x" />
               </div>
-            </form>
-          </div>
-        )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">Distribution</label>
+                  <select value={profileForm.timing_system} onChange={e => setProfileForm({ ...profileForm, timing_system: e.target.value })} className="input-modern mt-1">
+                    <option value="courroie">Courroie</option>
+                    <option value="chaine">Chaîne</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">AdBlue</label>
+                  <select value={profileForm.adblue_equipped} onChange={e => setProfileForm({ ...profileForm, adblue_equipped: e.target.value === 'true' })} className="input-modern mt-1">
+                    <option value="true">Oui</option>
+                    <option value="false">Non</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">Révision (km)</label>
+                  <input type="number" value={profileForm.revision_km} onChange={e => setProfileForm({ ...profileForm, revision_km: parseInt(e.target.value) || 0 })} className="input-modern mt-1" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Révision (mois)</label>
+                  <input type="number" value={profileForm.revision_months} onChange={e => setProfileForm({ ...profileForm, revision_months: parseInt(e.target.value) || 0 })} className="input-modern mt-1" />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button type="button" onClick={() => setShowProfileForm(false)} className="flex-1 btn-ghost">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
+            </div>
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

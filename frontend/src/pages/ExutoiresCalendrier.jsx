@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { AlertCircle, AlertTriangle, Info } from 'lucide-react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -73,25 +75,10 @@ function isSameDay(a, b) {
 }
 
 function AlertIcon({ severity }) {
-  if (severity === 'danger') {
-    return (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    );
-  }
-  if (severity === 'warning') {
-    return (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M10.29 3.86l-8.7 15.04A1 1 0 002.46 20h17.08a1 1 0 00.87-1.5l-8.7-15.04a1 1 0 00-1.74 0z" />
-      </svg>
-    );
-  }
-  return (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" />
-    </svg>
-  );
+  const cls = "w-5 h-5";
+  if (severity === 'danger') return <AlertCircle className={cls} strokeWidth={1.8} />;
+  if (severity === 'warning') return <AlertTriangle className={cls} strokeWidth={1.8} />;
+  return <Info className={cls} strokeWidth={1.8} />;
 }
 
 export default function ExutoiresCalendrier() {
@@ -203,19 +190,19 @@ export default function ExutoiresCalendrier() {
             {/* Summary cards */}
             {!loading && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
+                <div className="card-modern p-4">
                   <p className="text-sm text-gray-500">Total expéditions</p>
                   <p className="text-2xl font-bold text-gray-900">{resume.total_expeditions ?? 0}</p>
                 </div>
-                <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
+                <div className="card-modern p-4">
                   <p className="text-sm text-gray-500">Tonnage total</p>
                   <p className="text-2xl font-bold text-gray-900">{resume.tonnage_total != null ? `${Number(resume.tonnage_total).toFixed(1)} t` : '0 t'}</p>
                 </div>
-                <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
+                <div className="card-modern p-4">
                   <p className="text-sm text-gray-500">CA prévisionnel</p>
                   <p className="text-2xl font-bold text-gray-900">{resume.ca_previsionnel != null ? `${Number(resume.ca_previsionnel).toLocaleString('fr-FR')} €` : '0 €'}</p>
                 </div>
-                <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
+                <div className="card-modern p-4">
                   <p className="text-sm text-gray-500">Taux moyen d'occupation</p>
                   <p className="text-2xl font-bold text-gray-900">{resume.taux_moyen_occupation != null ? `${Number(resume.taux_moyen_occupation).toFixed(0)}%` : '—'}</p>
                 </div>
@@ -260,13 +247,10 @@ export default function ExutoiresCalendrier() {
             </div>
 
             {loading ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-                <span className="ml-3 text-gray-500">Chargement...</span>
-              </div>
+              <LoadingSpinner size="lg" message="Chargement du calendrier..." />
             ) : viewMode === 'mensuel' ? (
               /* Monthly calendar grid */
-              <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+              <div className="card-modern overflow-hidden">
                 {/* Day headers */}
                 <div className="grid grid-cols-7 border-b border-gray-200">
                   {JOURS.map((jour) => (
@@ -338,14 +322,14 @@ export default function ExutoiresCalendrier() {
               /* Weekly detail view */
               <div className="space-y-4">
                 {semaines.length === 0 && (
-                  <div className="bg-white rounded-lg shadow border border-gray-200 p-8 text-center text-gray-500">
+                  <div className="card-modern p-8 text-center text-gray-500">
                     Aucune donnée pour ce mois.
                   </div>
                 )}
                 {semaines.map((sem) => {
                   const isExpanded = expandedWeek === sem.semaine;
                   return (
-                    <div key={sem.semaine} className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+                    <div key={sem.semaine} className="card-modern overflow-hidden">
                       {/* Week header */}
                       <button
                         onClick={() => setExpandedWeek(isExpanded ? null : sem.semaine)}
@@ -458,7 +442,7 @@ export default function ExutoiresCalendrier() {
           {/* Alerts sidebar */}
           {showAlertes && (
             <div className="w-80 flex-shrink-0">
-              <div className="bg-white rounded-lg shadow border border-gray-200 sticky top-6">
+              <div className="card-modern sticky top-6">
                 <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                     Alertes

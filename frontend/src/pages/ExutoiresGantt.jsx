@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const LIEUX = {
@@ -547,7 +548,7 @@ export default function ExutoiresGantt() {
         </h1>
 
         {/* Controls bar */}
-        <div className="flex flex-wrap items-center gap-4 mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-3">
+        <div className="flex flex-wrap items-center gap-4 mb-6 card-modern p-3">
           {/* View mode buttons */}
           <div className="flex rounded-lg border border-gray-300 overflow-hidden">
             {viewModes.map(({ key, label }) => (
@@ -594,12 +595,12 @@ export default function ExutoiresGantt() {
 
           {/* Counter */}
           <span className="ml-auto text-sm text-gray-500">
-            {loading ? 'Chargement...' : `${totalItems} pr\u00e9paration${totalItems > 1 ? 's' : ''}`}
+            {loading ? 'Chargement du Gantt...' : `${totalItems} pr\u00e9paration${totalItems > 1 ? 's' : ''}`}
           </span>
         </div>
 
         {/* Gantt Chart */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="card-modern overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />

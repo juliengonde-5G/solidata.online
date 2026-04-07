@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
 import { UserPlus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, StatusBadge, LoadingSpinner } from '../components';
+import { DataTable, StatusBadge, LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 
 const ROLE_LABELS = { ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines', COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité' };
-const ROLE_COLORS = { ADMIN: 'bg-red-100 text-red-700', MANAGER: 'bg-purple-100 text-purple-700', RH: 'bg-blue-100 text-blue-700', COLLABORATEUR: 'bg-green-100 text-green-700', AUTORITE: 'bg-yellow-100 text-yellow-700' };
 
 export default function Users() {
   const [users, setUsers] = useState([]);
@@ -64,21 +63,13 @@ export default function Users() {
       key: 'role',
       label: 'Rôle',
       sortable: true,
-      render: (u) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${ROLE_COLORS[u.role] || ''}`}>
-          {ROLE_LABELS[u.role] || u.role}
-        </span>
-      ),
+      render: (u) => <StatusBadge status={u.role} size="sm" />,
     },
     {
       key: 'is_active',
       label: 'Statut',
       sortable: true,
-      render: (u) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${u.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-          {u.is_active ? 'Actif' : 'Désactivé'}
-        </span>
-      ),
+      render: (u) => <StatusBadge status={u.is_active ? 'active' : 'inactive'} size="sm" />,
     },
     {
       key: 'last_login',
@@ -120,29 +111,26 @@ export default function Users() {
         />
 
         {/* Form */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createUser} className="bg-white rounded-xl p-6 w-[400px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouvel utilisateur</h2>
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="Prénom" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
-                  <input placeholder="Nom" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} className="border rounded-lg px-3 py-2 text-sm" />
-                </div>
-                <input placeholder="Nom d'utilisateur *" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input placeholder="Mot de passe *" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvel utilisateur" size="sm">
+          <form onSubmit={createUser}>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <input placeholder="Prénom" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} className="input-modern" />
+                <input placeholder="Nom" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} className="input-modern" />
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
-              </div>
-            </form>
-          </div>
-        )}
+              <input placeholder="Nom d'utilisateur *" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} className="input-modern" required />
+              <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="input-modern" />
+              <input placeholder="Mot de passe *" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className="input-modern" required />
+              <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="select-modern">
+                {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
+            </div>
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

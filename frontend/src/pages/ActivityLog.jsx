@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const ACTION_LABELS = {
@@ -151,22 +152,22 @@ export default function ActivityLog() {
     <Layout>
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-solidata-dark">Journal d'activité</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Journal d'activité</h1>
           <p className="text-gray-500">Suivi des actions, connexions et sessions utilisateurs</p>
         </div>
 
         {/* Stats rapides */}
         {stats && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <p className="text-xs text-gray-400 mb-1">Actions aujourd'hui</p>
               <p className="text-2xl font-bold text-[var(--color-primary)]">{stats.today}</p>
             </div>
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <p className="text-xs text-gray-400 mb-1">Sessions actives</p>
               <p className="text-2xl font-bold text-blue-600">{activeSessionCount}</p>
             </div>
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <p className="text-xs text-gray-400 mb-2">Top actions (30j)</p>
               <div className="space-y-1">
                 {stats.by_action?.slice(0, 3).map(a => (
@@ -179,7 +180,7 @@ export default function ActivityLog() {
                 ))}
               </div>
             </div>
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <p className="text-xs text-gray-400 mb-2">Plus actifs (30j)</p>
               <div className="space-y-1">
                 {stats.by_user?.slice(0, 3).map(u => (
@@ -214,7 +215,7 @@ export default function ActivityLog() {
             <select
               value={filters.user_id}
               onChange={e => { setFilters({ ...filters, user_id: e.target.value }); setPage(0); }}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="select-modern w-auto"
             >
               <option value="">Tous les utilisateurs</option>
               {users.map(u => (
@@ -223,7 +224,7 @@ export default function ActivityLog() {
             </select>
             {tab === 'activity' && (
               <>
-                <select value={filters.action} onChange={e => { setFilters({ ...filters, action: e.target.value }); setPage(0); }} className="border rounded-lg px-3 py-2 text-sm">
+                <select value={filters.action} onChange={e => { setFilters({ ...filters, action: e.target.value }); setPage(0); }} className="select-modern w-auto">
                   <option value="">Toutes les actions</option>
                   <option value="login">Connexion</option>
                   <option value="logout">Déconnexion</option>
@@ -232,7 +233,7 @@ export default function ActivityLog() {
                   <option value="delete">Suppression</option>
                   <option value="password_change">Changement MDP</option>
                 </select>
-                <select value={filters.entity_type} onChange={e => { setFilters({ ...filters, entity_type: e.target.value }); setPage(0); }} className="border rounded-lg px-3 py-2 text-sm">
+                <select value={filters.entity_type} onChange={e => { setFilters({ ...filters, entity_type: e.target.value }); setPage(0); }} className="select-modern w-auto">
                   <option value="">Toutes les entités</option>
                   {Object.entries(ENTITY_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
@@ -245,21 +246,21 @@ export default function ActivityLog() {
 
         {/* Contenu par onglet */}
         {loading ? (
-          <div className="bg-white rounded-xl shadow-sm border p-12 text-center text-gray-400">Chargement...</div>
+          <LoadingSpinner size="lg" message="Chargement des logs..." />
         ) : tab === 'chatbot' ? (
           /* SolidataBot History */
           <div className="space-y-4">
             {chatStats && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white rounded-xl shadow-sm border p-4">
+                <div className="card-modern p-4">
                   <p className="text-xs text-gray-400 mb-1">Total conversations</p>
                   <p className="text-2xl font-bold text-[var(--color-primary)]">{chatStats.total}</p>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border p-4">
+                <div className="card-modern p-4">
                   <p className="text-xs text-gray-400 mb-1">Aujourd'hui</p>
                   <p className="text-2xl font-bold text-blue-600">{chatStats.today}</p>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border p-4">
+                <div className="card-modern p-4">
                   <p className="text-xs text-gray-400 mb-1">Temps de réponse moyen</p>
                   <p className="text-2xl font-bold text-purple-600">
                     {chatStats.avg_response_ms > 1000 ? `${(chatStats.avg_response_ms / 1000).toFixed(1)}s` : `${chatStats.avg_response_ms}ms`}
@@ -271,7 +272,7 @@ export default function ActivityLog() {
               <select
                 value={filters.user_id}
                 onChange={e => { setFilters({ ...filters, user_id: e.target.value }); setPage(0); }}
-                className="border rounded-lg px-3 py-2 text-sm"
+                className="select-modern w-auto"
               >
                 <option value="">Tous les utilisateurs</option>
                 {users.map(u => (
@@ -279,7 +280,7 @@ export default function ActivityLog() {
                 ))}
               </select>
             </div>
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="card-modern overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
@@ -323,7 +324,7 @@ export default function ActivityLog() {
           </div>
         ) : tab === 'sessions' ? (
           /* Sessions */
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <div className="card-modern overflow-hidden">
             <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
               <span className="text-sm font-medium text-gray-600">
                 {activeSessionCount} session{activeSessionCount > 1 ? 's' : ''} active{activeSessionCount > 1 ? 's' : ''}
@@ -383,7 +384,7 @@ export default function ActivityLog() {
         ) : (
           /* Activity & Connections */
           <>
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="card-modern overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase">

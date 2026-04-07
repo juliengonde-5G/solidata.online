@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 
 const TARIF_TYPES = [
@@ -221,7 +222,7 @@ export default function Settings() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des paramètres..." /></Layout>;
 
   // Group tarifs by type
   const tarifsByType = {};
@@ -234,14 +235,14 @@ export default function Settings() {
     <Layout>
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-solidata-dark">Paramètres</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Paramètres</h1>
           <p className="text-gray-500">Configuration de l'application</p>
         </div>
 
         {/* État du système */}
         {health && (
-          <div className="bg-white rounded-xl shadow-sm border p-6 mb-8">
-            <h2 className="font-semibold text-solidata-dark mb-4">État du système</h2>
+          <div className="card-modern p-6 mb-8">
+            <h2 className="font-semibold text-slate-800 mb-4">État du système</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatusItem label="API" active={health.status === 'ok'} />
               <StatusItem label="Base de données" active={health.database?.connected} />
@@ -255,14 +256,14 @@ export default function Settings() {
         )}
 
         {/* Pennylane */}
-        <div className="bg-white rounded-xl shadow-sm border p-6 mb-8">
+        <div className="card-modern p-6 mb-8">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
                 <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               </div>
               <div>
-                <h2 className="font-semibold text-solidata-dark">Connexion Pennylane</h2>
+                <h2 className="font-semibold text-slate-800">Connexion Pennylane</h2>
                 <p className="text-xs text-gray-400">Comptabilite — synchronisation factures</p>
               </div>
             </div>
@@ -287,7 +288,7 @@ export default function Settings() {
                 placeholder="pl_api_..."
                 value={plForm.api_key}
                 onChange={e => setPlForm({ ...plForm, api_key: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm"
+                className="input-modern"
               />
               <p className="text-[10px] text-gray-400 mt-0.5">Vide = conserver la cle existante</p>
             </div>
@@ -297,7 +298,7 @@ export default function Settings() {
                 placeholder="ex: solidarite-textiles"
                 value={plForm.company_id}
                 onChange={e => setPlForm({ ...plForm, company_id: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm"
+                className="input-modern"
               />
             </div>
             <div className="flex flex-col justify-between">
@@ -340,7 +341,7 @@ export default function Settings() {
         </div>
 
         {/* Settings */}
-        <div className="bg-white rounded-xl shadow-sm border mb-8">
+        <div className="card-modern mb-8">
           <div className="p-4 border-b bg-gray-50">
             <h2 className="font-semibold">Paramètres généraux</h2>
           </div>
@@ -356,7 +357,7 @@ export default function Settings() {
                     <input
                       defaultValue={s.value}
                       onKeyDown={(e) => { if (e.key === 'Enter') updateSetting(s.key, e.target.value); }}
-                      className="border rounded px-2 py-1 text-sm w-48"
+                      className="input-modern w-48 py-1"
                       autoFocus
                     />
                     <button onClick={() => setEditSetting(null)} className="text-gray-400 text-sm">Annuler</button>
@@ -364,7 +365,7 @@ export default function Settings() {
                 ) : (
                   <div className="flex items-center gap-3">
                     <span className="text-sm text-gray-600 font-mono bg-gray-50 px-2 py-1 rounded">{s.value}</span>
-                    <button onClick={() => setEditSetting(s.key)} className="text-solidata-green text-xs hover:underline">Modifier</button>
+                    <button onClick={() => setEditSetting(s.key)} className="text-primary text-xs hover:underline">Modifier</button>
                   </div>
                 )}
               </div>
@@ -373,7 +374,7 @@ export default function Settings() {
         </div>
 
         {/* ══════════ GRILLE TARIFAIRE ══════════ */}
-        <div className="bg-white rounded-xl shadow-sm border mb-8">
+        <div className="card-modern mb-8">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <div>
               <h2 className="font-semibold">Grille tarifaire</h2>
@@ -398,7 +399,7 @@ export default function Settings() {
                       {tt.parClient && <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] rounded">par client</span>}
                       {tt.parTrimestre && <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] rounded">par trimestre</span>}
                     </div>
-                    <button onClick={() => openTarifEdit(tt.key)} className="text-solidata-green text-xs font-medium hover:underline">+ Ajouter</button>
+                    <button onClick={() => openTarifEdit(tt.key)} className="text-primary text-xs font-medium hover:underline">+ Ajouter</button>
                   </div>
 
                   {rows.length > 0 ? (
@@ -434,7 +435,7 @@ export default function Settings() {
                       {tt.parTrimestre && (
                         <div className="flex-1">
                           <label className="text-[10px] text-gray-500 block mb-0.5">Trimestre</label>
-                          <select value={tarifForm.trimestre} onChange={e => setTarifForm({ ...tarifForm, trimestre: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required>
+                          <select value={tarifForm.trimestre} onChange={e => setTarifForm({ ...tarifForm, trimestre: e.target.value })} className="select-modern py-1.5" required>
                             <option value="">—</option>
                             <option value="1">T1</option>
                             <option value="2">T2</option>
@@ -446,7 +447,7 @@ export default function Settings() {
                       {tt.parClient && (
                         <div className="flex-1">
                           <label className="text-[10px] text-gray-500 block mb-0.5">Client</label>
-                          <select value={tarifForm.exutoire_id} onChange={e => setTarifForm({ ...tarifForm, exutoire_id: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required>
+                          <select value={tarifForm.exutoire_id} onChange={e => setTarifForm({ ...tarifForm, exutoire_id: e.target.value })} className="select-modern py-1.5" required>
                             <option value="">Choisir…</option>
                             {exutoires.map(ex => <option key={ex.id} value={ex.id}>{ex.nom}</option>)}
                           </select>
@@ -454,9 +455,9 @@ export default function Settings() {
                       )}
                       <div className="flex-1">
                         <label className="text-[10px] text-gray-500 block mb-0.5">Prix €/tonne</label>
-                        <input type="number" step="0.01" min="0" value={tarifForm.prix_tonne} onChange={e => setTarifForm({ ...tarifForm, prix_tonne: e.target.value })} className="w-full border rounded px-2 py-1.5 text-sm" required placeholder="0.00" />
+                        <input type="number" step="0.01" min="0" value={tarifForm.prix_tonne} onChange={e => setTarifForm({ ...tarifForm, prix_tonne: e.target.value })} className="input-modern py-1.5" required placeholder="0.00" />
                       </div>
-                      <button type="submit" className="bg-solidata-green text-white rounded px-3 py-1.5 text-sm">OK</button>
+                      <button type="submit" className="btn-primary text-sm">OK</button>
                       <button type="button" onClick={() => setEditTarif(null)} className="text-gray-400 text-sm px-2 py-1.5">Annuler</button>
                     </form>
                   )}
@@ -467,10 +468,10 @@ export default function Settings() {
         </div>
 
         {/* Message Templates */}
-        <div className="bg-white rounded-xl shadow-sm border">
+        <div className="card-modern">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <h2 className="font-semibold">Modèles de messages</h2>
-            <button onClick={() => setShowTemplateForm(true)} className="text-solidata-green text-sm font-medium hover:underline">+ Ajouter</button>
+            <button onClick={() => setShowTemplateForm(true)} className="text-primary text-sm font-medium hover:underline">+ Ajouter</button>
           </div>
           <div className="divide-y">
             {templates.map(t => (
@@ -494,38 +495,35 @@ export default function Settings() {
         </div>
 
         {/* Template Form Modal */}
-        {showTemplateForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createTemplate} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau modele de message</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom du template *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="email">Email</option>
-                  <option value="sms">SMS</option>
-                </select>
-                {templateForm.type === 'email' && (
-                  <input placeholder="Objet de l'email" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                )}
-                <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows={4} required />
-                <p className="text-[10px] text-gray-400">Variables : {'{prenom}'}, {'{nom}'}, {'{date}'}, {'{heure}'}, {'{lieu}'}, {'{poste}'}, {'{equipe}'}</p>
-              </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button type="button" onClick={() => setShowTemplateForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-                <button type="submit" className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm font-medium">Creer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showTemplateForm} onClose={() => setShowTemplateForm(false)} title="Nouveau modele de message" size="md">
+          <form onSubmit={createTemplate}>
+            <div className="space-y-3">
+              <input placeholder="Nom du template *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="input-modern" required />
+              <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="select-modern">
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+              </select>
+              {templateForm.type === 'email' && (
+                <input placeholder="Objet de l'email" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="input-modern" />
+              )}
+              <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="textarea-modern" rows={4} required />
+              <p className="text-[10px] text-gray-400">Variables : {'{prenom}'}, {'{nom}'}, {'{date}'}, {'{heure}'}, {'{lieu}'}, {'{poste}'}, {'{equipe}'}</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setShowTemplateForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
+              <button type="submit" className="btn-primary text-sm">Creer</button>
+            </div>
+          </form>
+        </Modal>
 
         {/* Declencheurs automatiques */}
-        <div className="bg-white rounded-xl shadow-sm border">
+        <div className="card-modern">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <div>
               <h2 className="font-semibold">Declencheurs automatiques</h2>
               <p className="text-xs text-gray-400 mt-0.5">Definir quand envoyer automatiquement un email ou SMS</p>
             </div>
-            <button onClick={() => setShowTriggerForm(true)} className="bg-solidata-green text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-solidata-green/90">+ Declencheur</button>
+            <button onClick={() => setShowTriggerForm(true)} className="btn-primary text-xs">+ Declencheur</button>
           </div>
           <div className="divide-y">
             {triggers.length === 0 ? (
@@ -558,39 +556,36 @@ export default function Settings() {
         </div>
 
         {/* Trigger Form Modal */}
-        {showTriggerForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createTrigger} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau declencheur</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom (ex: Rappel entretien J-1) *" value={triggerForm.name} onChange={e => setTriggerForm({ ...triggerForm, name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <select value={triggerForm.event} onChange={e => setTriggerForm({ ...triggerForm, event: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
-                  <option value="">-- Evenement declencheur --</option>
-                  {triggerEvents.map(ev => (
-                    <option key={ev.value} value={ev.value}>{ev.label}</option>
-                  ))}
-                </select>
-                <select value={triggerForm.template_id} onChange={e => setTriggerForm({ ...triggerForm, template_id: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
-                  <option value="">-- Template a utiliser --</option>
-                  {templates.filter(t => t.is_active).map(t => (
-                    <option key={t.id} value={t.id}>[{t.type.toUpperCase()}] {t.name}</option>
-                  ))}
-                </select>
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Delai avant envoi (minutes)</label>
-                  <input type="number" min="0" value={triggerForm.delay_minutes} onChange={e => setTriggerForm({ ...triggerForm, delay_minutes: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="0 = immediat" />
-                </div>
+        <Modal isOpen={showTriggerForm} onClose={() => setShowTriggerForm(false)} title="Nouveau declencheur" size="md">
+          <form onSubmit={createTrigger}>
+            <div className="space-y-3">
+              <input placeholder="Nom (ex: Rappel entretien J-1) *" value={triggerForm.name} onChange={e => setTriggerForm({ ...triggerForm, name: e.target.value })} className="input-modern" required />
+              <select value={triggerForm.event} onChange={e => setTriggerForm({ ...triggerForm, event: e.target.value })} className="select-modern" required>
+                <option value="">-- Evenement declencheur --</option>
+                {triggerEvents.map(ev => (
+                  <option key={ev.value} value={ev.value}>{ev.label}</option>
+                ))}
+              </select>
+              <select value={triggerForm.template_id} onChange={e => setTriggerForm({ ...triggerForm, template_id: e.target.value })} className="select-modern" required>
+                <option value="">-- Template a utiliser --</option>
+                {templates.filter(t => t.is_active).map(t => (
+                  <option key={t.id} value={t.id}>[{t.type.toUpperCase()}] {t.name}</option>
+                ))}
+              </select>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Delai avant envoi (minutes)</label>
+                <input type="number" min="0" value={triggerForm.delay_minutes} onChange={e => setTriggerForm({ ...triggerForm, delay_minutes: e.target.value })} className="input-modern" placeholder="0 = immediat" />
               </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button type="button" onClick={() => setShowTriggerForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-                <button type="submit" className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm font-medium">Creer</button>
-              </div>
-            </form>
-          </div>
-        )}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setShowTriggerForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
+              <button type="submit" className="btn-primary text-sm">Creer</button>
+            </div>
+          </form>
+        </Modal>
 
         {/* Objectifs periodiques */}
-        <div className="bg-white rounded-xl shadow-sm border mb-8">
+        <div className="card-modern mb-8">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <div>
               <h2 className="font-semibold">Objectifs periodiques</h2>
@@ -600,7 +595,7 @@ export default function Settings() {
               <button onClick={() => setObjAnnee(objAnnee - 1)} className="text-gray-400 hover:text-gray-600 px-1">&lt;</button>
               <span className="font-bold text-sm">{objAnnee}</span>
               <button onClick={() => setObjAnnee(objAnnee + 1)} className="text-gray-400 hover:text-gray-600 px-1">&gt;</button>
-              <button onClick={() => setShowObjForm(true)} className="ml-3 bg-solidata-green text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-solidata-green/90">+ Objectif</button>
+              <button onClick={() => setShowObjForm(true)} className="ml-3 btn-primary text-xs">+ Objectif</button>
             </div>
           </div>
           {objectives.length === 0 ? (
@@ -622,7 +617,7 @@ export default function Settings() {
                               {obj.periode === 'mensuel' && obj.mois ? `Mois ${obj.mois}` : obj.periode === 'trimestriel' && obj.trimestre ? `T${obj.trimestre}` : obj.periode}
                             </span>
                           </div>
-                          <span className="font-bold text-sm text-solidata-green mr-3">{obj.valeur_cible} {obj.unite}</span>
+                          <span className="font-bold text-sm text-primary mr-3">{obj.valeur_cible} {obj.unite}</span>
                           <button onClick={() => deleteObjective(obj.id)} className="text-red-400 hover:text-red-600 text-xs">Suppr.</button>
                         </div>
                       ))}
@@ -635,73 +630,67 @@ export default function Settings() {
         </div>
 
         {/* Objectif Form Modal */}
-        {showObjForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createObjective} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouvel objectif — {objAnnee}</h2>
-              <div className="space-y-3">
-                <select value={objForm.domaine} onChange={e => setObjForm({ ...objForm, domaine: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required>
-                  <option value="collecte">Collecte</option>
-                  <option value="production">Production</option>
-                  <option value="tri">Tri</option>
-                  <option value="rh">RH</option>
-                  <option value="commercial">Commercial</option>
-                  <option value="logistique">Logistique</option>
+        <Modal isOpen={showObjForm} onClose={() => setShowObjForm(false)} title={`Nouvel objectif — ${objAnnee}`} size="md">
+          <form onSubmit={createObjective}>
+            <div className="space-y-3">
+              <select value={objForm.domaine} onChange={e => setObjForm({ ...objForm, domaine: e.target.value })} className="select-modern" required>
+                <option value="collecte">Collecte</option>
+                <option value="production">Production</option>
+                <option value="tri">Tri</option>
+                <option value="rh">RH</option>
+                <option value="commercial">Commercial</option>
+                <option value="logistique">Logistique</option>
+              </select>
+              <input placeholder="Indicateur (ex: Tonnage collecte) *" value={objForm.indicateur} onChange={e => setObjForm({ ...objForm, indicateur: e.target.value })} className="input-modern" required />
+              <input placeholder="Unite (ex: tonnes, %, EUR)" value={objForm.unite} onChange={e => setObjForm({ ...objForm, unite: e.target.value })} className="input-modern" />
+              <select value={objForm.periode} onChange={e => setObjForm({ ...objForm, periode: e.target.value, mois: '', trimestre: '' })} className="select-modern">
+                <option value="mensuel">Mensuel</option>
+                <option value="trimestriel">Trimestriel</option>
+                <option value="annuel">Annuel</option>
+              </select>
+              {objForm.periode === 'mensuel' && (
+                <select value={objForm.mois} onChange={e => setObjForm({ ...objForm, mois: e.target.value })} className="select-modern">
+                  <option value="">Tous les mois</option>
+                  {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'][m-1]}</option>)}
                 </select>
-                <input placeholder="Indicateur (ex: Tonnage collecte) *" value={objForm.indicateur} onChange={e => setObjForm({ ...objForm, indicateur: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <input placeholder="Unite (ex: tonnes, %, EUR)" value={objForm.unite} onChange={e => setObjForm({ ...objForm, unite: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <select value={objForm.periode} onChange={e => setObjForm({ ...objForm, periode: e.target.value, mois: '', trimestre: '' })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="mensuel">Mensuel</option>
-                  <option value="trimestriel">Trimestriel</option>
-                  <option value="annuel">Annuel</option>
+              )}
+              {objForm.periode === 'trimestriel' && (
+                <select value={objForm.trimestre} onChange={e => setObjForm({ ...objForm, trimestre: e.target.value })} className="select-modern">
+                  <option value="">Tous les trimestres</option>
+                  <option value="1">T1</option>
+                  <option value="2">T2</option>
+                  <option value="3">T3</option>
+                  <option value="4">T4</option>
                 </select>
-                {objForm.periode === 'mensuel' && (
-                  <select value={objForm.mois} onChange={e => setObjForm({ ...objForm, mois: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                    <option value="">Tous les mois</option>
-                    {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'][m-1]}</option>)}
-                  </select>
-                )}
-                {objForm.periode === 'trimestriel' && (
-                  <select value={objForm.trimestre} onChange={e => setObjForm({ ...objForm, trimestre: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                    <option value="">Tous les trimestres</option>
-                    <option value="1">T1</option>
-                    <option value="2">T2</option>
-                    <option value="3">T3</option>
-                    <option value="4">T4</option>
-                  </select>
-                )}
-                <input type="number" step="0.01" placeholder="Valeur cible *" value={objForm.valeur_cible} onChange={e => setObjForm({ ...objForm, valeur_cible: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <input placeholder="Commentaire" value={objForm.commentaire} onChange={e => setObjForm({ ...objForm, commentaire: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Creer</button>
-              </div>
-            </form>
-          </div>
-        )}
+              )}
+              <input type="number" step="0.01" placeholder="Valeur cible *" value={objForm.valeur_cible} onChange={e => setObjForm({ ...objForm, valeur_cible: e.target.value })} className="input-modern" required />
+              <input placeholder="Commentaire" value={objForm.commentaire} onChange={e => setObjForm({ ...objForm, commentaire: e.target.value })} className="input-modern" />
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 btn-ghost">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Creer</button>
+            </div>
+          </form>
+        </Modal>
 
-        {showTemplateForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createTemplate} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau modèle</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom du modèle *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-                <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="email">Email</option>
-                  <option value="sms">SMS</option>
-                </select>
-                <input placeholder="Objet (email)" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" rows="5" required />
-                <input placeholder="Variables (ex: {nom}, {date})" value={templateForm.variables} onChange={e => setTemplateForm({ ...templateForm, variables: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowTemplateForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm">Créer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showTemplateForm} onClose={() => setShowTemplateForm(false)} title="Nouveau modèle" size="md">
+          <form onSubmit={createTemplate}>
+            <div className="space-y-3">
+              <input placeholder="Nom du modèle *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="input-modern" required />
+              <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="select-modern">
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+              </select>
+              <input placeholder="Objet (email)" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="input-modern" />
+              <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="textarea-modern" rows="5" required />
+              <input placeholder="Variables (ex: {nom}, {date})" value={templateForm.variables} onChange={e => setTemplateForm({ ...templateForm, variables: e.target.value })} className="input-modern" />
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowTemplateForm(false)} className="flex-1 btn-ghost">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
+            </div>
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

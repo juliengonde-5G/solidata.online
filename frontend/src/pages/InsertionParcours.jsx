@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 
 const URGENCY_COLORS = {
@@ -225,7 +226,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Statut</label>
           <select value={form.status || 'a_planifier'} onChange={e => setForm({ ...form, status: e.target.value })}
-            className="w-full border rounded px-2 py-1 text-sm">
+            className="input-modern py-1">
             <option value="a_planifier">A planifier</option>
             <option value="planifie">Planifie</option>
             <option value="realise">Realise</option>
@@ -236,13 +237,13 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
           <label className="block text-xs font-medium text-gray-500 mb-1">Date entretien</label>
           <input type="datetime-local" value={form.interview_date ? form.interview_date.substring(0, 16) : ''}
             onChange={e => setForm({ ...form, interview_date: e.target.value })}
-            className="w-full border rounded px-2 py-1 text-sm" />
+            className="input-modern py-1" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Date realisation</label>
           <input type="date" value={form.completed_date || ''}
             onChange={e => setForm({ ...form, completed_date: e.target.value })}
-            className="w-full border rounded px-2 py-1 text-sm" />
+            className="input-modern py-1" />
         </div>
       </div>
 
@@ -259,7 +260,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
               ))}
               <textarea value={form[section.champ] || ''} onChange={e => setForm({ ...form, [section.champ]: e.target.value })}
                 placeholder={`Reponses et observations pour "${section.titre}"...`}
-                className="w-full border rounded px-2 py-1 text-sm mt-1" rows={3} />
+                className="input-modern py-1 mt-1" rows={3} />
             </div>
           ))}
         </div>
@@ -296,27 +297,27 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Bilan professionnel</label>
           <textarea value={form.bilan_professionnel || ''} onChange={e => setForm({ ...form, bilan_professionnel: e.target.value })}
-            className="w-full border rounded px-2 py-1 text-sm" rows={3} />
+            className="input-modern py-1" rows={3} />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Bilan social</label>
           <textarea value={form.bilan_social || ''} onChange={e => setForm({ ...form, bilan_social: e.target.value })}
-            className="w-full border rounded px-2 py-1 text-sm" rows={3} />
+            className="input-modern py-1" rows={3} />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Objectifs realises</label>
           <textarea value={form.objectifs_realises || ''} onChange={e => setForm({ ...form, objectifs_realises: e.target.value })}
-            className="w-full border rounded px-2 py-1 text-sm" rows={2} />
+            className="input-modern py-1" rows={2} />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Objectifs prochaine periode</label>
           <textarea value={form.objectifs_prochaine_periode || ''} onChange={e => setForm({ ...form, objectifs_prochaine_periode: e.target.value })}
-            className="w-full border rounded px-2 py-1 text-sm" rows={2} />
+            className="input-modern py-1" rows={2} />
         </div>
         <div className="col-span-2">
           <label className="block text-xs font-medium text-gray-500 mb-1">Observations</label>
           <textarea value={form.observations || ''} onChange={e => setForm({ ...form, observations: e.target.value })}
-            className="w-full border rounded px-2 py-1 text-sm" rows={2} />
+            className="input-modern py-1" rows={2} />
         </div>
       </div>
 
@@ -354,7 +355,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
           <div>
             <label className="block text-xs text-gray-500 mb-1">Type de sortie</label>
             <select value={form.sortie_type || ''} onChange={e => setForm({ ...form, sortie_type: e.target.value })}
-              className="w-full border rounded px-2 py-1 text-sm">
+              className="input-modern py-1">
               <option value="">Selectionner...</option>
               <option value="CDI">CDI</option>
               <option value="CDD">CDD &gt; 6 mois</option>
@@ -370,13 +371,13 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
             <label className="block text-xs text-gray-500 mb-1">Employeur / Organisme de formation</label>
             <input type="text" value={form.sortie_employeur || ''}
               onChange={e => setForm({ ...form, sortie_employeur: e.target.value })}
-              className="w-full border rounded px-2 py-1 text-sm" />
+              className="input-modern py-1" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Commentaires CIP sortie</label>
             <textarea value={form.sortie_commentaires || ''}
               onChange={e => setForm({ ...form, sortie_commentaires: e.target.value })}
-              className="w-full border rounded px-2 py-1 text-sm" rows={3} />
+              className="input-modern py-1" rows={3} />
           </div>
         </div>
       )}
@@ -404,7 +405,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
         <div className="flex gap-2">
           <input type="text" value={newAction.action_label} placeholder="Nouvelle action..."
             onChange={e => setNewAction({ ...newAction, action_label: e.target.value })}
-            className="flex-1 border rounded px-2 py-1 text-sm" />
+            className="input-modern py-1 flex-1" />
           <select value={newAction.category} onChange={e => setNewAction({ ...newAction, category: e.target.value })}
             className="border rounded px-1 py-1 text-xs">
             {Object.entries(ACTION_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -415,7 +416,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
             <option value="moyenne">Moyenne</option>
             <option value="basse">Basse</option>
           </select>
-          <button onClick={handleAddAction} className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">+</button>
+          <button onClick={handleAddAction} className="btn-primary text-xs">+</button>
         </div>
       </div>
 
@@ -602,7 +603,7 @@ export default function InsertionParcours() {
             )}
 
             {selectedEmployee && loading && (
-              <div className="bg-white rounded-lg border p-8 text-center text-gray-400">Chargement...</div>
+              <LoadingSpinner size="lg" message="Chargement des parcours..." />
             )}
 
             {selectedEmployee && !loading && analysis && (
@@ -624,7 +625,7 @@ export default function InsertionParcours() {
                     </div>
                   </div>
                   <button onClick={initializeMilestones}
-                    className="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600">
+                    className="btn-primary text-sm">
                     Initialiser jalons
                   </button>
                 </div>
@@ -658,7 +659,7 @@ export default function InsertionParcours() {
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Parcours anterieur</label>
                       <textarea value={diagnostic.parcours_anterieur || ''} onChange={e => setDiagnostic({ ...diagnostic, parcours_anterieur: e.target.value })}
-                        className="w-full border rounded px-2 py-1 text-sm" rows={3} />
+                        className="input-modern py-1" rows={3} />
                     </div>
 
                     {/* Freins avec questions indirectes */}
@@ -685,7 +686,7 @@ export default function InsertionParcours() {
                           <textarea value={diagnostic[`frein_${key}_detail`] || ''}
                             onChange={e => setDiagnostic({ ...diagnostic, [`frein_${key}_detail`]: e.target.value })}
                             placeholder={`Observations ${def.label}...`}
-                            className="w-full border rounded px-2 py-1 text-xs" rows={2} />
+                            className="input-modern py-1 text-xs" rows={2} />
                         </div>
                       );
                     })}
@@ -701,7 +702,7 @@ export default function InsertionParcours() {
                         <div key={key}>
                           <label className="block text-xs text-gray-500 mb-1">{label}</label>
                           <textarea value={diagnostic[key] || ''} onChange={e => setDiagnostic({ ...diagnostic, [key]: e.target.value })}
-                            className="w-full border rounded px-2 py-1 text-sm" rows={2} />
+                            className="input-modern py-1" rows={2} />
                         </div>
                       ))}
                     </div>

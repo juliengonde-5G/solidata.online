@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
@@ -67,14 +68,14 @@ export default function LiveVehicles() {
 
   const center = [49.4231, 1.0993];
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des véhicules..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Suivi en direct</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Suivi en direct</h1>
             <p className="text-gray-500">{activeTours.length} tournée{activeTours.length > 1 ? 's' : ''} en cours</p>
           </div>
           <div className="flex items-center gap-2">
@@ -85,7 +86,7 @@ export default function LiveVehicles() {
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           {/* Map */}
-          <div className="lg:col-span-3 bg-white rounded-xl shadow-sm border overflow-hidden" style={{ height: '75vh' }}>
+          <div className="lg:col-span-3 card-modern overflow-hidden" style={{ height: '75vh' }}>
             <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
@@ -127,7 +128,7 @@ export default function LiveVehicles() {
             {activeTours.map(tour => {
               const pos = positions[tour.id];
               return (
-                <div key={tour.id} className="bg-white rounded-xl shadow-sm border p-4">
+                <div key={tour.id} className="card-modern p-4">
                   <div className="flex items-center gap-3 mb-2">
                     <span className="text-lg">🚛</span>
                     <div>
@@ -164,7 +165,7 @@ export default function LiveVehicles() {
               );
             })}
             {activeTours.length === 0 && (
-              <div className="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 text-sm">
+              <div className="card-modern p-6 text-center text-gray-400 text-sm">
                 Aucune tournée en cours
               </div>
             )}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
@@ -62,19 +63,19 @@ export default function CAVMap() {
   // Centre Rouen
   const center = [49.4231, 1.0993];
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la carte..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Carte des CAV</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Carte des CAV</h1>
             <p className="text-gray-500">{filtered.length} Conteneurs d'Apport Volontaire</p>
             <p className="text-xs text-amber-600 italic mt-1">Taux de remplissage estimé par calcul algorithmique (remis à zéro après chaque collecte)</p>
           </div>
           <div className="flex gap-2 items-center">
-            <select value={filterCommune} onChange={e => setFilterCommune(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+            <select value={filterCommune} onChange={e => setFilterCommune(e.target.value)} className="select-modern w-auto">
               <option value="">Toutes les communes</option>
               {communes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -89,7 +90,7 @@ export default function CAVMap() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Map */}
-          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border overflow-hidden" style={{ height: '70vh' }}>
+          <div className="lg:col-span-2 card-modern overflow-hidden" style={{ height: '70vh' }}>
             <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
@@ -132,8 +133,8 @@ export default function CAVMap() {
           {/* Sidebar */}
           <div className="space-y-3 max-h-[70vh] overflow-y-auto">
             {selectedCav ? (
-              <div className="bg-white rounded-xl shadow-sm border p-4">
-                <button onClick={() => setSelectedCav(null)} className="text-solidata-green text-xs hover:underline mb-2">← Retour</button>
+              <div className="card-modern p-4">
+                <button onClick={() => setSelectedCav(null)} className="text-primary text-xs hover:underline mb-2">← Retour</button>
                 <h3 className="font-bold text-lg mb-2">{selectedCav.name}</h3>
                 <div className="space-y-2 text-sm">
                   <p><span className="text-gray-500">Commune :</span> {selectedCav.commune}</p>
@@ -151,7 +152,7 @@ export default function CAVMap() {
                   <div
                     key={cav.id}
                     onClick={() => loadCavDetail(cav.id)}
-                    className="bg-white rounded-lg shadow-sm border p-3 cursor-pointer hover:shadow-md transition"
+                    className="card-modern p-3 cursor-pointer hover:shadow-md transition"
                   >
                     <div className="flex items-center justify-between">
                       <div>

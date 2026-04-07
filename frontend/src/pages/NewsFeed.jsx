@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -70,18 +71,18 @@ export default function NewsFeed() {
 
   const formatDate = (d) => new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des actualités..." /></Layout>;
 
   return (
     <Layout>
       <div className="p-6 max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Fil d'actualite</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Fil d'actualite</h1>
             <p className="text-gray-500 text-sm">Veille reglementaire, actualite filiere textile et nouvelles locales</p>
           </div>
           {isAdmin && (
-            <button onClick={() => setShowForm(true)} className="bg-solidata-green text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-solidata-green/90">
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
               + Publier
             </button>
           )}
@@ -105,7 +106,7 @@ export default function NewsFeed() {
         {/* Articles */}
         <div className="space-y-4">
           {articles.length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm border p-12 text-center">
+            <div className="card-modern p-12 text-center">
               <p className="text-gray-400">Aucun article pour le moment</p>
               {isAdmin && <p className="text-sm text-gray-300 mt-1">Cliquez sur "Publier" pour ajouter du contenu</p>}
             </div>
@@ -114,7 +115,7 @@ export default function NewsFeed() {
             const hasFullContent = article.content && article.content.length > 0;
             const hasMore = hasFullContent || article.source_url;
             return (
-            <div key={article.id} className={`bg-white rounded-xl shadow-sm border p-5 transition-all ${article.is_pinned ? 'border-l-4 border-l-amber-400' : ''}`}>
+            <div key={article.id} className={`card-modern p-5 transition-all ${article.is_pinned ? 'border-l-4 border-l-amber-400' : ''}`}>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
@@ -152,7 +153,7 @@ export default function NewsFeed() {
                     {hasMore && (
                       <button
                         onClick={() => setExpandedArticle(isExpanded ? null : article.id)}
-                        className="text-sm text-solidata-green hover:text-solidata-green/80 font-medium flex items-center gap-1 transition"
+                        className="text-sm text-primary hover:text-primary/80 font-medium flex items-center gap-1 transition"
                       >
                         {isExpanded ? (
                           <>
@@ -201,45 +202,41 @@ export default function NewsFeed() {
       </div>
 
       {/* Creation form modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
-          <form onSubmit={createArticle} className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold mb-4">Publier un article</h2>
-            <div className="space-y-3">
-              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
-                <option value="metier">Filiere & Reglementation</option>
-                <option value="local">Actualite locale</option>
-              </select>
-              <input placeholder="Titre *" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" required />
-              <textarea placeholder="Resume (2-3 lignes)" value={form.summary} onChange={e => setForm({ ...form, summary: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows={2} />
-              <textarea placeholder="Contenu detaille (optionnel)" value={form.content} onChange={e => setForm({ ...form, content: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows={5} />
-              <input placeholder="URL source (optionnel)" value={form.source_url} onChange={e => setForm({ ...form, source_url: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-              <input placeholder="Nom de la source (optionnel)" value={form.source_name} onChange={e => setForm({ ...form, source_name: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Publier un article" size="md"
+        footer={<>
+          <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
+          <button type="submit" form="newsfeed-form" className="btn-primary text-sm">Publier</button>
+        </>}
+      >
+        <form id="newsfeed-form" onSubmit={createArticle} className="space-y-3">
+          <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="select-modern">
+            <option value="metier">Filiere & Reglementation</option>
+            <option value="local">Actualite locale</option>
+          </select>
+          <input placeholder="Titre *" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="input-modern" required />
+          <textarea placeholder="Resume (2-3 lignes)" value={form.summary} onChange={e => setForm({ ...form, summary: e.target.value })} className="textarea-modern" rows={2} />
+          <textarea placeholder="Contenu detaille (optionnel)" value={form.content} onChange={e => setForm({ ...form, content: e.target.value })} className="textarea-modern" rows={5} />
+          <input placeholder="URL source (optionnel)" value={form.source_url} onChange={e => setForm({ ...form, source_url: e.target.value })} className="input-modern" />
+          <input placeholder="Nom de la source (optionnel)" value={form.source_name} onChange={e => setForm({ ...form, source_name: e.target.value })} className="input-modern" />
 
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Tags :</p>
-                <div className="flex flex-wrap gap-1">
-                  {TAG_SUGGESTIONS.map(tag => (
-                    <button key={tag} type="button" onClick={() => toggleTag(tag)}
-                      className={`px-2 py-1 rounded text-xs transition ${form.tags.includes(tag) ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                      #{tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          <div>
+            <p className="text-xs text-gray-500 mb-2">Tags :</p>
+            <div className="flex flex-wrap gap-1">
+              {TAG_SUGGESTIONS.map(tag => (
+                <button key={tag} type="button" onClick={() => toggleTag(tag)}
+                  className={`px-2 py-1 rounded text-xs transition ${form.tags.includes(tag) ? 'bg-primary text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                  #{tag}
+                </button>
+              ))}
+            </div>
+          </div>
 
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.is_pinned} onChange={e => setForm({ ...form, is_pinned: e.target.checked })} className="rounded" />
-                Epingler en haut du fil
-              </label>
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-              <button type="submit" className="px-4 py-2 bg-solidata-green text-white rounded-lg text-sm font-medium">Publier</button>
-            </div>
-          </form>
-        </div>
-      )}
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.is_pinned} onChange={e => setForm({ ...form, is_pinned: e.target.checked })} className="rounded" />
+            Epingler en haut du fil
+          </label>
+        </form>
+      </Modal>
     </Layout>
   );
 }

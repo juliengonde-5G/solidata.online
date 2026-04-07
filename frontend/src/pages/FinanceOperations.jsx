@@ -1,4 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  BarChart3, Calculator, Factory, Scale, Ship, Tag, TrendingUp, Truck, Users,
+} from 'lucide-react';
+
+const IconPL = BarChart3;
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { PageHeader, KPICard, LoadingSpinner, EmptyState } from '../components';
@@ -14,29 +19,29 @@ const fmtDec = (v) => v != null ? Number(v).toLocaleString('fr-FR', { maximumFra
 const fmtPct = (v) => v != null ? `${Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}%` : '—';
 
 const CATEGORIES = [
-  { key: 'volumes', label: 'Volumes (tonnes)', icon: IconScale, fields: [
+  { key: 'volumes', label: 'Volumes (tonnes)', icon: Scale, fields: [
     { key: 'tonnes_collectees', label: 'Tonnes collectees' },
     { key: 'tonnes_triees', label: 'Tonnes triees' },
     { key: 'tonnes_expedites', label: 'Tonnes expediees' },
     { key: 'taux_valorisation', label: 'Taux de valorisation (%)' },
   ]},
-  { key: 'exutoires', label: 'Exutoires', icon: IconShip, fields: [
+  { key: 'exutoires', label: 'Exutoires', icon: Ship, fields: [
     { key: 'nb_exutoires', label: 'Nombre d\'exutoires' },
     { key: 'ca_exutoires', label: 'CA exutoires (EUR)' },
     { key: 'prix_moyen_tonne', label: 'Prix moyen / tonne' },
   ]},
-  { key: 'prix', label: 'Prix & Tarifs', icon: IconTag, fields: [
+  { key: 'prix', label: 'Prix & Tarifs', icon: Tag, fields: [
     { key: 'prix_collecte_tonne', label: 'Prix collecte / tonne' },
     { key: 'prix_tri_tonne', label: 'Prix tri / tonne' },
     { key: 'prix_vente_moyen', label: 'Prix de vente moyen' },
   ]},
-  { key: 'flotte', label: 'Flotte', icon: IconTruck, fields: [
+  { key: 'flotte', label: 'Flotte', icon: Truck, fields: [
     { key: 'nb_vehicules', label: 'Nombre de vehicules' },
     { key: 'km_total', label: 'Km total' },
     { key: 'cout_km', label: 'Cout / km' },
     { key: 'carburant_total', label: 'Carburant total (EUR)' },
   ]},
-  { key: 'effectifs', label: 'Effectifs', icon: IconTeam, fields: [
+  { key: 'effectifs', label: 'Effectifs', icon: Users, fields: [
     { key: 'etp_total', label: 'ETP total' },
     { key: 'masse_salariale', label: 'Masse salariale (EUR)' },
     { key: 'cout_etp_moyen', label: 'Cout ETP moyen' },
@@ -107,7 +112,7 @@ export default function FinanceOperations() {
         <PageHeader
           title="Donnees Operationnelles"
           subtitle="Donnees auto-calculees et saisies manuelles"
-          icon={IconCalc}
+          icon={Calculator}
           breadcrumb={[
             { label: 'Accueil', path: '/' },
             { label: 'Finance', path: '/finance' },
@@ -127,7 +132,7 @@ export default function FinanceOperations() {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 disabled:opacity-50 transition-colors"
+                className="btn-primary text-sm"
               >
                 {saving ? 'Sauvegarde...' : saved ? 'Sauvegarde !' : 'Sauvegarder'}
               </button>
@@ -137,10 +142,10 @@ export default function FinanceOperations() {
 
         {/* KPI calculees */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <KPICard title="Cout / tonne collecte" value={fmtDec(results?.cout_tonne_collecte)} unit="EUR/t" icon={IconTruck} accent="primary" />
-          <KPICard title="Cout / tonne trie" value={fmtDec(results?.cout_tonne_trie)} unit="EUR/t" icon={IconFactory} accent="amber" />
-          <KPICard title="Marge operationnelle" value={fmtPct(results?.marge_operationnelle)} icon={IconChart} accent="emerald" />
-          <KPICard title="CA / ETP" value={fmt(results?.ca_par_etp)} unit="EUR" icon={IconTeam} accent="primary" />
+          <KPICard title="Cout / tonne collecte" value={fmtDec(results?.cout_tonne_collecte)} unit="EUR/t" icon={Truck} accent="primary" />
+          <KPICard title="Cout / tonne trie" value={fmtDec(results?.cout_tonne_trie)} unit="EUR/t" icon={Factory} accent="amber" />
+          <KPICard title="Marge operationnelle" value={fmtPct(results?.marge_operationnelle)} icon={TrendingUp} accent="emerald" />
+          <KPICard title="CA / ETP" value={fmt(results?.ca_par_etp)} unit="EUR" icon={Users} accent="primary" />
         </div>
 
         {/* Categories editables */}
@@ -248,34 +253,3 @@ export default function FinanceOperations() {
   );
 }
 
-// ══════════════════════════════════════════
-// SVG Icons
-// ══════════════════════════════════════════
-
-function IconCalc({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>;
-}
-function IconScale({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>;
-}
-function IconShip({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12l-2 8h18l-2-8" /></svg>;
-}
-function IconTag({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>;
-}
-function IconTruck({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10m10 0H3m10 0a2 2 0 104 0m-4 0a2 2 0 114 0m6-6h-2a1 1 0 00-1 1v5m3 0h-3m3 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>;
-}
-function IconTeam({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197" /></svg>;
-}
-function IconFactory({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0H5m14 0h2m-16 0H3m2-5h4m2 0h4m-8-4h4m2 0h4" /></svg>;
-}
-function IconChart({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>;
-}
-function IconPL({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
-}

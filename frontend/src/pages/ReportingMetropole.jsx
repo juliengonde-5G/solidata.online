@@ -49,17 +49,17 @@ export default function ReportingMetropole() {
             <p className="text-sm text-gray-500">Suivi des indicateurs environnementaux et sociaux</p>
           </div>
           <div className="flex gap-2 items-center">
-            <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="border rounded-lg px-3 py-2 text-sm">
+            <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="input-modern w-auto">
               {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
             </select>
-            <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="border rounded-lg px-3 py-2 text-sm">
+            <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="input-modern w-auto">
               {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-solidata-green" /></div>
+          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
         ) : d && (
           <>
             {/* KPI Cards */}
@@ -91,7 +91,7 @@ export default function ReportingMetropole() {
                     return (
                       <div key={i} className="flex-1 flex flex-col items-center gap-1">
                         <span className="text-[10px] text-gray-500 font-medium">{(parseFloat(h.total_kg) / 1000).toFixed(1)}t</span>
-                        <div className="w-full bg-solidata-green/80 rounded-t" style={{ height: `${Math.max(pct, 2)}%` }} />
+                        <div className="w-full bg-primary/80 rounded-t" style={{ height: `${Math.max(pct, 2)}%` }} />
                         <span className="text-[10px] text-gray-400">{moisLabel}</span>
                       </div>
                     );
@@ -142,7 +142,7 @@ export default function ReportingMetropole() {
                   {cavList.map(c => (
                     <button key={c.id} onClick={() => openCavDetail(c)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition ${
-                        selectedCav?.id === c.id ? 'bg-solidata-green/10 border border-solidata-green' : 'hover:bg-gray-50 border border-transparent'
+                        selectedCav?.id === c.id ? 'bg-primary/10 border border-primary' : 'hover:bg-gray-50 border border-transparent'
                       }`}>
                       <div className="flex items-center justify-between">
                         <div>
@@ -160,7 +160,7 @@ export default function ReportingMetropole() {
                   {!selectedCav ? (
                     <div className="flex items-center justify-center h-64 text-gray-400">Cliquez sur un CAV pour voir ses détails</div>
                   ) : !cavDetail ? (
-                    <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-solidata-green" /></div>
+                    <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
                   ) : (
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">

@@ -29,19 +29,12 @@ export default {
           800: '#1E293B',  // slate-800
           900: '#0F172A',  // slate-900
         },
-        // Alias pour compatibilité (à supprimer progressivement)
+        // Alias legacy (utilisé dans DiagrammeFluxTri uniquement)
         'solidata-green': '#0D9488',
-        'solidata-green-dark': '#0F766E',
-        'solidata-green-light': '#14B8A6',
-        'solidata-yellow': '#F59E0B',
-        'solidata-yellow-light': '#FEF3C7',
-        'solidata-gray': '#64748B',
-        'solidata-gray-light': '#F1F5F9',
         'solidata-dark': '#0F172A',
       },
       borderRadius: {
         'card': '12px',
-        'card-lg': '16px',
         'button': '10px',
         'input': '10px',
       },

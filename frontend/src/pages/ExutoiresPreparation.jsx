@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 
 const LIEUX = {
@@ -198,7 +199,7 @@ export default function ExutoiresPreparation() {
     return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   };
 
-  if (loading) return <Layout><div className="p-6">Chargement...</div></Layout>;
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des préparations..." /></Layout>;
 
   return (
     <Layout>
@@ -206,21 +207,21 @@ export default function ExutoiresPreparation() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Préparation & Chargement</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Préparation & Chargement</h1>
             <p className="text-gray-500 text-sm">Gestion des préparations et chargements</p>
           </div>
-          <button onClick={openCreate} className="bg-solidata-green text-white px-4 py-2 rounded-lg hover:bg-solidata-green-dark text-sm font-medium">
+          <button onClick={openCreate} className="btn-primary text-sm">
             + Nouvelle préparation
           </button>
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl shadow-sm border p-4 mb-6">
+        <div className="card-modern p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <select
               value={filterLieu}
               onChange={e => setFilterLieu(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="select-modern"
             >
               <option value="">Tous les lieux</option>
               {Object.entries(LIEUX).map(([k, v]) => (
@@ -230,7 +231,7 @@ export default function ExutoiresPreparation() {
             <select
               value={filterStatut}
               onChange={e => setFilterStatut(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="select-modern"
             >
               <option value="">Tous les statuts</option>
               {Object.entries(STATUTS_PREP).map(([k, v]) => (
@@ -241,14 +242,14 @@ export default function ExutoiresPreparation() {
               type="date"
               value={filterDateFrom}
               onChange={e => setFilterDateFrom(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern"
               placeholder="Date début"
             />
             <input
               type="date"
               value={filterDateTo}
               onChange={e => setFilterDateTo(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern"
               placeholder="Date fin"
             />
           </div>
@@ -259,11 +260,11 @@ export default function ExutoiresPreparation() {
           {preparations.map(prep => {
             const statut = STATUTS_PREP[prep.statut_preparation] || STATUTS_PREP.planifiee;
             return (
-              <div key={prep.id} className="bg-white rounded-xl shadow-sm border p-5 relative flex flex-col gap-3">
+              <div key={prep.id} className="card-modern p-5 relative flex flex-col gap-3">
                 {/* Status badge */}
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-solidata-dark truncate">
+                    <p className="text-sm font-bold text-slate-800 truncate">
                       {prep.commande_reference || `CMD-${prep.commande_id}`}
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">
@@ -316,7 +317,7 @@ export default function ExutoiresPreparation() {
                       <span
                         key={i}
                         title={nom}
-                        className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-solidata-green/10 text-solidata-green text-xs font-bold"
+                        className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold"
                       >
                         {getInitials(nom)}
                       </span>
@@ -328,7 +329,7 @@ export default function ExutoiresPreparation() {
                 {prep.pesee_interne != null && (
                   <div className="text-sm">
                     <span className="text-gray-500">Pesée interne :</span>{' '}
-                    <span className="font-semibold text-solidata-dark">{prep.pesee_interne} t</span>
+                    <span className="font-semibold text-slate-800">{prep.pesee_interne} t</span>
                   </div>
                 )}
 
@@ -407,7 +408,7 @@ export default function ExutoiresPreparation() {
                     <>
                       <button
                         onClick={() => openEdit(prep)}
-                        className="text-gray-400 hover:text-solidata-green p-1"
+                        className="text-gray-400 hover:text-primary p-1"
                         title="Modifier"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -438,142 +439,136 @@ export default function ExutoiresPreparation() {
         </div>
 
         {/* Create/Edit Modal */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={submitForm} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto">
-              <h2 className="text-lg font-bold mb-4">
-                {editing ? 'Modifier la préparation' : 'Nouvelle préparation'}
-              </h2>
-              <div className="space-y-3">
-                {/* Commande */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Commande *</label>
-                  <select
-                    value={form.commande_id}
-                    onChange={e => handleFormChange('commande_id', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                    required
-                  >
-                    <option value="">Sélectionner une commande</option>
-                    {commandes.map(cmd => (
-                      <option key={cmd.id} value={cmd.id}>
-                        {cmd.reference} — {cmd.client_nom || 'Client'} — {TYPES_PRODUIT[cmd.type_produit] || cmd.type_produit}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editing ? 'Modifier la préparation' : 'Nouvelle préparation'} size="md">
+          <form onSubmit={submitForm}>
+            <div className="space-y-3">
+              {/* Commande */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Commande *</label>
+                <select
+                  value={form.commande_id}
+                  onChange={e => handleFormChange('commande_id', e.target.value)}
+                  className="select-modern"
+                  required
+                >
+                  <option value="">Sélectionner une commande</option>
+                  {commandes.map(cmd => (
+                    <option key={cmd.id} value={cmd.id}>
+                      {cmd.reference} — {cmd.client_nom || 'Client'} — {TYPES_PRODUIT[cmd.type_produit] || cmd.type_produit}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                {/* Transporteur */}
+              {/* Transporteur */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Transporteur *</label>
+                <input
+                  type="text"
+                  placeholder="Nom du transporteur"
+                  value={form.transporteur}
+                  onChange={e => handleFormChange('transporteur', e.target.value)}
+                  className="input-modern"
+                  required
+                />
+              </div>
+
+              {/* Dates */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Transporteur *</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Livraison remorque *</label>
                   <input
-                    type="text"
-                    placeholder="Nom du transporteur"
-                    value={form.transporteur}
-                    onChange={e => handleFormChange('transporteur', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    type="datetime-local"
+                    value={form.date_livraison_remorque}
+                    onChange={e => handleFormChange('date_livraison_remorque', e.target.value)}
+                    className="input-modern"
                     required
                   />
                 </div>
-
-                {/* Dates */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Livraison remorque *</label>
-                    <input
-                      type="datetime-local"
-                      value={form.date_livraison_remorque}
-                      onChange={e => handleFormChange('date_livraison_remorque', e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Expédition *</label>
-                    <input
-                      type="datetime-local"
-                      value={form.date_expedition}
-                      onChange={e => handleFormChange('date_expedition', e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Lieu */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Lieu de chargement *</label>
-                  <select
-                    value={form.lieu_chargement}
-                    onChange={e => handleFormChange('lieu_chargement', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Expédition *</label>
+                  <input
+                    type="datetime-local"
+                    value={form.date_expedition}
+                    onChange={e => handleFormChange('date_expedition', e.target.value)}
+                    className="input-modern"
                     required
-                  >
-                    {Object.entries(LIEUX).map(([k, v]) => (
-                      <option key={k} value={k}>{v}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Conflict warning */}
-                {conflitWarning && (
-                  <div className="bg-orange-50 border border-orange-200 text-orange-700 text-xs rounded-lg px-3 py-2 flex items-center gap-2">
-                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                    </svg>
-                    {conflitWarning}
-                  </div>
-                )}
-
-                {/* Collaborateurs */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Collaborateurs</label>
-                  <div className="border rounded-lg p-2 max-h-36 overflow-y-auto space-y-1">
-                    {employees.map(emp => (
-                      <label key={emp.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
-                        <input
-                          type="checkbox"
-                          checked={form.collaborateurs.includes(emp.id)}
-                          onChange={() => toggleCollaborateur(emp.id)}
-                          className="rounded border-gray-300 text-solidata-green focus:ring-solidata-green"
-                        />
-                        <span>{emp.prenom} {emp.nom}</span>
-                      </label>
-                    ))}
-                    {employees.length === 0 && (
-                      <p className="text-xs text-gray-400 px-2 py-1">Aucun collaborateur disponible</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
-                  <textarea
-                    placeholder="Notes de préparation..."
-                    value={form.notes_preparation}
-                    onChange={e => handleFormChange('notes_preparation', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                    rows="3"
                   />
                 </div>
               </div>
 
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium">
-                  {editing ? 'Enregistrer' : 'Créer'}
-                </button>
+              {/* Lieu */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Lieu de chargement *</label>
+                <select
+                  value={form.lieu_chargement}
+                  onChange={e => handleFormChange('lieu_chargement', e.target.value)}
+                  className="select-modern"
+                  required
+                >
+                  {Object.entries(LIEUX).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
               </div>
-            </form>
-          </div>
-        )}
+
+              {/* Conflict warning */}
+              {conflitWarning && (
+                <div className="bg-orange-50 border border-orange-200 text-orange-700 text-xs rounded-lg px-3 py-2 flex items-center gap-2">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                  {conflitWarning}
+                </div>
+              )}
+
+              {/* Collaborateurs */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Collaborateurs</label>
+                <div className="border rounded-lg p-2 max-h-36 overflow-y-auto space-y-1">
+                  {employees.map(emp => (
+                    <label key={emp.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
+                      <input
+                        type="checkbox"
+                        checked={form.collaborateurs.includes(emp.id)}
+                        onChange={() => toggleCollaborateur(emp.id)}
+                        className="rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                      <span>{emp.prenom} {emp.nom}</span>
+                    </label>
+                  ))}
+                  {employees.length === 0 && (
+                    <p className="text-xs text-gray-400 px-2 py-1">Aucun collaborateur disponible</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+                <textarea
+                  placeholder="Notes de préparation..."
+                  value={form.notes_preparation}
+                  onChange={e => handleFormChange('notes_preparation', e.target.value)}
+                  className="textarea-modern"
+                  rows="3"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">
+                {editing ? 'Enregistrer' : 'Créer'}
+              </button>
+            </div>
+          </form>
+        </Modal>
 
         {/* Pesée Modal */}
-        {showPesee && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl p-6 w-[360px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Pesée interne</h2>
+        <Modal isOpen={!!showPesee} onClose={() => setShowPesee(null)} title="Pesée interne" size="sm">
+          {showPesee && (
+            <>
               <p className="text-sm text-gray-500 mb-3">
                 Saisir le poids pour terminer le chargement de{' '}
                 <span className="font-medium text-gray-700">{showPesee.commande_reference || `CMD-${showPesee.commande_id}`}</span>
@@ -587,7 +582,7 @@ export default function ExutoiresPreparation() {
                   placeholder="Ex: 24.500"
                   value={peseeValue}
                   onChange={e => setPeseeValue(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  className="input-modern"
                   autoFocus
                 />
               </div>
@@ -595,7 +590,7 @@ export default function ExutoiresPreparation() {
                 <button
                   type="button"
                   onClick={() => setShowPesee(null)}
-                  className="flex-1 border rounded-lg py-2 text-sm"
+                  className="flex-1 btn-ghost"
                 >
                   Annuler
                 </button>
@@ -603,14 +598,14 @@ export default function ExutoiresPreparation() {
                   type="button"
                   onClick={submitPesee}
                   disabled={!peseeValue}
-                  className="flex-1 bg-solidata-green text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+                  className="flex-1 btn-primary text-sm"
                 >
                   Valider
                 </button>
               </div>
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </Modal>
       </div>
     </Layout>
   );

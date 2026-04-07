@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { PageHeader, KPICard, LoadingSpinner } from '../components';
@@ -59,7 +60,7 @@ export default function FinancePL() {
         <PageHeader
           title="Compte de Resultat"
           subtitle="P&L par centre et par famille"
-          icon={IconPL}
+          icon={BarChart3}
           breadcrumb={[
             { label: 'Accueil', path: '/' },
             { label: 'Finance', path: '/finance' },
@@ -92,11 +93,11 @@ export default function FinancePL() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <KPICard title="Produits (classe 7)" value={fmtK(kpis.produits)} unit="EUR" icon={IconUp} accent="emerald" loading={loading}
+          <KPICard title="Produits (classe 7)" value={fmtK(kpis.produits)} unit="EUR" icon={TrendingUp} accent="emerald" loading={loading}
             trend={kpis.produits_trend ? { direction: kpis.produits_trend > 0 ? 'up' : 'down', value: Math.abs(kpis.produits_trend) } : undefined}
           />
-          <KPICard title="Charges (classe 6)" value={fmtK(kpis.charges)} unit="EUR" icon={IconDown} accent="red" loading={loading} />
-          <KPICard title="Resultat" value={fmtK(kpis.resultat)} unit="EUR" icon={IconPL} accent="primary" loading={loading}
+          <KPICard title="Charges (classe 6)" value={fmtK(kpis.charges)} unit="EUR" icon={TrendingDown} accent="red" loading={loading} />
+          <KPICard title="Resultat" value={fmtK(kpis.resultat)} unit="EUR" icon={BarChart3} accent="primary" loading={loading}
             trend={kpis.resultat_trend ? { direction: kpis.resultat_trend > 0 ? 'up' : 'down', value: Math.abs(kpis.resultat_trend) } : undefined}
           />
         </div>
@@ -215,16 +216,3 @@ function PLGroup({ group, expanded, onToggle }) {
   );
 }
 
-// ══════════════════════════════════════════
-// SVG Icons
-// ══════════════════════════════════════════
-
-function IconPL({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
-}
-function IconUp({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>;
-}
-function IconDown({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg>;
-}

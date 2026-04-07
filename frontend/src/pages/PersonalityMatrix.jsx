@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { DataTable } from '../components';
+import { Brain } from 'lucide-react';
 import api from '../services/api';
 
 const TYPE_COLORS = {
@@ -226,65 +228,48 @@ export default function PersonalityMatrix() {
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Matrice PCM</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Matrice PCM</h1>
             <p className="text-gray-500">Process Communication Model — 6 types de personnalite</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>Profils</button>
-            <button onClick={() => setView('types')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'types' ? 'bg-solidata-green text-white' : 'bg-gray-100'}`}>Types PCM</button>
+            <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Profils</button>
+            <button onClick={() => setView('types')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'types' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Types PCM</button>
           </div>
         </div>
 
         {view === 'list' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Candidat</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Base</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Phase</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Alerte RPS</th>
-                  <th className="text-left p-3 text-xs font-semibold text-gray-500">Date</th>
-                  <th className="p-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {profiles.map(p => (
-                  <tr key={p.id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 font-medium text-sm">{p.first_name} {p.last_name}</td>
-                    <td className="p-3">
-                      <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: TYPE_COLORS[p.base_type] }}>
-                        {p.base_type}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: TYPE_COLORS[p.phase_type] }}>
-                        {p.phase_type}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      {p.risk_alert && <span className="text-red-500 text-xs font-bold">Alerte</span>}
-                    </td>
-                    <td className="p-3 text-xs text-gray-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</td>
-                    <td className="p-3">
-                      <button onClick={() => loadProfile(p.candidate_id)} className="text-solidata-green text-xs font-medium hover:underline">
-                        Voir profil
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {profiles.length === 0 && (
-                  <tr><td colSpan="6" className="p-8 text-center text-gray-400">Aucun profil PCM genere</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              { key: 'name', label: 'Candidat', sortable: true, render: (p) => <span className="font-medium">{p.first_name} {p.last_name}</span> },
+              { key: 'base_type', label: 'Base', render: (p) => (
+                <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: TYPE_COLORS[p.base_type] }}>
+                  {p.base_type}
+                </span>
+              )},
+              { key: 'phase_type', label: 'Phase', render: (p) => (
+                <span className="px-2 py-1 rounded text-xs font-medium text-white" style={{ backgroundColor: TYPE_COLORS[p.phase_type] }}>
+                  {p.phase_type}
+                </span>
+              )},
+              { key: 'risk_alert', label: 'Alerte RPS', render: (p) => p.risk_alert && <span className="text-red-500 text-xs font-bold">Alerte</span> },
+              { key: 'created_at', label: 'Date', sortable: true, render: (p) => <span className="text-xs text-gray-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</span> },
+              { key: 'actions', label: '', render: (p) => (
+                <button onClick={() => loadProfile(p.candidate_id)} className="text-primary text-xs font-medium hover:underline">
+                  Voir profil
+                </button>
+              )},
+            ]}
+            data={profiles}
+            loading={false}
+            emptyIcon={Brain}
+            emptyMessage="Aucun profil PCM genere"
+          />
         )}
 
         {view === 'types' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {types.map(t => (
-              <div key={t.key} className="bg-white rounded-xl shadow-sm border p-5">
+              <div key={t.key} className="card-modern p-5">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold" style={{ backgroundColor: TYPE_COLORS[t.key] }}>
                     {t.nom[0]}
@@ -309,11 +294,11 @@ export default function PersonalityMatrix() {
         {view === 'profile' && selectedProfile && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <button onClick={() => setView('list')} className="text-solidata-green text-sm hover:underline">← Retour a la liste</button>
+              <button onClick={() => setView('list')} className="text-primary text-sm hover:underline">← Retour a la liste</button>
               <div className="flex gap-2">
                 <button
                   onClick={handleExportResults}
-                  className="px-3 py-1.5 rounded-lg text-sm bg-solidata-green text-white hover:opacity-90 flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-lg text-sm bg-primary text-white hover:opacity-90 flex items-center gap-1.5"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                   Export resultats
@@ -328,7 +313,7 @@ export default function PersonalityMatrix() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border p-6">
+            <div className="card-modern p-6">
               <h2 className="text-xl font-bold mb-4">
                 {selectedProfile.candidate.first_name} {selectedProfile.candidate.last_name}
               </h2>
@@ -372,8 +357,8 @@ export default function PersonalityMatrix() {
 
             {/* Comportements principaux selon le profil */}
             {selectedProfile.report.comportementsPrincipaux && (
-              <div className="bg-white rounded-xl shadow-sm border p-6">
-                <h3 className="font-semibold text-solidata-dark mb-4">Comportements principaux</h3>
+              <div className="card-modern p-6">
+                <h3 className="font-semibold text-slate-800 mb-4">Comportements principaux</h3>
                 <div className="grid grid-cols-1 md:grid-cols-1 gap-4 space-y-3">
                   <div>
                     <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Avec les autres</h4>

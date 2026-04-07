@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Landmark, List } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { PageHeader, KPICard, DataTable, LoadingSpinner } from '../components';
@@ -68,7 +69,7 @@ export default function FinanceTresorerie() {
         <PageHeader
           title="Tresorerie"
           subtitle="Position et flux de tresorerie"
-          icon={IconBank}
+          icon={Landmark}
           breadcrumb={[
             { label: 'Accueil', path: '/' },
             { label: 'Finance', path: '/finance' },
@@ -89,12 +90,12 @@ export default function FinanceTresorerie() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <KPICard title="Position actuelle" value={fmtK(kpis.position)} unit="EUR" icon={IconBank} accent="primary" loading={loading}
+          <KPICard title="Position actuelle" value={fmtK(kpis.position)} unit="EUR" icon={Landmark} accent="primary" loading={loading}
             trend={kpis.position_trend ? { direction: kpis.position_trend > 0 ? 'up' : 'down', value: Math.abs(kpis.position_trend) } : undefined}
           />
-          <KPICard title="Encaissements YTD" value={fmtK(kpis.encaissements)} unit="EUR" icon={IconArrowDown} accent="emerald" loading={loading} />
-          <KPICard title="Decaissements YTD" value={fmtK(kpis.decaissements)} unit="EUR" icon={IconArrowUp} accent="red" loading={loading} />
-          <KPICard title="Variation" value={fmtK(kpis.variation)} unit="EUR" icon={IconDelta} accent="amber" loading={loading} />
+          <KPICard title="Encaissements YTD" value={fmtK(kpis.encaissements)} unit="EUR" icon={ArrowDown} accent="emerald" loading={loading} />
+          <KPICard title="Decaissements YTD" value={fmtK(kpis.decaissements)} unit="EUR" icon={ArrowUp} accent="red" loading={loading} />
+          <KPICard title="Variation" value={fmtK(kpis.variation)} unit="EUR" icon={ArrowUpDown} accent="amber" loading={loading} />
         </div>
 
         {/* Graphiques */}
@@ -160,7 +161,7 @@ export default function FinanceTresorerie() {
         {/* Tableau flux par categorie */}
         <div className="card-modern p-6">
           <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <IconList className="w-5 h-5 text-slate-400" />
+            <List className="w-5 h-5 text-slate-400" />
             Flux de tresorerie par categorie
           </h3>
           {loading ? (
@@ -246,22 +247,3 @@ function CashFlowGroup({ group, expanded, onToggle }) {
   );
 }
 
-// ══════════════════════════════════════════
-// SVG Icons
-// ══════════════════════════════════════════
-
-function IconBank({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v3m4-3v3m4-3v3" /></svg>;
-}
-function IconArrowDown({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>;
-}
-function IconArrowUp({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>;
-}
-function IconDelta({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>;
-}
-function IconList({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>;
-}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { Modal } from '../components';
 import api from '../services/api';
 
 export default function CollectionProposals() {
@@ -82,19 +83,19 @@ export default function CollectionProposals() {
       <div className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-solidata-dark">Propositions de collecte</h1>
+            <h1 className="text-2xl font-bold text-slate-800">Propositions de collecte</h1>
             <p className="text-gray-500">Prédictions journalières et hebdomadaires — météo, trafic, apprentissage continu</p>
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => setView('daily')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'daily' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-700'}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'daily' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'}`}
             >
               Jour
             </button>
             <button
               onClick={() => setView('weekly')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'weekly' ? 'bg-solidata-green text-white' : 'bg-gray-100 text-gray-700'}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'weekly' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'}`}
             >
               Semaine
             </button>
@@ -108,7 +109,7 @@ export default function CollectionProposals() {
               type="date"
               value={date}
               onChange={e => setDate(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern w-auto"
             />
           </div>
         )}
@@ -119,14 +120,14 @@ export default function CollectionProposals() {
               type="date"
               value={weekStart}
               onChange={e => setWeekStart(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
+              className="input-modern w-auto"
             />
           </div>
         )}
 
         {loading && (
           <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-10 w-10 border-2 border-solidata-green border-t-transparent" />
+            <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary border-t-transparent" />
           </div>
         )}
 
@@ -139,7 +140,7 @@ export default function CollectionProposals() {
                   <h3 className="font-semibold text-gray-700">Références du calcul prédictif</h3>
                   <button
                     onClick={() => setContextEdit({ date, weather_factor: daily.context?.weatherFactor ?? 1, traffic_factor: daily.context?.trafficFactor ?? 1, duration_factor: daily.context?.durationFactor ?? 1, notes: '' })}
-                    className="text-solidata-green text-xs font-medium hover:underline"
+                    className="text-primary text-xs font-medium hover:underline"
                   >
                     Modifier le contexte
                   </button>
@@ -266,7 +267,7 @@ export default function CollectionProposals() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => createTourFromProposal(p.vehicle_id, daily.drivers?.[0]?.id)}
-                        className="bg-solidata-green text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-solidata-green-dark"
+                        className="btn-primary text-sm"
                       >
                         Créer cette tournée
                       </button>
@@ -343,35 +344,33 @@ export default function CollectionProposals() {
           </div>
         )}
 
-        {contextEdit && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-              <h3 className="font-bold mb-4">Contexte collecte — {contextEdit.date}</h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Facteur météo (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.weather_factor} onChange={e => setContextEdit({ ...contextEdit, weather_factor: parseFloat(e.target.value) || 1 })} className="w-full border rounded-lg px-3 py-2" />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Facteur trafic (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.traffic_factor} onChange={e => setContextEdit({ ...contextEdit, traffic_factor: parseFloat(e.target.value) || 1 })} className="w-full border rounded-lg px-3 py-2" />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Facteur durée (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.duration_factor} onChange={e => setContextEdit({ ...contextEdit, duration_factor: parseFloat(e.target.value) || 1 })} className="w-full border rounded-lg px-3 py-2" />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Notes</label>
-                  <input type="text" value={contextEdit.notes || ''} onChange={e => setContextEdit({ ...contextEdit, notes: e.target.value })} className="w-full border rounded-lg px-3 py-2" placeholder="Ex. Grève, travaux..." />
-                </div>
+        <Modal isOpen={!!contextEdit} onClose={() => setContextEdit(null)} title={`Contexte collecte — ${contextEdit?.date || ''}`} size="sm" footer={
+          <>
+            <button onClick={() => setContextEdit(null)} className="px-4 py-2 rounded-lg border text-sm">Annuler</button>
+            <button onClick={saveContext} disabled={savingContext} className="btn-primary text-sm">Enregistrer</button>
+          </>
+        }>
+          {contextEdit && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Facteur météo (0.8–1.2)</label>
+                <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.weather_factor} onChange={e => setContextEdit({ ...contextEdit, weather_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
               </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button onClick={() => setContextEdit(null)} className="px-4 py-2 rounded-lg border text-sm">Annuler</button>
-                <button onClick={saveContext} disabled={savingContext} className="bg-solidata-green text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">Enregistrer</button>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Facteur trafic (0.8–1.2)</label>
+                <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.traffic_factor} onChange={e => setContextEdit({ ...contextEdit, traffic_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Facteur durée (0.8–1.2)</label>
+                <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.duration_factor} onChange={e => setContextEdit({ ...contextEdit, duration_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Notes</label>
+                <input type="text" value={contextEdit.notes || ''} onChange={e => setContextEdit({ ...contextEdit, notes: e.target.value })} className="input-modern" placeholder="Ex. Grève, travaux..." />
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </Modal>
       </div>
     </Layout>
   );
