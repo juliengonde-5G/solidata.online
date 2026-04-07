@@ -113,7 +113,7 @@ export default function ProduitsFinis() {
         {/* Form */}
         <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouveau produit fini" size="sm"
           footer={<>
-            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
             <button type="submit" form="produits-finis-form" className="flex-1 btn-primary text-sm">Créer</button>
           </>}
         >

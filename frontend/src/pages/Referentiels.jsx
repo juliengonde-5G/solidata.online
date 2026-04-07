@@ -145,7 +145,7 @@ export default function Referentiels() {
         {/* Form */}
         <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={view === 'associations' ? 'Nouvelle association' : view === 'exutoires' ? 'Nouveau débouché' : 'Nouveau produit'} size="sm"
           footer={<>
-            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
             <button type="submit" form="referentiels-form" className="flex-1 btn-primary text-sm">Créer</button>
           </>}
         >

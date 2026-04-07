@@ -394,7 +394,7 @@ export default function VehicleMaintenance() {
               </div>
             </div>
             <div className="flex gap-2 mt-6">
-              <button type="button" onClick={() => setShowProfileForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="button" onClick={() => setShowProfileForm(false)} className="flex-1 btn-ghost">Annuler</button>
               <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
             </div>
           </form>

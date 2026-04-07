@@ -667,7 +667,7 @@ export default function Settings() {
               <input placeholder="Commentaire" value={objForm.commentaire} onChange={e => setObjForm({ ...objForm, commentaire: e.target.value })} className="input-modern" />
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 btn-ghost">Annuler</button>
               <button type="submit" className="flex-1 btn-primary text-sm">Creer</button>
             </div>
           </form>
@@ -686,7 +686,7 @@ export default function Settings() {
               <input placeholder="Variables (ex: {nom}, {date})" value={templateForm.variables} onChange={e => setTemplateForm({ ...templateForm, variables: e.target.value })} className="input-modern" />
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setShowTemplateForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="button" onClick={() => setShowTemplateForm(false)} className="flex-1 btn-ghost">Annuler</button>
               <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
             </div>
           </form>

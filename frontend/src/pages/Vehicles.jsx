@@ -643,7 +643,7 @@ export default function Vehicles() {
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
                 <button type="submit" className="flex-1 btn-primary text-sm">{editingId ? 'Enregistrer' : 'Créer'}</button>
               </div>
             </form>
@@ -678,7 +678,7 @@ export default function Vehicles() {
               </div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => { setShowDocForm(false); setDocFile(null); }} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="button" onClick={() => { setShowDocForm(false); setDocFile(null); }} className="flex-1 btn-ghost">Annuler</button>
               <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium">Enregistrer</button>
             </div>
           </form>
@@ -720,7 +720,7 @@ export default function Vehicles() {
               </div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 btn-ghost">Annuler</button>
               <button type="submit" className="flex-1 btn-primary text-sm">Enregistrer</button>
             </div>
           </form>

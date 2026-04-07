@@ -489,7 +489,7 @@ export default function ExutoiresCommandes() {
               </div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="flex-1 border rounded-lg py-2 text-sm">
+              <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="flex-1 btn-ghost">
                 Annuler
               </button>
               <button type="submit" className="flex-1 btn-primary text-sm">
@@ -623,7 +623,7 @@ export default function ExutoiresCommandes() {
 
               {/* Action buttons */}
               <div className="flex gap-2 mt-4">
-                <button onClick={() => setShowDetail(null)} className="flex-1 border rounded-lg py-2 text-sm">
+                <button onClick={() => setShowDetail(null)} className="flex-1 btn-ghost">
                   Fermer
                 </button>
                 {STATUS_TRANSITIONS[showDetail.statut] && (

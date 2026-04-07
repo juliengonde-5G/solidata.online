@@ -462,7 +462,7 @@ export default function Pennylane() {
             </div>
           </div>
           <div className="flex gap-2 mt-6">
-            <button type="button" onClick={() => setShowConfig(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="button" onClick={() => setShowConfig(false)} className="flex-1 btn-ghost">Annuler</button>
             <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Enregistrer</button>
           </div>
         </form>

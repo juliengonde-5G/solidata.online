@@ -106,7 +106,7 @@ export default function Billing() {
         {/* Form */}
         <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvelle facture" size="lg"
           footer={<>
-            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
             <button type="submit" form="billing-form" className="flex-1 btn-primary text-sm">Créer</button>
           </>}
         >

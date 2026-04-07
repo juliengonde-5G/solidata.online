@@ -106,7 +106,7 @@ export default function Expeditions() {
                 <input placeholder="N° Bon de livraison" value={form.bon_livraison} onChange={e => setForm({ ...form, bon_livraison: e.target.value })} className="input-modern" />
                 <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="input-modern" rows="2" />
               <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
                 <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
