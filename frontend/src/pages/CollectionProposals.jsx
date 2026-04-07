@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { Modal } from '../components';
 import api from '../services/api';
 
 export default function CollectionProposals() {
@@ -343,35 +344,33 @@ export default function CollectionProposals() {
           </div>
         )}
 
-        {contextEdit && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-              <h3 className="font-bold mb-4">Contexte collecte — {contextEdit.date}</h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Facteur météo (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.weather_factor} onChange={e => setContextEdit({ ...contextEdit, weather_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Facteur trafic (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.traffic_factor} onChange={e => setContextEdit({ ...contextEdit, traffic_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Facteur durée (0.8–1.2)</label>
-                  <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.duration_factor} onChange={e => setContextEdit({ ...contextEdit, duration_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Notes</label>
-                  <input type="text" value={contextEdit.notes || ''} onChange={e => setContextEdit({ ...contextEdit, notes: e.target.value })} className="input-modern" placeholder="Ex. Grève, travaux..." />
-                </div>
+        <Modal isOpen={!!contextEdit} onClose={() => setContextEdit(null)} title={`Contexte collecte — ${contextEdit?.date || ''}`} size="sm" footer={
+          <>
+            <button onClick={() => setContextEdit(null)} className="px-4 py-2 rounded-lg border text-sm">Annuler</button>
+            <button onClick={saveContext} disabled={savingContext} className="btn-primary text-sm">Enregistrer</button>
+          </>
+        }>
+          {contextEdit && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Facteur météo (0.8–1.2)</label>
+                <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.weather_factor} onChange={e => setContextEdit({ ...contextEdit, weather_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
               </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button onClick={() => setContextEdit(null)} className="px-4 py-2 rounded-lg border text-sm">Annuler</button>
-                <button onClick={saveContext} disabled={savingContext} className="btn-primary text-sm">Enregistrer</button>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Facteur trafic (0.8–1.2)</label>
+                <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.traffic_factor} onChange={e => setContextEdit({ ...contextEdit, traffic_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Facteur durée (0.8–1.2)</label>
+                <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.duration_factor} onChange={e => setContextEdit({ ...contextEdit, duration_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Notes</label>
+                <input type="text" value={contextEdit.notes || ''} onChange={e => setContextEdit({ ...contextEdit, notes: e.target.value })} className="input-modern" placeholder="Ex. Grève, travaux..." />
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </Modal>
       </div>
     </Layout>
   );

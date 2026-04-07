@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FileText, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
 import api from '../services/api';
 
 export default function Billing() {
@@ -104,51 +104,47 @@ export default function Billing() {
         />
 
         {/* Form */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createInvoice} className="bg-white rounded-xl p-6 w-[560px] shadow-xl max-h-[90vh] overflow-y-auto">
-              <h2 className="text-lg font-bold mb-4">Nouvelle facture</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom du client *" value={form.client_name} onChange={e => setForm({ ...form, client_name: e.target.value })} className="input-modern" required />
-                <input placeholder="Adresse du client" value={form.client_address} onChange={e => setForm({ ...form, client_address: e.target.value })} className="input-modern" />
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-500">Date</label>
-                    <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="input-modern" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">Échéance</label>
-                    <input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} className="input-modern" />
-                  </div>
-                </div>
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvelle facture" size="lg"
+          footer={<>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="submit" form="billing-form" className="flex-1 btn-primary text-sm">Créer</button>
+          </>}
+        >
+          <form id="billing-form" onSubmit={createInvoice} className="space-y-3">
+            <input placeholder="Nom du client *" value={form.client_name} onChange={e => setForm({ ...form, client_name: e.target.value })} className="input-modern" required />
+            <input placeholder="Adresse du client" value={form.client_address} onChange={e => setForm({ ...form, client_address: e.target.value })} className="input-modern" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-500">Date</label>
+                <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="input-modern" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Échéance</label>
+                <input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} className="input-modern" />
+              </div>
+            </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-semibold">Lignes</label>
-                    <button type="button" onClick={addLine} className="text-primary text-xs font-medium">+ Ajouter une ligne</button>
-                  </div>
-                  {form.lines.map((line, i) => (
-                    <div key={i} className="flex gap-2 mb-2">
-                      <input placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} className="input-modern flex-1" />
-                      <input type="number" placeholder="Qté" value={line.quantity} onChange={e => updateLine(i, 'quantity', parseFloat(e.target.value) || 0)} className="input-modern w-16" />
-                      <input type="number" step="0.01" placeholder="P.U." value={line.unit_price} onChange={e => updateLine(i, 'unit_price', parseFloat(e.target.value) || 0)} className="input-modern w-24" />
-                      <button type="button" onClick={() => removeLine(i)} className="text-red-400 hover:text-red-600 px-1">&times;</button>
-                    </div>
-                  ))}
-                  <div className="text-right text-sm mt-2">
-                    <p className="text-slate-500">Total HT : <span className="font-bold text-slate-800">{totalHT.toFixed(2)}€</span></p>
-                    <p className="text-slate-500">TVA 20% : <span className="font-bold">{(totalHT * 0.2).toFixed(2)}€</span></p>
-                    <p className="text-primary font-bold text-lg">TTC : {(totalHT * 1.2).toFixed(2)}€</p>
-                  </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-semibold">Lignes</label>
+                <button type="button" onClick={addLine} className="text-primary text-xs font-medium">+ Ajouter une ligne</button>
+              </div>
+              {form.lines.map((line, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <input placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} className="input-modern flex-1" />
+                  <input type="number" placeholder="Qté" value={line.quantity} onChange={e => updateLine(i, 'quantity', parseFloat(e.target.value) || 0)} className="input-modern w-16" />
+                  <input type="number" step="0.01" placeholder="P.U." value={line.unit_price} onChange={e => updateLine(i, 'unit_price', parseFloat(e.target.value) || 0)} className="input-modern w-24" />
+                  <button type="button" onClick={() => removeLine(i)} className="text-red-400 hover:text-red-600 px-1">&times;</button>
                 </div>
+              ))}
+              <div className="text-right text-sm mt-2">
+                <p className="text-slate-500">Total HT : <span className="font-bold text-slate-800">{totalHT.toFixed(2)}€</span></p>
+                <p className="text-slate-500">TVA 20% : <span className="font-bold">{(totalHT * 0.2).toFixed(2)}€</span></p>
+                <p className="text-primary font-bold text-lg">TTC : {(totalHT * 1.2).toFixed(2)}€</p>
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
-              </div>
-            </form>
-          </div>
-        )}
+            </div>
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

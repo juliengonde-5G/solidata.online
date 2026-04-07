@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 
 const TARIF_TYPES = [
@@ -495,29 +495,26 @@ export default function Settings() {
         </div>
 
         {/* Template Form Modal */}
-        {showTemplateForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createTemplate} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau modele de message</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom du template *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="input-modern" required />
-                <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="select-modern">
-                  <option value="email">Email</option>
-                  <option value="sms">SMS</option>
-                </select>
-                {templateForm.type === 'email' && (
-                  <input placeholder="Objet de l'email" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="input-modern" />
-                )}
-                <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="textarea-modern" rows={4} required />
-                <p className="text-[10px] text-gray-400">Variables : {'{prenom}'}, {'{nom}'}, {'{date}'}, {'{heure}'}, {'{lieu}'}, {'{poste}'}, {'{equipe}'}</p>
-              </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button type="button" onClick={() => setShowTemplateForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-                <button type="submit" className="btn-primary text-sm">Creer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showTemplateForm} onClose={() => setShowTemplateForm(false)} title="Nouveau modele de message" size="md">
+          <form onSubmit={createTemplate}>
+            <div className="space-y-3">
+              <input placeholder="Nom du template *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="input-modern" required />
+              <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="select-modern">
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+              </select>
+              {templateForm.type === 'email' && (
+                <input placeholder="Objet de l'email" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="input-modern" />
+              )}
+              <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="textarea-modern" rows={4} required />
+              <p className="text-[10px] text-gray-400">Variables : {'{prenom}'}, {'{nom}'}, {'{date}'}, {'{heure}'}, {'{lieu}'}, {'{poste}'}, {'{equipe}'}</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setShowTemplateForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
+              <button type="submit" className="btn-primary text-sm">Creer</button>
+            </div>
+          </form>
+        </Modal>
 
         {/* Declencheurs automatiques */}
         <div className="bg-white rounded-xl shadow-sm border">
@@ -559,36 +556,33 @@ export default function Settings() {
         </div>
 
         {/* Trigger Form Modal */}
-        {showTriggerForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createTrigger} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau declencheur</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom (ex: Rappel entretien J-1) *" value={triggerForm.name} onChange={e => setTriggerForm({ ...triggerForm, name: e.target.value })} className="input-modern" required />
-                <select value={triggerForm.event} onChange={e => setTriggerForm({ ...triggerForm, event: e.target.value })} className="select-modern" required>
-                  <option value="">-- Evenement declencheur --</option>
-                  {triggerEvents.map(ev => (
-                    <option key={ev.value} value={ev.value}>{ev.label}</option>
-                  ))}
-                </select>
-                <select value={triggerForm.template_id} onChange={e => setTriggerForm({ ...triggerForm, template_id: e.target.value })} className="select-modern" required>
-                  <option value="">-- Template a utiliser --</option>
-                  {templates.filter(t => t.is_active).map(t => (
-                    <option key={t.id} value={t.id}>[{t.type.toUpperCase()}] {t.name}</option>
-                  ))}
-                </select>
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Delai avant envoi (minutes)</label>
-                  <input type="number" min="0" value={triggerForm.delay_minutes} onChange={e => setTriggerForm({ ...triggerForm, delay_minutes: e.target.value })} className="input-modern" placeholder="0 = immediat" />
-                </div>
+        <Modal isOpen={showTriggerForm} onClose={() => setShowTriggerForm(false)} title="Nouveau declencheur" size="md">
+          <form onSubmit={createTrigger}>
+            <div className="space-y-3">
+              <input placeholder="Nom (ex: Rappel entretien J-1) *" value={triggerForm.name} onChange={e => setTriggerForm({ ...triggerForm, name: e.target.value })} className="input-modern" required />
+              <select value={triggerForm.event} onChange={e => setTriggerForm({ ...triggerForm, event: e.target.value })} className="select-modern" required>
+                <option value="">-- Evenement declencheur --</option>
+                {triggerEvents.map(ev => (
+                  <option key={ev.value} value={ev.value}>{ev.label}</option>
+                ))}
+              </select>
+              <select value={triggerForm.template_id} onChange={e => setTriggerForm({ ...triggerForm, template_id: e.target.value })} className="select-modern" required>
+                <option value="">-- Template a utiliser --</option>
+                {templates.filter(t => t.is_active).map(t => (
+                  <option key={t.id} value={t.id}>[{t.type.toUpperCase()}] {t.name}</option>
+                ))}
+              </select>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Delai avant envoi (minutes)</label>
+                <input type="number" min="0" value={triggerForm.delay_minutes} onChange={e => setTriggerForm({ ...triggerForm, delay_minutes: e.target.value })} className="input-modern" placeholder="0 = immediat" />
               </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button type="button" onClick={() => setShowTriggerForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
-                <button type="submit" className="btn-primary text-sm">Creer</button>
-              </div>
-            </form>
-          </div>
-        )}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setShowTriggerForm(false)} className="px-4 py-2 text-gray-500 text-sm">Annuler</button>
+              <button type="submit" className="btn-primary text-sm">Creer</button>
+            </div>
+          </form>
+        </Modal>
 
         {/* Objectifs periodiques */}
         <div className="bg-white rounded-xl shadow-sm border mb-8">
@@ -636,73 +630,67 @@ export default function Settings() {
         </div>
 
         {/* Objectif Form Modal */}
-        {showObjForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createObjective} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouvel objectif — {objAnnee}</h2>
-              <div className="space-y-3">
-                <select value={objForm.domaine} onChange={e => setObjForm({ ...objForm, domaine: e.target.value })} className="select-modern" required>
-                  <option value="collecte">Collecte</option>
-                  <option value="production">Production</option>
-                  <option value="tri">Tri</option>
-                  <option value="rh">RH</option>
-                  <option value="commercial">Commercial</option>
-                  <option value="logistique">Logistique</option>
+        <Modal isOpen={showObjForm} onClose={() => setShowObjForm(false)} title={`Nouvel objectif — ${objAnnee}`} size="md">
+          <form onSubmit={createObjective}>
+            <div className="space-y-3">
+              <select value={objForm.domaine} onChange={e => setObjForm({ ...objForm, domaine: e.target.value })} className="select-modern" required>
+                <option value="collecte">Collecte</option>
+                <option value="production">Production</option>
+                <option value="tri">Tri</option>
+                <option value="rh">RH</option>
+                <option value="commercial">Commercial</option>
+                <option value="logistique">Logistique</option>
+              </select>
+              <input placeholder="Indicateur (ex: Tonnage collecte) *" value={objForm.indicateur} onChange={e => setObjForm({ ...objForm, indicateur: e.target.value })} className="input-modern" required />
+              <input placeholder="Unite (ex: tonnes, %, EUR)" value={objForm.unite} onChange={e => setObjForm({ ...objForm, unite: e.target.value })} className="input-modern" />
+              <select value={objForm.periode} onChange={e => setObjForm({ ...objForm, periode: e.target.value, mois: '', trimestre: '' })} className="select-modern">
+                <option value="mensuel">Mensuel</option>
+                <option value="trimestriel">Trimestriel</option>
+                <option value="annuel">Annuel</option>
+              </select>
+              {objForm.periode === 'mensuel' && (
+                <select value={objForm.mois} onChange={e => setObjForm({ ...objForm, mois: e.target.value })} className="select-modern">
+                  <option value="">Tous les mois</option>
+                  {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'][m-1]}</option>)}
                 </select>
-                <input placeholder="Indicateur (ex: Tonnage collecte) *" value={objForm.indicateur} onChange={e => setObjForm({ ...objForm, indicateur: e.target.value })} className="input-modern" required />
-                <input placeholder="Unite (ex: tonnes, %, EUR)" value={objForm.unite} onChange={e => setObjForm({ ...objForm, unite: e.target.value })} className="input-modern" />
-                <select value={objForm.periode} onChange={e => setObjForm({ ...objForm, periode: e.target.value, mois: '', trimestre: '' })} className="select-modern">
-                  <option value="mensuel">Mensuel</option>
-                  <option value="trimestriel">Trimestriel</option>
-                  <option value="annuel">Annuel</option>
+              )}
+              {objForm.periode === 'trimestriel' && (
+                <select value={objForm.trimestre} onChange={e => setObjForm({ ...objForm, trimestre: e.target.value })} className="select-modern">
+                  <option value="">Tous les trimestres</option>
+                  <option value="1">T1</option>
+                  <option value="2">T2</option>
+                  <option value="3">T3</option>
+                  <option value="4">T4</option>
                 </select>
-                {objForm.periode === 'mensuel' && (
-                  <select value={objForm.mois} onChange={e => setObjForm({ ...objForm, mois: e.target.value })} className="select-modern">
-                    <option value="">Tous les mois</option>
-                    {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'][m-1]}</option>)}
-                  </select>
-                )}
-                {objForm.periode === 'trimestriel' && (
-                  <select value={objForm.trimestre} onChange={e => setObjForm({ ...objForm, trimestre: e.target.value })} className="select-modern">
-                    <option value="">Tous les trimestres</option>
-                    <option value="1">T1</option>
-                    <option value="2">T2</option>
-                    <option value="3">T3</option>
-                    <option value="4">T4</option>
-                  </select>
-                )}
-                <input type="number" step="0.01" placeholder="Valeur cible *" value={objForm.valeur_cible} onChange={e => setObjForm({ ...objForm, valeur_cible: e.target.value })} className="input-modern" required />
-                <input placeholder="Commentaire" value={objForm.commentaire} onChange={e => setObjForm({ ...objForm, commentaire: e.target.value })} className="input-modern" />
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Creer</button>
-              </div>
-            </form>
-          </div>
-        )}
+              )}
+              <input type="number" step="0.01" placeholder="Valeur cible *" value={objForm.valeur_cible} onChange={e => setObjForm({ ...objForm, valeur_cible: e.target.value })} className="input-modern" required />
+              <input placeholder="Commentaire" value={objForm.commentaire} onChange={e => setObjForm({ ...objForm, commentaire: e.target.value })} className="input-modern" />
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowObjForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Creer</button>
+            </div>
+          </form>
+        </Modal>
 
-        {showTemplateForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createTemplate} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau modèle</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom du modèle *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="input-modern" required />
-                <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="select-modern">
-                  <option value="email">Email</option>
-                  <option value="sms">SMS</option>
-                </select>
-                <input placeholder="Objet (email)" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="input-modern" />
-                <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="textarea-modern" rows="5" required />
-                <input placeholder="Variables (ex: {nom}, {date})" value={templateForm.variables} onChange={e => setTemplateForm({ ...templateForm, variables: e.target.value })} className="input-modern" />
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowTemplateForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showTemplateForm} onClose={() => setShowTemplateForm(false)} title="Nouveau modèle" size="md">
+          <form onSubmit={createTemplate}>
+            <div className="space-y-3">
+              <input placeholder="Nom du modèle *" value={templateForm.name} onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })} className="input-modern" required />
+              <select value={templateForm.type} onChange={e => setTemplateForm({ ...templateForm, type: e.target.value })} className="select-modern">
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+              </select>
+              <input placeholder="Objet (email)" value={templateForm.subject} onChange={e => setTemplateForm({ ...templateForm, subject: e.target.value })} className="input-modern" />
+              <textarea placeholder="Corps du message *" value={templateForm.body} onChange={e => setTemplateForm({ ...templateForm, body: e.target.value })} className="textarea-modern" rows="5" required />
+              <input placeholder="Variables (ex: {nom}, {date})" value={templateForm.variables} onChange={e => setTemplateForm({ ...templateForm, variables: e.target.value })} className="input-modern" />
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowTemplateForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
+            </div>
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

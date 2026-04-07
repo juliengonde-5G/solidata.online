@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Tag } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable } from '../components';
+import { LoadingSpinner, DataTable, Modal } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -203,95 +203,88 @@ export default function ExutoiresTarifs() {
         </div>
 
         {/* Modal */}
-        {showModal && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-              <h2 className="text-lg font-bold text-slate-800 mb-4">
-                {editing ? 'Modifier le tarif' : 'Nouveau tarif'}
-              </h2>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Type de produit</label>
-                  <select
-                    value={form.type_produit}
-                    onChange={e => setForm({ ...form, type_produit: e.target.value })}
-                    required
-                    className="input-modern"
-                  >
-                    <option value="">Sélectionner...</option>
-                    {Object.entries(TYPES_PRODUIT).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Prix (€/tonne)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={form.prix_reference_tonne}
-                    onChange={e => setForm({ ...form, prix_reference_tonne: e.target.value })}
-                    required
-                    className="input-modern"
-                    placeholder="0.00"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Client</label>
-                  <select
-                    value={form.client_id}
-                    onChange={e => setForm({ ...form, client_id: e.target.value })}
-                    className="input-modern"
-                  >
-                    <option value="">Prix de référence (aucun client)</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.raison_sociale}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date début</label>
-                  <input
-                    type="date"
-                    value={form.date_debut}
-                    onChange={e => setForm({ ...form, date_debut: e.target.value })}
-                    required
-                    className="input-modern"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date fin <span className="text-slate-400">(optionnel)</span></label>
-                  <input
-                    type="date"
-                    value={form.date_fin}
-                    onChange={e => setForm({ ...form, date_fin: e.target.value })}
-                    className="input-modern"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => { setShowModal(false); resetForm(); }}
-                    className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800"
-                  >
-                    Annuler
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn-primary text-sm"
-                  >
-                    {editing ? 'Enregistrer' : 'Créer'}
-                  </button>
-                </div>
-              </form>
+        <Modal isOpen={showModal} onClose={() => { setShowModal(false); resetForm(); }} title={editing ? 'Modifier le tarif' : 'Nouveau tarif'} size="sm">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Type de produit</label>
+              <select
+                value={form.type_produit}
+                onChange={e => setForm({ ...form, type_produit: e.target.value })}
+                required
+                className="input-modern"
+              >
+                <option value="">Sélectionner...</option>
+                {Object.entries(TYPES_PRODUIT).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
             </div>
-          </div>
-        )}
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Prix (€/tonne)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.prix_reference_tonne}
+                onChange={e => setForm({ ...form, prix_reference_tonne: e.target.value })}
+                required
+                className="input-modern"
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Client</label>
+              <select
+                value={form.client_id}
+                onChange={e => setForm({ ...form, client_id: e.target.value })}
+                className="input-modern"
+              >
+                <option value="">Prix de référence (aucun client)</option>
+                {clients.map(c => (
+                  <option key={c.id} value={c.id}>{c.raison_sociale}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Date début</label>
+              <input
+                type="date"
+                value={form.date_debut}
+                onChange={e => setForm({ ...form, date_debut: e.target.value })}
+                required
+                className="input-modern"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Date fin <span className="text-slate-400">(optionnel)</span></label>
+              <input
+                type="date"
+                value={form.date_fin}
+                onChange={e => setForm({ ...form, date_fin: e.target.value })}
+                className="input-modern"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => { setShowModal(false); resetForm(); }}
+                className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800"
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                className="btn-primary text-sm"
+              >
+                {editing ? 'Enregistrer' : 'Créer'}
+              </button>
+            </div>
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

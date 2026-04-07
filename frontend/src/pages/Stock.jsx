@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Warehouse, Plus, ArrowDownUp } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
 import api from '../services/api';
 
 export default function Stock() {
@@ -289,30 +289,26 @@ export default function Stock() {
         )}
 
         {/* Form */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createMovement} className="bg-white rounded-xl p-6 w-[400px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Mouvement de stock</h2>
-              <div className="space-y-3">
-                <select value={form.categorie_sortante_id} onChange={e => setForm({ ...form, categorie_sortante_id: e.target.value })} className="select-modern" required>
-                  <option value="">Catégorie *</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
-                </select>
-                <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="select-modern">
-                  <option value="entree">Entrée</option>
-                  <option value="sortie">Sortie</option>
-                </select>
-                <input type="number" placeholder="Quantité (kg) *" value={form.quantity_kg} onChange={e => setForm({ ...form, quantity_kg: e.target.value })} className="input-modern" required />
-                <input placeholder="Source" value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} className="input-modern" />
-                <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="textarea-modern" rows="2" />
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Enregistrer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Mouvement de stock" size="sm"
+          footer={<>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="submit" form="stock-form" className="flex-1 btn-primary text-sm">Enregistrer</button>
+          </>}
+        >
+          <form id="stock-form" onSubmit={createMovement} className="space-y-3">
+            <select value={form.categorie_sortante_id} onChange={e => setForm({ ...form, categorie_sortante_id: e.target.value })} className="select-modern" required>
+              <option value="">Catégorie *</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+            </select>
+            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="select-modern">
+              <option value="entree">Entrée</option>
+              <option value="sortie">Sortie</option>
+            </select>
+            <input type="number" placeholder="Quantité (kg) *" value={form.quantity_kg} onChange={e => setForm({ ...form, quantity_kg: e.target.value })} className="input-modern" required />
+            <input placeholder="Source" value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} className="input-modern" />
+            <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="textarea-modern" rows="2" />
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

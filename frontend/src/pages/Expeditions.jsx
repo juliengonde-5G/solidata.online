@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Ship, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner } from '../components';
+import { DataTable, LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 
 export default function Expeditions() {
@@ -93,10 +93,8 @@ export default function Expeditions() {
 
         {/* Form */}
         {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createExpedition} className="bg-white rounded-xl p-6 w-[420px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouvelle expédition</h2>
-              <div className="space-y-3">
+          <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouvelle expédition" size="sm">
+            <form onSubmit={createExpedition} className="space-y-3">
                 <select value={form.exutoire_id} onChange={e => setForm({ ...form, exutoire_id: e.target.value })} className="input-modern" required>
                   <option value="">Destinataire *</option>
                   {exutoires.map(ex => <option key={ex.id} value={ex.id}>{ex.nom}</option>)}
@@ -107,13 +105,12 @@ export default function Expeditions() {
                 <input placeholder="Transporteur" value={form.transporteur} onChange={e => setForm({ ...form, transporteur: e.target.value })} className="input-modern" />
                 <input placeholder="N° Bon de livraison" value={form.bon_livraison} onChange={e => setForm({ ...form, bon_livraison: e.target.value })} className="input-modern" />
                 <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="input-modern" rows="2" />
-              </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
                 <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
-          </div>
+          </Modal>
         )}
       </div>
     </Layout>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, ShoppingCart } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -388,130 +388,122 @@ export default function ExutoiresCommandes() {
         })()}
 
         {/* Create/Edit modal form */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowForm(false); setEditing(null); }}>
-            <form onSubmit={handleSubmit} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4 text-slate-800">
-                {editing ? 'Modifier la commande' : 'Nouvelle commande logistique'}
-              </h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-500">Client *</label>
-                  <select
-                    value={form.client_id}
-                    onChange={e => handleClientChange(e.target.value)}
-                    className="select-modern mt-1"
-                    required
-                  >
-                    <option value="">Sélectionner un client...</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.raison_sociale || c.nom}</option>
-                    ))}
-                  </select>
+        <Modal isOpen={showForm} onClose={() => { setShowForm(false); setEditing(null); }} title={editing ? 'Modifier la commande' : 'Nouvelle commande logistique'} size="md">
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500">Client *</label>
+                <select
+                  value={form.client_id}
+                  onChange={e => handleClientChange(e.target.value)}
+                  className="select-modern mt-1"
+                  required
+                >
+                  <option value="">Sélectionner un client...</option>
+                  {clients.map(c => (
+                    <option key={c.id} value={c.id}>{c.raison_sociale || c.nom}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Types de produit * <span className="text-gray-400">(plusieurs possibles)</span></label>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
+                    <label key={k} className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${form.type_produit.includes(k) ? 'bg-primary/10 border-primary' : 'hover:bg-gray-50'}`}>
+                      <input
+                        type="checkbox"
+                        checked={form.type_produit.includes(k)}
+                        onChange={() => handleTypeToggle(k)}
+                        className="accent-primary"
+                      />
+                      {v}
+                    </label>
+                  ))}
                 </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Date de commande *</label>
+                <input
+                  type="date"
+                  value={form.date_commande}
+                  onChange={e => setForm({ ...form, date_commande: e.target.value })}
+                  className="input-modern mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Prix (€/tonne) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.prix_tonne}
+                  onChange={e => setForm({ ...form, prix_tonne: e.target.value })}
+                  className="input-modern mt-1"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Tonnage prévu (t)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={form.tonnage_prevu}
+                  onChange={e => setForm({ ...form, tonnage_prevu: e.target.value })}
+                  className="input-modern mt-1"
+                  placeholder="0.000"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Fréquence *</label>
+                <select
+                  value={form.frequence}
+                  onChange={e => setForm({ ...form, frequence: e.target.value })}
+                  className="select-modern mt-1"
+                  required
+                >
+                  {Object.entries(FREQUENCES).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+              </div>
+              {form.frequence !== 'unique' && (
                 <div>
-                  <label className="text-xs text-gray-500">Types de produit * <span className="text-gray-400">(plusieurs possibles)</span></label>
-                  <div className="mt-1 grid grid-cols-2 gap-2">
-                    {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
-                      <label key={k} className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${form.type_produit.includes(k) ? 'bg-primary/10 border-primary' : 'hover:bg-gray-50'}`}>
-                        <input
-                          type="checkbox"
-                          checked={form.type_produit.includes(k)}
-                          onChange={() => handleTypeToggle(k)}
-                          className="accent-primary"
-                        />
-                        {v}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Date de commande *</label>
+                  <label className="text-xs text-gray-500">Date fin de récurrence</label>
                   <input
                     type="date"
-                    value={form.date_commande}
-                    onChange={e => setForm({ ...form, date_commande: e.target.value })}
+                    value={form.date_fin_recurrence}
+                    onChange={e => setForm({ ...form, date_fin_recurrence: e.target.value })}
                     className="input-modern mt-1"
-                    required
                   />
                 </div>
-                <div>
-                  <label className="text-xs text-gray-500">Prix (€/tonne) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={form.prix_tonne}
-                    onChange={e => setForm({ ...form, prix_tonne: e.target.value })}
-                    className="input-modern mt-1"
-                    placeholder="0.00"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Tonnage prévu (t)</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={form.tonnage_prevu}
-                    onChange={e => setForm({ ...form, tonnage_prevu: e.target.value })}
-                    className="input-modern mt-1"
-                    placeholder="0.000"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Fréquence *</label>
-                  <select
-                    value={form.frequence}
-                    onChange={e => setForm({ ...form, frequence: e.target.value })}
-                    className="select-modern mt-1"
-                    required
-                  >
-                    {Object.entries(FREQUENCES).map(([k, v]) => (
-                      <option key={k} value={k}>{v}</option>
-                    ))}
-                  </select>
-                </div>
-                {form.frequence !== 'unique' && (
-                  <div>
-                    <label className="text-xs text-gray-500">Date fin de récurrence</label>
-                    <input
-                      type="date"
-                      value={form.date_fin_recurrence}
-                      onChange={e => setForm({ ...form, date_fin_recurrence: e.target.value })}
-                      className="input-modern mt-1"
-                    />
-                  </div>
-                )}
-                <div>
-                  <label className="text-xs text-gray-500">Notes</label>
-                  <textarea
-                    value={form.notes}
-                    onChange={e => setForm({ ...form, notes: e.target.value })}
-                    className="textarea-modern mt-1"
-                    rows={3}
-                  />
-                </div>
+              )}
+              <div>
+                <label className="text-xs text-gray-500">Notes</label>
+                <textarea
+                  value={form.notes}
+                  onChange={e => setForm({ ...form, notes: e.target.value })}
+                  className="textarea-modern mt-1"
+                  rows={3}
+                />
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="flex-1 border rounded-lg py-2 text-sm">
-                  Annuler
-                </button>
-                <button type="submit" className="flex-1 btn-primary text-sm">
-                  {editing ? 'Enregistrer' : 'Créer'}
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="flex-1 border rounded-lg py-2 text-sm">
+                Annuler
+              </button>
+              <button type="submit" className="flex-1 btn-primary text-sm">
+                {editing ? 'Enregistrer' : 'Créer'}
+              </button>
+            </div>
+          </form>
+        </Modal>
 
         {/* Detail modal */}
-        {showDetail && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDetail(null)}>
-            <div className="bg-white rounded-xl p-6 w-[600px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-slate-800">
-                  Commande {showDetail.reference || `#${showDetail.id}`}
-                </h2>
+        <Modal isOpen={!!showDetail} onClose={() => setShowDetail(null)} title={showDetail ? `Commande ${showDetail.reference || `#${showDetail.id}`}` : ''} size="lg">
+          {showDetail && (
+            <>
+              <div className="flex justify-end -mt-2 mb-4">
                 <StatusBadge status={showDetail.statut} label={STATUTS[showDetail.statut]?.label} />
               </div>
 
@@ -651,9 +643,9 @@ export default function ExutoiresCommandes() {
                   </button>
                 )}
               </div>
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </Modal>
       </div>
     </Layout>
   );

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
 import { Users } from 'lucide-react';
 import api from '../services/api';
 
@@ -562,10 +562,8 @@ export default function Employees() {
 
         {/* New Employee Form */}
         {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={() => setShowForm(false)}>
-            <form onSubmit={createEmployee} className="bg-white rounded-xl p-6 w-[440px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4">Nouveau collaborateur</h2>
-              <div className="space-y-3">
+          <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouveau collaborateur" size="sm">
+            <form onSubmit={createEmployee} className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} className="input-modern" required />
                   <input placeholder="Nom *" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} className="input-modern" required />
@@ -587,13 +585,12 @@ export default function Employees() {
                   <label className="text-xs text-gray-500">Date d'embauche</label>
                   <input type="date" value={form.hire_date} onChange={e => setForm({ ...form, hire_date: e.target.value })} className="input-modern" />
                 </div>
-              </div>
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
                 <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>
-          </div>
+          </Modal>
         )}
       </div>
     </Layout>

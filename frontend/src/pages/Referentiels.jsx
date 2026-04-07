@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
 import { Building2, Truck } from 'lucide-react';
 import api from '../services/api';
 
@@ -143,59 +143,53 @@ export default function Referentiels() {
         )}
 
         {/* Form */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createItem} className="bg-white rounded-xl p-6 w-[400px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">
-                {view === 'associations' ? 'Nouvelle association' : view === 'exutoires' ? 'Nouveau débouché' : 'Nouveau produit'}
-              </h2>
-              <div className="space-y-3">
-                <input placeholder="Nom *" value={form.nom || ''} onChange={e => setForm({ ...form, nom: e.target.value })} className="input-modern" required />
-                <input placeholder="Type" value={form.type || ''} onChange={e => setForm({ ...form, type: e.target.value })} className="input-modern" />
-                {view === 'associations' && (
-                  <>
-                    <input placeholder="Adresse" value={form.adresse || ''} onChange={e => setForm({ ...form, adresse: e.target.value })} className="input-modern" />
-                    <input placeholder="Commune" value={form.commune || ''} onChange={e => setForm({ ...form, commune: e.target.value })} className="input-modern" />
-                    <input placeholder="Nom contact" value={form.contact_nom || ''} onChange={e => setForm({ ...form, contact_nom: e.target.value })} className="input-modern" />
-                    <input placeholder="Tél contact" value={form.contact_tel || ''} onChange={e => setForm({ ...form, contact_tel: e.target.value })} className="input-modern" />
-                  </>
-                )}
-                {view === 'exutoires' && (
-                  <>
-                    <input placeholder="Adresse" value={form.adresse || ''} onChange={e => setForm({ ...form, adresse: e.target.value })} className="input-modern" />
-                    <input placeholder="Nom contact" value={form.contact_nom || ''} onChange={e => setForm({ ...form, contact_nom: e.target.value })} className="input-modern" />
-                    <input placeholder="Email contact" value={form.contact_email || ''} onChange={e => setForm({ ...form, contact_email: e.target.value })} className="input-modern" />
-                    <input placeholder="Tél contact" value={form.contact_tel || ''} onChange={e => setForm({ ...form, contact_tel: e.target.value })} className="input-modern" />
-                  </>
-                )}
-                {view === 'catalogue' && (
-                  <>
-                    <input placeholder="Catégorie éco-org" value={form.categorie_eco_org || ''} onChange={e => setForm({ ...form, categorie_eco_org: e.target.value })} className="input-modern" />
-                    <select value={form.genre || ''} onChange={e => setForm({ ...form, genre: e.target.value })} className="select-modern">
-                      <option value="">Genre</option>
-                      <option value="homme">Homme</option>
-                      <option value="femme">Femme</option>
-                      <option value="enfant">Enfant</option>
-                      <option value="mixte">Mixte</option>
-                    </select>
-                    <select value={form.saison || ''} onChange={e => setForm({ ...form, saison: e.target.value })} className="select-modern">
-                      <option value="">Saison</option>
-                      <option value="Été">Été</option>
-                      <option value="Hiver">Hiver</option>
-                      <option value="Mi-saison">Mi-saison</option>
-                      <option value="Sans Saison">Sans Saison</option>
-                    </select>
-                    <input placeholder="Gamme" value={form.gamme || ''} onChange={e => setForm({ ...form, gamme: e.target.value })} className="input-modern" />
-                  </>
-                )}
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={view === 'associations' ? 'Nouvelle association' : view === 'exutoires' ? 'Nouveau débouché' : 'Nouveau produit'} size="sm"
+          footer={<>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="submit" form="referentiels-form" className="flex-1 btn-primary text-sm">Créer</button>
+          </>}
+        >
+          <form id="referentiels-form" onSubmit={createItem} className="space-y-3">
+            <input placeholder="Nom *" value={form.nom || ''} onChange={e => setForm({ ...form, nom: e.target.value })} className="input-modern" required />
+            <input placeholder="Type" value={form.type || ''} onChange={e => setForm({ ...form, type: e.target.value })} className="input-modern" />
+            {view === 'associations' && (
+              <>
+                <input placeholder="Adresse" value={form.adresse || ''} onChange={e => setForm({ ...form, adresse: e.target.value })} className="input-modern" />
+                <input placeholder="Commune" value={form.commune || ''} onChange={e => setForm({ ...form, commune: e.target.value })} className="input-modern" />
+                <input placeholder="Nom contact" value={form.contact_nom || ''} onChange={e => setForm({ ...form, contact_nom: e.target.value })} className="input-modern" />
+                <input placeholder="Tél contact" value={form.contact_tel || ''} onChange={e => setForm({ ...form, contact_tel: e.target.value })} className="input-modern" />
+              </>
+            )}
+            {view === 'exutoires' && (
+              <>
+                <input placeholder="Adresse" value={form.adresse || ''} onChange={e => setForm({ ...form, adresse: e.target.value })} className="input-modern" />
+                <input placeholder="Nom contact" value={form.contact_nom || ''} onChange={e => setForm({ ...form, contact_nom: e.target.value })} className="input-modern" />
+                <input placeholder="Email contact" value={form.contact_email || ''} onChange={e => setForm({ ...form, contact_email: e.target.value })} className="input-modern" />
+                <input placeholder="Tél contact" value={form.contact_tel || ''} onChange={e => setForm({ ...form, contact_tel: e.target.value })} className="input-modern" />
+              </>
+            )}
+            {view === 'catalogue' && (
+              <>
+                <input placeholder="Catégorie éco-org" value={form.categorie_eco_org || ''} onChange={e => setForm({ ...form, categorie_eco_org: e.target.value })} className="input-modern" />
+                <select value={form.genre || ''} onChange={e => setForm({ ...form, genre: e.target.value })} className="select-modern">
+                  <option value="">Genre</option>
+                  <option value="homme">Homme</option>
+                  <option value="femme">Femme</option>
+                  <option value="enfant">Enfant</option>
+                  <option value="mixte">Mixte</option>
+                </select>
+                <select value={form.saison || ''} onChange={e => setForm({ ...form, saison: e.target.value })} className="select-modern">
+                  <option value="">Saison</option>
+                  <option value="Été">Été</option>
+                  <option value="Hiver">Hiver</option>
+                  <option value="Mi-saison">Mi-saison</option>
+                  <option value="Sans Saison">Sans Saison</option>
+                </select>
+                <input placeholder="Gamme" value={form.gamme || ''} onChange={e => setForm({ ...form, gamme: e.target.value })} className="input-modern" />
+              </>
+            )}
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

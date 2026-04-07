@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 
 const FILIERE_COLORS = {
@@ -329,26 +329,20 @@ export default function PlanningHebdo() {
       </div>
 
       {/* Picker modal */}
-      {showPicker && (
-        <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50" onClick={() => setShowPicker(null)}>
-          <div className="bg-white rounded-t-xl sm:rounded-xl w-full sm:w-[480px] max-h-[80vh] overflow-y-auto shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-sm">Affecter a : {showPicker.poste.nom}</h3>
-                <p className="text-xs text-gray-500">{JOURS[showPicker.dateIdx]} {formatDateShort(showPicker.date)}</p>
-              </div>
-              <button onClick={() => setShowPicker(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
+      <Modal isOpen={!!showPicker} onClose={() => setShowPicker(null)} title={showPicker ? `Affecter a : ${showPicker.poste.nom}` : ''} size="md">
+        {showPicker && (
+          <>
+            <p className="text-xs text-gray-500 -mt-2 mb-3">{JOURS[showPicker.dateIdx]} {formatDateShort(showPicker.date)}</p>
 
             {showPicker.poste.require_permis_b || showPicker.poste.require_caces ? (
-              <div className="px-4 py-2 bg-yellow-50 border-b text-xs text-yellow-800 flex gap-2">
+              <div className="px-4 py-2 bg-yellow-50 border rounded-lg text-xs text-yellow-800 flex gap-2 mb-3">
                 <span>Competences requises :</span>
                 {showPicker.poste.require_permis_b && <span className="font-medium px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">Permis B</span>}
                 {showPicker.poste.require_caces && <span className="font-medium px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded">CACES</span>}
               </div>
             ) : null}
 
-            <div className="p-2">
+            <div>
               {pickerLoading ? (
                 <div className="py-8 text-center text-gray-400">
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent mx-auto mb-2" />
@@ -390,9 +384,9 @@ export default function PlanningHebdo() {
                 </div>
               )}
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
     </Layout>
   );
 }

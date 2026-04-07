@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
 
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
@@ -755,50 +755,47 @@ export default function AdminPredictive() {
         </Section>
 
         {/* Modal événement */}
-        {showEventForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createEvent} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto">
-              <h2 className="text-lg font-bold mb-4">Nouvel événement local</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom de l'événement *" value={eventForm.nom} onChange={e => setEventForm({ ...eventForm, nom: e.target.value })} className="input-modern" required />
-                <select value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} className="input-modern">
-                  {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-0.5">Date début *</label>
-                    <input type="date" value={eventForm.date_debut} onChange={e => setEventForm({ ...eventForm, date_debut: e.target.value })} className="input-modern" required />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-0.5">Date fin *</label>
-                    <input type="date" value={eventForm.date_fin} onChange={e => setEventForm({ ...eventForm, date_fin: e.target.value })} className="input-modern" required />
-                  </div>
+        <Modal isOpen={showEventForm} onClose={() => setShowEventForm(false)} title="Nouvel événement local" size="md">
+          <form onSubmit={createEvent}>
+            <div className="space-y-3">
+              <input placeholder="Nom de l'événement *" value={eventForm.nom} onChange={e => setEventForm({ ...eventForm, nom: e.target.value })} className="input-modern" required />
+              <select value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} className="input-modern">
+                {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-0.5">Date début *</label>
+                  <input type="date" value={eventForm.date_debut} onChange={e => setEventForm({ ...eventForm, date_debut: e.target.value })} className="input-modern" required />
                 </div>
-                <input placeholder="Adresse" value={eventForm.adresse} onChange={e => setEventForm({ ...eventForm, adresse: e.target.value })} className="input-modern" />
-                <input placeholder="Commune" value={eventForm.commune} onChange={e => setEventForm({ ...eventForm, commune: e.target.value })} className="input-modern" />
-                <div className="grid grid-cols-2 gap-3">
-                  <input type="number" step="0.0001" placeholder="Latitude" value={eventForm.latitude} onChange={e => setEventForm({ ...eventForm, latitude: e.target.value })} className="input-modern" />
-                  <input type="number" step="0.0001" placeholder="Longitude" value={eventForm.longitude} onChange={e => setEventForm({ ...eventForm, longitude: e.target.value })} className="input-modern" />
+                <div>
+                  <label className="text-xs text-gray-500 block mb-0.5">Date fin *</label>
+                  <input type="date" value={eventForm.date_fin} onChange={e => setEventForm({ ...eventForm, date_fin: e.target.value })} className="input-modern" required />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-0.5">Rayon d'impact (km)</label>
-                    <input type="number" step="0.5" min="0.5" value={eventForm.rayon_km} onChange={e => setEventForm({ ...eventForm, rayon_km: e.target.value })} className="input-modern" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-0.5">Bonus remplissage (x)</label>
-                    <input type="number" step="0.05" min="1" value={eventForm.bonus_factor} onChange={e => setEventForm({ ...eventForm, bonus_factor: e.target.value })} className="input-modern" />
-                  </div>
-                </div>
-                <textarea placeholder="Notes (optionnel)" value={eventForm.notes} onChange={e => setEventForm({ ...eventForm, notes: e.target.value })} className="input-modern" rows="2" />
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
+              <input placeholder="Adresse" value={eventForm.adresse} onChange={e => setEventForm({ ...eventForm, adresse: e.target.value })} className="input-modern" />
+              <input placeholder="Commune" value={eventForm.commune} onChange={e => setEventForm({ ...eventForm, commune: e.target.value })} className="input-modern" />
+              <div className="grid grid-cols-2 gap-3">
+                <input type="number" step="0.0001" placeholder="Latitude" value={eventForm.latitude} onChange={e => setEventForm({ ...eventForm, latitude: e.target.value })} className="input-modern" />
+                <input type="number" step="0.0001" placeholder="Longitude" value={eventForm.longitude} onChange={e => setEventForm({ ...eventForm, longitude: e.target.value })} className="input-modern" />
               </div>
-            </form>
-          </div>
-        )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-0.5">Rayon d'impact (km)</label>
+                  <input type="number" step="0.5" min="0.5" value={eventForm.rayon_km} onChange={e => setEventForm({ ...eventForm, rayon_km: e.target.value })} className="input-modern" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-0.5">Bonus remplissage (x)</label>
+                  <input type="number" step="0.05" min="1" value={eventForm.bonus_factor} onChange={e => setEventForm({ ...eventForm, bonus_factor: e.target.value })} className="input-modern" />
+                </div>
+              </div>
+              <textarea placeholder="Notes (optionnel)" value={eventForm.notes} onChange={e => setEventForm({ ...eventForm, notes: e.target.value })} className="input-modern" rows="2" />
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
+            </div>
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

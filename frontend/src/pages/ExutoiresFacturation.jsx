@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
 import { Scale, FileText } from 'lucide-react';
 import api from '../services/api';
 
@@ -326,131 +326,124 @@ export default function ExutoiresFacturation() {
         )}
 
         {/* ========== MODAL: Nouveau contrôle pesée ========== */}
-        {showControleForm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowControleForm(false)}>
-            <form onSubmit={submitControle} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4 text-slate-800">Nouveau contrôle de pesée</h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-500">Commande *</label>
-                  <select
-                    value={controleForm.commande_id}
-                    onChange={e => setControleForm({ ...controleForm, commande_id: e.target.value })}
-                    className="select-modern mt-1"
-                    required
-                  >
-                    <option value="">Sélectionner une commande...</option>
-                    {commandesExpediees.map(cmd => (
-                      <option key={cmd.id} value={cmd.id}>
-                        {cmd.reference} — {cmd.client_nom || 'Client'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Pesée client (tonnes) *</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    value={controleForm.pesee_client}
-                    onChange={e => setControleForm({ ...controleForm, pesee_client: e.target.value })}
-                    className="input-modern mt-1"
-                    placeholder="0.000"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Date de réception du ticket *</label>
-                  <input
-                    type="date"
-                    value={controleForm.date_reception_ticket}
-                    onChange={e => setControleForm({ ...controleForm, date_reception_ticket: e.target.value })}
-                    className="input-modern mt-1"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Ticket de pesée (PDF)</label>
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={e => setControleForm({ ...controleForm, ticket_pesee: e.target.files[0] || null })}
-                    className="input-modern mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Notes</label>
-                  <textarea
-                    value={controleForm.notes}
-                    onChange={e => setControleForm({ ...controleForm, notes: e.target.value })}
-                    className="textarea-modern mt-1"
-                    rows={3}
-                  />
-                </div>
+        <Modal isOpen={showControleForm} onClose={() => setShowControleForm(false)} title="Nouveau contrôle de pesée" size="md">
+          <form onSubmit={submitControle}>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500">Commande *</label>
+                <select
+                  value={controleForm.commande_id}
+                  onChange={e => setControleForm({ ...controleForm, commande_id: e.target.value })}
+                  className="select-modern mt-1"
+                  required
+                >
+                  <option value="">Sélectionner une commande...</option>
+                  {commandesExpediees.map(cmd => (
+                    <option key={cmd.id} value={cmd.id}>
+                      {cmd.reference} — {cmd.client_nom || 'Client'}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowControleForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
-                  Annuler
-                </button>
-                <button type="submit" className="flex-1 btn-primary text-sm">
-                  Créer
-                </button>
+              <div>
+                <label className="text-xs text-gray-500">Pesée client (tonnes) *</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={controleForm.pesee_client}
+                  onChange={e => setControleForm({ ...controleForm, pesee_client: e.target.value })}
+                  className="input-modern mt-1"
+                  placeholder="0.000"
+                  required
+                />
               </div>
-            </form>
-          </div>
-        )}
+              <div>
+                <label className="text-xs text-gray-500">Date de réception du ticket *</label>
+                <input
+                  type="date"
+                  value={controleForm.date_reception_ticket}
+                  onChange={e => setControleForm({ ...controleForm, date_reception_ticket: e.target.value })}
+                  className="input-modern mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Ticket de pesée (PDF)</label>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={e => setControleForm({ ...controleForm, ticket_pesee: e.target.files[0] || null })}
+                  className="input-modern mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Notes</label>
+                <textarea
+                  value={controleForm.notes}
+                  onChange={e => setControleForm({ ...controleForm, notes: e.target.value })}
+                  className="textarea-modern mt-1"
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowControleForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
+                Annuler
+              </button>
+              <button type="submit" className="flex-1 btn-primary text-sm">
+                Créer
+              </button>
+            </div>
+          </form>
+        </Modal>
 
         {/* ========== MODAL: Upload facture ========== */}
-        {showFactureForm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowFactureForm(false)}>
-            <form onSubmit={submitFacture} className="bg-white rounded-xl p-6 w-[520px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4 text-slate-800">Uploader une facture</h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-500">Commande *</label>
-                  <select
-                    value={factureForm.commande_id}
-                    onChange={e => setFactureForm({ ...factureForm, commande_id: e.target.value })}
-                    className="select-modern mt-1"
-                    required
-                  >
-                    <option value="">Sélectionner une commande...</option>
-                    {commandesPesee.map(cmd => (
-                      <option key={cmd.id} value={cmd.id}>
-                        {cmd.reference} — {cmd.client_nom || 'Client'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Facture (PDF) *</label>
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={e => setFactureForm({ ...factureForm, facture: e.target.files[0] || null })}
-                    className="input-modern mt-1"
-                    required
-                  />
-                </div>
+        <Modal isOpen={showFactureForm} onClose={() => setShowFactureForm(false)} title="Uploader une facture" size="md">
+          <form onSubmit={submitFacture}>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500">Commande *</label>
+                <select
+                  value={factureForm.commande_id}
+                  onChange={e => setFactureForm({ ...factureForm, commande_id: e.target.value })}
+                  className="select-modern mt-1"
+                  required
+                >
+                  <option value="">Sélectionner une commande...</option>
+                  {commandesPesee.map(cmd => (
+                    <option key={cmd.id} value={cmd.id}>
+                      {cmd.reference} — {cmd.client_nom || 'Client'}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowFactureForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
-                  Annuler
-                </button>
-                <button type="submit" className="flex-1 btn-primary text-sm">
-                  Uploader
-                </button>
+              <div>
+                <label className="text-xs text-gray-500">Facture (PDF) *</label>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={e => setFactureForm({ ...factureForm, facture: e.target.files[0] || null })}
+                  className="input-modern mt-1"
+                  required
+                />
               </div>
-            </form>
-          </div>
-        )}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowFactureForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
+                Annuler
+              </button>
+              <button type="submit" className="flex-1 btn-primary text-sm">
+                Uploader
+              </button>
+            </div>
+          </form>
+        </Modal>
 
         {/* ========== MODAL: Correction OCR + Concordance ========== */}
-        {showOcrModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowOcrModal(null); setConcordance(null); }}>
-            <div className="bg-white rounded-xl p-6 w-[560px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-2 text-slate-800">Correction OCR & Concordance</h2>
+        <Modal isOpen={!!showOcrModal} onClose={() => { setShowOcrModal(null); setConcordance(null); }} title="Correction OCR & Concordance" size="lg">
+          {showOcrModal && (
+            <>
               <p className="text-sm text-gray-500 mb-4">
                 Vérifiez et corrigez les valeurs extraites de la facture{' '}
                 <span className="font-medium text-gray-700">{showOcrModal.commande_reference || `#${showOcrModal.commande_id}`}</span>
@@ -552,9 +545,9 @@ export default function ExutoiresFacturation() {
                   Corriger & Valider
                 </button>
               </div>
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </Modal>
       </div>
     </Layout>
   );

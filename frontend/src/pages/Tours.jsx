@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Route, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
 import api from '../services/api';
 
 const MODE_LABELS = { intelligent: 'IA', standard: 'Standard', manual: 'Manuel' };
@@ -172,14 +172,7 @@ export default function Tours() {
         </div>
 
         {/* Wizard Modal */}
-        {showWizard && (
-          <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50">
-            <div className="bg-white rounded-t-xl sm:rounded-xl p-5 sm:p-6 w-full sm:w-[520px] shadow-xl max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold">Nouvelle tournée — Étape {wizardStep}/4</h2>
-                <button onClick={() => setShowWizard(false)} className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
-              </div>
-
+        <Modal isOpen={showWizard} onClose={() => setShowWizard(false)} title={`Nouvelle tournée — Étape ${wizardStep}/4`} size="md">
               {/* Progress */}
               <div className="flex gap-1 mb-6">
                 {[1, 2, 3, 4].map(s => (
@@ -292,9 +285,7 @@ export default function Tours() {
                   <button onClick={() => setShowWizard(false)} className="w-full btn-primary text-sm">Fermer</button>
                 </div>
               )}
-            </div>
-          </div>
-        )}
+        </Modal>
 
         {/* Tour Detail Modal */}
         {selectedTour && (

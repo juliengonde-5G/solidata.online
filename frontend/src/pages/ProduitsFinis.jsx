@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Package, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
 import api from '../services/api';
 
 export default function ProduitsFinis() {
@@ -111,31 +111,27 @@ export default function ProduitsFinis() {
         )}
 
         {/* Form */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createProduct} className="bg-white rounded-xl p-6 w-[400px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouveau produit fini</h2>
-              <div className="space-y-3">
-                <select value={form.produit_catalogue_id} onChange={e => setForm({ ...form, produit_catalogue_id: e.target.value })} className="input-modern" required>
-                  <option value="">Produit catalogue *</option>
-                  {catalogue.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
-                </select>
-                <input placeholder="Code-barres" value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} className="input-modern" />
-                <input type="number" step="0.1" placeholder="Poids (kg)" value={form.poids_kg} onChange={e => setForm({ ...form, poids_kg: e.target.value })} className="input-modern" />
-                <select value={form.qualite} onChange={e => setForm({ ...form, qualite: e.target.value })} className="input-modern">
-                  <option value="A">Qualité A — Premium</option>
-                  <option value="B">Qualité B — Standard</option>
-                  <option value="C">Qualité C — Déclassé</option>
-                </select>
-                <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="input-modern" rows="2" />
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouveau produit fini" size="sm"
+          footer={<>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="submit" form="produits-finis-form" className="flex-1 btn-primary text-sm">Créer</button>
+          </>}
+        >
+          <form id="produits-finis-form" onSubmit={createProduct} className="space-y-3">
+            <select value={form.produit_catalogue_id} onChange={e => setForm({ ...form, produit_catalogue_id: e.target.value })} className="input-modern" required>
+              <option value="">Produit catalogue *</option>
+              {catalogue.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+            </select>
+            <input placeholder="Code-barres" value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} className="input-modern" />
+            <input type="number" step="0.1" placeholder="Poids (kg)" value={form.poids_kg} onChange={e => setForm({ ...form, poids_kg: e.target.value })} className="input-modern" />
+            <select value={form.qualite} onChange={e => setForm({ ...form, qualite: e.target.value })} className="input-modern">
+              <option value="A">Qualité A — Premium</option>
+              <option value="B">Qualité B — Standard</option>
+              <option value="C">Qualité C — Déclassé</option>
+            </select>
+            <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="input-modern" rows="2" />
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

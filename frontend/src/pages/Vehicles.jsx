@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Truck, Plus, Pencil, FileText, Download, Trash2, Lightbulb, AlertTriangle } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, StatusBadge } from '../components';
+import { LoadingSpinner, StatusBadge, Modal } from '../components';
 import api from '../services/api';
 
 const EVENT_TYPES = [
@@ -527,10 +527,8 @@ export default function Vehicles() {
         )}
 
         {/* Modale Créer / Modifier véhicule */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={saveVehicle} className="bg-white rounded-xl p-6 w-[480px] shadow-xl max-h-[90vh] overflow-y-auto">
-              <h2 className="text-lg font-bold mb-4">{editingId ? 'Modifier le véhicule' : 'Nouveau véhicule'}</h2>
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editingId ? 'Modifier le véhicule' : 'Nouveau véhicule'} size="lg">
+            <form onSubmit={saveVehicle}>
               <div className="space-y-3">
                 <input placeholder="Immatriculation *" value={form.registration} onChange={e => setForm({ ...form, registration: e.target.value.toUpperCase() })} className="input-modern" required disabled={!!editingId} />
                 <input placeholder="Nom / Libellé" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-modern" />
@@ -649,91 +647,84 @@ export default function Vehicles() {
                 <button type="submit" className="flex-1 btn-primary text-sm">{editingId ? 'Enregistrer' : 'Créer'}</button>
               </div>
             </form>
-          </div>
-        )}
+        </Modal>
 
         {/* Modale Ajouter document */}
-        {showDocForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={addDocument} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Ajouter un document</h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-slate-500">Type de document</label>
-                  <select value={docForm.doc_type} onChange={e => setDocForm({ ...docForm, doc_type: e.target.value })} className="input-modern">
-                    {DOC_TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Titre</label>
-                  <input value={docForm.title} onChange={e => setDocForm({ ...docForm, title: e.target.value })} className="input-modern" placeholder="Ex: Carte grise Ducato" />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Fichier *</label>
-                  <input type="file" onChange={e => setDocFile(e.target.files[0])} className="input-modern" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" />
-                  <p className="text-[10px] text-slate-400 mt-1">PDF, images, Word, Excel — max 10 Mo</p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Date d'expiration (optionnel)</label>
-                  <input type="date" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} className="input-modern" />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Notes</label>
-                  <textarea value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} className="input-modern" rows={2} placeholder="Remarques..." />
-                </div>
+        <Modal isOpen={showDocForm} onClose={() => { setShowDocForm(false); setDocFile(null); }} title="Ajouter un document" size="md">
+          <form onSubmit={addDocument}>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-500">Type de document</label>
+                <select value={docForm.doc_type} onChange={e => setDocForm({ ...docForm, doc_type: e.target.value })} className="input-modern">
+                  {DOC_TYPE_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => { setShowDocForm(false); setDocFile(null); }} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium">Enregistrer</button>
+              <div>
+                <label className="text-xs text-slate-500">Titre</label>
+                <input value={docForm.title} onChange={e => setDocForm({ ...docForm, title: e.target.value })} className="input-modern" placeholder="Ex: Carte grise Ducato" />
               </div>
-            </form>
-          </div>
-        )}
+              <div>
+                <label className="text-xs text-slate-500">Fichier *</label>
+                <input type="file" onChange={e => setDocFile(e.target.files[0])} className="input-modern" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" />
+                <p className="text-[10px] text-slate-400 mt-1">PDF, images, Word, Excel — max 10 Mo</p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Date d'expiration (optionnel)</label>
+                <input type="date" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} className="input-modern" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Notes</label>
+                <textarea value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} className="input-modern" rows={2} placeholder="Remarques..." />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => { setShowDocForm(false); setDocFile(null); }} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium">Enregistrer</button>
+            </div>
+          </form>
+        </Modal>
 
         {/* Modale Ajouter événement */}
-        {showEventForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={addEvent} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Nouvel événement</h2>
-              <div className="space-y-3">
+        <Modal isOpen={showEventForm} onClose={() => setShowEventForm(false)} title="Nouvel événement" size="md">
+          <form onSubmit={addEvent}>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-500">Type d'événement</label>
+                <select value={eventForm.event_type} onChange={e => setEventForm({ ...eventForm, event_type: e.target.value })} className="input-modern">
+                  {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-500">Type d'événement</label>
-                  <select value={eventForm.event_type} onChange={e => setEventForm({ ...eventForm, event_type: e.target.value })} className="input-modern">
-                    {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-500">Date</label>
-                    <input type="date" value={eventForm.event_date} onChange={e => setEventForm({ ...eventForm, event_date: e.target.value })} className="input-modern" required />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">Kilométrage</label>
-                    <input type="number" placeholder="km" value={eventForm.km_at_event} onChange={e => setEventForm({ ...eventForm, km_at_event: e.target.value })} className="input-modern" />
-                  </div>
+                  <label className="text-xs text-slate-500">Date</label>
+                  <input type="date" value={eventForm.event_date} onChange={e => setEventForm({ ...eventForm, event_date: e.target.value })} className="input-modern" required />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500">Description</label>
-                  <textarea value={eventForm.description} onChange={e => setEventForm({ ...eventForm, description: e.target.value })} className="input-modern" rows={2} placeholder="Détails de l'intervention..." />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-500">Coût (€)</label>
-                    <input type="number" step="0.01" placeholder="0.00" value={eventForm.cost} onChange={e => setEventForm({ ...eventForm, cost: e.target.value })} className="input-modern" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">Réalisé par</label>
-                    <input value={eventForm.performed_by} onChange={e => setEventForm({ ...eventForm, performed_by: e.target.value })} className="input-modern" placeholder="Garage, mécanicien..." />
-                  </div>
+                  <label className="text-xs text-slate-500">Kilométrage</label>
+                  <input type="number" placeholder="km" value={eventForm.km_at_event} onChange={e => setEventForm({ ...eventForm, km_at_event: e.target.value })} className="input-modern" />
                 </div>
               </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Enregistrer</button>
+              <div>
+                <label className="text-xs text-slate-500">Description</label>
+                <textarea value={eventForm.description} onChange={e => setEventForm({ ...eventForm, description: e.target.value })} className="input-modern" rows={2} placeholder="Détails de l'intervention..." />
               </div>
-            </form>
-          </div>
-        )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">Coût (€)</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={eventForm.cost} onChange={e => setEventForm({ ...eventForm, cost: e.target.value })} className="input-modern" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Réalisé par</label>
+                  <input value={eventForm.performed_by} onChange={e => setEventForm({ ...eventForm, performed_by: e.target.value })} className="input-modern" placeholder="Garage, mécanicien..." />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setShowEventForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Enregistrer</button>
+            </div>
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { DataTable } from '../components';
+import { DataTable, Modal } from '../components';
 import { Shield, ScrollText } from 'lucide-react';
 import api from '../services/api';
 
@@ -184,29 +184,25 @@ export default function RGPD() {
           </>
         )}
 
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={() => setShowForm(false)}>
-            <form onSubmit={addTraitement} className="bg-white rounded-xl p-6 w-[540px] shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h2 className="text-lg font-bold mb-4">Nouveau traitement</h2>
-              <div className="space-y-3">
-                <input placeholder="Nom du traitement *" value={form.nom_traitement} onChange={e => setForm({ ...form, nom_traitement: e.target.value })} className="input-modern" required />
-                <textarea placeholder="Finalité *" value={form.finalite} onChange={e => setForm({ ...form, finalite: e.target.value })} className="textarea-modern" rows={2} required />
-                <select value={form.base_legale} onChange={e => setForm({ ...form, base_legale: e.target.value })} className="select-modern">
-                  {BASES.map(b => <option key={b} value={b}>{b.replace(/_/g, ' ')}</option>)}
-                </select>
-                <input placeholder="Catégories de personnes" value={form.categories_personnes} onChange={e => setForm({ ...form, categories_personnes: e.target.value })} className="input-modern" />
-                <input placeholder="Catégories de données" value={form.categories_donnees} onChange={e => setForm({ ...form, categories_donnees: e.target.value })} className="input-modern" />
-                <input placeholder="Destinataires" value={form.destinataires} onChange={e => setForm({ ...form, destinataires: e.target.value })} className="input-modern" />
-                <input placeholder="Durée de conservation" value={form.duree_conservation} onChange={e => setForm({ ...form, duree_conservation: e.target.value })} className="input-modern" />
-                <textarea placeholder="Mesures de sécurité" value={form.mesures_securite} onChange={e => setForm({ ...form, mesures_securite: e.target.value })} className="textarea-modern" rows={2} />
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouveau traitement" size="lg"
+          footer={<>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="submit" form="rgpd-form" className="flex-1 btn-primary text-sm">Créer</button>
+          </>}
+        >
+          <form id="rgpd-form" onSubmit={addTraitement} className="space-y-3">
+            <input placeholder="Nom du traitement *" value={form.nom_traitement} onChange={e => setForm({ ...form, nom_traitement: e.target.value })} className="input-modern" required />
+            <textarea placeholder="Finalité *" value={form.finalite} onChange={e => setForm({ ...form, finalite: e.target.value })} className="textarea-modern" rows={2} required />
+            <select value={form.base_legale} onChange={e => setForm({ ...form, base_legale: e.target.value })} className="select-modern">
+              {BASES.map(b => <option key={b} value={b}>{b.replace(/_/g, ' ')}</option>)}
+            </select>
+            <input placeholder="Catégories de personnes" value={form.categories_personnes} onChange={e => setForm({ ...form, categories_personnes: e.target.value })} className="input-modern" />
+            <input placeholder="Catégories de données" value={form.categories_donnees} onChange={e => setForm({ ...form, categories_donnees: e.target.value })} className="input-modern" />
+            <input placeholder="Destinataires" value={form.destinataires} onChange={e => setForm({ ...form, destinataires: e.target.value })} className="input-modern" />
+            <input placeholder="Durée de conservation" value={form.duree_conservation} onChange={e => setForm({ ...form, duree_conservation: e.target.value })} className="input-modern" />
+            <textarea placeholder="Mesures de sécurité" value={form.mesures_securite} onChange={e => setForm({ ...form, mesures_securite: e.target.value })} className="textarea-modern" rows={2} />
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

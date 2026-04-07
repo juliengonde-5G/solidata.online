@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { Modal } from '../components';
 import api from '../services/api';
 
 const STATUSES = ['received', 'interview', 'hired', 'rejected'];
@@ -383,7 +384,7 @@ export default function Candidates() {
 
         {/* Add Modal */}
         {showAddModal && (
-          <Modal title="Nouveau candidat" onClose={() => setShowAddModal(false)}>
+          <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Nouveau candidat" size="sm">
             <form onSubmit={createCandidate} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({...form, first_name: e.target.value})} className="input-modern" required />
@@ -407,7 +408,7 @@ export default function Candidates() {
 
         {/* Positions Modal */}
         {showPositionModal && (
-          <Modal title="Gestion des postes" onClose={() => setShowPositionModal(false)} wide>
+          <Modal isOpen={showPositionModal} onClose={() => setShowPositionModal(false)} title="Gestion des postes" size="md">
             <div className="space-y-4">
               {positions.map(p => (
                 <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3 text-sm">
@@ -604,19 +605,7 @@ function EditForm({ ef, set, save, cancel, positions }) {
   );
 }
 
-function Modal({ title, onClose, children, wide }) {
-  return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className={`bg-white rounded-xl p-6 shadow-xl ${wide ? 'max-w-xl' : 'max-w-md'} w-full max-h-[80vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold">{title}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
+// Local Modal removed — using shared Modal from '../components'
 
 function Field({ l, v }) { return <div><span className="text-gray-500 text-xs">{l}</span><p className="font-medium">{v || '—'}</p></div>; }
 function EF({ l, v, o, t = 'text' }) { return <div><span className="text-gray-500 text-xs">{l}</span><input type={t} value={v} onChange={e => o(e.target.value)} className="input-modern mt-1" /></div>; }

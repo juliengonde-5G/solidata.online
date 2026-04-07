@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Factory, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable } from '../components';
+import { DataTable, Modal } from '../components';
 import api from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
@@ -119,30 +119,26 @@ export default function Production() {
         />
 
         {/* Form */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-            <form onSubmit={createEntry} className="bg-white rounded-xl p-6 w-[440px] shadow-xl">
-              <h2 className="text-lg font-bold mb-4">Saisie production</h2>
-              <div className="space-y-3">
-                <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="input-modern" required />
-                <input type="number" placeholder="Effectif réel *" value={form.effectif_reel} onChange={e => setForm({ ...form, effectif_reel: e.target.value })} className="input-modern" required />
-                <div className="grid grid-cols-2 gap-3">
-                  <input type="number" placeholder="Entrée ligne (kg)" value={form.entree_ligne_kg} onChange={e => setForm({ ...form, entree_ligne_kg: e.target.value })} className="input-modern" />
-                  <input type="number" placeholder="Objectif ligne" value={form.objectif_entree_ligne_kg} onChange={e => setForm({ ...form, objectif_entree_ligne_kg: e.target.value })} className="input-modern" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <input type="number" placeholder="Entrée R3 (kg)" value={form.entree_recyclage_r3_kg} onChange={e => setForm({ ...form, entree_recyclage_r3_kg: e.target.value })} className="input-modern" />
-                  <input type="number" placeholder="Objectif R3" value={form.objectif_entree_r3_kg} onChange={e => setForm({ ...form, objectif_entree_r3_kg: e.target.value })} className="input-modern" />
-                </div>
-                <input placeholder="Encadrant" value={form.encadrant} onChange={e => setForm({ ...form, encadrant: e.target.value })} className="input-modern" />
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Enregistrer</button>
-              </div>
-            </form>
-          </div>
-        )}
+        <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Saisie production" size="sm"
+          footer={<>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="submit" form="production-form" className="flex-1 btn-primary text-sm">Enregistrer</button>
+          </>}
+        >
+          <form id="production-form" onSubmit={createEntry} className="space-y-3">
+            <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="input-modern" required />
+            <input type="number" placeholder="Effectif réel *" value={form.effectif_reel} onChange={e => setForm({ ...form, effectif_reel: e.target.value })} className="input-modern" required />
+            <div className="grid grid-cols-2 gap-3">
+              <input type="number" placeholder="Entrée ligne (kg)" value={form.entree_ligne_kg} onChange={e => setForm({ ...form, entree_ligne_kg: e.target.value })} className="input-modern" />
+              <input type="number" placeholder="Objectif ligne" value={form.objectif_entree_ligne_kg} onChange={e => setForm({ ...form, objectif_entree_ligne_kg: e.target.value })} className="input-modern" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <input type="number" placeholder="Entrée R3 (kg)" value={form.entree_recyclage_r3_kg} onChange={e => setForm({ ...form, entree_recyclage_r3_kg: e.target.value })} className="input-modern" />
+              <input type="number" placeholder="Objectif R3" value={form.objectif_entree_r3_kg} onChange={e => setForm({ ...form, objectif_entree_r3_kg: e.target.value })} className="input-modern" />
+            </div>
+            <input placeholder="Encadrant" value={form.encadrant} onChange={e => setForm({ ...form, encadrant: e.target.value })} className="input-modern" />
+          </form>
+        </Modal>
       </div>
     </Layout>
   );

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BookOpen } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable } from '../components';
+import { LoadingSpinner, DataTable, Modal } from '../components';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -418,58 +418,55 @@ export default function Pennylane() {
       </div>
 
       {/* Modal configuration */}
-      {showConfig && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
-          <form onSubmit={saveConfig} className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-lg font-bold mb-4">Configuration Pennylane</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs text-slate-500 font-medium">Cle API Pennylane</label>
-                <input
-                  type="password"
-                  placeholder="pl_api_..."
-                  value={configForm.api_key}
-                  onChange={e => setConfigForm({ ...configForm, api_key: e.target.value })}
-                  className="input-modern mt-1"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">Laissez vide pour conserver la cle existante</p>
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 font-medium">ID Societe Pennylane *</label>
-                <input
-                  placeholder="ex: solidarite-textiles"
-                  value={configForm.company_id}
-                  onChange={e => setConfigForm({ ...configForm, company_id: e.target.value })}
-                  className="input-modern mt-1"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={configForm.is_active} onChange={e => setConfigForm({ ...configForm, is_active: e.target.checked })} className="rounded" />
-                  Connexion active
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={configForm.sync_invoices} onChange={e => setConfigForm({ ...configForm, sync_invoices: e.target.checked })} className="rounded" />
-                  Synchroniser les factures
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={configForm.sync_suppliers} onChange={e => setConfigForm({ ...configForm, sync_suppliers: e.target.checked })} className="rounded" />
-                  Synchroniser les fournisseurs
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={configForm.sync_journal} onChange={e => setConfigForm({ ...configForm, sync_journal: e.target.checked })} className="rounded" />
-                  Synchroniser le journal comptable
-                </label>
-              </div>
+      <Modal isOpen={showConfig} onClose={() => setShowConfig(false)} title="Configuration Pennylane" size="sm">
+        <form onSubmit={saveConfig}>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs text-slate-500 font-medium">Cle API Pennylane</label>
+              <input
+                type="password"
+                placeholder="pl_api_..."
+                value={configForm.api_key}
+                onChange={e => setConfigForm({ ...configForm, api_key: e.target.value })}
+                className="input-modern mt-1"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Laissez vide pour conserver la cle existante</p>
             </div>
-            <div className="flex gap-2 mt-6">
-              <button type="button" onClick={() => setShowConfig(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
-              <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Enregistrer</button>
+            <div>
+              <label className="text-xs text-slate-500 font-medium">ID Societe Pennylane *</label>
+              <input
+                placeholder="ex: solidarite-textiles"
+                value={configForm.company_id}
+                onChange={e => setConfigForm({ ...configForm, company_id: e.target.value })}
+                className="input-modern mt-1"
+                required
+              />
             </div>
-          </form>
-        </div>
-      )}
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={configForm.is_active} onChange={e => setConfigForm({ ...configForm, is_active: e.target.checked })} className="rounded" />
+                Connexion active
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={configForm.sync_invoices} onChange={e => setConfigForm({ ...configForm, sync_invoices: e.target.checked })} className="rounded" />
+                Synchroniser les factures
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={configForm.sync_suppliers} onChange={e => setConfigForm({ ...configForm, sync_suppliers: e.target.checked })} className="rounded" />
+                Synchroniser les fournisseurs
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={configForm.sync_journal} onChange={e => setConfigForm({ ...configForm, sync_journal: e.target.checked })} className="rounded" />
+                Synchroniser le journal comptable
+              </label>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-6">
+            <button type="button" onClick={() => setShowConfig(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-indigo-700">Enregistrer</button>
+          </div>
+        </form>
+      </Modal>
     </Layout>
   );
 }
