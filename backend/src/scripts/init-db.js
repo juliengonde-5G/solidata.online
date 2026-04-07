@@ -2239,6 +2239,81 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_cav_collection_times_cav ON cav_collection_times(cav_id)');
     console.log('[INIT-DB] Table cav_collection_times créée ✓');
 
+    // ══════════════════════════════════════════
+    // MODULE FEUILLE DE PRODUCTION (suivi quotidien chaîne de tri)
+    // ══════════════════════════════════════════
+
+    // Colonnes supplémentaires sur production_daily
+    const prodDailyMigrations = [
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS encadrant_atelier TEXT",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS controleur_tri TEXT",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS consigne TEXT",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS effectif_tri INTEGER",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS effectif_recuperation INTEGER",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS effectif_cp INTEGER",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS effectif_formation INTEGER",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS effectif_abs_injustifiee INTEGER",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS effectif_am INTEGER",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS entree_recyclage_r4_kg DOUBLE PRECISION DEFAULT 0",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS objectif_entree_r4_kg DOUBLE PRECISION DEFAULT 900",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS objectif_recyclage_pct DOUBLE PRECISION DEFAULT 70",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS objectif_reutilisation_pct DOUBLE PRECISION DEFAULT 30",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS objectif_csr_pct VARCHAR(20) DEFAULT '<10%'",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS resultat_ligne_ok BOOLEAN",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS resultat_r3_ok BOOLEAN",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS resultat_r4_ok BOOLEAN",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS resultat_general_ok BOOLEAN",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS signature_encadrant TEXT",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS signature_direction TEXT",
+    ];
+    for (const sql of prodDailyMigrations) {
+      try { await client.query(sql); } catch(e) { /* colonne existe déjà */ }
+    }
+
+    // Postes opérateurs par jour (affectation matin/après-midi)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS production_postes (
+        id SERIAL PRIMARY KEY,
+        production_date DATE NOT NULL,
+        poste VARCHAR(50) NOT NULL,
+        periode VARCHAR(20) NOT NULL CHECK (periode IN ('matin', 'apres_midi')),
+        employe_nom VARCHAR(100),
+        employe_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(production_date, poste, periode, employe_nom)
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_production_postes_date ON production_postes(production_date)');
+
+    // Chariots / pesées par ligne
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS production_chariots (
+        id SERIAL PRIMARY KEY,
+        production_date DATE NOT NULL,
+        ligne VARCHAR(20) NOT NULL CHECK (ligne IN ('r1r2', 'r3', 'r4')),
+        numero INTEGER NOT NULL,
+        poids_kg DOUBLE PRECISION NOT NULL,
+        heure TIME,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_production_chariots_date ON production_chariots(production_date)');
+
+    // Historique commentaires production
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS production_commentaires (
+        id SERIAL PRIMARY KEY,
+        production_date DATE NOT NULL,
+        commentaire TEXT NOT NULL,
+        type VARCHAR(20) DEFAULT 'general' CHECK (type IN ('general', 'consigne', 'resultat')),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_production_commentaires_date ON production_commentaires(production_date)');
+
+    console.log('[INIT-DB] Module Feuille de Production ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');
