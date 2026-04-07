@@ -121,7 +121,7 @@ export default function WorkHours() {
         )}
 
         {!selectedEmployee && (
-          <div className="bg-white rounded-xl shadow-sm border p-12 text-center text-gray-400">
+          <div className="card-modern p-12 text-center text-gray-400">
             Sélectionnez un collaborateur pour voir ses heures
           </div>
         )}
@@ -165,7 +165,7 @@ export default function WorkHours() {
 
 function SummaryCard({ label, value, color }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-4">
+    <div className="card-modern p-4">
       <p className="text-xs text-gray-500">{label}</p>
       <p className={`text-2xl font-bold ${color}`}>{value}</p>
     </div>

@@ -58,7 +58,7 @@ export default function ReportingProduction() {
 
         {/* Summary table */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="card-modern p-4">
             <h3 className="font-semibold text-slate-800 mb-3">Resume du mois</h3>
             <table className="w-full text-sm">
               <tbody>
@@ -87,7 +87,7 @@ export default function ReportingProduction() {
           </div>
 
           {/* Progress toward target */}
-          <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="card-modern p-4">
             <h3 className="font-semibold text-slate-800 mb-3">Progression vers objectif</h3>
             <div className="flex flex-col items-center justify-center h-full gap-4 py-4">
               <div className="relative w-40 h-40">
@@ -114,7 +114,7 @@ export default function ReportingProduction() {
         </div>
 
         {/* Daily KPI table */}
-        <div className="bg-white rounded-xl shadow-sm border">
+        <div className="card-modern">
           <div className="p-4 border-b">
             <h3 className="font-semibold text-slate-800">Detail journalier</h3>
           </div>
@@ -182,7 +182,7 @@ export default function ReportingProduction() {
 
 function KPICard({ label, value, icon, color }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-4">
+    <div className="card-modern p-4">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-lg">{icon}</span>
         <span className="text-xs text-gray-500">{label}</span>

@@ -241,7 +241,7 @@ export default function Settings() {
 
         {/* État du système */}
         {health && (
-          <div className="bg-white rounded-xl shadow-sm border p-6 mb-8">
+          <div className="card-modern p-6 mb-8">
             <h2 className="font-semibold text-slate-800 mb-4">État du système</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatusItem label="API" active={health.status === 'ok'} />
@@ -256,7 +256,7 @@ export default function Settings() {
         )}
 
         {/* Pennylane */}
-        <div className="bg-white rounded-xl shadow-sm border p-6 mb-8">
+        <div className="card-modern p-6 mb-8">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
@@ -341,7 +341,7 @@ export default function Settings() {
         </div>
 
         {/* Settings */}
-        <div className="bg-white rounded-xl shadow-sm border mb-8">
+        <div className="card-modern mb-8">
           <div className="p-4 border-b bg-gray-50">
             <h2 className="font-semibold">Paramètres généraux</h2>
           </div>
@@ -374,7 +374,7 @@ export default function Settings() {
         </div>
 
         {/* ══════════ GRILLE TARIFAIRE ══════════ */}
-        <div className="bg-white rounded-xl shadow-sm border mb-8">
+        <div className="card-modern mb-8">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <div>
               <h2 className="font-semibold">Grille tarifaire</h2>
@@ -468,7 +468,7 @@ export default function Settings() {
         </div>
 
         {/* Message Templates */}
-        <div className="bg-white rounded-xl shadow-sm border">
+        <div className="card-modern">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <h2 className="font-semibold">Modèles de messages</h2>
             <button onClick={() => setShowTemplateForm(true)} className="text-primary text-sm font-medium hover:underline">+ Ajouter</button>
@@ -517,7 +517,7 @@ export default function Settings() {
         </Modal>
 
         {/* Declencheurs automatiques */}
-        <div className="bg-white rounded-xl shadow-sm border">
+        <div className="card-modern">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <div>
               <h2 className="font-semibold">Declencheurs automatiques</h2>
@@ -585,7 +585,7 @@ export default function Settings() {
         </Modal>
 
         {/* Objectifs periodiques */}
-        <div className="bg-white rounded-xl shadow-sm border mb-8">
+        <div className="card-modern mb-8">
           <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
             <div>
               <h2 className="font-semibold">Objectifs periodiques</h2>

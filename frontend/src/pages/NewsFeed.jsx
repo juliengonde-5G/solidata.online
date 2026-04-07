@@ -106,7 +106,7 @@ export default function NewsFeed() {
         {/* Articles */}
         <div className="space-y-4">
           {articles.length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm border p-12 text-center">
+            <div className="card-modern p-12 text-center">
               <p className="text-gray-400">Aucun article pour le moment</p>
               {isAdmin && <p className="text-sm text-gray-300 mt-1">Cliquez sur "Publier" pour ajouter du contenu</p>}
             </div>
@@ -115,7 +115,7 @@ export default function NewsFeed() {
             const hasFullContent = article.content && article.content.length > 0;
             const hasMore = hasFullContent || article.source_url;
             return (
-            <div key={article.id} className={`bg-white rounded-xl shadow-sm border p-5 transition-all ${article.is_pinned ? 'border-l-4 border-l-amber-400' : ''}`}>
+            <div key={article.id} className={`card-modern p-5 transition-all ${article.is_pinned ? 'border-l-4 border-l-amber-400' : ''}`}>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">

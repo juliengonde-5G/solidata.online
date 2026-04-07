@@ -99,7 +99,7 @@ export default function ChaineTri() {
         <>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           {chains.map(chain => (
-            <div key={chain.id} className="bg-white rounded-xl shadow-sm border p-5">
+            <div key={chain.id} className="card-modern p-5">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-bold text-lg">{chain.nom}</h3>
                 <StatusBadge status={chain.is_active ? 'active' : 'inactive'} size="sm" />
@@ -117,7 +117,7 @@ export default function ChaineTri() {
 
         {/* Chain Detail */}
         {selectedChain && (
-          <div className="bg-white rounded-xl shadow-sm border p-6 mb-8">
+          <div className="card-modern p-6 mb-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold">{selectedChain.nom} — Opérations</h2>
               <button onClick={() => setSelectedChain(null)} className="text-gray-400 hover:text-gray-600 text-sm">Fermer</button>
@@ -147,7 +147,7 @@ export default function ChaineTri() {
           <h2 className="text-xl font-bold text-slate-800 mb-4">Catégories sortantes</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {categories.map(cat => (
-              <div key={cat.id} className="bg-white rounded-lg shadow-sm border p-4 flex items-center gap-3">
+              <div key={cat.id} className="card-modern p-4 flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.couleur || '#8BC540' }}></div>
                 <div className="flex-1">
                   <p className="font-medium text-sm">{cat.nom}</p>
@@ -183,19 +183,19 @@ export default function ChaineTri() {
               const avgProductivite = (prodData.reduce((s, d) => s + (d.productivite_kg_per || 0), 0) / prodData.length).toFixed(0);
               return (
                 <div className="grid grid-cols-4 gap-4 mb-6">
-                  <div className="bg-white rounded-xl shadow-sm border p-4">
+                  <div className="card-modern p-4">
                     <p className="text-xs text-gray-500 font-medium">Effectif moyen / jour</p>
                     <p className="text-2xl font-bold text-slate-800">{avgEffectif}</p>
                   </div>
-                  <div className="bg-white rounded-xl shadow-sm border p-4">
+                  <div className="card-modern p-4">
                     <p className="text-xs text-gray-500 font-medium">Total entrée (kg)</p>
                     <p className="text-2xl font-bold text-blue-600">{totalEntree.toLocaleString('fr-FR')}</p>
                   </div>
-                  <div className="bg-white rounded-xl shadow-sm border p-4">
+                  <div className="card-modern p-4">
                     <p className="text-xs text-gray-500 font-medium">Total sortie (kg)</p>
                     <p className="text-2xl font-bold text-green-600">{totalSortie.toLocaleString('fr-FR')}</p>
                   </div>
-                  <div className="bg-white rounded-xl shadow-sm border p-4">
+                  <div className="card-modern p-4">
                     <p className="text-xs text-gray-500 font-medium">Productivité moy. (kg/pers)</p>
                     <p className="text-2xl font-bold text-purple-600">{avgProductivite}</p>
                   </div>
@@ -204,7 +204,7 @@ export default function ChaineTri() {
             })()}
 
             {/* Daily chart - bar chart with stacked bars */}
-            <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <div className="card-modern p-5 mb-6">
               <h3 className="text-sm font-semibold text-gray-600 mb-4">Production journalière & effectifs</h3>
               {prodData.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">Aucune donnée pour ce mois</p>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { AlertTriangle, Check, Download, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { PageHeader, LoadingSpinner } from '../components';
@@ -9,9 +10,9 @@ import { PageHeader, LoadingSpinner } from '../components';
 // ══════════════════════════════════════════
 
 const STATUS_CONFIG = {
-  ok: { label: 'OK', bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: IconCheck },
-  warning: { label: 'Attention', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', dot: 'bg-amber-500', icon: IconAlert },
-  error: { label: 'Erreur', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', dot: 'bg-red-500', icon: IconX },
+  ok: { label: 'OK', bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: Check },
+  warning: { label: 'Attention', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', dot: 'bg-amber-500', icon: AlertTriangle },
+  error: { label: 'Erreur', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', dot: 'bg-red-500', icon: X },
 };
 
 export default function FinanceControles() {
@@ -76,7 +77,7 @@ export default function FinanceControles() {
         <PageHeader
           title="Controles Finance"
           subtitle="Verifications automatiques des donnees comptables"
-          icon={IconShield}
+          icon={ShieldCheck}
           breadcrumb={[
             { label: 'Accueil', path: '/' },
             { label: 'Finance', path: '/finance' },
@@ -98,14 +99,14 @@ export default function FinanceControles() {
                 disabled={refreshing}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
               >
-                <IconRefresh className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                 Actualiser
               </button>
               <button
                 onClick={handleExport}
                 className="btn-primary text-sm"
               >
-                <IconDownload className="w-4 h-4" />
+                <Download className="w-4 h-4" />
                 Exporter
               </button>
             </div>
@@ -139,7 +140,7 @@ export default function FinanceControles() {
           <div className="flex items-center justify-center py-32"><LoadingSpinner /></div>
         ) : checks.length === 0 ? (
           <div className="card-modern p-16 text-center">
-            <IconShield className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
             <p className="text-slate-500 text-sm">Aucun controle disponible. Cliquez sur Actualiser pour lancer les verifications.</p>
           </div>
         ) : (
@@ -181,25 +182,3 @@ export default function FinanceControles() {
   );
 }
 
-// ══════════════════════════════════════════
-// SVG Icons
-// ══════════════════════════════════════════
-
-function IconShield({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>;
-}
-function IconCheck({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>;
-}
-function IconAlert({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>;
-}
-function IconX({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
-}
-function IconRefresh({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>;
-}
-function IconDownload({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>;
-}

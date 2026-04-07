@@ -226,26 +226,26 @@ export default function ExutoiresCommandes() {
 
         {/* Stats bar */}
         <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="card-modern p-4">
             <p className="text-xs text-gray-500 font-medium">Commandes actives</p>
             <p className="text-2xl font-bold text-slate-800">{stats.actives || 0}</p>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="card-modern p-4">
             <p className="text-xs text-gray-500 font-medium">Tonnage prévu</p>
             <p className="text-2xl font-bold text-blue-600">{formatTonnage(stats.tonnage_prevu)} <span className="text-sm font-normal text-gray-400">t</span></p>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="card-modern p-4">
             <p className="text-xs text-gray-500 font-medium">CA prévisionnel</p>
             <p className="text-2xl font-bold text-green-600">{formatPrice(stats.ca_previsionnel)} <span className="text-sm font-normal text-gray-400">€</span></p>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="card-modern p-4">
             <p className="text-xs text-gray-500 font-medium">En attente de traitement</p>
             <p className="text-2xl font-bold text-orange-600">{stats.en_attente || 0}</p>
           </div>
         </div>
 
         {/* Pipeline / Flow diagram */}
-        <div className="bg-white rounded-xl shadow-sm border p-4 mb-6 overflow-x-auto">
+        <div className="card-modern p-4 mb-6 overflow-x-auto">
           <h3 className="text-sm font-semibold text-gray-500 mb-3">Flux des commandes</h3>
           <div className="flex items-center gap-1 min-w-[700px]">
             {[

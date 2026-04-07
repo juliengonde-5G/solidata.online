@@ -63,7 +63,7 @@ export default function ReportingCollecte() {
         )}
 
         {/* Collecte table by period */}
-        <div className="bg-white rounded-xl shadow-sm border mb-6">
+        <div className="card-modern mb-6">
           <div className="p-4 border-b">
             <h3 className="font-semibold text-slate-800">Collecte par periode</h3>
           </div>
@@ -110,7 +110,7 @@ export default function ReportingCollecte() {
         {/* Tours summary */}
         {dashboard && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <h3 className="font-semibold text-slate-800 mb-3">Resume des tournees</h3>
               <table className="w-full text-sm">
                 <tbody>
@@ -134,7 +134,7 @@ export default function ReportingCollecte() {
               </table>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <h3 className="font-semibold text-slate-800 mb-3">CAV</h3>
               <table className="w-full text-sm">
                 <tbody>
@@ -162,7 +162,7 @@ export default function ReportingCollecte() {
 
 function KPICard({ label, value, icon, color }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-4">
+    <div className="card-modern p-4">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-lg">{icon}</span>
         <span className="text-xs text-gray-500">{label}</span>

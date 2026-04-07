@@ -216,7 +216,7 @@ export default function ExutoiresPreparation() {
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl shadow-sm border p-4 mb-6">
+        <div className="card-modern p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <select
               value={filterLieu}
@@ -260,7 +260,7 @@ export default function ExutoiresPreparation() {
           {preparations.map(prep => {
             const statut = STATUTS_PREP[prep.statut_preparation] || STATUTS_PREP.planifiee;
             return (
-              <div key={prep.id} className="bg-white rounded-xl shadow-sm border p-5 relative flex flex-col gap-3">
+              <div key={prep.id} className="card-modern p-5 relative flex flex-col gap-3">
                 {/* Status badge */}
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">

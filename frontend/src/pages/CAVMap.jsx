@@ -90,7 +90,7 @@ export default function CAVMap() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Map */}
-          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border overflow-hidden" style={{ height: '70vh' }}>
+          <div className="lg:col-span-2 card-modern overflow-hidden" style={{ height: '70vh' }}>
             <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
@@ -133,7 +133,7 @@ export default function CAVMap() {
           {/* Sidebar */}
           <div className="space-y-3 max-h-[70vh] overflow-y-auto">
             {selectedCav ? (
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <button onClick={() => setSelectedCav(null)} className="text-primary text-xs hover:underline mb-2">← Retour</button>
                 <h3 className="font-bold text-lg mb-2">{selectedCav.name}</h3>
                 <div className="space-y-2 text-sm">
@@ -152,7 +152,7 @@ export default function CAVMap() {
                   <div
                     key={cav.id}
                     onClick={() => loadCavDetail(cav.id)}
-                    className="bg-white rounded-lg shadow-sm border p-3 cursor-pointer hover:shadow-md transition"
+                    className="card-modern p-3 cursor-pointer hover:shadow-md transition"
                   >
                     <div className="flex items-center justify-between">
                       <div>

@@ -71,7 +71,7 @@ export default function ReportingRH() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Employees by team */}
-          <div className="bg-white rounded-xl shadow-sm border">
+          <div className="card-modern">
             <div className="p-4 border-b">
               <h3 className="font-semibold text-slate-800">Effectifs par equipe</h3>
             </div>
@@ -113,7 +113,7 @@ export default function ReportingRH() {
           </div>
 
           {/* Candidate pipeline */}
-          <div className="bg-white rounded-xl shadow-sm border">
+          <div className="card-modern">
             <div className="p-4 border-b">
               <h3 className="font-semibold text-slate-800">Pipeline de recrutement</h3>
             </div>
@@ -162,7 +162,7 @@ export default function ReportingRH() {
         </div>
 
         {/* Candidate funnel visual */}
-        <div className="bg-white rounded-xl shadow-sm border p-4">
+        <div className="card-modern p-4">
           <h3 className="font-semibold text-slate-800 mb-4">Entonnoir de recrutement</h3>
           <div className="space-y-2">
             {['received', 'screening', 'interview', 'trial', 'recruited'].map((status) => {
@@ -217,7 +217,7 @@ function getFunnelColor(status) {
 
 function KPICard({ label, value, icon, color }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-4">
+    <div className="card-modern p-4">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-lg">{icon}</span>
         <span className="text-xs text-gray-500">{label}</span>

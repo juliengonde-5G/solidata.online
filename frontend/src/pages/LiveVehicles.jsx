@@ -86,7 +86,7 @@ export default function LiveVehicles() {
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           {/* Map */}
-          <div className="lg:col-span-3 bg-white rounded-xl shadow-sm border overflow-hidden" style={{ height: '75vh' }}>
+          <div className="lg:col-span-3 card-modern overflow-hidden" style={{ height: '75vh' }}>
             <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
@@ -128,7 +128,7 @@ export default function LiveVehicles() {
             {activeTours.map(tour => {
               const pos = positions[tour.id];
               return (
-                <div key={tour.id} className="bg-white rounded-xl shadow-sm border p-4">
+                <div key={tour.id} className="card-modern p-4">
                   <div className="flex items-center gap-3 mb-2">
                     <span className="text-lg">🚛</span>
                     <div>
@@ -165,7 +165,7 @@ export default function LiveVehicles() {
               );
             })}
             {activeTours.length === 0 && (
-              <div className="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400 text-sm">
+              <div className="card-modern p-6 text-center text-gray-400 text-sm">
                 Aucune tournée en cours
               </div>
             )}

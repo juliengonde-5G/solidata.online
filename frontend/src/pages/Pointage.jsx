@@ -148,7 +148,7 @@ export default function Pointage() {
             {loading ? (
               <LoadingSpinner size="lg" message="Chargement des pointages..." />
             ) : (
-              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="card-modern overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
@@ -198,7 +198,7 @@ export default function Pointage() {
         {/* ═══ ONGLET BADGES ═══ */}
         {tab === 'badges' && (
           <div>
-            <form onSubmit={handleBadgeCreate} className="bg-white rounded-xl shadow-sm border p-4 mb-6">
+            <form onSubmit={handleBadgeCreate} className="card-modern p-4 mb-6">
               <h3 className="font-semibold mb-3">Enregistrer un nouveau badge</h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <input type="text" placeholder="UID du badge (ex: A1B2C3D4)" value={badgeForm.badge_uid}
@@ -214,7 +214,7 @@ export default function Pointage() {
               {badgeMsg && <p className={`mt-2 text-sm ${badgeMsg.startsWith('Erreur') ? 'text-red-600' : 'text-green-600'}`}>{badgeMsg}</p>}
             </form>
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="card-modern overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
@@ -266,7 +266,7 @@ export default function Pointage() {
         {/* ═══ ONGLET SAISIE MANUELLE ═══ */}
         {tab === 'manual' && (
           <div className="max-w-2xl">
-            <div className="bg-white rounded-xl shadow-sm border p-6">
+            <div className="card-modern p-6">
               <h3 className="font-semibold mb-4">Saisie manuelle des heures</h3>
               <p className="text-sm text-gray-500 mb-4">Permet au manager de saisir ou corriger les horaires d'un collaborateur.</p>
 
@@ -333,7 +333,7 @@ export default function Pointage() {
                 <p className="text-green-600 text-sm mt-1">Tous les collaborateurs planifiés ont badgé.</p>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="card-modern overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-red-50">
                     <tr>
@@ -369,7 +369,7 @@ export default function Pointage() {
               <button onClick={loadLog} className="btn-primary text-sm">Actualiser</button>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="card-modern overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
@@ -420,7 +420,7 @@ export default function Pointage() {
               <button onClick={loadMonthly} className="btn-primary text-sm">Actualiser</button>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="card-modern overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>

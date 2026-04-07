@@ -834,7 +834,7 @@ function EventRow({ evt, onDelete, past }) {
 
 function Section({ title, desc, children }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
+    <div className="card-modern p-5 mb-4">
       <h2 className="text-lg font-semibold text-slate-800 mb-1">{title}</h2>
       {desc && <p className="text-xs text-gray-400 mb-4">{desc}</p>}
       {children}

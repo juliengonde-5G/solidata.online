@@ -61,7 +61,7 @@ export default function Reporting() {
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Collecte Chart */}
-          <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="card-modern p-4">
             <h3 className="font-semibold mb-3">Collecte par période (kg)</h3>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={collecteData}>
@@ -76,7 +76,7 @@ export default function Reporting() {
 
           {/* Tours Status */}
           {dashboard?.tours_by_status && (
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <h3 className="font-semibold mb-3">Répartition des tournées</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
@@ -97,7 +97,7 @@ export default function Reporting() {
 
           {/* Production Trend */}
           {dashboard?.production_trend && (
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <h3 className="font-semibold mb-3">Tendance production (t/jour)</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={dashboard.production_trend}>
@@ -114,7 +114,7 @@ export default function Reporting() {
 
           {/* Candidates by Status */}
           {dashboard?.candidates_by_status && (
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="card-modern p-4">
               <h3 className="font-semibold mb-3">Candidatures par statut</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
@@ -140,7 +140,7 @@ export default function Reporting() {
 
 function KPICard({ label, value, icon, color }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-4">
+    <div className="card-modern p-4">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-lg">{icon}</span>
         <span className="text-xs text-gray-500">{label}</span>

@@ -292,7 +292,7 @@ export default function AdminCAV() {
         <div className={`grid gap-6 ${detailCav ? 'grid-cols-1 lg:grid-cols-5' : 'grid-cols-1'}`}>
 
           {/* Table */}
-          <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${detailCav ? 'lg:col-span-3' : ''}`}>
+          <div className={`card-modern overflow-hidden ${detailCav ? 'lg:col-span-3' : ''}`}>
             {loading ? (
               <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
             ) : (
@@ -357,7 +357,7 @@ export default function AdminCAV() {
           {detailCav && (
             <div className="lg:col-span-2 space-y-4">
               {/* Card principale */}
-              <div className="bg-white rounded-xl shadow-sm border p-5">
+              <div className="card-modern p-5">
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h2 className="text-lg font-bold text-slate-800">CAV #{detailCav.id}</h2>
@@ -421,7 +421,7 @@ export default function AdminCAV() {
 
               {/* Carte GPS */}
               {detailCav.latitude && detailCav.longitude && (
-                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                <div className="card-modern overflow-hidden">
                   <div className="px-4 py-2 bg-gray-50 border-b">
                     <h3 className="text-xs font-medium text-gray-500 uppercase">Localisation</h3>
                   </div>
@@ -444,7 +444,7 @@ export default function AdminCAV() {
               )}
 
               {/* Photo CAV */}
-              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="card-modern overflow-hidden">
                 <div className="px-4 py-2 bg-gray-50 border-b flex items-center justify-between">
                   <h3 className="text-xs font-medium text-gray-500 uppercase">Photo du CAV</h3>
                   {detailCav.photo_path && (
@@ -476,7 +476,7 @@ export default function AdminCAV() {
               </div>
 
               {/* QR Code */}
-              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="card-modern overflow-hidden">
                 <div className="px-4 py-2 bg-gray-50 border-b">
                   <h3 className="text-xs font-medium text-gray-500 uppercase">QR Code</h3>
                 </div>

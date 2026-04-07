@@ -114,7 +114,7 @@ export default function FillRateMap() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Carte */}
-          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border overflow-hidden relative" style={{ height: '65vh' }}>
+          <div className="lg:col-span-2 card-modern overflow-hidden relative" style={{ height: '65vh' }}>
             <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
@@ -182,7 +182,7 @@ export default function FillRateMap() {
 
             {/* Détail sélectionné */}
             {selectedCav && (
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-bold">{selectedCav.name}</h3>

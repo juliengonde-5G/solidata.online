@@ -1,6 +1,7 @@
 export { ToastProvider, useToast } from './Toast';
 export { default as Modal } from './Modal';
 export { default as KPICard } from './KPICard';
+export { KpiCard, NavCard } from './HubComponents';
 export { default as StatusBadge } from './StatusBadge';
 export { default as DataTable } from './DataTable';
 export { default as PageHeader } from './PageHeader';

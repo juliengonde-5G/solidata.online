@@ -269,7 +269,7 @@ export default function PersonalityMatrix() {
         {view === 'types' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {types.map(t => (
-              <div key={t.key} className="bg-white rounded-xl shadow-sm border p-5">
+              <div key={t.key} className="card-modern p-5">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold" style={{ backgroundColor: TYPE_COLORS[t.key] }}>
                     {t.nom[0]}
@@ -313,7 +313,7 @@ export default function PersonalityMatrix() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border p-6">
+            <div className="card-modern p-6">
               <h2 className="text-xl font-bold mb-4">
                 {selectedProfile.candidate.first_name} {selectedProfile.candidate.last_name}
               </h2>
@@ -357,7 +357,7 @@ export default function PersonalityMatrix() {
 
             {/* Comportements principaux selon le profil */}
             {selectedProfile.report.comportementsPrincipaux && (
-              <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="card-modern p-6">
                 <h3 className="font-semibold text-slate-800 mb-4">Comportements principaux</h3>
                 <div className="grid grid-cols-1 md:grid-cols-1 gap-4 space-y-3">
                   <div>

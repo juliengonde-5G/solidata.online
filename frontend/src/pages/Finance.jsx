@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  AlertTriangle, BarChart3, Calculator, CircleDollarSign, Euro, Factory,
+  Landmark, Scale, ShieldCheck, TrendingDown, TrendingUp, Truck, Upload,
+} from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { PageHeader, KPICard, LoadingSpinner, EmptyState } from '../components';
@@ -34,13 +38,13 @@ const fmtPct = (v) => {
 };
 
 const SUB_PAGES = [
-  { path: '/pennylane', label: 'Pennylane', description: 'Synchroniser GL, transactions, balances', icon: IconUpload, color: 'blue' },
-  { path: '/finance/operations', label: 'Donnees Operationnelles', description: 'Volumes, couts, marges par centre', icon: IconCalc, color: 'emerald' },
-  { path: '/finance/rentabilite', label: 'Rentabilite Matiere', description: 'Cout complet collecte / tri, PV moyen, marge par qualite', icon: IconChart, color: 'teal' },
-  { path: '/finance/tresorerie', label: 'Tresorerie', description: 'Position, encaissements, decaissements', icon: IconBank, color: 'teal' },
-  { path: '/finance/pl', label: 'Compte de Resultat', description: 'P&L par centre analytique', icon: IconPL, color: 'amber' },
-  { path: '/finance/bilan', label: 'Bilan & Ratios', description: 'Actif, passif, SIG, seuil de rentabilite', icon: IconBalance, color: 'purple' },
-  { path: '/finance/controles', label: 'Controles', description: 'Verifications automatiques', icon: IconShield, color: 'rose' },
+  { path: '/pennylane', label: 'Pennylane', description: 'Synchroniser GL, transactions, balances', icon: Upload, color: 'blue' },
+  { path: '/finance/operations', label: 'Donnees Operationnelles', description: 'Volumes, couts, marges par centre', icon: Calculator, color: 'emerald' },
+  { path: '/finance/rentabilite', label: 'Rentabilite Matiere', description: 'Cout complet collecte / tri, PV moyen, marge par qualite', icon: TrendingUp, color: 'teal' },
+  { path: '/finance/tresorerie', label: 'Tresorerie', description: 'Position, encaissements, decaissements', icon: Landmark, color: 'teal' },
+  { path: '/finance/pl', label: 'Compte de Resultat', description: 'P&L par centre analytique', icon: BarChart3, color: 'amber' },
+  { path: '/finance/bilan', label: 'Bilan & Ratios', description: 'Actif, passif, SIG, seuil de rentabilite', icon: Scale, color: 'purple' },
+  { path: '/finance/controles', label: 'Controles', description: 'Verifications automatiques', icon: ShieldCheck, color: 'rose' },
 ];
 
 const COLOR_MAP = {
@@ -96,7 +100,7 @@ export default function Finance() {
         <PageHeader
           title="Finance"
           subtitle="Synthese dirigeant"
-          icon={IconFinance}
+          icon={CircleDollarSign}
           breadcrumb={[{ label: 'Accueil', path: '/' }, { label: 'Finance' }]}
           actions={
             <select
@@ -125,7 +129,7 @@ export default function Finance() {
                     : 'bg-blue-50 border border-blue-200 text-blue-800'
                 }`}
               >
-                <IconAlert className={`w-5 h-5 flex-shrink-0 ${
+                <AlertTriangle className={`w-5 h-5 flex-shrink-0 ${
                   alerte.type === 'error' ? 'text-red-500' : alerte.type === 'warning' ? 'text-amber-500' : 'text-blue-500'
                 }`} />
                 <span>{alerte.message}</span>
@@ -136,16 +140,16 @@ export default function Finance() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <KPICard title="CA YTD" value={fmtK(kpis?.ca_ytd)} unit="EUR" icon={IconEuro} accent="primary" loading={loading} />
-          <KPICard title="Charges YTD" value={fmtK(kpis?.charges_ytd)} unit="EUR" icon={IconDown} accent="red" loading={loading} />
-          <KPICard title="Resultat" value={fmtK(kpis?.resultat)} unit="EUR" icon={IconPL} accent="emerald" loading={loading}
+          <KPICard title="CA YTD" value={fmtK(kpis?.ca_ytd)} unit="EUR" icon={Euro} accent="primary" loading={loading} />
+          <KPICard title="Charges YTD" value={fmtK(kpis?.charges_ytd)} unit="EUR" icon={TrendingDown} accent="red" loading={loading} />
+          <KPICard title="Resultat" value={fmtK(kpis?.resultat)} unit="EUR" icon={BarChart3} accent="emerald" loading={loading}
             trend={kpis?.resultat_trend ? { direction: kpis.resultat_trend > 0 ? 'up' : 'down', value: Math.abs(kpis.resultat_trend) } : undefined}
           />
-          <KPICard title="Tresorerie" value={fmtK(kpis?.tresorerie)} unit="EUR" icon={IconBank} accent="primary" loading={loading} />
-          <KPICard title="BFR" value={fmtK(kpis?.bfr)} unit="EUR" icon={IconCalc} accent="amber" loading={loading} />
-          <KPICard title="Cout / tonne collecte" value={fmt(kpis?.cout_tonne_collecte)} unit="EUR/t" icon={IconTruck} accent="slate" loading={loading} />
-          <KPICard title="Cout / tonne trie" value={fmt(kpis?.cout_tonne_trie)} unit="EUR/t" icon={IconFactory} accent="slate" loading={loading} />
-          <KPICard title="Marge globale" value={fmtPct(kpis?.marge_globale)} icon={IconChart} accent="emerald" loading={loading}
+          <KPICard title="Tresorerie" value={fmtK(kpis?.tresorerie)} unit="EUR" icon={Landmark} accent="primary" loading={loading} />
+          <KPICard title="BFR" value={fmtK(kpis?.bfr)} unit="EUR" icon={Calculator} accent="amber" loading={loading} />
+          <KPICard title="Cout / tonne collecte" value={fmt(kpis?.cout_tonne_collecte)} unit="EUR/t" icon={Truck} accent="slate" loading={loading} />
+          <KPICard title="Cout / tonne trie" value={fmt(kpis?.cout_tonne_trie)} unit="EUR/t" icon={Factory} accent="slate" loading={loading} />
+          <KPICard title="Marge globale" value={fmtPct(kpis?.marge_globale)} icon={TrendingUp} accent="emerald" loading={loading}
             trend={kpis?.marge_trend ? { direction: kpis.marge_trend > 0 ? 'up' : 'down', value: Math.abs(kpis.marge_trend) } : undefined}
           />
         </div>
@@ -231,46 +235,3 @@ export default function Finance() {
   );
 }
 
-// ══════════════════════════════════════════
-// SVG Icons
-// ══════════════════════════════════════════
-
-function IconFinance({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
-}
-function IconEuro({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14.121 15.536c-1.171 1.952-3.07 1.952-4.242 0-1.172-1.953-1.172-5.119 0-7.072 1.171-1.952 3.07-1.952 4.242 0M8 10.5h4m-4 3h4" /></svg>;
-}
-function IconDown({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg>;
-}
-function IconBank({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v3m4-3v3m4-3v3" /></svg>;
-}
-function IconCalc({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>;
-}
-function IconPL({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
-}
-function IconBalance({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>;
-}
-function IconShield({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>;
-}
-function IconUpload({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
-}
-function IconTruck({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10m10 0H3m10 0a2 2 0 104 0m-4 0a2 2 0 114 0m6-6h-2a1 1 0 00-1 1v5m3 0h-3m3 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>;
-}
-function IconFactory({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0H5m14 0h2m-16 0H3m2-5h4m2 0h4m-8-4h4m2 0h4" /></svg>;
-}
-function IconChart({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>;
-}
-function IconAlert({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>;
-}

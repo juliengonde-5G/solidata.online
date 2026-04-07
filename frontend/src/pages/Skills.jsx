@@ -80,7 +80,7 @@ export default function Skills() {
             {Object.entries(SKILL_CATEGORIES).map(([key, cat]) => (
               <div
                 key={key}
-                className={`bg-white rounded-xl shadow-sm border p-4 cursor-pointer hover:shadow-md transition ${selectedSkill === key ? 'ring-2 ring-primary' : ''}`}
+                className={`card-modern p-4 cursor-pointer hover:shadow-md transition ${selectedSkill === key ? 'ring-2 ring-primary' : ''}`}
                 onClick={() => setSelectedSkill(selectedSkill === key ? null : key)}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -106,7 +106,7 @@ export default function Skills() {
         )}
 
         {view === 'matrix' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+          <div className="card-modern overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50">
                 <tr>

@@ -114,7 +114,7 @@ export default function Referentiels() {
         {view === 'catalogue' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {catalogue.map(p => (
-              <div key={p.id} className="bg-white rounded-lg shadow-sm border p-4">
+              <div key={p.id} className="card-modern p-4">
                 <h3 className="font-medium text-sm">{p.nom}</h3>
                 <div className="mt-2 space-y-1 text-xs text-gray-500">
                   <p>Catégorie éco-org : {p.categorie_eco_org || '—'}</p>
@@ -131,7 +131,7 @@ export default function Referentiels() {
         {view === 'conteneurs' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {conteneurs.map(c => (
-              <div key={c.id} className="bg-white rounded-xl shadow-sm border p-5">
+              <div key={c.id} className="card-modern p-5">
                 <h3 className="font-bold">{c.nom}</h3>
                 <div className="mt-2 space-y-1 text-sm text-gray-600">
                   <p>Capacité : {c.capacite_litres || '—'} L</p>

@@ -83,7 +83,7 @@ export default function Refashion() {
 
             {/* Detail table */}
             {dpav.details && (
-              <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="card-modern overflow-hidden">
                 <table className="w-full">
                   <thead className="bg-gray-50">
                     <tr>
@@ -151,7 +151,7 @@ export default function Refashion() {
 
 function DPAVCard({ label, value, rate, color }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-4">
+    <div className="card-modern p-4">
       <p className="text-xs text-gray-500">{label}</p>
       <p className={`text-xl font-bold ${color}`}>{(value || 0).toFixed(2)}t</p>
       <p className="text-xs text-gray-400">{rate}</p>

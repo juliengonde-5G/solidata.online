@@ -215,7 +215,7 @@ export default function PlanningHebdo() {
             const isExpanded = expandedFilieres[filiere.code];
 
             return (
-              <div key={filiere.code} className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div key={filiere.code} className="card-modern overflow-hidden">
                 {/* Filiere header */}
                 <button
                   onClick={() => toggleFiliere(filiere.code)}
@@ -298,7 +298,7 @@ export default function PlanningHebdo() {
 
         {/* Employes non affectes */}
         {planning?.employees && (
-          <div className="mt-6 bg-white rounded-xl shadow-sm border p-4">
+          <div className="mt-6 card-modern p-4">
             <h3 className="text-sm font-bold text-gray-700 mb-3">
               Employes ({planning.employees.length})
             </h3>

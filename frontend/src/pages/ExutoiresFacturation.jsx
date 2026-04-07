@@ -230,19 +230,19 @@ export default function ExutoiresFacturation() {
           <>
             {/* Summary cards */}
             <div className="grid grid-cols-4 gap-4 mb-6">
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <p className="text-xs text-gray-500 font-medium">Conformes</p>
                 <p className="text-2xl font-bold text-green-600">{peseeStats.conformes}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <p className="text-xs text-gray-500 font-medium">Écarts acceptables</p>
                 <p className="text-2xl font-bold text-yellow-600">{peseeStats.ecarts}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <p className="text-xs text-gray-500 font-medium">Litiges</p>
                 <p className="text-2xl font-bold text-red-600">{peseeStats.litiges}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-sm border p-4">
+              <div className="card-modern p-4">
                 <p className="text-xs text-gray-500 font-medium">En attente validation</p>
                 <p className="text-2xl font-bold text-blue-600">{peseeStats.en_attente}</p>
               </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ArrowLeft, ArrowRight, BarChart3, Scale, ShieldCheck, Target, TrendingUp } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { PageHeader, KPICard, LoadingSpinner } from '../components';
@@ -53,7 +54,7 @@ export default function FinanceBilan() {
         <PageHeader
           title="Bilan & Ratios"
           subtitle="Bilan simplifie, SIG et seuil de rentabilite"
-          icon={IconBalance}
+          icon={Scale}
           breadcrumb={[
             { label: 'Accueil', path: '/' },
             { label: 'Finance', path: '/finance' },
@@ -74,13 +75,13 @@ export default function FinanceBilan() {
 
         {/* KPI Cards avec comparatif N-1 */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <KPICard title="Total Actif" value={fmtK(kpis.total_actif)} unit="EUR" icon={IconBalance} accent="primary" loading={loading}
+          <KPICard title="Total Actif" value={fmtK(kpis.total_actif)} unit="EUR" icon={Scale} accent="primary" loading={loading}
             trend={kpis.actif_variation ? { direction: kpis.actif_variation > 0 ? 'up' : 'down', value: Math.abs(kpis.actif_variation) } : undefined}
           />
-          <KPICard title="Capitaux propres" value={fmtK(kpis.capitaux_propres)} unit="EUR" icon={IconShield} accent="emerald" loading={loading}
+          <KPICard title="Capitaux propres" value={fmtK(kpis.capitaux_propres)} unit="EUR" icon={ShieldCheck} accent="emerald" loading={loading}
             trend={kpis.cp_variation ? { direction: kpis.cp_variation > 0 ? 'up' : 'down', value: Math.abs(kpis.cp_variation) } : undefined}
           />
-          <KPICard title="Resultat net" value={fmtK(kpis.resultat_net)} unit="EUR" icon={IconPL} accent="amber" loading={loading}
+          <KPICard title="Resultat net" value={fmtK(kpis.resultat_net)} unit="EUR" icon={BarChart3} accent="amber" loading={loading}
             trend={kpis.resultat_variation ? { direction: kpis.resultat_variation > 0 ? 'up' : 'down', value: Math.abs(kpis.resultat_variation) } : undefined}
           />
         </div>
@@ -88,7 +89,7 @@ export default function FinanceBilan() {
         {/* Compte de resultat (SIG) */}
         <div className="card-modern p-6">
           <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <IconPL className="w-5 h-5 text-slate-400" />
+            <BarChart3 className="w-5 h-5 text-slate-400" />
             Soldes Intermediaires de Gestion
           </h3>
           {loading ? (
@@ -128,7 +129,7 @@ export default function FinanceBilan() {
           {/* Actif */}
           <div className="card-modern p-6">
             <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <IconArrowRight className="w-5 h-5 text-teal-500" />
+              <ArrowRight className="w-5 h-5 text-teal-500" />
               Actif
             </h3>
             {loading ? (
@@ -162,7 +163,7 @@ export default function FinanceBilan() {
           {/* Passif */}
           <div className="card-modern p-6">
             <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <IconArrowLeft className="w-5 h-5 text-amber-500" />
+              <ArrowLeft className="w-5 h-5 text-amber-500" />
               Passif
             </h3>
             {loading ? (
@@ -197,7 +198,7 @@ export default function FinanceBilan() {
         {/* Ratios financiers */}
         <div className="card-modern p-6">
           <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <IconChart className="w-5 h-5 text-slate-400" />
+            <TrendingUp className="w-5 h-5 text-slate-400" />
             Ratios financiers
           </h3>
           {loading ? (
@@ -228,7 +229,7 @@ export default function FinanceBilan() {
         {/* Seuil de rentabilite */}
         <div className="card-modern p-6">
           <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <IconTarget className="w-5 h-5 text-slate-400" />
+            <Target className="w-5 h-5 text-slate-400" />
             Seuil de rentabilite
           </h3>
           {loading ? (
@@ -279,28 +280,3 @@ export default function FinanceBilan() {
   );
 }
 
-// ══════════════════════════════════════════
-// SVG Icons
-// ══════════════════════════════════════════
-
-function IconBalance({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>;
-}
-function IconShield({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>;
-}
-function IconPL({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>;
-}
-function IconArrowRight({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>;
-}
-function IconArrowLeft({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>;
-}
-function IconChart({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>;
-}
-function IconTarget({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeWidth={1.8} /><circle cx="12" cy="12" r="6" strokeWidth={1.8} /><circle cx="12" cy="12" r="2" strokeWidth={1.8} /></svg>;
-}

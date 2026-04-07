@@ -279,7 +279,7 @@ export default function Vehicles() {
         {activeTab === 'fleet' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {vehicles.map(v => (
-              <div key={v.id} className="bg-white rounded-xl shadow-sm border p-5 cursor-pointer hover:shadow-md transition" onClick={() => selectVehicle(v)}>
+              <div key={v.id} className="card-modern p-5 cursor-pointer hover:shadow-md transition" onClick={() => selectVehicle(v)}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-lg">
@@ -309,7 +309,7 @@ export default function Vehicles() {
               </div>
             ))}
             {vehicles.length === 0 && (
-              <div className="col-span-full bg-white rounded-xl shadow-sm border p-8 text-center text-slate-400">Aucun véhicule enregistré</div>
+              <div className="col-span-full card-modern p-8 text-center text-slate-400">Aucun véhicule enregistré</div>
             )}
           </div>
         )}
@@ -318,11 +318,11 @@ export default function Vehicles() {
         {activeTab === 'maintenance' && (
           <div className="space-y-4">
             {maintenanceOverview.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm border p-8 text-center text-slate-400">Aucune donnée de maintenance. Configurez la maintenance sur chaque véhicule.</div>
+              <div className="card-modern p-8 text-center text-slate-400">Aucune donnée de maintenance. Configurez la maintenance sur chaque véhicule.</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {maintenanceOverview.map(v => (
-                  <div key={v.id} className={`bg-white rounded-xl shadow-sm border p-5 cursor-pointer hover:shadow-md transition ${v.computed_alerts.some(a => a.urgency === 'critique') ? 'border-red-300' : v.computed_alerts.length > 0 ? 'border-orange-200' : ''}`}
+                  <div key={v.id} className={`card-modern p-5 cursor-pointer hover:shadow-md transition ${v.computed_alerts.some(a => a.urgency === 'critique') ? 'border-red-300' : v.computed_alerts.length > 0 ? 'border-orange-200' : ''}`}
                     onClick={() => { const full = vehicles.find(vv => vv.id === v.id); if (full) selectVehicle(full); }}>
                     <div className="flex items-center justify-between mb-3">
                       <div>
@@ -355,7 +355,7 @@ export default function Vehicles() {
         {activeTab === 'detail' && selectedVehicle && (
           <div className="space-y-6">
             {/* Fiche résumé */}
-            <div className="bg-white rounded-xl shadow-sm border p-5">
+            <div className="card-modern p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-2xl">
@@ -383,7 +383,7 @@ export default function Vehicles() {
             </div>
 
             {/* Grille d'entretien constructeur */}
-            <div className="bg-white rounded-xl shadow-sm border p-5">
+            <div className="card-modern p-5">
               <h3 className="font-bold mb-4">Grille d'entretien constructeur</h3>
               {schedule && schedule.schedule && schedule.schedule.length > 0 ? (
                 <div className="overflow-x-auto">
@@ -441,7 +441,7 @@ export default function Vehicles() {
             </div>
 
             {/* Historique des événements */}
-            <div className="bg-white rounded-xl shadow-sm border p-5">
+            <div className="card-modern p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold">Historique des événements</h3>
                 <button onClick={() => setShowEventForm(true)} className="btn-primary text-sm">
@@ -474,7 +474,7 @@ export default function Vehicles() {
             </div>
 
             {/* Documents véhicule */}
-            <div className="bg-white rounded-xl shadow-sm border p-5">
+            <div className="card-modern p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold">Documents</h3>
                 <button onClick={() => setShowDocForm(true)} className="btn-primary text-sm">

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, CircleDollarSign, Download, ExternalLink, RefreshCw, Zap } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, DataTable, Modal } from '../components';
 import api from '../services/api';
@@ -139,7 +139,7 @@ export default function Pennylane() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
-              <IconPennylane className="w-6 h-6 text-indigo-600" />
+              <CircleDollarSign className="w-6 h-6 text-indigo-600" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-800">Finances — Pennylane</h1>
@@ -166,28 +166,28 @@ export default function Pennylane() {
 
         {/* KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white rounded-xl shadow-sm border p-5">
+          <div className="card-modern p-5">
             <p className="text-xs text-slate-500 mb-1">Statut connexion</p>
             <p className={`text-lg font-bold ${status?.active ? 'text-green-600' : 'text-gray-400'}`}>
               {status?.active ? 'Active' : 'Inactive'}
             </p>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border p-5">
+          <div className="card-modern p-5">
             <p className="text-xs text-slate-500 mb-1">Societe Pennylane</p>
             <p className="text-lg font-bold text-slate-800">{status?.company_id || '—'}</p>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border p-5">
+          <div className="card-modern p-5">
             <p className="text-xs text-slate-500 mb-1">Derniere synchronisation</p>
             <p className="text-sm font-medium text-slate-700">{formatDate(status?.last_sync)}</p>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border p-5">
+          <div className="card-modern p-5">
             <p className="text-xs text-slate-500 mb-1">Elements synchronises</p>
             <p className="text-lg font-bold text-indigo-600">{status?.total_mappings || 0}</p>
           </div>
         </div>
 
         {/* Actions */}
-        <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="card-modern p-6">
           <h2 className="font-bold text-slate-800 mb-4">Actions de synchronisation</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Test connexion */}
@@ -197,7 +197,7 @@ export default function Pennylane() {
               className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition disabled:opacity-50"
             >
               <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
-                <IconPlug className="w-5 h-5 text-indigo-600" />
+                <Zap className="w-5 h-5 text-indigo-600" />
               </div>
               <div className="text-left">
                 <p className="font-medium text-sm">{testing ? 'Test en cours...' : 'Tester la connexion'}</p>
@@ -212,7 +212,7 @@ export default function Pennylane() {
               className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-green-300 hover:bg-green-50 transition disabled:opacity-50"
             >
               <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
-                <IconSync className="w-5 h-5 text-green-600" />
+                <RefreshCw className="w-5 h-5 text-green-600" />
               </div>
               <div className="text-left">
                 <p className="font-medium text-sm">{syncing ? 'Synchronisation...' : 'Synchroniser factures'}</p>
@@ -227,7 +227,7 @@ export default function Pennylane() {
               className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-amber-300 hover:bg-amber-50 transition disabled:opacity-50"
             >
               <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
-                <IconDownload className="w-5 h-5 text-amber-600" />
+                <Download className="w-5 h-5 text-amber-600" />
               </div>
               <div className="text-left">
                 <p className="font-medium text-sm">{syncingGL ? 'Import en cours...' : 'GL Analytique'}</p>
@@ -242,7 +242,7 @@ export default function Pennylane() {
               className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-cyan-300 hover:bg-cyan-50 transition disabled:opacity-50"
             >
               <div className="w-10 h-10 rounded-lg bg-cyan-100 flex items-center justify-center">
-                <IconDownload className="w-5 h-5 text-cyan-600" />
+                <Download className="w-5 h-5 text-cyan-600" />
               </div>
               <div className="text-left">
                 <p className="font-medium text-sm">{syncingTx ? 'Import en cours...' : 'Tresorerie'}</p>
@@ -257,7 +257,7 @@ export default function Pennylane() {
               className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-violet-300 hover:bg-violet-50 transition disabled:opacity-50"
             >
               <div className="w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center">
-                <IconDownload className="w-5 h-5 text-violet-600" />
+                <Download className="w-5 h-5 text-violet-600" />
               </div>
               <div className="text-left">
                 <p className="font-medium text-sm">{loadingBalances ? 'Chargement...' : 'Balances comptables'}</p>
@@ -271,7 +271,7 @@ export default function Pennylane() {
               className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-purple-300 hover:bg-purple-50 transition"
             >
               <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
-                <IconExternal className="w-5 h-5 text-purple-600" />
+                <ExternalLink className="w-5 h-5 text-purple-600" />
               </div>
               <div className="text-left">
                 <p className="font-medium text-sm">Ouvrir Pennylane</p>
@@ -320,7 +320,7 @@ export default function Pennylane() {
 
         {/* Balances comptables */}
         {balances && (
-          <div className="bg-white rounded-xl shadow-sm border p-6">
+          <div className="card-modern p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-slate-800">Balances comptables Pennylane</h2>
               <div className="flex items-center gap-4 text-xs text-slate-500">
@@ -379,7 +379,7 @@ export default function Pennylane() {
         )}
 
         {/* Historique des syncs */}
-        <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="card-modern p-6">
           <h2 className="font-bold text-slate-800 mb-4">Historique des synchronisations</h2>
           {(() => {
             const historyColumns = [
@@ -471,19 +471,3 @@ export default function Pennylane() {
   );
 }
 
-// Icons
-function IconPennylane({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
-}
-function IconPlug({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>;
-}
-function IconSync({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>;
-}
-function IconDownload({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>;
-}
-function IconExternal({ className }) {
-  return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>;
-}
