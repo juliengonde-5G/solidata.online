@@ -129,7 +129,7 @@ export default function WorkHours() {
         {/* Form Modal */}
         <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Saisir des heures" size="sm"
           footer={<>
-            <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+            <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
             <button type="submit" form="workhours-form" className="flex-1 btn-primary text-sm">Enregistrer</button>
           </>}
         >

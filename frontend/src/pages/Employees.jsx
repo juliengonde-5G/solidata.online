@@ -586,7 +586,7 @@ export default function Employees() {
                   <input type="date" value={form.hire_date} onChange={e => setForm({ ...form, hire_date: e.target.value })} className="input-modern" />
                 </div>
               <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
                 <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
               </div>
             </form>

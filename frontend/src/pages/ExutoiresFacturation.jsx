@@ -388,7 +388,7 @@ export default function ExutoiresFacturation() {
               </div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setShowControleForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
+              <button type="button" onClick={() => setShowControleForm(false)} className="flex-1 btn-ghost">
                 Annuler
               </button>
               <button type="submit" className="flex-1 btn-primary text-sm">
@@ -430,7 +430,7 @@ export default function ExutoiresFacturation() {
               </div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setShowFactureForm(false)} className="flex-1 border rounded-lg py-2 text-sm">
+              <button type="button" onClick={() => setShowFactureForm(false)} className="flex-1 btn-ghost">
                 Annuler
               </button>
               <button type="submit" className="flex-1 btn-primary text-sm">
@@ -534,7 +534,7 @@ export default function ExutoiresFacturation() {
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => { setShowOcrModal(null); setConcordance(null); }} className="flex-1 border rounded-lg py-2 text-sm">
+                <button type="button" onClick={() => { setShowOcrModal(null); setConcordance(null); }} className="flex-1 btn-ghost">
                   Annuler
                 </button>
                 <button

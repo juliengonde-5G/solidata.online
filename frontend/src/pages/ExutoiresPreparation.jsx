@@ -557,7 +557,7 @@ export default function ExutoiresPreparation() {
             </div>
 
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setShowForm(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>
+              <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
               <button type="submit" className="flex-1 btn-primary text-sm">
                 {editing ? 'Enregistrer' : 'Créer'}
               </button>
@@ -590,7 +590,7 @@ export default function ExutoiresPreparation() {
                 <button
                   type="button"
                   onClick={() => setShowPesee(null)}
-                  className="flex-1 border rounded-lg py-2 text-sm"
+                  className="flex-1 btn-ghost"
                 >
                   Annuler
                 </button>
