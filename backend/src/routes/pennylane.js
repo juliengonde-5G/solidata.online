@@ -138,6 +138,78 @@ async function fetchAllPages(path, apiKey, params = {}) {
   return allItems;
 }
 
+/**
+ * Enrichit les écritures GL en base avec les catégories analytiques Pennylane.
+ * Pour chaque écriture API sans catégorie, appelle GET /ledger_entry_lines/{id}/categories
+ * et met à jour family_category, category, analytical_code.
+ * @param {number} exerciseId
+ * @param {string} apiKey
+ * @returns {Promise<number>} nombre de lignes enrichies
+ */
+async function enrichGLCategories(exerciseId, apiKey) {
+  // Récupérer les lignes API sans catégorie qui ont un line_id Pennylane
+  const lines = await pool.query(
+    `SELECT id, line_id FROM financial_gl_entries
+     WHERE exercise_id = $1 AND source = 'api' AND line_id IS NOT NULL
+       AND (category IS NULL OR category = '')`,
+    [exerciseId]
+  );
+  if (lines.rows.length === 0) return 0;
+
+  console.log(`[PENNYLANE] Enrichissement catégories : ${lines.rows.length} lignes à traiter`);
+
+  let enriched = 0;
+  for (let i = 0; i < lines.rows.length; i++) {
+    const row = lines.rows[i];
+    try {
+      const result = await pennylaneRequest('GET', `/ledger_entry_lines/${row.line_id}/categories`, apiKey);
+      if (result.status !== 200 || !result.data) continue;
+
+      const cats = Array.isArray(result.data) ? result.data : result.data?.categories || result.data?.items || [];
+      if (cats.length === 0) continue;
+
+      let category = null, familyCategory = null, analyticalCode = null;
+      for (const cat of cats) {
+        const group = (cat.group_name || cat.group_label || '').toLowerCase();
+        const label = cat.label || cat.name || cat.code || null;
+        if (!label) continue;
+        if (group.includes('dépenses') || group.includes('depenses') || group.includes('revenus') || group.includes('catégorie') || group.includes('categorie')) {
+          category = label;
+        } else if (group.includes('famille')) {
+          familyCategory = label;
+        } else if (group.includes('analytique') || group.includes('analyse') || group.includes('cost') || group.includes('centre')) {
+          analyticalCode = label;
+        }
+      }
+
+      // Si aucune correspondance par group_name, utiliser le premier comme category
+      if (!category && !familyCategory && !analyticalCode && cats.length > 0) {
+        category = cats[0].label || cats[0].name || null;
+      }
+
+      if (category || familyCategory || analyticalCode) {
+        const updates = [];
+        const params = [];
+        let idx = 1;
+        if (category) { updates.push(`category = $${idx++}`); params.push(category); }
+        if (familyCategory) { updates.push(`family_category = $${idx++}`); params.push(familyCategory); }
+        if (analyticalCode) { updates.push(`analytical_code = COALESCE(analytical_code, $${idx++})`); params.push(analyticalCode); }
+        params.push(row.id);
+        await pool.query(`UPDATE financial_gl_entries SET ${updates.join(', ')} WHERE id = $${idx}`, params);
+        enriched++;
+      }
+    } catch (err) {
+      // Rate limit ou erreur réseau — continuer
+      if (i > 0 && i % 100 === 0) console.log(`[PENNYLANE] Catégories : ${i}/${lines.rows.length} traitées, ${enriched} enrichies`);
+    }
+    // Rate limit Pennylane : 5 req/s
+    await new Promise(r => setTimeout(r, 220));
+  }
+
+  console.log(`[PENNYLANE] Enrichissement terminé : ${enriched}/${lines.rows.length} lignes enrichies`);
+  return enriched;
+}
+
 // ══════════════════════════════════════════
 // AUTO-CREATE TABLES
 // ══════════════════════════════════════════
@@ -526,6 +598,14 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
 
+    // Phase 2 : Enrichir les lignes avec les catégories analytiques Pennylane
+    let enrichedCount = 0;
+    try {
+      enrichedCount = await enrichGLCategories(exerciseId, apiKey);
+    } catch (err) {
+      console.error('[PENNYLANE] Erreur enrichissement catégories (non bloquant) :', err.message);
+    }
+
     // Diagnostic : vérifier ce qui a été inséré
     const diag = await pool.query(`
       SELECT COUNT(*) as total,
@@ -534,15 +614,16 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
         COUNT(CASE WHEN account LIKE '6%' THEN 1 END) as class6,
         COUNT(CASE WHEN account LIKE '7%' THEN 1 END) as class7,
         COUNT(CASE WHEN account IS NULL OR account = '' THEN 1 END) as no_account,
-        COUNT(CASE WHEN debit = 0 AND credit = 0 THEN 1 END) as zero_amounts
+        COUNT(CASE WHEN category IS NOT NULL AND category != '' THEN 1 END) as with_category
       FROM financial_gl_entries WHERE exercise_id = $1 AND source = 'api'
     `, [exerciseId]);
 
     const diagData = diag.rows[0] || {};
 
     res.json({
-      message: `Import GL terminé : ${inserted} écriture(s) importée(s) pour l'exercice ${year}`,
+      message: `Import GL terminé : ${inserted} écriture(s) importée(s), ${enrichedCount} enrichie(s) avec catégories analytiques pour l'exercice ${year}`,
       synced: inserted,
+      enriched: enrichedCount,
       exercise_id: exerciseId,
       year,
       diagnostic: {
@@ -885,7 +966,16 @@ async function syncGLAuto(year) {
     );
     await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
 
-    return { synced: inserted, year };
+    // Phase 2 : Enrichir les lignes avec les catégories analytiques
+    let enrichedCount = 0;
+    try {
+      enrichedCount = await enrichGLCategories(exerciseId, apiKey);
+      console.log(`[PENNYLANE] Auto sync GL : ${enrichedCount} lignes enrichies avec catégories`);
+    } catch (err) {
+      console.error('[PENNYLANE] Erreur enrichissement catégories auto (non bloquant) :', err.message);
+    }
+
+    return { synced: inserted, enriched: enrichedCount, year };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;

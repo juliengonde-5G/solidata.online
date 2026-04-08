@@ -231,7 +231,7 @@ export default function Pennylane() {
               </div>
               <div className="text-left">
                 <p className="font-medium text-sm">{syncingGL ? 'Import en cours...' : 'GL Analytique'}</p>
-                <p className="text-xs text-slate-400">Importer le grand livre</p>
+                <p className="text-xs text-slate-400">Grand livre + catégories analytiques</p>
               </div>
             </button>
 
@@ -303,6 +303,7 @@ export default function Pennylane() {
                     <div className="bg-white rounded p-2"><span className="text-slate-500">Classe 6 (charges)</span><p className="font-bold">{glDiag.diagnostic.en_base?.class6 || 0}</p></div>
                     <div className="bg-white rounded p-2"><span className="text-slate-500">Classe 7 (produits)</span><p className="font-bold">{glDiag.diagnostic.en_base?.class7 || 0}</p></div>
                     <div className="bg-white rounded p-2"><span className="text-slate-500">Sans compte</span><p className="font-bold text-red-600">{glDiag.diagnostic.en_base?.no_account || 0}</p></div>
+                    <div className="bg-white rounded p-2"><span className="text-slate-500">Avec catégorie</span><p className="font-bold text-emerald-600">{glDiag.diagnostic.en_base?.with_category || 0}</p></div>
                   </div>
                   <details className="text-xs">
                     <summary className="cursor-pointer text-slate-500 hover:text-slate-700">Voir structure brute Pennylane</summary>

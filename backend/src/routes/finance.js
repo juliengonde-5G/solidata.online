@@ -408,13 +408,26 @@ router.get('/gl/:year/pl', async (req, res) => {
     const centres = [...centresSet].sort().map(c => ({ code: c, label: c }));
 
     // Grouper par axe "Types de dépenses / revenus" (category Pennylane)
-    // Sous-lignes = par axe analytique (analytical_code)
+    // Fallback : regroupement par classe comptable PCG si category non renseignée
+    // Sous-lignes = par axe analytique (analytical_code) ou libellé compte
+    const pcgLabels = {
+      '60': 'Achats et approvisionnements', '61': 'Services extérieurs',
+      '62': 'Autres services extérieurs', '63': 'Impôts et taxes',
+      '64': 'Charges de personnel', '65': 'Autres charges de gestion',
+      '66': 'Charges financières', '67': 'Charges exceptionnelles',
+      '68': 'Dotations aux amortissements', '69': 'Impôts sur bénéfices',
+      '70': 'Ventes de produits et services', '71': 'Production stockée',
+      '72': 'Production immobilisée', '74': 'Subventions d\'exploitation',
+      '75': 'Autres produits de gestion', '76': 'Produits financiers',
+      '77': 'Produits exceptionnels', '78': 'Reprises sur provisions',
+      '79': 'Transferts de charges',
+    };
     const groupMap = {};
     for (const e of entries) {
       const acct = e.account || '';
       const cls = acct.charAt(0);
-      // Le groupe est la catégorie (table analytique "Types de dépenses / revenus")
-      const key = e.category || 'Non affecté';
+      // Le groupe est la catégorie analytique ou, à défaut, la classe PCG
+      const key = e.category || pcgLabels[acct.substring(0, 2)] || `Compte ${acct.substring(0, 2)}xx`;
       if (!groupMap[key]) {
         groupMap[key] = { key, label: key, class: cls, months: Array.from({ length: 12 }, () => 0), total: 0, lines: {} };
       }

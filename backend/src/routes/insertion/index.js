@@ -125,6 +125,15 @@ const { authenticate, authorize } = require('../../middleware/auth');
       await pool.query(`ALTER TABLE insertion_milestones ADD CONSTRAINT insertion_milestones_milestone_type_check CHECK (milestone_type IN ('Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie', 'Bilan M+2'))`);
     } catch (err) { console.warn('[INSERTION] Migration ms check:', err.message); }
 
+    // Ensure UNIQUE constraint on (employee_id, milestone_type) exists — needed for ON CONFLICT
+    try {
+      await pool.query(`
+        DELETE FROM insertion_milestones a USING insertion_milestones b
+        WHERE a.id < b.id AND a.employee_id = b.employee_id AND a.milestone_type = b.milestone_type
+      `);
+      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_milestones_emp_type_unique ON insertion_milestones(employee_id, milestone_type)`);
+    } catch (err) { console.warn('[INSERTION] Migration unique constraint:', err.message); }
+
     try {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS cip_action_plans (
