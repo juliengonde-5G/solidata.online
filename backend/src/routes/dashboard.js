@@ -165,7 +165,7 @@ router.get('/kpis', async (req, res) => {
       ),
       // Mouvements stock récents
       pool.query(
-        `SELECT sm.type, sm.quantity, sm.reference, sm.created_at
+        `SELECT sm.type, sm.poids_kg as quantity, sm.notes as reference, sm.created_at
          FROM stock_movements sm
          ORDER BY sm.created_at DESC LIMIT 5`
       ),
