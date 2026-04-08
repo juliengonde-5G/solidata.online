@@ -477,7 +477,11 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
         const journal = (typeof line.journal === 'object' && line.journal?.code)
           || line.journal_code || line.journal || null;
 
-        placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+        // Axes analytiques Pennylane : catégorie et famille de catégories
+        const category = line.category || line.expense_category || line.revenue_category || null;
+        const familyCategory = line.family_category || line.category_family || line.family || null;
+
+        placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
         values.push(
           exerciseId,
           line.id ? String(line.id) : null,
@@ -489,6 +493,8 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
           line.document_label || line.description || null,
           line.invoice_number || line.document_number || null,
           line.third_party || line.third_party_name || line.thirdparty_name || null,
+          familyCategory,
+          category,
           line.analytical_reference || line.analytical_code || null,
           line.currency || 'EUR',
           debit,
@@ -502,7 +508,7 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       if (placeholders.length > 0) {
         await client.query(
           `INSERT INTO financial_gl_entries
-            (exercise_id, line_id, date, journal, account, account_label, piece_label, line_label, invoice_number, third_party, analytical_code, currency, debit, credit, balance, due_date, source)
+            (exercise_id, line_id, date, journal, account, account_label, piece_label, line_label, invoice_number, third_party, family_category, category, analytical_code, currency, debit, credit, balance, due_date, source)
            VALUES ${placeholders.join(', ')}`,
           values
         );
@@ -832,7 +838,11 @@ async function syncGLAuto(year) {
         const journal = (typeof line.journal === 'object' && line.journal?.code)
           || line.journal_code || line.journal || null;
 
-        placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+        // Axes analytiques Pennylane : catégorie et famille de catégories
+        const category = line.category || line.expense_category || line.revenue_category || null;
+        const familyCategory = line.family_category || line.category_family || line.family || null;
+
+        placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
         values.push(
           exerciseId,
           line.id ? String(line.id) : null,
@@ -844,6 +854,8 @@ async function syncGLAuto(year) {
           line.document_label || line.description || null,
           line.invoice_number || line.document_number || null,
           line.third_party || line.third_party_name || line.thirdparty_name || null,
+          familyCategory,
+          category,
           line.analytical_reference || line.analytical_code || null,
           line.currency || 'EUR',
           debit,
@@ -857,7 +869,7 @@ async function syncGLAuto(year) {
       if (placeholders.length > 0) {
         await client.query(
           `INSERT INTO financial_gl_entries
-            (exercise_id, line_id, date, journal, account, account_label, piece_label, line_label, invoice_number, third_party, analytical_code, currency, debit, credit, balance, due_date, source)
+            (exercise_id, line_id, date, journal, account, account_label, piece_label, line_label, invoice_number, third_party, family_category, category, analytical_code, currency, debit, credit, balance, due_date, source)
            VALUES ${placeholders.join(', ')}`,
           values
         );
