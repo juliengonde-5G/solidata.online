@@ -1647,6 +1647,22 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_schedule_date ON schedule(date);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_schedule_poste ON schedule(poste_code);');
+
+    // Schedule: colonne periode (matin/apres_midi/journee) pour demi-journées
+    await client.query(`
+      DO $$ BEGIN ALTER TABLE schedule ADD COLUMN periode VARCHAR(20) DEFAULT 'journee'; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    // Changer la contrainte UNIQUE pour permettre matin + apres_midi sur le même jour
+    try {
+      await client.query(`ALTER TABLE schedule DROP CONSTRAINT IF EXISTS schedule_employee_id_date_key`);
+      await client.query(`
+        DO $$ BEGIN
+          ALTER TABLE schedule ADD CONSTRAINT schedule_employee_id_date_periode_key UNIQUE (employee_id, date, periode);
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$;
+      `);
+    } catch (e) { /* constraint may already be updated */ }
+    await client.query('CREATE INDEX IF NOT EXISTS idx_schedule_periode ON schedule(periode);');
     // Candidate rejected status migration
     const candidateChecks2 = await client.query(`
       SELECT con.conname FROM pg_constraint con

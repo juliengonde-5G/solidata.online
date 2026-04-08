@@ -176,6 +176,7 @@ router.get('/feuille/:date', async (req, res) => {
       // Affectations depuis le planning (filière tri = poste_code lié à postes_operation)
       pool.query(`
         SELECT s.id, s.employee_id, s.date, s.status, s.poste_code, s.is_provisional,
+               COALESCE(s.periode, 'journee') as periode,
                e.first_name, e.last_name,
                po.nom as poste_nom, po.code as poste_operation_code,
                op.nom as operation_nom, op.code as operation_code,
