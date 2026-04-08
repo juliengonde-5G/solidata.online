@@ -297,7 +297,10 @@ async function seedCAV(externalPool) {
   if (listePavPath) {
     console.log(`[SEED-CAV] Lecture Liste PAV.xlsx: ${listePavPath}`);
     cavs = parseListePAV(listePavPath);
-    console.log(`[SEED-CAV] ${cavs.length} PAV trouvés dans Liste PAV.xlsx`);
+    const activePavCount = cavs.filter(c => c.nb_containers > 0).length;
+    const inactivePavCount = cavs.filter(c => c.nb_containers === 0).length;
+    const totalCavCount = cavs.reduce((sum, c) => sum + c.nb_containers, 0);
+    console.log(`[SEED-CAV] ${cavs.length} PAV trouvés (${activePavCount} actives, ${inactivePavCount} inactives, ${totalCavCount} CAV total)`);
   }
 
   // Fallback CSV si Liste PAV.xlsx non trouvé
@@ -373,6 +376,9 @@ async function seedCAV(externalPool) {
     for (const cav of cavs) {
       const existing = existingByName.get(cav.name);
       const hasGPS = cav.latitude != null && cav.longitude != null;
+      const isActive = cav.nb_containers > 0;
+      const cavStatus = isActive ? 'active' : 'unavailable';
+      const unavailableReason = isActive ? null : 'PAV inactive (0 CAV dans la liste actualisée)';
 
       if (existing) {
         // Mise à jour complète du CAV existant
@@ -393,22 +399,23 @@ async function seedCAV(externalPool) {
            ref_refashion = COALESCE(NULLIF($8, ''), ref_refashion),
            entite_detentrice = COALESCE(NULLIF($9, ''), entite_detentrice),
            code_postal = COALESCE(NULLIF($10, ''), code_postal),
-           status = 'active',
-           unavailable_reason = NULL,
-           unavailable_since = NULL,
+           status = $12,
+           unavailable_reason = $13,
+           unavailable_since = ${isActive ? 'NULL' : 'COALESCE(unavailable_since, CURRENT_DATE)'},
            updated_at = NOW()
            WHERE id = $11`,
           [
             cav.address, cav.latitude, cav.longitude, cav.commune,
             cav.nb_containers, cav.communaute || '', cav.surface || '',
             cav.refRefashion || '', cav.entite || '', cav.postalCode || '',
-            existing.id
+            existing.id, cavStatus, unavailableReason
           ]
         );
         updated++;
+        if (!isActive) deactivated++;
 
-        // Générer QR code si manquant
-        if (!existing.qr_code_data) {
+        // Générer QR code si manquant et PAV active
+        if (isActive && !existing.qr_code_data) {
           const { qrData, qrImagePath } = await generateQRCode(existing.id, cav.name);
           if (qrData) {
             await client.query(
@@ -424,26 +431,32 @@ async function seedCAV(externalPool) {
 
         const result = await client.query(
           `INSERT INTO cav (name, address, commune, latitude, longitude, geom, nb_containers,
-           communaute_communes, surface, ref_refashion, entite_detentrice, code_postal, status)
-           VALUES ($1, $2, $3, $4, $5, ${geomExpr}, $6, $7, $8, $9, $10, $11, 'active')
+           communaute_communes, surface, ref_refashion, entite_detentrice, code_postal,
+           status, unavailable_reason, unavailable_since)
+           VALUES ($1, $2, $3, $4, $5, ${geomExpr}, $6, $7, $8, $9, $10, $11,
+                   $12, $13, ${isActive ? 'NULL' : 'CURRENT_DATE'})
            RETURNING id`,
           [
             cav.name, cav.address, cav.commune, cav.latitude, cav.longitude,
             cav.nb_containers, cav.communaute || null, cav.surface || null,
-            cav.refRefashion || null, cav.entite || null, cav.postalCode || null
+            cav.refRefashion || null, cav.entite || null, cav.postalCode || null,
+            cavStatus, unavailableReason
           ]
         );
         inserted++;
+        if (!isActive) deactivated++;
 
-        // Générer QR code pour le nouveau CAV
-        const newId = result.rows[0].id;
-        const { qrData, qrImagePath } = await generateQRCode(newId, cav.name);
-        if (qrData) {
-          await client.query(
-            'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2 WHERE id = $3',
-            [qrData, qrImagePath, newId]
-          );
-          qrGenerated++;
+        // Générer QR code pour le nouveau CAV (uniquement si actif)
+        if (isActive) {
+          const newId = result.rows[0].id;
+          const { qrData, qrImagePath } = await generateQRCode(newId, cav.name);
+          if (qrData) {
+            await client.query(
+              'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2 WHERE id = $3',
+              [qrData, qrImagePath, newId]
+            );
+            qrGenerated++;
+          }
         }
       }
     }
@@ -464,12 +477,15 @@ async function seedCAV(externalPool) {
     }
 
     await client.query('COMMIT');
+    const activePav = cavs.filter(c => c.nb_containers > 0).length;
+    const totalContainers = cavs.reduce((sum, c) => sum + c.nb_containers, 0);
     console.log(`[SEED-CAV] Terminé:`);
     console.log(`  - ${inserted} insérés`);
     console.log(`  - ${updated} mis à jour`);
-    console.log(`  - ${deactivated} désactivés (absents de la liste)`);
+    console.log(`  - ${deactivated} désactivés (0 CAV ou absents de la liste)`);
     console.log(`  - ${qrGenerated} QR codes générés`);
-    console.log(`  - Total actifs: ${cavs.length}`);
+    console.log(`  - Total PAV: ${cavs.length} (${activePav} actives, ${cavs.length - activePav} inactives)`);
+    console.log(`  - Total CAV (conteneurs): ${totalContainers}`);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[SEED-CAV] Erreur:', err.message);
