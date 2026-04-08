@@ -76,12 +76,15 @@ services:
       CENTRE_TRI_LNG: 1.0993
     volumes:
       - uploads:/app/uploads
+      - "./Liste PAV.xlsx:/data/Liste PAV.xlsx:ro"
       - ./tournee.xlsx:/data/tournee.xlsx:ro
       - ./tonnages.xlsx:/data/tonnages.xlsx:ro
       - ./KPI_Production 2026.xlsx:/data/KPI_Production 2026.xlsx:ro
       - ./Carte des PAV au 28-02-2026.kml:/data/Carte des PAV au 28-02-2026.kml:ro
       - "./Dashboard 2025.xlsm:/data/Dashboard 2025.xlsm:ro"
       - "./Dashboard 2026.xlsm:/data/Dashboard 2026.xlsm:ro"
+      - "./Feuille_Production_V1.xlsx:/data/Feuille_Production_V1.xlsx:ro"
+      - "./Liste_asso.xlsx:/data/Liste_asso.xlsx:ro"
     networks:
       - internal
     deploy:
