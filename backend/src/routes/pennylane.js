@@ -773,4 +773,207 @@ router.get('/status', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// FONCTIONS DE SYNC RÉUTILISABLES (pour scheduler)
+// ══════════════════════════════════════════
+
+/**
+ * Import automatique du Grand Livre depuis Pennylane.
+ * Utilisable sans contexte HTTP (scheduler, cron).
+ * @param {number} [year] - Année à importer (défaut : année courante)
+ * @returns {Promise<{synced: number, year: number}>}
+ */
+async function syncGLAuto(year) {
+  year = year || new Date().getFullYear();
+  const { apiKey } = await getActiveApiKey();
+  const client = await pool.connect();
+  try {
+    const syncLog = await pool.query(
+      `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count)
+       VALUES ('gl', 'pull', 'in_progress', 0) RETURNING id`
+    );
+
+    const filter = JSON.stringify([
+      { field: 'date', operator: 'gteq', value: `${year}-01-01` },
+      { field: 'date', operator: 'lteq', value: `${year}-12-31` },
+    ]);
+    const allLines = await fetchAllPages('/ledger_entry_lines', apiKey, { filter });
+
+    await client.query('BEGIN');
+
+    const exResult = await client.query(
+      `INSERT INTO financial_exercises (year, status) VALUES ($1, 'open')
+       ON CONFLICT (year) DO UPDATE SET updated_at = NOW()
+       RETURNING id`,
+      [year]
+    );
+    const exerciseId = exResult.rows[0].id;
+
+    await client.query(
+      `DELETE FROM financial_gl_entries WHERE exercise_id = $1 AND source = 'api'`,
+      [exerciseId]
+    );
+
+    let inserted = 0;
+    const batchSize = 500;
+    for (let i = 0; i < allLines.length; i += batchSize) {
+      const batch = allLines.slice(i, i + batchSize);
+      const values = [];
+      const placeholders = [];
+      let paramIdx = 1;
+
+      for (const line of batch) {
+        const debit = parseFloat(line.debit) || 0;
+        const credit = parseFloat(line.credit) || 0;
+        const accountNumber = (line.ledger_account && line.ledger_account.number)
+          || line.plan_item_number || line.account_number || line.account || null;
+        const accountLabel = (line.ledger_account && (line.ledger_account.label || line.ledger_account.name))
+          || line.account_name || line.account_label || null;
+        const journal = (typeof line.journal === 'object' && line.journal?.code)
+          || line.journal_code || line.journal || null;
+
+        placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+        values.push(
+          exerciseId,
+          line.id ? String(line.id) : null,
+          line.date || null,
+          journal,
+          accountNumber,
+          accountLabel,
+          line.label || null,
+          line.document_label || line.description || null,
+          line.invoice_number || line.document_number || null,
+          line.third_party || line.third_party_name || line.thirdparty_name || null,
+          line.analytical_reference || line.analytical_code || null,
+          line.currency || 'EUR',
+          debit,
+          credit,
+          debit - credit,
+          line.due_date || null,
+          'api'
+        );
+      }
+
+      if (placeholders.length > 0) {
+        await client.query(
+          `INSERT INTO financial_gl_entries
+            (exercise_id, line_id, date, journal, account, account_label, piece_label, line_label, invoice_number, third_party, analytical_code, currency, debit, credit, balance, due_date, source)
+           VALUES ${placeholders.join(', ')}`,
+          values
+        );
+        inserted += batch.length;
+      }
+    }
+
+    await client.query('COMMIT');
+
+    await pool.query(
+      `UPDATE pennylane_sync_log SET status = 'completed', completed_at = NOW(), records_count = $1, details = $2 WHERE id = $3`,
+      [inserted, JSON.stringify({ exercise_id: exerciseId, year, entries_imported: inserted }), syncLog.rows[0].id]
+    );
+    await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
+
+    return { synced: inserted, year };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Import automatique des transactions bancaires depuis Pennylane.
+ * @param {number} [year] - Année à importer (défaut : année courante)
+ * @returns {Promise<{synced: number, year: number}>}
+ */
+async function syncTransactionsAuto(year) {
+  year = year || new Date().getFullYear();
+  const { apiKey } = await getActiveApiKey();
+  const client = await pool.connect();
+  try {
+    const syncLog = await pool.query(
+      `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count)
+       VALUES ('transactions', 'pull', 'in_progress', 0) RETURNING id`
+    );
+
+    const filter = JSON.stringify([
+      { field: 'date', operator: 'gteq', value: `${year}-01-01` },
+      { field: 'date', operator: 'lteq', value: `${year}-12-31` },
+    ]);
+    const transactions = await fetchAllPages('/transactions', apiKey, { filter });
+
+    await client.query('BEGIN');
+
+    const exResult = await client.query(
+      `INSERT INTO financial_exercises (year, status) VALUES ($1, 'open')
+       ON CONFLICT (year) DO UPDATE SET updated_at = NOW()
+       RETURNING id`,
+      [year]
+    );
+    const exerciseId = exResult.rows[0].id;
+
+    await client.query(
+      `DELETE FROM financial_transactions WHERE exercise_id = $1 AND label LIKE '[API]%'`,
+      [exerciseId]
+    );
+
+    let inserted = 0;
+    const batchSize = 500;
+    const months = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+    for (let i = 0; i < transactions.length; i += batchSize) {
+      const batch = transactions.slice(i, i + batchSize);
+      const values = [];
+      const placeholders = [];
+      let paramIdx = 1;
+
+      for (const tx of batch) {
+        const txDate = tx.date || tx.operation_date || null;
+        const txMonth = txDate ? months[new Date(txDate).getMonth()] : null;
+        const amount = parseFloat(tx.amount) || parseFloat(tx.currency_amount) || 0;
+
+        placeholders.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+        values.push(
+          exerciseId,
+          txDate,
+          txMonth,
+          tx.bank_account_name || tx.account_name || tx.source_account || null,
+          `[API] ${tx.label || tx.wording || tx.description || ''}`,
+          amount,
+          tx.third_party || tx.counterpart_name || null,
+          tx.is_justified || tx.justified || false
+        );
+      }
+
+      if (placeholders.length > 0) {
+        await client.query(
+          `INSERT INTO financial_transactions
+            (exercise_id, date, month, bank_account, label, amount, third_party, justified)
+           VALUES ${placeholders.join(', ')}`,
+          values
+        );
+        inserted += batch.length;
+      }
+    }
+
+    await client.query('COMMIT');
+
+    await pool.query(
+      `UPDATE pennylane_sync_log SET status = 'completed', completed_at = NOW(), records_count = $1, details = $2 WHERE id = $3`,
+      [inserted, JSON.stringify({ exercise_id: exerciseId, year, transactions_imported: inserted }), syncLog.rows[0].id]
+    );
+    await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
+
+    return { synced: inserted, year };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = router;
+module.exports.syncGLAuto = syncGLAuto;
+module.exports.syncTransactionsAuto = syncTransactionsAuto;

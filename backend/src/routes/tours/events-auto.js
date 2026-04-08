@@ -696,11 +696,21 @@ router.get('/events-auto/stats', authorize('ADMIN', 'MANAGER'), async (req, res)
       'SELECT ROUND(AVG(bonus_factor)::numeric, 2) as avg_bonus FROM evenements_locaux WHERE is_active = true AND date_debut >= CURRENT_DATE'
     );
 
+    // Convertir by_source en objet { source: count } pour le frontend
+    const bySourceObj = {};
+    bySource.rows.forEach(r => { bySourceObj[r.source] = parseInt(r.count); });
+
+    // Compter les événements générés par IA
+    const iaCount = await pool.query(
+      "SELECT COUNT(*) as total FROM evenements_locaux WHERE is_active = true AND notes LIKE '%Prédiction IA%'"
+    );
+
     res.json({
       total_events: parseInt(total.rows[0].total),
       upcoming_events: parseInt(upcoming.rows[0].total),
+      predicted_by_ia: parseInt(iaCount.rows[0].total),
       by_type: byType.rows,
-      by_source: bySource.rows,
+      by_source: bySourceObj,
       avg_bonus_factor: parseFloat(avgBonus.rows[0]?.avg_bonus || 1),
     });
   } catch (err) {
