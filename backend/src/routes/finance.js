@@ -379,15 +379,30 @@ router.get('/gl/:year/pl', async (req, res) => {
     const year = parseInt(req.params.year);
     const { centre } = req.query;
 
+    // Vérifier si les deux sources (file + api) coexistent → ne garder que file (qui a les catégories)
+    const sourcesRes = await pool.query(
+      `SELECT DISTINCT g.source FROM financial_gl_entries g
+       JOIN financial_exercises e ON g.exercise_id = e.id
+       WHERE e.year = $1 AND (g.account LIKE '6%' OR g.account LIKE '7%')`, [year]
+    );
+    const sources = sourcesRes.rows.map(r => r.source);
+    const hasFile = sources.includes('file');
+    const hasApi = sources.includes('api');
+
     // Récupérer toutes les écritures classe 6 et 7
+    // Si les deux sources existent, prioriser 'file' (CSV avec catégories analytiques)
     // Centre = analytical_code (table analytique "Analyse comptable" de Pennylane)
     // Groupes = category (table analytique "Types de dépenses / revenus")
     let query = `SELECT g.account, g.account_label, g.family_category, g.category, g.analytical_code,
-                        g.debit, g.credit, g.date
+                        g.debit, g.credit, g.date, g.source
                  FROM financial_gl_entries g
                  JOIN financial_exercises e ON g.exercise_id = e.id
                  WHERE e.year = $1 AND (g.account LIKE '6%' OR g.account LIKE '7%')`;
     const params = [year];
+    // Dédupliquer : si les deux sources existent, ne garder que file
+    if (hasFile && hasApi) {
+      query += ` AND g.source = 'file'`;
+    }
     if (centre && centre !== 'all') {
       params.push(centre);
       query += ` AND g.analytical_code = $${params.length}`;
@@ -918,7 +933,7 @@ router.get('/operations/:year/auto', async (req, res) => {
     const etpColl = await pool.query(`
       SELECT COUNT(*) as count FROM employees e
       JOIN teams t ON e.team_id = t.id
-      WHERE t.type = 'collecte' AND e.status = 'active'
+      WHERE t.type = 'collecte' AND e.is_active = true
     `);
     auto.etp_collecte = parseInt(etpColl.rows[0].count) || 0;
 
@@ -926,7 +941,7 @@ router.get('/operations/:year/auto', async (req, res) => {
     const etpTri = await pool.query(`
       SELECT COUNT(*) as count FROM employees e
       JOIN teams t ON e.team_id = t.id
-      WHERE t.type = 'tri' AND e.status = 'active'
+      WHERE t.type = 'tri' AND e.is_active = true
     `);
     auto.etp_tri = parseInt(etpTri.rows[0].count) || 0;
 

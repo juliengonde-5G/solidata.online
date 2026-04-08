@@ -1,5 +1,12 @@
 const pool = require('../config/database');
 
+// Auto-migration : ajouter la colonne username si absente
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE user_activity_log ADD COLUMN IF NOT EXISTS username VARCHAR(100)`);
+  } catch (e) { /* table pas encore créée — OK */ }
+})();
+
 /**
  * Log une action utilisateur dans user_activity_log
  * @param {object} params - { userId, username, action, entityType, entityId, details, ip }
