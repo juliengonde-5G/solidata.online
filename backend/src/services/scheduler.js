@@ -526,6 +526,58 @@ async function refreshMaterializedViews() {
 }
 
 // ══════════════════════════════════════════
+// IMPORT AUTOMATIQUE PENNYLANE (quotidien)
+// ══════════════════════════════════════════
+
+/**
+ * Import automatique quotidien des données Pennylane (GL + transactions)
+ * S'exécute uniquement si Pennylane est configuré et actif
+ */
+async function syncPennylaneDaily() {
+  try {
+    // Vérifier si Pennylane est configuré et actif
+    const config = await pool.query(
+      'SELECT is_active FROM pennylane_config WHERE is_active = true LIMIT 1'
+    );
+    if (config.rows.length === 0) {
+      console.log('[SCHEDULER] Pennylane non configuré ou inactif, skip sync');
+      return;
+    }
+
+    const { syncGLAuto, syncTransactionsAuto } = require('../routes/pennylane');
+    const year = new Date().getFullYear();
+
+    // Import Grand Livre
+    try {
+      const glResult = await syncGLAuto(year);
+      console.log(`[SCHEDULER] Pennylane GL sync: ${glResult.synced} écritures importées (${year})`);
+    } catch (err) {
+      console.error('[SCHEDULER] Erreur sync Pennylane GL:', err.message);
+      await pool.query(
+        `INSERT INTO pennylane_sync_log (sync_type, direction, status, error_message, completed_at)
+         VALUES ('gl', 'pull', 'error', $1, NOW())`,
+        [err.message]
+      ).catch(() => {});
+    }
+
+    // Import transactions bancaires
+    try {
+      const txResult = await syncTransactionsAuto(year);
+      console.log(`[SCHEDULER] Pennylane transactions sync: ${txResult.synced} transactions importées (${year})`);
+    } catch (err) {
+      console.error('[SCHEDULER] Erreur sync Pennylane transactions:', err.message);
+      await pool.query(
+        `INSERT INTO pennylane_sync_log (sync_type, direction, status, error_message, completed_at)
+         VALUES ('transactions', 'pull', 'error', $1, NOW())`,
+        [err.message]
+      ).catch(() => {});
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur syncPennylaneDaily:', err.message);
+  }
+}
+
+// ══════════════════════════════════════════
 // ORCHESTRATEUR
 // ══════════════════════════════════════════
 
@@ -546,6 +598,11 @@ function startScheduler() {
     if ([7, 12, 18].includes(now.getHours())) {
       console.log(`[SCHEDULER] Execution planifiee a ${now.toLocaleTimeString('fr-FR')}`);
       await runAllJobs();
+    }
+    // Import Pennylane quotidien à 2h du matin (UTC)
+    if (now.getHours() === 2) {
+      console.log('[SCHEDULER] Lancement sync Pennylane quotidienne...');
+      await syncPennylaneDaily();
     }
   }, 60 * 60 * 1000);
 }
