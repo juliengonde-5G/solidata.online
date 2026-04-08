@@ -358,49 +358,50 @@ async function seedCAV(externalPool) {
     await client.query('BEGIN');
 
     // ── Nettoyage doublons encodage (KML avec caractères corrompus vs CSV/XLSX corrects) ──
-    // Certaines sources (KML) ont des caractères accentués corrompus (ex: "è" → "�")
-    // ce qui crée des doublons en base. On fusionne les entrées corrompues vers les bonnes.
+    // Le KML encode mal les accents : "ç" → "�" (U+FFFD), "è" → "�", etc.
+    // Cela crée des doublons car "François" ≠ "Fran�ois" en BDD.
+    // Stratégie : pour chaque entrée corrompue (contient U+FFFD), chercher un match propre
+    // via regex (chaque U+FFFD matche n'importe quel caractère).
     const allCavs = await client.query('SELECT id, name, qr_code_data, status FROM cav ORDER BY id');
-    const normalizeName = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-    const hasBadChars = (s) => /\uFFFD/.test(s); // U+FFFD = replacement character (encoding cassé)
+    const hasBadChars = (s) => /\uFFFD/.test(s);
 
-    const byNorm = new Map();
+    const cleanRows = allCavs.rows.filter(r => !hasBadChars(r.name));
+    const badRows = allCavs.rows.filter(r => hasBadChars(r.name));
     let duplicatesRemoved = 0;
-    for (const row of allCavs.rows) {
-      const key = normalizeName(row.name);
-      if (!byNorm.has(key)) {
-        byNorm.set(key, []);
-      }
-      byNorm.get(key).push(row);
-    }
 
-    for (const [key, rows] of byNorm) {
-      if (rows.length <= 1) continue;
+    for (const bad of badRows) {
+      // Construire un regex depuis le nom corrompu : chaque U+FFFD → . (any char)
+      const escaped = bad.name.replace(/[.*+?^${}()|[\]\\]/g, (m) => m === '\uFFFD' ? m : '\\' + m);
+      const pattern = escaped.replace(/\uFFFD/g, '.');
+      let re;
+      try { re = new RegExp('^' + pattern + '$', 'i'); } catch (e) { continue; }
 
-      // Garder l'entrée avec le nom propre (sans caractères corrompus), ou la plus ancienne (id le plus bas)
-      const good = rows.find(r => !hasBadChars(r.name)) || rows[0];
-      const bad = rows.filter(r => r.id !== good.id);
+      const match = cleanRows.find(r => re.test(r.name));
+      if (match) {
+        // Transférer les FK (tour_cav, tonnage_history, cav_qr_scans) vers l'entrée propre
+        await client.query('UPDATE tour_cav SET cav_id = $1 WHERE cav_id = $2', [match.id, bad.id]);
+        await client.query('UPDATE tonnage_history SET cav_id = $1 WHERE cav_id = $2', [match.id, bad.id]);
+        await client.query('UPDATE cav_qr_scans SET cav_id = $1 WHERE cav_id = $2', [match.id, bad.id]);
 
-      for (const dup of bad) {
-        // Transférer les FK (tour_cav, tonnage_history, cav_qr_scans) vers le bon CAV
-        await client.query('UPDATE tour_cav SET cav_id = $1 WHERE cav_id = $2', [good.id, dup.id]);
-        await client.query('UPDATE tonnage_history SET cav_id = $1 WHERE cav_id = $2', [good.id, dup.id]);
-        await client.query('UPDATE cav_qr_scans SET cav_id = $1 WHERE cav_id = $2', [good.id, dup.id]);
-
-        // Récupérer le QR code si le bon n'en a pas
-        if (!good.qr_code_data && dup.qr_code_data) {
-          await client.query('UPDATE cav SET qr_code_data = $1 WHERE id = $2', [dup.qr_code_data, good.id]);
-          good.qr_code_data = dup.qr_code_data;
+        // Récupérer le QR code si l'entrée propre n'en a pas
+        if (!match.qr_code_data && bad.qr_code_data) {
+          await client.query('UPDATE cav SET qr_code_data = $1 WHERE id = $2', [bad.qr_code_data, match.id]);
+          match.qr_code_data = bad.qr_code_data;
         }
 
-        // Supprimer le doublon
-        await client.query('DELETE FROM cav WHERE id = $1', [dup.id]);
+        // Supprimer le doublon corrompu
+        await client.query('DELETE FROM cav WHERE id = $1', [bad.id]);
         duplicatesRemoved++;
-        console.log(`[SEED-CAV] Doublon supprimé: "${dup.name}" (id=${dup.id}) → fusionné avec "${good.name}" (id=${good.id})`);
+        console.log(`[SEED-CAV] Doublon supprimé: "${bad.name}" (id=${bad.id}) → fusionné avec "${match.name}" (id=${match.id})`);
+      } else {
+        // Pas de match propre — corriger le nom en place en remplaçant U+FFFD par ?
+        const fixedName = bad.name.replace(/\uFFFD/g, '?');
+        await client.query('UPDATE cav SET name = $1, updated_at = NOW() WHERE id = $2', [fixedName, bad.id]);
+        console.log(`[SEED-CAV] Nom corrigé: "${bad.name}" → "${fixedName}" (id=${bad.id})`);
       }
     }
     if (duplicatesRemoved > 0) {
-      console.log(`[SEED-CAV] ${duplicatesRemoved} doublons (encodage) supprimés`);
+      console.log(`[SEED-CAV] ${duplicatesRemoved} doublons (encodage corrompu) supprimés`);
     }
 
     // Récupérer tous les CAV existants en base (après nettoyage)
