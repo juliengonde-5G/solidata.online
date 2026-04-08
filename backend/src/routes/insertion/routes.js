@@ -391,31 +391,31 @@ router.post('/milestones/:employeeId/initialize', async (req, res) => {
       { type: 'Bilan Sortie', months: 12 },
     ];
 
-    // Batch insert all milestones in a single query
-    const values = [];
-    const placeholders = [];
-    let paramIdx = 1;
+    // Insert milestones one by one (pas de ON CONFLICT pour éviter problème de contrainte UNIQUE manquante)
+    const results = [];
     for (const ms of milestonesDef) {
       const dueDate = addMonths(startDate, ms.months);
-      placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3})`);
-      values.push(empId, ms.type, dueDate, req.user.id);
-      paramIdx += 4;
+      // Vérifier si le jalon existe déjà
+      const existing = await pool.query(
+        'SELECT * FROM insertion_milestones WHERE employee_id = $1 AND milestone_type = $2',
+        [empId, ms.type]
+      );
+      if (existing.rows.length > 0) {
+        results.push(existing.rows[0]);
+      } else {
+        const ins = await pool.query(
+          `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
+           VALUES ($1, $2, $3, $4) RETURNING *`,
+          [empId, ms.type, dueDate, req.user.id]
+        );
+        results.push(ins.rows[0]);
+      }
     }
 
-    const result = await pool.query(
-      `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
-       VALUES ${placeholders.join(', ')}
-       ON CONFLICT (employee_id, milestone_type) DO UPDATE SET
-         due_date = COALESCE(NULLIF(insertion_milestones.due_date::text, ''), EXCLUDED.due_date),
-         updated_at = NOW()
-       RETURNING *`,
-      values
-    );
-
-    res.status(201).json(result.rows);
+    res.status(201).json(results);
   } catch (err) {
     console.error('[INSERTION] Erreur initialize milestones :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
   }
 });
 

@@ -542,7 +542,8 @@ export default function InsertionParcours() {
       await api.post(`/insertion/milestones/${selectedEmployee.id}/initialize`);
       selectEmployee(selectedEmployee);
     } catch (err) {
-      alert('Erreur: ' + (err.response?.data?.error || err.message));
+      const detail = err.response?.data?.detail ? `\n${err.response.data.detail}` : '';
+      alert('Erreur: ' + (err.response?.data?.error || err.message) + detail);
     }
   };
 
