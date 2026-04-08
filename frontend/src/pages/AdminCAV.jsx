@@ -23,7 +23,8 @@ function LocationPicker({ position, onPick }) {
   return position ? <Marker position={position} /> : null;
 }
 
-const EMPTY_FORM = { name: '', address: '', commune: '', latitude: '', longitude: '', nb_containers: 1 };
+const EMPTY_FORM = { name: '', address: '', commune: '', latitude: '', longitude: '', nb_containers: 1,
+  communaute_communes: '', surface: '', ref_refashion: '', entite_detentrice: '', code_postal: '' };
 
 export default function AdminCAV() {
   const [cavList, setCavList] = useState([]);
@@ -74,6 +75,11 @@ export default function AdminCAV() {
       latitude: cav.latitude || '',
       longitude: cav.longitude || '',
       nb_containers: cav.nb_containers || 1,
+      communaute_communes: cav.communaute_communes || '',
+      surface: cav.surface || '',
+      ref_refashion: cav.ref_refashion || '',
+      entite_detentrice: cav.entite_detentrice || '',
+      code_postal: cav.code_postal || '',
     });
     setMapPos(cav.latitude && cav.longitude ? [cav.latitude, cav.longitude] : null);
     setShowModal(true);
@@ -114,6 +120,11 @@ export default function AdminCAV() {
         latitude: parseFloat(form.latitude),
         longitude: parseFloat(form.longitude),
         nb_containers: parseInt(form.nb_containers) || 1,
+        communaute_communes: form.communaute_communes?.trim() || null,
+        surface: form.surface?.trim() || null,
+        ref_refashion: form.ref_refashion?.trim() || null,
+        entite_detentrice: form.entite_detentrice?.trim() || null,
+        code_postal: form.code_postal?.trim() || null,
       };
 
       if (editCav) {
@@ -390,6 +401,36 @@ export default function AdminCAV() {
                         : 'Non renseigné'}
                     </span>
                   </div>
+                  {detailCav.code_postal && (
+                    <div className="flex gap-2">
+                      <span className="text-gray-400 w-24 shrink-0">Code postal</span>
+                      <span className="text-gray-700">{detailCav.code_postal}</span>
+                    </div>
+                  )}
+                  {detailCav.communaute_communes && (
+                    <div className="flex gap-2">
+                      <span className="text-gray-400 w-24 shrink-0">Communauté</span>
+                      <span className="text-gray-700">{detailCav.communaute_communes}</span>
+                    </div>
+                  )}
+                  {detailCav.surface && (
+                    <div className="flex gap-2">
+                      <span className="text-gray-400 w-24 shrink-0">Surface</span>
+                      <span className="text-gray-700">{detailCav.surface}</span>
+                    </div>
+                  )}
+                  {detailCav.ref_refashion && (
+                    <div className="flex gap-2">
+                      <span className="text-gray-400 w-24 shrink-0">Réf. Refashion</span>
+                      <span className="text-gray-700">{detailCav.ref_refashion}</span>
+                    </div>
+                  )}
+                  {detailCav.entite_detentrice && (
+                    <div className="flex gap-2">
+                      <span className="text-gray-400 w-24 shrink-0">Entité</span>
+                      <span className="text-gray-700">{detailCav.entite_detentrice}</span>
+                    </div>
+                  )}
                   {detailCav.unavailable_reason && (
                     <div className="flex gap-2">
                       <span className="text-gray-400 w-24 shrink-0">Raison</span>
@@ -542,6 +583,37 @@ export default function AdminCAV() {
                       <label className="block text-xs font-medium text-gray-500 mb-1">Nb conteneurs</label>
                       <input type="number" min={1} value={form.nb_containers} onChange={e => setForm(f => ({ ...f, nb_containers: e.target.value }))}
                         className="input-modern" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Code postal</label>
+                      <input value={form.code_postal} onChange={e => setForm(f => ({ ...f, code_postal: e.target.value }))}
+                        className="input-modern" placeholder="76000" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Communauté de communes</label>
+                      <input value={form.communaute_communes} onChange={e => setForm(f => ({ ...f, communaute_communes: e.target.value }))}
+                        className="input-modern" placeholder="Métropole Rouen Normandie" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Surface</label>
+                      <input value={form.surface} onChange={e => setForm(f => ({ ...f, surface: e.target.value }))}
+                        className="input-modern" placeholder="Publique" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Réf. Refashion</label>
+                      <input value={form.ref_refashion} onChange={e => setForm(f => ({ ...f, ref_refashion: e.target.value }))}
+                        className="input-modern" placeholder="152" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Entité détentrice</label>
+                      <input value={form.entite_detentrice} onChange={e => setForm(f => ({ ...f, entite_detentrice: e.target.value }))}
+                        className="input-modern" placeholder="Solidarité Textiles" />
                     </div>
                   </div>
 

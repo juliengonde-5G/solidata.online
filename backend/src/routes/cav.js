@@ -554,7 +554,8 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
   body('longitude').isFloat().withMessage('Longitude invalide'),
 ], validate, async (req, res) => {
   try {
-    const { name, address, commune, latitude, longitude, nb_containers } = req.body;
+    const { name, address, commune, latitude, longitude, nb_containers,
+            communaute_communes, surface, ref_refashion, entite_detentrice, code_postal } = req.body;
     if (!name || !latitude || !longitude) {
       return res.status(400).json({ error: 'Nom, latitude et longitude requis' });
     }
@@ -569,10 +570,13 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
 
     const result = await pool.query(
       `INSERT INTO cav (name, address, commune, latitude, longitude,
-       geom, nb_containers, qr_code_data, qr_code_image_path)
-       VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($5, $4), 4326), $6, $7, $8)
+       geom, nb_containers, qr_code_data, qr_code_image_path,
+       communaute_communes, surface, ref_refashion, entite_detentrice, code_postal)
+       VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($5, $4), 4326), $6, $7, $8,
+               $9, $10, $11, $12, $13)
        RETURNING *`,
-      [name, address, commune, latitude, longitude, nb_containers || 1, qrData, `/uploads/qrcodes/${qrFilename}`]
+      [name, address, commune, latitude, longitude, nb_containers || 1, qrData, `/uploads/qrcodes/${qrFilename}`,
+       communaute_communes || null, surface || null, ref_refashion || null, entite_detentrice || null, code_postal || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -585,7 +589,8 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
 // PUT /api/cav/:id
 router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { name, address, commune, latitude, longitude, nb_containers, status, unavailable_reason } = req.body;
+    const { name, address, commune, latitude, longitude, nb_containers, status, unavailable_reason,
+            communaute_communes, surface, ref_refashion, entite_detentrice, code_postal } = req.body;
 
     const setClauses = ['updated_at = NOW()'];
     const values = [];
@@ -600,6 +605,11 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       setClauses.push(`geom = ST_SetSRID(ST_MakePoint($${i-1}, $${i-2}), 4326)`);
     }
     if (nb_containers !== undefined) { setClauses.push(`nb_containers = $${i}`); values.push(nb_containers); i++; }
+    if (communaute_communes !== undefined) { setClauses.push(`communaute_communes = $${i}`); values.push(communaute_communes); i++; }
+    if (surface !== undefined) { setClauses.push(`surface = $${i}`); values.push(surface); i++; }
+    if (ref_refashion !== undefined) { setClauses.push(`ref_refashion = $${i}`); values.push(ref_refashion); i++; }
+    if (entite_detentrice !== undefined) { setClauses.push(`entite_detentrice = $${i}`); values.push(entite_detentrice); i++; }
+    if (code_postal !== undefined) { setClauses.push(`code_postal = $${i}`); values.push(code_postal); i++; }
     if (status !== undefined) {
       setClauses.push(`status = $${i}`); values.push(status); i++;
       if (status === 'unavailable') {

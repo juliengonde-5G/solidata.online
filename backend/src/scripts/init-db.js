@@ -2054,7 +2054,12 @@ async function initDatabase() {
     await client.query(`
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS population_commune INTEGER;
     `);
-    console.log('[INIT-DB] Colonne population_commune ajoutée à CAV ✓');
+    await client.query(`ALTER TABLE cav ADD COLUMN IF NOT EXISTS communaute_communes VARCHAR(255);`);
+    await client.query(`ALTER TABLE cav ADD COLUMN IF NOT EXISTS surface VARCHAR(100);`);
+    await client.query(`ALTER TABLE cav ADD COLUMN IF NOT EXISTS ref_refashion VARCHAR(100);`);
+    await client.query(`ALTER TABLE cav ADD COLUMN IF NOT EXISTS entite_detentrice VARCHAR(255);`);
+    await client.query(`ALTER TABLE cav ADD COLUMN IF NOT EXISTS code_postal VARCHAR(10);`);
+    console.log('[INIT-DB] Colonnes population_commune, communaute_communes, surface, ref_refashion, entite_detentrice, code_postal ajoutées à CAV ✓');
 
     // ══════════════════════════════════════════
     // INDEX ADDITIONNELS (Performance)

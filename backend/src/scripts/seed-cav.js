@@ -1,17 +1,32 @@
 #!/usr/bin/env node
 /**
- * SOLIDATA — Import des CAV depuis CSV / KML / Excel
+ * SOLIDATA — Import des CAV depuis Liste PAV.xlsx / CSV / KML / Excel
  * Usage: node src/scripts/seed-cav.js
  *
  * Sources (par priorité) :
- *   1. CSV (listeCAV290326.csv) — source complète 209 CAV avec métadonnées
- *   2. KML — coordonnées GPS
- *   3. Excel (tournee.xlsx) — métadonnées complémentaires
+ *   1. Liste PAV.xlsx — liste actualisée officielle (209 PAV, toutes métadonnées)
+ *   2. CSV (listeCAV290326.csv) — source complète 209 CAV avec métadonnées
+ *   3. KML — coordonnées GPS
+ *   4. Excel (tournee.xlsx) — métadonnées complémentaires (tournée, jours collecte)
+ *
+ * Opérations :
+ *   - Créer les nouveaux PAV
+ *   - Mettre à jour les PAV existants (tous les champs)
+ *   - Désactiver les PAV absents de la liste (status = 'unavailable')
+ *   - Générer les QR codes manquants
  */
 const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
+
+let QRCode;
+try {
+  QRCode = require('qrcode');
+} catch (e) {
+  // QRCode optionnel — si absent, les QR ne seront pas générés
+  QRCode = null;
+}
 
 function findFile(filename) {
   const paths = [
@@ -20,6 +35,65 @@ function findFile(filename) {
     path.join('/app', filename),
   ];
   return paths.find(p => fs.existsSync(p)) || null;
+}
+
+/**
+ * Parse "Liste PAV.xlsx" — fichier officiel actualisé
+ * Colonnes: A=Nom PAV, B=Nb CAV, C=Adresse, D=Complément, E=Code postal,
+ *           F=Ville, G=Latitude, H=Longitude, I=Communauté de communes,
+ *           J=Surface, K=Reference Refashion, L=Entité détentrice
+ */
+function parseListePAV(filePath) {
+  const wb = XLSX.readFile(filePath);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) return [];
+
+  const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  const cavs = [];
+
+  // Row 0 is header, data starts at row 1
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (!row || !row[0]) continue;
+
+    const name = String(row[0]).trim();
+    const nbContainers = parseInt(row[1]) || 1;
+    const address = row[2] ? String(row[2]).trim() : '';
+    const complement = row[3] ? String(row[3]).trim() : '';
+    const postalCode = row[4] ? String(row[4]).trim() : '';
+    const ville = row[5] ? String(row[5]).trim() : '';
+    const lat = parseFloat(row[6]);
+    const lng = parseFloat(row[7]);
+    const communaute = row[8] ? String(row[8]).trim() : '';
+    const surface = row[9] ? String(row[9]).trim() : '';
+    const refRefashion = row[10] != null ? String(row[10]).trim() : '';
+    const entite = row[11] ? String(row[11]).trim() : '';
+
+    if (!name) continue;
+
+    // Extraire la commune du nom (format: "COMMUNE - Adresse (Détail)")
+    const dashIdx = name.indexOf(' - ');
+    const commune = dashIdx > 0 ? name.substring(0, dashIdx).trim() : ville;
+
+    // Adresse complète
+    const fullAddress = [address, complement].filter(Boolean).join(', ');
+
+    cavs.push({
+      name,
+      address: fullAddress || address,
+      commune: commune || ville,
+      postalCode,
+      latitude: isNaN(lat) ? null : lat,
+      longitude: isNaN(lng) ? null : lng,
+      nb_containers: nbContainers,
+      communaute,
+      surface,
+      refRefashion,
+      entite,
+    });
+  }
+
+  return cavs;
 }
 
 /**
@@ -50,7 +124,7 @@ function parseCSV(filePath) {
     const lng = parseFloat(fields[6]);
     const communaute = (fields[7] || '').trim();
     const surface = (fields[8] || '').trim();
-    const refEcoTLC = (fields[9] || '').trim();
+    const refRefashion = (fields[9] || '').trim();
     const entite = (fields[10] || '').trim();
 
     if (!name) continue;
@@ -72,7 +146,7 @@ function parseCSV(filePath) {
       nb_containers: 1,
       communaute,
       surface,
-      refEcoTLC,
+      refRefashion,
       entite,
     });
   }
@@ -149,9 +223,9 @@ function parseKML(filePath) {
 }
 
 /**
- * Parse Excel file for additional CAV data
+ * Parse Excel file for additional CAV data (tournee.xlsx)
  */
-function parseExcel(filePath) {
+function parseTourneeExcel(filePath) {
   const wb = XLSX.readFile(filePath);
   const ws = wb.Sheets['TournéesCAV'];
   if (!ws) return [];
@@ -186,33 +260,59 @@ function parseExcel(filePath) {
   return cavs;
 }
 
+/**
+ * Générer un QR code unique pour un CAV
+ */
+async function generateQRCode(cavId, cavName) {
+  if (!QRCode) return { qrData: null, qrPath: null };
+
+  const qrDir = path.join(__dirname, '..', '..', 'uploads', 'qrcodes');
+  if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
+
+  const qrData = `SOLIDATA-CAV-${cavId}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+  const qrFilename = `qr_${qrData}.png`;
+  const qrPath = path.join(qrDir, qrFilename);
+
+  await QRCode.toFile(qrPath, qrData, { width: 300, margin: 2 });
+
+  return { qrData, qrImagePath: `/uploads/qrcodes/${qrFilename}` };
+}
+
 async function seedCAV(externalPool) {
   const db = externalPool || pool;
 
-  // Source 1: CSV (prioritaire — fichier complet 209 CAV)
+  // Source 1: Liste PAV.xlsx (prioritaire — fichier officiel actualisé)
+  const listePavPath = findFile('Liste PAV.xlsx');
+  // Source 2: CSV (listeCAV290326.csv)
   const csvPath = findFile('listeCAV290326.csv');
-  // Source 2: KML
+  // Source 3: KML
   const kmlPath = findFile('Carte des PAV au 29-03-2026.kml')
     || findFile('Carte des PAV au 28-02-2026.kml');
-  // Source 3: Excel
+  // Source 4: Excel (tournee.xlsx — métadonnées complémentaires)
   const xlsPath = findFile('tournee.xlsx');
 
   let cavs = [];
 
-  // CSV est la source prioritaire
-  if (csvPath) {
+  // Liste PAV.xlsx est la source prioritaire
+  if (listePavPath) {
+    console.log(`[SEED-CAV] Lecture Liste PAV.xlsx: ${listePavPath}`);
+    cavs = parseListePAV(listePavPath);
+    console.log(`[SEED-CAV] ${cavs.length} PAV trouvés dans Liste PAV.xlsx`);
+  }
+
+  // Fallback CSV si Liste PAV.xlsx non trouvé
+  if (cavs.length === 0 && csvPath) {
     console.log(`[SEED-CAV] Lecture CSV: ${csvPath}`);
     cavs = parseCSV(csvPath);
     console.log(`[SEED-CAV] ${cavs.length} CAV trouvés dans le CSV`);
   }
 
-  // Compléter avec KML si le CSV n'a pas été trouvé ou est vide
+  // Fallback KML
   if (cavs.length === 0 && kmlPath) {
     console.log(`[SEED-CAV] Lecture KML: ${kmlPath}`);
     cavs = parseKML(kmlPath);
     console.log(`[SEED-CAV] ${cavs.length} CAV trouvés dans le KML`);
 
-    // Vérifier que le KML est complet
     const kmlContent = fs.readFileSync(kmlPath, 'utf-8');
     if (!kmlContent.includes('</Document>')) {
       console.warn(`[SEED-CAV] ATTENTION: KML tronqué (pas de </Document>), ${cavs.length} CAV seulement`);
@@ -227,11 +327,11 @@ async function seedCAV(externalPool) {
     }
   }
 
-  // Merge avec Excel si disponible
+  // Merge avec tournee.xlsx si disponible (données complémentaires : tournée, jours collecte)
   if (xlsPath) {
-    console.log(`[SEED-CAV] Lecture Excel: ${xlsPath}`);
-    const xlsCavs = parseExcel(xlsPath);
-    console.log(`[SEED-CAV] ${xlsCavs.length} CAV trouvés dans l'Excel`);
+    console.log(`[SEED-CAV] Lecture Excel complémentaire: ${xlsPath}`);
+    const xlsCavs = parseTourneeExcel(xlsPath);
+    console.log(`[SEED-CAV] ${xlsCavs.length} CAV trouvés dans tournee.xlsx`);
 
     const existingNames = new Set(cavs.map(c => c.name.toLowerCase()));
     let added = 0;
@@ -242,11 +342,11 @@ async function seedCAV(externalPool) {
         added++;
       }
     }
-    if (added > 0) console.log(`[SEED-CAV] ${added} CAV supplémentaires depuis l'Excel`);
+    if (added > 0) console.log(`[SEED-CAV] ${added} CAV supplémentaires depuis tournee.xlsx`);
   }
 
   if (cavs.length === 0) {
-    console.log('[SEED-CAV] Aucun fichier source trouvé (CSV, KML ou Excel), skip');
+    console.log('[SEED-CAV] Aucun fichier source trouvé, skip');
     return;
   }
 
@@ -254,59 +354,122 @@ async function seedCAV(externalPool) {
   try {
     await client.query('BEGIN');
 
-    // Toujours mode upsert — ne jamais supprimer les CAV existants (FK: tour_cav, cav_qr_scans, tonnage_history...)
-    const existing = await client.query('SELECT COUNT(*) FROM cav');
-    console.log(`[SEED-CAV] ${existing.rows[0].count} CAV existants en base, mode upsert`);
+    // Récupérer tous les CAV existants en base
+    const existingResult = await client.query('SELECT id, name, qr_code_data FROM cav');
+    const existingByName = new Map();
+    for (const row of existingResult.rows) {
+      existingByName.set(row.name, row);
+    }
+    console.log(`[SEED-CAV] ${existingByName.size} CAV existants en base`);
+
+    // Set des noms dans le fichier source (pour détecter les suppressions)
+    const sourceNames = new Set(cavs.map(c => c.name));
 
     let inserted = 0;
     let updated = 0;
-    let skipped = 0;
+    let deactivated = 0;
+    let qrGenerated = 0;
 
     for (const cav of cavs) {
-      // Check if exists by name
-      const exists = await client.query('SELECT id FROM cav WHERE name = $1', [cav.name]);
-
+      const existing = existingByName.get(cav.name);
       const hasGPS = cav.latitude != null && cav.longitude != null;
-      const geomExpr = hasGPS ? `ST_SetSRID(ST_MakePoint($5, $4), 4326)` : 'NULL';
 
-      if (exists.rows.length > 0) {
-        // Update existing record
-        if (hasGPS) {
-          await client.query(
-            `UPDATE cav SET latitude = $1, longitude = $2,
-             geom = ST_SetSRID(ST_MakePoint($2, $1), 4326),
-             address = COALESCE(NULLIF($3, ''), address),
-             commune = COALESCE(NULLIF($4, ''), commune),
-             updated_at = NOW()
-             WHERE id = $5`,
-            [cav.latitude, cav.longitude, cav.address, cav.commune, exists.rows[0].id]
-          );
-          updated++;
-        } else {
-          // Update address/commune even without GPS
-          await client.query(
-            `UPDATE cav SET
-             address = COALESCE(NULLIF($1, ''), address),
-             commune = COALESCE(NULLIF($2, ''), commune),
-             updated_at = NOW()
-             WHERE id = $3`,
-            [cav.address, cav.commune, exists.rows[0].id]
-          );
-          updated++;
+      if (existing) {
+        // Mise à jour complète du CAV existant
+        const geomClause = hasGPS
+          ? `geom = ST_SetSRID(ST_MakePoint($3, $2), 4326),`
+          : '';
+
+        await client.query(
+          `UPDATE cav SET
+           address = COALESCE(NULLIF($1, ''), address),
+           latitude = ${hasGPS ? '$2' : 'latitude'},
+           longitude = ${hasGPS ? '$3' : 'longitude'},
+           ${geomClause}
+           commune = COALESCE(NULLIF($4, ''), commune),
+           nb_containers = $5,
+           communaute_communes = COALESCE(NULLIF($6, ''), communaute_communes),
+           surface = COALESCE(NULLIF($7, ''), surface),
+           ref_refashion = COALESCE(NULLIF($8, ''), ref_refashion),
+           entite_detentrice = COALESCE(NULLIF($9, ''), entite_detentrice),
+           code_postal = COALESCE(NULLIF($10, ''), code_postal),
+           status = 'active',
+           unavailable_reason = NULL,
+           unavailable_since = NULL,
+           updated_at = NOW()
+           WHERE id = $11`,
+          [
+            cav.address, cav.latitude, cav.longitude, cav.commune,
+            cav.nb_containers, cav.communaute || '', cav.surface || '',
+            cav.refRefashion || '', cav.entite || '', cav.postalCode || '',
+            existing.id
+          ]
+        );
+        updated++;
+
+        // Générer QR code si manquant
+        if (!existing.qr_code_data) {
+          const { qrData, qrImagePath } = await generateQRCode(existing.id, cav.name);
+          if (qrData) {
+            await client.query(
+              'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2 WHERE id = $3',
+              [qrData, qrImagePath, existing.id]
+            );
+            qrGenerated++;
+          }
         }
-        continue;
-      }
+      } else {
+        // Nouveau CAV — insertion
+        const geomExpr = hasGPS ? `ST_SetSRID(ST_MakePoint($5, $4), 4326)` : 'NULL';
 
-      await client.query(
-        `INSERT INTO cav (name, address, commune, latitude, longitude, geom, nb_containers, status)
-         VALUES ($1, $2, $3, $4, $5, ${geomExpr}, $6, 'active')`,
-        [cav.name, cav.address, cav.commune, cav.latitude, cav.longitude, cav.nb_containers]
-      );
-      inserted++;
+        const result = await client.query(
+          `INSERT INTO cav (name, address, commune, latitude, longitude, geom, nb_containers,
+           communaute_communes, surface, ref_refashion, entite_detentrice, code_postal, status)
+           VALUES ($1, $2, $3, $4, $5, ${geomExpr}, $6, $7, $8, $9, $10, $11, 'active')
+           RETURNING id`,
+          [
+            cav.name, cav.address, cav.commune, cav.latitude, cav.longitude,
+            cav.nb_containers, cav.communaute || null, cav.surface || null,
+            cav.refRefashion || null, cav.entite || null, cav.postalCode || null
+          ]
+        );
+        inserted++;
+
+        // Générer QR code pour le nouveau CAV
+        const newId = result.rows[0].id;
+        const { qrData, qrImagePath } = await generateQRCode(newId, cav.name);
+        if (qrData) {
+          await client.query(
+            'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2 WHERE id = $3',
+            [qrData, qrImagePath, newId]
+          );
+          qrGenerated++;
+        }
+      }
+    }
+
+    // Désactiver les CAV absents de la liste source (ne pas supprimer pour préserver les FK)
+    for (const [name, row] of existingByName) {
+      if (!sourceNames.has(name)) {
+        await client.query(
+          `UPDATE cav SET status = 'unavailable',
+           unavailable_reason = 'Absent de la liste PAV actualisée du ${new Date().toLocaleDateString('fr-FR')}',
+           unavailable_since = CURRENT_DATE,
+           updated_at = NOW()
+           WHERE id = $1 AND status = 'active'`,
+          [row.id]
+        );
+        deactivated++;
+      }
     }
 
     await client.query('COMMIT');
-    console.log(`[SEED-CAV] Terminé: ${inserted} insérés, ${updated} mis à jour, ${skipped} ignorés`);
+    console.log(`[SEED-CAV] Terminé:`);
+    console.log(`  - ${inserted} insérés`);
+    console.log(`  - ${updated} mis à jour`);
+    console.log(`  - ${deactivated} désactivés (absents de la liste)`);
+    console.log(`  - ${qrGenerated} QR codes générés`);
+    console.log(`  - Total actifs: ${cavs.length}`);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[SEED-CAV] Erreur:', err.message);
