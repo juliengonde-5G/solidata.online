@@ -429,16 +429,14 @@ async function seedCAV(externalPool) {
 
       if (existing) {
         // Mise à jour complète du CAV existant
-        const geomClause = hasGPS
-          ? `geom = ST_SetSRID(ST_MakePoint($3, $2), 4326),`
-          : '';
-
+        // Toujours référencer $2/$3 (lat/lng) pour éviter "could not determine data type"
         await client.query(
           `UPDATE cav SET
            address = COALESCE(NULLIF($1, ''), address),
-           latitude = ${hasGPS ? '$2' : 'latitude'},
-           longitude = ${hasGPS ? '$3' : 'longitude'},
-           ${geomClause}
+           latitude = COALESCE($2::double precision, latitude),
+           longitude = COALESCE($3::double precision, longitude),
+           geom = CASE WHEN $2::double precision IS NOT NULL AND $3::double precision IS NOT NULL
+                       THEN ST_SetSRID(ST_MakePoint($3, $2), 4326) ELSE geom END,
            commune = COALESCE(NULLIF($4, ''), commune),
            nb_containers = $5,
            communaute_communes = COALESCE(NULLIF($6, ''), communaute_communes),
