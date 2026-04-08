@@ -378,6 +378,11 @@ router.post('/milestones/:employeeId/initialize', async (req, res) => {
     if (emp.rows.length === 0) return res.status(404).json({ error: 'Employe non trouve' });
 
     const startDate = emp.rows[0].insertion_start_date || new Date().toISOString().split('T')[0];
+    function addMonths(dateStr, months) {
+      const d = new Date(dateStr);
+      d.setMonth(d.getMonth() + months);
+      return d.toISOString().split('T')[0];
+    }
     const milestonesDef = [
       { type: 'Diagnostic accueil', months: 1 },
       { type: 'Bilan M+3', months: 3 },

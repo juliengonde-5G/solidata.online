@@ -283,10 +283,10 @@ router.post('/import/transactions', upload.single('file'), async (req, res) => {
         const placeholders = [];
         let p = 1;
         for (const r of batch) {
-          placeholders.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
-          values.push(exerciseId, r.date, r.month, r.bank_account, r.label, r.amount, r.third_party, r.justified, r.pl);
+          placeholders.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+          values.push(exerciseId, r.date, r.month, r.bank_account, r.label, r.amount, r.third_party, r.justified, r.pl, r.tresorerie || null);
         }
-        await client.query(`INSERT INTO financial_transactions (exercise_id, date, month, bank_account, label, amount, third_party, justified, pl) VALUES ${placeholders.join(',')}`, values);
+        await client.query(`INSERT INTO financial_transactions (exercise_id, date, month, bank_account, label, amount, third_party, justified, pl, tresorerie) VALUES ${placeholders.join(',')}`, values);
       }
 
       await client.query('INSERT INTO financial_import_logs (exercise_id, type, filename, row_count, period, imported_by) VALUES ($1,$2,$3,$4,$5,$6)',
@@ -407,14 +407,14 @@ router.get('/gl/:year/pl', async (req, res) => {
     for (const e of entries) if (e.analytical_code) centresSet.add(e.analytical_code);
     const centres = [...centresSet].sort().map(c => ({ code: c, label: c }));
 
-    // Grouper par code analytique (centre de coût)
-    // Sous-lignes = par compte comptable
+    // Grouper par axe "Types de dépenses / revenus" (category Pennylane)
+    // Sous-lignes = par axe analytique (analytical_code)
     const groupMap = {};
     for (const e of entries) {
       const acct = e.account || '';
       const cls = acct.charAt(0);
-      // Le groupe est le code analytique (centre de coût : Collecte, Tri, etc.)
-      const key = e.analytical_code || 'Non affecté';
+      // Le groupe est la catégorie (table analytique "Types de dépenses / revenus")
+      const key = e.category || 'Non affecté';
       if (!groupMap[key]) {
         groupMap[key] = { key, label: key, class: cls, months: Array.from({ length: 12 }, () => 0), total: 0, lines: {} };
       }
@@ -424,8 +424,8 @@ router.get('/gl/:year/pl', async (req, res) => {
         const m = new Date(e.date).getMonth();
         groupMap[key].months[m] += amount;
       }
-      // Sous-lignes par compte comptable
-      const lineKey = e.account_label || acct;
+      // Sous-lignes par axe analytique (centre de coût)
+      const lineKey = e.analytical_code || e.account_label || acct;
       if (!groupMap[key].lines[lineKey]) {
         groupMap[key].lines[lineKey] = { label: lineKey, months: Array.from({ length: 12 }, () => 0), total: 0 };
       }
@@ -672,35 +672,22 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     const year = parseInt(req.params.year);
     const MONTHS_FR = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
 
-    // Écritures des comptes 512 (banque/trésorerie) avec la catégorie de la contrepartie
-    // Axe "Types de dépenses / revenus" : utilise le champ category (Pennylane),
-    // sinon dérive du compte contrepartie dans la même écriture
+    // Source 1 : Écritures GL 512 (banque/trésorerie) pour les totaux mensuels
     const r = await pool.query(`
-      SELECT g.date, g.account, g.account_label, g.third_party, g.piece_label, g.line_label,
-             g.debit, g.credit, g.journal, g.category, g.family_category, g.analytical_code,
-             cp.account as cp_account, cp.account_label as cp_account_label, cp.category as cp_category
+      SELECT g.date, g.debit, g.credit
       FROM financial_gl_entries g
       JOIN financial_exercises e ON g.exercise_id = e.id
-      LEFT JOIN LATERAL (
-        SELECT c.account, c.account_label, c.category
-        FROM financial_gl_entries c
-        WHERE c.exercise_id = g.exercise_id
-          AND c.piece_label = g.piece_label AND c.date = g.date
-          AND NOT c.account LIKE '512%' AND c.id != g.id
-        ORDER BY ABS(c.debit - g.credit + c.credit - g.debit) ASC
-        LIMIT 1
-      ) cp ON true
       WHERE e.year = $1 AND g.account LIKE '512%'
       ORDER BY g.date, g.id
     `, [year]);
 
-    const entries = r.rows;
+    const glEntries = r.rows;
 
     // Mensuel : encaissements (debit), décaissements (credit), solde cumulé
     const monthly = Array.from({ length: 12 }, () => ({ encaissements: 0, decaissements: 0, solde: 0 }));
     let cumul = 0;
 
-    for (const e of entries) {
+    for (const e of glEntries) {
       if (!e.date) continue;
       const m = new Date(e.date).getMonth();
       const debit = parseFloat(e.debit) || 0;
@@ -739,42 +726,23 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     }
     waterfall.push({ label: 'Position', value: Math.round(position), invisible: 0, type: 'total' });
 
-    // Flux par type de dépense/revenu (axe "Types de dépenses / revenus")
-    // Priorité : category Pennylane > catégorie contrepartie > classification par compte
-    function classifyEntry(e) {
-      // 1. Catégorie directe (import CSV Pennylane avec colonne "Catégorie")
-      if (e.category) return e.category;
-      // 2. Catégorie de la contrepartie
-      if (e.cp_category) return e.cp_category;
-      // 3. Classification par compte contrepartie
-      const cp = e.cp_account;
-      if (cp) {
-        if (cp.startsWith('60')) return 'Achats';
-        if (cp.startsWith('61') || cp.startsWith('62')) return 'Services & frais externes';
-        if (cp.startsWith('63')) return 'Impôts & taxes';
-        if (cp.startsWith('64')) return 'Charges de personnel';
-        if (cp.startsWith('65')) return 'Autres charges de gestion';
-        if (cp.startsWith('66')) return 'Charges financières';
-        if (cp.startsWith('67')) return 'Charges exceptionnelles';
-        if (cp.startsWith('68')) return 'Dotations amortissements';
-        if (cp.startsWith('70')) return 'Ventes & prestations';
-        if (cp.startsWith('74')) return 'Subventions';
-        if (cp.startsWith('75')) return 'Autres produits de gestion';
-        if (cp.startsWith('76')) return 'Produits financiers';
-        if (cp.startsWith('77')) return 'Produits exceptionnels';
-        if (cp.startsWith('4')) return 'Tiers (clients/fournisseurs)';
-        if (cp.startsWith('1')) return 'Capitaux & emprunts';
-      }
-      return 'Non classé';
-    }
+    // Source 2 : Transactions bancaires avec axe "Types de dépenses / revenus - trésorerie"
+    // Le champ `tresorerie` provient de l'import Pennylane (CSV colonne "tresorerie")
+    const txResult = await pool.query(`
+      SELECT t.date, t.amount, t.tresorerie
+      FROM financial_transactions t
+      JOIN financial_exercises e ON t.exercise_id = e.id
+      WHERE e.year = $1
+      ORDER BY t.date
+    `, [year]);
 
     const byCategory = {};
-    for (const e of entries) {
-      const key = classifyEntry(e);
+    for (const t of txResult.rows) {
+      const key = t.tresorerie || 'Non classé';
       if (!byCategory[key]) byCategory[key] = Array.from({ length: 12 }, () => 0);
-      if (!e.date) continue;
-      const m = new Date(e.date).getMonth();
-      byCategory[key][m] += (parseFloat(e.debit) || 0) - (parseFloat(e.credit) || 0);
+      if (!t.date) continue;
+      const m = new Date(t.date).getMonth();
+      byCategory[key][m] += parseFloat(t.amount) || 0;
     }
 
     const cashFlow = Object.entries(byCategory)

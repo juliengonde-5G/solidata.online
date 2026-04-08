@@ -435,8 +435,8 @@ export default function Settings() {
                       {tt.parTrimestre && (
                         <div className="flex-1">
                           <label className="text-[10px] text-gray-500 block mb-0.5">Trimestre</label>
-                          <select value={tarifForm.trimestre} onChange={e => setTarifForm({ ...tarifForm, trimestre: e.target.value })} className="select-modern py-1.5" required>
-                            <option value="">—</option>
+                          <select value={tarifForm.trimestre} onChange={e => setTarifForm({ ...tarifForm, trimestre: e.target.value })} className="select-modern py-1.5">
+                            <option value="">Tous</option>
                             <option value="1">T1</option>
                             <option value="2">T2</option>
                             <option value="3">T3</option>
