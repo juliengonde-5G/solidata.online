@@ -31,7 +31,16 @@ async function generateIntelligentTour(vehicleId, date) {
   if (vResult.rows.length === 0) throw new Error('Véhicule non trouvé');
   const vehicle = vResult.rows[0];
 
-  // 2. Récupérer tous les CAV actifs
+  // 1b. Vérifier que le véhicule n'est pas déjà affecté à une tournée association ce jour
+  const assoTourCheck = await pool.query(
+    `SELECT id FROM tours WHERE vehicle_id = $1 AND date = $2 AND collection_type = 'association' AND status != 'cancelled'`,
+    [vehicleId, date]
+  );
+  if (assoTourCheck.rows.length > 0) {
+    throw new Error('Ce véhicule est déjà affecté à une tournée association ce jour. On ne peut pas mélanger collecte PAV et association.');
+  }
+
+  // 2. Récupérer tous les CAV actifs (uniquement PAV, pas les associations)
   const cavResult = await pool.query("SELECT id, name, address, commune, latitude, longitude, nb_containers, status FROM cav WHERE status = 'active' ORDER BY name");
   const allCavs = cavResult.rows;
   if (allCavs.length === 0) throw new Error('Aucun CAV actif trouvé. Ajoutez des CAV avant de créer une tournée.');

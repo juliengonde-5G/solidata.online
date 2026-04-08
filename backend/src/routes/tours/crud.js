@@ -16,8 +16,14 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       SELECT t.*, v.registration, v.name as vehicle_name,
        CONCAT(e.first_name, ' ', e.last_name) as driver_name,
        sr.name as route_name,
-       COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id)) as nb_cav,
-       (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count
+       CASE WHEN t.collection_type = 'association'
+         THEN COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_association_point tap WHERE tap.tour_id = t.id))
+         ELSE COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id))
+       END as nb_cav,
+       CASE WHEN t.collection_type = 'association'
+         THEN (SELECT COUNT(*)::int FROM tour_association_point tap WHERE tap.tour_id = t.id AND tap.status = 'collected')
+         ELSE (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected')
+       END as collected_count
       FROM tours t
       LEFT JOIN vehicles v ON t.vehicle_id = v.id
       LEFT JOIN employees e ON t.driver_employee_id = e.id
@@ -109,12 +115,26 @@ router.get('/:id', async (req, res) => {
 
     if (tour.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
 
-    const cavs = await pool.query(
-      `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude, c.nb_containers
-       FROM tour_cav tc JOIN cav c ON tc.cav_id = c.id
-       WHERE tc.tour_id = $1 ORDER BY tc.position`,
-      [req.params.id]
-    );
+    let cavs;
+    if (tour.rows[0].collection_type === 'association') {
+      cavs = await pool.query(
+        `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
+                tap.fill_level, tap.collected_at, tap.notes,
+                ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
+                ap.contact_phone, NULL as nb_containers
+         FROM tour_association_point tap
+         JOIN association_points ap ON ap.id = tap.association_point_id
+         WHERE tap.tour_id = $1 ORDER BY tap.position`,
+        [req.params.id]
+      );
+    } else {
+      cavs = await pool.query(
+        `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude, c.nb_containers
+         FROM tour_cav tc JOIN cav c ON tc.cav_id = c.id
+         WHERE tc.tour_id = $1 ORDER BY tc.position`,
+        [req.params.id]
+      );
+    }
 
     const weights = await pool.query(
       'SELECT * FROM tour_weights WHERE tour_id = $1 ORDER BY recorded_at',
@@ -255,6 +275,75 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), [
   } catch (err) {
     console.error('[TOURS] Erreur tournée manuelle :', err.message, err.stack);
     res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/association — Créer une tournée association
+router.post('/association', authorize('ADMIN', 'MANAGER'), [
+  body('vehicle_id').isInt().withMessage('ID véhicule requis'),
+  body('date').notEmpty().withMessage('Date requise'),
+  body('association_point_ids').isArray({ min: 1 }).withMessage('Liste de points association requise'),
+], validate, async (req, res) => {
+  try {
+    const { vehicle_id, date, driver_employee_id, association_point_ids, standard_route_id } = req.body;
+
+    const vid = parseInt(vehicle_id, 10);
+    const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
+    const srid = standard_route_id ? parseInt(standard_route_id, 10) : null;
+
+    const tourResult = await pool.query(
+      `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status, collection_type)
+       VALUES ($1, $2, $3, $4, 'standard', 'planned', 'association') RETURNING *`,
+      [date, vid, did, srid]
+    );
+    const tourId = tourResult.rows[0].id;
+
+    for (let i = 0; i < association_point_ids.length; i++) {
+      await pool.query(
+        'INSERT INTO tour_association_point (tour_id, association_point_id, position) VALUES ($1, $2, $3)',
+        [tourId, association_point_ids[i], i + 1]
+      );
+    }
+
+    await pool.query('UPDATE tours SET nb_cav = $1 WHERE id = $2', [association_point_ids.length, tourId]);
+
+    res.status(201).json(tourResult.rows[0]);
+  } catch (err) {
+    console.error('[TOURS] Erreur tournée association :', err.message, err.stack);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/association-routes — Routes standard association
+router.get('/association-routes/list', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT sr.*, COUNT(sra.id) as point_count
+      FROM standard_routes sr
+      LEFT JOIN standard_route_association sra ON sra.route_id = sr.id
+      WHERE EXISTS (SELECT 1 FROM standard_route_association sra2 WHERE sra2.route_id = sr.id)
+      GROUP BY sr.id ORDER BY sr.name
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TOURS] Erreur routes association :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/association-routes/:id/points — Points d'une route association
+router.get('/association-routes/:id/points', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT sra.position, ap.*
+      FROM standard_route_association sra
+      JOIN association_points ap ON ap.id = sra.association_point_id
+      WHERE sra.route_id = $1
+      ORDER BY sra.position
+    `, [req.params.id]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

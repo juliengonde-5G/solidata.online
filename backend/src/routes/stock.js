@@ -76,7 +76,7 @@ router.post('/', [
 ], validate, async (req, res) => {
   try {
     const { type, date, poids_kg, matiere_id, destination, notes, code_barre,
-      origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id } = req.body;
+      origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id, origine_type } = req.body;
 
     if (!type || !date || !poids_kg) {
       return res.status(400).json({ error: 'type, date et poids_kg requis' });
@@ -84,10 +84,10 @@ router.post('/', [
 
     const result = await pool.query(
       `INSERT INTO stock_movements (type, date, poids_kg, matiere_id, destination, notes,
-       code_barre, origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+       code_barre, origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id, created_by, origine_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
       [type, date, poids_kg, matiere_id, destination, notes,
-       code_barre, origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id, req.user.id]
+       code_barre, origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id, req.user.id, origine_type || 'pav']
     );
 
     res.status(201).json(result.rows[0]);

@@ -89,9 +89,18 @@ export default function TourMap() {
     }, 10000);
   };
 
+  const isAssociationTour = tour?.collection_type === 'association';
+
   const goToCAV = () => {
     if (cavs[currentCavIndex]) {
-      navigate('/qr-scanner');
+      const cav = cavs[currentCavIndex];
+      localStorage.setItem('selected_cav_id', String(cav.cav_id || cav.id));
+      if (isAssociationTour) {
+        // Pas de scan QR pour la collecte association → directement au remplissage
+        navigate('/fill-level');
+      } else {
+        navigate('/qr-scanner');
+      }
     }
   };
 
@@ -113,7 +122,7 @@ export default function TourMap() {
       <header className="screen-header flex-shrink-0 flex flex-row items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="font-bold text-lg">Tournée #{tourId}</h1>
-          <p className="text-white/80 text-sm">{currentCavIndex}/{cavs.length} CAV collectés</p>
+          <p className="text-white/80 text-sm">{currentCavIndex}/{cavs.length} {isAssociationTour ? 'associations' : 'CAV'} collectés</p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
           <button
@@ -186,8 +195,16 @@ export default function TourMap() {
               <p className="text-xs text-gray-500 truncate">{currentCAV.commune}</p>
             </div>
             <div className="text-right flex-shrink-0 ml-2">
-              <span className="text-sm font-bold text-amber-600">{Math.round(currentCAV.predicted_fill_rate || currentCAV.estimated_fill_rate || 0)}%</span>
-              <p className="text-[10px] text-gray-400">remplissage</p>
+              {isAssociationTour && currentCAV.contact_phone ? (
+                <a href={`tel:${currentCAV.contact_phone.replace(/\s/g, '')}`} className="text-sm font-bold text-blue-600 underline">
+                  {currentCAV.contact_phone}
+                </a>
+              ) : (
+                <>
+                  <span className="text-sm font-bold text-amber-600">{Math.round(currentCAV.predicted_fill_rate || currentCAV.estimated_fill_rate || 0)}%</span>
+                  <p className="text-[10px] text-gray-400">remplissage</p>
+                </>
+              )}
             </div>
           </div>
           <div className="flex gap-3">
@@ -202,7 +219,7 @@ export default function TourMap() {
               </button>
             )}
             <button type="button" onClick={goToCAV} className="flex-1 btn-primary-mobile py-3 text-base">
-              Scanner QR Code
+              {isAssociationTour ? 'Collecter' : 'Scanner QR Code'}
             </button>
             <button type="button" aria-label="Signaler un incident" onClick={() => navigate('/incident')} className="touch-target flex items-center justify-center bg-red-500 text-white rounded-2xl px-4 font-semibold">
               Incident
@@ -213,7 +230,7 @@ export default function TourMap() {
 
       {!currentCAV && cavs.length > 0 && (
         <div className="bg-green-50 border-t border-green-200 p-4 flex-shrink-0 text-center safe-bottom">
-          <p className="text-green-800 font-bold">Tous les CAV ont été collectés !</p>
+          <p className="text-green-800 font-bold">Tous les {isAssociationTour ? 'points association' : 'CAV'} ont été collectés !</p>
           <button type="button" onClick={() => navigate('/return-centre')} className="mt-3 btn-primary-mobile py-3">
             Retour au centre de tri
           </button>

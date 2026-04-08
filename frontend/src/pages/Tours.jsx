@@ -20,9 +20,14 @@ export default function Tours() {
   const [wizForm, setWizForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     vehicle_id: '', driver_employee_id: '', mode: 'intelligent',
+    collection_type: 'pav',
   });
   const [generatedTour, setGeneratedTour] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [assoRoutes, setAssoRoutes] = useState([]);
+  const [assoPoints, setAssoPoints] = useState([]);
+  const [selectedAssoRoute, setSelectedAssoRoute] = useState('');
+  const [selectedAssoPoints, setSelectedAssoPoints] = useState([]);
 
   useEffect(() => { loadTours(); }, []);
 
@@ -36,24 +41,42 @@ export default function Tours() {
 
   const openWizard = async () => {
     try {
-      const [vRes, eRes] = await Promise.all([
+      const [vRes, eRes, arRes, apRes] = await Promise.all([
         api.get('/vehicles?available=true'),
         api.get('/employees'),
+        api.get('/tours/association-routes/list').catch(() => ({ data: [] })),
+        api.get('/association-points?status=active').catch(() => ({ data: [] })),
       ]);
       setVehicles(vRes.data);
       setEmployees(eRes.data);
+      setAssoRoutes(arRes.data);
+      setAssoPoints(apRes.data);
     } catch (err) { console.error(err); }
     setWizardStep(1);
     setGeneratedTour(null);
+    setSelectedAssoRoute('');
+    setSelectedAssoPoints([]);
+    setWizForm(f => ({ ...f, collection_type: 'pav', mode: 'intelligent' }));
     setShowWizard(true);
   };
 
   const generateTour = async () => {
     setGenerating(true);
     try {
-      const mode = wizForm.mode || 'intelligent';
-      const res = await api.post(`/tours/${mode}`, { ...wizForm });
-      setGeneratedTour(res.data);
+      if (wizForm.collection_type === 'association') {
+        // Tournée association
+        const pointIds = selectedAssoPoints.length > 0 ? selectedAssoPoints : assoPoints.map(p => p.id);
+        const res = await api.post('/tours/association', {
+          ...wizForm,
+          association_point_ids: pointIds,
+          standard_route_id: selectedAssoRoute || null,
+        });
+        setGeneratedTour(res.data);
+      } else {
+        const mode = wizForm.mode || 'intelligent';
+        const res = await api.post(`/tours/${mode}`, { ...wizForm });
+        setGeneratedTour(res.data);
+      }
       setWizardStep(4);
       loadTours();
     } catch (err) {
@@ -89,7 +112,8 @@ export default function Tours() {
       sortable: true,
       render: (t) => <StatusBadge status={t.mode} size="sm" />,
     },
-    { key: 'nb_cav', label: 'CAV', sortable: true, render: (t) => t.nb_cav || 0 },
+    { key: 'collection_type', label: 'Type', sortable: true, render: (t) => t.collection_type === 'association' ? <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">Asso</span> : <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-100 text-teal-700">PAV</span> },
+    { key: 'nb_cav', label: 'Points', sortable: true, render: (t) => t.nb_cav || 0 },
     { key: 'total_weight_kg', label: 'Poids (kg)', sortable: true, render: (t) => <span className="font-medium">{t.total_weight_kg || 0}</span> },
     {
       key: 'status',
@@ -183,27 +207,86 @@ export default function Tours() {
               {/* Step 1: Date & Mode */}
               {wizardStep === 1 && (
                 <div className="space-y-4">
-                  <h3 className="font-semibold">Date et mode de génération</h3>
+                  <h3 className="font-semibold">Date et type de collecte</h3>
                   <div>
                     <label className="text-xs text-slate-500">Date de tournée</label>
                     <input type="date" value={wizForm.date} onChange={e => setWizForm({ ...wizForm, date: e.target.value })} className="input-modern" />
                   </div>
+
+                  {/* Type de collecte */}
                   <div className="space-y-2">
-                    <label className="text-xs text-slate-500">Mode de génération</label>
-                    {[
-                      { key: 'intelligent', label: 'IA Intelligente', desc: 'Optimisation par prédiction de remplissage, TSP + 2-opt' },
-                      { key: 'standard', label: 'Standard', desc: 'Tous les CAV triés par distance' },
-                      { key: 'manual', label: 'Manuel', desc: 'Sélection manuelle des CAV' },
-                    ].map(m => (
-                      <label key={m.key} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${wizForm.mode === m.key ? 'border-primary bg-primary/5' : ''}`}>
-                        <input type="radio" name="mode" value={m.key} checked={wizForm.mode === m.key} onChange={() => setWizForm({ ...wizForm, mode: m.key })} className="mt-1" />
-                        <div>
-                          <p className="font-medium text-sm">{m.label}</p>
-                          <p className="text-xs text-slate-500">{m.desc}</p>
-                        </div>
-                      </label>
-                    ))}
+                    <label className="text-xs text-slate-500">Type de collecte</label>
+                    <div className="flex gap-2">
+                      {[
+                        { key: 'pav', label: 'PAV (espace public)', color: 'border-teal-500 bg-teal-50' },
+                        { key: 'association', label: 'Association', color: 'border-orange-500 bg-orange-50' },
+                      ].map(ct => (
+                        <label key={ct.key} className={`flex-1 flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition ${wizForm.collection_type === ct.key ? ct.color : 'border-gray-200'}`}>
+                          <input type="radio" name="collection_type" value={ct.key} checked={wizForm.collection_type === ct.key}
+                            onChange={() => setWizForm({ ...wizForm, collection_type: ct.key, mode: ct.key === 'association' ? 'standard' : 'intelligent' })} />
+                          <span className="text-sm font-medium">{ct.label}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Mode de génération (PAV uniquement) */}
+                  {wizForm.collection_type === 'pav' && (
+                    <div className="space-y-2">
+                      <label className="text-xs text-slate-500">Mode de génération</label>
+                      {[
+                        { key: 'intelligent', label: 'IA Intelligente', desc: 'Optimisation par prédiction de remplissage, TSP + 2-opt' },
+                        { key: 'standard', label: 'Standard', desc: 'Tous les CAV triés par distance' },
+                        { key: 'manual', label: 'Manuel', desc: 'Sélection manuelle des CAV' },
+                      ].map(m => (
+                        <label key={m.key} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${wizForm.mode === m.key ? 'border-primary bg-primary/5' : ''}`}>
+                          <input type="radio" name="mode" value={m.key} checked={wizForm.mode === m.key} onChange={() => setWizForm({ ...wizForm, mode: m.key })} className="mt-1" />
+                          <div>
+                            <p className="font-medium text-sm">{m.label}</p>
+                            <p className="text-xs text-slate-500">{m.desc}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Sélection points association */}
+                  {wizForm.collection_type === 'association' && (
+                    <div className="space-y-2">
+                      <label className="text-xs text-slate-500">Points de collecte associatifs</label>
+                      {assoRoutes.length > 0 && (
+                        <select value={selectedAssoRoute} onChange={e => {
+                          setSelectedAssoRoute(e.target.value);
+                          if (e.target.value) {
+                            api.get(`/tours/association-routes/${e.target.value}/points`).then(res => {
+                              setSelectedAssoPoints(res.data.map(p => p.id));
+                            });
+                          } else {
+                            setSelectedAssoPoints([]);
+                          }
+                        }} className="select-modern">
+                          <option value="">Sélection manuelle</option>
+                          {assoRoutes.map(r => <option key={r.id} value={r.id}>{r.name} ({r.point_count} points)</option>)}
+                        </select>
+                      )}
+                      <div className="max-h-48 overflow-y-auto border rounded-lg p-2 space-y-1">
+                        {assoPoints.map(ap => (
+                          <label key={ap.id} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm ${selectedAssoPoints.includes(ap.id) ? 'bg-orange-50' : 'hover:bg-slate-50'}`}>
+                            <input type="checkbox" checked={selectedAssoPoints.includes(ap.id)}
+                              onChange={e => {
+                                if (e.target.checked) setSelectedAssoPoints([...selectedAssoPoints, ap.id]);
+                                else setSelectedAssoPoints(selectedAssoPoints.filter(id => id !== ap.id));
+                              }} />
+                            <span className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" />
+                            <span className="truncate">{ap.name}</span>
+                            <span className="text-xs text-slate-400 ml-auto">{ap.ville || ''}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="text-xs text-slate-400">{selectedAssoPoints.length > 0 ? `${selectedAssoPoints.length} points sélectionnés` : `Tous les ${assoPoints.length} points actifs seront inclus`}</p>
+                    </div>
+                  )}
+
                   <button onClick={() => setWizardStep(2)} className="w-full btn-primary text-sm">Suivant</button>
                 </div>
               )}

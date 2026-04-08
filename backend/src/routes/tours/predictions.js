@@ -356,6 +356,77 @@ async function predictFillRate(cavId, targetDate) {
   };
 }
 
+// ══════════════════════════════════════════════════════════════
+// PRÉDICTION REMPLISSAGE ASSOCIATION (isolé des PAV)
+// ══════════════════════════════════════════════════════════════
+async function predictAssociationFillRate(associationPointId, targetDate) {
+  const now = new Date(targetDate || Date.now());
+  const monthIndex = now.getMonth();
+  const dateStr = now.toISOString().split('T')[0];
+
+  // Historique de ce point association
+  const histResult = await pool.query(
+    `SELECT date, weight_kg FROM tonnage_history_association
+     WHERE association_point_id = $1 AND date >= NOW() - INTERVAL '180 days'
+     ORDER BY date DESC`,
+    [associationPointId]
+  );
+
+  const pointResult = await pool.query('SELECT * FROM association_points WHERE id = $1', [associationPointId]);
+  if (pointResult.rows.length === 0) return { fill: 0, confidence: 0 };
+
+  const history = histResult.rows;
+
+  if (history.length === 0) {
+    return { fill: 50, confidence: 0.2, method: 'default' };
+  }
+
+  const avgWeight = history.reduce((sum, h) => sum + parseFloat(h.weight_kg), 0) / history.length;
+  const lastCollection = history[0].date;
+  const daysSince = Math.floor((now - new Date(lastCollection)) / 86400000);
+
+  // Accumulation hebdomadaire (collecte association = 1x/semaine en moyenne)
+  const dailyAccumulation = avgWeight / 7;
+  let rawFill = (daysSince * dailyAccumulation) * 100;
+
+  // Appliquer facteurs saisonniers (même que PAV)
+  rawFill *= SEASONAL_FACTORS[monthIndex];
+  if (isHoliday(dateStr)) rawFill *= SCORING_CONFIG.holidayBonus || 1.1;
+
+  const vacationStatus = getSchoolVacationStatus(dateStr);
+  if (vacationStatus.status === 'during') {
+    const isSummer = vacationStatus.name && /été/i.test(vacationStatus.name);
+    rawFill *= isSummer ? 1.0 : 0.90;
+  }
+
+  // ML correction depuis feedback
+  const feedbackResult = await pool.query(
+    `SELECT predicted_fill_rate, observed_fill_level FROM association_learning_feedback
+     WHERE association_point_id = $1 ORDER BY created_at DESC LIMIT 20`,
+    [associationPointId]
+  );
+  let mlCorrection = 1;
+  if (feedbackResult.rows.length >= 3) {
+    const ratios = feedbackResult.rows.map(f => {
+      const observed = (f.observed_fill_level / 4) * 100; // 0-4 → 0-100
+      return f.predicted_fill_rate > 0 ? observed / f.predicted_fill_rate : 1;
+    });
+    mlCorrection = ratios.reduce((s, r) => s + r, 0) / ratios.length;
+    mlCorrection = Math.max(0.5, Math.min(1.5, mlCorrection));
+  }
+  rawFill *= mlCorrection;
+
+  const fill = Math.min(120, Math.max(0, rawFill));
+  const confidence = Math.min(0.95, 0.1 + Math.min(history.length / 20, 1) * 0.4 + Math.min(feedbackResult.rows.length / 10, 1) * 0.3);
+
+  return {
+    fill: Math.round(fill * 10) / 10,
+    confidence: Math.round(confidence * 100) / 100,
+    method: feedbackResult.rows.length >= 3 ? 'ml_corrected' : 'historical',
+    factors: { daysSinceCollection: daysSince, avgWeight, mlCorrection },
+  };
+}
+
 // Getters and setters for mutable config (used by predictive-config routes)
 function getSeasonalFactors() { return SEASONAL_FACTORS; }
 function setSeasonalFactors(v) { SEASONAL_FACTORS = v; }
@@ -382,4 +453,5 @@ module.exports = {
   setSchoolVacations,
   getScoringConfig,
   setScoringConfig,
+  predictAssociationFillRate,
 };
