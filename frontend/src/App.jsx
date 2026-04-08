@@ -34,6 +34,7 @@ import PCMTest from './pages/PCMTest';
 import RGPD from './pages/RGPD';
 import AdminDB from './pages/AdminDB';
 import AdminCAV from './pages/AdminCAV';
+import AdminAssociations from './pages/AdminAssociations';
 import ReportingMetropole from './pages/ReportingMetropole';
 import FillRateMap from './pages/FillRateMap';
 import NewsFeed from './pages/NewsFeed';
@@ -164,6 +165,7 @@ function App() {
             <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
             <Route path="/activity-log" element={<ProtectedRoute roles={['ADMIN']}><ActivityLog /></ProtectedRoute>} />
             <Route path="/admin-cav" element={<ProtectedRoute roles={['ADMIN']}><AdminCAV /></ProtectedRoute>} />
+            <Route path="/admin-associations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAssociations /></ProtectedRoute>} />
             <Route path="/news" element={<ProtectedRoute><NewsFeed /></ProtectedRoute>} />
 
             <Route path="*" element={<Navigate to="/" />} />

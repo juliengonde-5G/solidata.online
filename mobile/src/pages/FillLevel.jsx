@@ -19,15 +19,17 @@ export default function FillLevel() {
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const scannedQR = localStorage.getItem('scanned_qr');
+  const [isAssociation, setIsAssociation] = useState(false);
 
   const submit = async () => {
     if (fillLevel === null) return;
     setLoading(true);
     try {
-      // Load tour to find the correct CAV
+      // Load tour to find the correct point
       const tourRes = await fetch(`/api/tours/${tourId}/public`);
       const tourData = await tourRes.json();
       const cavs = tourData.cavs || [];
+      const tourIsAssociation = tourData.collection_type === 'association';
 
       // Use selected_cav_id from QRScanner/QRUnavailable if available, otherwise fallback to first non-collected
       const selectedCavId = localStorage.getItem('selected_cav_id');
@@ -47,7 +49,7 @@ export default function FillLevel() {
           body: JSON.stringify({
             status: 'collected',
             fill_level: fillLevel,
-            qr_scanned: true,
+            qr_scanned: !tourIsAssociation,
             notes: anomaly ? `${anomaly}${notes ? ': ' + notes : ''}` : notes,
           }),
         });
@@ -66,7 +68,7 @@ export default function FillLevel() {
   return (
     <MobileShell
       title="Niveau de remplissage"
-      subtitle={scannedQR ? `QR scanné` : 'Estimez le remplissage du conteneur'}
+      subtitle={scannedQR ? 'QR scanné' : 'Estimez le remplissage du point de collecte'}
       onBack={() => navigate('/tour-map')}
     >
       <div className="space-y-6">

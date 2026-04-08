@@ -50,17 +50,33 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
       return res.json({ tour: null });
     }
     const tour = tourResult.rows[0];
-    // Charger les CAV de la tournée
-    const cavsResult = await pool.query(
-      `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude,
-              c.nb_containers, c.qr_code_data
-       FROM tour_cav tc
-       JOIN cav c ON c.id = tc.cav_id
-       WHERE tc.tour_id = $1
-       ORDER BY tc.position`,
-      [tour.id]
-    );
-    res.json({ tour, cavs: cavsResult.rows });
+    // Charger les points de la tournée selon le type de collecte
+    let points = [];
+    if (tour.collection_type === 'association') {
+      const assoResult = await pool.query(
+        `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
+                tap.fill_level, tap.collected_at, tap.notes,
+                ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
+                ap.contact_phone, NULL as nb_containers, NULL as qr_code_data
+         FROM tour_association_point tap
+         JOIN association_points ap ON ap.id = tap.association_point_id
+         WHERE tap.tour_id = $1 ORDER BY tap.position`,
+        [tour.id]
+      );
+      points = assoResult.rows;
+    } else {
+      const cavsResult = await pool.query(
+        `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude,
+                c.nb_containers, c.qr_code_data
+         FROM tour_cav tc
+         JOIN cav c ON c.id = tc.cav_id
+         WHERE tc.tour_id = $1
+         ORDER BY tc.position`,
+        [tour.id]
+      );
+      points = cavsResult.rows;
+    }
+    res.json({ tour, cavs: points });
   } catch (err) {
     console.error('[TOURS] Erreur vehicle/today:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -78,14 +94,32 @@ router.get('/:id/public', async (req, res) => {
     );
     if (tourResult.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
     const tour = tourResult.rows[0];
-    const cavsResult = await pool.query(
-      `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude,
-              c.nb_containers, c.qr_code_data
-       FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id
-       WHERE tc.tour_id = $1 ORDER BY tc.position`,
-      [tour.id]
-    );
-    res.json({ ...tour, cavs: cavsResult.rows });
+
+    let points = [];
+    if (tour.collection_type === 'association') {
+      // Charger les points association
+      const assoResult = await pool.query(
+        `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
+                tap.fill_level, tap.collected_at, tap.notes,
+                ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
+                ap.contact_phone, NULL as nb_containers, NULL as qr_code_data
+         FROM tour_association_point tap
+         JOIN association_points ap ON ap.id = tap.association_point_id
+         WHERE tap.tour_id = $1 ORDER BY tap.position`,
+        [tour.id]
+      );
+      points = assoResult.rows;
+    } else {
+      const cavsResult = await pool.query(
+        `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude,
+                c.nb_containers, c.qr_code_data
+         FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id
+         WHERE tc.tour_id = $1 ORDER BY tc.position`,
+        [tour.id]
+      );
+      points = cavsResult.rows;
+    }
+    res.json({ ...tour, cavs: points });
   } catch (err) {
     console.error('[TOURS] Erreur public/:id:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -129,23 +163,42 @@ router.put('/:id/start-public', async (req, res) => {
   }
 });
 
-// PUT /api/tours/:id/cav/:cavId/collect-public — Marquer un CAV comme collecté (mobile sans auth)
+// PUT /api/tours/:id/cav/:cavId/collect-public — Marquer un point comme collecté (mobile sans auth)
 router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
   try {
     const { fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes } = req.body;
-    const result = await pool.query(
-      `UPDATE tour_cav SET status = 'collected',
-       fill_level = $1,
-       qr_scanned = $2,
-       qr_unavailable = $3,
-       qr_unavailable_reason = $4,
-       notes = $5,
-       collected_at = NOW()
-       WHERE tour_id = $6 AND cav_id = $7 RETURNING *`,
-      [fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null, notes || null, req.params.id, req.params.cavId]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
-    res.json(result.rows[0]);
+
+    // Vérifier si c'est une tournée association
+    const tourCheck = await pool.query('SELECT collection_type FROM tours WHERE id = $1', [req.params.id]);
+    const collectionType = tourCheck.rows[0]?.collection_type || 'pav';
+
+    if (collectionType === 'association') {
+      // Mettre à jour dans tour_association_point
+      const result = await pool.query(
+        `UPDATE tour_association_point SET status = 'collected',
+         fill_level = $1,
+         notes = $2,
+         collected_at = NOW()
+         WHERE tour_id = $3 AND association_point_id = $4 RETURNING *`,
+        [fill_level, notes || null, req.params.id, req.params.cavId]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
+      res.json(result.rows[0]);
+    } else {
+      const result = await pool.query(
+        `UPDATE tour_cav SET status = 'collected',
+         fill_level = $1,
+         qr_scanned = $2,
+         qr_unavailable = $3,
+         qr_unavailable_reason = $4,
+         notes = $5,
+         collected_at = NOW()
+         WHERE tour_id = $6 AND cav_id = $7 RETURNING *`,
+        [fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null, notes || null, req.params.id, req.params.cavId]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
+      res.json(result.rows[0]);
+    }
   } catch (err) {
     console.error('[TOURS] Erreur collect-public:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -266,14 +319,27 @@ router.get('/:id/summary-public', async (req, res) => {
     }
     const tour = tourResult.rows[0];
 
-    const statsResult = await pool.query(
-      `SELECT
-         (SELECT COUNT(*)::int FROM tour_cav WHERE tour_id = $1 AND status = 'collected') as cavs_collected,
-         (SELECT COUNT(*)::int FROM tour_cav WHERE tour_id = $1) as cavs_total,
-         (SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights WHERE tour_id = $1) as total_weight_kg,
-         (SELECT COUNT(*)::int FROM incidents WHERE tour_id = $1) as incidents_count`,
-      [req.params.id]
-    );
+    // Adapter les stats selon le type de collecte
+    let statsResult;
+    if (tour.collection_type === 'association') {
+      statsResult = await pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM tour_association_point WHERE tour_id = $1 AND status = 'collected') as cavs_collected,
+           (SELECT COUNT(*)::int FROM tour_association_point WHERE tour_id = $1) as cavs_total,
+           (SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights WHERE tour_id = $1) as total_weight_kg,
+           (SELECT COUNT(*)::int FROM incidents WHERE tour_id = $1) as incidents_count`,
+        [req.params.id]
+      );
+    } else {
+      statsResult = await pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM tour_cav WHERE tour_id = $1 AND status = 'collected') as cavs_collected,
+           (SELECT COUNT(*)::int FROM tour_cav WHERE tour_id = $1) as cavs_total,
+           (SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights WHERE tour_id = $1) as total_weight_kg,
+           (SELECT COUNT(*)::int FROM incidents WHERE tour_id = $1) as incidents_count`,
+        [req.params.id]
+      );
+    }
     const stats = statsResult.rows[0];
 
     // Calculer la durée en minutes

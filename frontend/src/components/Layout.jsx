@@ -7,6 +7,7 @@ import {
   ClipboardList, IdCard, Truck, Sparkles, Map, BarChart3, MapPin, Factory,
   ArrowUpDown, Package, Tag, Ship, CircleDollarSign, PieChart, BarChart2,
   RefreshCw, Lock, Settings, Car, LogOut, ChevronDown, ChevronLeft, Menu, X,
+  Handshake,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════
@@ -68,6 +69,7 @@ const menuSections = [
       { path: '/cav-map', label: 'Carte CAV', icon: Map, roles: ['ADMIN', 'MANAGER'] },
       { path: '/fill-rate', label: 'Remplissage CAV', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
       { path: '/live-vehicles', label: 'Suivi GPS', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/admin-associations', label: 'Associations', icon: Handshake, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {

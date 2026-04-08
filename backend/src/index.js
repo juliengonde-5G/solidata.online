@@ -108,6 +108,7 @@ app.use('/api/employees', require('./routes/employees'));
 app.use('/api/cav', require('./routes/cav'));
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/tours', require('./routes/tours'));
+app.use('/api/association-points', require('./routes/association-points'));
 // Lot 4 : Tri + Stock + Production + Facturation + Reporting + Refashion
 app.use('/api/stock', require('./routes/stock'));
 app.use('/api/production', require('./routes/production'));
@@ -192,6 +193,7 @@ app.get('/api/health', async (req, res) => {
         adminDb: true,
         exutoires: true,
         pennylane: true,
+        associationPoints: true,
       },
     });
   } catch (err) {

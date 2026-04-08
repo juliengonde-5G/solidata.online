@@ -35,6 +35,8 @@ export default function FillRateMap() {
   const [activityLoading, setActivityLoading] = useState(false);
   const [filter, setFilter] = useState('all'); // all, critical, warning, ok
   const [sortBy, setSortBy] = useState('fill_rate'); // fill_rate, days_to_full, name
+  const [assoPoints, setAssoPoints] = useState([]);
+  const [showAsso, setShowAsso] = useState(true);
 
   useEffect(() => { loadData(); }, []);
 
@@ -52,8 +54,12 @@ export default function FillRateMap() {
 
   const loadData = async () => {
     try {
-      const res = await api.get('/cav/fill-rate');
+      const [res, assoRes] = await Promise.all([
+        api.get('/cav/fill-rate'),
+        api.get('/association-points/map'),
+      ]);
       setData(res.data);
+      setAssoPoints(assoRes.data);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -120,6 +126,29 @@ export default function FillRateMap() {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
+              {/* Association points */}
+              {showAsso && assoPoints.map(ap => {
+                if (!ap.latitude || !ap.longitude) return null;
+                return (
+                  <CircleMarker
+                    key={`asso-${ap.id}`}
+                    center={[ap.latitude, ap.longitude]}
+                    radius={7}
+                    pathOptions={{ color: '#EA580C', fillColor: '#FB923C', fillOpacity: 0.85, weight: 2 }}
+                  >
+                    <Popup>
+                      <div className="text-xs space-y-1">
+                        <p className="font-bold text-sm text-orange-700">{ap.name}</p>
+                        <p className="text-gray-500">{ap.address}{ap.ville ? `, ${ap.ville}` : ''}</p>
+                        {ap.contact_phone && <p>Tél : {ap.contact_phone}</p>}
+                        <p className="text-orange-600 font-medium">Point associatif</p>
+                        {ap.last_collection && <p>Dernière collecte : {new Date(ap.last_collection).toLocaleDateString('fr-FR')}</p>}
+                      </div>
+                    </Popup>
+                  </CircleMarker>
+                );
+              })}
+
               {filtered.map(cav => (
                 <CircleMarker
                   key={cav.id}
@@ -162,6 +191,12 @@ export default function FillRateMap() {
               <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-orange-500" /> 60-80% Élevé</div>
               <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-yellow-500" /> 40-60% Moyen</div>
               <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-green-500" /> &lt;40% Faible</div>
+              <hr className="border-gray-200 my-1" />
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={showAsso} onChange={e => setShowAsso(e.target.checked)} className="rounded" />
+                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#FB923C' }} />
+                Associations ({assoPoints.filter(a => a.latitude).length})
+              </label>
             </div>
           </div>
 

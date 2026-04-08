@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner } from '../components';
 import api from '../services/api';
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -32,6 +32,8 @@ export default function CAVMap() {
   const [loading, setLoading] = useState(true);
   const [communes, setCommunes] = useState([]);
   const [filterCommune, setFilterCommune] = useState('');
+  const [assoPoints, setAssoPoints] = useState([]);
+  const [showAsso, setShowAsso] = useState(true);
 
   useEffect(() => {
     loadData();
@@ -39,12 +41,14 @@ export default function CAVMap() {
 
   const loadData = async () => {
     try {
-      const [mapRes, communeRes] = await Promise.all([
+      const [mapRes, communeRes, assoRes] = await Promise.all([
         api.get('/cav/map'),
         api.get('/cav/communes'),
+        api.get('/association-points/map'),
       ]);
       setCavs(mapRes.data);
       setCommunes(communeRes.data);
+      setAssoPoints(assoRes.data);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -80,10 +84,14 @@ export default function CAVMap() {
               {communes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             {/* Legend */}
-            <div className="flex gap-2 text-xs">
+            <div className="flex gap-2 text-xs flex-wrap">
               <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-500"></span>&gt;80%</span>
               <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-500"></span>40-80%</span>
               <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500"></span>&lt;40%</span>
+              <label className="flex items-center gap-1 ml-2 cursor-pointer">
+                <input type="checkbox" checked={showAsso} onChange={e => setShowAsso(e.target.checked)} />
+                <span className="w-3 h-3 rounded-sm bg-orange-500"></span>Associations ({assoPoints.filter(a => a.latitude).length})
+              </label>
             </div>
           </div>
         </div>
@@ -106,7 +114,7 @@ export default function CAVMap() {
                 const fillRate = cav.estimated_fill_rate || 0;
                 return (
                   <Circle
-                    key={cav.id}
+                    key={`cav-${cav.id}`}
                     center={[cav.latitude, cav.longitude]}
                     radius={200}
                     pathOptions={{
@@ -125,6 +133,33 @@ export default function CAVMap() {
                       </div>
                     </Popup>
                   </Circle>
+                );
+              })}
+
+              {/* Points de collecte associatifs */}
+              {showAsso && assoPoints.map(ap => {
+                if (!ap.latitude || !ap.longitude) return null;
+                return (
+                  <CircleMarker
+                    key={`asso-${ap.id}`}
+                    center={[ap.latitude, ap.longitude]}
+                    radius={8}
+                    pathOptions={{
+                      color: '#EA580C',
+                      fillColor: '#FB923C',
+                      fillOpacity: 0.8,
+                      weight: 2,
+                    }}
+                  >
+                    <Popup>
+                      <div className="text-xs">
+                        <p className="font-bold text-orange-700">{ap.name}</p>
+                        <p>{ap.address}{ap.ville ? `, ${ap.ville}` : ''}</p>
+                        {ap.contact_phone && <p>Tél : {ap.contact_phone}</p>}
+                        <p className="text-orange-600 font-medium mt-1">Point associatif</p>
+                      </div>
+                    </Popup>
+                  </CircleMarker>
                 );
               })}
             </MapContainer>
