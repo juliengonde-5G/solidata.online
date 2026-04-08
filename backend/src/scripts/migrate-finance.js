@@ -172,7 +172,10 @@ async function migrateFinance() {
       { col: 'analytical_code', def: 'TEXT' },
     ];
     for (const w of glWidenings) {
-      await client.query(`ALTER TABLE financial_gl_entries ALTER COLUMN ${w.col} TYPE ${w.def}`);
+      try {
+        await client.query(`ALTER TABLE financial_gl_entries ADD COLUMN IF NOT EXISTS ${w.col} ${w.def}`);
+        await client.query(`ALTER TABLE financial_gl_entries ALTER COLUMN ${w.col} TYPE ${w.def}`);
+      } catch (e) { console.warn(`[MIGRATE-FINANCE] Colonne ${w.col}:`, e.message); }
     }
     console.log('[MIGRATE-FINANCE] Colonnes GL élargies ✓');
 

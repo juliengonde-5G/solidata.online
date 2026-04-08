@@ -257,6 +257,14 @@ async function enrichGLCategories(exerciseId, apiKey) {
         UNIQUE(local_type, local_id)
       )
     `);
+    // S'assurer que les colonnes analytiques existent dans financial_gl_entries
+    const glCols = ['family_category TEXT', 'category TEXT', 'analytical_code TEXT'];
+    for (const colDef of glCols) {
+      const colName = colDef.split(' ')[0];
+      try {
+        await pool.query(`ALTER TABLE financial_gl_entries ADD COLUMN IF NOT EXISTS ${colDef}`);
+      } catch (e) { /* colonne existe deja ou table absente — OK */ }
+    }
     console.log('[PENNYLANE] Tables OK');
   } catch (err) {
     console.error('[PENNYLANE] Migration :', err.message);
@@ -598,13 +606,13 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
     await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
 
-    // Phase 2 : Enrichir les lignes avec les catégories analytiques Pennylane
-    let enrichedCount = 0;
-    try {
-      enrichedCount = await enrichGLCategories(exerciseId, apiKey);
-    } catch (err) {
-      console.error('[PENNYLANE] Erreur enrichissement catégories (non bloquant) :', err.message);
-    }
+    // Phase 2 : Enrichir les lignes avec les catégories analytiques (en arrière-plan)
+    // Ne pas bloquer la réponse HTTP — l'enrichissement peut prendre plusieurs minutes
+    enrichGLCategories(exerciseId, apiKey).then(count => {
+      console.log(`[PENNYLANE] Enrichissement catégories terminé : ${count} lignes`);
+    }).catch(err => {
+      console.error('[PENNYLANE] Erreur enrichissement catégories :', err.message);
+    });
 
     // Diagnostic : vérifier ce qui a été inséré
     const diag = await pool.query(`
@@ -621,9 +629,8 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     const diagData = diag.rows[0] || {};
 
     res.json({
-      message: `Import GL terminé : ${inserted} écriture(s) importée(s), ${enrichedCount} enrichie(s) avec catégories analytiques pour l'exercice ${year}`,
+      message: `Import GL terminé : ${inserted} écriture(s) importée(s) pour l'exercice ${year}. Enrichissement catégories analytiques en cours en arrière-plan.`,
       synced: inserted,
-      enriched: enrichedCount,
       exercise_id: exerciseId,
       year,
       diagnostic: {

@@ -98,7 +98,8 @@ export default function Pennylane() {
       setGlDiag(res.data);
       loadAll();
     } catch (err) {
-      alert(err.response?.data?.error || 'Erreur import GL analytique');
+      const msg = err.response?.data?.error || err.message || 'Erreur import GL analytique';
+      alert('Erreur GL : ' + msg);
     }
     setSyncingGL(false);
   };
