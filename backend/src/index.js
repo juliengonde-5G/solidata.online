@@ -358,6 +358,85 @@ async function initOnStartup() {
         await migrateFinance();
         logger.info('Migration Finance vérifiée');
       } catch (e) { logger.warn('Migration Finance warning', { error: e.message }); }
+
+      // Migration module Collecte Association (idempotent — création tables si absentes)
+      try {
+        await pool.query('CREATE EXTENSION IF NOT EXISTS postgis');
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS association_points (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            address VARCHAR(500),
+            complement_adresse VARCHAR(255),
+            code_postal VARCHAR(10),
+            ville VARCHAR(100),
+            latitude DOUBLE PRECISION,
+            longitude DOUBLE PRECISION,
+            geom GEOMETRY(Point, 4326),
+            contact_phone VARCHAR(50),
+            contact_info TEXT,
+            avg_fill_rate DOUBLE PRECISION DEFAULT 0,
+            status VARCHAR(30) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'temporairement_indisponible')),
+            unavailable_reason TEXT,
+            unavailable_since DATE,
+            route_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+          )
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_association_points_geom ON association_points USING GIST(geom)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_association_points_status ON association_points(status)');
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS tour_association_point (
+            id SERIAL PRIMARY KEY,
+            tour_id INTEGER REFERENCES tours(id) ON DELETE CASCADE,
+            association_point_id INTEGER REFERENCES association_points(id),
+            position INTEGER NOT NULL,
+            status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'collected', 'skipped', 'incident')),
+            fill_level INTEGER CHECK (fill_level BETWEEN 0 AND 5),
+            collected_at TIMESTAMP,
+            notes TEXT
+          )
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_tour_assoc_tour ON tour_association_point(tour_id)');
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS standard_route_association (
+            id SERIAL PRIMARY KEY,
+            route_id INTEGER REFERENCES standard_routes(id) ON DELETE CASCADE,
+            association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            UNIQUE(route_id, association_point_id)
+          )
+        `);
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS tonnage_history_association (
+            id SERIAL PRIMARY KEY,
+            association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
+            date DATE NOT NULL,
+            weight_kg DOUBLE PRECISION NOT NULL,
+            tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+            route_name VARCHAR(100),
+            source VARCHAR(20) DEFAULT 'manual',
+            created_at TIMESTAMP DEFAULT NOW()
+          )
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_tonnage_assoc_point ON tonnage_history_association(association_point_id)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_tonnage_assoc_date ON tonnage_history_association(date DESC)');
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS association_learning_feedback (
+            id SERIAL PRIMARY KEY,
+            tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+            association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
+            predicted_fill_rate DOUBLE PRECISION NOT NULL,
+            observed_fill_level INTEGER CHECK (observed_fill_level BETWEEN 0 AND 5),
+            predicted_weight_kg DOUBLE PRECISION,
+            created_at TIMESTAMP DEFAULT NOW()
+          )
+        `);
+        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN collection_type VARCHAR(20) DEFAULT 'pav'; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        await pool.query(`DO $$ BEGIN ALTER TABLE stock_movements ADD COLUMN origine_type VARCHAR(20) DEFAULT 'pav'; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+        logger.info('Migration Collecte Association vérifiée');
+      } catch (e) { logger.warn('Migration Association warning', { error: e.message }); }
     }
 
     // Seed CAV si la table est vide
@@ -372,6 +451,20 @@ async function initOnStartup() {
       }
     } catch (err) {
       logger.error('Erreur seed CAV', { error: err.message });
+    }
+
+    // Seed associations si la table est vide
+    try {
+      const assoCount = await pool.query('SELECT COUNT(*) FROM association_points');
+      if (parseInt(assoCount.rows[0].count) === 0) {
+        logger.info('Table association_points vide, lancement du seed...');
+        const { seedAssociations } = require('./scripts/seed-associations');
+        await seedAssociations();
+      } else {
+        logger.info(`${assoCount.rows[0].count} points association déjà en base`);
+      }
+    } catch (err) {
+      logger.error('Erreur seed associations', { error: err.message });
     }
 
     // Cleanup expired refresh tokens
