@@ -14,6 +14,7 @@ const CHECKLIST_ITEMS = [
   { id: 'pneus', label: 'État des pneus', icon: '🔧' },
   { id: 'niveaux', label: 'Niveaux (huile, liquide refr.)', icon: '🛢️' },
   { id: 'proprete', label: 'Propreté du véhicule', icon: '🧹' },
+  { id: 'sacs_remballes', label: 'Sacs de remballes', icon: '🛍️' },
 ];
 
 export default function Checklist() {
