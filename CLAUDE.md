@@ -2,7 +2,7 @@
 
 > **Ce fichier est le contexte de référence pour tout agent IA (Claude, Copilot, etc.) travaillant sur le projet SOLIDATA.**
 > Il est lu automatiquement par Claude Code au démarrage de chaque session.
-> Dernière mise à jour : 31 mars 2026
+> Dernière mise à jour : 11 avril 2026
 
 ---
 
@@ -55,15 +55,15 @@ solidata.online/
 │   ├── index.js              # Entry point Express + Socket.IO + auto-init DB
 │   ├── config/database.js    # Pool PostgreSQL
 │   ├── middleware/auth.js     # authenticate() + authorize(...roles)
-│   ├── routes/               # 61 fichiers de routes API
+│   ├── routes/               # 63 fichiers de routes API
 │   ├── services/             # predictive-ai.js, insertion-ai.js, ml-model.js
 │   └── scripts/              # init-db.js, seed-*.js, migrate-*.js
 ├── frontend/src/
-│   ├── App.jsx               # Routeur (62 pages, ProtectedRoute)
+│   ├── App.jsx               # Routeur (66 pages, ProtectedRoute)
 │   ├── contexts/AuthContext.jsx  # Auth state + token refresh
 │   ├── services/api.js       # Axios instance + interceptors
 │   ├── components/Layout.jsx # Sidebar + navigation role-based
-│   └── pages/                # 62 pages React
+│   └── pages/                # 66 pages React
 ├── mobile/src/
 │   ├── App.jsx               # Routeur mobile (11 pages)
 │   ├── services/haptic.js    # Vibration feedback
@@ -95,7 +95,7 @@ solidata.online/
 | 5 | Insertion | insertion | InsertionParcours | Parcours insertion IA, 3 jalons (M1/M6/M12), radar 7 freins, plans d'action |
 | 6 | Collecte | cav, vehicles, tours | Tours, CAVMap, Vehicles, LiveVehicles, FillRateMap, CollectionProposals | CAV géolocalisés, 3 modes tournée, GPS temps réel, IA prédictive |
 | 7 | Tri & Production | tri, production, produits-finis | ChaineTri, Production, ProduitsFinis | 2 chaînes, batch tracking, code-barres, KPI productivité |
-| 8 | Stock | stock | Stock | Mouvements entrée/sortie, inventaire physique, code-barres |
+| 8 | Stock | stock, stock-original | Stock, AdminStockOriginal, InventaireOriginal | Mouvements entrée/sortie, inventaire physique, grand livre brut, verrouillage trimestriel Refashion |
 | 9 | Expéditions | expeditions | Expeditions | Expéditions vers exutoires, bons de livraison, conteneurs |
 | 10 | Facturation | billing | — | Factures HT/TVA/TTC, statuts brouillon→payée |
 
@@ -303,6 +303,9 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | `docs/FORMATION_MANAGER_RH_INSERTION.md` | Formation manager RH & insertion | Formation |
 | `docs/PROPOSITIONS_AMELIORATION.md` | Propositions d'amélioration UX/accessibilité | Évolution |
 | `rapports/rapport-quotidien-*.md` | Rapports quotidiens automatisés (branches, sécurité, tests personas) | Ops/QA |
+| `docs/LOGIQUE_TOURNEES.md` | Logique complète du module collecte/tournées (IA prédictive, OSRM, flux complet) | Technique |
+| `docs/LOGIQUE_STOCK_INVENTAIRES.md` | Logique complète des deux modules de stock (moderne + original, Refashion) | Technique |
+| `docs/VARIABLES_APPLICATION.md` | Toutes les variables d'environnement et de configuration | Technique |
 
 ---
 
@@ -323,6 +326,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | 4 avril 2026 | 1.3.2 | Audit le plus approfondi (4 personas complètes). 7 branches obsolètes. Sécurité **5.5/10** : 2 critiques, 8 hautes, 7 vuln npm. **76 bugs dont 18 BLOQUANTS** — 6 modules cassés : Dashboard (SQL crash), WorkHours (100% non-fonctionnel), Mobile Chauffeur (CHECK constraint, données perdues), Expéditions (mismatch champs complet), Commandes Exutoires (workflow bloqué statut `chargée`), ProduitsFinis (création+affichage). Note globale **4.7/10**. Sprint correctif urgent recommandé (6-8h). 179 commits |
 | 6 avril 2026 | 1.3.2 | Audit quotidien : 11 commits orphelins réintégrés (design system lot 1, fix vue mv_cav_stats). Repo propre (1 branche). Sécurité **4.5/10** (6 CRITIQUES : injection SQL insertion/index.js, injection shell admin-db, auth manquante PCM). 10 vuln npm (8 HIGH). **39 bugs dont 7 BLOQUANTS** — 7 modules cassés : Dashboard (SQL crash), WorkHours (endpoints incompatibles), ProduitsFinis (mismatch champs), GPS temps réel (Socket.IO), LiveVehicles, Expéditions (date mismatch), FillRateMap (structure réponse). 4 bugs bloquants récurrents depuis 02/04. Note globale **4.8/10**. 155 commits |
 | 7 avril 2026 | 1.3.2 | Audit quotidien : 15 commits orphelins réintégrés sur main. Repo propre (1 branche). Sécurité **4.5/10** (2 CRITIQUES : injection SQL insertion/index.js, injection shell admin-db + 6 HAUTES dont PCM sans auth). 11 vuln npm (9 HIGH). **36 bugs dont 12 BLOQUANTS** — 10 modules cassés : Mobile GPS (Socket.IO mismatch+auth), Mobile retour (CHECK constraint), WorkHours (triple incompatibilité), Expéditions (champs POST), Commandes Exutoires (status `chargée`), LiveVehicles (Socket.IO), Dashboard KPIs (colonne erronée), ProduitsFinis (JOIN manquant), Reporting (paramètre API), ChaineTri (nb_postes). **8 bugs récurrents ≥3 jours non corrigés**. Note globale **4.8/10**. 143 commits |
+| 11 avril 2026 | 1.3.3 | Stock Original (AdminStockOriginal, InventaireOriginal, grand livre, verrouillage trimestriel Refashion). Fix mobile (navigation incidents, checklist, erreurs silencieuses). Suppression doublon route `GET /api/vehicles/available`. Documentation : LOGIQUE_TOURNEES.md, LOGIQUE_STOCK_INVENTAIRES.md, VARIABLES_APPLICATION.md. 66 pages React, 63 fichiers routes. |
 
 ---
 

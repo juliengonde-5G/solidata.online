@@ -14,35 +14,54 @@ Collecte, tri, recyclage & insertion sociale
 SOLIDATA est un ERP concu pour **Solidarite Textiles**, structure d'insertion par l'activite economique (IAE) specialisee dans la collecte, le tri et la valorisation de textiles usages en Normandie (Metropole de Rouen).
 
 **Domaine :** https://solidata.online
-**Presentation des modules :** [/presentation-solidata.html](https://solidata.online/presentation-solidata.html)
+**Mobile :** https://m.solidata.online
 
 ---
 
-## Modules
+## Modules (25)
 
 | # | Module | Description |
 |---|--------|-------------|
-| 1 | **Recrutement** | Kanban candidatures, parsing CV, test PCM (6 profils), Explorama, workflow embauche |
-| 2 | **Parcours Insertion** | Diagnostic CIP, jalons ASP (M+1 → Sortie), freins peripheriques, moteur IA continu |
-| 3 | **Collecte & Logistique IA** | Prediction remplissage (meteo, saisonnalite, evenements), optimisation tournees TSP+2-opt |
-| 4 | **CAV & Stock** | Carte PostGIS des conteneurs, QR codes, stock temps reel, inventaire physique |
-| 5 | **Flotte Vehicules** | Maintenance preventive (Ducato/Master eTech), alertes km/date, controle technique |
-| 6 | **Reporting Metropole** | Tonnages, impact CO2, taux captation kg/hab/an, conformite Refashion/ASP |
-| 7 | **RH & Notifications** | Fiches employes, contrats, objectifs, alertes SMS/email (Brevo) |
-| 8 | **Fil d'actualite** | Veille sectorielle automatisee, fil LinkedIn recyclage textile |
+| 1 | **Auth & Admin** | JWT, 5 roles (ADMIN/MANAGER/RH/COLLABORATEUR/AUTORITE), parametrage |
+| 2 | **Recrutement** | Kanban candidatures, parsing CV, test PCM (6 profils), workflow embauche |
+| 3 | **Parcours Insertion** | Diagnostic CIP, jalons M1/M6/M12, 7 freins peripheriques, moteur IA |
+| 4 | **Collecte IA** | Prediction remplissage (meteo, saisonnalite, evenements), optimisation tournees OSRM+2-opt |
+| 5 | **CAV & GPS** | Carte PostGIS, QR codes, GPS temps reel, 209 conteneurs |
+| 6 | **Stock moderne** | Mouvements entree/sortie par categorie, inventaire physique, reconciliation tournees |
+| 7 | **Stock original** | Suivi brut collecte, grand livre, regularisation, verrouillage trimestriel Refashion |
+| 8 | **Tri & Production** | 2 chaines, batch tracking, code-barres, KPI productivite |
+| 9 | **Expeditions** | Flux vers exutoires, bons de livraison, conteneurs |
+| 10 | **Facturation** | Factures HT/TVA/TTC, statuts brouillon→payee |
+| 11 | **Logistique Exutoires** | Workflow commande 8 statuts, preparation, pesee, Gantt, calendrier |
+| 12 | **Reporting** | Collecte, Production, RH, Metropole, Refashion |
+| 13 | **RH** | Employes, contrats, heures, competences, planning hebdo 4 filieres |
+| 14 | **Finance** | P&L analytique, bilan, tresorerie, controle de gestion, Pennylane |
+| 15 | **Flotte Vehicules** | Maintenance preventive, alertes km/date, controle technique |
+| 16 | **IA Predictive** | Facteurs saisonniers, meteo, apprentissage ML V2, export training data |
+| 17 | **Insertion IA** | Analyse parcours, recommandations CIP (Claude API) |
+| 18 | **SolidataBot** | Chat IA conversationnel (Claude API), contexte ERP complet |
+| 19 | **RGPD** | Registre traitements, audit log, consentements, anonymisation |
+| 20 | **Notifications** | SMS/email via Brevo, triggers automatiques |
+| 21 | **Pointage** | Gestion pointages employes |
+| 22 | **NewsFeed** | Articles categorises, epinglage |
+| 23 | **Referentiels** | Associations, exutoires, catalogue produits, conteneurs |
+| 24 | **Admin DB** | Backup/restore, VACUUM, purge, statistiques |
+| 25 | **PCM** | Test personnalite 20 questions, 6 types, scoring pondere, export PDF |
 
 ---
 
 ## Stack technique
 
 ```
-Frontend     React 18 + Vite + TailwindCSS + Recharts
-Backend      Node.js + Express
-BDD          PostgreSQL + PostGIS
-Infra        Docker Compose + Nginx + Certbot SSL
-Mobile       PWA (Progressive Web App)
-Notifications  Brevo API (SMS + email)
-Securite     JWT + AES-256 (PCM) + Helmet + RBAC (5 roles)
+Frontend      React 18.3 + Vite 6 + TailwindCSS + Recharts + Leaflet — 66 pages
+Backend       Node.js 20 + Express 4.21 — 63 fichiers de routes
+BDD           PostgreSQL 15 + PostGIS 3.4 — 70+ tables
+Cache/Queue   Redis 7 + BullMQ
+Infra         Docker Compose (8 services) + Nginx SSL + Let's Encrypt
+Mobile        PWA React — 11 pages chauffeur
+IA            Claude API (Anthropic) — chat, insertion, predictif, vehicules
+Notifications Brevo API (SMS + email)
+Securite      JWT + AES-256 (PCM) + Helmet + RBAC (5 roles) + rate limiting
 ```
 
 ---
@@ -51,21 +70,21 @@ Securite     JWT + AES-256 (PCM) + Helmet + RBAC (5 roles)
 
 ```
 solidata.online/
-├── frontend/          # Application React (Vite)
-│   ├── src/
-│   │   ├── pages/     # 35 pages (Dashboard, Candidates, Tours, Insertion...)
-│   │   ├── components/
-│   │   ├── contexts/
-│   │   └── services/
-│   └── public/        # Assets statiques + presentation
+├── frontend/          # Application React (Vite) — 66 pages
+│   └── src/
+│       ├── pages/     # Pages React (Dashboard, Tours, Stock, Finance...)
+│       ├── components/
+│       ├── contexts/  # AuthContext (JWT + refresh)
+│       └── services/  # api.js (Axios)
 ├── backend/
-│   ├── src/
-│   │   ├── routes/    # 27 modules API REST
-│   │   ├── services/  # Moteur predictif, scheduler, IA insertion
-│   │   └── middleware/ # Auth JWT, RBAC, rate limiting
-│   └── scripts/       # Seeds, import donnees, migrations
-├── mobile/            # PWA chauffeur terrain
+│   └── src/
+│       ├── routes/    # 63 modules API REST (dont tours/, candidates/, insertion/)
+│       ├── services/  # predictive-ai.js, insertion-ai.js, ml-model.js
+│       └── middleware/ # auth.js (JWT/RBAC), activity-logger.js
+├── mobile/            # PWA chauffeur terrain (11 pages)
+├── ai-agent/          # SolidataBot Flask (optionnel)
 ├── deploy/            # Scripts deploiement, nginx, backups
+├── docs/              # Documentation technique et fonctionnelle
 ├── docker-compose.yml
 └── docker-compose.prod.yml
 ```
@@ -85,8 +104,9 @@ solidata.online/
 git clone https://github.com/juliengonde-5G/solidata.online.git
 cd solidata.online
 
-# Copier la config
-cp .env.example .env
+# Configurer l'environnement
+cp backend/.env.example backend/.env
+# Editer backend/.env (DB_PASSWORD, JWT_SECRET, ANTHROPIC_API_KEY...)
 
 # Lancer avec Docker
 docker compose up -d
@@ -96,12 +116,12 @@ cd backend && npm install && npm run dev
 cd ../frontend && npm install && npm run dev
 ```
 
-L'application est accessible sur `http://localhost:5173` (frontend) et `http://localhost:3000` (API).
+- Frontend : `http://localhost:5173`
+- API : `http://localhost:3001`
 
 ### Production
 
 ```bash
-# Deploiement complet sur serveur
 bash deploy/scripts/init-server.sh
 docker compose -f docker-compose.prod.yml up -d
 ```
@@ -115,7 +135,7 @@ Voir [deploy/DEPLOIEMENT.md](deploy/DEPLOIEMENT.md) pour le guide complet.
 | Role | Acces |
 |------|-------|
 | **ADMIN** | Acces complet, parametrage, BDD |
-| **MANAGER** | Gestion equipes, reporting |
+| **MANAGER** | Gestion equipes, reporting, tournees |
 | **RH** | Recrutement, insertion, employes |
 | **COLLABORATEUR** | Acces limite a son perimetre |
 | **AUTORITE** | Consultation reporting uniquement |
@@ -126,18 +146,22 @@ Voir [deploy/DEPLOIEMENT.md](deploy/DEPLOIEMENT.md) pour le guide complet.
 
 | Document | Description |
 |----------|-------------|
-| [DOCUMENTATION_TECHNIQUE.md](DOCUMENTATION_TECHNIQUE.md) | Reference technique complete (architecture, API, BDD, deploiement) |
-| [RECONSTRUCTION.md](RECONSTRUCTION.md) | Pack de reconstruction depuis zero |
-| [CHANGELOG.md](CHANGELOG.md) | Historique des versions |
+| [CLAUDE.md](CLAUDE.md) | Instructions pour agents IA — contexte complet du projet |
+| [DOCUMENTATION_TECHNIQUE.md](DOCUMENTATION_TECHNIQUE.md) | Architecture complete, BDD, API, deploiement |
+| [docs/VARIABLES_APPLICATION.md](docs/VARIABLES_APPLICATION.md) | Toutes les variables d'environnement |
+| [docs/LOGIQUE_TOURNEES.md](docs/LOGIQUE_TOURNEES.md) | Logique complete du module collecte/tournees |
+| [docs/LOGIQUE_STOCK_INVENTAIRES.md](docs/LOGIQUE_STOCK_INVENTAIRES.md) | Logique complete des modules de stock |
+| [RECONSTRUCTION.md](RECONSTRUCTION.md) | Procedure de reconstruction depuis zero |
 | [deploy/DEPLOIEMENT.md](deploy/DEPLOIEMENT.md) | Guide de deploiement production |
 
 ---
 
-## Historique des versions
+## Version actuelle : 1.3.3 (11 avril 2026)
 
-Voir [CHANGELOG.md](CHANGELOG.md) pour le detail complet.
-
-**Version actuelle : 1.2.0** (13 mars 2026)
+- Module Stock Original (grand livre, regularisation, verrouillage Refashion)
+- 2 nouvelles pages : AdminStockOriginal, InventaireOriginal
+- Fix mobile : navigation incidents, checklist, erreurs silencieuses
+- Documentation : logique tournees, stock, variables
 
 ---
 
