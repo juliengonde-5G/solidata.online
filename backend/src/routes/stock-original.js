@@ -125,6 +125,71 @@ router.get('/evolution', async (req, res) => {
   }
 });
 
+// GET /api/stock-original/ledger — Grand livre ligne par ligne avec solde cumulé
+router.get('/ledger', async (req, res) => {
+  try {
+    const { date_from, date_to, limit: lim } = req.query;
+    const params = [];
+    let dateFilter = '';
+
+    if (date_from) { params.push(date_from); dateFilter += ` AND som.date >= $${params.length}`; }
+    if (date_to) { params.push(date_to); dateFilter += ` AND som.date <= $${params.length}`; }
+
+    const result = await pool.query(`
+      SELECT som.id, som.type, som.date, som.poids_kg, som.origine, som.destination,
+        som.notes, som.motif, som.tour_id, som.batch_id, som.expedition_id, som.created_at,
+        u.first_name || ' ' || u.last_name as created_by_name,
+        CASE
+          WHEN som.type = 'entree' THEN som.poids_kg
+          ELSE 0
+        END as entree_kg,
+        CASE
+          WHEN som.type = 'sortie' THEN som.poids_kg
+          ELSE 0
+        END as sortie_kg,
+        CASE
+          WHEN som.type = 'regularisation' AND som.poids_kg >= 0 THEN som.poids_kg
+          WHEN som.type = 'regularisation' AND som.poids_kg < 0 THEN 0
+          ELSE 0
+        END as regul_plus_kg,
+        CASE
+          WHEN som.type = 'regularisation' AND som.poids_kg < 0 THEN ABS(som.poids_kg)
+          ELSE 0
+        END as regul_moins_kg,
+        SUM(
+          CASE
+            WHEN som.type = 'entree' THEN som.poids_kg
+            WHEN som.type = 'sortie' THEN -som.poids_kg
+            WHEN som.type = 'regularisation' THEN som.poids_kg
+          END
+        ) OVER (ORDER BY som.date ASC, som.id ASC) as solde_cumule_kg
+      FROM stock_original_movements som
+      LEFT JOIN users u ON som.created_by = u.id
+      WHERE 1=1 ${dateFilter}
+      ORDER BY som.date ASC, som.id ASC
+      ${lim ? `LIMIT $${params.push(parseInt(lim)) && params.length}` : ''}
+    `, params);
+
+    // Totaux
+    const totals = result.rows.length > 0 ? {
+      total_entrees_kg: result.rows.reduce((s, r) => s + parseFloat(r.entree_kg), 0),
+      total_sorties_kg: result.rows.reduce((s, r) => s + parseFloat(r.sortie_kg), 0),
+      total_regul_plus_kg: result.rows.reduce((s, r) => s + parseFloat(r.regul_plus_kg), 0),
+      total_regul_moins_kg: result.rows.reduce((s, r) => s + parseFloat(r.regul_moins_kg), 0),
+      solde_final_kg: parseFloat(result.rows[result.rows.length - 1].solde_cumule_kg),
+      nb_lignes: result.rows.length,
+    } : {
+      total_entrees_kg: 0, total_sorties_kg: 0, total_regul_plus_kg: 0,
+      total_regul_moins_kg: 0, solde_final_kg: 0, nb_lignes: 0,
+    };
+
+    res.json({ lignes: result.rows, totaux: totals });
+  } catch (err) {
+    console.error('[STOCK-ORIGINAL] Erreur ledger :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // POST /api/stock-original/pesee — Pesée manuelle (entrée)
 router.post('/pesee', [
   body('date').notEmpty().withMessage('Date requise'),
