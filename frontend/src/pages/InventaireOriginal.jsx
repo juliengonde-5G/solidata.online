@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Warehouse, Scale, TrendingUp, ArrowDownUp, Plus, Lock, BookOpen, Download, Printer } from 'lucide-react';
+import { Warehouse, Scale, TrendingUp, ArrowDownUp, Plus, Lock } from 'lucide-react';
 import Layout from '../components/Layout';
 import { DataTable, LoadingSpinner, StatusBadge } from '../components';
 import api from '../services/api';
@@ -32,8 +32,6 @@ export default function InventaireOriginal() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState(null);
-  const [ledger, setLedger] = useState({ lignes: [], totaux: null });
-  const [ledgerFilters, setLedgerFilters] = useState({ date_from: '', date_to: '' });
 
   const loadMovements = useCallback(async () => {
     try {
@@ -71,24 +69,13 @@ export default function InventaireOriginal() {
     } catch (err) { console.error(err); }
   }, [period]);
 
-  const loadLedger = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (ledgerFilters.date_from) params.set('date_from', ledgerFilters.date_from);
-      if (ledgerFilters.date_to) params.set('date_to', ledgerFilters.date_to);
-      const res = await api.get(`/stock-original/ledger?${params}`);
-      setLedger(res.data);
-    } catch (err) { console.error(err); }
-  }, [ledgerFilters]);
-
   useEffect(() => {
-    Promise.all([loadMovements(), loadSummary(), loadEvolution(), loadLedger()])
+    Promise.all([loadMovements(), loadSummary(), loadEvolution()])
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { loadMovements(); }, [filters, loadMovements]);
   useEffect(() => { loadEvolution(); }, [period, loadEvolution]);
-  useEffect(() => { loadLedger(); }, [ledgerFilters, loadLedger]);
 
   const handlePesee = async (e) => {
     e.preventDefault();
@@ -128,7 +115,6 @@ export default function InventaireOriginal() {
 
   const tabs = [
     { id: 'historique', label: 'Historique', icon: ArrowDownUp },
-    { id: 'journal', label: 'Journal de stock', icon: BookOpen },
     { id: 'pesee', label: 'Pesee manuelle', icon: Scale },
     { id: 'inventaire', label: 'Inventaire permanent', icon: TrendingUp },
   ];
@@ -211,159 +197,6 @@ export default function InventaireOriginal() {
               emptyMessage="Aucun mouvement de stock original"
               dense
             />
-          </>
-        )}
-
-        {/* Onglet Journal de stock — grand livre ligne par ligne */}
-        {activeTab === 'journal' && (
-          <>
-            {/* Filtres date + export */}
-            <div className="flex gap-3 mb-4 items-center flex-wrap">
-              <span className="text-sm text-slate-500">Periode :</span>
-              <input type="date" value={ledgerFilters.date_from} onChange={e => setLedgerFilters({ ...ledgerFilters, date_from: e.target.value })} className="input-modern text-sm" />
-              <span className="text-slate-400">—</span>
-              <input type="date" value={ledgerFilters.date_to} onChange={e => setLedgerFilters({ ...ledgerFilters, date_to: e.target.value })} className="input-modern text-sm" />
-              {(ledgerFilters.date_from || ledgerFilters.date_to) && (
-                <button onClick={() => setLedgerFilters({ date_from: '', date_to: '' })} className="text-sm text-primary hover:underline">
-                  Reinitialiser
-                </button>
-              )}
-              <div className="ml-auto">
-                <button onClick={() => {
-                  const rows = ledger.lignes.map((l, i) => [
-                    i + 1, new Date(l.date).toLocaleDateString('fr-FR'), l.type,
-                    ORIGINES_LABELS[l.origine] || l.origine || '',
-                    l.type === 'entree' ? parseFloat(l.entree_kg).toFixed(1) : '',
-                    l.type === 'sortie' ? parseFloat(l.sortie_kg).toFixed(1) : '',
-                    l.type === 'regularisation' && parseFloat(l.poids_kg) >= 0 ? parseFloat(l.regul_plus_kg).toFixed(1) : '',
-                    l.type === 'regularisation' && parseFloat(l.poids_kg) < 0 ? parseFloat(l.regul_moins_kg).toFixed(1) : '',
-                    parseFloat(l.solde_cumule_kg).toFixed(1),
-                    l.notes || '',
-                  ].join(';'));
-                  const header = '#;Date;Type;Origine;Entree (kg);Sortie (kg);Regul+ (kg);Regul- (kg);Solde (kg);Notes';
-                  const csv = [header, ...rows].join('\n');
-                  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a'); a.href = url;
-                  a.download = `journal-stock-original-${new Date().toISOString().slice(0, 10)}.csv`;
-                  a.click(); URL.revokeObjectURL(url);
-                }} className="btn-ghost text-sm flex items-center gap-1.5">
-                  <Download className="w-4 h-4" strokeWidth={1.8} /> Export CSV
-                </button>
-              </div>
-            </div>
-
-            {/* Totaux en haut */}
-            {ledger.totaux && (
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-                <div className="card-modern p-3 text-center">
-                  <p className="text-xs text-slate-400">Lignes</p>
-                  <p className="text-lg font-bold text-slate-700">{ledger.totaux.nb_lignes}</p>
-                </div>
-                <div className="card-modern p-3 text-center">
-                  <p className="text-xs text-slate-400">Total entrees</p>
-                  <p className="text-lg font-bold text-green-600">+{(ledger.totaux.total_entrees_kg / 1000).toFixed(2)} t</p>
-                </div>
-                <div className="card-modern p-3 text-center">
-                  <p className="text-xs text-slate-400">Total sorties</p>
-                  <p className="text-lg font-bold text-red-600">-{(ledger.totaux.total_sorties_kg / 1000).toFixed(2)} t</p>
-                </div>
-                <div className="card-modern p-3 text-center">
-                  <p className="text-xs text-slate-400">Regularisations</p>
-                  <p className="text-lg font-bold text-amber-600">
-                    {ledger.totaux.total_regul_plus_kg > 0 && `+${(ledger.totaux.total_regul_plus_kg / 1000).toFixed(2)}`}
-                    {ledger.totaux.total_regul_plus_kg > 0 && ledger.totaux.total_regul_moins_kg > 0 && ' / '}
-                    {ledger.totaux.total_regul_moins_kg > 0 && `-${(ledger.totaux.total_regul_moins_kg / 1000).toFixed(2)}`}
-                    {ledger.totaux.total_regul_plus_kg === 0 && ledger.totaux.total_regul_moins_kg === 0 && '0'} t
-                  </p>
-                </div>
-                <div className="card-modern p-3 text-center border-primary/30 bg-primary/5">
-                  <p className="text-xs text-slate-400">Solde final</p>
-                  <p className="text-lg font-bold text-primary">{(ledger.totaux.solde_final_kg / 1000).toFixed(2)} t</p>
-                </div>
-              </div>
-            )}
-
-            {/* Tableau grand livre */}
-            <div className="card-modern overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 border-b">
-                      <th className="text-left p-2.5 text-xs font-semibold text-slate-500 w-10">#</th>
-                      <th className="text-left p-2.5 text-xs font-semibold text-slate-500">Date</th>
-                      <th className="text-left p-2.5 text-xs font-semibold text-slate-500">Type</th>
-                      <th className="text-left p-2.5 text-xs font-semibold text-slate-500">Origine / Reference</th>
-                      <th className="text-right p-2.5 text-xs font-semibold text-green-600 bg-green-50/50">Entree (kg)</th>
-                      <th className="text-right p-2.5 text-xs font-semibold text-red-600 bg-red-50/50">Sortie (kg)</th>
-                      <th className="text-right p-2.5 text-xs font-semibold text-amber-600 bg-amber-50/50">Regul. (kg)</th>
-                      <th className="text-right p-2.5 text-xs font-semibold text-primary bg-blue-50/50">Solde (kg)</th>
-                      <th className="text-left p-2.5 text-xs font-semibold text-slate-500">Notes</th>
-                      <th className="text-left p-2.5 text-xs font-semibold text-slate-500">Par</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ledger.lignes.map((l, idx) => {
-                      const ref = l.tour_id ? `Tournee #${l.tour_id}` :
-                                  l.batch_id ? `Lot #${l.batch_id}` :
-                                  l.expedition_id ? `Expedition #${l.expedition_id}` :
-                                  ORIGINES_LABELS[l.origine] || l.origine || '—';
-                      return (
-                        <tr key={l.id} className={`border-b hover:bg-slate-50 ${idx % 2 === 0 ? '' : 'bg-slate-25'}`}>
-                          <td className="p-2.5 text-xs text-slate-300">{idx + 1}</td>
-                          <td className="p-2.5 text-sm text-slate-700 whitespace-nowrap">{new Date(l.date).toLocaleDateString('fr-FR')}</td>
-                          <td className="p-2.5">
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                              l.type === 'entree' ? 'bg-green-100 text-green-700' :
-                              l.type === 'sortie' ? 'bg-red-100 text-red-700' :
-                              'bg-amber-100 text-amber-700'
-                            }`}>
-                              {l.type === 'entree' ? 'Entree' : l.type === 'sortie' ? 'Sortie' : 'Regul.'}
-                            </span>
-                          </td>
-                          <td className="p-2.5 text-sm text-slate-600">{ref}</td>
-                          <td className="p-2.5 text-right font-mono text-sm bg-green-50/30">
-                            {parseFloat(l.entree_kg) > 0 ? <span className="text-green-600 font-medium">{parseFloat(l.entree_kg).toFixed(1)}</span> : <span className="text-slate-200">—</span>}
-                          </td>
-                          <td className="p-2.5 text-right font-mono text-sm bg-red-50/30">
-                            {parseFloat(l.sortie_kg) > 0 ? <span className="text-red-600 font-medium">{parseFloat(l.sortie_kg).toFixed(1)}</span> : <span className="text-slate-200">—</span>}
-                          </td>
-                          <td className="p-2.5 text-right font-mono text-sm bg-amber-50/30">
-                            {l.type === 'regularisation' ? (
-                              <span className={parseFloat(l.poids_kg) >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                                {parseFloat(l.poids_kg) >= 0 ? '+' : ''}{parseFloat(l.poids_kg).toFixed(1)}
-                              </span>
-                            ) : <span className="text-slate-200">—</span>}
-                          </td>
-                          <td className="p-2.5 text-right font-mono text-sm font-semibold text-primary bg-blue-50/30">
-                            {parseFloat(l.solde_cumule_kg).toFixed(1)}
-                          </td>
-                          <td className="p-2.5 text-xs text-slate-400 max-w-[180px] truncate">{l.notes || '—'}</td>
-                          <td className="p-2.5 text-xs text-slate-400 whitespace-nowrap">{l.created_by_name || '—'}</td>
-                        </tr>
-                      );
-                    })}
-                    {ledger.lignes.length === 0 && (
-                      <tr><td colSpan={10} className="p-8 text-center text-slate-400">Aucun mouvement enregistre</td></tr>
-                    )}
-                  </tbody>
-                  {ledger.lignes.length > 0 && (
-                    <tfoot>
-                      <tr className="bg-slate-100 font-semibold text-sm border-t-2">
-                        <td colSpan={4} className="p-2.5 text-right text-slate-500">TOTAUX</td>
-                        <td className="p-2.5 text-right font-mono text-green-700 bg-green-50/50">{ledger.totaux.total_entrees_kg.toFixed(1)}</td>
-                        <td className="p-2.5 text-right font-mono text-red-700 bg-red-50/50">{ledger.totaux.total_sorties_kg.toFixed(1)}</td>
-                        <td className="p-2.5 text-right font-mono text-amber-700 bg-amber-50/50">
-                          {(ledger.totaux.total_regul_plus_kg - ledger.totaux.total_regul_moins_kg).toFixed(1)}
-                        </td>
-                        <td className="p-2.5 text-right font-mono text-primary font-bold bg-blue-50/50">{ledger.totaux.solde_final_kg.toFixed(1)}</td>
-                        <td colSpan={2} className="p-2.5"></td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-            </div>
           </>
         )}
 
