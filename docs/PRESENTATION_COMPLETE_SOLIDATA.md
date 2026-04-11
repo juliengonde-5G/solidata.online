@@ -35,7 +35,7 @@
 1. Qui sommes-nous ?
 2. Le défi
 3. La solution SOLIDATA
-4. Les 21 modules fonctionnels
+4. Les 25 modules fonctionnels
 5. Architecture technique
 6. Application mobile
 7. Intelligence artificielle
@@ -117,8 +117,8 @@
 ╚═══════════════════════════════════════════════════════════════════════════╝
 ```
 
-- **21 modules fonctionnels** intégrés
-- **Application web** : https://solidata.online (44 pages)
+- **25 modules fonctionnels** intégrés
+- **Application web** : https://solidata.online (66 pages)
 - **Application mobile** : https://m.solidata.online (11 pages, PWA)
 - **Intelligence artificielle** : prédiction remplissage, optimisation tournées
 - **Temps réel** : GPS, WebSocket, alertes instantanées
@@ -432,4 +432,4 @@ Collecte → Pesée → Stock → TRI → Produits Finis → Colisage → Prépa
 
 ---
 
-*Présentation générée le 24 mars 2026 — SOLIDATA ERP v1.2.1*
+*Présentation générée le 11 avril 2026 — SOLIDATA ERP v1.3.3*

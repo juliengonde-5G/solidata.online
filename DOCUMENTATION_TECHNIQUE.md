@@ -3,8 +3,8 @@
 > **Fichier de référence officiel du projet.** Toute évolution technique, déploiement et maintenance doit s’appuyer sur ce document. Lisible par humain et IA.
 
 **Application :** SOLIDATA ERP — Logiciel de gestion pour Solidarité Textiles
-**Version :** 1.2.1
-**Date :** 24 mars 2026
+**Version :** 1.3.3
+**Date :** 11 avril 2026
 **Domaine :** https://solidata.online
 **Dépôt GitHub :** https://github.com/juliengonde-5G/solidata.online
 
@@ -224,7 +224,7 @@ solidata.online/
 │       │   └── database.js        # Pool de connexion PostgreSQL
 │       ├── middleware/
 │       │   └── auth.js            # Vérification JWT
-│       ├── routes/                # 36 fichiers de routes API
+│       ├── routes/                # 63 fichiers de routes API
 │       │   ├── auth.js            # Authentification (login, refresh, logout, me)
 │       │   ├── users.js           # Gestion utilisateurs (CRUD)
 │       │   ├── settings.js        # Paramètres, templates, tarifs, objectifs, triggers
@@ -283,7 +283,7 @@ solidata.online/
 │       │   └── api.js             # Client Axios configuré
 │       ├── components/
 │       │   └── Layout.jsx         # Sidebar + header + navigation
-│       └── pages/                 # 44 pages
+│       └── pages/                 # 66 pages
 │           ├── Login.jsx
 │           ├── Dashboard.jsx          # KPI, comparaison annuelle, inventaire
 │           ├── NewsFeed.jsx           # Fil d'actualités

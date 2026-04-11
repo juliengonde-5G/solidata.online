@@ -1,6 +1,6 @@
-# Documentation Applicative — SOLIDATA ERP v1.2.1
+# Documentation Applicative — SOLIDATA ERP v1.3.3
 
-> **Version** : 1.2.1 | **Date** : 2026-03-24
+> **Version** : 1.3.3 | **Date** : 2026-04-11
 > **Éditeur** : Solidarité Textile — Rouen, Normandie
 > **URL** : https://solidata.online | **Mobile** : https://m.solidata.online
 

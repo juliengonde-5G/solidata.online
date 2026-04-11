@@ -15,7 +15,7 @@ CONTEXTE TECHNIQUE :
 - Stack : Node.js 20, Express, PostgreSQL 15 + PostGIS, Redis, React 18, Docker, Nginx
 - Mobile : PWA React avec scan QR, GPS temps réel (Socket.IO), retour haptique
 - IA : moteur prédictif de remplissage de conteneurs (ML), optimisation de tournées de collecte
-- 70+ tables PostgreSQL, 36 API REST, 44 pages web, 11 écrans mobile
+- 70+ tables PostgreSQL, 63 routes API, 66 pages web, 11 écrans mobile, 25 modules
 - Modules : recrutement (Kanban, test PCM personnalité), RH (contrats insertion CDDI, parcours avec jalons M1/M6/M12), collecte (CAV géolocalisés, QR codes, GPS), tri (2 chaînes, batch tracking, code-barres), stock, expéditions vers exutoires, facturation, reporting Refashion (éco-organisme REP textile), RGPD
 
 CONTEXTE MÉTIER :
@@ -162,4 +162,4 @@ Avant toute modification :
 
 ---
 
-*Document maintenu à jour avec chaque évolution du projet. Dernière mise à jour : 19 mars 2026.*
+*Document maintenu à jour avec chaque évolution du projet. Dernière mise à jour : 11 avril 2026.*
