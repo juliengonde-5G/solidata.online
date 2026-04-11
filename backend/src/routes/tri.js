@@ -189,6 +189,17 @@ router.post('/batches', authorize('ADMIN', 'MANAGER'), [
        VALUES ($1, $2, $3, $4, $4, $5) RETURNING *`,
       [code, stock_movement_id || null, chaine_id, poids_initial_kg, req.user.id]
     );
+
+    // Stock Original : sortie automatique quand lot entre en tri
+    if (poids_initial_kg > 0) {
+      await pool.query(
+        `INSERT INTO stock_original_movements (type, date, poids_kg, batch_id, origine, notes, created_by)
+         VALUES ('sortie', CURRENT_DATE, $1, $2, 'tri_batch', $3, $4)`,
+        [poids_initial_kg, result.rows[0].id,
+         `Auto: lot ${result.rows[0].code} en tri (${poids_initial_kg} kg)`, req.user.id]
+      );
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[TRI] Erreur création lot :', err);

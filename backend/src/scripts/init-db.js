@@ -2528,6 +2528,69 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Module Collecte Association ✓');
 
+    // ══════════════════════════════════════════
+    // MODULE : Stock Original (Inventaire matière brute collectée)
+    // ══════════════════════════════════════════
+
+    // Table principale des mouvements de stock original
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_original_movements (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(20) NOT NULL CHECK (type IN ('entree', 'sortie', 'regularisation')),
+        date DATE NOT NULL,
+        poids_kg DOUBLE PRECISION NOT NULL,
+        poids_brut_kg DOUBLE PRECISION,
+        tare_kg DOUBLE PRECISION,
+        origine VARCHAR(50),
+        destination VARCHAR(255),
+        notes TEXT,
+        motif TEXT,
+        tour_id INTEGER REFERENCES tours(id),
+        vehicle_id INTEGER REFERENCES vehicles(id),
+        batch_id INTEGER,
+        expedition_id INTEGER,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_original_date ON stock_original_movements(date DESC)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_original_type ON stock_original_movements(type)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_original_tour ON stock_original_movements(tour_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_original_batch ON stock_original_movements(batch_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_original_expedition ON stock_original_movements(expedition_id)`);
+
+    // Verrouillage trimestriel (déclarations Refashion)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_period_locks (
+        id SERIAL PRIMARY KEY,
+        year INTEGER NOT NULL,
+        quarter INTEGER NOT NULL CHECK (quarter BETWEEN 1 AND 4),
+        locked_at TIMESTAMP DEFAULT NOW(),
+        locked_by INTEGER REFERENCES users(id),
+        notes TEXT,
+        UNIQUE(year, quarter)
+      )
+    `);
+
+    // Audit trail des modifications
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_original_audit (
+        id SERIAL PRIMARY KEY,
+        movement_id INTEGER REFERENCES stock_original_movements(id) ON DELETE SET NULL,
+        action VARCHAR(20) NOT NULL CHECK (action IN ('create', 'update', 'delete')),
+        field_name VARCHAR(50),
+        old_value TEXT,
+        new_value TEXT,
+        user_id INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_original_audit_movement ON stock_original_audit(movement_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_original_audit_created ON stock_original_audit(created_at DESC)`);
+
+    console.log('[INIT-DB] Module Stock Original ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

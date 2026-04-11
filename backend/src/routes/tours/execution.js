@@ -207,6 +207,15 @@ module.exports = function createExecutionRouter(upload) {
             [tour.date, tour.total_weight_kg, parseInt(req.params.id), tour.vehicle_id,
              `Auto: tournée #${req.params.id} (${cavs.rows.length} CAV collectés)`, req.user.id]
           );
+
+          // Stock Original : entrée automatique depuis collecte
+          await pool.query(
+            `INSERT INTO stock_original_movements (type, date, poids_kg, tour_id, vehicle_id, origine, notes, created_by)
+             VALUES ('entree', $1, $2, $3, $4, $5, $6, $7)`,
+            [tour.date, tour.total_weight_kg, parseInt(req.params.id), tour.vehicle_id,
+             tour.collection_type === 'association' ? 'collecte_association' : 'collecte_pav',
+             `Auto: tournée #${req.params.id} (${cavs.rows.length} CAV collectés)`, req.user.id]
+          );
         }
 
         // Apprentissage continu : enregistrer prédit vs observé (fill_level 0-5)

@@ -7,7 +7,7 @@ import {
   ClipboardList, IdCard, Truck, Sparkles, Map, BarChart3, MapPin, Factory,
   ArrowUpDown, Package, Tag, Ship, CircleDollarSign, PieChart, BarChart2,
   RefreshCw, Lock, Settings, Car, LogOut, ChevronDown, ChevronLeft, Menu, X,
-  Handshake,
+  Handshake, Warehouse, Scale,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════
@@ -94,6 +94,7 @@ const menuSections = [
       { path: '/exutoires-calendrier', label: 'Calendrier', icon: Clock, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-clients', label: 'Clients', icon: Users, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-tarifs', label: 'Grille Tarifaire', icon: CircleDollarSign, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/inventaire-original', label: 'Inventaire Original', icon: Warehouse, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {
@@ -134,6 +135,7 @@ const menuSections = [
       { path: '/rgpd', label: 'RGPD', icon: Lock, roles: ['ADMIN'] },
       { path: '/admin-cav', label: 'Gestion CAV', icon: Map, roles: ['ADMIN'] },
       { path: '/admin-db', label: 'Base de données', icon: Settings, roles: ['ADMIN'] },
+      { path: '/admin-stock-original', label: 'Stock Original', icon: Scale, roles: ['ADMIN'] },
       { path: '/activity-log', label: 'Journal d\'activité', icon: ClipboardList, roles: ['ADMIN'] },
     ],
   },

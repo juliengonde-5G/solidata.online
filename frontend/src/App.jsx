@@ -49,6 +49,8 @@ import ExutoiresTarifs from './pages/ExutoiresTarifs';
 import Billing from './pages/Billing';
 import Pennylane from './pages/Pennylane';
 import ActivityLog from './pages/ActivityLog';
+import InventaireOriginal from './pages/InventaireOriginal';
+import AdminStockOriginal from './pages/AdminStockOriginal';
 
 // Finance module
 import Finance from './pages/Finance';
@@ -133,6 +135,7 @@ function App() {
             <Route path="/exutoires-calendrier" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCalendrier /></ProtectedRoute>} />
             <Route path="/exutoires-clients" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresClients /></ProtectedRoute>} />
             <Route path="/exutoires-tarifs" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresTarifs /></ProtectedRoute>} />
+            <Route path="/inventaire-original" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><InventaireOriginal /></ProtectedRoute>} />
 
             {/* Reporting */}
             <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingCollecte /></ProtectedRoute>} />
@@ -165,6 +168,7 @@ function App() {
             <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
             <Route path="/activity-log" element={<ProtectedRoute roles={['ADMIN']}><ActivityLog /></ProtectedRoute>} />
             <Route path="/admin-cav" element={<ProtectedRoute roles={['ADMIN']}><AdminCAV /></ProtectedRoute>} />
+            <Route path="/admin-stock-original" element={<ProtectedRoute roles={['ADMIN']}><AdminStockOriginal /></ProtectedRoute>} />
             <Route path="/admin-associations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAssociations /></ProtectedRoute>} />
             <Route path="/news" element={<ProtectedRoute><NewsFeed /></ProtectedRoute>} />
 
