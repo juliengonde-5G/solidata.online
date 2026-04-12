@@ -15,29 +15,36 @@ export default function Incident() {
   const [type, setType] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
 
   const submit = async () => {
     if (!type) return;
     setLoading(true);
+    setError('');
     try {
       const vehicleId = localStorage.getItem('selected_vehicle_id');
       const cavId = localStorage.getItem('selected_cav_id');
 
-      await fetch(`/api/tours/${tourId}/incident-public`, {
+      const res = await fetch(`/api/tours/${tourId}/incident-public`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type,
-          description,
+          description: description || null,
           cav_id: cavId ? parseInt(cavId) : null,
           vehicle_id: vehicleId ? parseInt(vehicleId) : null,
         }),
       });
+      if (!res.ok) throw new Error('Erreur lors de l\'envoi de l\'incident');
       vibrateSuccess();
       navigate('/tour-map');
-    } catch (err) { vibrateError(); console.error(err); }
+    } catch (err) {
+      vibrateError();
+      setError(err.message || 'Erreur réseau, réessayez');
+      console.error(err);
+    }
     setLoading(false);
   };
 
@@ -75,6 +82,12 @@ export default function Incident() {
             rows={3}
           />
         </div>
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 font-medium">
+            {error}
+          </div>
+        )}
+
         <button
           type="button"
           onClick={submit}

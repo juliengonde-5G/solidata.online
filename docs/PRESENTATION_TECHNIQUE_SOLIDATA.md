@@ -1,6 +1,6 @@
 # SOLIDATA — Présentation Technique
 
-> **Version** : 1.2.1 | **Date** : 24 mars 2026
+> **Version** : 1.3.3 | **Date** : 11 avril 2026
 > **Public** : Équipe technique, DSI, prestataires, auditeurs
 
 ---
@@ -144,7 +144,7 @@
 
 ### 4.1 Structure
 
-- **33 fichiers de routes** dans `backend/src/routes/`
+- **63 fichiers de routes** dans `backend/src/routes/`
 - **Middleware auth** : `authenticate` (vérifie JWT) + `authorize('ROLE1', 'ROLE2')`
 - **Réponse erreur** : `{ error: 'message' }` avec status HTTP approprié
 - **Rate limiting** : 1000 req/15min global, 30 req/15min auth
@@ -332,7 +332,7 @@ Développeur → git push origin main → SSH serveur → bash deploy/scripts/de
 | `backend/src/config/database.js` | Pool PostgreSQL |
 | `backend/src/middleware/auth.js` | authenticate() + authorize() |
 | `backend/src/scripts/init-db.js` | Création 85+ tables (idempotent) |
-| `frontend/src/App.jsx` | Routeur (44 pages, ProtectedRoute) |
+| `frontend/src/App.jsx` | Routeur (66 pages, ProtectedRoute) |
 | `frontend/src/contexts/AuthContext.jsx` | Auth state + token refresh |
 | `frontend/src/services/api.js` | Axios instance + interceptors |
 | `frontend/src/components/Layout.jsx` | Sidebar + navigation role-based |
@@ -342,5 +342,5 @@ Développeur → git push origin main → SSH serveur → bash deploy/scripts/de
 
 ---
 
-*Document technique de référence — SOLIDATA ERP v1.2.1*
-*Dernière mise à jour : 24 mars 2026*
+*Document technique de référence — SOLIDATA ERP v1.3.3*
+*Dernière mise à jour : 11 avril 2026*

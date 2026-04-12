@@ -187,7 +187,7 @@ export default function TourMap() {
       </div>
 
       {currentCAV && (
-        <div className="bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] p-4 flex-shrink-0 safe-bottom">
+        <div className="relative z-20 bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] p-4 flex-shrink-0 safe-bottom">
           <div className="flex items-center justify-between mb-3">
             <div className="min-w-0">
               <p className="text-xs text-gray-400">Prochain point #{currentCavIndex + 1}</p>
@@ -229,11 +229,16 @@ export default function TourMap() {
       )}
 
       {!currentCAV && cavs.length > 0 && (
-        <div className="bg-green-50 border-t border-green-200 p-4 flex-shrink-0 text-center safe-bottom">
+        <div className="relative z-20 bg-green-50 border-t border-green-200 p-4 flex-shrink-0 text-center safe-bottom">
           <p className="text-green-800 font-bold">Tous les {isAssociationTour ? 'points association' : 'CAV'} ont été collectés !</p>
-          <button type="button" onClick={() => navigate('/return-centre')} className="mt-3 btn-primary-mobile py-3">
-            Retour au centre de tri
-          </button>
+          <div className="flex gap-3 mt-3">
+            <button type="button" onClick={() => navigate('/return-centre')} className="flex-1 btn-primary-mobile py-3">
+              Retour au centre de tri
+            </button>
+            <button type="button" onClick={() => navigate('/incident')} className="touch-target flex items-center justify-center bg-red-500 text-white rounded-2xl px-4 font-semibold">
+              Incident
+            </button>
+          </div>
         </div>
       )}
     </div>

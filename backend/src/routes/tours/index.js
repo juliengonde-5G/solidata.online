@@ -249,8 +249,8 @@ router.post('/:id/weigh-public', async (req, res) => {
 router.post('/:id/incident-public', async (req, res) => {
   try {
     const { type, description, cav_id, vehicle_id } = req.body;
-    if (!type || !description) {
-      return res.status(400).json({ error: 'Type et description requis' });
+    if (!type) {
+      return res.status(400).json({ error: 'Type d\'incident requis' });
     }
     const result = await pool.query(
       `INSERT INTO incidents (tour_id, type, description, cav_id, vehicle_id, created_at)

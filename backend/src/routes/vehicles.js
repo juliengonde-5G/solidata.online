@@ -328,19 +328,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/vehicles/available — Véhicules disponibles
-router.get('/available', async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT id, registration, name, max_capacity_kg, team_id, status, current_km FROM vehicles WHERE status = 'available' ORDER BY name"
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('[VEHICLES] Erreur available :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
 // GET /api/vehicles/:id — déplacé après les routes statiques pour éviter que /:id intercepte /maintenance/*, /document-types/*
 // Voir plus bas dans le fichier
 

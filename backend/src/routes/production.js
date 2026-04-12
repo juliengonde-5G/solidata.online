@@ -171,7 +171,7 @@ router.get('/feuille/:date', async (req, res) => {
   try {
     const { date } = req.params;
 
-    const [dailyRes, planningRes, chariotsRes, commentairesRes] = await Promise.all([
+    const [dailyRes, planningRes, chariotsRes, commentairesRes, balanceEntreesRes] = await Promise.all([
       pool.query('SELECT * FROM production_daily WHERE date = $1', [date]),
       // Affectations depuis le planning (filière tri = poste_code lié à postes_operation)
       pool.query(`
@@ -196,6 +196,16 @@ router.get('/feuille/:date', async (req, res) => {
         LEFT JOIN users u ON u.id = pc.created_by
         WHERE pc.production_date = $1
         ORDER BY pc.created_at DESC
+      `, [date]),
+      // Entrées balance "Vers Atelier de tri" du jour — source vérité pour la pesée des chariots
+      pool.query(`
+        SELECT id, created_at, poids_kg, poids_brut_kg, tare_kg, contenant, destination, notes
+        FROM stock_original_movements
+        WHERE type = 'sortie'
+          AND destination = 'atelier_tri'
+          AND source = 'balance'
+          AND date = $1
+        ORDER BY created_at ASC
       `, [date]),
     ]);
 
@@ -226,6 +236,7 @@ router.get('/feuille/:date', async (req, res) => {
       planning: planningByPoste,
       planning_list: planningRes.rows,
       chariots: chariotsRes.rows,
+      balance_entrees: balanceEntreesRes.rows,
       commentaires: commentairesRes.rows,
     });
   } catch (err) {

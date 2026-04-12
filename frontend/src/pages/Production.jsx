@@ -7,11 +7,23 @@ import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
-const LIGNES = [
-  { key: 'r1r2', label: 'Entrée ligne R1 & R2' },
-  { key: 'r3', label: 'Entrée recyclage R3' },
-  { key: 'r4', label: 'Entrée recyclage R4' },
-];
+// Libellés des contenants pour l'affichage lecture seule dans Production
+const CONTENANT_LABELS = {
+  bac_metal: 'Bac métal',
+  bac_metal_jaune: 'Bac métal jaune',
+  geobox_rouge: 'Geobox rouge ajouré',
+  geobox_noir: 'Geobox noir',
+  chariot_grillagee: 'Chariot aire grillagée',
+  chariot_curon_petit: 'Chariot curon petit',
+  chariot_curon_grand: 'Chariot curon grand',
+  palette_eur: 'Palette EUR',
+  demi_palette: 'Demi palette légère',
+  poubelle_4roues: 'Poubelle 4 roues',
+  chariot_pal: 'Chariot grillagée + PAL EUR',
+  petite_poubelle: 'Petite poubelle grise',
+  sans_contenant: 'Sans contenant',
+  tare_manuelle: 'Tare manuelle',
+};
 
 export default function Production() {
   const { user } = useAuth();
@@ -36,7 +48,6 @@ export default function Production() {
     objectif_recyclage_pct: 70, objectif_reutilisation_pct: 30, objectif_csr_pct: '<10%',
     encadrant: '',
   });
-  const [chariots, setChariots] = useState({ r1r2: [], r3: [], r4: [] });
 
   // Charger feuille de production
   const loadFeuille = useCallback(async () => {
@@ -75,17 +86,6 @@ export default function Production() {
         });
       }
 
-      // Chariots par ligne
-      const ch = { r1r2: [], r3: [], r4: [] };
-      (res.data.chariots || []).forEach(c => {
-        if (ch[c.ligne]) {
-          ch[c.ligne].push({ poids_kg: c.poids_kg, heure: c.heure || '' });
-        }
-      });
-      Object.keys(ch).forEach(k => {
-        while (ch[k].length < 4) ch[k].push({ poids_kg: '', heure: '' });
-      });
-      setChariots(ch);
     } catch (err) {
       console.error(err);
     }
@@ -114,32 +114,31 @@ export default function Production() {
     setSelectedDate(d.toISOString().slice(0, 10));
   };
 
-  const getTotalLigne = (ligne) => {
-    return chariots[ligne]?.reduce((sum, c) => sum + (parseFloat(c.poids_kg) || 0), 0) || 0;
-  };
-
-  const totalR1R2 = getTotalLigne('r1r2');
-  const totalR3 = getTotalLigne('r3');
-  const totalR4 = getTotalLigne('r4');
-  const totalGeneral = totalR1R2 + totalR3 + totalR4;
   const effectifTotal = (parseInt(form.effectif_tri) || 0) + (parseInt(form.effectif_recuperation) || 0);
 
   // Nombre d'opérateurs affectés depuis le planning
   const planningList = feuille?.planning_list || [];
   const nbAffectes = planningList.length;
 
+  // Entrées balance "Vers Atelier de tri" — source vérité pour la pesée
+  const balanceEntrees = feuille?.balance_entrees || [];
+  const totalAtelier = balanceEntrees.reduce((sum, e) => sum + (parseFloat(e.poids_kg) || 0), 0);
+  const objectifTotal = (parseFloat(form.objectif_entree_ligne_kg) || 0) + (parseFloat(form.objectif_entree_r3_kg) || 0) + (parseFloat(form.objectif_entree_r4_kg) || 0);
+
   // Sauvegarder la feuille (sans postes — ceux-ci sont gérés dans le planning)
   const saveFeuille = async () => {
     setSaving(true);
     try {
+      // Totaux alimentés depuis la page balance (sorties "Vers Atelier de tri")
+      const totalAtelierLocal = (feuille?.balance_entrees || []).reduce((s, e) => s + (parseFloat(e.poids_kg) || 0), 0);
       await api.post('/production', {
         date: selectedDate,
         effectif_reel: effectifTotal || nbAffectes,
-        entree_ligne_kg: totalR1R2,
+        entree_ligne_kg: totalAtelierLocal,
         objectif_entree_ligne_kg: form.objectif_entree_ligne_kg,
-        entree_recyclage_r3_kg: totalR3,
+        entree_recyclage_r3_kg: 0,
         objectif_entree_r3_kg: form.objectif_entree_r3_kg,
-        entree_recyclage_r4_kg: totalR4,
+        entree_recyclage_r4_kg: 0,
         objectif_entree_r4_kg: form.objectif_entree_r4_kg,
         encadrant: form.encadrant,
         encadrant_atelier: form.encadrant_atelier,
@@ -154,27 +153,11 @@ export default function Production() {
         objectif_recyclage_pct: form.objectif_recyclage_pct,
         objectif_reutilisation_pct: form.objectif_reutilisation_pct,
         objectif_csr_pct: form.objectif_csr_pct,
-        resultat_ligne_ok: totalR1R2 >= (parseFloat(form.objectif_entree_ligne_kg) || 0),
-        resultat_r3_ok: totalR3 >= (parseFloat(form.objectif_entree_r3_kg) || 0),
-        resultat_r4_ok: totalR4 >= (parseFloat(form.objectif_entree_r4_kg) || 0),
-        resultat_general_ok: totalGeneral >= ((parseFloat(form.objectif_entree_ligne_kg) || 0) + (parseFloat(form.objectif_entree_r3_kg) || 0) + (parseFloat(form.objectif_entree_r4_kg) || 0)),
+        resultat_ligne_ok: totalAtelierLocal >= ((parseFloat(form.objectif_entree_ligne_kg) || 0) + (parseFloat(form.objectif_entree_r3_kg) || 0) + (parseFloat(form.objectif_entree_r4_kg) || 0)),
+        resultat_r3_ok: true,
+        resultat_r4_ok: true,
+        resultat_general_ok: totalAtelierLocal >= ((parseFloat(form.objectif_entree_ligne_kg) || 0) + (parseFloat(form.objectif_entree_r3_kg) || 0) + (parseFloat(form.objectif_entree_r4_kg) || 0)),
       });
-
-      // Sauvegarder les chariots
-      const chariotsArray = [];
-      Object.entries(chariots).forEach(([ligne, items]) => {
-        items.forEach((item, idx) => {
-          if (item.poids_kg && parseFloat(item.poids_kg) > 0) {
-            chariotsArray.push({
-              ligne,
-              numero: idx + 1,
-              poids_kg: parseFloat(item.poids_kg),
-              heure: item.heure || null,
-            });
-          }
-        });
-      });
-      await api.post('/production/chariots', { date: selectedDate, chariots: chariotsArray });
 
       await loadFeuille();
     } catch (err) {
@@ -203,17 +186,6 @@ export default function Production() {
       await api.delete(`/production/commentaires/${id}`);
       loadFeuille();
     } catch (err) { console.error(err); }
-  };
-
-  const updateChariot = (ligne, index, field, value) => {
-    const items = [...chariots[ligne]];
-    items[index] = { ...items[index], [field]: value };
-    setChariots({ ...chariots, [ligne]: items });
-  };
-
-  const addChariot = (ligne) => {
-    const items = [...chariots[ligne], { poids_kg: '', heure: '' }];
-    setChariots({ ...chariots, [ligne]: items });
   };
 
   const formatDate = (d) => new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -480,40 +452,54 @@ export default function Production() {
                 )}
               </div>
 
-              {/* Chariots / Pesées (droite) */}
+              {/* Pesées — lecture seule, alimentées par la page balance */}
               <div className="card-modern p-4">
-                <h3 className="text-sm font-bold text-slate-700 mb-3 border-b pb-2">
-                  <Factory className="w-4 h-4 inline mr-1 text-green-600" />
-                  Pesées des chariots
-                </h3>
+                <div className="flex items-center justify-between mb-3 border-b pb-2">
+                  <h3 className="text-sm font-bold text-slate-700">
+                    <Factory className="w-4 h-4 inline mr-1 text-green-600" />
+                    Entrées atelier de tri
+                  </h3>
+                  <a href="/balance" target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-primary hover:underline flex items-center gap-1">
+                    <ExternalLink className="w-3 h-3" />
+                    Page balance
+                  </a>
+                </div>
 
-                {LIGNES.map(({ key, label }) => (
-                  <div key={key} className="mb-4">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-slate-600">{label}</span>
-                      <span className={`text-xs font-bold ${getTotalLigne(key) >= (parseFloat(form[key === 'r1r2' ? 'objectif_entree_ligne_kg' : key === 'r3' ? 'objectif_entree_r3_kg' : 'objectif_entree_r4_kg']) || 0) ? 'text-green-600' : 'text-red-500'}`}>
-                        Total : {getTotalLigne(key)} kg
+                {balanceEntrees.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Factory className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                    <p className="text-xs text-slate-400">Aucune entrée saisie sur la balance pour cette date.</p>
+                    <a href="/balance" target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline mt-1 block">
+                      Ouvrir la page balance →
+                    </a>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {balanceEntrees.map((e) => (
+                      <div key={e.id} className="flex items-center justify-between py-1.5 px-2 bg-slate-50 rounded border border-slate-100 text-xs">
+                        <span className="text-slate-400 w-12 shrink-0">
+                          {new Date(e.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        <span className="text-slate-600 flex-1 mx-2">
+                          {CONTENANT_LABELS[e.contenant] || e.contenant || '—'}
+                          {e.poids_brut_kg && e.tare_kg != null && (
+                            <span className="text-slate-400 ml-1">({parseFloat(e.poids_brut_kg).toFixed(1)} - {parseFloat(e.tare_kg).toFixed(1)})</span>
+                          )}
+                        </span>
+                        <span className="font-semibold text-slate-800 shrink-0">{parseFloat(e.poids_kg).toFixed(1)} kg</span>
+                      </div>
+                    ))}
+                    <div className="mt-2 pt-2 border-t border-slate-200 flex justify-between items-center">
+                      <span className="text-xs font-semibold text-slate-600">Total atelier</span>
+                      <span className={`text-sm font-bold ${totalAtelier >= objectifTotal ? 'text-green-600' : 'text-red-500'}`}>
+                        {totalAtelier.toFixed(1)} kg
+                        <span className="text-xs font-normal text-slate-400 ml-1">/ obj. {objectifTotal} kg</span>
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-1">
-                      {chariots[key]?.map((c, i) => (
-                        <div key={i} className="flex gap-1">
-                          <input type="number" value={c.poids_kg}
-                            onChange={e => updateChariot(key, i, 'poids_kg', e.target.value)}
-                            className="input-modern text-xs flex-1"
-                            placeholder={`Ch.${i + 1} (kg)`} />
-                          <input type="time" value={c.heure}
-                            onChange={e => updateChariot(key, i, 'heure', e.target.value)}
-                            className="input-modern text-xs w-20" />
-                        </div>
-                      ))}
-                    </div>
-                    <button onClick={() => addChariot(key)}
-                      className="text-[10px] text-primary hover:underline mt-1">
-                      + ajouter un chariot
-                    </button>
                   </div>
-                ))}
+                )}
               </div>
             </div>
 
@@ -523,31 +509,34 @@ export default function Production() {
               <div className="card-modern p-4">
                 <h3 className="text-sm font-bold text-slate-700 mb-3 border-b pb-2">Résultats du jour</h3>
                 <div className="space-y-2">
-                  {[
-                    { label: 'Total ligne R1 & R2', value: totalR1R2, obj: form.objectif_entree_ligne_kg },
-                    { label: 'Total R3', value: totalR3, obj: form.objectif_entree_r3_kg },
-                    { label: 'Total R4', value: totalR4, obj: form.objectif_entree_r4_kg },
-                    { label: 'Total Général', value: totalGeneral, obj: (parseFloat(form.objectif_entree_ligne_kg) || 0) + (parseFloat(form.objectif_entree_r3_kg) || 0) + (parseFloat(form.objectif_entree_r4_kg) || 0) },
-                  ].map(({ label, value, obj }) => {
-                    const ok = value >= (parseFloat(obj) || 0);
+                  {(() => {
+                    const ok = totalAtelier >= objectifTotal;
                     return (
-                      <div key={label} className={`flex items-center justify-between p-2 rounded-lg ${ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-                        <span className="text-xs font-medium text-slate-700">{label}</span>
+                      <div className={`flex items-center justify-between p-2 rounded-lg ${ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                        <span className="text-xs font-medium text-slate-700">Total entrées atelier</span>
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-bold">{value} kg</span>
-                          <span className="text-xs text-slate-400">Obj: {obj} kg</span>
+                          <span className="text-sm font-bold">{totalAtelier.toFixed(1)} kg</span>
+                          <span className="text-xs text-slate-400">Obj: {objectifTotal} kg</span>
                           <span className={`text-xs font-bold px-2 py-0.5 rounded ${ok ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
                             {ok ? 'OK' : 'NOK'}
                           </span>
                         </div>
                       </div>
                     );
-                  })}
-                  {(effectifTotal > 0 || nbAffectes > 0) && totalGeneral > 0 && (
+                  })()}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                    <p className="text-[10px] text-slate-500 mb-1 font-medium">Objectifs de référence</p>
+                    <div className="grid grid-cols-3 gap-1 text-xs text-slate-600">
+                      <span>Ligne R1&R2 : {form.objectif_entree_ligne_kg} kg</span>
+                      <span>R3 : {form.objectif_entree_r3_kg} kg</span>
+                      <span>R4 : {form.objectif_entree_r4_kg} kg</span>
+                    </div>
+                  </div>
+                  {(effectifTotal > 0 || nbAffectes > 0) && totalAtelier > 0 && (
                     <div className="flex items-center justify-between p-2 rounded-lg bg-blue-50 border border-blue-200">
                       <span className="text-xs font-medium text-slate-700">Productivité</span>
                       <span className="text-sm font-bold text-blue-700">
-                        {Math.round(totalGeneral / (effectifTotal || nbAffectes))} kg/personne
+                        {Math.round(totalAtelier / (effectifTotal || nbAffectes))} kg/personne
                       </span>
                     </div>
                   )}

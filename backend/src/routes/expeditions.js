@@ -57,6 +57,21 @@ router.post('/', [
        nb_conteneurs || 1, poids_kg, valeur_euros, bon_livraison, notes, req.user.id]
     );
 
+    // Stock Original : sortie automatique si expédition de famille 'original'
+    const catCheck = await pool.query(
+      'SELECT famille FROM categories_sortantes WHERE id = $1',
+      [categorie_sortante_id]
+    );
+    if (catCheck.rows.length > 0 && catCheck.rows[0].famille === 'original') {
+      await pool.query(
+        `INSERT INTO stock_original_movements (type, date, poids_kg, expedition_id, origine, destination, notes, created_by)
+         VALUES ('sortie', $1, $2, $3, 'expedition_original', $4, $5, $6)`,
+        [date, poids_kg, result.rows[0].id,
+         `Exutoire #${exutoire_id}`,
+         `Auto: expédition #${result.rows[0].id} (${poids_kg} kg original)`, req.user.id]
+      );
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[EXPEDITIONS] Erreur création :', err);

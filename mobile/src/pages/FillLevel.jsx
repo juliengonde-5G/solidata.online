@@ -16,6 +16,7 @@ export default function FillLevel() {
   const [anomaly, setAnomaly] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const scannedQR = localStorage.getItem('scanned_qr');
@@ -24,9 +25,11 @@ export default function FillLevel() {
   const submit = async () => {
     if (fillLevel === null) return;
     setLoading(true);
+    setError('');
     try {
       // Load tour to find the correct point
       const tourRes = await fetch(`/api/tours/${tourId}/public`);
+      if (!tourRes.ok) throw new Error('Impossible de charger la tournée');
       const tourData = await tourRes.json();
       const cavs = tourData.cavs || [];
       const tourIsAssociation = tourData.collection_type === 'association';
@@ -43,7 +46,7 @@ export default function FillLevel() {
 
       if (cav) {
         const cavId = cav.cav_id || cav.id;
-        await fetch(`/api/tours/${tourId}/cav/${cavId}/collect-public`, {
+        const collectRes = await fetch(`/api/tours/${tourId}/cav/${cavId}/collect-public`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -53,12 +56,17 @@ export default function FillLevel() {
             notes: anomaly ? `${anomaly}${notes ? ': ' + notes : ''}` : notes,
           }),
         });
+        if (!collectRes.ok) throw new Error('Erreur lors de l\'enregistrement de la collecte');
       }
       vibrateSuccess();
       localStorage.removeItem('scanned_qr');
       localStorage.removeItem('selected_cav_id');
       navigate('/tour-map');
-    } catch (err) { vibrateError(); console.error(err); }
+    } catch (err) {
+      vibrateError();
+      setError(err.message || 'Erreur réseau, réessayez');
+      console.error(err);
+    }
     setLoading(false);
   };
 
@@ -120,6 +128,7 @@ export default function FillLevel() {
             <option value="acces_bloque">Accès bloqué</option>
             <option value="conteneur_endommage">Conteneur endommagé</option>
             <option value="dechets_non_conformes">Déchets non conformes</option>
+            <option value="cle_cassee">Clé cassée</option>
           </select>
         </div>
 
@@ -133,6 +142,12 @@ export default function FillLevel() {
             rows={2}
           />
         </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 font-medium">
+            {error}
+          </div>
+        )}
 
         <button
           type="button"
