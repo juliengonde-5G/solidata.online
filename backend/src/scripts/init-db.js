@@ -2591,6 +2591,17 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Module Stock Original ✓');
 
+    // ══════════════════════════════════════════
+    // Migration : champs balance sur stock_original_movements
+    // ══════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE stock_original_movements ADD COLUMN IF NOT EXISTS contenant VARCHAR(100);
+    `);
+    await client.query(`
+      ALTER TABLE stock_original_movements ADD COLUMN IF NOT EXISTS source VARCHAR(50);
+    `);
+    console.log('[INIT-DB] Migration balance (contenant, source) ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

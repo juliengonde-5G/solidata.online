@@ -6,6 +6,157 @@ const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
 
+// ══════════════════════════════════════════
+// TARES DES CONTENANTS (référentiel serveur)
+// ══════════════════════════════════════════
+const CONTENANTS_TARES = {
+  bac_metal: 80,
+  bac_metal_jaune: 145,
+  geobox_rouge: 38,
+  geobox_noir: 44,
+  chariot_grillagee: 98,
+  chariot_curon_petit: 55,
+  chariot_curon_grand: 90,
+  palette_eur: 22,
+  demi_palette: 7,
+  poubelle_4roues: 39,
+  chariot_pal: 120,
+  petite_poubelle: 6,
+  sans_contenant: 0,
+  tare_manuelle: null
+};
+
+// ══════════════════════════════════════════
+// ENDPOINTS PUBLICS BALANCE (sans authentification)
+// Définis AVANT router.use(authenticate) pour bypasser l'auth
+// ══════════════════════════════════════════
+
+// POST /api/stock-original/balance-entree — Entrée balance publique
+router.post('/balance-entree', async (req, res) => {
+  try {
+    const { date, origine, poids_brut_kg, contenant, tare_kg, operateur } = req.body;
+
+    if (!date || !origine || poids_brut_kg == null || !contenant) {
+      return res.status(400).json({ error: 'Champs requis : date, origine, poids_brut_kg, contenant' });
+    }
+    if (!['apport_volontaire', 'retour'].includes(origine)) {
+      return res.status(400).json({ error: 'Origine invalide (apport_volontaire ou retour)' });
+    }
+    if (!Object.keys(CONTENANTS_TARES).includes(contenant)) {
+      return res.status(400).json({ error: 'Contenant invalide' });
+    }
+
+    let tare;
+    if (contenant === 'tare_manuelle') {
+      tare = parseFloat(tare_kg);
+      if (isNaN(tare)) return res.status(400).json({ error: 'Tare manuelle requise et doit etre un nombre' });
+    } else {
+      tare = CONTENANTS_TARES[contenant];
+    }
+
+    const poidsBrut = parseFloat(poids_brut_kg);
+    const poidsNet = poidsBrut - tare;
+
+    if (poidsNet <= 0) {
+      return res.status(400).json({ error: `Poids net invalide (${poidsBrut} - ${tare} = ${poidsNet}). Verifier la saisie.` });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO stock_original_movements
+         (type, date, poids_kg, poids_brut_kg, tare_kg, origine, contenant, source, notes)
+       VALUES ('entree', $1, $2, $3, $4, $5, $6, 'balance', $7) RETURNING *`,
+      [date, poidsNet, poidsBrut, tare, origine, contenant, operateur || null]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[STOCK-ORIGINAL] Erreur balance-entree :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/stock-original/balance-sortie — Sortie balance publique
+router.post('/balance-sortie', async (req, res) => {
+  try {
+    const { date, destination, poids_brut_kg, contenant, tare_kg, operateur } = req.body;
+
+    const DESTINATIONS_VALIDES = ['atelier_tri', 'tri_preclasse', 'original_conditionne'];
+
+    if (!date || !destination || poids_brut_kg == null || !contenant) {
+      return res.status(400).json({ error: 'Champs requis : date, destination, poids_brut_kg, contenant' });
+    }
+    if (!DESTINATIONS_VALIDES.includes(destination)) {
+      return res.status(400).json({ error: 'Destination invalide' });
+    }
+    if (!Object.keys(CONTENANTS_TARES).includes(contenant)) {
+      return res.status(400).json({ error: 'Contenant invalide' });
+    }
+
+    let tare;
+    if (contenant === 'tare_manuelle') {
+      tare = parseFloat(tare_kg);
+      if (isNaN(tare)) return res.status(400).json({ error: 'Tare manuelle requise et doit etre un nombre' });
+    } else {
+      tare = CONTENANTS_TARES[contenant];
+    }
+
+    const poidsBrut = parseFloat(poids_brut_kg);
+    const poidsNet = poidsBrut - tare;
+
+    if (poidsNet <= 0) {
+      return res.status(400).json({ error: `Poids net invalide (${poidsBrut} - ${tare} = ${poidsNet}). Verifier la saisie.` });
+    }
+
+    const mvt = await pool.query(
+      `INSERT INTO stock_original_movements
+         (type, date, poids_kg, poids_brut_kg, tare_kg, destination, contenant, source, notes)
+       VALUES ('sortie', $1, $2, $3, $4, $5, $6, 'balance', $7) RETURNING *`,
+      [date, poidsNet, poidsBrut, tare, destination, contenant, operateur || null]
+    );
+
+    let produitFini = null;
+    if (destination === 'tri_preclasse' || destination === 'original_conditionne') {
+      const labels = { tri_preclasse: 'Tri pré-classé', original_conditionne: 'Original Conditionné' };
+      const codeBarre = `PF-${Date.now()}`;
+      const pfResult = await pool.query(
+        `INSERT INTO produits_finis (code_barre, produit, poids_kg, date_fabrication)
+         VALUES ($1, $2, $3, NOW()) RETURNING *`,
+        [codeBarre, labels[destination], poidsNet]
+      );
+      produitFini = pfResult.rows[0];
+    }
+
+    res.status(201).json({ mouvement: mvt.rows[0], produit_fini: produitFini });
+  } catch (err) {
+    console.error('[STOCK-ORIGINAL] Erreur balance-sortie :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/stock-original/balance-historique — Historique balance du jour (public)
+router.get('/balance-historique', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+
+    const result = await pool.query(`
+      SELECT id, type, date, poids_kg, poids_brut_kg, tare_kg,
+             origine, destination, contenant, source, notes, created_at
+      FROM stock_original_movements
+      WHERE source = 'balance'
+        AND date = $1
+      ORDER BY created_at DESC
+    `, [date]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[STOCK-ORIGINAL] Erreur balance-historique :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// ROUTES AUTHENTIFIÉES (ADMIN / MANAGER)
+// ══════════════════════════════════════════
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 router.use(autoLogActivity('stock_original'));
 

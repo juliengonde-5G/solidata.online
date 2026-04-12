@@ -51,6 +51,7 @@ import Pennylane from './pages/Pennylane';
 import ActivityLog from './pages/ActivityLog';
 import InventaireOriginal from './pages/InventaireOriginal';
 import AdminStockOriginal from './pages/AdminStockOriginal';
+import BalancePage from './pages/BalancePage';
 
 // Finance module
 import Finance from './pages/Finance';
@@ -86,6 +87,7 @@ function App() {
         <ToastProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/balance" element={<BalancePage />} />
             <Route path="/pcm-test/:token" element={<PCMTest />} />
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
 
