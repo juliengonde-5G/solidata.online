@@ -341,7 +341,20 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
     const result = await pool.query(
       `INSERT INTO vehicles (registration, name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, current_km, next_maintenance, insurance_expiry, vehicle_type)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-      [registration.toUpperCase(), name, brand, model, type || 'utilitaire', max_capacity_kg || 3500, tare_weight_kg, team_id, current_km || 0, next_maintenance || null, insurance_expiry || null, vehicle_type || 'generic']
+      [
+        registration.toUpperCase(),
+        name || null,
+        brand || null,
+        model || null,
+        type || 'utilitaire',
+        max_capacity_kg || 3500,
+        tare_weight_kg ? parseFloat(tare_weight_kg) : null,
+        team_id ? parseInt(team_id) : null,
+        current_km || 0,
+        next_maintenance || null,
+        insurance_expiry || null,
+        vehicle_type || 'generic',
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -364,7 +377,7 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
        next_maintenance = $10, insurance_expiry = $11, vehicle_type = COALESCE($12, vehicle_type),
        updated_at = NOW()
        WHERE id = $13 RETURNING *`,
-      [name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, status, current_km, next_maintenance || null, insurance_expiry || null, vehicle_type, req.params.id]
+      [name || null, brand || null, model || null, type || null, max_capacity_kg || null, tare_weight_kg ? parseFloat(tare_weight_kg) : null, team_id ? parseInt(team_id) : null, status || null, current_km || null, next_maintenance || null, insurance_expiry || null, vehicle_type || null, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
     res.json(result.rows[0]);
