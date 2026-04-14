@@ -346,10 +346,22 @@ export default function PersonalityMatrix() {
                     <h3 className="font-semibold mb-2">Base : {selectedProfile.report.base?.nom}</h3>
                     <p className="text-sm text-gray-600">{selectedProfile.report.base?.perception}</p>
                     <p className="text-sm text-gray-600">Canal : {selectedProfile.report.base?.canal}</p>
+                    {selectedProfile.report.confidence && (
+                      <p className={`text-xs mt-1 font-medium ${selectedProfile.report.confidence.baseIndetermine ? 'text-amber-600' : 'text-gray-400'}`}>
+                        Fiabilité : {selectedProfile.report.confidence.base}%
+                        {selectedProfile.report.confidence.baseIndetermine && ' — profil peu marqué'}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <h3 className="font-semibold mb-2">Phase : {selectedProfile.report.phase?.nom}</h3>
                     <p className="text-sm text-gray-600">Besoin : {selectedProfile.report.phase?.besoinPsychologique}</p>
+                    {selectedProfile.report.confidence && (
+                      <p className={`text-xs mt-1 font-medium ${selectedProfile.report.confidence.phaseIndetermine ? 'text-amber-600' : 'text-gray-400'}`}>
+                        Fiabilité : {selectedProfile.report.confidence.phase}%
+                        {selectedProfile.report.confidence.phaseIndetermine && ' — phase indéterminée'}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
