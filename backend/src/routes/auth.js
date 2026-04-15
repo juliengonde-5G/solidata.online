@@ -9,7 +9,12 @@ const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { logActivity } = require('../middleware/activity-logger');
 
+// Centralisé — fail-fast si non défini en production (cf. middleware/auth.js)
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
+if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change-this-in-production') {
+  console.error('[FATAL] JWT_SECRET non configuré en production (routes/auth.js).');
+  process.exit(1);
+}
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
 

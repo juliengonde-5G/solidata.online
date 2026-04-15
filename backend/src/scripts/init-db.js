@@ -421,7 +421,7 @@ async function initDatabase() {
         driver_employee_id INTEGER REFERENCES employees(id),
         standard_route_id INTEGER REFERENCES standard_routes(id),
         mode VARCHAR(20) NOT NULL CHECK (mode IN ('intelligent', 'standard', 'manual')),
-        status VARCHAR(20) DEFAULT 'planned' CHECK (status IN ('planned', 'in_progress', 'paused', 'completed', 'cancelled')),
+        status VARCHAR(20) DEFAULT 'planned' CHECK (status IN ('planned', 'in_progress', 'paused', 'returning', 'completed', 'cancelled')),
         started_at TIMESTAMP,
         completed_at TIMESTAMP,
         total_weight_kg DOUBLE PRECISION DEFAULT 0,
@@ -1072,6 +1072,36 @@ async function initDatabase() {
       DO $$ BEGIN
         ALTER TABLE employees ADD COLUMN candidate_id INTEGER UNIQUE REFERENCES candidates(id) ON DELETE SET NULL;
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // MIGRATION 2026-04-15 : ajout du statut `returning` aux tournées
+    // (le chauffeur a terminé sa collecte et revient au centre de tri).
+    // Fix bug C4 : mobile/ReturnCentre.jsx envoyait 'returning' mais la
+    // CHECK constraint d'origine ne l'acceptait pas → violation + données
+    // perdues.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tours DROP CONSTRAINT IF EXISTS tours_status_check;
+        ALTER TABLE tours ADD CONSTRAINT tours_status_check
+          CHECK (status IN ('planned', 'in_progress', 'paused', 'returning', 'completed', 'cancelled'));
+      EXCEPTION WHEN undefined_table THEN NULL; END $$;
+    `);
+
+    // MIGRATION 2026-04-15 : colonnes km_start/km_end/notes manquantes sur
+    // tours (fix bug C6 + C7 : km_end envoyé par mobile/ReturnCentre mais
+    // jamais stocké, cascade TourSummary distance = null).
+    await client.query(`
+      ALTER TABLE tours ADD COLUMN IF NOT EXISTS km_start INTEGER;
+      ALTER TABLE tours ADD COLUMN IF NOT EXISTS km_end INTEGER;
+      ALTER TABLE tours ADD COLUMN IF NOT EXISTS notes TEXT;
+    `);
+
+    // MIGRATION 2026-04-15 : colonnes tare_kg / is_intermediate / notes
+    // sur tour_weights (fix bug C5 : données mobile WeighIn perdues).
+    await client.query(`
+      ALTER TABLE tour_weights ADD COLUMN IF NOT EXISTS tare_kg DOUBLE PRECISION;
+      ALTER TABLE tour_weights ADD COLUMN IF NOT EXISTS is_intermediate BOOLEAN DEFAULT FALSE;
+      ALTER TABLE tour_weights ADD COLUMN IF NOT EXISTS notes TEXT;
     `);
 
     // Tables pour exécution tri et colisages

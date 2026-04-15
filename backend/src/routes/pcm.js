@@ -624,7 +624,10 @@ function decryptReport(encrypted) {
 // ══════════════════════════════════════════
 
 // GET /api/pcm/questionnaire — Retourne les 20 questions
-router.get('/questionnaire', (req, res) => {
+// Note : route authentifiée côté interne. Les candidats en mode autonome
+// récupèrent les questions via GET /sessions/:token qui intègre déjà la
+// liste des questions — inutile d'exposer /questionnaire publiquement.
+router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
   res.json(PCM_QUESTIONS.map(q => ({
     num: q.num,
     category: q.category,
@@ -634,7 +637,7 @@ router.get('/questionnaire', (req, res) => {
 });
 
 // GET /api/pcm/types — Référence des 6 types PCM
-router.get('/types', (req, res) => {
+router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
   const types = Object.entries(PCM_TYPES).map(([key, data]) => ({
     key,
     ...data,
@@ -643,7 +646,7 @@ router.get('/types', (req, res) => {
 });
 
 // GET /api/pcm/types/:typeKey — Détail d'un type
-router.get('/types/:typeKey', (req, res) => {
+router.get('/types/:typeKey', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
   const data = PCM_TYPES[req.params.typeKey];
   if (!data) return res.status(404).json({ error: 'Type PCM inconnu' });
   res.json({ key: req.params.typeKey, ...data });
@@ -719,19 +722,32 @@ router.get('/sessions/:token', async (req, res) => {
   }
 });
 
+// Middleware : autorise soit un utilisateur RH/ADMIN authentifié, soit
+// un access_token de session PCM (lien autonome envoyé au candidat).
+// Bloque la soumission par simple `session_id` sans preuve de légitimité.
+async function authenticateSubmit(req, res, next) {
+  const { access_token } = req.body || {};
+  if (access_token) return next(); // token capabilité vérifié plus bas
+  return authenticate(req, res, (err) => {
+    if (err) return;
+    return authorize('ADMIN', 'RH', 'MANAGER')(req, res, next);
+  });
+}
+
 // POST /api/pcm/submit — Soumettre les réponses et calculer le profil
-router.post('/submit', [
+router.post('/submit', authenticateSubmit, [
   body('answers').isArray({ min: 15 }).withMessage('Minimum 15 réponses requises'),
 ], validate, async (req, res) => {
   try {
     const { session_id, access_token, answers } = req.body;
 
-    // Trouver la session
+    // Trouver la session — access_token prioritaire (flux candidat autonome)
     let session;
     if (access_token) {
       const r = await pool.query('SELECT * FROM pcm_sessions WHERE access_token = $1', [access_token]);
       session = r.rows[0];
-    } else if (session_id) {
+    } else if (session_id && req.user) {
+      // Session par ID uniquement si utilisateur RH/ADMIN authentifié
       const r = await pool.query('SELECT * FROM pcm_sessions WHERE id = $1', [session_id]);
       session = r.rows[0];
     }

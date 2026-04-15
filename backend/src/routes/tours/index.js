@@ -224,18 +224,29 @@ router.post('/:id/scan-public', async (req, res) => {
 // POST /api/tours/:id/weigh-public — Enregistrer une pesée (mobile sans auth)
 router.post('/:id/weigh-public', async (req, res) => {
   try {
-    const { weight_kg } = req.body;
-    if (!weight_kg && weight_kg !== 0) {
+    const { weight_kg, tare_kg, is_intermediate, notes } = req.body;
+    if (weight_kg === undefined || weight_kg === null) {
       return res.status(400).json({ error: 'Poids requis (weight_kg)' });
     }
+    // Fix bug C5 : persistance de tare_kg, is_intermediate et notes
+    // (champs envoyés par mobile/WeighIn.jsx mais ignorés auparavant).
     const result = await pool.query(
-      `INSERT INTO tour_weights (tour_id, weight_kg, recorded_at)
-       VALUES ($1, $2, NOW()) RETURNING *`,
-      [req.params.id, weight_kg]
+      `INSERT INTO tour_weights (tour_id, weight_kg, tare_kg, is_intermediate, notes, recorded_at)
+       VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
+      [
+        req.params.id,
+        weight_kg,
+        tare_kg ?? null,
+        is_intermediate === true || is_intermediate === 'true',
+        notes ?? null,
+      ]
     );
-    // Mettre à jour le total de la tournée
+    // Mettre à jour le total de la tournée (somme des pesées non intermédiaires)
     await pool.query(
-      `UPDATE tours SET total_weight_kg = (SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights WHERE tour_id = $1) WHERE id = $1`,
+      `UPDATE tours SET total_weight_kg = (
+         SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights
+         WHERE tour_id = $1 AND COALESCE(is_intermediate, FALSE) = FALSE
+       ) WHERE id = $1`,
       [req.params.id]
     );
     res.status(201).json(result.rows[0]);
@@ -267,7 +278,7 @@ router.post('/:id/incident-public', async (req, res) => {
 // PUT /api/tours/:id/status-public — Changer le statut d'une tournée (mobile sans auth)
 router.put('/:id/status-public', async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, km_start, km_end, notes } = req.body;
     if (!status) {
       return res.status(400).json({ error: 'Statut requis' });
     }
@@ -287,10 +298,25 @@ router.put('/:id/status-public', async (req, res) => {
       return res.status(400).json({ error: `Transition ${currentStatus} → ${status} non autorisée` });
     }
 
+    // Fix bug C6 : persister km_start / km_end / notes envoyés par le
+    // mobile (Checklist, ReturnCentre). Sans ça, TourSummary affiche
+    // distance = null.
     const updates = ['status = $1', 'updated_at = NOW()'];
     const params = [status];
     if (status === 'in_progress') updates.push('started_at = NOW()');
     if (status === 'completed') updates.push('completed_at = NOW()');
+    if (km_start !== undefined && km_start !== null && km_start !== '') {
+      params.push(parseInt(km_start, 10));
+      updates.push(`km_start = $${params.length}`);
+    }
+    if (km_end !== undefined && km_end !== null && km_end !== '') {
+      params.push(parseInt(km_end, 10));
+      updates.push(`km_end = $${params.length}`);
+    }
+    if (notes !== undefined && notes !== null && notes !== '') {
+      params.push(String(notes));
+      updates.push(`notes = $${params.length}`);
+    }
 
     params.push(req.params.id);
     const result = await pool.query(

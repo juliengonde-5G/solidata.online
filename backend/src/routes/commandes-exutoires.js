@@ -36,10 +36,14 @@ async function generateReference() {
   return `CMD-${year}-${String(num).padStart(4, '0')}`;
 }
 
+// Fix bug L2 : ajout du statut `chargee` (accent retiré pour cohérence DB)
+// utilisé par frontend/src/pages/ExutoiresCommandes.jsx dans le workflow
+// en_preparation → chargee → expediee. Sans ça, le workflow est bloqué.
 const STATUTS_VALIDES = [
   'en_attente',
   'confirmee',
   'en_preparation',
+  'chargee',
   'expediee',
   'pesee_recue',
   'facturee',

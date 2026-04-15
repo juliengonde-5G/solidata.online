@@ -261,6 +261,123 @@ router.post('/schedule/bulk', authorize('ADMIN', 'RH', 'MANAGER'), [
 // HEURES DE TRAVAIL
 // ══════════════════════════════════════════
 
+// Fix bugs R1/R2 : alias conservant la compatibilité avec
+// frontend/src/pages/WorkHours.jsx qui appelle /employees/:id/hours,
+// /employees/:id/hours/summary, POST /employees/:id/hours, et
+// PUT /employees/:id/hours/:entryId/validate avec les champs start_time /
+// end_time / break_minutes. On convertit vers hours_worked et on expose
+// `validated` comme booléen dérivé de validated_by.
+
+function computeHoursFromSlots(start_time, end_time, break_minutes) {
+  if (!start_time || !end_time) return null;
+  const [sh, sm] = String(start_time).split(':').map(Number);
+  const [eh, em] = String(end_time).split(':').map(Number);
+  if ([sh, sm, eh, em].some(n => Number.isNaN(n))) return null;
+  const startMin = sh * 60 + sm;
+  const endMin = eh * 60 + em;
+  const gross = endMin - startMin - (parseInt(break_minutes, 10) || 0);
+  return gross > 0 ? +(gross / 60).toFixed(2) : 0;
+}
+
+// GET /api/employees/:id/hours?month=YYYY-MM
+router.get('/:id/hours', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+  try {
+    const { month } = req.query;
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(400).json({ error: 'ID employé invalide' });
+    let query = `
+      SELECT wh.*,
+             (wh.validated_by IS NOT NULL) AS validated,
+             u.first_name AS validated_by_name
+      FROM work_hours wh
+      LEFT JOIN users u ON wh.validated_by = u.id
+      WHERE wh.employee_id = $1`;
+    const params = [req.params.id];
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      params.push(month + '-01');
+      params.push(month + '-31');
+      query += ` AND wh.date BETWEEN $${params.length - 1} AND $${params.length}`;
+    }
+    query += ' ORDER BY wh.date DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[WORK_HOURS] Erreur /hours (alias) :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/employees/:id/hours/summary?month=YYYY-MM
+router.get('/:id/hours/summary', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+  try {
+    const { month } = req.query;
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'Paramètre month requis (YYYY-MM)' });
+    }
+    const result = await pool.query(
+      `SELECT
+         COALESCE(SUM(hours_worked), 0)::float AS total_hours,
+         COALESCE(SUM(overtime_hours), 0)::float AS overtime_hours,
+         COUNT(CASE WHEN type = 'normal' THEN 1 END)::int AS days_worked,
+         COUNT(CASE WHEN type = 'absence' THEN 1 END)::int AS absence_days,
+         COUNT(CASE WHEN type = 'sick' THEN 1 END)::int AS sick_days,
+         COUNT(CASE WHEN type = 'holiday' THEN 1 END)::int AS holiday_days
+       FROM work_hours
+       WHERE employee_id = $1 AND date BETWEEN $2 AND $3`,
+      [req.params.id, month + '-01', month + '-31']
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[WORK_HOURS] Erreur /hours/summary (alias) :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/employees/:id/hours — accepte start_time/end_time/break_minutes
+router.post('/:id/hours', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const empId = req.params.id;
+    const { date, start_time, end_time, break_minutes, type, notes, hours_worked: hw, overtime_hours: oh } = req.body;
+    if (!date) return res.status(400).json({ error: 'Date requise' });
+    const hours_worked = hw !== undefined && hw !== null && hw !== ''
+      ? parseFloat(hw)
+      : computeHoursFromSlots(start_time, end_time, break_minutes);
+    if (hours_worked === null || Number.isNaN(hours_worked)) {
+      return res.status(400).json({ error: 'Heures travaillées invalides (start_time/end_time requis)' });
+    }
+    const dbType = ['normal', 'training', 'absence', 'sick', 'holiday'].includes(type) ? type : 'normal';
+    const result = await pool.query(
+      `INSERT INTO work_hours (employee_id, date, hours_worked, overtime_hours, type, notes)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (employee_id, date) DO UPDATE SET
+         hours_worked = EXCLUDED.hours_worked,
+         overtime_hours = EXCLUDED.overtime_hours,
+         type = EXCLUDED.type,
+         notes = EXCLUDED.notes
+       RETURNING *`,
+      [empId, date, hours_worked, parseFloat(oh) || 0, dbType, notes || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[WORK_HOURS] Erreur POST /hours (alias) :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/employees/:id/hours/:entryId/validate
+router.put('/:id/hours/:entryId/validate', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'UPDATE work_hours SET validated_by = $1 WHERE id = $2 AND employee_id = $3 RETURNING *',
+      [req.user.id, req.params.entryId, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Entrée non trouvée' });
+    res.json({ ...result.rows[0], validated: true });
+  } catch (err) {
+    console.error('[WORK_HOURS] Erreur validate (alias) :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/employees/work-hours?month=2026-03&employee_id=1
 router.get('/work-hours/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {

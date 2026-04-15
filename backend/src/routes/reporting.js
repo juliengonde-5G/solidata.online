@@ -116,7 +116,26 @@ router.get('/dashboard', async (req, res) => {
 // GET /api/reporting/collecte — Données collecte par période
 router.get('/collecte', async (req, res) => {
   try {
-    const { group_by, date_from, date_to } = req.query;
+    // Fix bug O3 : frontend/src/pages/Reporting.jsx envoie `period` avec les
+    // valeurs week|month|quarter|year. On mappe vers (group_by, date_from)
+    // tout en conservant la compatibilité avec l'ancien paramètre `group_by`.
+    const PERIOD_MAP = {
+      week: { group_by: 'date', days: 7 },
+      month: { group_by: 'date', days: 30 },
+      quarter: { group_by: 'month', days: 92 },
+      year: { group_by: 'month', days: 365 },
+    };
+    let { group_by, date_from, date_to } = req.query;
+    const periodKey = req.query.period;
+    if (periodKey && PERIOD_MAP[periodKey]) {
+      group_by = group_by || PERIOD_MAP[periodKey].group_by;
+      if (!date_from) {
+        const d = new Date();
+        d.setDate(d.getDate() - PERIOD_MAP[periodKey].days);
+        date_from = d.toISOString().slice(0, 10);
+      }
+    }
+    if (!['month', 'date'].includes(group_by)) group_by = 'month';
 
     // Use materialized view for monthly grouping without date filters (fast path)
     if (group_by === 'month' && !date_from && !date_to && await mvExists('mv_collecte_mensuelle')) {

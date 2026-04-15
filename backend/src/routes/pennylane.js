@@ -258,11 +258,14 @@ async function enrichGLCategories(exerciseId, apiKey) {
       )
     `);
     // S'assurer que les colonnes analytiques existent dans financial_gl_entries
-    const glCols = ['family_category TEXT', 'category TEXT', 'analytical_code TEXT'];
-    for (const colDef of glCols) {
-      const colName = colDef.split(' ')[0];
+    // Whitelist stricte : nom colonne + type SQL internes, pas d'input externe.
+    const SAFE_IDENT_PL = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+    const SAFE_TYPE_PL = /^[A-Z0-9_() ]+$/i;
+    const glCols = [['family_category', 'TEXT'], ['category', 'TEXT'], ['analytical_code', 'TEXT']];
+    for (const [colName, colType] of glCols) {
+      if (!SAFE_IDENT_PL.test(colName) || !SAFE_TYPE_PL.test(colType)) continue;
       try {
-        await pool.query(`ALTER TABLE financial_gl_entries ADD COLUMN IF NOT EXISTS ${colDef}`);
+        await pool.query(`ALTER TABLE financial_gl_entries ADD COLUMN IF NOT EXISTS ${colName} ${colType}`);
       } catch (e) { /* colonne existe deja ou table absente — OK */ }
     }
     console.log('[PENNYLANE] Tables OK');

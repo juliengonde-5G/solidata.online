@@ -72,15 +72,31 @@ export default function TourMap() {
 
   const connectSocket = () => {
     const vehicleId = localStorage.getItem('selected_vehicle_id');
-    const socket = io(window.location.origin, { transports: ['websocket', 'polling'] });
+    const token = localStorage.getItem('mobile_token');
+    if (!token) {
+      console.warn('[TourMap] Pas de token — GPS temps réel désactivé');
+      return;
+    }
+    const socket = io(window.location.origin, {
+      transports: ['websocket', 'polling'],
+      auth: { token },
+    });
     socketRef.current = socket;
 
-    // Send GPS position every 10 seconds
+    socket.on('connect', () => {
+      if (tourId) socket.emit('join-tour', parseInt(tourId));
+    });
+    socket.on('connect_error', (err) => {
+      console.warn('[TourMap] Socket.IO connect_error:', err.message);
+    });
+
+    // Envoi de la position GPS toutes les 10 secondes
+    // Event name aligné sur backend/src/index.js (gps-update)
     intervalRef.current = setInterval(() => {
-      if (positionRef.current && socketRef.current) {
-        socketRef.current.emit('gps:position', {
-          tour_id: parseInt(tourId),
-          vehicle_id: parseInt(vehicleId) || null,
+      if (positionRef.current && socketRef.current && socketRef.current.connected) {
+        socketRef.current.emit('gps-update', {
+          tourId: parseInt(tourId),
+          vehicleId: parseInt(vehicleId) || null,
           latitude: positionRef.current.lat,
           longitude: positionRef.current.lng,
           speed: 0,
