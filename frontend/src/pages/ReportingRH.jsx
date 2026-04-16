@@ -1,228 +1,211 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, KPICard } from '../components';
 import api from '../services/api';
+import {
+  BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import { Users, UserPlus, Heart, ClipboardList, BarChart3 } from 'lucide-react';
+
+// ══════════════════════════════════════════
+// REPORTING RH — enrichi avec graphiques
+// ══════════════════════════════════════════
+
+const TEAM_COLORS = ['#0D9488', '#6366F1', '#F59E0B', '#EC4899', '#8B5CF6', '#10B981', '#EF4444', '#64748B'];
+const STATUS_COLORS_MAP = {
+  received: '#3B82F6', screening: '#FBBF24', interview: '#8B5CF6',
+  trial: '#F97316', recruited: '#10B981', rejected: '#EF4444', withdrawn: '#94A3B8',
+};
 
 export default function ReportingRH() {
   const [loading, setLoading] = useState(true);
   const [employees, setEmployees] = useState([]);
   const [teams, setTeams] = useState([]);
   const [candidates, setCandidates] = useState([]);
+  const [insertionStats, setInsertionStats] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [empRes, teamRes, candRes] = await Promise.all([
+      const [empRes, teamRes, candRes, insRes] = await Promise.all([
         api.get('/employees?is_active=true'),
         api.get('/teams'),
         api.get('/candidates'),
+        api.get('/performance/industrial-kpis').catch(() => ({ data: null })),
       ]);
-      setEmployees(empRes.data);
-      setTeams(teamRes.data);
-      setCandidates(candRes.data);
+      const empData = Array.isArray(empRes.data) ? empRes.data : (empRes.data?.employees || []);
+      setEmployees(empData);
+      setTeams(teamRes.data || []);
+      setCandidates(candRes.data || []);
+      setInsertionStats(insRes.data?.insertion || null);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement..." /></Layout>;
 
-  // Compute stats
   const totalEmployees = employees.length;
-  const teamCounts = teams.map(t => ({
-    name: t.name,
-    count: parseInt(t.member_count) || 0,
-  })).sort((a, b) => b.count - a.count);
 
-  // Candidate pipeline stats
+  // Team data for bar chart
+  const teamData = teams.map(t => ({
+    name: t.name,
+    effectif: parseInt(t.member_count) || 0,
+  })).sort((a, b) => b.effectif - a.effectif);
+
+  // Candidate pipeline
   const candidateStatuses = {};
   candidates.forEach(c => {
     const s = c.status || 'inconnu';
     candidateStatuses[s] = (candidateStatuses[s] || 0) + 1;
   });
+
   const statusLabels = {
-    received: 'Recus',
-    screening: 'Pre-selection',
-    interview: 'Entretien',
-    trial: 'Essai',
-    recruited: 'Recrutes',
-    rejected: 'Refuses',
-    withdrawn: 'Desistes',
+    received: 'Reçus', screening: 'Pré-sélection', interview: 'Entretien',
+    trial: 'Essai', recruited: 'Recrutés', rejected: 'Refusés', withdrawn: 'Désistés',
   };
+
+  // Funnel data
+  const funnelSteps = ['received', 'screening', 'interview', 'trial', 'recruited'];
+  const funnelData = funnelSteps.map(s => ({
+    step: statusLabels[s] || s,
+    count: candidateStatuses[s] || 0,
+    fill: STATUS_COLORS_MAP[s] || '#94A3B8',
+  }));
+
+  // Pie data for candidate distribution
+  const pieData = Object.entries(candidateStatuses).map(([status, count]) => ({
+    name: statusLabels[status] || status,
+    value: count,
+    fill: STATUS_COLORS_MAP[status] || '#94A3B8',
+  }));
+
+  // Insertion stats
+  const sortiesPositives = insertionStats && insertionStats.total > 0
+    ? Math.round(insertionStats.parcours_termines / insertionStats.total * 100) : 0;
 
   return (
     <Layout>
-      <div className="p-6">
+      <div className="space-y-6">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">Reporting RH</h1>
-          <p className="text-gray-500">Effectifs, recrutement et indicateurs RH</p>
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-blue-50">
+            <Users className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Reporting RH</h1>
+            <p className="text-slate-500 text-sm">Effectifs, recrutement et indicateurs RH</p>
+          </div>
         </div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-          <KPICard label="Collaborateurs actifs" value={totalEmployees} icon="🏢" color="text-purple-600" />
-          <KPICard label="Equipes" value={teams.length} icon="👥" color="text-blue-600" />
-          <KPICard label="Candidatures totales" value={candidates.length} icon="📋" color="text-orange-600" />
-          <KPICard label="Recrutes" value={candidateStatuses['recruited'] || 0} icon="✅" color="text-primary" />
-          <KPICard label="Absentéisme" value="—" icon="📊" color="text-red-600" />
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <KPICard title="Collaborateurs actifs" value={totalEmployees} icon={Users} accent="primary" />
+          <KPICard title="Équipes" value={teams.length} icon={ClipboardList} accent="slate" />
+          <KPICard title="Candidatures" value={candidates.length} icon={UserPlus} accent="amber" />
+          <KPICard title="Recrutés" value={candidateStatuses.recruited || 0} icon={UserPlus} accent="emerald" />
+          <KPICard title="Parcours insertion" value={insertionStats?.parcours_actifs || '—'} unit="actifs" icon={Heart} accent="red" />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Employees by team */}
-          <div className="card-modern">
-            <div className="p-4 border-b">
-              <h3 className="font-semibold text-slate-800">Effectifs par equipe</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Equipe</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-600">Effectif</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-600">% du total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {teamCounts.length === 0 ? (
-                    <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">Aucune equipe</td></tr>
-                  ) : (
-                    teamCounts.map((t, i) => (
-                      <tr key={i} className="border-t hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium">{t.name}</td>
-                        <td className="px-4 py-3 text-right font-semibold">{t.count}</td>
-                        <td className="px-4 py-3 text-right text-gray-500">
-                          {totalEmployees > 0 ? Math.round((t.count / totalEmployees) * 100) : 0}%
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                {teamCounts.length > 0 && (
-                  <tfoot>
-                    <tr className="border-t-2 bg-gray-50 font-semibold">
-                      <td className="px-4 py-3">Total</td>
-                      <td className="px-4 py-3 text-right">{teamCounts.reduce((s, t) => s + t.count, 0)}</td>
-                      <td className="px-4 py-3 text-right">100%</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
+        {/* Charts row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Team bar chart */}
+          <div className="card-modern p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Effectifs par équipe</h3>
+            {teamData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={teamData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis type="number" tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Bar dataKey="effectif" name="Effectif" fill="#0D9488" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-12">Aucune équipe</p>
+            )}
           </div>
 
-          {/* Candidate pipeline */}
-          <div className="card-modern">
-            <div className="p-4 border-b">
-              <h3 className="font-semibold text-slate-800">Pipeline de recrutement</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Statut</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-600">Nombre</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-600">% du total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.keys(candidateStatuses).length === 0 ? (
-                    <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">Aucune candidature</td></tr>
-                  ) : (
-                    Object.entries(candidateStatuses)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([status, count], i) => (
-                        <tr key={i} className="border-t hover:bg-gray-50">
-                          <td className="px-4 py-3">
-                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(status)}`}>
-                              {statusLabels[status] || status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right font-semibold">{count}</td>
-                          <td className="px-4 py-3 text-right text-gray-500">
-                            {candidates.length > 0 ? Math.round((count / candidates.length) * 100) : 0}%
-                          </td>
-                        </tr>
-                      ))
-                  )}
-                </tbody>
-                {Object.keys(candidateStatuses).length > 0 && (
-                  <tfoot>
-                    <tr className="border-t-2 bg-gray-50 font-semibold">
-                      <td className="px-4 py-3">Total</td>
-                      <td className="px-4 py-3 text-right">{candidates.length}</td>
-                      <td className="px-4 py-3 text-right">100%</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </div>
-        </div>
-
-        {/* Candidate funnel visual */}
-        <div className="card-modern p-4">
-          <h3 className="font-semibold text-slate-800 mb-4">Entonnoir de recrutement</h3>
-          <div className="space-y-2">
-            {['received', 'screening', 'interview', 'trial', 'recruited'].map((status) => {
-              const count = candidateStatuses[status] || 0;
-              const maxCount = Math.max(...Object.values(candidateStatuses), 1);
-              const pct = Math.round((count / maxCount) * 100);
-              return (
-                <div key={status} className="flex items-center gap-3">
-                  <span className="text-sm text-gray-600 w-28 text-right">{statusLabels[status] || status}</span>
-                  <div className="flex-1 bg-gray-100 rounded-full h-6 relative">
-                    <div
-                      className={`h-6 rounded-full ${getFunnelColor(status)} transition-all`}
-                      style={{ width: `${Math.max(pct, 2)}%` }}
-                    />
-                    <span className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
-                      {count}
-                    </span>
-                  </div>
+          {/* Candidate pie chart */}
+          <div className="card-modern p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Répartition candidatures</h3>
+            {pieData.length > 0 ? (
+              <div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2}>
+                      {pieData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="grid grid-cols-2 gap-1.5 mt-2">
+                  {pieData.map((d, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.fill }} />
+                      <span className="truncate">{d.name}</span>
+                      <span className="font-medium ml-auto">{d.value}</span>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-12">Aucune candidature</p>
+            )}
           </div>
         </div>
+
+        {/* Funnel */}
+        <div className="card-modern p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">Entonnoir de recrutement</h3>
+          {funnelData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={funnelData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="step" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="count" name="Candidats">
+                  {funnelData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
+          )}
+        </div>
+
+        {/* Insertion summary */}
+        {insertionStats && (
+          <div className="card-modern p-6">
+            <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+              <Heart className="w-5 h-5 text-rose-500" />
+              Insertion professionnelle
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="bg-slate-50 rounded-card p-4 text-center">
+                <p className="text-2xl font-bold text-slate-800">{insertionStats.parcours_actifs}</p>
+                <p className="text-xs text-slate-500 mt-1">Parcours actifs</p>
+              </div>
+              <div className="bg-slate-50 rounded-card p-4 text-center">
+                <p className="text-2xl font-bold text-emerald-600">{insertionStats.parcours_termines}</p>
+                <p className="text-xs text-slate-500 mt-1">Terminés</p>
+              </div>
+              <div className="bg-slate-50 rounded-card p-4 text-center">
+                <p className="text-2xl font-bold text-slate-800">{insertionStats.total}</p>
+                <p className="text-xs text-slate-500 mt-1">Total historique</p>
+              </div>
+              <div className="bg-slate-50 rounded-card p-4 text-center">
+                <p className="text-2xl font-bold text-primary">{sortiesPositives}%</p>
+                <p className="text-xs text-slate-500 mt-1">Sorties positives</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
-  );
-}
-
-function getStatusColor(status) {
-  const colors = {
-    received: 'bg-blue-100 text-blue-700',
-    screening: 'bg-yellow-100 text-yellow-700',
-    interview: 'bg-purple-100 text-purple-700',
-    trial: 'bg-orange-100 text-orange-700',
-    recruited: 'bg-green-100 text-green-700',
-    rejected: 'bg-red-100 text-red-700',
-    withdrawn: 'bg-gray-100 text-gray-700',
-  };
-  return colors[status] || 'bg-gray-100 text-gray-700';
-}
-
-function getFunnelColor(status) {
-  const colors = {
-    received: 'bg-blue-400',
-    screening: 'bg-yellow-400',
-    interview: 'bg-purple-400',
-    trial: 'bg-orange-400',
-    recruited: 'bg-primary',
-  };
-  return colors[status] || 'bg-gray-400';
-}
-
-function KPICard({ label, value, icon, color }) {
-  return (
-    <div className="card-modern p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-lg">{icon}</span>
-        <span className="text-xs text-gray-500">{label}</span>
-      </div>
-      <p className={`text-2xl font-bold ${color}`}>{value}</p>
-    </div>
   );
 }

@@ -47,6 +47,9 @@ export default {
       spacing: {
         'sidebar': '16rem',
         'sidebar-collapsed': '4.5rem',
+        'icon-sidebar': '60px',
+        'content-sidebar': '15rem',
+        'topbar': '3.5rem',
       },
     },
   },

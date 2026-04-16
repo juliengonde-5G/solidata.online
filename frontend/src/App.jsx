@@ -63,6 +63,9 @@ import FinancePL from './pages/FinancePL';
 import FinanceBilan from './pages/FinanceBilan';
 import FinanceControles from './pages/FinanceControles';
 
+// Performance dashboard
+import PerformanceDashboard from './pages/PerformanceDashboard';
+
 // Hub pages
 import HubRecrutement from './pages/HubRecrutement';
 import HubEquipe from './pages/HubEquipe';
@@ -140,6 +143,7 @@ function App() {
             <Route path="/inventaire-original" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><InventaireOriginal /></ProtectedRoute>} />
 
             {/* Reporting */}
+            <Route path="/performance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PerformanceDashboard /></ProtectedRoute>} />
             <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingCollecte /></ProtectedRoute>} />
             <Route path="/reporting-rh" element={<ProtectedRoute roles={['ADMIN', 'RH']}><ReportingRH /></ProtectedRoute>} />
             <Route path="/reporting-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingProduction /></ProtectedRoute>} />

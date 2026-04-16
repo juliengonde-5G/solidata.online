@@ -156,6 +156,9 @@ app.use('/api/finance', require('./routes/finance'));
 // SolidataBot : Agent conversationnel IA (Claude API)
 app.use('/api/chat', require('./routes/chat'));
 
+// Performance : Dashboard KPI consolide et indicateurs industriels
+app.use('/api/performance', require('./routes/performance'));
+
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 
