@@ -198,11 +198,19 @@ export default function Layout({ children }) {
 
   const visibleSectionTitles = useMemo(() => filteredSections.map(s => s.title), [filteredSections]);
 
-  // Determine active section from current path
-  const activeSection = useMemo(
+  // Active section derived from URL (for icon highlight)
+  const urlSection = useMemo(
     () => findActiveSection(location.pathname, filteredSections),
     [location.pathname, filteredSections]
   );
+
+  // Selected section = user can click icons to switch, but follows URL on navigation
+  const [selectedSection, setSelectedSection] = useState(urlSection);
+
+  // When URL changes, sync selected section to match
+  useEffect(() => {
+    setSelectedSection(urlSection);
+  }, [urlSection]);
 
   // Load alerts for notification bell (only once)
   useEffect(() => {
@@ -211,17 +219,17 @@ export default function Layout({ children }) {
       .catch(() => {});
   }, []);
 
-  const activeSectionData = filteredSections.find(s => s.title === activeSection);
+  const activeSectionData = filteredSections.find(s => s.title === selectedSection);
 
-  // Click icon: if same section is already active and content sidebar is open → toggle off
-  // Otherwise, switch to that section and open content sidebar
+  // Click icon: if same section and content open → close; otherwise switch and open
   const handleSelectSection = useCallback((sectionTitle) => {
-    if (sectionTitle === activeSection && contentSidebarOpen) {
+    if (sectionTitle === selectedSection && contentSidebarOpen) {
       setContentSidebarOpen(false);
     } else {
+      setSelectedSection(sectionTitle);
       setContentSidebarOpen(true);
     }
-  }, [activeSection, contentSidebarOpen]);
+  }, [selectedSection, contentSidebarOpen]);
 
   const handleMobileNav = useCallback(() => {
     if (window.innerWidth < 1024) setMobileMenuOpen(false);
@@ -245,7 +253,7 @@ export default function Layout({ children }) {
       `}>
         {/* Icon sidebar — always visible on desktop */}
         <IconSidebar
-          activeSection={activeSection}
+          activeSection={selectedSection}
           visibleSections={visibleSectionTitles}
           onSelectSection={handleSelectSection}
         />
