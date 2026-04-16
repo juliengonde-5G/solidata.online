@@ -35,11 +35,26 @@ export default function LiveVehicles() {
     };
   }, []);
 
+  // Lorsque les tournées actives changent, rejoindre chaque room Socket.IO
+  // — sinon les messages `vehicle-position` (broadcast par room) sont perdus.
+  useEffect(() => {
+    if (!socketRef.current || !activeTours.length) return;
+    const join = () => {
+      activeTours.forEach((t) => {
+        if (t.id) socketRef.current.emit('join-tour', parseInt(t.id));
+      });
+    };
+    if (socketRef.current.connected) join();
+    else socketRef.current.once('connect', join);
+  }, [activeTours]);
+
   const loadActiveTours = async () => {
     try {
       const res = await api.get('/tours?status=in_progress');
       setActiveTours(res.data);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error('[LiveVehicles] Chargement tournées actives:', err);
+    }
     setLoading(false);
   };
 
@@ -48,21 +63,24 @@ export default function LiveVehicles() {
     const socket = io(window.location.origin, { auth: { token } });
     socketRef.current = socket;
 
-    socket.on('gps:update', (data) => {
+    // Event name aligné sur backend/src/index.js (vehicle-position)
+    socket.on('vehicle-position', (data) => {
+      const tourKey = data.tourId || data.tour_id;
+      if (!tourKey) return;
       setPositions(prev => ({
         ...prev,
-        [data.tour_id]: {
+        [tourKey]: {
           lat: data.latitude,
           lng: data.longitude,
           speed: data.speed,
           timestamp: data.timestamp,
-          trail: [...(prev[data.tour_id]?.trail || []), [data.latitude, data.longitude]].slice(-100),
+          trail: [...(prev[tourKey]?.trail || []), [data.latitude, data.longitude]].slice(-100),
         },
       }));
     });
 
-    socket.on('connect_error', () => {
-      console.log('Socket connection error');
+    socket.on('connect_error', (err) => {
+      console.warn('[LiveVehicles] Socket connection error:', err?.message);
     });
   };
 

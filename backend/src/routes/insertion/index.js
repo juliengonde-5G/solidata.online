@@ -44,7 +44,16 @@ const { authenticate, authorize } = require('../../middleware/auth');
         UNIQUE(employee_id)
       )
     `);
+    // Garde-fou : identifiants SQL uniquement (a-z, A-Z, 0-9, _) pour col,
+    // et liste blanche de motifs pour `type` (les migrations internes sont
+    // contrôlées, mais on valide par sécurité en profondeur).
+    const SAFE_IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+    const SAFE_TYPE = /^[A-Z0-9_() ,'=<>+-]+$/i;
     const addCol = async (col, type) => {
+      if (!SAFE_IDENT.test(col) || !SAFE_TYPE.test(type)) {
+        console.error('[INSERTION] Migration rejetée (identifiant invalide):', col, type);
+        return;
+      }
       try { await pool.query(`ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (err) { console.warn('[INSERTION] Migration col:', err.message); }
     };
     await addCol('frein_mobilite_causes', 'TEXT');
@@ -106,6 +115,10 @@ const { authenticate, authorize } = require('../../middleware/auth');
     `);
 
     const addMsCol = async (col, type) => {
+      if (!SAFE_IDENT.test(col) || !SAFE_TYPE.test(type)) {
+        console.error('[INSERTION] Migration ms rejetée (identifiant invalide):', col, type);
+        return;
+      }
       try { await pool.query(`ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (err) { console.warn('[INSERTION] Migration ms col:', err.message); }
     };
     await addMsCol('frein_numerique', 'INTEGER CHECK (frein_numerique BETWEEN 1 AND 5)');

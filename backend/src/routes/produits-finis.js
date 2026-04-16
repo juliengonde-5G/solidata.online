@@ -11,10 +11,18 @@ router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 router.get('/', async (req, res) => {
   try {
     const { gamme, categorie, date_from, date_to, limit: lim } = req.query;
-    let query = `SELECT pf.*, e.nom as exutoire_nom, po.nom as poste_nom
+    // Fix bug O2 : JOIN sur produits_catalogue pour fournir `produit_nom`
+    // et `is_shipped` (fix bug O10, toujours vide auparavant).
+    let query = `SELECT pf.*,
+         e.nom as exutoire_nom,
+         po.nom as poste_nom,
+         pc.nom as produit_nom,
+         (pf.date_sortie IS NOT NULL) as is_shipped
        FROM produits_finis pf
        LEFT JOIN exutoires e ON pf.exutoire_id = e.id
-       LEFT JOIN postes_operation po ON pf.poste_id = po.id WHERE 1=1`;
+       LEFT JOIN postes_operation po ON pf.poste_id = po.id
+       LEFT JOIN produits_catalogue pc ON pf.catalogue_id = pc.id
+       WHERE 1=1`;
     const params = [];
 
     if (gamme) { params.push(gamme); query += ` AND pf.gamme = $${params.length}`; }

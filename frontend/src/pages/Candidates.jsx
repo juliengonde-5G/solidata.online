@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Users, Inbox, Briefcase, Award, FileText } from 'lucide-react';
 import Layout from '../components/Layout';
-import { Modal } from '../components';
+import { Modal, KanbanBoard } from '../components';
 import api from '../services/api';
 
 const STATUSES = ['received', 'interview', 'hired', 'rejected'];
@@ -18,6 +19,14 @@ const STATUS_COLORS = {
   interview:   { bg: 'bg-purple-50', border: 'border-purple-200', drop: 'bg-purple-100 border-purple-400', badge: 'bg-purple-500' },
   hired:       { bg: 'bg-green-50',  border: 'border-green-200',  drop: 'bg-green-100 border-green-400',   badge: 'bg-green-500' },
   rejected:    { bg: 'bg-red-50',    border: 'border-red-200',    drop: 'bg-red-100 border-red-400',       badge: 'bg-red-500' },
+};
+
+// Accents utilisés par le composant KanbanBoard pour le point de tête de colonne
+const STATUS_DOT = {
+  received: 'bg-blue-500',
+  interview: 'bg-purple-500',
+  hired: 'bg-emerald-500',
+  rejected: 'bg-rose-500',
 };
 
 // Onglets visibles selon le statut du candidat
@@ -245,90 +254,181 @@ export default function Candidates() {
   const onDragLeaveCol = (e, s) => { if (e.currentTarget.contains(e.relatedTarget)) return; if (dragOver === s) setDragOver(null); };
   const onDropCol = (e, s) => { e.preventDefault(); setDragOver(null); const id = parseInt(e.dataTransfer.getData('text/plain')); if (id) moveCandidate(id, s); setDraggedId(null); };
 
+  // Recherche locale et filtre de vue (sidebar)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeView, setActiveView] = useState('all');
+  const [activePosition, setActivePosition] = useState('all');
+
+  const filteredKanban = useMemo(() => {
+    if (!kanban) return null;
+    const matchesSearch = (c) => {
+      if (!searchQuery) return true;
+      const q = searchQuery.toLowerCase();
+      return (
+        `${c.first_name || ''} ${c.last_name || ''}`.toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.phone || '').toLowerCase().includes(q)
+      );
+    };
+    const matchesView = (c) => {
+      if (activeView === 'all') return true;
+      if (activeView === 'withCV') return !!c.cv_file_path;
+      if (activeView === 'withPCM') return !!c.pcm_completed || !!c.pcm_type;
+      if (activeView === 'thisMonth') {
+        if (!c.created_at) return false;
+        const d = new Date(c.created_at);
+        const now = new Date();
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      }
+      return true;
+    };
+    const matchesPosition = (c) => {
+      if (activePosition === 'all') return true;
+      return String(c.position_id || '') === String(activePosition);
+    };
+    const out = {};
+    for (const s of STATUSES) {
+      out[s] = (kanban[s] || []).filter((c) => matchesSearch(c) && matchesView(c) && matchesPosition(c));
+    }
+    return out;
+  }, [kanban, searchQuery, activeView, activePosition]);
+
   if (loading) return <Layout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" /></div></Layout>;
+
+  // Construction des KPIs
+  const kpiList = [
+    { key: 'total', label: 'Total candidats', value: stats?.total ?? 0, accent: 'slate',
+      delta: stats?.trend ? { direction: stats.trend > 0 ? 'up' : 'down', value: `${Math.abs(stats.trend)}%`, text: 'vs mois dernier' } : null },
+    { key: 'received', label: 'Reçus', value: stats?.byStatus?.received ?? 0, accent: 'blue' },
+    { key: 'interview', label: 'En entretien', value: stats?.byStatus?.interview ?? 0, accent: 'purple' },
+    { key: 'hired', label: 'Recrutés', value: stats?.byStatus?.hired ?? 0, accent: 'green' },
+  ];
+
+  // Sidebar gauche
+  const sidebar = {
+    views: {
+      title: 'Vues',
+      active: activeView,
+      onSelect: (k) => setActiveView(k),
+      items: [
+        { key: 'all', label: 'Tous les candidats', icon: Users, count: stats?.total ?? 0 },
+        { key: 'thisMonth', label: 'Ce mois', icon: Inbox, count: stats?.thisMonth ?? 0 },
+        { key: 'withPCM', label: 'Avec PCM', icon: Award, count: stats?.withPCM ?? 0 },
+        { key: 'withCV', label: 'Avec CV', icon: FileText },
+      ],
+    },
+    categories: positions.length > 0 ? {
+      title: 'Postes',
+      active: activePosition,
+      onSelect: (k) => setActivePosition(k),
+      items: [
+        { key: 'all', label: 'Tous les postes', icon: Briefcase },
+        ...positions.map((p) => ({ key: String(p.id), label: p.title, icon: Briefcase })),
+      ],
+    } : null,
+  };
+
+  // Colonnes du kanban
+  const columns = STATUSES.map((status) => ({
+    key: status,
+    label: STATUS_LABELS[status],
+    accent: STATUS_DOT[status],
+    onAdd: status === 'received' ? () => setShowAddModal(true) : null,
+  }));
+
+  // Rendu d'une carte candidat (format ticket)
+  const renderCandidateCard = (c) => (
+    <div>
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <span className="text-[10px] font-mono font-semibold text-slate-400 uppercase">
+          #{String(c.id).padStart(4, '0')}
+        </span>
+        <div className="flex items-center gap-1">
+          {c.cv_file_path && <FileText className="w-3.5 h-3.5 text-emerald-500" />}
+          {(c.pcm_completed || c.pcm_type) && <Award className="w-3.5 h-3.5 text-purple-500" />}
+        </div>
+      </div>
+      <p className="font-medium text-sm text-slate-800 leading-tight line-clamp-2">
+        {c.first_name || '?'} {c.last_name || '?'}
+      </p>
+      {(c.position_title || c.email) && (
+        <p className="text-[11px] text-slate-500 mt-1 truncate">
+          {c.position_title || c.email}
+        </p>
+      )}
+      <div className="flex items-center justify-between mt-3">
+        <div className="flex items-center gap-1.5">
+          <span className="w-6 h-6 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center text-[10px] font-semibold text-slate-600">
+            {(c.first_name?.[0] || '?')}{(c.last_name?.[0] || '')}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1 justify-end">
+          {c.has_permis_b && <Tag text="B" c="blue" />}
+          {c.has_caces && <Tag text="CACES" c="purple" />}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <Layout>
-      <div className="p-4 lg:p-6 h-full flex flex-col">
-        {/* Header */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-4 gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Candidats</h1>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {stats && (
-              <div className="flex gap-2 mr-2">
-                <Pill label="Total" value={stats.total} color="gray" />
-                <Pill label="Ce mois" value={stats.thisMonth} color="blue" />
-                <Pill label="PCM" value={stats.withPCM} color="purple" />
-                <Pill label="Recrutés" value={stats.byStatus?.hired || 0} color="green" />
+      <KanbanBoard
+        title="Recrutement"
+        subtitle="Pipeline des candidatures"
+        headerActions={
+          <>
+            <button onClick={() => setShowPositionModal(true)} className="text-sm border border-slate-200 bg-white text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-50 transition">
+              Postes ({positions.length})
+            </button>
+            <button onClick={() => setShowAddModal(true)} className="btn-primary text-sm">
+              + Candidat
+            </button>
+          </>
+        }
+        kpis={kpiList}
+        sidebar={sidebar}
+        search={{
+          value: searchQuery,
+          onChange: setSearchQuery,
+          placeholder: 'Rechercher par nom, email, téléphone…',
+        }}
+        columns={columns}
+        itemsByColumn={filteredKanban || {}}
+        renderCard={renderCandidateCard}
+        onCardClick={(item) => loadDetails(item)}
+        dnd={{
+          draggedId,
+          dragOverColumn: dragOver,
+          onDragStart,
+          onDragEnd,
+          onDragOverCol,
+          onDragLeaveCol,
+          onDropCol,
+        }}
+        extraTopBar={
+          <div
+            className={`border-2 border-dashed rounded-xl p-3 text-center transition-all cursor-pointer ${cvDragActive ? 'border-primary bg-primary/10' : 'border-slate-200 bg-slate-50 hover:border-primary/40'}`}
+            onDragOver={(e) => { e.preventDefault(); setCvDragActive(true); }}
+            onDragLeave={() => setCvDragActive(false)}
+            onDrop={(e) => { e.preventDefault(); setCvDragActive(false); handleCVUpload(e.dataTransfer.files[0]); }}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" className="hidden" onChange={(e) => handleCVUpload(e.target.files[0])} />
+            {uploading
+              ? <div className="flex items-center justify-center gap-2 text-primary"><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" /><span className="text-xs font-medium">Analyse du CV en cours…</span></div>
+              : <p className="text-xs text-slate-500"><span className="font-medium text-primary">Glissez un CV ici</span> ou cliquez pour importer (PDF, Word, Image)</p>
+            }
+            {uploadMsg && (
+              <div className={`mt-2 px-3 py-1.5 rounded-lg text-[11px] ${uploadMsg.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                {uploadMsg.text}
               </div>
             )}
-            <button onClick={() => setShowPositionModal(true)} className="text-sm border border-gray-300 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-50">Postes ({positions.length})</button>
-            <button onClick={() => setShowAddModal(true)} className="btn-primary text-sm">+ Candidat</button>
           </div>
-        </div>
-
-        {/* CV Drop Zone */}
-        <div
-          className={`mb-4 border-2 border-dashed rounded-xl p-4 text-center transition-all cursor-pointer ${cvDragActive ? 'border-primary bg-primary/10' : 'border-gray-300 bg-gray-50 hover:border-primary/50'}`}
-          onDragOver={(e) => { e.preventDefault(); setCvDragActive(true); }}
-          onDragLeave={() => setCvDragActive(false)}
-          onDrop={(e) => { e.preventDefault(); setCvDragActive(false); handleCVUpload(e.dataTransfer.files[0]); }}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" className="hidden" onChange={(e) => handleCVUpload(e.target.files[0])} />
-          {uploading
-            ? <div className="flex items-center justify-center gap-2 text-primary"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary" /><span className="text-sm font-medium">Analyse du CV en cours...</span></div>
-            : <p className="text-sm text-gray-500"><span className="font-medium text-primary">Glissez un CV ici</span> ou cliquez pour importer (PDF, Word, Image)</p>
-          }
-        </div>
-
-        {/* Upload feedback */}
-        {uploadMsg && (
-          <div className={`mb-3 px-4 py-2 rounded-lg text-sm flex items-center justify-between ${uploadMsg.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-            <span>{uploadMsg.text}</span>
-            <button onClick={() => setUploadMsg(null)} className="ml-3 text-lg leading-none opacity-60 hover:opacity-100">&times;</button>
-          </div>
-        )}
-
-        {/* Kanban */}
-        <div className="flex gap-3 overflow-x-auto flex-1 pb-2">
-          {STATUSES.map(status => {
-            const col = STATUS_COLORS[status];
-            const items = kanban?.[status] || [];
-            return (
-              <div key={status}
-                className={`flex-shrink-0 w-64 lg:w-72 rounded-xl border-2 p-3 transition-all flex flex-col ${dragOver === status ? col.drop : `${col.bg} ${col.border}`}`}
-                onDragOver={(e) => onDragOverCol(e, status)} onDragLeave={(e) => onDragLeaveCol(e, status)} onDrop={(e) => onDropCol(e, status)}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${col.badge}`} />
-                    <h3 className="font-semibold text-sm">{STATUS_LABELS[status]}</h3>
-                  </div>
-                  <span className="bg-white/80 rounded-full px-2 py-0.5 text-xs font-bold text-gray-600 shadow-sm">{items.length}</span>
-                </div>
-                <div className="space-y-2 flex-1 overflow-y-auto max-h-[60vh]">
-                  {items.map(c => (
-                    <div key={c.id} draggable onDragStart={(e) => onDragStart(e, c.id)} onDragEnd={onDragEnd} onClick={() => loadDetails(c)}
-                      className={`bg-white rounded-lg p-3 shadow-sm cursor-grab hover:shadow-md transition border active:cursor-grabbing ${draggedId === c.id ? 'opacity-30 scale-95' : ''}`}>
-                      <p className="font-medium text-sm text-slate-800 truncate">{c.first_name || '?'} {c.last_name || '?'}</p>
-                      {c.email && <p className="text-xs text-gray-500 mt-0.5 truncate">{c.email}</p>}
-                      {c.phone && <p className="text-xs text-gray-400">{c.phone}</p>}
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {c.has_permis_b && <Tag text="Permis B" c="blue" />}
-                        {c.has_caces && <Tag text="CACES" c="purple" />}
-                        {c.cv_file_path && <Tag text="CV" c="green" />}
-                      </div>
-                    </div>
-                  ))}
-                  {items.length === 0 && <div className="text-center py-8 text-gray-400 text-xs">Aucun candidat</div>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        }
+      />
+      <div className="hidden">{/* placeholder pour conserver la structure — modals ci-dessous */}</div>
+      <div className="p-0">
+        {/* Modals & detail panel (conservés à l'identique) */}
 
         {/* Detail Panel */}
         {selected && (
@@ -430,11 +530,6 @@ export default function Candidates() {
 function Tag({ text, c }) {
   const m = { blue: 'bg-blue-50 text-blue-600', purple: 'bg-purple-50 text-purple-600', green: 'bg-green-50 text-green-600', gray: 'bg-gray-100 text-gray-600', orange: 'bg-orange-50 text-orange-600' };
   return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${m[c] || m.gray}`}>{text}</span>;
-}
-
-function Pill({ label, value, color }) {
-  const m = { gray: 'bg-gray-100 text-gray-700', blue: 'bg-blue-100 text-blue-700', purple: 'bg-purple-100 text-purple-700', green: 'bg-green-100 text-green-700' };
-  return <div className={`px-3 py-1 rounded-full text-xs font-medium ${m[color]}`}>{label}: <strong>{value}</strong></div>;
 }
 
 function InfoView({ s, skills, positions, onMove, onConvert }) {

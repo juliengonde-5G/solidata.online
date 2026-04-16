@@ -59,27 +59,32 @@ router.get('/kpis', async (req, res) => {
       ),
 
       // === PRODUCTION ===
+      // Fix bug O1 : la colonne `kg_entree` n'existe pas dans
+      // production_daily. Le schéma réel est :
+      //   - entree_ligne_kg  (kg bruts entrés sur la ligne de tri)
+      //   - total_jour_t     (tonnes triées — sortie valorisée)
+      // Les KPIs "triés" doivent utiliser total_jour_t × 1000 (conversion).
       // Kg triés ce mois (sorties tri)
       pool.query(
-        `SELECT COALESCE(SUM(kg_entree), 0) as total
+        `SELECT COALESCE(SUM(total_jour_t) * 1000, 0) as total
          FROM production_daily WHERE date >= $1`,
         [monthStart]
       ),
       // Kg triés aujourd'hui
       pool.query(
-        `SELECT COALESCE(SUM(kg_entree), 0) as total
+        `SELECT COALESCE(SUM(total_jour_t) * 1000, 0) as total
          FROM production_daily WHERE date = $1`,
         [today]
       ),
-      // Total trié ce mois (pour taux valorisation — sorties valorisées)
+      // Total trié ce mois (pour taux valorisation — sorties valorisées, tonnes)
       pool.query(
         `SELECT COALESCE(SUM(total_jour_t), 0) as total
          FROM production_daily WHERE date >= $1`,
         [monthStart]
       ),
-      // Total entré ce mois (pour taux valorisation — entrées brutes)
+      // Total entré ce mois (pour taux valorisation — entrées brutes en kg)
       pool.query(
-        `SELECT COALESCE(SUM(kg_entree), 0) as total
+        `SELECT COALESCE(SUM(entree_ligne_kg), 0) as total
          FROM production_daily WHERE date >= $1`,
         [monthStart]
       ),
@@ -279,10 +284,13 @@ router.get('/kpis', async (req, res) => {
       );
       trendCollecte = trendC.rows.map(r => r.val);
 
+      // Fix bug O5 : la sparkline "production" doit refléter les kg
+      // réellement triés (production_daily.total_jour_t), pas les mouvements
+      // de stock (qui incluent expéditions, retours, etc.).
       const trendP = await pool.query(
-        `SELECT date, COALESCE(SUM(poids_kg), 0)::int as val
-         FROM stock_movements WHERE type = 'sortie' AND date >= CURRENT_DATE - INTERVAL '7 days'
-         GROUP BY date ORDER BY date`
+        `SELECT date, COALESCE(total_jour_t * 1000, 0)::int as val
+         FROM production_daily WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+         ORDER BY date`
       );
       trendProduction = trendP.rows.map(r => r.val);
     } catch (e) { /* trends optionnels */ }

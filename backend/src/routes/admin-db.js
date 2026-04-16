@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
@@ -8,6 +8,24 @@ const { authenticate, authorize } = require('../middleware/auth');
 
 router.use(authenticate);
 router.use(authorize('ADMIN'));
+
+// Whitelist stricte pour les noms de fichiers de sauvegarde (évite path
+// traversal et caractères shell inattendus même si `path.basename` est
+// déjà utilisé en amont).
+const SAFE_BACKUP_NAME = /^[A-Za-z0-9._-]+$/;
+
+// Construit l'environnement pg_dump / psql à partir des variables dédiées
+// pour éviter l'interpolation de credentials dans une ligne de commande shell.
+function buildPgEnv() {
+  return {
+    ...process.env,
+    PGHOST: process.env.DB_HOST || 'localhost',
+    PGPORT: process.env.DB_PORT || '5432',
+    PGUSER: process.env.DB_USER || 'postgres',
+    PGPASSWORD: process.env.DB_PASSWORD || '',
+    PGDATABASE: process.env.DB_NAME || 'solidata',
+  };
+}
 
 // ══════════════════════════════════════════
 // INFORMATIONS BASE DE DONNÉES
@@ -69,9 +87,12 @@ router.post('/backup', async (req, res) => {
     const filename = `solidata_backup_${timestamp}.sql`;
     const filepath = path.join(backupDir, filename);
 
-    const dbUrl = process.env.DATABASE_URL || `postgresql://${process.env.DB_USER || 'postgres'}:${process.env.DB_PASSWORD || ''}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}/${process.env.DB_NAME || 'solidata'}`;
-
-    execSync(`pg_dump "${dbUrl}" --no-owner --no-acl > "${filepath}"`, { timeout: 120000 });
+    // execFileSync évite l'interprétation shell. pg_dump écrit directement
+    // dans le fichier via l'option -f, aucune redirection shell nécessaire.
+    execFileSync('pg_dump', ['--no-owner', '--no-acl', '-f', filepath], {
+      env: buildPgEnv(),
+      timeout: 120000,
+    });
 
     const stats = fs.statSync(filepath);
 
@@ -119,13 +140,18 @@ router.post('/restore', async (req, res) => {
   try {
     const { filename } = req.body;
     if (!filename) return res.status(400).json({ error: 'Nom de fichier requis' });
+    const safeName = path.basename(String(filename));
+    if (!SAFE_BACKUP_NAME.test(safeName)) {
+      return res.status(400).json({ error: 'Nom de fichier invalide' });
+    }
 
-    const filepath = path.join(__dirname, '..', '..', 'backups', path.basename(filename));
+    const filepath = path.join(__dirname, '..', '..', 'backups', safeName);
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Sauvegarde non trouvée' });
 
-    const dbUrl = process.env.DATABASE_URL || `postgresql://${process.env.DB_USER || 'postgres'}:${process.env.DB_PASSWORD || ''}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}/${process.env.DB_NAME || 'solidata'}`;
-
-    execSync(`psql "${dbUrl}" < "${filepath}"`, { timeout: 300000 });
+    execFileSync('psql', ['-f', filepath], {
+      env: buildPgEnv(),
+      timeout: 300000,
+    });
 
     await pool.query(
       'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
@@ -142,7 +168,11 @@ router.post('/restore', async (req, res) => {
 // DELETE /api/admin-db/backups/:filename — Supprimer une sauvegarde
 router.delete('/backups/:filename', async (req, res) => {
   try {
-    const filepath = path.join(__dirname, '..', '..', 'backups', path.basename(req.params.filename));
+    const safeName = path.basename(String(req.params.filename));
+    if (!SAFE_BACKUP_NAME.test(safeName)) {
+      return res.status(400).json({ error: 'Nom de fichier invalide' });
+    }
+    const filepath = path.join(__dirname, '..', '..', 'backups', safeName);
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Fichier non trouvé' });
     fs.unlinkSync(filepath);
     res.json({ message: 'Sauvegarde supprimée' });

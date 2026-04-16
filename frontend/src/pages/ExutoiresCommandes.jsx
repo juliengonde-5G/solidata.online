@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Plus, ShoppingCart } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  ShoppingCart, Inbox, Package, Truck, CheckCircle2,
+  ArrowUpRight, Calendar, Tag as TagIcon, Building2,
+} from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
+import { LoadingSpinner, Modal, KanbanBoard, StatusBadge } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -20,6 +23,45 @@ const STATUTS = {
   annulee: { label: 'Annulée', color: 'bg-red-100 text-red-700' },
 };
 const FREQUENCES = { unique: 'Unique', hebdomadaire: 'Hebdomadaire', bi_mensuel: 'Bi-mensuel', mensuel: 'Mensuel' };
+
+// Regroupement des 9 statuts de workflow en 4 colonnes kanban
+// (mirror du visuel ticket board Open/Pending/Resolved/Closed).
+const KANBAN_COLUMNS = [
+  {
+    key: 'nouveau',
+    label: 'Nouvelles',
+    icon: Inbox,
+    accent: 'bg-slate-400',
+    statuts: ['en_attente'],
+  },
+  {
+    key: 'en_cours',
+    label: 'En préparation',
+    icon: Package,
+    accent: 'bg-amber-500',
+    statuts: ['confirmee', 'en_preparation', 'chargee'],
+  },
+  {
+    key: 'expedie',
+    label: 'Expédiées',
+    icon: Truck,
+    accent: 'bg-indigo-500',
+    statuts: ['expediee', 'pesee_recue'],
+  },
+  {
+    key: 'termine',
+    label: 'Terminées',
+    icon: CheckCircle2,
+    accent: 'bg-emerald-500',
+    statuts: ['facturee', 'cloturee'],
+  },
+];
+
+// Index inversé : statut → colonne kanban
+const STATUT_TO_COLUMN = KANBAN_COLUMNS.reduce((acc, col) => {
+  col.statuts.forEach((s) => { acc[s] = col.key; });
+  return acc;
+}, {});
 
 const EMPTY_FORM = {
   client_id: '',
@@ -208,185 +250,163 @@ export default function ExutoiresCommandes() {
   const formatPrice = (v) => v != null ? parseFloat(v).toFixed(2) : '—';
   const formatTonnage = (v) => v != null ? parseFloat(v).toFixed(3) : '—';
 
+  // Regroupement des commandes filtrées par colonne kanban
+  const itemsByColumn = useMemo(() => {
+    const out = Object.fromEntries(KANBAN_COLUMNS.map((c) => [c.key, []]));
+    out._annulees = [];
+    for (const cmd of commandes) {
+      if (cmd.statut === 'annulee') { out._annulees.push(cmd); continue; }
+      const colKey = STATUT_TO_COLUMN[cmd.statut];
+      if (colKey && out[colKey]) out[colKey].push(cmd);
+    }
+    return out;
+  }, [commandes]);
+
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des commandes..." /></Layout>;
+
+  // KPIs en haut du kanban
+  const totalActive = KANBAN_COLUMNS.reduce((acc, c) => acc + (itemsByColumn[c.key]?.length || 0), 0);
+  const kpiList = [
+    {
+      key: 'total',
+      label: 'Commandes actives',
+      value: stats.actives || totalActive,
+      accent: 'slate',
+      delta: stats.actives_delta != null ? {
+        direction: stats.actives_delta >= 0 ? 'up' : 'down',
+        value: `${Math.abs(stats.actives_delta)}%`,
+        text: 'vs mois dernier',
+      } : null,
+    },
+    {
+      key: 'tonnage',
+      label: 'Tonnage prévu',
+      value: formatTonnage(stats.tonnage_prevu),
+      unit: 't',
+      accent: 'blue',
+    },
+    {
+      key: 'ca',
+      label: 'CA prévisionnel',
+      value: formatPrice(stats.ca_previsionnel),
+      unit: '€',
+      accent: 'green',
+    },
+    {
+      key: 'en_attente',
+      label: 'En attente',
+      value: stats.en_attente || (itemsByColumn.nouveau?.length ?? 0),
+      accent: 'orange',
+    },
+  ];
+
+  // Sidebar : vue par statut réel + filtres type de produit
+  const sidebar = {
+    views: {
+      title: 'Vues',
+      active: filterStatut || 'all',
+      onSelect: (k) => setFilterStatut(k === 'all' ? '' : k),
+      items: [
+        { key: 'all', label: 'Toutes', icon: ShoppingCart, count: totalActive },
+        ...Object.entries(STATUTS).map(([k, v]) => ({
+          key: k,
+          label: v.label,
+          count: commandes.filter((c) => c.statut === k).length,
+        })),
+      ],
+    },
+    categories: {
+      title: 'Type de produit',
+      active: filterType || 'all',
+      onSelect: (k) => setFilterType(k === 'all' ? '' : k),
+      items: [
+        { key: 'all', label: 'Tous les types', icon: TagIcon },
+        ...Object.entries(TYPES_PRODUIT).map(([k, v]) => ({ key: k, label: v, icon: TagIcon })),
+      ],
+    },
+  };
+
+  // Colonnes passées à KanbanBoard
+  const boardColumns = KANBAN_COLUMNS.map((c) => ({
+    key: c.key,
+    label: c.label,
+    accent: c.accent,
+    onAdd: c.key === 'nouveau' ? () => openCreate() : null,
+  }));
+
+  // Rendu d'une carte de commande (format ticket board)
+  const renderCommandeCard = (cmd) => {
+    const statusInfo = STATUTS[cmd.statut] || {};
+    const clientName = cmd.client_nom || getClientName(cmd.client_id);
+    const types = Array.isArray(cmd.type_produit) ? cmd.type_produit : (cmd.type_produit ? [cmd.type_produit] : []);
+    const statusColorClass = statusInfo.color || 'bg-slate-100 text-slate-700';
+    return (
+      <div>
+        <div className="flex items-start justify-between gap-2 mb-1.5">
+          <span className="text-[10px] font-mono font-semibold text-slate-400 uppercase">
+            {cmd.reference || `#${String(cmd.id).padStart(4, '0')}`}
+          </span>
+          <div className="flex items-center gap-1 text-slate-400">
+            <Calendar className="w-3 h-3" />
+            <span className="text-[10px]">{formatDate(cmd.date_commande)}</span>
+          </div>
+        </div>
+        <p className="font-medium text-sm text-slate-800 leading-tight line-clamp-2">
+          <Building2 className="w-3.5 h-3.5 text-slate-400 inline mr-1 -mt-0.5" />
+          {clientName}
+        </p>
+        {types.length > 0 && (
+          <p className="text-[11px] text-slate-500 mt-1 truncate">
+            {types.map((t) => TYPES_PRODUIT[t] || t).join(' · ')}
+          </p>
+        )}
+        <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
+          <div className="flex flex-col">
+            <span className="text-[10px] text-slate-400 uppercase">Tonnage</span>
+            <span className="text-xs font-semibold text-slate-700 font-mono">
+              {formatTonnage(cmd.tonnage_prevu)}<span className="text-slate-400 font-normal"> t</span>
+            </span>
+          </div>
+          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusColorClass}`}>
+            {statusInfo.label || cmd.statut}
+          </span>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <Layout>
-      <div className="p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Commandes Logistiques</h1>
-            <p className="text-gray-500">Gestion des commandes et expéditions</p>
-          </div>
-          <button onClick={openCreate} className="btn-primary text-sm">
-            + Nouvelle commande
+      <KanbanBoard
+        title="Commandes Logistiques"
+        subtitle="Pipeline des commandes clients → expéditions"
+        headerActions={
+          <button onClick={openCreate} className="btn-primary text-sm flex items-center gap-1.5">
+            <ArrowUpRight className="w-4 h-4" />
+            Nouvelle commande
           </button>
-        </div>
-
-        {/* Stats bar */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="card-modern p-4">
-            <p className="text-xs text-gray-500 font-medium">Commandes actives</p>
-            <p className="text-2xl font-bold text-slate-800">{stats.actives || 0}</p>
-          </div>
-          <div className="card-modern p-4">
-            <p className="text-xs text-gray-500 font-medium">Tonnage prévu</p>
-            <p className="text-2xl font-bold text-blue-600">{formatTonnage(stats.tonnage_prevu)} <span className="text-sm font-normal text-gray-400">t</span></p>
-          </div>
-          <div className="card-modern p-4">
-            <p className="text-xs text-gray-500 font-medium">CA prévisionnel</p>
-            <p className="text-2xl font-bold text-green-600">{formatPrice(stats.ca_previsionnel)} <span className="text-sm font-normal text-gray-400">€</span></p>
-          </div>
-          <div className="card-modern p-4">
-            <p className="text-xs text-gray-500 font-medium">En attente de traitement</p>
-            <p className="text-2xl font-bold text-orange-600">{stats.en_attente || 0}</p>
-          </div>
-        </div>
-
-        {/* Pipeline / Flow diagram */}
-        <div className="card-modern p-4 mb-6 overflow-x-auto">
-          <h3 className="text-sm font-semibold text-gray-500 mb-3">Flux des commandes</h3>
-          <div className="flex items-center gap-1 min-w-[700px]">
-            {[
-              { key: 'en_attente', icon: '📋' },
-              { key: 'confirmee', icon: '✅' },
-              { key: 'en_preparation', icon: '📦' },
-              { key: 'chargee', icon: '🏗️' },
-              { key: 'expediee', icon: '🚛' },
-              { key: 'pesee_recue', icon: '⚖️' },
-              { key: 'facturee', icon: '💶' },
-              { key: 'cloturee', icon: '🔒' },
-            ].map((step, i, arr) => {
-              const count = commandes.filter(c => c.statut === step.key).length;
-              const statusInfo = STATUTS[step.key];
-              const hasItems = count > 0;
-              return (
-                <div key={step.key} className="flex items-center">
-                  <button
-                    onClick={() => setFilterStatut(filterStatut === step.key ? '' : step.key)}
-                    className={`flex flex-col items-center px-3 py-2 rounded-lg transition-all min-w-[80px] ${
-                      filterStatut === step.key
-                        ? 'ring-2 ring-primary bg-primary/10'
-                        : hasItems ? 'hover:bg-gray-50' : 'opacity-40'
-                    }`}
-                  >
-                    <span className="text-lg mb-1">{step.icon}</span>
-                    <span className={`text-lg font-bold ${hasItems ? 'text-slate-800' : 'text-gray-300'}`}>{count}</span>
-                    <span className="text-[10px] text-gray-500 leading-tight text-center">{statusInfo.label}</span>
-                  </button>
-                  {i < arr.length - 1 && (
-                    <div className={`text-gray-300 mx-0.5 ${count > 0 ? 'text-primary' : ''}`}>→</div>
-                  )}
-                </div>
-              );
-            })}
-            {/* Annulées aside */}
-            <div className="ml-4 border-l pl-4">
-              <button
-                onClick={() => setFilterStatut(filterStatut === 'annulee' ? '' : 'annulee')}
-                className={`flex flex-col items-center px-3 py-2 rounded-lg min-w-[60px] ${
-                  filterStatut === 'annulee' ? 'ring-2 ring-red-400 bg-red-50' : 'hover:bg-gray-50'
-                }`}
-              >
-                <span className="text-lg mb-1">❌</span>
-                <span className="text-lg font-bold text-red-500">{commandes.filter(c => c.statut === 'annulee').length}</span>
-                <span className="text-[10px] text-gray-500">Annulées</span>
-              </button>
+        }
+        kpis={kpiList}
+        sidebar={sidebar}
+        search={{
+          value: filterSearch,
+          onChange: setFilterSearch,
+          placeholder: 'Rechercher par client, référence…',
+        }}
+        columns={boardColumns}
+        itemsByColumn={itemsByColumn}
+        renderCard={renderCommandeCard}
+        onCardClick={(cmd) => openDetail(cmd)}
+        emptyState={
+          (itemsByColumn._annulees?.length || 0) > 0 ? (
+            <div className="text-xs text-slate-500 text-center">
+              {itemsByColumn._annulees.length} commande(s) annulée(s) — filtrable via la sidebar.
             </div>
-          </div>
-        </div>
-
-        {/* Filters row */}
-        <div className="flex flex-wrap gap-3 mb-4">
-          <select
-            value={filterStatut}
-            onChange={e => setFilterStatut(e.target.value)}
-            className="select-modern w-auto"
-          >
-            <option value="">Tous les statuts</option>
-            {Object.entries(STATUTS).map(([k, v]) => (
-              <option key={k} value={k}>{v.label}</option>
-            ))}
-          </select>
-          <select
-            value={filterType}
-            onChange={e => setFilterType(e.target.value)}
-            className="select-modern w-auto"
-          >
-            <option value="">Tous les types</option>
-            {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-          <input
-            type="date"
-            value={filterDateFrom}
-            onChange={e => setFilterDateFrom(e.target.value)}
-            className="input-modern w-auto"
-            placeholder="Date début"
-          />
-          <input
-            type="date"
-            value={filterDateTo}
-            onChange={e => setFilterDateTo(e.target.value)}
-            className="input-modern w-auto"
-            placeholder="Date fin"
-          />
-          <input
-            placeholder="Rechercher par client..."
-            value={filterSearch}
-            onChange={e => setFilterSearch(e.target.value)}
-            className="input-modern w-64"
-          />
-        </div>
-
-        {/* Orders table */}
-        {(() => {
-          const commandeColumns = [
-            { key: 'reference', label: 'Référence', sortable: true, render: (cmd) => (
-              <span className="font-medium font-mono">{cmd.reference || `#${cmd.id}`}</span>
-            )},
-            { key: 'date_commande', label: 'Date', sortable: true, render: (cmd) => formatDate(cmd.date_commande) },
-            { key: 'client_nom', label: 'Client', sortable: true, render: (cmd) => cmd.client_nom || getClientName(cmd.client_id) },
-            { key: 'type_produit', label: 'Type', render: (cmd) => (
-              Array.isArray(cmd.type_produit)
-                ? cmd.type_produit.map(t => TYPES_PRODUIT[t] || t).join(', ')
-                : TYPES_PRODUIT[cmd.type_produit] || cmd.type_produit || '—'
-            )},
-            { key: 'tonnage_prevu', label: 'Tonnage (t)', align: 'right', sortable: true, render: (cmd) => (
-              <span className="font-mono">{formatTonnage(cmd.tonnage_prevu)}</span>
-            )},
-            { key: 'prix_tonne', label: 'Prix (€/t)', align: 'right', sortable: true, render: (cmd) => (
-              <span className="font-mono">{formatPrice(cmd.prix_tonne)}</span>
-            )},
-            { key: 'frequence', label: 'Fréquence', render: (cmd) => FREQUENCES[cmd.frequence] || cmd.frequence || '—' },
-            { key: 'statut', label: 'Statut', render: (cmd) => (
-              <StatusBadge status={cmd.statut} size="sm" label={STATUTS[cmd.statut]?.label} />
-            )},
-            { key: 'actions', label: 'Actions', render: (cmd) => {
-              const canEdit = ['en_attente', 'confirmee'].includes(cmd.statut);
-              const canCancel = !['cloturee', 'annulee'].includes(cmd.statut);
-              return (
-                <div className="flex gap-2">
-                  <button onClick={() => openDetail(cmd)} className="text-primary hover:underline text-sm font-medium">Voir</button>
-                  {canEdit && <button onClick={() => openEdit(cmd)} className="text-blue-600 hover:underline text-sm font-medium">Modifier</button>}
-                  {canCancel && <button onClick={() => handleCancel(cmd)} className="text-red-500 hover:underline text-sm font-medium">Annuler</button>}
-                </div>
-              );
-            }},
-          ];
-          return (
-            <DataTable
-              columns={commandeColumns}
-              data={commandes}
-              loading={false}
-              emptyIcon={ShoppingCart}
-              emptyMessage="Aucune commande logistique"
-            />
-          );
-        })()}
-
+          ) : null
+        }
+      />
+      <div className="p-0">
+        {/* Modals conservés à l'identique */}
         {/* Create/Edit modal form */}
         <Modal isOpen={showForm} onClose={() => { setShowForm(false); setEditing(null); }} title={editing ? 'Modifier la commande' : 'Nouvelle commande logistique'} size="md">
           <form onSubmit={handleSubmit}>

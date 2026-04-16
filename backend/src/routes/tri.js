@@ -14,10 +14,15 @@ router.use(autoLogActivity('tri'));
 // GET /api/tri/chaines
 router.get('/chaines', async (req, res) => {
   try {
+    // Fix bug O4 : ajout du count `nb_postes` (attendu par
+    // frontend/src/pages/ChaineTri.jsx, sinon affichait "undefined").
     const result = await pool.query(`
-      SELECT ct.*, COUNT(ot.id) as nb_operations
+      SELECT ct.*,
+             COUNT(DISTINCT ot.id) as nb_operations,
+             COUNT(DISTINCT po.id) as nb_postes
       FROM chaines_tri ct
       LEFT JOIN operations_tri ot ON ot.chaine_id = ct.id
+      LEFT JOIN postes_operation po ON po.operation_id = ot.id
       GROUP BY ct.id ORDER BY ct.nom
     `);
     res.json(result.rows);

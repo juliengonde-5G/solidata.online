@@ -313,6 +313,24 @@ function getOptionLabelSimple(num, value) {
   return TEXT_SIMPLE.options[key] || TEXT_SIMPLE.options[value] || value;
 }
 
+// Mélange déterministe des options par question (Fisher-Yates + LCG seedé sur num).
+// Objectif : empêcher "Analyseur" d'être toujours en 1re position et éviter
+// qu'un utilisateur pressé qui clique la première option ne finisse systématiquement
+// sur le même type. L'ordre est stable pour une question donnée (réponse
+// reproductible) mais diffère entre questions.
+function shuffleOptionsDeterministic(questionNum, options) {
+  if (!Array.isArray(options) || options.length < 2) return options;
+  const arr = options.slice();
+  // LCG seedé sur questionNum (Numerical Recipes constants)
+  let seed = ((questionNum * 2654435761) >>> 0) || 1;
+  for (let i = arr.length - 1; i > 0; i--) {
+    seed = ((seed * 1103515245) + 12345) >>> 0;
+    const j = seed % (i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 // ══════════════════════════════════════════
 // QUESTIONNAIRE PCM (20 questions)
 // ══════════════════════════════════════════
@@ -485,85 +503,158 @@ const PCM_QUESTIONS = [
 ];
 
 // ══════════════════════════════════════════
-// SCORING PCM
+// SCORING PCM v2 — Kahler 2024
+// Corrections v1.3.3 :
+// - Suppression du biais "Analyseur par défaut" (tri stable V8 en cas d'égalité)
+// - Poids recalibrés selon la théorie PCM (perception=Base, stress=Phase)
+// - Tie-breakers multiples non biaisés : count, signal fort, rotation hashée
+// - Score de confiance pour chaque décision Base/Phase
+// - Détection RPS élargie (2 stress sur 3 minimum, plus tolérant)
 // ══════════════════════════════════════════
+const TYPE_KEYS = ['analyseur', 'perseverant', 'empathique', 'imagineur', 'energiseur', 'promoteur'];
+
+function emptyTypeScores() {
+  return { analyseur: 0, perseverant: 0, empathique: 0, imagineur: 0, energiseur: 0, promoteur: 0 };
+}
+
+// Hash déterministe sur les réponses, sert de clé de rotation pour casser
+// toute égalité résiduelle sans privilégier un type particulier.
+function computeTieSeed(answers) {
+  let h = 2166136261;
+  for (const a of answers) {
+    const v = (a.answer_value || '') + ':' + (a.question_number || 0);
+    for (let i = 0; i < v.length; i++) {
+      h ^= v.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+  }
+  return (h >>> 0) % TYPE_KEYS.length;
+}
+
+// Résout un type dominant avec tie-breakers hiérarchisés (sans biais Analyseur)
+function resolveDominantType(scoresMap, rawCounts, signalScores, tieSeed) {
+  const rotation = TYPE_KEYS.slice(tieSeed).concat(TYPE_KEYS.slice(0, tieSeed));
+  const entries = Object.entries(scoresMap);
+  entries.sort((a, b) => {
+    // 1. Score pondéré principal
+    if (Math.abs(b[1] - a[1]) > 0.0001) return b[1] - a[1];
+    // 2. Nombre brut de réponses pour ce type (plus discriminant qu'un poids)
+    const ca = rawCounts[a[0]] || 0;
+    const cb = rawCounts[b[0]] || 0;
+    if (cb !== ca) return cb - ca;
+    // 3. Score du signal fort (perception pour Base, stress pour Phase)
+    const sa = signalScores[a[0]] || 0;
+    const sb = signalScores[b[0]] || 0;
+    if (Math.abs(sb - sa) > 0.0001) return sb - sa;
+    // 4. Rotation hashée : empêche "analyseur" de gagner systématiquement
+    return rotation.indexOf(a[0]) - rotation.indexOf(b[0]);
+  });
+  return entries;
+}
+
+function computeConfidence(sortedEntries) {
+  if (!sortedEntries || sortedEntries.length < 2) return 0;
+  const top = sortedEntries[0][1];
+  const second = sortedEntries[1][1];
+  if (top <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round(((top - second) / top) * 100)));
+}
+
 function calculatePCMProfile(answers) {
-  const scores = { analyseur: 0, perseverant: 0, empathique: 0, imagineur: 0, energiseur: 0, promoteur: 0 };
-
-  // Poids par catégorie de question
+  // ─── 1. Poids recalibrés selon la théorie PCM ───
+  // Base (fondation immuable) : perception > points_forts > relation > communication
+  // Phase (état motivationnel) : stress > motivation > besoin > situation
   const weights = {
-    perception: 3,    // Questions 1-3 : poids fort (déterminent la Base)
-    points_forts: 2,  // Question 4
-    relation: 2,      // Question 5
-    motivation: 2.5,  // Questions 6-7, 9 : influencent la Phase
-    stress: 2.5,      // Questions 8, 10 : confirment la Phase
-    communication: 1.5, // Questions 11-13
-    besoin: 2,        // Questions 14-17
-    situation: 1.5,   // Questions 18-20
+    perception: 4,     // Questions 1-3 — signal Base le plus fort (comment on perçoit le monde)
+    points_forts: 3,   // Question 4   — confirmation Base via qualités
+    relation: 2,       // Question 5   — Base (canal de communication)
+    communication: 2,  // Questions 11-13 — Base (canal et zones d'inconfort)
+    motivation: 3,     // Questions 6, 9 — Phase (besoin psychologique courant)
+    stress: 4,         // Questions 7, 8, 10 — signal Phase le plus fort (driver/masque)
+    besoin: 3,         // Questions 14-17 — Phase (besoins à combler)
+    situation: 1.5,    // Questions 18-20 — confirmation contextuelle (mixte)
   };
 
+  const scores = emptyTypeScores();
+  const rawCounts = emptyTypeScores();
   const categoryScores = {
-    base: { analyseur: 0, perseverant: 0, empathique: 0, imagineur: 0, energiseur: 0, promoteur: 0 },
-    phase: { analyseur: 0, perseverant: 0, empathique: 0, imagineur: 0, energiseur: 0, promoteur: 0 },
+    base: emptyTypeScores(),
+    phase: emptyTypeScores(),
   };
+  // Signaux forts : perception pour la Base, stress pour la Phase
+  const perceptionSignal = emptyTypeScores();
+  const stressSignal = emptyTypeScores();
 
+  let validAnswers = 0;
   for (const answer of answers) {
     const question = PCM_QUESTIONS.find(q => q.num === answer.question_number);
     if (!question) continue;
+    const type = answer.answer_value;
+    if (scores[type] === undefined) continue; // valeur invalide → on ignore
+    validAnswers += 1;
 
     const weight = weights[question.category] || 1;
-    const type = answer.answer_value;
-    if (scores[type] !== undefined) {
-      scores[type] += weight;
+    scores[type] += weight;
+    rawCounts[type] += 1;
 
-      // Base = perception + points_forts + relation + communication
-      if (['perception', 'points_forts', 'relation', 'communication'].includes(question.category)) {
-        categoryScores.base[type] += weight;
-      }
-      // Phase = motivation + stress + besoin + situation
-      if (['motivation', 'stress', 'besoin', 'situation'].includes(question.category)) {
-        categoryScores.phase[type] += weight;
-      }
+    // Base = perception + points_forts + relation + communication
+    if (['perception', 'points_forts', 'relation', 'communication'].includes(question.category)) {
+      categoryScores.base[type] += weight;
     }
+    // Phase = motivation + stress + besoin + situation
+    if (['motivation', 'stress', 'besoin', 'situation'].includes(question.category)) {
+      categoryScores.phase[type] += weight;
+    }
+    if (question.category === 'perception') perceptionSignal[type] += weight;
+    if (question.category === 'stress') stressSignal[type] += weight;
   }
 
-  // Déterminer Base et Phase
-  const baseType = Object.entries(categoryScores.base).sort((a, b) => b[1] - a[1])[0][0];
-  const phaseType = Object.entries(categoryScores.phase).sort((a, b) => b[1] - a[1])[0][0];
+  // ─── 2. Tie-breakers non biaisés ───
+  const tieSeed = computeTieSeed(answers);
+  const baseSorted = resolveDominantType(categoryScores.base, rawCounts, perceptionSignal, tieSeed);
+  const phaseSorted = resolveDominantType(categoryScores.phase, rawCounts, stressSignal, tieSeed);
+  const baseType = baseSorted[0][0];
+  const phaseType = phaseSorted[0][0];
 
-  // Normaliser les scores (0-100)
+  // ─── 3. Scores de confiance ───
+  const baseConfidence = computeConfidence(baseSorted);
+  const phaseConfidence = computeConfidence(phaseSorted);
+  // Profil indéterminé si confiance < 8% OU si top score = 0 (pas assez de données)
+  const baseIndetermine = baseConfidence < 8 || baseSorted[0][1] === 0;
+  const phaseIndetermine = phaseConfidence < 8 || phaseSorted[0][1] === 0;
+
+  // ─── 4. Scores normalisés (0-100) ───
   const maxScore = Math.max(...Object.values(scores));
   const normalizedScores = {};
   for (const [type, score] of Object.entries(scores)) {
     normalizedScores[type] = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
   }
 
-  // Construire l'immeuble PCM : Base toujours en étage 1 (fondation),
-  // puis les autres types classés par score décroissant.
-  // On utilise les scores de catégorie (base+phase) pondérés pour un classement cohérent.
-  const immeubleEntries = Object.entries(scores)
-    .filter(([, raw]) => raw > 0)
-    .sort((a, b) => {
-      // La Base est toujours en premier (fondation de l'immeuble)
-      if (a[0] === baseType) return -1;
-      if (b[0] === baseType) return 1;
-      return b[1] - a[1];
-    })
+  // ─── 5. Immeuble PCM ───
+  // Base en étage 1 (fondation), puis les autres types classés par score décroissant
+  // avec les mêmes tie-breakers pour rester cohérent.
+  const immeubleSorted = resolveDominantType(scores, rawCounts, perceptionSignal, tieSeed);
+  const othersOrdered = immeubleSorted.filter(([type, score]) => type !== baseType && score > 0);
+  const immeuble = [[baseType, scores[baseType]], ...othersOrdered]
     .map(([type], index) => ({
       etage: index + 1,
       type,
       nom: PCM_TYPES[type].nom,
       score: normalizedScores[type],
     }));
-  const immeuble = immeubleEntries;
 
-  // Évaluation du risque RPS
+  // ─── 6. Détection RPS élargie ───
+  // Alerte si ≥2/3 des réponses stress correspondent à la Phase (tolérant)
+  // ou si la confiance Phase est forte et le driver du type s'active clairement.
   const stressAnswers = answers.filter(a => {
     const q = PCM_QUESTIONS.find(qu => qu.num === a.question_number);
     return q && q.category === 'stress';
   });
   const phaseData = PCM_TYPES[phaseType];
-  const riskAlert = stressAnswers.length >= 2 && stressAnswers.every(a => a.answer_value === phaseType);
+  const stressMatchCount = stressAnswers.filter(a => a.answer_value === phaseType).length;
+  const stressRatio = stressAnswers.length > 0 ? stressMatchCount / stressAnswers.length : 0;
+  const riskAlert = (stressAnswers.length >= 2 && stressRatio >= 0.66)
+    || (stressAnswers.length >= 3 && stressMatchCount >= 2);
 
   const baseData = PCM_TYPES[baseType];
   const phaseDataPcm = PCM_TYPES[phaseType];
@@ -589,11 +680,23 @@ function calculatePCMProfile(answers) {
       ...phaseDataPcm,
     },
     scores: normalizedScores,
+    categoryScores: {
+      base: categoryScores.base,
+      phase: categoryScores.phase,
+    },
     immeuble,
     comportementsPrincipaux,
     riskAlert,
+    confidence: {
+      base: baseConfidence,
+      phase: phaseConfidence,
+      baseIndetermine,
+      phaseIndetermine,
+      validAnswers,
+      totalQuestions: PCM_QUESTIONS.length,
+    },
     rpsIndicators: riskAlert ? [
-      `Profil de phase ${PCM_TYPES[phaseType].nom} avec indices de stress élevé`,
+      `Profil de phase ${PCM_TYPES[phaseType].nom} avec indices de stress élevé (${stressMatchCount}/${stressAnswers.length} réponses stress concordantes)`,
       `Driver principal : "${phaseData.driverPrincipal}"`,
       `Masques de stress observables : ${phaseData.masqueStress.join(', ')}`,
     ] : [],
@@ -604,7 +707,17 @@ function calculatePCMProfile(answers) {
     ],
   };
 
-  return { baseType, phaseType, report, riskAlert, normalizedScores };
+  return {
+    baseType,
+    phaseType,
+    report,
+    riskAlert,
+    normalizedScores,
+    baseConfidence,
+    phaseConfidence,
+    baseIndetermine,
+    phaseIndetermine,
+  };
 }
 
 // Clé de chiffrement AES-256
@@ -624,17 +737,28 @@ function decryptReport(encrypted) {
 // ══════════════════════════════════════════
 
 // GET /api/pcm/questionnaire — Retourne les 20 questions
-router.get('/questionnaire', (req, res) => {
+// Note : route authentifiée côté interne. Les candidats en mode autonome
+// récupèrent les questions via GET /sessions/:token qui intègre déjà la
+// liste des questions — inutile d'exposer /questionnaire publiquement.
+// Les options sont mélangées déterministiquement par question pour éviter
+// le biais "première position = analyseur".
+router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
   res.json(PCM_QUESTIONS.map(q => ({
     num: q.num,
     category: q.category,
     text: q.text,
-    options: q.options.map(o => ({ value: o.value, label: o.label })),
+    text_simple: TEXT_SIMPLE.questions[q.num] || q.text,
+    options: shuffleOptionsDeterministic(q.num, q.options).map(o => ({
+      value: o.value,
+      label: o.label,
+      label_simple: getOptionLabelSimple(q.num, o.value) || o.label,
+      icon: OPTION_ICONS[o.value] || '',
+    })),
   })));
 });
 
 // GET /api/pcm/types — Référence des 6 types PCM
-router.get('/types', (req, res) => {
+router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
   const types = Object.entries(PCM_TYPES).map(([key, data]) => ({
     key,
     ...data,
@@ -643,7 +767,7 @@ router.get('/types', (req, res) => {
 });
 
 // GET /api/pcm/types/:typeKey — Détail d'un type
-router.get('/types/:typeKey', (req, res) => {
+router.get('/types/:typeKey', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
   const data = PCM_TYPES[req.params.typeKey];
   if (!data) return res.status(404).json({ error: 'Type PCM inconnu' });
   res.json({ key: req.params.typeKey, ...data });
@@ -705,7 +829,7 @@ router.get('/sessions/:token', async (req, res) => {
         category: q.category,
         text: q.text,
         text_simple: TEXT_SIMPLE.questions[q.num] || q.text,
-        options: (q.options || []).map(o => ({
+        options: shuffleOptionsDeterministic(q.num, q.options || []).map(o => ({
           value: o.value,
           label: o.label,
           label_simple: getOptionLabelSimple(q.num, o.value) || o.label,
@@ -719,19 +843,34 @@ router.get('/sessions/:token', async (req, res) => {
   }
 });
 
+// Middleware : autorise soit un utilisateur RH/ADMIN authentifié, soit
+// un access_token de session PCM (lien autonome envoyé au candidat).
+// Bloque la soumission par simple `session_id` sans preuve de légitimité.
+async function authenticateSubmit(req, res, next) {
+  const { access_token } = req.body || {};
+  if (access_token) return next(); // token capabilité vérifié plus bas
+  return authenticate(req, res, (err) => {
+    if (err) return;
+    return authorize('ADMIN', 'RH', 'MANAGER')(req, res, next);
+  });
+}
+
 // POST /api/pcm/submit — Soumettre les réponses et calculer le profil
-router.post('/submit', [
-  body('answers').isArray({ min: 15 }).withMessage('Minimum 15 réponses requises'),
+// Minimum relevé à 18/20 réponses pour garantir la fiabilité de l'analyse
+// (les 2 tolérées couvrent les questions auxquelles le candidat n'ose pas répondre).
+router.post('/submit', authenticateSubmit, [
+  body('answers').isArray({ min: 18 }).withMessage('Minimum 18 réponses requises pour une analyse fiable'),
 ], validate, async (req, res) => {
   try {
     const { session_id, access_token, answers } = req.body;
 
-    // Trouver la session
+    // Trouver la session — access_token prioritaire (flux candidat autonome)
     let session;
     if (access_token) {
       const r = await pool.query('SELECT * FROM pcm_sessions WHERE access_token = $1', [access_token]);
       session = r.rows[0];
-    } else if (session_id) {
+    } else if (session_id && req.user) {
+      // Session par ID uniquement si utilisateur RH/ADMIN authentifié
       const r = await pool.query('SELECT * FROM pcm_sessions WHERE id = $1', [session_id]);
       session = r.rows[0];
     }
@@ -739,12 +878,24 @@ router.post('/submit', [
     if (!session) return res.status(404).json({ error: 'Session non trouvée' });
     if (session.status === 'completed') return res.status(400).json({ error: 'Session déjà terminée' });
 
-    if (!answers || answers.length < 15) {
-      return res.status(400).json({ error: 'Minimum 15 réponses requises' });
+    if (!answers || answers.length < 18) {
+      return res.status(400).json({ error: 'Minimum 18 réponses requises pour une analyse fiable' });
     }
 
+    // Vérifier que les valeurs de réponse sont bien des types PCM connus
+    const validTypes = new Set(TYPE_KEYS);
+    const filteredAnswers = answers.filter(a => validTypes.has(a.answer_value));
+    if (filteredAnswers.length < 18) {
+      return res.status(400).json({ error: 'Réponses invalides détectées (type PCM inconnu)' });
+    }
+
+    // Dédupliquer par numéro de question (on garde la dernière réponse fournie)
+    const byNum = new Map();
+    for (const a of filteredAnswers) byNum.set(a.question_number, a);
+    const uniqueAnswers = Array.from(byNum.values());
+
     // Enregistrer les réponses
-    for (const answer of answers) {
+    for (const answer of uniqueAnswers) {
       await pool.query(
         'INSERT INTO pcm_answers (session_id, question_number, answer_value, answer_voice_text) VALUES ($1, $2, $3, $4)',
         [session.id, answer.question_number, answer.answer_value, answer.answer_voice_text || null]
@@ -752,7 +903,16 @@ router.post('/submit', [
     }
 
     // Calculer le profil
-    const { baseType, phaseType, report, riskAlert } = calculatePCMProfile(answers);
+    const {
+      baseType,
+      phaseType,
+      report,
+      riskAlert,
+      baseConfidence,
+      phaseConfidence,
+      baseIndetermine,
+      phaseIndetermine,
+    } = calculatePCMProfile(uniqueAnswers);
 
     // Chiffrer et stocker le rapport
     const encryptedReport = encryptReport(report);
@@ -777,6 +937,10 @@ router.post('/submit', [
         baseNom: PCM_TYPES[baseType].nom,
         phaseNom: PCM_TYPES[phaseType].nom,
         riskAlert,
+        baseConfidence,
+        phaseConfidence,
+        baseIndetermine,
+        phaseIndetermine,
       },
       report,
     });

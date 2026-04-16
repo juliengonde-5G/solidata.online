@@ -2,8 +2,6 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { body } = require('express-validator');
-const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
@@ -35,18 +33,22 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/expeditions
-router.post('/', [
-  body('date').notEmpty().withMessage('Date requise'),
-  body('exutoire_id').isInt().withMessage('ID exutoire requis'),
-  body('categorie_sortante_id').isInt().withMessage('ID catégorie sortante requis'),
-  body('poids_kg').isFloat({ min: 0 }).withMessage('Poids requis (valeur numérique)'),
-], validate, async (req, res) => {
+// Fix bug L1 : accepte les alias `date_expedition` et `poids_total_kg`
+// utilisés par frontend/src/pages/Expeditions.jsx en plus des noms
+// canoniques `date` / `poids_kg`.
+router.post('/', async (req, res) => {
   try {
-    const { date, exutoire_id, categorie_sortante_id, type_conteneur_id,
-      nb_conteneurs, poids_kg, valeur_euros, bon_livraison, notes } = req.body;
+    const body = req.body || {};
+    const date = body.date || body.date_expedition;
+    const poids_kg = body.poids_kg ?? body.poids_total_kg;
+    const { exutoire_id, categorie_sortante_id, type_conteneur_id,
+      nb_conteneurs, valeur_euros, bon_livraison, notes } = body;
 
-    if (!date || !exutoire_id || !categorie_sortante_id || !poids_kg) {
-      return res.status(400).json({ error: 'Date, exutoire, catégorie et poids requis' });
+    if (!date) return res.status(400).json({ error: 'Date requise' });
+    if (!exutoire_id) return res.status(400).json({ error: 'ID exutoire requis' });
+    if (!categorie_sortante_id) return res.status(400).json({ error: 'ID catégorie sortante requis' });
+    if (poids_kg === undefined || poids_kg === null || isNaN(parseFloat(poids_kg)) || parseFloat(poids_kg) < 0) {
+      return res.status(400).json({ error: 'Poids requis (valeur numérique ≥ 0)' });
     }
 
     const result = await pool.query(

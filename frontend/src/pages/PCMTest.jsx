@@ -63,10 +63,12 @@ export default function PCMTest() {
 
   const handleAnswer = (questionId, value) => {
     setAnswers(prev => ({ ...prev, [questionId]: value }));
-    // Auto-advance après un court délai visuel
+    // Auto-advance après un délai visuel suffisant pour voir la sélection.
+    // 600 ms : compromis accessibilité (temps de lecture pour personnes peu à l'aise
+    // avec l'écrit) vs fluidité du test.
     setTimeout(() => {
       setCurrentQ(prev => prev < totalQuestions - 1 ? prev + 1 : prev);
-    }, 350);
+    }, 600);
   };
 
   const goNext = () => {
@@ -238,6 +240,10 @@ export default function PCMTest() {
 
   if (phase === 'done') {
     const baseType = result?.profile?.baseType || result?.profile?.base_type || result?.baseType || result?.base_type;
+    const phaseType = result?.profile?.phaseType || result?.profile?.phase_type;
+    const baseConfidence = result?.profile?.baseConfidence ?? 0;
+    const phaseConfidence = result?.profile?.phaseConfidence ?? 0;
+    const baseIndetermine = result?.profile?.baseIndetermine === true;
     const label = TYPE_LABELS[baseType] || baseType || 'Votre profil';
     const description = TYPE_DESCRIPTIONS[baseType] || '';
 
@@ -260,6 +266,21 @@ export default function PCMTest() {
               <p className="text-2xl font-bold" style={{ color: BRAND_GREEN }}>{label}</p>
               {description && (
                 <p className="text-sm text-gray-600 mt-3 leading-relaxed">{description}</p>
+              )}
+              {phaseType && phaseType !== baseType && TYPE_LABELS[phaseType] && (
+                <p className="text-xs text-gray-500 mt-3">
+                  État actuel (phase) : <span className="font-semibold">{TYPE_LABELS[phaseType]}</span>
+                </p>
+              )}
+              {baseIndetermine && (
+                <p className="text-xs text-amber-600 mt-3 font-medium">
+                  Résultat peu marqué — des réponses complémentaires seront utiles.
+                </p>
+              )}
+              {!baseIndetermine && baseConfidence > 0 && (
+                <p className="text-xs text-gray-400 mt-3">
+                  Fiabilité base {baseConfidence}% · phase {phaseConfidence}%
+                </p>
               )}
             </div>
 

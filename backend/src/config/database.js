@@ -1,5 +1,13 @@
 const { Pool } = require('pg');
 
+// Refus du mot de passe par défaut en production — évite qu'une instance
+// passe en ligne avec `changeme`. En dev, le fallback reste toléré pour
+// faciliter l'initialisation locale.
+if (process.env.NODE_ENV === 'production' && !process.env.DB_PASSWORD) {
+  console.error('[FATAL] DB_PASSWORD non défini en production. Arrêt immédiat.');
+  process.exit(1);
+}
+
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT) || 5432,
