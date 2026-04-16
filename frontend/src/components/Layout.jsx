@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import SolidataBot from './SolidataBot';
 import IconSidebar from './IconSidebar';
@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Newspaper, UserPlus, Brain, Users, Clock, Star, Heart,
   ClipboardList, IdCard, Truck, Sparkles, Map, BarChart3, MapPin, Factory,
   ArrowUpDown, Package, Tag, Ship, CircleDollarSign, PieChart, BarChart2,
-  RefreshCw, Lock, Settings, Car, LogOut, ChevronDown, ChevronLeft, Menu, X,
+  RefreshCw, Lock, Settings, Car,
   Handshake, Warehouse, Scale, Activity,
 } from 'lucide-react';
 import api from '../services/api';
@@ -130,39 +130,81 @@ const menuSections = [
   },
 ];
 
-export default function Layout({ children }) {
-  const { user } = useAuth();
-  const location = useLocation();
-  const [contentSidebarOpen, setContentSidebarOpen] = useState(true);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [alerts, setAlerts] = useState([]);
+// ══════════════════════════════════════════
+// Persist sidebar state across Layout re-mounts
+// (Layout re-mounts on every page navigation because each page wraps in <Layout>)
+// ══════════════════════════════════════════
+const persistedState = { contentOpen: true, mobileOpen: false };
 
-  // Filter sections by role
-  const filteredSections = menuSections.map(section => ({
-    ...section,
-    items: section.items.filter(item => !item.roles || item.roles.includes(user?.role)),
-  })).filter(section => section.items.length > 0);
+// Map hub paths to their section titles for proper active section detection
+const HUB_PATH_MAP = {};
+menuSections.forEach(s => {
+  if (s.hubPath && s.hubPath !== '/') {
+    HUB_PATH_MAP[s.hubPath] = s.title;
+  }
+  // Also map sub-paths that start with a known prefix (e.g. /finance/import → Finances)
+  s.items.forEach(item => {
+    HUB_PATH_MAP[item.path] = s.title;
+  });
+});
 
-  const visibleSectionTitles = filteredSections.map(s => s.title);
-
-  // Determine active section from current path
-  const getActiveSection = useCallback(() => {
-    for (const section of filteredSections) {
-      if (section.items.some(item => item.path === location.pathname)) {
+function findActiveSection(pathname, filteredSections) {
+  // 1. Exact match on item path
+  for (const section of filteredSections) {
+    if (section.items.some(item => item.path === pathname)) {
+      return section.title;
+    }
+  }
+  // 2. Match on hub path
+  for (const section of filteredSections) {
+    if (section.hubPath && section.hubPath === pathname) {
+      return section.title;
+    }
+  }
+  // 3. Match on path prefix (e.g. /finance/import → Finances)
+  for (const section of filteredSections) {
+    if (section.hubPath && section.hubPath !== '/' && pathname.startsWith(section.hubPath)) {
+      return section.title;
+    }
+    for (const item of section.items) {
+      if (pathname.startsWith(item.path) && item.path !== '/') {
         return section.title;
       }
     }
-    return 'Accueil';
-  }, [location.pathname, filteredSections]);
+  }
+  return 'Accueil';
+}
 
-  const [activeSection, setActiveSection] = useState(getActiveSection);
+export default function Layout({ children }) {
+  const { user } = useAuth();
+  const location = useLocation();
 
-  // Update active section when path changes
-  useEffect(() => {
-    setActiveSection(getActiveSection());
-  }, [location.pathname, getActiveSection]);
+  // Use persisted state so sidebar doesn't reset on re-mount
+  const [contentSidebarOpen, setContentSidebarOpen] = useState(persistedState.contentOpen);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [alerts, setAlerts] = useState([]);
 
-  // Load alerts for notification bell
+  // Sync persisted state
+  useEffect(() => { persistedState.contentOpen = contentSidebarOpen; }, [contentSidebarOpen]);
+
+  // Stabilize filteredSections with useMemo
+  const filteredSections = useMemo(() =>
+    menuSections.map(section => ({
+      ...section,
+      items: section.items.filter(item => !item.roles || item.roles.includes(user?.role)),
+    })).filter(section => section.items.length > 0),
+    [user?.role]
+  );
+
+  const visibleSectionTitles = useMemo(() => filteredSections.map(s => s.title), [filteredSections]);
+
+  // Determine active section from current path
+  const activeSection = useMemo(
+    () => findActiveSection(location.pathname, filteredSections),
+    [location.pathname, filteredSections]
+  );
+
+  // Load alerts for notification bell (only once)
   useEffect(() => {
     api.get('/dashboard/kpis')
       .then(res => setAlerts(res.data?.alertes || []))
@@ -171,14 +213,19 @@ export default function Layout({ children }) {
 
   const activeSectionData = filteredSections.find(s => s.title === activeSection);
 
-  const handleSelectSection = (sectionTitle) => {
-    setActiveSection(sectionTitle);
-    setContentSidebarOpen(true);
-  };
+  // Click icon: if same section is already active and content sidebar is open → toggle off
+  // Otherwise, switch to that section and open content sidebar
+  const handleSelectSection = useCallback((sectionTitle) => {
+    if (sectionTitle === activeSection && contentSidebarOpen) {
+      setContentSidebarOpen(false);
+    } else {
+      setContentSidebarOpen(true);
+    }
+  }, [activeSection, contentSidebarOpen]);
 
-  const handleMobileNav = () => {
+  const handleMobileNav = useCallback(() => {
     if (window.innerWidth < 1024) setMobileMenuOpen(false);
-  };
+  }, []);
 
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
@@ -194,7 +241,7 @@ export default function Layout({ children }) {
       {/* === SIDEBARS (desktop: always visible / mobile: overlay) === */}
       <div className={`
         ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        fixed lg:relative z-50 lg:z-auto flex h-full transition-transform duration-300
+        fixed lg:relative z-50 lg:z-auto flex h-full flex-shrink-0 transition-transform duration-300
       `}>
         {/* Icon sidebar — always visible on desktop */}
         <IconSidebar
@@ -219,8 +266,8 @@ export default function Layout({ children }) {
           menuSections={filteredSections}
           alerts={alerts}
           sidebarOpen={contentSidebarOpen}
-          onToggleSidebar={() => setContentSidebarOpen(!contentSidebarOpen)}
-          onMobileMenu={() => setMobileMenuOpen(!mobileMenuOpen)}
+          onToggleSidebar={() => setContentSidebarOpen(prev => !prev)}
+          onMobileMenu={() => setMobileMenuOpen(prev => !prev)}
         />
 
         <main className="flex-1 overflow-y-auto min-h-0">
