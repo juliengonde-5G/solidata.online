@@ -224,7 +224,7 @@ solidata.online/
 │       │   └── database.js        # Pool de connexion PostgreSQL
 │       ├── middleware/
 │       │   └── auth.js            # Vérification JWT
-│       ├── routes/                # 63 fichiers de routes API
+│       ├── routes/                # 69 fichiers de routes API
 │       │   ├── auth.js            # Authentification (login, refresh, logout, me)
 │       │   ├── users.js           # Gestion utilisateurs (CRUD)
 │       │   ├── settings.js        # Paramètres, templates, tarifs, objectifs, triggers
@@ -259,9 +259,16 @@ solidata.online/
 │       │   ├── preparations.js         # Préparation expéditions
 │       │   ├── controles-pesee.js      # Contrôle de pesée
 │       │   ├── calendrier-logistique.js # Calendrier logistique mensuel
-│       │   └── planning-hebdo.js       # Planning hebdomadaire par filière
+│       │   ├── planning-hebdo.js       # Planning hebdomadaire par filière
+│       │   ├── boutiques.js           # Référentiel boutiques (CRUD, budget)
+│       │   ├── boutique-ventes.js     # Import CSV LogicS, analytics, tickets
+│       │   ├── boutique-commandes.js  # Commandes boutique (5 statuts)
+│       │   ├── boutique-objectifs.js  # Objectifs mensuels, comparaison
+│       │   └── boutique-meteo.js      # Météo quotidienne, corrélation CA
+│       ├── utils/
+│       │   └── weather.js             # Open-Meteo API + WMO codes → labels FR
 │       └── scripts/               # Scripts d'initialisation et migrations
-│           ├── init-db.js         # Création 70+ tables + données initiales + migrations
+│           ├── init-db.js         # Création 80+ tables + données initiales + migrations
 │           ├── seed-cav.js        # Import CAV depuis Excel + KML (coordonnées GPS)
 │           ├── seed-data.js       # Données de démonstration
 │           ├── seed-production.js # Import KPI_Production 2026.xlsx
@@ -283,7 +290,7 @@ solidata.online/
 │       │   └── api.js             # Client Axios configuré
 │       ├── components/
 │       │   └── Layout.jsx         # Sidebar + header + navigation
-│       └── pages/                 # 66 pages
+│       └── pages/                 # 75 pages
 │           ├── Login.jsx
 │           ├── Dashboard.jsx          # KPI, comparaison annuelle, inventaire
 │           ├── NewsFeed.jsx           # Fil d'actualités
@@ -324,7 +331,16 @@ solidata.online/
 │           ├── ReportingMetropole.jsx # Reporting Métropole Rouen
 │           ├── Refashion.jsx          # DPAV trimestriel + subventions
 │           │   ── ADMINISTRATION ──
-│           ├── Users.jsx              # Gestion comptes (5 rôles)
+│           │   ── BOUTIQUES (7 pages) ──
+│           ├── HubBoutiques.jsx       # Hub KPI + navigation
+│           ├── BoutiquesDashboard.jsx # Dashboard 3 niveaux (jour/mois/année)
+│           ├── BoutiquesVentes.jsx    # Ventes, analytics, top articles
+│           ├── BoutiquesCommandes.jsx # Kanban 3 colonnes (5 statuts)
+│           ├── BoutiquesPlanning.jsx  # Planning filtré (lecture seule)
+│           ├── BoutiquesObjectifs.jsx # Objectifs mensuels éditables
+│           ├── BoutiquesImport.jsx    # Import CSV + historique batches
+│           │   ── ADMINISTRATION ──
+│           ├── Users.jsx              # Gestion comptes (6 rôles)
 │           ├── Settings.jsx           # Objectifs, tarifs, templates, triggers
 │           ├── Referentiels.jsx       # Associations, exutoires, catalogue, conteneurs
 │           ├── AdminPredictive.jsx    # Config IA (facteurs saisonniers, météo)
@@ -537,6 +553,21 @@ solidata.online/
 - Création/suppression par les admins
 - Visible par tous les utilisateurs connectés
 
+### Module 22 — Boutiques (Performance Retail 2nde Main)
+- **Rôle dédié** : `RESP_BTQ` (Responsable Boutique) — 6ème rôle du système
+- **Référentiel** : multi-boutiques (St-Sever active, L'Hopital à venir), lat/lng, budget annuel, lien team
+- **Import CSV** : parsing LogicS (séparateur `;`, dates DD/MM/YYYY), SHA-256 anti-doublon, segmentation auto 3 catégories (ventes_courantes / promotions / consommables), reconstruction tickets par minute_key
+- **Import automatique** : job scheduler `scanBoutiqueCSVFolders()` scanne `BOUTIQUE_CSV_BASE_PATH`, déplace vers `processed/`
+- **Dashboard 3 niveaux** : Jour (CA + météo + tickets + panier + timeline horaire), Mois (CA vs objectif + précipitations overlay + segments + top articles), Année (budget vs réalisé + projection linéaire)
+- **Commandes** : par lot/poids par catégorie textile (FEMME, ENFANTS, etc.), 5 statuts (brouillon→envoyee→ajustee→en_preparation→expediee + annulee), ajustement logistique, stock_movements sortie à l'expédition
+- **Objectifs** : grille 12 mois éditable (CA TTC, nb tickets, panier moyen), bulk UPSERT, comparaison vs réalisé
+- **Météo** : collecte quotidienne Open-Meteo API, corrélation pluie/CA, job scheduler `collectBoutiqueWeather()`
+- **Planning** : vue filtrée du planning hebdo (postes BTQ_*)
+- **9 tables** : boutiques, boutique_import_batches, boutique_ventes, boutique_tickets, boutique_commandes, boutique_commande_lignes, boutique_commande_historique, boutique_objectifs, boutique_meteo_quotidien
+- **5 routes API** : boutiques, boutique-ventes, boutique-commandes, boutique-objectifs, boutique-meteo
+- **7 pages React** : HubBoutiques, BoutiquesDashboard, BoutiquesVentes, BoutiquesCommandes, BoutiquesPlanning, BoutiquesObjectifs, BoutiquesImport
+- **Utilitaire partagé** : `backend/src/utils/weather.js` (WMO codes → labels FR, fetchOpenMeteoDaily)
+
 ---
 
 ## 7. Base de données
@@ -547,7 +578,7 @@ solidata.online/
 - Utilisateur : `solidata_user`
 - Mot de passe : défini dans `.env` (`DB_PASSWORD`)
 
-### Tables (70+ tables)
+### Tables (80+ tables)
 
 #### Authentification (4 tables)
 | Table | Description |
@@ -718,6 +749,19 @@ solidata.online/
 | `notification_triggers` | Triggers de notifications (événement, template, délai, conditions) |
 | `periodic_objectives` | Objectifs périodiques (domaine, indicateur, cible) |
 
+#### Boutiques (9 tables)
+| Table | Description |
+|-------|-------------|
+| `boutiques` | Référentiel boutiques (nom, code, adresse, lat/lng, budget annuel, csv_folder_path, team_id) |
+| `boutique_import_batches` | Traçabilité imports CSV (filename, file_hash SHA-256, nb_lignes, ca_total_ttc, statut) |
+| `boutique_ventes` | Lignes de vente importées (date_vente, rayon, segment, article, quantite, totaux HT/TTC/TVA) |
+| `boutique_tickets` | Tickets reconstitués par minute_key YYYY-MM-DD HH:MM (nb_articles, total_ttc) |
+| `boutique_commandes` | Commandes boutique (reference BTQ-YYYY-####, statut 5 états, poids totaux, created_by) |
+| `boutique_commande_lignes` | Lignes par catégorie (categorie, poids_demande_kg, poids_ajuste_kg, poids_expedie_kg) |
+| `boutique_commande_historique` | Historique transitions statut (ancien_statut → nouveau_statut, user_id, commentaire) |
+| `boutique_objectifs` | Objectifs mensuels (annee, mois, segment, ca_objectif_ttc, nb_tickets_objectif, panier_moyen_objectif) |
+| `boutique_meteo_quotidien` | Météo quotidienne Open-Meteo (weather_code WMO, temp_min/max, precipitation_mm, wind, sunshine) |
+
 ### Index spatiaux et de performance
 - `idx_cav_geom` — Index GIST sur la géométrie des CAV
 - `idx_cav_status` — Index sur le statut des CAV
@@ -770,6 +814,11 @@ Base URL : `https://solidata.online/api`
 | `/api/controles-pesee` | `controles-pesee.js` | Contrôle de pesée |
 | `/api/calendrier-logistique` | `calendrier-logistique.js` | Calendrier logistique mensuel |
 | `/api/planning-hebdo` | `planning-hebdo.js` | Planning hebdomadaire par filière |
+| `/api/boutiques` | `boutiques.js` | CRUD boutiques, budget annuel |
+| `/api/boutique-ventes` | `boutique-ventes.js` | Import CSV LogicS, analytics (daily/monthly/rayons/segments/articles/panier-moyen), tickets |
+| `/api/boutique-commandes` | `boutique-commandes.js` | CRUD commandes, transitions statut (envoyer/ajuster/preparer/expedier/annuler) |
+| `/api/boutique-objectifs` | `boutique-objectifs.js` | CRUD objectifs mensuels, bulk UPSERT, comparaison objectif vs réalisé |
+| `/api/boutique-meteo` | `boutique-meteo.js` | Données météo quotidiennes, corrélation pluie/CA, collecte manuelle |
 
 ### Health check
 `GET /api/health` — Retourne l'état de la base, la version PostgreSQL/PostGIS et les modules actifs.

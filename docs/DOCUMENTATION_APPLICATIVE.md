@@ -1,6 +1,6 @@
-# Documentation Applicative — SOLIDATA ERP v1.3.3
+# Documentation Applicative — SOLIDATA ERP v1.4.0
 
-> **Version** : 1.3.3 | **Date** : 2026-04-11
+> **Version** : 1.4.0 | **Date** : 2026-04-16
 > **Éditeur** : Solidarité Textile — Rouen, Normandie
 > **URL** : https://solidata.online | **Mobile** : https://m.solidata.online
 
@@ -371,7 +371,104 @@ Tous les reportings supportent :
 - Export Excel (ExcelJS)
 - Graphiques interactifs (barres, lignes, camemberts)
 
-### 2.8 Administration
+### 2.8 Boutiques (Performance Retail)
+
+Module complet de pilotage de la performance des boutiques de seconde main textile. Architecture multi-boutiques dès le départ (St-Sever active, L'Hopital à venir). Nouveau rôle **RESP_BTQ** (Responsable Boutique).
+
+#### 2.8.1 Hub Boutiques
+
+| Élément | Détail |
+|---------|--------|
+| Route | `/hub-boutiques` |
+| Rôles | ADMIN, MANAGER, RESP_BTQ |
+| Contenu | 4 KPI cards (boutiques actives, CA mois, commandes en cours, tickets jour), 6 liens de navigation vers les sous-pages |
+
+#### 2.8.2 Dashboard 3 niveaux
+
+| Élément | Détail |
+|---------|--------|
+| Route | `/boutiques` |
+| Rôles | ADMIN, MANAGER, RESP_BTQ |
+
+3 onglets de pilotage :
+
+- **Jour** : CA du jour + météo (icône + label + temp + précipitations), nombre de tickets, panier moyen, timeline horaire (barres CA par heure), répartition par rayon
+- **Mois** : CA vs objectif (jauge %), barres quotidiennes avec ligne précipitations superposée (ComposedChart), camembert segments (ventes courantes / promotions / consommables), top 10 articles
+- **Année** : Budget annuel vs réalisé, 12 barres mensuelles avec ligne de référence budget/mois, projection fin d'année par régression linéaire, tableau détaillé 12 mois avec % atteinte
+
+#### 2.8.3 Ventes
+
+| Élément | Détail |
+|---------|--------|
+| Route | `/boutiques/ventes` |
+| Rôles | ADMIN, MANAGER, RESP_BTQ |
+| Contenu | Table ventes filtrable (boutique, période), 4 KPI cards (CA TTC, tickets, articles, panier moyen), graphique CA quotidien, camembert rayons, tableau segments, top 15 articles |
+
+#### 2.8.4 Import CSV (LogicS)
+
+| Élément | Détail |
+|---------|--------|
+| Route | `/boutiques/import` |
+| Rôles | ADMIN, MANAGER |
+| Format CSV | Séparateur `;`, date `DD/MM/YYYY HH:MM:SS`, colonnes : DATE_VENTE, RAYON, ID_ARTICLE, ARTICLE, QUANTITE, TOTAL_HT, TOTAL_TTC, MONTANT_TVA |
+
+Fonctionnement :
+- **Import manuel** : upload par drag-and-drop ou sélection fichier (max 20 Mo)
+- **Import automatique** : scheduler scanne le dossier partagé (variable `BOUTIQUE_CSV_BASE_PATH`), hash SHA-256 anti-doublon
+- **Segmentation automatique** : FEMME/ENFANTS/LAYETTES/KINTSU → `ventes_courantes`, BRADERIE/OPERATION/PRIX RONDS → `promotions`, SAC KRAFT → `consommables`
+- **Reconstruction tickets** : regroupement par minute (YYYY-MM-DD HH:MM) car le CSV LogicS ne contient pas d'identifiant ticket
+- Historique des imports avec statut (en_cours / termine / erreur / doublon)
+
+#### 2.8.5 Commandes Boutique
+
+| Élément | Détail |
+|---------|--------|
+| Route | `/boutiques/commandes` |
+| Rôles | ADMIN, MANAGER, RESP_BTQ |
+
+**Kanban 3 colonnes** :
+1. **Nouvelles** (brouillon + envoyée) — créées par RESP_BTQ
+2. **En préparation** (ajustée + en préparation) — gérées par logistique
+3. **Expédiées** (expédiée + annulée) — terminales
+
+**State machine (5 statuts)** :
+```
+brouillon → envoyee → ajustee → en_preparation → expediee
+    ↓         ↓         ↓           ↓
+annulee   annulee   annulee     annulee
+```
+
+- Commande par catégorie textile (FEMME, ENFANTS, LAYETTES, KINTSU, ACCESSOIRES, CHAUSSURES, AUTRE) avec poids demandé en kg
+- Référence auto : `BTQ-YYYY-####`
+- RESP_BTQ : créer, envoyer, annuler
+- ADMIN/MANAGER : ajuster poids, préparer, expédier
+- À l'expédition : création automatique d'un mouvement de stock sortie (`stock_movements` type=sortie)
+- Historique complet des transitions de statut avec horodatage et auteur
+
+#### 2.8.6 Objectifs de Vente
+
+| Élément | Détail |
+|---------|--------|
+| Route | `/boutiques/objectifs` |
+| Rôles | ADMIN, MANAGER |
+| Contenu | Grille 12 mois éditable (CA objectif TTC, nb tickets, panier moyen), comparaison en temps réel avec le réalisé, % atteinte coloré (vert ≥100%, ambre ≥80%, rouge <80%), graphique barres objectif vs réalisé |
+
+#### 2.8.7 Planning Boutiques
+
+| Élément | Détail |
+|---------|--------|
+| Route | `/boutiques/planning` |
+| Rôles | ADMIN, MANAGER, RESP_BTQ |
+| Contenu | Vue en lecture seule du planning hebdo filtré sur les postes boutique (filiere='btq', code commençant par `BTQ_`), navigation par semaine, grille postes × jours × périodes (Matin/Après-midi), lien vers Planning Hebdo pour modification |
+
+#### 2.8.8 Météo & Corrélation
+
+- Collecte automatique quotidienne via Open-Meteo API (gratuit, sans clé)
+- Données : code WMO, label français, temp min/max, précipitations mm, vent max, heures d'ensoleillement
+- Corrélation pluie/CA via endpoint `/api/boutique-meteo/correlation`
+- Coordonnées par boutique (St-Sever : 49.4331°N, 1.0856°E)
+
+### 2.9 Administration
 
 | Module | Route | Description |
 |--------|-------|-------------|
@@ -473,6 +570,11 @@ POST /api/auth/logout        → { message }
 | RGPD | GET/POST | `/api/rgpd/*` | Registre/export/anonymisation |
 | Utilisateurs | GET/POST/PUT | `/api/users` | Gestion comptes |
 | Véhicules | GET/POST/PUT | `/api/vehicles` | Flotte |
+| Boutiques | GET/POST/PUT/DELETE | `/api/boutiques` | Référentiel boutiques, budget |
+| Ventes Boutique | GET/POST | `/api/boutique-ventes` | Import CSV, analytics (daily/monthly/rayons/segments/articles/panier-moyen), tickets |
+| Commandes Boutique | GET/POST/PATCH | `/api/boutique-commandes` | CRUD + transitions (envoyer/ajuster/preparer/expedier/annuler) |
+| Objectifs Boutique | GET/POST | `/api/boutique-objectifs` | CRUD + bulk UPSERT + compare (objectif vs réalisé) |
+| Météo Boutique | GET/POST | `/api/boutique-meteo` | Données météo, corrélation pluie/CA, collecte manuelle |
 
 ### 4.3 Codes de Réponse
 
@@ -504,7 +606,7 @@ Tous les endpoints de liste supportent :
 
 | Table | Description | Relations |
 |-------|-------------|-----------|
-| `users` | Comptes utilisateurs (5 rôles) | → employees |
+| `users` | Comptes utilisateurs (6 rôles) | → employees |
 | `candidates` | Candidats recrutement + CV | → candidate_skills, candidate_history |
 | `candidate_skills` | Compétences détectées/confirmées | → candidates, skill_keywords |
 | `candidate_history` | Historique statuts | → candidates, users |
@@ -540,6 +642,15 @@ Tous les endpoints de liste supportent :
 | `news` | Fil d'actualité | → users |
 | `settings` | Configuration système | — |
 | `notifications` | Notifications internes | → users |
+| `boutiques` | Référentiel boutiques (nom, adresse, lat/lng, budget) | → teams, users |
+| `boutique_import_batches` | Traçabilité imports CSV (hash SHA-256) | → boutiques |
+| `boutique_ventes` | Lignes de vente importées (rayon, segment, article) | → boutiques, boutique_import_batches, boutique_tickets |
+| `boutique_tickets` | Tickets reconstitués par minute_key | → boutiques |
+| `boutique_commandes` | Commandes boutique (référence, statut, poids) | → boutiques, users |
+| `boutique_commande_lignes` | Lignes commande par catégorie/poids | → boutique_commandes |
+| `boutique_commande_historique` | Historique transitions statut | → boutique_commandes, users |
+| `boutique_objectifs` | Objectifs mensuels (CA, tickets, panier moyen) | → boutiques |
+| `boutique_meteo_quotidien` | Météo quotidienne (WMO, temp, précip, vent) | → boutiques |
 
 ### 5.2 Extensions PostgreSQL
 

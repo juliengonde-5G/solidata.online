@@ -2,7 +2,7 @@
 
 > **Ce fichier est le contexte de référence pour tout agent IA (Claude, Copilot, etc.) travaillant sur le projet SOLIDATA.**
 > Il est lu automatiquement par Claude Code au démarrage de chaque session.
-> Dernière mise à jour : 11 avril 2026
+> Dernière mise à jour : 16 avril 2026
 
 ---
 
@@ -55,15 +55,16 @@ solidata.online/
 │   ├── index.js              # Entry point Express + Socket.IO + auto-init DB
 │   ├── config/database.js    # Pool PostgreSQL
 │   ├── middleware/auth.js     # authenticate() + authorize(...roles)
-│   ├── routes/               # 63 fichiers de routes API
-│   ├── services/             # predictive-ai.js, insertion-ai.js, ml-model.js
+│   ├── routes/               # 69 fichiers de routes API
+│   ├── services/             # predictive-ai.js, insertion-ai.js, ml-model.js, scheduler.js
+│   ├── utils/                # weather.js (Open-Meteo, WMO codes)
 │   └── scripts/              # init-db.js, seed-*.js, migrate-*.js
 ├── frontend/src/
-│   ├── App.jsx               # Routeur (66 pages, ProtectedRoute)
+│   ├── App.jsx               # Routeur (75 pages, ProtectedRoute)
 │   ├── contexts/AuthContext.jsx  # Auth state + token refresh
 │   ├── services/api.js       # Axios instance + interceptors
 │   ├── components/Layout.jsx # Sidebar + navigation role-based
-│   └── pages/                # 66 pages React
+│   └── pages/                # 75 pages React
 ├── mobile/src/
 │   ├── App.jsx               # Routeur mobile (11 pages)
 │   ├── services/haptic.js    # Vibration feedback
@@ -83,12 +84,12 @@ solidata.online/
 
 ---
 
-## 5. MODULES FONCTIONNELS (25 modules)
+## 5. MODULES FONCTIONNELS (26 modules)
 
 ### Modules core
 | # | Module | Routes API | Pages Web | Description |
 |---|--------|-----------|-----------|-------------|
-| 1 | Auth & Admin | auth, users, settings | Login, Users, Settings | JWT, 5 rôles (ADMIN/MANAGER/RH/COLLABORATEUR/AUTORITE) |
+| 1 | Auth & Admin | auth, users, settings | Login, Users, Settings | JWT, 6 rôles (ADMIN/MANAGER/RH/COLLABORATEUR/AUTORITE/RESP_BTQ) |
 | 2 | Recrutement | candidates | Candidates | Kanban 4 colonnes (Reçus/Entretien/Recrutés/Refusés), CV parsing, entretiens structurés, mise en situation |
 | 3 | PCM | pcm | PersonalityMatrix, PCMTest | Test personnalité 20 questions, 6 types, scoring pondéré, export PDF A4 |
 | 4 | Gestion RH | employees, teams | Employees, WorkHours, Skills, PlanningHebdo | Contrats, heures, compétences, planning hebdo 4 filières |
@@ -117,10 +118,11 @@ solidata.online/
 | 23 | Pennylane | pennylane | Pennylane | Synchronisation comptable, Grand Livre, balances, factures |
 | 24 | SolidataBot | chat | — (widget flottant) | Chat IA conversationnel Claude, contexte ERP, analyse insertion/prédictif |
 | 25 | Pointage | pointage | Pointage | Gestion des pointages employés |
+| 26 | Boutiques | boutiques, boutique-ventes, boutique-commandes, boutique-objectifs, boutique-meteo | HubBoutiques, BoutiquesDashboard, BoutiquesVentes, BoutiquesCommandes, BoutiquesPlanning, BoutiquesObjectifs, BoutiquesImport | Performance retail 2nde main : import CSV caisse LogicS, dashboard 3 niveaux (jour/mois/année), commandes par lot/poids, objectifs mensuels, corrélation météo/CA, planning filtré |
 
 ---
 
-## 6. BASE DE DONNÉES (70+ tables)
+## 6. BASE DE DONNÉES (80+ tables)
 
 ### Tables principales par domaine
 
@@ -148,6 +150,7 @@ solidata.online/
 **Finance** : financial_exercises, financial_periods, financial_entries, pennylane_config, pennylane_sync_log
 **Notifications** : notification_triggers
 **Historique** : historique_mensuel
+**Boutiques** : boutiques, boutique_import_batches, boutique_ventes, boutique_tickets, boutique_commandes, boutique_commande_lignes, boutique_commande_historique, boutique_objectifs, boutique_meteo_quotidien
 
 ---
 
@@ -229,6 +232,10 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | **Filière** | Secteur d'activité interne : tri, collecte, logistique, boutique |
 | **Balles** | Unité de conditionnement textile pressé (~400kg) |
 | **Tare** | Poids du véhicule vide (pour calcul poids net collecté) |
+| **LogicS** | Logiciel de caisse des boutiques — export CSV quotidien des ventes |
+| **RESP_BTQ** | Responsable Boutique — 6ème rôle, gère les ventes et commandes de sa boutique |
+| **Panier moyen** | CA TTC / nombre de tickets — indicateur clé retail |
+| **Minute key** | Clé de reconstitution ticket (YYYY-MM-DD HH:MM) — pas d'ID ticket dans le CSV LogicS |
 
 ### Parties prenantes externes
 - **Refashion** : éco-organisme, subventions trimestrielles
@@ -327,6 +334,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | 6 avril 2026 | 1.3.2 | Audit quotidien : 11 commits orphelins réintégrés (design system lot 1, fix vue mv_cav_stats). Repo propre (1 branche). Sécurité **4.5/10** (6 CRITIQUES : injection SQL insertion/index.js, injection shell admin-db, auth manquante PCM). 10 vuln npm (8 HIGH). **39 bugs dont 7 BLOQUANTS** — 7 modules cassés : Dashboard (SQL crash), WorkHours (endpoints incompatibles), ProduitsFinis (mismatch champs), GPS temps réel (Socket.IO), LiveVehicles, Expéditions (date mismatch), FillRateMap (structure réponse). 4 bugs bloquants récurrents depuis 02/04. Note globale **4.8/10**. 155 commits |
 | 7 avril 2026 | 1.3.2 | Audit quotidien : 15 commits orphelins réintégrés sur main. Repo propre (1 branche). Sécurité **4.5/10** (2 CRITIQUES : injection SQL insertion/index.js, injection shell admin-db + 6 HAUTES dont PCM sans auth). 11 vuln npm (9 HIGH). **36 bugs dont 12 BLOQUANTS** — 10 modules cassés : Mobile GPS (Socket.IO mismatch+auth), Mobile retour (CHECK constraint), WorkHours (triple incompatibilité), Expéditions (champs POST), Commandes Exutoires (status `chargée`), LiveVehicles (Socket.IO), Dashboard KPIs (colonne erronée), ProduitsFinis (JOIN manquant), Reporting (paramètre API), ChaineTri (nb_postes). **8 bugs récurrents ≥3 jours non corrigés**. Note globale **4.8/10**. 143 commits |
 | 11 avril 2026 | 1.3.3 | Stock Original (AdminStockOriginal, InventaireOriginal, grand livre, verrouillage trimestriel Refashion). Fix mobile (navigation incidents, checklist, erreurs silencieuses). Suppression doublon route `GET /api/vehicles/available`. Documentation : LOGIQUE_TOURNEES.md, LOGIQUE_STOCK_INVENTAIRES.md, VARIABLES_APPLICATION.md. 66 pages React, 63 fichiers routes. |
+| 16 avril 2026 | 1.4.0 | **Module Boutiques complet** — Espace performance retail 2nde main textile. 9 tables (boutiques, import_batches, ventes, tickets, commandes, commande_lignes, commande_historique, objectifs, meteo_quotidien). 5 routes API (boutiques, boutique-ventes, boutique-commandes, boutique-objectifs, boutique-meteo). 7 pages React (Hub, Dashboard 3 niveaux jour/mois/année, Ventes, Commandes Kanban 3 colonnes, Planning, Objectifs, Import). Utilitaire partagé `utils/weather.js` (Open-Meteo, WMO). Nouveau rôle `RESP_BTQ`. Import CSV LogicS (séparateur `;`, SHA-256 anti-doublon, reconstruction tickets par minute). Commandes par lot/poids (5 statuts : brouillon→envoyee→ajustee→en_preparation→expediee + annulee). Corrélation météo/CA. Objectifs mensuels avec % atteinte. 2 jobs scheduler (scan CSV auto + collecte météo). Sidebar section Boutiques (pink). Docker volume CSV. Seed St-Sever + L'Hopital. 21 fichiers, +3 298 lignes. 75 pages React, 69 fichiers routes. |
 
 ---
 
