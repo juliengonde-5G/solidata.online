@@ -28,6 +28,9 @@
   --shadow-card-hover: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.05);
   --sidebar-width: 16rem;
   --sidebar-width-collapsed: 4.5rem;
+  --icon-sidebar-width: 60px;
+  --content-sidebar-width: 15rem;
+  --topbar-height: 3.5rem;
 }
 
 @layer base {
@@ -203,11 +206,4 @@
   background: var(--color-primary-dark);
 }
 
-/* Contenu principal responsive (éviter chevauchement menu mobile) */
-@media (max-width: 1023px) {
-  main.flex-1 {
-    padding-top: 56px;
-    padding-left: 0.75rem;
-    padding-right: 0.75rem;
-  }
-}
+/* Contenu principal responsive — plus besoin de padding-top avec TopBar */

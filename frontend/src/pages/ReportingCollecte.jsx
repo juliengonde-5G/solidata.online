@@ -1,7 +1,18 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, KPICard } from '../components';
 import api from '../services/api';
+import {
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import { Truck, Leaf, MapPin, Target, BarChart3 } from 'lucide-react';
+
+// ══════════════════════════════════════════
+// REPORTING COLLECTE — enrichi avec graphiques
+// ══════════════════════════════════════════
+
+const STATUS_COLORS = { completed: '#0D9488', in_progress: '#F59E0B', cancelled: '#EF4444', planned: '#6366F1' };
 
 export default function ReportingCollecte() {
   const [period, setPeriod] = useState('month');
@@ -16,16 +27,13 @@ export default function ReportingCollecte() {
     try {
       const periodDays = period === 'week' ? 7 : period === 'month' ? 30 : period === 'quarter' ? 90 : 365;
       const groupBy = period === 'year' ? 'month' : 'day';
-
       const today = new Date();
       const dateFrom = new Date(today);
       dateFrom.setDate(today.getDate() - periodDays);
-      const dateFromStr = dateFrom.toISOString().slice(0, 10);
-      const dateToStr = today.toISOString().slice(0, 10);
 
       const [dashRes, collecteRes] = await Promise.all([
         api.get(`/reporting/dashboard?period=${periodDays}`),
-        api.get(`/reporting/collecte?group_by=${groupBy}&date_from=${dateFromStr}&date_to=${dateToStr}`),
+        api.get(`/reporting/collecte?group_by=${groupBy}&date_from=${dateFrom.toISOString().slice(0, 10)}&date_to=${today.toISOString().slice(0, 10)}`),
       ]);
       setDashboard(dashRes.data);
       setCollecteData(collecteRes.data);
@@ -35,139 +43,165 @@ export default function ReportingCollecte() {
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement..." /></Layout>;
 
+  const totalKg = collecteData.reduce((s, r) => s + parseFloat(r.total_kg || 0), 0);
+  const totalTours = collecteData.reduce((s, r) => s + parseInt(r.nb_tours || 0), 0);
+  const avgKgTour = totalTours > 0 ? Math.round(totalKg / totalTours) : 0;
+  const co2Evite = Math.round(totalKg * 1.567 / 1000);
+  const tauxCompletion = dashboard?.tours?.nb_tours > 0 ? Math.round((dashboard.tours.completed / dashboard.tours.nb_tours) * 100) : 0;
+
+  // Chart data
+  const chartData = collecteData.map(r => ({
+    periode: r.periode.length > 10 ? r.periode.slice(5) : r.periode.slice(5),
+    kg: parseFloat(r.total_kg || 0),
+    tours: parseInt(r.nb_tours || 0),
+    avg: parseFloat(r.avg_kg || 0),
+  }));
+
+  // Tours by status for donut
+  const toursByStatus = dashboard ? [
+    { name: 'Terminées', value: parseInt(dashboard.tours?.completed || 0), color: STATUS_COLORS.completed },
+    { name: 'En cours', value: Math.max(0, parseInt(dashboard.tours?.nb_tours || 0) - parseInt(dashboard.tours?.completed || 0)), color: STATUS_COLORS.in_progress },
+  ].filter(d => d.value > 0) : [];
+
   return (
     <Layout>
-      <div className="p-6">
+      <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Reporting Collecte</h1>
-            <p className="text-gray-500">Tonnages, tournees et indicateurs de collecte</p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-teal-50">
+              <Truck className="w-6 h-6 text-teal-600" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Reporting Collecte</h1>
+              <p className="text-slate-500 text-sm">Tonnages, tournées et indicateurs de collecte</p>
+            </div>
           </div>
-          <select value={period} onChange={e => setPeriod(e.target.value)} className="input-modern w-auto">
+          <select value={period} onChange={e => setPeriod(e.target.value)} className="select-modern w-auto">
             <option value="week">Cette semaine</option>
             <option value="month">Ce mois</option>
             <option value="quarter">Ce trimestre</option>
-            <option value="year">Cette annee</option>
+            <option value="year">Cette année</option>
           </select>
         </div>
 
         {/* KPI Cards */}
-        {dashboard && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <KPICard label="Tonnage collecte" value={`${dashboard.collecte?.tonnage_t || 0} t`} icon="♻️" color="text-primary" />
-            <KPICard label="CO2 evite" value={`${dashboard.collecte?.co2_evite_kg || 0} kg`} icon="🌿" color="text-green-600" />
-            <KPICard label="Tours realisees" value={dashboard.tours?.completed || 0} icon="🚛" color="text-orange-600" />
-            <KPICard label="CAV actifs" value={dashboard.cav?.actifs || 0} icon="📍" color="text-teal-600" />
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <KPICard title="Tonnage collecté" value={`${(totalKg / 1000).toFixed(1)}`} unit="t" icon={Truck} accent="primary" />
+          <KPICard title="CO2 évité" value={co2Evite} unit="kg" icon={Leaf} accent="emerald" />
+          <KPICard title="Tours réalisées" value={dashboard?.tours?.completed || 0} icon={Target} accent="amber" />
+          <KPICard title="Kg moyen/tour" value={avgKgTour.toLocaleString('fr-FR')} unit="kg" icon={BarChart3} accent="primary" />
+          <KPICard title="CAV actifs" value={dashboard?.cav?.actifs || 0} icon={MapPin} accent="slate" />
+        </div>
+
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Bar chart tonnage */}
+          <div className="lg:col-span-2 card-modern p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Tonnage collecté par période</h3>
+            {chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="periode" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(v) => `${Number(v).toLocaleString('fr-FR')} kg`} />
+                  <Bar dataKey="kg" name="Tonnage (kg)" fill="#0D9488" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
+            )}
+          </div>
+
+          {/* Donut tours par statut */}
+          <div className="card-modern p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Taux de complétion</h3>
+            <div className="flex flex-col items-center">
+              <div className="relative">
+                <ResponsiveContainer width={180} height={180}>
+                  <PieChart>
+                    <Pie data={toursByStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3}>
+                      {toursByStatus.map((d, i) => <Cell key={i} fill={d.color} />)}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-2xl font-bold text-slate-800">{tauxCompletion}%</span>
+                </div>
+              </div>
+              <div className="flex gap-4 mt-3">
+                {toursByStatus.map((d, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                    {d.name} ({d.value})
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Trend line chart */}
+        {chartData.length > 2 && (
+          <div className="card-modern p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Tendance kg moyen par tour</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="periode" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(v) => `${Number(v).toLocaleString('fr-FR')} kg`} />
+                <Line type="monotone" dataKey="avg" name="Moy. kg/tour" stroke="#F59E0B" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         )}
 
-        {/* Collecte table by period */}
-        <div className="card-modern mb-6">
-          <div className="p-4 border-b">
-            <h3 className="font-semibold text-slate-800">Collecte par periode</h3>
+        {/* Table */}
+        <div className="card-modern">
+          <div className="p-4 border-b border-slate-100">
+            <h3 className="font-semibold text-slate-800">Détail par période</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Periode</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">Nb tournees</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">Total (kg)</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">Moyenne (kg)</th>
+                <tr className="bg-slate-50">
+                  <th className="text-left px-4 py-3 font-medium text-slate-600">Période</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Nb tournées</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Total (kg)</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600">Moyenne (kg)</th>
                 </tr>
               </thead>
               <tbody>
                 {collecteData.length === 0 ? (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Aucune donnee pour cette periode</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">Aucune donnée pour cette période</td></tr>
                 ) : (
                   collecteData.map((row, i) => (
-                    <tr key={i} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{row.periode}</td>
-                      <td className="px-4 py-3 text-right">{row.nb_tours}</td>
+                    <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+                      <td className="px-4 py-3 font-medium text-slate-800">{row.periode}</td>
+                      <td className="px-4 py-3 text-right text-slate-600">{row.nb_tours}</td>
                       <td className="px-4 py-3 text-right font-semibold text-primary">{Number(row.total_kg).toLocaleString('fr-FR')}</td>
-                      <td className="px-4 py-3 text-right">{Number(row.avg_kg).toLocaleString('fr-FR')}</td>
+                      <td className="px-4 py-3 text-right text-slate-600">{Number(row.avg_kg).toLocaleString('fr-FR')}</td>
                     </tr>
                   ))
                 )}
               </tbody>
               {collecteData.length > 0 && (
                 <tfoot>
-                  <tr className="border-t-2 bg-gray-50 font-semibold">
+                  <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                     <td className="px-4 py-3">Total</td>
-                    <td className="px-4 py-3 text-right">{collecteData.reduce((s, r) => s + parseInt(r.nb_tours || 0), 0)}</td>
-                    <td className="px-4 py-3 text-right text-primary">
-                      {collecteData.reduce((s, r) => s + parseFloat(r.total_kg || 0), 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}
-                    </td>
-                    <td className="px-4 py-3 text-right">-</td>
+                    <td className="px-4 py-3 text-right">{totalTours}</td>
+                    <td className="px-4 py-3 text-right text-primary">{totalKg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</td>
+                    <td className="px-4 py-3 text-right">{avgKgTour.toLocaleString('fr-FR')}</td>
                   </tr>
                 </tfoot>
               )}
             </table>
           </div>
         </div>
-
-        {/* Tours summary */}
-        {dashboard && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="card-modern p-4">
-              <h3 className="font-semibold text-slate-800 mb-3">Resume des tournees</h3>
-              <table className="w-full text-sm">
-                <tbody>
-                  <tr className="border-b">
-                    <td className="py-2 text-gray-600">Total tournees</td>
-                    <td className="py-2 text-right font-semibold">{dashboard.tours?.nb_tours || 0}</td>
-                  </tr>
-                  <tr className="border-b">
-                    <td className="py-2 text-gray-600">Completees</td>
-                    <td className="py-2 text-right font-semibold text-primary">{dashboard.tours?.completed || 0}</td>
-                  </tr>
-                  <tr className="border-b">
-                    <td className="py-2 text-gray-600">Taux de completion</td>
-                    <td className="py-2 text-right font-semibold">
-                      {dashboard.tours?.nb_tours > 0
-                        ? Math.round((dashboard.tours.completed / dashboard.tours.nb_tours) * 100)
-                        : 0}%
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div className="card-modern p-4">
-              <h3 className="font-semibold text-slate-800 mb-3">CAV</h3>
-              <table className="w-full text-sm">
-                <tbody>
-                  <tr className="border-b">
-                    <td className="py-2 text-gray-600">CAV totaux</td>
-                    <td className="py-2 text-right font-semibold">{dashboard.cav?.total || 0}</td>
-                  </tr>
-                  <tr className="border-b">
-                    <td className="py-2 text-gray-600">CAV actifs</td>
-                    <td className="py-2 text-right font-semibold text-primary">{dashboard.cav?.actifs || 0}</td>
-                  </tr>
-                  <tr className="border-b">
-                    <td className="py-2 text-gray-600">Tonnage total collecte</td>
-                    <td className="py-2 text-right font-semibold">{dashboard.collecte?.tonnage_t || 0} t</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
       </div>
     </Layout>
-  );
-}
-
-function KPICard({ label, value, icon, color }) {
-  return (
-    <div className="card-modern p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-lg">{icon}</span>
-        <span className="text-xs text-gray-500">{label}</span>
-      </div>
-      <p className={`text-2xl font-bold ${color}`}>{value}</p>
-    </div>
   );
 }
