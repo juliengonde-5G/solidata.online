@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, UserPlus, Users, Truck, Factory,
-  Ship, CircleDollarSign, BarChart3, Settings,
+  Ship, CircleDollarSign, BarChart3, Settings, Store,
 } from 'lucide-react';
 
 const ICON_STROKE = 1.8;
@@ -12,6 +12,7 @@ const MODULE_ICONS = [
   { key: 'Collecte', icon: Truck, color: 'teal' },
   { key: 'Tri & Production', icon: Factory, color: 'amber' },
   { key: 'Logistique', icon: Ship, color: 'purple' },
+  { key: 'Boutiques', icon: Store, color: 'pink' },
   { key: 'Finances', icon: CircleDollarSign, color: 'indigo' },
   { key: 'Reporting', icon: BarChart3, color: 'rose' },
   { key: 'Administration', icon: Settings, color: 'slate' },
@@ -25,6 +26,7 @@ const ACTIVE_COLORS = {
   purple: 'border-purple-500 text-purple-600 bg-purple-50',
   indigo: 'border-indigo-500 text-indigo-600 bg-indigo-50',
   rose: 'border-rose-500 text-rose-600 bg-rose-50',
+  pink: 'border-pink-500 text-pink-600 bg-pink-50',
   slate: 'border-slate-500 text-slate-600 bg-slate-100',
 };
 

@@ -11,6 +11,7 @@ import {
   ArrowUpDown, Package, Tag, Ship, CircleDollarSign, PieChart, BarChart2,
   RefreshCw, Lock, Settings, Car,
   Handshake, Warehouse, Scale, Activity,
+  Store, ShoppingBag, Target, Upload, Calendar,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -83,6 +84,18 @@ const menuSections = [
       { path: '/exutoires-clients', label: 'Clients', icon: Users, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-tarifs', label: 'Grille Tarifaire', icon: CircleDollarSign, roles: ['ADMIN', 'MANAGER'] },
       { path: '/inventaire-original', label: 'Inventaire Original', icon: Warehouse, roles: ['ADMIN', 'MANAGER'] },
+    ],
+  },
+  {
+    title: 'Boutiques',
+    hubPath: '/hub-boutiques',
+    items: [
+      { path: '/boutiques', label: 'Tableau de bord', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+      { path: '/boutiques/ventes', label: 'Ventes', icon: ShoppingBag, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+      { path: '/boutiques/commandes', label: 'Commandes', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+      { path: '/boutiques/planning', label: 'Planning', icon: Calendar, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+      { path: '/boutiques/objectifs', label: 'Objectifs', icon: Target, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/boutiques/import', label: 'Import CSV', icon: Upload, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {
