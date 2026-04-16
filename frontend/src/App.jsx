@@ -74,6 +74,13 @@ import HubTriProduction from './pages/HubTriProduction';
 import HubExutoires from './pages/HubExutoires';
 import HubReporting from './pages/HubReporting';
 import HubAdmin from './pages/HubAdmin';
+import HubBoutiques from './pages/HubBoutiques';
+import BoutiquesDashboard from './pages/BoutiquesDashboard';
+import BoutiquesVentes from './pages/BoutiquesVentes';
+import BoutiquesCommandes from './pages/BoutiquesCommandes';
+import BoutiquesPlanning from './pages/BoutiquesPlanning';
+import BoutiquesObjectifs from './pages/BoutiquesObjectifs';
+import BoutiquesImport from './pages/BoutiquesImport';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -100,8 +107,17 @@ function App() {
             <Route path="/hub-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><HubCollecte /></ProtectedRoute>} />
             <Route path="/hub-tri-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><HubTriProduction /></ProtectedRoute>} />
             <Route path="/hub-exutoires" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><HubExutoires /></ProtectedRoute>} />
+            <Route path="/hub-boutiques" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><HubBoutiques /></ProtectedRoute>} />
             <Route path="/hub-reporting" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH']}><HubReporting /></ProtectedRoute>} />
             <Route path="/hub-admin" element={<ProtectedRoute roles={['ADMIN']}><HubAdmin /></ProtectedRoute>} />
+
+            {/* Boutiques */}
+            <Route path="/boutiques" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesDashboard /></ProtectedRoute>} />
+            <Route path="/boutiques/ventes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesVentes /></ProtectedRoute>} />
+            <Route path="/boutiques/commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesCommandes /></ProtectedRoute>} />
+            <Route path="/boutiques/planning" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesPlanning /></ProtectedRoute>} />
+            <Route path="/boutiques/objectifs" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><BoutiquesObjectifs /></ProtectedRoute>} />
+            <Route path="/boutiques/import" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><BoutiquesImport /></ProtectedRoute>} />
 
             {/* Recrutement */}
             <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Candidates /></ProtectedRoute>} />

@@ -607,6 +607,89 @@ function startScheduler() {
   }, 60 * 60 * 1000);
 }
 
+// ══════════════════════════════════════════
+// MODULE BOUTIQUES : scan dossier CSV + collecte météo
+// ══════════════════════════════════════════
+async function scanBoutiqueCSVFolders() {
+  const fs = require('fs');
+  const path = require('path');
+  const crypto = require('crypto');
+  const { importCSVContent } = require('../routes/boutique-ventes');
+
+  if (!importCSVContent) return; // route pas encore chargée
+
+  try {
+    const boutiques = await pool.query(
+      'SELECT id, nom, csv_folder_path FROM boutiques WHERE is_active = true AND csv_folder_path IS NOT NULL'
+    );
+    for (const btq of boutiques.rows) {
+      const folder = btq.csv_folder_path;
+      if (!folder || !fs.existsSync(folder)) continue;
+
+      const processedDir = path.join(folder, 'processed');
+      if (!fs.existsSync(processedDir)) fs.mkdirSync(processedDir, { recursive: true });
+
+      const files = fs.readdirSync(folder).filter(f => f.toLowerCase().endsWith('.csv'));
+      for (const f of files) {
+        const full = path.join(folder, f);
+        try {
+          const content = fs.readFileSync(full, 'utf-8');
+          const hash = crypto.createHash('sha256').update(content).digest('hex');
+          const existing = await pool.query(
+            'SELECT id FROM boutique_import_batches WHERE file_hash = $1 LIMIT 1',
+            [hash]
+          );
+          if (existing.rows.length > 0) {
+            // Déjà importé, on déplace vers processed
+            fs.renameSync(full, path.join(processedDir, f));
+            continue;
+          }
+          const result = await importCSVContent(btq.id, content, f, null, 'auto');
+          console.log(`[SCHEDULER] CSV ${f} importé pour ${btq.nom}: ${result.nb_lignes_importees} lignes`);
+          fs.renameSync(full, path.join(processedDir, `${Date.now()}-${f}`));
+        } catch (e) {
+          console.error(`[SCHEDULER] Erreur import CSV ${f} pour ${btq.nom}:`, e.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] scanBoutiqueCSVFolders:', err.message);
+  }
+}
+
+async function collectBoutiqueWeather() {
+  const { fetchOpenMeteoDaily } = require('../utils/weather');
+  try {
+    const boutiques = await pool.query(
+      'SELECT id, nom, latitude, longitude FROM boutiques WHERE is_active = true'
+    );
+    const today = new Date().toISOString().slice(0, 10);
+    for (const btq of boutiques.rows) {
+      const existing = await pool.query(
+        'SELECT id FROM boutique_meteo_quotidien WHERE boutique_id = $1 AND date = $2',
+        [btq.id, today]
+      );
+      if (existing.rows.length > 0) continue;
+
+      const lat = btq.latitude || 49.4431;
+      const lng = btq.longitude || 1.0993;
+      const data = await fetchOpenMeteoDaily(lat, lng, today);
+      if (!data) continue;
+
+      await pool.query(`
+        INSERT INTO boutique_meteo_quotidien
+          (boutique_id, date, weather_code, weather_label, temp_min, temp_max,
+           precipitation_mm, wind_speed_max, sunshine_hours)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (boutique_id, date) DO NOTHING
+      `, [btq.id, today, data.code, data.label, data.tempMin, data.tempMax, data.precipMm, data.windMax, data.sunshineHours]);
+      console.log(`[SCHEDULER] Météo collectée pour ${btq.nom}: ${data.label}`);
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] collectBoutiqueWeather:', err.message);
+  }
+}
+
 async function runAllJobs() {
   // Distributed locking: seule une instance exécute les jobs
   const locked = await acquireLock();
@@ -625,6 +708,8 @@ async function runAllJobs() {
     await purgeExpiredCandidates();
     await purgeOldGpsPositions();
     await refreshMaterializedViews();
+    await scanBoutiqueCSVFolders();
+    await collectBoutiqueWeather();
     console.log('[SCHEDULER] Tous les jobs executes');
   } catch (err) {
     console.error('[SCHEDULER] Erreur globale:', err.message);

@@ -159,6 +159,13 @@ app.use('/api/chat', require('./routes/chat'));
 // Performance : Dashboard KPI consolide et indicateurs industriels
 app.use('/api/performance', require('./routes/performance'));
 
+// Module Boutiques : gestion de la performance des boutiques retail 2nde main
+app.use('/api/boutiques', require('./routes/boutiques'));
+app.use('/api/boutique-ventes', require('./routes/boutique-ventes'));
+app.use('/api/boutique-commandes', require('./routes/boutique-commandes'));
+app.use('/api/boutique-objectifs', require('./routes/boutique-objectifs'));
+app.use('/api/boutique-meteo', require('./routes/boutique-meteo'));
+
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 

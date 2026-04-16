@@ -22,7 +22,7 @@ async function initDatabase() {
         username VARCHAR(100) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         email VARCHAR(255),
-        role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE')),
+        role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ')),
         first_name VARCHAR(100),
         last_name VARCHAR(100),
         phone VARCHAR(20),
@@ -2631,6 +2631,241 @@ async function initDatabase() {
       ALTER TABLE stock_original_movements ADD COLUMN IF NOT EXISTS source VARCHAR(50);
     `);
     console.log('[INIT-DB] Migration balance (contenant, source) ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE BOUTIQUES : performance retail 2nde main
+    // ══════════════════════════════════════════
+
+    // Migration : étendre la CHECK constraint du rôle utilisateur pour inclure RESP_BTQ
+    try {
+      const roleChecks = await client.query(`
+        SELECT con.conname FROM pg_constraint con
+        JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
+        WHERE con.conrelid = 'users'::regclass AND con.contype = 'c' AND att.attname = 'role'
+      `);
+      for (const row of roleChecks.rows) {
+        await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+      }
+      await client.query(`
+        ALTER TABLE users ADD CONSTRAINT users_role_check
+          CHECK (role IN ('ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ'));
+      `);
+      console.log('[INIT-DB] Migration rôle RESP_BTQ ajouté ✓');
+    } catch (e) {
+      console.warn('[INIT-DB] Migration users_role_check:', e.message);
+    }
+
+    // Table 1 : boutiques (référentiel)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutiques (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(100) NOT NULL UNIQUE,
+        code VARCHAR(20) NOT NULL UNIQUE,
+        adresse TEXT,
+        ville VARCHAR(100),
+        code_postal VARCHAR(10),
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        telephone VARCHAR(20),
+        responsable_id INTEGER REFERENCES users(id),
+        team_id INTEGER REFERENCES teams(id),
+        budget_annuel DECIMAL(12,2) DEFAULT 0,
+        csv_folder_path VARCHAR(500),
+        is_active BOOLEAN DEFAULT true,
+        ouverture_lundi BOOLEAN DEFAULT true,
+        ouverture_mardi BOOLEAN DEFAULT true,
+        ouverture_mercredi BOOLEAN DEFAULT true,
+        ouverture_jeudi BOOLEAN DEFAULT true,
+        ouverture_vendredi BOOLEAN DEFAULT true,
+        ouverture_samedi BOOLEAN DEFAULT true,
+        ouverture_dimanche BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    // Table 2 : boutique_import_batches (traçabilité imports CSV)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutique_import_batches (
+        id SERIAL PRIMARY KEY,
+        boutique_id INTEGER NOT NULL REFERENCES boutiques(id),
+        filename VARCHAR(255) NOT NULL,
+        file_hash VARCHAR(64),
+        date_debut DATE,
+        date_fin DATE,
+        nb_lignes_total INTEGER DEFAULT 0,
+        nb_lignes_importees INTEGER DEFAULT 0,
+        nb_lignes_erreur INTEGER DEFAULT 0,
+        nb_tickets_reconstitues INTEGER DEFAULT 0,
+        ca_total_ttc DECIMAL(12,2) DEFAULT 0,
+        statut VARCHAR(20) NOT NULL DEFAULT 'en_cours'
+          CHECK (statut IN ('en_cours', 'termine', 'erreur', 'doublon')),
+        erreurs JSONB,
+        source VARCHAR(20) DEFAULT 'manuel'
+          CHECK (source IN ('auto', 'manuel')),
+        imported_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_import_hash ON boutique_import_batches(file_hash)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_import_boutique ON boutique_import_batches(boutique_id)`);
+
+    // Table 3 : boutique_tickets (tickets reconstitués)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutique_tickets (
+        id SERIAL PRIMARY KEY,
+        boutique_id INTEGER NOT NULL REFERENCES boutiques(id),
+        date_ticket TIMESTAMP NOT NULL,
+        minute_key VARCHAR(16) NOT NULL,
+        nb_articles INTEGER DEFAULT 0,
+        total_ttc DECIMAL(10,2) DEFAULT 0,
+        total_ht DECIMAL(10,4) DEFAULT 0,
+        batch_id INTEGER REFERENCES boutique_import_batches(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(boutique_id, minute_key)
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_tickets_date ON boutique_tickets(date_ticket)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_tickets_boutique ON boutique_tickets(boutique_id)`);
+
+    // Table 4 : boutique_ventes (lignes de vente importées)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutique_ventes (
+        id SERIAL PRIMARY KEY,
+        boutique_id INTEGER NOT NULL REFERENCES boutiques(id),
+        batch_id INTEGER NOT NULL REFERENCES boutique_import_batches(id) ON DELETE CASCADE,
+        ticket_id INTEGER REFERENCES boutique_tickets(id),
+        date_vente TIMESTAMP NOT NULL,
+        rayon VARCHAR(50) NOT NULL,
+        segment VARCHAR(30) NOT NULL
+          CHECK (segment IN ('ventes_courantes', 'promotions', 'consommables')),
+        id_article INTEGER,
+        article VARCHAR(255) NOT NULL,
+        quantite INTEGER NOT NULL DEFAULT 1,
+        prix_unitaire_ttc DECIMAL(10,2) NOT NULL,
+        total_ht DECIMAL(10,4) NOT NULL,
+        total_ttc DECIMAL(10,2) NOT NULL,
+        montant_tva DECIMAL(10,4) NOT NULL,
+        taux_tva DECIMAL(5,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_date ON boutique_ventes(date_vente)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_boutique ON boutique_ventes(boutique_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_rayon ON boutique_ventes(rayon)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_segment ON boutique_ventes(segment)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_batch ON boutique_ventes(batch_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_ticket ON boutique_ventes(ticket_id)`);
+
+    // Table 5 : boutique_commandes (en-tête commandes)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutique_commandes (
+        id SERIAL PRIMARY KEY,
+        reference VARCHAR(20) NOT NULL UNIQUE,
+        boutique_id INTEGER NOT NULL REFERENCES boutiques(id),
+        date_commande DATE NOT NULL,
+        date_livraison_souhaitee DATE,
+        statut VARCHAR(20) NOT NULL DEFAULT 'brouillon'
+          CHECK (statut IN ('brouillon', 'envoyee', 'ajustee', 'en_preparation', 'expediee', 'annulee')),
+        notes TEXT,
+        poids_total_demande_kg DECIMAL(10,2) DEFAULT 0,
+        poids_total_ajuste_kg DECIMAL(10,2),
+        created_by INTEGER REFERENCES users(id),
+        ajuste_par INTEGER REFERENCES users(id),
+        expedie_par INTEGER REFERENCES users(id),
+        date_expedition TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_commandes_boutique ON boutique_commandes(boutique_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_commandes_statut ON boutique_commandes(statut)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_commandes_date ON boutique_commandes(date_commande DESC)`);
+
+    // Table 6 : boutique_commande_lignes
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutique_commande_lignes (
+        id SERIAL PRIMARY KEY,
+        commande_id INTEGER NOT NULL REFERENCES boutique_commandes(id) ON DELETE CASCADE,
+        categorie VARCHAR(100) NOT NULL,
+        poids_demande_kg DECIMAL(10,2) NOT NULL,
+        poids_ajuste_kg DECIMAL(10,2),
+        poids_expedie_kg DECIMAL(10,2),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_cmd_lignes_commande ON boutique_commande_lignes(commande_id)`);
+
+    // Table 7 : boutique_commande_historique
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutique_commande_historique (
+        id SERIAL PRIMARY KEY,
+        commande_id INTEGER NOT NULL REFERENCES boutique_commandes(id) ON DELETE CASCADE,
+        ancien_statut VARCHAR(20),
+        nouveau_statut VARCHAR(20) NOT NULL,
+        commentaire TEXT,
+        utilisateur_id INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_cmd_hist_commande ON boutique_commande_historique(commande_id)`);
+
+    // Table 8 : boutique_objectifs
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutique_objectifs (
+        id SERIAL PRIMARY KEY,
+        boutique_id INTEGER NOT NULL REFERENCES boutiques(id),
+        annee INTEGER NOT NULL,
+        mois INTEGER NOT NULL CHECK (mois BETWEEN 1 AND 12),
+        ca_objectif_ttc DECIMAL(12,2) NOT NULL,
+        nb_tickets_objectif INTEGER,
+        panier_moyen_objectif DECIMAL(10,2),
+        segment VARCHAR(30) DEFAULT 'global'
+          CHECK (segment IN ('global', 'ventes_courantes', 'promotions')),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(boutique_id, annee, mois, segment)
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_objectifs_boutique ON boutique_objectifs(boutique_id, annee)`);
+
+    // Table 9 : boutique_meteo_quotidien
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS boutique_meteo_quotidien (
+        id SERIAL PRIMARY KEY,
+        boutique_id INTEGER NOT NULL REFERENCES boutiques(id),
+        date DATE NOT NULL,
+        weather_code INTEGER,
+        weather_label VARCHAR(50),
+        temp_min DECIMAL(4,1),
+        temp_max DECIMAL(4,1),
+        precipitation_mm DECIMAL(6,1),
+        wind_speed_max DECIMAL(5,1),
+        sunshine_hours DECIMAL(4,1),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(boutique_id, date)
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_meteo_date ON boutique_meteo_quotidien(boutique_id, date)`);
+
+    // Seed : boutique St-Sever (référence géographique : Rouen)
+    const btqExist = await client.query("SELECT id FROM boutiques LIMIT 1");
+    if (btqExist.rows.length === 0) {
+      const teamStSever = await client.query("SELECT id FROM teams WHERE type = 'btq_st_sever' LIMIT 1");
+      const teamLhopital = await client.query("SELECT id FROM teams WHERE type = 'btq_lhopital' LIMIT 1");
+      await client.query(`
+        INSERT INTO boutiques (nom, code, adresse, ville, code_postal, latitude, longitude, team_id, budget_annuel, csv_folder_path)
+        VALUES
+          ('Boutique St-Sever', 'st_sever', 'Centre commercial St-Sever', 'Rouen', '76100', 49.4331, 1.0856, $1, 100000, '/data/boutiques-csv/st_sever'),
+          ('Boutique L''Hopital', 'lhopital', 'Rue de L''Hopital', 'Rouen', '76000', 49.4431, 1.0993, $2, 80000, '/data/boutiques-csv/lhopital')
+      `, [teamStSever.rows[0]?.id || null, teamLhopital.rows[0]?.id || null]);
+      console.log("[INIT-DB] Seed boutiques (St-Sever, L'Hopital) ✓");
+    }
+
+    console.log('[INIT-DB] Module Boutiques ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');

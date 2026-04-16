@@ -11,6 +11,7 @@ const MODULE_COLORS = {
   'Collecte':         { active: 'bg-teal-50 text-teal-700 border-l-4 border-teal-500 font-semibold', icon: 'text-teal-500', header: 'text-teal-600' },
   'Tri & Production': { active: 'bg-amber-50 text-amber-700 border-l-4 border-amber-500 font-semibold', icon: 'text-amber-500', header: 'text-amber-600' },
   'Logistique':       { active: 'bg-purple-50 text-purple-700 border-l-4 border-purple-500 font-semibold', icon: 'text-purple-500', header: 'text-purple-600' },
+  'Boutiques':        { active: 'bg-pink-50 text-pink-700 border-l-4 border-pink-500 font-semibold', icon: 'text-pink-500', header: 'text-pink-600' },
   'Finances':         { active: 'bg-indigo-50 text-indigo-700 border-l-4 border-indigo-500 font-semibold', icon: 'text-indigo-500', header: 'text-indigo-600' },
   'Reporting':        { active: 'bg-rose-50 text-rose-700 border-l-4 border-rose-500 font-semibold', icon: 'text-rose-500', header: 'text-rose-600' },
   'Administration':   { active: 'bg-slate-100 text-slate-700 border-l-4 border-slate-500 font-semibold', icon: 'text-slate-500', header: 'text-slate-600' },
