@@ -65,6 +65,7 @@ export default function Checklist() {
       title="Checklist départ"
       subtitle={`Tournée #${tourId} — ${checkedCount}/${CHECKLIST_ITEMS.length} vérifiés`}
       onBack={() => navigate('/start')}
+      usageHint="operational_stop"
     >
       <div className="mb-4">
         <TourStepBar currentPath="/checklist" />

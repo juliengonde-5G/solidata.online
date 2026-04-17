@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import OfflineActionBadge from '../components/OfflineActionBadge';
+import { getPendingCount, syncEvents, syncAll } from '../services/sync';
 
 export default function TourSummary() {
   const [tour, setTour] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(0);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
 
@@ -11,12 +14,36 @@ export default function TourSummary() {
     const load = async () => {
       try {
         const res = await fetch(`/api/tours/${tourId}/summary-public`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        setTour(data);
-      } catch (err) { console.error(err); }
+        // Le backend renvoie { tour, stats }. On aplatit pour compatibilité
+        // avec le rendu existant (data.total_weight_kg, data.cavs…).
+        const flat = {
+          ...(data.tour || {}),
+          stats: data.stats || null,
+          cavs: data.cavs || data.tour?.cavs || [],
+          incidents: data.incidents || [],
+          total_weight_kg: data.stats?.total_weight_kg ?? data.tour?.total_weight_kg ?? 0,
+          started_at: data.tour?.started_at,
+          completed_at: data.tour?.completed_at,
+          estimated_distance_km: data.tour?.estimated_distance_km,
+          checklist: data.checklist || null,
+        };
+        setTour(flat);
+      } catch (err) {
+        // Mode dégradé : on affiche quand même l'écran avec ce qu'on a
+        // en local (pour le cas offline au moment de la finalisation).
+        console.warn('[TourSummary] summary-public indisponible', err.message);
+        setTour({ cavs: [], incidents: [], total_weight_kg: 0, degraded: true });
+      }
       setLoading(false);
     };
     if (tourId) load();
+
+    const onPending = (e) => setPending(e.detail?.counts?.total || 0);
+    syncEvents.addEventListener('pending', onPending);
+    getPendingCount();
+    return () => syncEvents.removeEventListener('pending', onPending);
   }, [tourId]);
 
   const finishDay = () => {
@@ -100,7 +127,36 @@ export default function TourSummary() {
           </div>
         )}
 
-        <button type="button" onClick={finishDay} className="btn-primary-mobile py-4 text-lg mt-6">
+        <div className="mt-4 card-mobile p-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">État de la tournée</p>
+            <p className="text-xs text-gray-500">
+              {pending > 0 ? `${pending} action${pending > 1 ? 's' : ''} encore à envoyer` : 'Toutes les données sont envoyées'}
+            </p>
+          </div>
+          {pending > 0 ? (
+            <button
+              type="button"
+              onClick={() => syncAll()}
+              className="flex items-center gap-2"
+              aria-label="Forcer la synchronisation"
+            >
+              <OfflineActionBadge status="pending" label={`${pending} à envoyer`} />
+            </button>
+          ) : (
+            <OfflineActionBadge status="sent" label="Tout envoyé" />
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => navigate('/tour-history')}
+          className="btn-secondary-mobile py-3 text-base mt-4"
+        >
+          Voir l'historique de la tournée
+        </button>
+
+        <button type="button" onClick={finishDay} className="btn-primary-mobile py-4 text-lg mt-4">
           Terminer la journée
         </button>
       </div>

@@ -107,4 +107,66 @@
     background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
     color: white;
   }
+
+  /* Safe-area bottom utility — utilisé par les barres basses ancrées. */
+  .safe-bottom {
+    padding-bottom: calc(var(--safe-bottom) + 12px);
+  }
+
+  /* Barre d'action principale — CTA unique en bas d'écran. */
+  .primary-action-bar {
+    @apply bg-white border-t border-slate-200 px-4 pt-3 z-30;
+    padding-bottom: calc(var(--safe-bottom) + 12px);
+    box-shadow: 0 -4px 12px -2px rgb(0 0 0 / 0.04);
+  }
+  .primary-action-bar--fixed {
+    @apply fixed left-0 right-0 bottom-0;
+  }
+  .primary-action-row {
+    @apply flex gap-3 items-stretch;
+  }
+  .primary-action-hint {
+    @apply mb-2 rounded-xl px-3 py-2 text-xs font-medium;
+  }
+  .primary-action-hint--pending {
+    @apply bg-amber-50 border border-amber-200 text-amber-700;
+  }
+  .primary-action-hint--error {
+    @apply bg-red-50 border border-red-200 text-red-700 text-sm;
+  }
+
+  /* Pastille de mode d'usage — compacte, lisible en extérieur. */
+  .usage-banner {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold;
+    line-height: 1.1;
+  }
+  .usage-banner-icon { @apply leading-none; font-size: 14px; }
+  .usage-banner--driving { @apply bg-blue-100 text-blue-800; }
+  .usage-banner--short-stop { @apply bg-amber-100 text-amber-800; }
+  .usage-banner--operational { @apply bg-teal-100 text-teal-800; }
+  .usage-banner--on-dark {
+    @apply bg-white/20 text-white;
+  }
+
+  /* Bandeau global d'état de synchronisation. Masqué en nominal.
+     Fixed top pour garantir la visibilité quelque soit l'écran (y compris
+     TourMap plein écran). z-index inférieur à BatteryAlert (9999). */
+  .sync-banner {
+    @apply fixed top-0 left-0 right-0 flex items-center gap-2 px-4 py-2 text-sm font-medium;
+    z-index: 90;
+    padding-top: calc(var(--safe-top) + 8px);
+  }
+  .sync-banner--offline { @apply bg-amber-100 text-amber-900 border-b border-amber-200; }
+  .sync-banner--syncing { @apply bg-blue-50 text-blue-800 border-b border-blue-100; }
+  .sync-banner--error   { @apply bg-red-100 text-red-900 border-b border-red-200; }
+  .sync-banner--pending { @apply bg-slate-100 text-slate-800 border-b border-slate-200; }
+
+  /* Badge local de statut d'action (envoyé / en attente / à renvoyer). */
+  .action-badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold;
+    line-height: 1.2;
+  }
+  .action-badge--sent    { @apply bg-emerald-100 text-emerald-800; }
+  .action-badge--pending { @apply bg-amber-100 text-amber-800; }
+  .action-badge--retry   { @apply bg-red-100 text-red-800; }
 }

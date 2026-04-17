@@ -31,6 +31,7 @@ export default function ReturnCentre() {
       title="Retour au centre"
       subtitle="Centre de tri — Solidarité Textiles"
       onBack={() => navigate('/tour-map')}
+      usageHint="operational_stop"
     >
       <div className="mb-4">
         <TourStepBar currentPath="/return-centre" />

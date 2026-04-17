@@ -1,8 +1,32 @@
+import { useEffect } from 'react';
+import { useUsageMode } from '../contexts/UsageModeContext';
+
 /**
  * Enveloppe commune pour les écrans mobile : header + zone de contenu avec padding safe.
  * Option : barre de progression des étapes (flux tournée).
+ *
+ * usageHint : suggestion de mode d'usage pour l'écran (ex. 'operational_stop').
+ * Le provider l'utilise comme indice si le GPS ne tranche pas.
  */
-export function MobileShell({ title, subtitle, onBack, rightAction, children, className = '' }) {
+export function MobileShell({
+  title,
+  subtitle,
+  onBack,
+  rightAction,
+  belowHeader,
+  footer,
+  children,
+  className = '',
+  usageHint,
+}) {
+  const { setScreenHint } = useUsageMode();
+
+  useEffect(() => {
+    if (!usageHint) return undefined;
+    setScreenHint(usageHint);
+    return () => setScreenHint(null);
+  }, [usageHint, setScreenHint]);
+
   return (
     <div className={`min-h-screen flex flex-col bg-[var(--color-surface-2)] ${className}`}>
       <header className="screen-header flex-shrink-0 flex flex-row items-center justify-between gap-3">
@@ -26,9 +50,15 @@ export function MobileShell({ title, subtitle, onBack, rightAction, children, cl
         </div>
         {rightAction && <div className="flex-shrink-0">{rightAction}</div>}
       </header>
+      {belowHeader && (
+        <div className="flex-shrink-0 px-4 pt-3 pb-1 bg-[var(--color-surface-2)]">
+          {belowHeader}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
         {children}
       </div>
+      {footer && <div className="flex-shrink-0">{footer}</div>}
     </div>
   );
 }
@@ -40,7 +70,7 @@ const TOUR_STEPS = [
   { path: '/vehicle-select', label: 'Véhicule' },
   { path: '/checklist', label: 'Check' },
   { path: '/tour-map', label: 'Carte' },
-  { path: '/qr-scanner', label: 'Scan' },
+  { path: '/identify-cav', label: 'Identifier' },
   { path: '/fill-level', label: 'Remplir' },
   { path: '/return-centre', label: 'Retour' },
   { path: '/weigh-in', label: 'Pesée' },
