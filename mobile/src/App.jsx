@@ -9,9 +9,8 @@ import SolidataBot from './components/SolidataBot';
 import VehicleSelect from './pages/VehicleSelect';
 import Checklist from './pages/Checklist';
 import TourMap from './pages/TourMap';
-import QRScanner from './pages/QRScanner';
+import IdentifyCav from './pages/IdentifyCav';
 import FillLevel from './pages/FillLevel';
-import QRUnavailable from './pages/QRUnavailable';
 import Incident from './pages/Incident';
 import ReturnCentre from './pages/ReturnCentre';
 import WeighIn from './pages/WeighIn';
@@ -32,9 +31,11 @@ function App() {
             <Route path="/vehicle-select" element={<VehicleSelect />} />
             <Route path="/checklist" element={<Checklist />} />
             <Route path="/tour-map" element={<TourMap />} />
-            <Route path="/qr-scanner" element={<QRScanner />} />
+            <Route path="/identify-cav" element={<IdentifyCav />} />
+            {/* Alias rétro-compat — redirigent vers le flux unifié */}
+            <Route path="/qr-scanner" element={<Navigate to="/identify-cav" replace />} />
+            <Route path="/qr-unavailable" element={<Navigate to="/identify-cav" replace />} />
             <Route path="/fill-level" element={<FillLevel />} />
-            <Route path="/qr-unavailable" element={<QRUnavailable />} />
             <Route path="/incident" element={<Incident />} />
             <Route path="/return-centre" element={<ReturnCentre />} />
             <Route path="/weigh-in" element={<WeighIn />} />

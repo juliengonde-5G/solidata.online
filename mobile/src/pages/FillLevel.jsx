@@ -2,39 +2,62 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
+import PrimaryActionBar from '../components/PrimaryActionBar';
 
+// 5 niveaux métier conservés. Libellés courts, emoji pour lecture rapide.
 const FILL_LEVELS = [
-  { value: 0, label: 'Vide', emoji: '⬜', pct: '0%' },
-  { value: 1, label: '¼', emoji: '🟦', pct: '25%' },
-  { value: 2, label: '½', emoji: '🟨', pct: '50%' },
-  { value: 3, label: '¾', emoji: '🟧', pct: '75%' },
-  { value: 4, label: 'Plein', emoji: '🟥', pct: '100%' },
+  { value: 0, label: 'Vide', pct: '0%', color: 'bg-gray-200', fg: 'text-gray-600' },
+  { value: 1, label: '¼', pct: '25%', color: 'bg-blue-100', fg: 'text-blue-700' },
+  { value: 2, label: '½', pct: '50%', color: 'bg-amber-100', fg: 'text-amber-700' },
+  { value: 3, label: '¾', pct: '75%', color: 'bg-orange-100', fg: 'text-orange-700' },
+  { value: 4, label: 'Plein', pct: '100%', color: 'bg-red-100', fg: 'text-red-700' },
+];
+
+// Anomalies fréquentes (affichées d'emblée) vs autres (derrière bouton).
+const COMMON_ANOMALIES = [
+  { value: 'debordement', label: 'Débordement', icon: '🟨' },
+  { value: 'acces_bloque', label: 'Accès bloqué', icon: '🚧' },
+  { value: 'conteneur_endommage', label: 'Conteneur endommagé', icon: '⚠️' },
+  { value: 'dechets_non_conformes', label: 'Déchets non conformes', icon: '🗑' },
+];
+const OTHER_ANOMALIES = [
+  { value: 'vandalisme', label: 'Vandalisme' },
+  { value: 'cle_cassee', label: 'Clé cassée' },
 ];
 
 export default function FillLevel() {
   const [fillLevel, setFillLevel] = useState(null);
   const [anomaly, setAnomaly] = useState('');
+  const [showOtherAnomalies, setShowOtherAnomalies] = useState(false);
   const [notes, setNotes] = useState('');
+  const [notesOpen, setNotesOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const scannedQR = localStorage.getItem('scanned_qr');
-  const [isAssociation, setIsAssociation] = useState(false);
+
+  const chooseLevel = (v) => {
+    vibrateTap();
+    setFillLevel(v);
+  };
+
+  const toggleAnomaly = (value) => {
+    vibrateTap();
+    setAnomaly(prev => (prev === value ? '' : value));
+  };
 
   const submit = async () => {
     if (fillLevel === null) return;
     setLoading(true);
     setError('');
     try {
-      // Load tour to find the correct point
       const tourRes = await fetch(`/api/tours/${tourId}/public`);
       if (!tourRes.ok) throw new Error('Impossible de charger la tournée');
       const tourData = await tourRes.json();
       const cavs = tourData.cavs || [];
       const tourIsAssociation = tourData.collection_type === 'association';
 
-      // Use selected_cav_id from QRScanner/QRUnavailable if available, otherwise fallback to first non-collected
       const selectedCavId = localStorage.getItem('selected_cav_id');
       let cav = null;
       if (selectedCavId) {
@@ -56,11 +79,12 @@ export default function FillLevel() {
             notes: anomaly ? `${anomaly}${notes ? ': ' + notes : ''}` : notes,
           }),
         });
-        if (!collectRes.ok) throw new Error('Erreur lors de l\'enregistrement de la collecte');
+        if (!collectRes.ok) throw new Error('Erreur lors de l\'enregistrement');
       }
       vibrateSuccess();
       localStorage.removeItem('scanned_qr');
       localStorage.removeItem('selected_cav_id');
+      localStorage.removeItem('qr_unavailable_reason');
       navigate('/tour-map');
     } catch (err) {
       vibrateError();
@@ -70,94 +94,154 @@ export default function FillLevel() {
     setLoading(false);
   };
 
-  const selectedOption = FILL_LEVELS.find(o => o.value === fillLevel);
-  const pctDisplay = selectedOption ? selectedOption.pct : '—';
+  const selected = FILL_LEVELS.find(o => o.value === fillLevel);
 
   return (
     <MobileShell
-      title="Niveau de remplissage"
-      subtitle={scannedQR ? 'QR scanné' : 'Estimez le remplissage du point de collecte'}
+      title="Remplissage"
+      subtitle={scannedQR ? 'CAV identifié' : 'Niveau observé'}
       onBack={() => navigate('/tour-map')}
       usageHint="operational_stop"
+      footer={
+        <PrimaryActionBar
+          primaryLabel="Valider la collecte"
+          onPrimary={submit}
+          loading={loading}
+          disabled={fillLevel === null}
+          error={error || null}
+        />
+      }
     >
-      <div className="space-y-6">
-        <p className="font-medium text-gray-700">Choisissez le niveau observé :</p>
-        <div className="grid grid-cols-5 gap-2">
-          {FILL_LEVELS.map(level => (
+      <div className="space-y-5">
+        {/* 1. Niveau — gros boutons visuels, compatibles gants */}
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Niveau</p>
+          <div className="grid grid-cols-5 gap-2">
+            {FILL_LEVELS.map(level => {
+              const active = fillLevel === level.value;
+              return (
+                <button
+                  key={level.value}
+                  type="button"
+                  aria-label={`Remplissage ${level.pct}`}
+                  aria-pressed={active}
+                  onClick={() => chooseLevel(level.value)}
+                  className={`flex flex-col items-center justify-center rounded-2xl border-2 transition-all min-h-[88px] px-1 ${
+                    active
+                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 shadow-md'
+                      : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <span className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${level.color} ${level.fg}`}>
+                    {level.pct === '0%' ? '0' : level.pct === '100%' ? '100' : level.pct.replace('%', '')}
+                  </span>
+                  <span className="text-xs font-semibold text-gray-700 mt-1">{level.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {selected && (
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <span className="text-gray-500">Choisi</span>
+              <span className="font-bold text-[var(--color-primary)]">{selected.pct} — {selected.label}</span>
+            </div>
+          )}
+        </div>
+
+        {/* 2. Anomalies fréquentes — cartes tactiles, plus de select */}
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Anomalie (optionnel)</p>
+          <div className="grid grid-cols-2 gap-2">
+            {COMMON_ANOMALIES.map(a => {
+              const active = anomaly === a.value;
+              return (
+                <button
+                  key={a.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => toggleAnomaly(a.value)}
+                  className={`card-mobile p-3 flex items-center gap-2 text-left transition-all ${
+                    active ? 'ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5' : ''
+                  }`}
+                >
+                  <span className="text-xl" aria-hidden="true">{a.icon}</span>
+                  <span className="text-sm font-semibold text-gray-800">{a.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {!showOtherAnomalies && (
             <button
-              key={level.value}
               type="button"
-              aria-label={`Remplissage ${level.pct}`}
-              onClick={() => { vibrateTap(); setFillLevel(level.value); }}
-              className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all min-h-[72px] ${
-                fillLevel === level.value
-                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 shadow-md'
-                  : 'border-gray-200 bg-white'
-              }`}
+              onClick={() => setShowOtherAnomalies(true)}
+              className="mt-2 text-sm font-medium text-[var(--color-primary)] underline"
             >
-              <span className="text-2xl mb-1">{level.emoji}</span>
-              <span className="text-xs font-semibold text-gray-700">{level.label}</span>
+              Autres anomalies
             </button>
-          ))}
+          )}
+
+          {showOtherAnomalies && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {OTHER_ANOMALIES.map(a => {
+                const active = anomaly === a.value;
+                return (
+                  <button
+                    key={a.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => toggleAnomaly(a.value)}
+                    className={`card-mobile p-3 text-sm font-medium text-gray-700 transition-all ${
+                      active ? 'ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5' : ''
+                    }`}
+                  >
+                    {a.label}
+                  </button>
+                );
+              })}
+              {anomaly && (
+                <button
+                  type="button"
+                  onClick={() => setAnomaly('')}
+                  className="card-mobile p-3 text-sm text-gray-500"
+                >
+                  Effacer
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
-        {fillLevel !== null && (
-          <div className="card-mobile p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-600">Remplissage</span>
-              <span className="font-bold text-lg text-[var(--color-primary)]">{pctDisplay}</span>
-            </div>
-            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)]"
-                style={{ width: `${(fillLevel / 4) * 100}%` }}
+        {/* 3. Notes libres — repliées par défaut (pas de clavier dans le cas nominal) */}
+        <div>
+          {!notesOpen ? (
+            <button
+              type="button"
+              onClick={() => setNotesOpen(true)}
+              className="text-sm font-medium text-[var(--color-primary)] underline"
+            >
+              Ajouter une note
+            </button>
+          ) : (
+            <div className="card-mobile p-4 space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Note</label>
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Observations…"
+                className="input-mobile min-h-[80px]"
+                rows={3}
               />
+              <button
+                type="button"
+                onClick={() => { setNotes(''); setNotesOpen(false); }}
+                className="text-xs text-gray-500 underline"
+              >
+                Masquer
+              </button>
             </div>
-          </div>
-        )}
-
-        <div className="card-mobile p-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Anomalie constatée</label>
-          <select
-            value={anomaly}
-            onChange={e => setAnomaly(e.target.value)}
-            className="input-mobile"
-          >
-            <option value="">Aucune anomalie</option>
-            <option value="debordement">Débordement</option>
-            <option value="vandalisme">Vandalisme</option>
-            <option value="acces_bloque">Accès bloqué</option>
-            <option value="conteneur_endommage">Conteneur endommagé</option>
-            <option value="dechets_non_conformes">Déchets non conformes</option>
-            <option value="cle_cassee">Clé cassée</option>
-          </select>
+          )}
         </div>
-
-        <div className="card-mobile p-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            placeholder="Observations..."
-            className="input-mobile min-h-[80px]"
-            rows={2}
-          />
-        </div>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 font-medium">
-            {error}
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={submit}
-          disabled={fillLevel === null || loading}
-          className="btn-primary-mobile py-4 text-base"
-        >
-          {loading ? 'Enregistrement...' : 'Valider la collecte'}
-        </button>
       </div>
     </MobileShell>
   );

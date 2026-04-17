@@ -5,6 +5,9 @@ import L from 'leaflet';
 import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
 import { useUsageMode } from '../contexts/UsageModeContext';
+import { USAGE_MODES } from '../services/usageMode';
+import UsageModeBanner from '../components/UsageModeBanner';
+import PrimaryActionBar from '../components/PrimaryActionBar';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -23,6 +26,27 @@ const myIcon = new L.DivIcon({
   className: '', iconSize: [16, 16], iconAnchor: [8, 8],
 });
 
+const NAV_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polygon points="3 11 22 2 13 21 11 13 3 11" />
+  </svg>
+);
+const IDENTIFY_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <path d="M14 14h3v3M20 14v7M14 17v4" />
+  </svg>
+);
+const INCIDENT_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 3l10 18H2L12 3z" />
+    <line x1="12" y1="10" x2="12" y2="14" />
+    <circle cx="12" cy="17" r="0.9" fill="currentColor" />
+  </svg>
+);
+
 export default function TourMap() {
   const [tour, setTour] = useState(null);
   const [cavs, setCavs] = useState([]);
@@ -34,7 +58,7 @@ export default function TourMap() {
   const positionRef = useRef(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
-  const { reportGpsSample } = useUsageMode();
+  const { reportGpsSample, mode } = useUsageMode();
 
   useEffect(() => {
     loadTour();
@@ -110,7 +134,7 @@ export default function TourMap() {
 
   const isAssociationTour = tour?.collection_type === 'association';
 
-  const goToCAV = () => {
+  const goToIdentify = () => {
     if (cavs[currentCavIndex]) {
       const cav = cavs[currentCavIndex];
       localStorage.setItem('selected_cav_id', String(cav.cav_id || cav.id));
@@ -118,32 +142,72 @@ export default function TourMap() {
         // Pas de scan QR pour la collecte association → directement au remplissage
         navigate('/fill-level');
       } else {
-        navigate('/qr-scanner');
+        navigate('/identify-cav');
       }
     }
   };
 
-  const intermediateReturn = async () => {
-    // Retour intermédiaire : pesée partielle puis reprise de la collecte
+  const intermediateReturn = () => {
     localStorage.setItem('intermediate_return', 'true');
     navigate('/weigh-in');
   };
 
-  const openNavigation = (lat, lng) => {
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+  const openNavigation = () => {
+    const cav = cavs[currentCavIndex];
+    if (cav?.latitude && cav?.longitude) {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${cav.latitude},${cav.longitude}`, '_blank');
+    }
   };
 
   const currentCAV = cavs[currentCavIndex];
   const center = myPosition || (currentCAV ? [currentCAV.latitude, currentCAV.longitude] : [49.4231, 1.0993]);
+  const hasCoords = currentCAV?.latitude && currentCAV?.longitude;
+
+  // Configuration de la barre d'action selon le mode d'usage.
+  // Une seule CTA visible à la fois. Le secondaire reste simple.
+  const actionConfig = (() => {
+    if (!currentCAV) return null;
+    if (mode === USAGE_MODES.DRIVING) {
+      return {
+        primaryLabel: 'Naviguer',
+        primaryIcon: NAV_ICON,
+        onPrimary: openNavigation,
+        disabled: !hasCoords,
+        secondaryLabel: null,
+      };
+    }
+    if (mode === USAGE_MODES.SHORT_STOP) {
+      return {
+        primaryLabel: isAssociationTour ? 'Collecter' : 'Identifier le CAV',
+        primaryIcon: IDENTIFY_ICON,
+        onPrimary: goToIdentify,
+        secondaryLabel: 'Incident',
+        secondaryIcon: INCIDENT_ICON,
+        onSecondary: () => navigate('/incident'),
+      };
+    }
+    // operational_stop (défaut)
+    return {
+      primaryLabel: isAssociationTour ? 'Collecter' : 'Identifier le CAV',
+      primaryIcon: IDENTIFY_ICON,
+      onPrimary: goToIdentify,
+      secondaryLabel: hasCoords ? 'Naviguer' : null,
+      secondaryIcon: hasCoords ? NAV_ICON : null,
+      onSecondary: hasCoords ? openNavigation : null,
+    };
+  })();
 
   return (
     <div className="h-screen flex flex-col bg-[var(--color-surface-2)]">
       <header className="screen-header flex-shrink-0 flex flex-row items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="font-bold text-lg">Tournée #{tourId}</h1>
-          <p className="text-white/80 text-sm">{currentCavIndex}/{cavs.length} {isAssociationTour ? 'associations' : 'CAV'} collectés</p>
+          <p className="text-white/80 text-sm">
+            {currentCavIndex}/{cavs.length} {isAssociationTour ? 'associations' : 'CAV'} collectés
+          </p>
         </div>
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <UsageModeBanner onDark />
           <button
             type="button"
             aria-label="Pesée intermédiaire"
@@ -163,27 +227,27 @@ export default function TourMap() {
         </div>
       </header>
       <div className="h-2 bg-white/20 flex-shrink-0">
-        <div className="h-full bg-white rounded-r-full transition-all duration-300" style={{ width: `${cavs.length > 0 ? (currentCavIndex / cavs.length) * 100 : 0}%` }} />
+        <div
+          className="h-full bg-white rounded-r-full transition-all duration-300"
+          style={{ width: `${cavs.length > 0 ? (currentCavIndex / cavs.length) * 100 : 0}%` }}
+        />
       </div>
 
-      {/* Map */}
-      <div className="flex-1">
+      <div className="flex-1 relative">
         <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-          {/* My position */}
           {myPosition && (
             <Marker position={[myPosition.lat, myPosition.lng]} icon={myIcon}>
               <Popup>Ma position</Popup>
             </Marker>
           )}
 
-          {/* CAV markers */}
           {cavs.map((cav, i) => {
             const color = cav.status === 'collected' ? '#22C55E' : i === currentCavIndex ? '#EF4444' : '#9CA3AF';
             if (!cav.latitude || !cav.longitude) return null;
             return (
-              <Marker key={i} position={[cav.latitude, cav.longitude]} icon={cavIcon(color)}>
+              <Marker key={cav.cav_id || i} position={[cav.latitude, cav.longitude]} icon={cavIcon(color)}>
                 <Popup>
                   <div className="text-xs">
                     <p className="font-bold">#{i + 1} {cav.nom || cav.cav_name}</p>
@@ -195,7 +259,6 @@ export default function TourMap() {
             );
           })}
 
-          {/* Route line */}
           {cavs.filter(c => c.latitude && c.longitude).length > 1 && (
             <Polyline
               positions={cavs.filter(c => c.latitude && c.longitude).map(c => [c.latitude, c.longitude])}
@@ -205,59 +268,57 @@ export default function TourMap() {
         </MapContainer>
       </div>
 
-      {currentCAV && (
-        <div className="relative z-20 bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] p-4 flex-shrink-0 safe-bottom">
-          <div className="flex items-center justify-between mb-3">
-            <div className="min-w-0">
-              <p className="text-xs text-gray-400">Prochain point #{currentCavIndex + 1}</p>
-              <h3 className="font-bold text-gray-900 truncate">{currentCAV.nom || currentCAV.cav_name}</h3>
-              <p className="text-xs text-gray-500 truncate">{currentCAV.commune}</p>
-            </div>
-            <div className="text-right flex-shrink-0 ml-2">
-              {isAssociationTour && currentCAV.contact_phone ? (
-                <a href={`tel:${currentCAV.contact_phone.replace(/\s/g, '')}`} className="text-sm font-bold text-blue-600 underline">
-                  {currentCAV.contact_phone}
-                </a>
-              ) : (
-                <>
-                  <span className="text-sm font-bold text-amber-600">{Math.round(currentCAV.predicted_fill_rate || currentCAV.estimated_fill_rate || 0)}%</span>
-                  <p className="text-[10px] text-gray-400">remplissage</p>
-                </>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-3">
-            {currentCAV.latitude && currentCAV.longitude && (
-              <button
-                type="button"
-                aria-label="Naviguer vers le CAV"
-                onClick={() => openNavigation(currentCAV.latitude, currentCAV.longitude)}
-                className="touch-target flex items-center justify-center bg-blue-500 text-white rounded-2xl px-4 font-semibold"
-              >
-                Naviguer
-              </button>
+      {currentCAV && actionConfig && (
+        <div className="relative z-20 bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] flex-shrink-0">
+          {/* Carte "Prochain point" — version allégée en conduite */}
+          <div className="px-4 pt-3 pb-2">
+            <p className="text-[11px] uppercase tracking-wide text-gray-400">
+              Prochain point #{currentCavIndex + 1}
+            </p>
+            <h3 className="font-bold text-gray-900 truncate text-lg">
+              {currentCAV.nom || currentCAV.cav_name}
+            </h3>
+            {mode !== USAGE_MODES.DRIVING && (
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-xs text-gray-500 truncate">{currentCAV.commune}</p>
+                {isAssociationTour && currentCAV.contact_phone ? (
+                  <a href={`tel:${currentCAV.contact_phone.replace(/\s/g, '')}`} className="text-sm font-bold text-blue-600 underline">
+                    {currentCAV.contact_phone}
+                  </a>
+                ) : (
+                  <span className="text-sm font-bold text-amber-600">
+                    {Math.round(currentCAV.predicted_fill_rate || currentCAV.estimated_fill_rate || 0)}% remplissage
+                  </span>
+                )}
+              </div>
             )}
-            <button type="button" onClick={goToCAV} className="flex-1 btn-primary-mobile py-3 text-base">
-              {isAssociationTour ? 'Collecter' : 'Scanner QR Code'}
-            </button>
-            <button type="button" aria-label="Signaler un incident" onClick={() => navigate('/incident')} className="touch-target flex items-center justify-center bg-red-500 text-white rounded-2xl px-4 font-semibold">
-              Incident
-            </button>
           </div>
+          <PrimaryActionBar
+            primaryLabel={actionConfig.primaryLabel}
+            primaryIcon={actionConfig.primaryIcon}
+            onPrimary={actionConfig.onPrimary}
+            disabled={actionConfig.disabled}
+            secondaryLabel={actionConfig.secondaryLabel}
+            secondaryIcon={actionConfig.secondaryIcon}
+            onSecondary={actionConfig.onSecondary}
+          />
         </div>
       )}
 
       {!currentCAV && cavs.length > 0 && (
-        <div className="relative z-20 bg-green-50 border-t border-green-200 p-4 flex-shrink-0 text-center safe-bottom">
-          <p className="text-green-800 font-bold">Tous les {isAssociationTour ? 'points association' : 'CAV'} ont été collectés !</p>
-          <div className="flex gap-3 mt-3">
-            <button type="button" onClick={() => navigate('/return-centre')} className="flex-1 btn-primary-mobile py-3">
-              Retour au centre de tri
-            </button>
-            <button type="button" onClick={() => navigate('/incident')} className="touch-target flex items-center justify-center bg-red-500 text-white rounded-2xl px-4 font-semibold">
-              Incident
-            </button>
+        <div className="relative z-20 bg-green-50 border-t border-green-200 flex-shrink-0">
+          <div className="px-4 py-3 text-center">
+            <p className="text-green-800 font-bold">
+              Tous les {isAssociationTour ? 'points association' : 'CAV'} ont été collectés
+            </p>
           </div>
+          <PrimaryActionBar
+            primaryLabel="Retour au centre de tri"
+            onPrimary={() => navigate('/return-centre')}
+            secondaryLabel="Incident"
+            secondaryIcon={INCIDENT_ICON}
+            onSecondary={() => navigate('/incident')}
+          />
         </div>
       )}
     </div>
