@@ -14,9 +14,28 @@ export default function TourSummary() {
     const load = async () => {
       try {
         const res = await fetch(`/api/tours/${tourId}/summary-public`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        setTour(data);
-      } catch (err) { console.error(err); }
+        // Le backend renvoie { tour, stats }. On aplatit pour compatibilité
+        // avec le rendu existant (data.total_weight_kg, data.cavs…).
+        const flat = {
+          ...(data.tour || {}),
+          stats: data.stats || null,
+          cavs: data.cavs || data.tour?.cavs || [],
+          incidents: data.incidents || [],
+          total_weight_kg: data.stats?.total_weight_kg ?? data.tour?.total_weight_kg ?? 0,
+          started_at: data.tour?.started_at,
+          completed_at: data.tour?.completed_at,
+          estimated_distance_km: data.tour?.estimated_distance_km,
+          checklist: data.checklist || null,
+        };
+        setTour(flat);
+      } catch (err) {
+        // Mode dégradé : on affiche quand même l'écran avec ce qu'on a
+        // en local (pour le cas offline au moment de la finalisation).
+        console.warn('[TourSummary] summary-public indisponible', err.message);
+        setTour({ cavs: [], incidents: [], total_weight_kg: 0, degraded: true });
+      }
       setLoading(false);
     };
     if (tourId) load();
@@ -129,7 +148,15 @@ export default function TourSummary() {
           )}
         </div>
 
-        <button type="button" onClick={finishDay} className="btn-primary-mobile py-4 text-lg mt-6">
+        <button
+          type="button"
+          onClick={() => navigate('/tour-history')}
+          className="btn-secondary-mobile py-3 text-base mt-4"
+        >
+          Voir l'historique de la tournée
+        </button>
+
+        <button type="button" onClick={finishDay} className="btn-primary-mobile py-4 text-lg mt-4">
           Terminer la journée
         </button>
       </div>

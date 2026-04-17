@@ -150,14 +150,29 @@ export function newClientId() {
 
 export async function addPendingScan(scanData) {
   return putItem(STORES.pendingScans, {
+    clientId: scanData.clientId || newClientId(),
     ...scanData,
     createdAt: new Date().toISOString(),
   });
 }
 
-export async function addPendingWeight(weightData) {
+/**
+ * Ajoute une pesée à synchroniser.
+ * @param {object} data - {
+ *   tourId, weightKg, tareKg?, isIntermediate?, finalize?, notes?, clientId?
+ * }
+ * - finalize=true : sync.js enchaînera un PUT /status-public status=completed
+ *   après succès de la pesée.
+ */
+export async function addPendingWeight(data) {
   return putItem(STORES.pendingWeights, {
-    ...weightData,
+    clientId: data.clientId || newClientId(),
+    tourId: data.tourId,
+    weightKg: data.weightKg,
+    tareKg: data.tareKg ?? null,
+    isIntermediate: !!data.isIntermediate,
+    finalize: !!data.finalize,
+    notes: data.notes || null,
     createdAt: new Date().toISOString(),
   });
 }
@@ -214,4 +229,31 @@ export async function addPendingCollect(data) {
     qrScanned: !!data.qrScanned,
     createdAt: new Date().toISOString(),
   });
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Drafts — état du dernier formulaire soumis, pour pré-remplir "Corriger".
+// Stockés dans `userData` (clé = draft:*) pour éviter un nouveau store.
+// ────────────────────────────────────────────────────────────────────────
+
+/** Clé canonique d'un draft de collecte. */
+export function draftKey(kind, ...parts) {
+  return ['draft', kind, ...parts.filter(p => p != null)].join(':');
+}
+
+export async function saveDraft(key, data) {
+  return putItem(STORES.userData, {
+    key,
+    draft: data,
+    savedAt: new Date().toISOString(),
+  });
+}
+
+export async function readDraft(key) {
+  const row = await getItem(STORES.userData, key);
+  return row?.draft || null;
+}
+
+export async function clearDraft(key) {
+  return deleteItem(STORES.userData, key);
 }

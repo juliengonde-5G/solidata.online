@@ -27,6 +27,36 @@ function emit(type, detail) {
 }
 
 /**
+ * Backoff léger par catégorie : après N échecs réseau consécutifs sur un
+ * store, on évite de réessayer pendant `backoffSeconds[n]` secondes.
+ * Reset à 0 dès qu'une tentative réussit ou qu'un 4xx purge l'élément.
+ */
+const BACKOFF_STEPS_S = [0, 30, 60, 120, 300];
+const backoffState = new Map(); // storeName → { failures, nextAttemptAt }
+
+function canAttempt(storeName) {
+  const s = backoffState.get(storeName);
+  if (!s) return true;
+  return Date.now() >= (s.nextAttemptAt || 0);
+}
+
+function recordFailure(storeName) {
+  const prev = backoffState.get(storeName) || { failures: 0 };
+  const failures = Math.min(prev.failures + 1, BACKOFF_STEPS_S.length - 1);
+  const waitS = BACKOFF_STEPS_S[failures];
+  backoffState.set(storeName, { failures, nextAttemptAt: Date.now() + waitS * 1000 });
+}
+
+function recordSuccess(storeName) {
+  backoffState.delete(storeName);
+}
+
+/** Utilitaire de tests : force le reset de l'état de backoff. */
+export function __resetBackoffForTests() {
+  backoffState.clear();
+}
+
+/**
  * Compte les éléments en attente dans tous les stores d'envoi.
  * @returns {Promise<{ scans, weights, gps, incidents, collects, total }>}
  */
@@ -49,51 +79,105 @@ function isClientError(err) {
   return status >= 400 && status < 500;
 }
 
-async function syncPendingScans() {
-  const scans = await getAllItems(STORES.pendingScans);
+export async function syncPendingScans() {
+  const store = STORES.pendingScans;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const scans = await getAllItems(store);
   let synced = 0; let failed = 0;
   for (const scan of scans) {
     try {
       await api.post(`/tours/${scan.tourId}/scan`, {
         cav_id: scan.cavId,
         scanned_at: scan.scannedAt,
+        client_id: scan.clientId || null,
       });
-      await deleteItem(STORES.pendingScans, scan.id);
+      await deleteItem(store, scan.id);
       synced++;
     } catch (err) {
       if (isClientError(err)) {
         console.warn('[SYNC] Scan rejeté, suppression:', err.response?.data?.error);
-        await deleteItem(STORES.pendingScans, scan.id);
+        await deleteItem(store, scan.id);
         failed++;
+      } else {
+        recordFailure(store);
+        break; // on arrête le lot, retry ultérieur
       }
     }
   }
+  if (synced > 0 || failed > 0) recordSuccess(store);
   return { synced, failed, pending: scans.length - synced - failed };
 }
 
-async function syncPendingWeights() {
-  const weights = await getAllItems(STORES.pendingWeights);
+/**
+ * Envoi unitaire d'une pesée. Gère le chaînage vers /status-public si
+ * la pesée finalise la tournée (pesée finale, non intermédiaire).
+ * Exporté pour usage direct depuis WeighIn.jsx.
+ */
+export async function sendWeight(w) {
+  const weighRes = await fetch(`/api/tours/${w.tourId}/weigh-public`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      weight_kg: w.weightKg,
+      tare_kg: w.tareKg ?? null,
+      is_intermediate: !!w.isIntermediate,
+      notes: w.notes || null,
+      client_id: w.clientId || null, // ignoré par le backend actuel
+    }),
+  });
+  if (!weighRes.ok) {
+    const err = new Error(`HTTP ${weighRes.status}`);
+    err.response = { status: weighRes.status };
+    throw err;
+  }
+  if (w.finalize && !w.isIntermediate) {
+    const statusRes = await fetch(`/api/tours/${w.tourId}/status-public`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'completed' }),
+    });
+    if (!statusRes.ok) {
+      // Pesée enregistrée mais transition d'état refusée : on remonte
+      // une erreur pour que l'appelant sache que la finalisation n'est
+      // pas complète. 4xx = état interdit (ex : déjà complétée) —
+      // traité comme succès métier (la pesée est bien passée).
+      if (statusRes.status >= 400 && statusRes.status < 500) {
+        return { weighOk: true, statusOk: false, statusCode: statusRes.status };
+      }
+      const err = new Error(`HTTP ${statusRes.status}`);
+      err.response = { status: statusRes.status };
+      throw err;
+    }
+  }
+  return { weighOk: true, statusOk: true };
+}
+
+export async function syncPendingWeights() {
+  const store = STORES.pendingWeights;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const weights = await getAllItems(store);
   let synced = 0; let failed = 0;
   for (const weight of weights) {
     try {
-      await api.post(`/tours/${weight.tourId}/weights`, {
-        weight_kg: weight.weightKg,
-        recorded_at: weight.recordedAt,
-      });
-      await deleteItem(STORES.pendingWeights, weight.id);
+      await sendWeight(weight);
+      await deleteItem(store, weight.id);
       synced++;
     } catch (err) {
       if (isClientError(err)) {
-        console.warn('[SYNC] Pesée rejetée, suppression:', err.response?.data?.error);
-        await deleteItem(STORES.pendingWeights, weight.id);
+        console.warn('[SYNC] Pesée rejetée, suppression:', err.response?.status);
+        await deleteItem(store, weight.id);
         failed++;
+      } else {
+        recordFailure(store);
+        break;
       }
     }
   }
+  if (synced > 0 || failed > 0) recordSuccess(store);
   return { synced, failed, pending: weights.length - synced - failed };
 }
 
-async function syncGpsBuffer() {
+export async function syncGpsBuffer() {
   const positions = await getAllItems(STORES.gpsBuffer);
   let synced = 0; let failed = 0;
   const batchSize = 50;
@@ -149,22 +233,28 @@ export async function sendIncident(incident) {
   return res.json();
 }
 
-async function syncPendingIncidents() {
-  const items = await getAllItems(STORES.pendingIncidents);
+export async function syncPendingIncidents() {
+  const store = STORES.pendingIncidents;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const items = await getAllItems(store);
   let synced = 0; let failed = 0;
   for (const it of items) {
     try {
       await sendIncident(it);
-      await deleteItem(STORES.pendingIncidents, it.id);
+      await deleteItem(store, it.id);
       synced++;
     } catch (err) {
       if (isClientError(err)) {
         console.warn('[SYNC] Incident rejeté, suppression:', err.response?.status);
-        await deleteItem(STORES.pendingIncidents, it.id);
+        await deleteItem(store, it.id);
         failed++;
+      } else {
+        recordFailure(store);
+        break;
       }
     }
   }
+  if (synced > 0 || failed > 0) recordSuccess(store);
   return { synced, failed, pending: items.length - synced - failed };
 }
 
@@ -192,22 +282,28 @@ export async function sendCollect(collect) {
   return res.json().catch(() => ({}));
 }
 
-async function syncPendingCollects() {
-  const items = await getAllItems(STORES.pendingCollects);
+export async function syncPendingCollects() {
+  const store = STORES.pendingCollects;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const items = await getAllItems(store);
   let synced = 0; let failed = 0;
   for (const it of items) {
     try {
       await sendCollect(it);
-      await deleteItem(STORES.pendingCollects, it.id);
+      await deleteItem(store, it.id);
       synced++;
     } catch (err) {
       if (isClientError(err)) {
         console.warn('[SYNC] Collecte rejetée, suppression:', err.response?.status);
-        await deleteItem(STORES.pendingCollects, it.id);
+        await deleteItem(store, it.id);
         failed++;
+      } else {
+        recordFailure(store);
+        break;
       }
     }
   }
+  if (synced > 0 || failed > 0) recordSuccess(store);
   return { synced, failed, pending: items.length - synced - failed };
 }
 

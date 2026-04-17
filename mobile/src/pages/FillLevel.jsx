@@ -4,7 +4,10 @@ import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
 import PrimaryActionBar from '../components/PrimaryActionBar';
 import StepConfirmScreen from '../components/StepConfirmScreen';
-import { addPendingCollect, deleteItem, newClientId, STORES } from '../services/db';
+import {
+  addPendingCollect, deleteItem, newClientId, STORES,
+  draftKey, saveDraft, readDraft, clearDraft,
+} from '../services/db';
 import { sendCollect, getPendingCount } from '../services/sync';
 
 const FILL_LEVELS = [
@@ -48,7 +51,19 @@ export default function FillLevel() {
     // Récupère le nom du CAV pour l'afficher dans la confirmation.
     const cachedName = localStorage.getItem('selected_cav_name');
     if (cachedName) setCavName(cachedName);
-  }, []);
+
+    // Pré-remplissage si un draft existe pour (tour, cav) : typiquement
+    // au retour d'un "Corriger" depuis StepConfirmScreen.
+    const cavIdLs = localStorage.getItem('selected_cav_id');
+    if (!tourId || !cavIdLs) return;
+    const key = draftKey('collect', tourId, cavIdLs);
+    readDraft(key).then(d => {
+      if (!d) return;
+      if (typeof d.fillLevel === 'number') setFillLevel(d.fillLevel);
+      if (d.anomaly) setAnomaly(d.anomaly);
+      if (d.notes) { setNotes(d.notes); setNotesOpen(true); }
+    }).catch(() => {});
+  }, [tourId]);
 
   const chooseLevel = (v) => { vibrateTap(); setFillLevel(v); };
   const toggleAnomaly = (value) => {
@@ -83,7 +98,12 @@ export default function FillLevel() {
       const displayName = cav.nom || cav.cav_name || 'CAV';
       setCavName(displayName);
 
-      // 2) Toujours écrire dans la file offline d'abord pour garantir aucune
+      // 2) Persiste un draft pour pouvoir re-pré-remplir le formulaire via
+      //    "Corriger" tant que l'action n'est pas sent.
+      const dKey = draftKey('collect', tourId, cavId);
+      await saveDraft(dKey, { fillLevel, anomaly, notes });
+
+      // 3) Toujours écrire dans la file offline d'abord pour garantir aucune
       //    perte de donnée, même si le submit backend échoue.
       const payload = {
         clientId: newClientId(),
@@ -115,6 +135,12 @@ export default function FillLevel() {
         }
       }
 
+      // Si envoi serveur OK, le draft devient sans valeur : on le supprime
+      // pour éviter de mentir à l'utilisateur au prochain retour.
+      if (status === 'sent') {
+        try { await clearDraft(dKey); } catch {}
+      }
+
       await getPendingCount();
       vibrateSuccess();
       setConfirm({ cavName: displayName, pendingId, status, cavId });
@@ -126,7 +152,9 @@ export default function FillLevel() {
     setLoading(false);
   };
 
-  const finishAndReturn = () => {
+  const finishAndReturn = async () => {
+    // Draft conservé si non envoyé pour pouvoir corriger plus tard.
+    // Nettoyé explicitement si déjà envoyé au serveur (fait dans submit).
     localStorage.removeItem('scanned_qr');
     localStorage.removeItem('selected_cav_id');
     localStorage.removeItem('selected_cav_name');
@@ -135,10 +163,9 @@ export default function FillLevel() {
   };
 
   const correct = async () => {
-    // Annule la collecte : supprime l'entrée locale si encore présente, reset
-    // l'écran pour permettre une nouvelle saisie. Attention : si la collecte
-    // a déjà été envoyée au backend (status === 'sent'), la correction ne
-    // défait PAS l'enregistrement serveur — cf. hypothèse backend.
+    // Retour édition : le draft (saveDraft dans submit) est déjà posé, le
+    // useEffect le re-lira au re-render de l'écran de saisie. On supprime
+    // la file locale pour que le prochain submit crée une entrée propre.
     if (confirm?.pendingId) {
       try { await deleteItem(STORES.pendingCollects, confirm.pendingId); } catch {}
     }
@@ -157,6 +184,11 @@ export default function FillLevel() {
   }, [selected, anomaly, notes]);
 
   if (confirm) {
+    // "Corriger" n'est proposé que si l'action n'a pas encore quitté le
+    // mobile. Le backend n'expose pas de endpoint uncollect-public, donc
+    // un rollback serveur n'est pas possible aujourd'hui (cf. contrat
+    // backend recommandé dans DOCUMENTATION_MOBILE.md).
+    const canCorrect = confirm.status !== 'sent';
     return (
       <StepConfirmScreen
         title="Collecte enregistrée"
@@ -165,8 +197,8 @@ export default function FillLevel() {
         summaryLines={summaryLines}
         primaryLabel="Continuer"
         onPrimary={finishAndReturn}
-        secondaryLabel="Corriger"
-        onCorrect={correct}
+        secondaryLabel={canCorrect ? 'Corriger' : null}
+        onCorrect={canCorrect ? correct : null}
         onAutoReturn={finishAndReturn}
         autoReturnMs={8000}
       />
