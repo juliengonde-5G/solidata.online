@@ -4,6 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
 import L from 'leaflet';
 import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
+import { useUsageMode } from '../contexts/UsageModeContext';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -33,6 +34,7 @@ export default function TourMap() {
   const positionRef = useRef(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
+  const { reportGpsSample } = useUsageMode();
 
   useEffect(() => {
     loadTour();
@@ -63,6 +65,7 @@ export default function TourMap() {
           const newPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setMyPosition(newPos);
           positionRef.current = newPos;
+          reportGpsSample({ speed: pos.coords.speed, timestamp: pos.timestamp });
         },
         () => {},
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }

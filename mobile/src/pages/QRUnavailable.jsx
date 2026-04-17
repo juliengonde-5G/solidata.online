@@ -44,6 +44,7 @@ export default function QRUnavailable() {
       title="QR Code indisponible"
       subtitle="Indiquez la raison puis continuez"
       onBack={() => navigate('/tour-map')}
+      usageHint="operational_stop"
     >
       <div className="space-y-4">
         <p className="text-sm text-gray-600">Pourquoi le QR n'a pas pu etre scanne ?</p>

@@ -78,6 +78,7 @@ export default function FillLevel() {
       title="Niveau de remplissage"
       subtitle={scannedQR ? 'QR scanné' : 'Estimez le remplissage du point de collecte'}
       onBack={() => navigate('/tour-map')}
+      usageHint="operational_stop"
     >
       <div className="space-y-6">
         <p className="font-medium text-gray-700">Choisissez le niveau observé :</p>

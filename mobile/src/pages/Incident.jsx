@@ -53,6 +53,7 @@ export default function Incident() {
       title="Signaler un incident"
       subtitle="Décrivez ce qui s'est passé"
       onBack={() => navigate('/tour-map')}
+      usageHint="operational_stop"
     >
       <div className="space-y-4">
         <p className="text-sm text-gray-600">Type d'incident :</p>

@@ -60,6 +60,7 @@ export default function VehicleSelect() {
     <MobileShell
       title={`Bonjour ${user?.first_name || ''}`}
       subtitle={dateLabel}
+      usageHint="operational_stop"
       rightAction={
         <button
           onClick={logout}

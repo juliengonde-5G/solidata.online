@@ -44,7 +44,7 @@ export default function WeighIn() {
   };
 
   return (
-    <MobileShell title={isIntermediate ? "Pesée intermédiaire" : "Pesée du véhicule"} subtitle={isIntermediate ? "Déchargement partiel — pesez puis reprenez la collecte" : "Enregistrez les données de pesée"} onBack={() => { if (isIntermediate) { localStorage.removeItem('intermediate_return'); navigate('/tour-map'); } else { navigate('/return-centre'); } }}>
+    <MobileShell usageHint="operational_stop" title={isIntermediate ? "Pesée intermédiaire" : "Pesée du véhicule"} subtitle={isIntermediate ? "Déchargement partiel — pesez puis reprenez la collecte" : "Enregistrez les données de pesée"} onBack={() => { if (isIntermediate) { localStorage.removeItem('intermediate_return'); navigate('/tour-map'); } else { navigate('/return-centre'); } }}>
       <div className="mb-4">
         <TourStepBar currentPath="/weigh-in" />
       </div>

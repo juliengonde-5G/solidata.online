@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { UsageModeProvider } from './contexts/UsageModeContext';
 import { startAutoSync, cacheReferenceData } from './services/sync';
 import Login from './pages/Login';
 import BatteryAlert from './components/BatteryAlert';
@@ -24,23 +25,25 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Navigate to="/start" />} />
-          <Route path="/start" element={<Login />} />
-          <Route path="/vehicle-select" element={<VehicleSelect />} />
-          <Route path="/checklist" element={<Checklist />} />
-          <Route path="/tour-map" element={<TourMap />} />
-          <Route path="/qr-scanner" element={<QRScanner />} />
-          <Route path="/fill-level" element={<FillLevel />} />
-          <Route path="/qr-unavailable" element={<QRUnavailable />} />
-          <Route path="/incident" element={<Incident />} />
-          <Route path="/return-centre" element={<ReturnCentre />} />
-          <Route path="/weigh-in" element={<WeighIn />} />
-          <Route path="/tour-summary" element={<TourSummary />} />
-          <Route path="*" element={<Navigate to="/start" />} />
-        </Routes>
-        <BatteryAlert />
-        <SolidataBot />
+        <UsageModeProvider>
+          <Routes>
+            <Route path="/login" element={<Navigate to="/start" />} />
+            <Route path="/start" element={<Login />} />
+            <Route path="/vehicle-select" element={<VehicleSelect />} />
+            <Route path="/checklist" element={<Checklist />} />
+            <Route path="/tour-map" element={<TourMap />} />
+            <Route path="/qr-scanner" element={<QRScanner />} />
+            <Route path="/fill-level" element={<FillLevel />} />
+            <Route path="/qr-unavailable" element={<QRUnavailable />} />
+            <Route path="/incident" element={<Incident />} />
+            <Route path="/return-centre" element={<ReturnCentre />} />
+            <Route path="/weigh-in" element={<WeighIn />} />
+            <Route path="/tour-summary" element={<TourSummary />} />
+            <Route path="*" element={<Navigate to="/start" />} />
+          </Routes>
+          <BatteryAlert />
+          <SolidataBot />
+        </UsageModeProvider>
       </AuthProvider>
     </BrowserRouter>
   );

@@ -1,8 +1,22 @@
+import { useEffect } from 'react';
+import { useUsageMode } from '../contexts/UsageModeContext';
+
 /**
  * Enveloppe commune pour les écrans mobile : header + zone de contenu avec padding safe.
  * Option : barre de progression des étapes (flux tournée).
+ *
+ * usageHint : suggestion de mode d'usage pour l'écran (ex. 'operational_stop').
+ * Le provider l'utilise comme indice si le GPS ne tranche pas.
  */
-export function MobileShell({ title, subtitle, onBack, rightAction, children, className = '' }) {
+export function MobileShell({ title, subtitle, onBack, rightAction, children, className = '', usageHint }) {
+  const { setScreenHint } = useUsageMode();
+
+  useEffect(() => {
+    if (!usageHint) return undefined;
+    setScreenHint(usageHint);
+    return () => setScreenHint(null);
+  }, [usageHint, setScreenHint]);
+
   return (
     <div className={`min-h-screen flex flex-col bg-[var(--color-surface-2)] ${className}`}>
       <header className="screen-header flex-shrink-0 flex flex-row items-center justify-between gap-3">
