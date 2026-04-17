@@ -138,6 +138,7 @@ export default function TourMap() {
     if (cavs[currentCavIndex]) {
       const cav = cavs[currentCavIndex];
       localStorage.setItem('selected_cav_id', String(cav.cav_id || cav.id));
+      localStorage.setItem('selected_cav_name', cav.nom || cav.cav_name || '');
       if (isAssociationTour) {
         // Pas de scan QR pour la collecte association → directement au remplissage
         navigate('/fill-level');

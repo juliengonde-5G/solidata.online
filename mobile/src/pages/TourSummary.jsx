@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import OfflineActionBadge from '../components/OfflineActionBadge';
+import { getPendingCount, syncEvents, syncAll } from '../services/sync';
 
 export default function TourSummary() {
   const [tour, setTour] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(0);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
 
@@ -17,6 +20,11 @@ export default function TourSummary() {
       setLoading(false);
     };
     if (tourId) load();
+
+    const onPending = (e) => setPending(e.detail?.counts?.total || 0);
+    syncEvents.addEventListener('pending', onPending);
+    getPendingCount();
+    return () => syncEvents.removeEventListener('pending', onPending);
   }, [tourId]);
 
   const finishDay = () => {
@@ -99,6 +107,27 @@ export default function TourSummary() {
             ))}
           </div>
         )}
+
+        <div className="mt-4 card-mobile p-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">État de la tournée</p>
+            <p className="text-xs text-gray-500">
+              {pending > 0 ? `${pending} action${pending > 1 ? 's' : ''} encore à envoyer` : 'Toutes les données sont envoyées'}
+            </p>
+          </div>
+          {pending > 0 ? (
+            <button
+              type="button"
+              onClick={() => syncAll()}
+              className="flex items-center gap-2"
+              aria-label="Forcer la synchronisation"
+            >
+              <OfflineActionBadge status="pending" label={`${pending} à envoyer`} />
+            </button>
+          ) : (
+            <OfflineActionBadge status="sent" label="Tout envoyé" />
+          )}
+        </div>
 
         <button type="button" onClick={finishDay} className="btn-primary-mobile py-4 text-lg mt-6">
           Terminer la journée

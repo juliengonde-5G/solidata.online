@@ -6,6 +6,7 @@ import { startAutoSync, cacheReferenceData } from './services/sync';
 import Login from './pages/Login';
 import BatteryAlert from './components/BatteryAlert';
 import SolidataBot from './components/SolidataBot';
+import SyncStatusBanner from './components/SyncStatusBanner';
 import VehicleSelect from './pages/VehicleSelect';
 import Checklist from './pages/Checklist';
 import TourMap from './pages/TourMap';
@@ -25,6 +26,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <UsageModeProvider>
+          <SyncStatusBanner />
           <Routes>
             <Route path="/login" element={<Navigate to="/start" />} />
             <Route path="/start" element={<Login />} />

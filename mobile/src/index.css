@@ -147,4 +147,26 @@
   .usage-banner--on-dark {
     @apply bg-white/20 text-white;
   }
+
+  /* Bandeau global d'état de synchronisation. Masqué en nominal.
+     Fixed top pour garantir la visibilité quelque soit l'écran (y compris
+     TourMap plein écran). z-index inférieur à BatteryAlert (9999). */
+  .sync-banner {
+    @apply fixed top-0 left-0 right-0 flex items-center gap-2 px-4 py-2 text-sm font-medium;
+    z-index: 90;
+    padding-top: calc(var(--safe-top) + 8px);
+  }
+  .sync-banner--offline { @apply bg-amber-100 text-amber-900 border-b border-amber-200; }
+  .sync-banner--syncing { @apply bg-blue-50 text-blue-800 border-b border-blue-100; }
+  .sync-banner--error   { @apply bg-red-100 text-red-900 border-b border-red-200; }
+  .sync-banner--pending { @apply bg-slate-100 text-slate-800 border-b border-slate-200; }
+
+  /* Badge local de statut d'action (envoyé / en attente / à renvoyer). */
+  .action-badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold;
+    line-height: 1.2;
+  }
+  .action-badge--sent    { @apply bg-emerald-100 text-emerald-800; }
+  .action-badge--pending { @apply bg-amber-100 text-amber-800; }
+  .action-badge--retry   { @apply bg-red-100 text-red-800; }
 }

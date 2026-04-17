@@ -94,6 +94,7 @@ export default function IdentifyCav() {
     if (!cav) return;
     const cavId = cav.cav_id || cav.id;
     localStorage.setItem('selected_cav_id', String(cavId));
+    localStorage.setItem('selected_cav_name', cav.nom || cav.cav_name || '');
     localStorage.setItem('scanned_qr', cav.qr_code_data || `CAV-${cavId}`);
     localStorage.setItem('qr_unavailable_reason', 'fallback');
     stopScanner();

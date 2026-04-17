@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
 import PrimaryActionBar from '../components/PrimaryActionBar';
+import StepConfirmScreen from '../components/StepConfirmScreen';
+import { addPendingCollect, deleteItem, newClientId, STORES } from '../services/db';
+import { sendCollect, getPendingCount } from '../services/sync';
 
-// 5 niveaux métier conservés. Libellés courts, emoji pour lecture rapide.
 const FILL_LEVELS = [
   { value: 0, label: 'Vide', pct: '0%', color: 'bg-gray-200', fg: 'text-gray-600' },
   { value: 1, label: '¼', pct: '25%', color: 'bg-blue-100', fg: 'text-blue-700' },
@@ -13,7 +15,6 @@ const FILL_LEVELS = [
   { value: 4, label: 'Plein', pct: '100%', color: 'bg-red-100', fg: 'text-red-700' },
 ];
 
-// Anomalies fréquentes (affichées d'emblée) vs autres (derrière bouton).
 const COMMON_ANOMALIES = [
   { value: 'debordement', label: 'Débordement', icon: '🟨' },
   { value: 'acces_bloque', label: 'Accès bloqué', icon: '🚧' },
@@ -24,6 +25,10 @@ const OTHER_ANOMALIES = [
   { value: 'vandalisme', label: 'Vandalisme' },
   { value: 'cle_cassee', label: 'Clé cassée' },
 ];
+const ANOMALY_LABELS = [...COMMON_ANOMALIES, ...OTHER_ANOMALIES].reduce((acc, a) => {
+  acc[a.value] = a.label;
+  return acc;
+}, {});
 
 export default function FillLevel() {
   const [fillLevel, setFillLevel] = useState(null);
@@ -33,15 +38,19 @@ export default function FillLevel() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [confirm, setConfirm] = useState(null); // { cavName, pendingId, status }
+  const [cavName, setCavName] = useState(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const scannedQR = localStorage.getItem('scanned_qr');
 
-  const chooseLevel = (v) => {
-    vibrateTap();
-    setFillLevel(v);
-  };
+  useEffect(() => {
+    // Récupère le nom du CAV pour l'afficher dans la confirmation.
+    const cachedName = localStorage.getItem('selected_cav_name');
+    if (cachedName) setCavName(cachedName);
+  }, []);
 
+  const chooseLevel = (v) => { vibrateTap(); setFillLevel(v); };
   const toggleAnomaly = (value) => {
     vibrateTap();
     setAnomaly(prev => (prev === value ? '' : value));
@@ -52,6 +61,7 @@ export default function FillLevel() {
     setLoading(true);
     setError('');
     try {
+      // 1) charger la tournée pour retrouver le CAV à marquer.
       const tourRes = await fetch(`/api/tours/${tourId}/public`);
       if (!tourRes.ok) throw new Error('Impossible de charger la tournée');
       const tourData = await tourRes.json();
@@ -63,38 +73,105 @@ export default function FillLevel() {
       if (selectedCavId) {
         cav = cavs.find(c => String(c.cav_id) === String(selectedCavId) || String(c.id) === String(selectedCavId));
       }
+      if (!cav) cav = cavs.find(c => c.status !== 'collected');
+
       if (!cav) {
-        cav = cavs.find(c => c.status !== 'collected');
+        throw new Error('Aucun CAV à collecter dans cette tournée');
       }
 
-      if (cav) {
-        const cavId = cav.cav_id || cav.id;
-        const collectRes = await fetch(`/api/tours/${tourId}/cav/${cavId}/collect-public`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: 'collected',
-            fill_level: fillLevel,
-            qr_scanned: !tourIsAssociation,
-            notes: anomaly ? `${anomaly}${notes ? ': ' + notes : ''}` : notes,
-          }),
-        });
-        if (!collectRes.ok) throw new Error('Erreur lors de l\'enregistrement');
+      const cavId = cav.cav_id || cav.id;
+      const displayName = cav.nom || cav.cav_name || 'CAV';
+      setCavName(displayName);
+
+      // 2) Toujours écrire dans la file offline d'abord pour garantir aucune
+      //    perte de donnée, même si le submit backend échoue.
+      const payload = {
+        clientId: newClientId(),
+        tourId,
+        cavId,
+        fillLevel,
+        anomaly,
+        notes,
+        qrScanned: !tourIsAssociation,
+      };
+      const pendingId = await addPendingCollect(payload);
+
+      // 3) Si online, tenter l'envoi immédiat. Si ça passe, on peut supprimer
+      //    l'entrée locale. Sinon on la laisse pour sync ultérieure.
+      let status = 'pending';
+      if (navigator.onLine) {
+        try {
+          await sendCollect(payload);
+          await deleteItem(STORES.pendingCollects, pendingId);
+          status = 'sent';
+        } catch (e) {
+          if (e?.response?.status >= 400 && e?.response?.status < 500) {
+            // 4xx : backend a rejeté — on supprime pour éviter la boucle.
+            await deleteItem(STORES.pendingCollects, pendingId);
+            status = 'retry';
+          } else {
+            status = 'pending';
+          }
+        }
       }
+
+      await getPendingCount();
       vibrateSuccess();
-      localStorage.removeItem('scanned_qr');
-      localStorage.removeItem('selected_cav_id');
-      localStorage.removeItem('qr_unavailable_reason');
-      navigate('/tour-map');
+      setConfirm({ cavName: displayName, pendingId, status, cavId });
     } catch (err) {
       vibrateError();
-      setError(err.message || 'Erreur réseau, réessayez');
-      console.error(err);
+      setError(err.message || 'Erreur, réessayez');
+      console.error('[FillLevel] submit', err);
     }
     setLoading(false);
   };
 
+  const finishAndReturn = () => {
+    localStorage.removeItem('scanned_qr');
+    localStorage.removeItem('selected_cav_id');
+    localStorage.removeItem('selected_cav_name');
+    localStorage.removeItem('qr_unavailable_reason');
+    navigate('/tour-map');
+  };
+
+  const correct = async () => {
+    // Annule la collecte : supprime l'entrée locale si encore présente, reset
+    // l'écran pour permettre une nouvelle saisie. Attention : si la collecte
+    // a déjà été envoyée au backend (status === 'sent'), la correction ne
+    // défait PAS l'enregistrement serveur — cf. hypothèse backend.
+    if (confirm?.pendingId) {
+      try { await deleteItem(STORES.pendingCollects, confirm.pendingId); } catch {}
+    }
+    await getPendingCount();
+    setConfirm(null);
+  };
+
   const selected = FILL_LEVELS.find(o => o.value === fillLevel);
+
+  const summaryLines = useMemo(() => {
+    const lines = [];
+    if (selected) lines.push({ label: 'Niveau', value: `${selected.pct} — ${selected.label}` });
+    if (anomaly) lines.push({ label: 'Anomalie', value: ANOMALY_LABELS[anomaly] || anomaly });
+    if (notes) lines.push({ label: 'Note', value: notes });
+    return lines;
+  }, [selected, anomaly, notes]);
+
+  if (confirm) {
+    return (
+      <StepConfirmScreen
+        title="Collecte enregistrée"
+        cavName={confirm.cavName}
+        status={confirm.status}
+        summaryLines={summaryLines}
+        primaryLabel="Continuer"
+        onPrimary={finishAndReturn}
+        secondaryLabel="Corriger"
+        onCorrect={correct}
+        onAutoReturn={finishAndReturn}
+        autoReturnMs={8000}
+      />
+    );
+  }
 
   return (
     <MobileShell
@@ -109,11 +186,12 @@ export default function FillLevel() {
           loading={loading}
           disabled={fillLevel === null}
           error={error || null}
+          pendingOffline={!navigator.onLine}
         />
       }
     >
       <div className="space-y-5">
-        {/* 1. Niveau — gros boutons visuels, compatibles gants */}
+        {/* 1. Niveau — gros boutons visuels */}
         <div>
           <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Niveau</p>
           <div className="grid grid-cols-5 gap-2">
@@ -148,7 +226,7 @@ export default function FillLevel() {
           )}
         </div>
 
-        {/* 2. Anomalies fréquentes — cartes tactiles, plus de select */}
+        {/* 2. Anomalies — cartes tactiles */}
         <div>
           <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Anomalie (optionnel)</p>
           <div className="grid grid-cols-2 gap-2">
@@ -212,7 +290,7 @@ export default function FillLevel() {
           )}
         </div>
 
-        {/* 3. Notes libres — repliées par défaut (pas de clavier dans le cas nominal) */}
+        {/* 3. Notes libres — repliées par défaut */}
         <div>
           {!notesOpen ? (
             <button

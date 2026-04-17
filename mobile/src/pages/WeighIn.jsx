@@ -1,15 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
+import OfflineActionBadge from '../components/OfflineActionBadge';
 
 export default function WeighIn() {
   const [grossWeight, setGrossWeight] = useState('');
   const [tareWeight, setTareWeight] = useState('');
   const [loading, setLoading] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const isIntermediate = localStorage.getItem('intermediate_return') === 'true';
+
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
 
   const netWeight = Math.max(0, (parseFloat(grossWeight) || 0) - (parseFloat(tareWeight) || 0));
 
@@ -78,6 +91,11 @@ export default function WeighIn() {
           <p className="text-4xl font-black text-[var(--color-primary)]">{netWeight.toFixed(0)}</p>
           <p className="text-sm text-gray-500">kg ({(netWeight / 1000).toFixed(2)} t)</p>
         </div>
+        {!online && (
+          <div className="flex items-center justify-center gap-2">
+            <OfflineActionBadge status="pending" label="Hors ligne — sera envoyé" />
+          </div>
+        )}
         <button
           type="button"
           onClick={submit}
