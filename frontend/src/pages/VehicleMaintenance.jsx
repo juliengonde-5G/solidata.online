@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Wrench } from 'lucide-react';
+import { Wrench, FileText, CalendarClock, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal } from '../components';
 import api from '../services/api';
@@ -12,6 +12,7 @@ export default function VehicleMaintenance() {
   const [profiles, setProfiles] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [overview, setOverview] = useState([]);
+  const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Profil sélectionné
@@ -26,20 +27,67 @@ export default function VehicleMaintenance() {
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [profileForm, setProfileForm] = useState({ vehicle_type: '', brand: '', model: '', engine_code: '', timing_system: 'courroie', adblue_equipped: true, revision_km: 30000, revision_months: 24 });
 
+  // Contrats d'entretien (Niveau 2.8)
+  const [showContractForm, setShowContractForm] = useState(false);
+  const [contractForm, setContractForm] = useState({
+    vehicle_id: '', prestataire: '', type_contrat: 'partiel',
+    debut: '', fin: '', tarif_mensuel_eur: '', operations_incluses: '',
+    contact_nom: '', contact_telephone: '', contact_email: '', notes: '', document: null,
+  });
+
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = async () => {
     try {
-      const [profilesRes, vehiclesRes, overviewRes] = await Promise.all([
+      const [profilesRes, vehiclesRes, overviewRes, contractsRes] = await Promise.all([
         api.get('/vehicles/maintenance/profiles-db'),
         api.get('/vehicles'),
         api.get('/vehicles/maintenance/overview').catch(() => ({ data: [] })),
+        api.get('/vehicle-contracts').catch(() => ({ data: [] })),
       ]);
       setProfiles(profilesRes.data);
       setVehicles(vehiclesRes.data);
       setOverview(overviewRes.data);
+      setContracts(contractsRes.data);
     } catch (err) { console.error(err); }
     setLoading(false);
+  };
+
+  const submitContract = async (e) => {
+    e.preventDefault();
+    try {
+      const fd = new FormData();
+      Object.entries(contractForm).forEach(([k, v]) => {
+        if (v === null || v === undefined || v === '') return;
+        if (k === 'document') fd.append('document', v);
+        else fd.append(k, v);
+      });
+      await api.post('/vehicle-contracts', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setShowContractForm(false);
+      setContractForm({
+        vehicle_id: '', prestataire: '', type_contrat: 'partiel',
+        debut: '', fin: '', tarif_mensuel_eur: '', operations_incluses: '',
+        contact_nom: '', contact_telephone: '', contact_email: '', notes: '', document: null,
+      });
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur création contrat');
+    }
+  };
+
+  const deleteContract = async (id) => {
+    if (!window.confirm('Supprimer ce contrat ?')) return;
+    try {
+      await api.delete(`/vehicle-contracts/${id}`);
+      loadAll();
+    } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
+  };
+
+  const toggleContractActive = async (c) => {
+    try {
+      await api.put(`/vehicle-contracts/${c.id}`, { active: !c.active });
+      loadAll();
+    } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
   };
 
   const loadVehicleDetail = useCallback(async (vehicleId) => {
@@ -82,11 +130,11 @@ export default function VehicleMaintenance() {
             <h1 className="text-2xl font-bold text-slate-800">Maintenance véhicules</h1>
             <p className="text-slate-500 text-sm">Plans constructeurs, suivi entretien, alertes</p>
           </div>
-          <div className="flex gap-2">
-            {['plans', 'flotte', 'historique'].map(t => (
+          <div className="flex gap-2 flex-wrap">
+            {['plans', 'flotte', 'contrats', 'historique'].map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition ${tab === t ? 'bg-teal-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-50'}`}>
-                {t === 'plans' ? 'Plans constructeurs' : t === 'flotte' ? 'État flotte' : 'Historique véhicule'}
+                {t === 'plans' ? 'Plans constructeurs' : t === 'flotte' ? 'État flotte' : t === 'contrats' ? `Contrats d'entretien${contracts.length ? ` (${contracts.length})` : ''}` : 'Historique véhicule'}
               </button>
             ))}
           </div>
@@ -225,6 +273,112 @@ export default function VehicleMaintenance() {
                       </td>
                       <td className="px-4 py-3">
                         <button onClick={() => selectVehicle(v)} className="text-xs text-teal-600 hover:underline">Détail</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ TAB CONTRATS D'ENTRETIEN (Niveau 2.8) ═══ */}
+        {tab === 'contrats' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">
+                {contracts.length} contrat{contracts.length > 1 ? 's' : ''} — {contracts.filter(c => c.active).length} actif{contracts.filter(c => c.active).length > 1 ? 's' : ''}
+              </p>
+              <button onClick={() => setShowContractForm(true)} className="btn-primary text-sm">
+                + Nouveau contrat
+              </button>
+            </div>
+
+            {/* Contrats expirant < 30 j */}
+            {contracts.filter(c => c.active && (new Date(c.fin) - new Date()) / 86400000 <= 30).length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <CalendarClock className="w-4 h-4 text-amber-700" />
+                  <p className="text-sm font-semibold text-amber-900">Expiration proche</p>
+                </div>
+                <ul className="text-xs text-amber-800 space-y-1">
+                  {contracts
+                    .filter(c => c.active && (new Date(c.fin) - new Date()) / 86400000 <= 30)
+                    .map(c => {
+                      const days = Math.round((new Date(c.fin) - new Date()) / 86400000);
+                      return (
+                        <li key={c.id}>
+                          <strong>{c.registration}</strong> ({c.prestataire}) — fin le {formatDate(c.fin)}
+                          {' · '}
+                          <span className={days <= 7 ? 'text-red-700 font-semibold' : ''}>
+                            {days < 0 ? `expiré depuis ${-days} j` : `J-${days}`}
+                          </span>
+                        </li>
+                      );
+                    })}
+                </ul>
+              </div>
+            )}
+
+            {/* Liste contrats */}
+            <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-slate-500 uppercase bg-slate-50">
+                    <th className="px-4 py-3">Véhicule</th>
+                    <th className="px-4 py-3">Prestataire</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Période</th>
+                    <th className="px-4 py-3 text-right">Tarif / mois</th>
+                    <th className="px-4 py-3">Contact</th>
+                    <th className="px-4 py-3">Doc</th>
+                    <th className="px-4 py-3">Statut</th>
+                    <th className="px-4 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {contracts.length === 0 && (
+                    <tr><td colSpan="9" className="px-4 py-8 text-center text-slate-400 text-sm">Aucun contrat enregistré</td></tr>
+                  )}
+                  {contracts.map(c => (
+                    <tr key={c.id} className={`border-t hover:bg-slate-50 ${!c.active ? 'opacity-60' : ''}`}>
+                      <td className="px-4 py-3">
+                        <p className="font-medium">{c.vehicle_name || c.registration}</p>
+                        <p className="text-[11px] text-slate-400 font-mono">{c.registration}</p>
+                      </td>
+                      <td className="px-4 py-3 font-medium">{c.prestataire}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${c.type_contrat === 'full' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {c.type_contrat === 'full' ? 'Complet' : 'Partiel'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        {formatDate(c.debut)} → <strong>{formatDate(c.fin)}</strong>
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium">{formatCost(c.tarif_mensuel_eur)}</td>
+                      <td className="px-4 py-3 text-xs">
+                        {c.contact_nom && <p>{c.contact_nom}</p>}
+                        {c.contact_telephone && <a href={`tel:${c.contact_telephone}`} className="text-teal-600 hover:underline">{c.contact_telephone}</a>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {c.document_path ? (
+                          <a href={c.document_path} target="_blank" rel="noreferrer" className="text-teal-600 hover:underline inline-flex items-center gap-1">
+                            <FileText className="w-3.5 h-3.5" /> PDF
+                          </a>
+                        ) : <span className="text-slate-300 text-xs">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => toggleContractActive(c)}
+                          className={`text-xs font-medium px-2 py-0.5 rounded ${c.active ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                        >
+                          {c.active ? 'Actif' : 'Archivé'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => deleteContract(c.id)} className="text-red-400 hover:text-red-600" title="Supprimer">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -396,6 +550,106 @@ export default function VehicleMaintenance() {
             <div className="flex gap-2 mt-6">
               <button type="button" onClick={() => setShowProfileForm(false)} className="flex-1 btn-ghost">Annuler</button>
               <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
+            </div>
+          </form>
+        </Modal>
+
+        {/* ═══ MODAL NOUVEAU CONTRAT D'ENTRETIEN (Niveau 2.8) ═══ */}
+        <Modal isOpen={showContractForm} onClose={() => setShowContractForm(false)} title="Nouveau contrat d'entretien" size="md">
+          <form onSubmit={submitContract}>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">Véhicule *</label>
+                  <select required value={contractForm.vehicle_id}
+                    onChange={e => setContractForm({ ...contractForm, vehicle_id: e.target.value })}
+                    className="input-modern mt-1">
+                    <option value="">— Sélectionner —</option>
+                    {vehicles.map(v => (
+                      <option key={v.id} value={v.id}>{v.registration} — {v.name || v.vehicle_type || 'véhicule'}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Type de contrat</label>
+                  <select value={contractForm.type_contrat}
+                    onChange={e => setContractForm({ ...contractForm, type_contrat: e.target.value })}
+                    className="input-modern mt-1">
+                    <option value="partiel">Partiel</option>
+                    <option value="full">Complet (all-in)</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Prestataire *</label>
+                <input required value={contractForm.prestataire}
+                  onChange={e => setContractForm({ ...contractForm, prestataire: e.target.value })}
+                  className="input-modern mt-1" placeholder="Ex: Garage Martin, Norauto, …" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">Début *</label>
+                  <input type="date" required value={contractForm.debut}
+                    onChange={e => setContractForm({ ...contractForm, debut: e.target.value })}
+                    className="input-modern mt-1" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Fin *</label>
+                  <input type="date" required value={contractForm.fin}
+                    onChange={e => setContractForm({ ...contractForm, fin: e.target.value })}
+                    className="input-modern mt-1" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">Tarif mensuel (€)</label>
+                  <input type="number" step="0.01" value={contractForm.tarif_mensuel_eur}
+                    onChange={e => setContractForm({ ...contractForm, tarif_mensuel_eur: e.target.value })}
+                    className="input-modern mt-1" placeholder="0" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Opérations incluses</label>
+                  <input value={contractForm.operations_incluses}
+                    onChange={e => setContractForm({ ...contractForm, operations_incluses: e.target.value })}
+                    className="input-modern mt-1" placeholder="vidange, filtres, freins (séparer par virgules)" />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">Contact — nom</label>
+                  <input value={contractForm.contact_nom}
+                    onChange={e => setContractForm({ ...contractForm, contact_nom: e.target.value })}
+                    className="input-modern mt-1" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Téléphone</label>
+                  <input value={contractForm.contact_telephone}
+                    onChange={e => setContractForm({ ...contractForm, contact_telephone: e.target.value })}
+                    className="input-modern mt-1" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">Email</label>
+                  <input type="email" value={contractForm.contact_email}
+                    onChange={e => setContractForm({ ...contractForm, contact_email: e.target.value })}
+                    className="input-modern mt-1" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Document (PDF / image)</label>
+                <input type="file" accept=".pdf,image/*"
+                  onChange={e => setContractForm({ ...contractForm, document: e.target.files?.[0] || null })}
+                  className="input-modern mt-1" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Notes</label>
+                <textarea rows="2" value={contractForm.notes}
+                  onChange={e => setContractForm({ ...contractForm, notes: e.target.value })}
+                  className="input-modern mt-1" placeholder="Conditions particulières, limites…" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button type="button" onClick={() => setShowContractForm(false)} className="flex-1 btn-ghost">Annuler</button>
+              <button type="submit" className="flex-1 btn-primary text-sm">Enregistrer</button>
             </div>
           </form>
         </Modal>

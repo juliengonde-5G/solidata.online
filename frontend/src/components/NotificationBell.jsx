@@ -1,10 +1,20 @@
-import { useState, useRef, useEffect } from 'react';
-import { Bell, AlertTriangle, Info, X } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Bell, AlertTriangle, Info, X, BellOff, BellRing } from 'lucide-react';
+import {
+  isPushSupported,
+  enablePushNotifications,
+  disablePushNotifications,
+  isPushActive,
+} from '../services/pushNotifications';
 
 export default function NotificationBell({ alerts = [] }) {
   const [open, setOpen] = useState(false);
+  const [pushActive, setPushActive] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMessage, setPushMessage] = useState(null);
   const ref = useRef(null);
   const count = alerts.length;
+  const supported = isPushSupported();
 
   useEffect(() => {
     const handleClick = (e) => {
@@ -13,6 +23,33 @@ export default function NotificationBell({ alerts = [] }) {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
+
+  useEffect(() => {
+    if (!supported) return;
+    isPushActive().then(setPushActive).catch(() => {});
+  }, [supported]);
+
+  const togglePush = useCallback(async () => {
+    if (!supported || pushBusy) return;
+    setPushBusy(true);
+    setPushMessage(null);
+    try {
+      if (pushActive) {
+        await disablePushNotifications();
+        setPushActive(false);
+      } else {
+        const res = await enablePushNotifications();
+        if (res?.ok) setPushActive(true);
+        else if (res?.error === 'permission_denied') setPushMessage('Permission refusée par le navigateur.');
+        else if (res?.error === 'not_configured') setPushMessage('Push non configuré côté serveur.');
+        else if (res?.error === 'unsupported') setPushMessage('Navigateur non compatible.');
+        else setPushMessage('Activation impossible.');
+      }
+    } catch (err) {
+      setPushMessage(err?.message || 'Erreur activation push');
+    }
+    setPushBusy(false);
+  }, [pushActive, pushBusy, supported]);
 
   return (
     <div className="relative" ref={ref}>
@@ -37,6 +74,36 @@ export default function NotificationBell({ alerts = [] }) {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {supported && (
+            <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                {pushActive ? (
+                  <BellRing className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                ) : (
+                  <BellOff className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-slate-700">Notifications push</p>
+                  <p className="text-[11px] text-slate-500 truncate">
+                    {pushMessage || (pushActive ? 'Actives sur ce navigateur' : 'Désactivées')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={togglePush}
+                disabled={pushBusy}
+                className={`text-xs font-medium px-2.5 py-1 rounded-lg transition ${
+                  pushActive
+                    ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                } disabled:opacity-50`}
+              >
+                {pushBusy ? '…' : pushActive ? 'Désactiver' : 'Activer'}
+              </button>
+            </div>
+          )}
           <div className="max-h-72 overflow-y-auto">
             {count === 0 ? (
               <p className="text-sm text-slate-400 text-center py-8">Aucune notification</p>

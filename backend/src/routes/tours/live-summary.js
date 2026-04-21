@@ -49,12 +49,15 @@ router.get('/:id/live-summary', async (req, res) => {
     }
     const tour = tourResult.rows[0];
 
-    // Points (CAV ou points association selon type)
+    // Points (CAV ou points association selon type). On récupère
+    // planned_passage_time si la colonne a été peuplée au démarrage de la
+    // tournée (OSRM), sinon on tombera sur une estimation linéaire en aval.
     let points = [];
     if (tour.collection_type === 'association') {
       const r = await pool.query(`
         SELECT tap.id, tap.tour_id, tap.association_point_id AS cav_id,
-               tap.position, tap.status, tap.fill_level, tap.collected_at, tap.notes,
+               tap.position, tap.status, tap.fill_level, tap.collected_at,
+               tap.notes, tap.planned_passage_time,
                ap.name AS cav_name, ap.address, ap.ville AS commune,
                ap.latitude, ap.longitude, NULL::int AS nb_containers
         FROM tour_association_point tap
@@ -131,10 +134,15 @@ router.get('/:id/live-summary', async (req, res) => {
       elapsedMin = Math.round((endRef - new Date(tour.started_at)) / 60000);
     }
 
-    // Construire la liste points enrichie
+    // Construire la liste points enrichie. On privilégie le
+    // planned_passage_time stocké en BDD (calcul OSRM au démarrage de la
+    // tournée) ; sinon on retombe sur l'estimation linéaire naïve.
     const nbPoints = points.length;
+    const plannedSource = points.some(p => p.planned_passage_time) ? 'osrm' : 'estimate';
     const enrichedPoints = points.map((p) => {
-      const planned = plannedPassageAt(tour.started_at, tour.estimated_duration_min, p.position, nbPoints);
+      const planned = p.planned_passage_time
+        ? new Date(p.planned_passage_time).toISOString()
+        : plannedPassageAt(tour.started_at, tour.estimated_duration_min, p.position, nbPoints);
       let delayMinutes = null;
       if (planned && p.collected_at) {
         delayMinutes = Math.round((new Date(p.collected_at) - new Date(planned)) / 60000);
@@ -216,6 +224,34 @@ router.get('/:id/live-summary', async (req, res) => {
       });
     }
 
+    // Niveau 2.4 — batches de tri générés à partir de cette tournée
+    // (chemin : stock_movements.tour_id → batch_tracking.stock_movement_id)
+    let batches = [];
+    try {
+      const batchRes = await pool.query(`
+        SELECT bt.id, bt.code, bt.status, bt.poids_initial_kg, bt.poids_restant_kg,
+               bt.date_debut, bt.date_fin, c.nom AS chaine_nom
+          FROM batch_tracking bt
+          JOIN stock_movements sm ON sm.id = bt.stock_movement_id
+          LEFT JOIN chaines_tri c ON c.id = bt.chaine_id
+         WHERE sm.tour_id = $1
+         ORDER BY bt.created_at DESC
+      `, [tourId]);
+      batches = batchRes.rows;
+    } catch (_) { /* tables absentes — ignore */ }
+
+    // Proposition de ré-optimisation pendante (Niveau 2.6)
+    let pendingReopt = null;
+    try {
+      const reoptRes = await pool.query(
+        `SELECT * FROM tour_reoptimizations
+           WHERE tour_id = $1 AND status = 'pending'
+           ORDER BY triggered_at DESC LIMIT 1`,
+        [tourId]
+      );
+      pendingReopt = reoptRes.rows[0] || null;
+    } catch (_) { /* table absente — on ignore */ }
+
     // Alerte maintenance véhicule proche (si table présente)
     try {
       const maintResult = await pool.query(`
@@ -231,6 +267,29 @@ router.get('/:id/live-summary', async (req, res) => {
           level: 'warn',
           category: 'maintenance',
           message: `Maintenance ${m.type || ''} prévue : ${m.description || 'échéance proche'}`,
+        });
+      }
+    } catch (_) { /* table absente — on ignore */ }
+
+    // Niveau 2.8 : alerte contrat d'entretien expirant ≤ 30 j
+    try {
+      const contractResult = await pool.query(`
+        SELECT prestataire, fin,
+               (fin - CURRENT_DATE)::int AS days_left
+        FROM vehicle_maintenance_contracts
+        WHERE vehicle_id = $1
+          AND active = true
+          AND fin <= CURRENT_DATE + INTERVAL '30 days'
+        ORDER BY fin ASC LIMIT 1
+      `, [tour.vehicle_id]);
+      for (const c of contractResult.rows) {
+        const days = c.days_left;
+        alerts.push({
+          level: days <= 7 ? 'error' : 'warn',
+          category: 'maintenance',
+          message: days < 0
+            ? `Contrat d'entretien ${c.prestataire} expiré depuis ${-days} j`
+            : `Contrat ${c.prestataire} expire dans ${days} j`,
         });
       }
     } catch (_) { /* table absente — on ignore */ }
@@ -278,6 +337,9 @@ router.get('/:id/live-summary', async (req, res) => {
       incidents,
       weights: weightsResult.rows,
       alerts,
+      planned_source: plannedSource,
+      pending_reoptimization: pendingReopt,
+      batches,
     });
   } catch (err) {
     console.error('[TOURS] Erreur live-summary :', err);

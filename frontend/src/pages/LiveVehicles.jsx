@@ -8,7 +8,7 @@ import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
 import {
   MapPin, Truck, Gauge, Clock, Target, TrendingUp, AlertTriangle,
-  CheckCircle2, CircleDashed, XCircle, Wrench, Info,
+  CheckCircle2, CircleDashed, XCircle, Wrench, Info, Shuffle, Filter,
 } from 'lucide-react';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -146,6 +146,9 @@ export default function LiveVehicles() {
   const [trail, setTrail] = useState([]);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all'); // all | pending | collected | skipped | incident
+  const [communeFilter, setCommuneFilter] = useState('all');
+  const [botInsights, setBotInsights] = useState([]);
   const socketRef = useRef(null);
 
   // Initialisation : liste des tournées actives + connexion socket
@@ -181,6 +184,10 @@ export default function LiveVehicles() {
     try {
       const res = await api.get(`/tours/${tourId}/live-summary`);
       setSummary(res.data);
+      // Observations SolidataBot (Niveau 3.4) — best-effort, non bloquant
+      api.get(`/chat/insights/tour/${tourId}`)
+        .then(r => setBotInsights(r.data?.insights || []))
+        .catch(() => setBotInsights([]));
       // Initialiser le trail avec la dernière position si dispo
       if (res.data.last_position) {
         setLivePosition({
@@ -225,16 +232,47 @@ export default function LiveVehicles() {
       loadSummary(selectedTourId);
     };
     const onTourUpdate = () => loadSummary(selectedTourId);
+    const onReoptUpdate = () => loadSummary(selectedTourId);
 
     socket.on('vehicle-position', onPosition);
     socket.on('cav-status-update', onCavUpdate);
     socket.on('tour-status-update', onTourUpdate);
+    socket.on('reoptimization-proposal', onReoptUpdate);
+    socket.on('reoptimization-accepted', onReoptUpdate);
+    socket.on('reoptimization-rejected', onReoptUpdate);
 
     return () => {
       socket.off('vehicle-position', onPosition);
       socket.off('cav-status-update', onCavUpdate);
       socket.off('tour-status-update', onTourUpdate);
+      socket.off('reoptimization-proposal', onReoptUpdate);
+      socket.off('reoptimization-accepted', onReoptUpdate);
+      socket.off('reoptimization-rejected', onReoptUpdate);
     };
+  }, [selectedTourId, loadSummary]);
+
+  const requestReoptimization = useCallback(async () => {
+    if (!selectedTourId) return;
+    try {
+      await api.post(`/tours/${selectedTourId}/reoptimize`, {
+        current_lat: livePosition?.lat ?? null,
+        current_lng: livePosition?.lng ?? null,
+        reason: 'manual',
+      });
+      loadSummary(selectedTourId);
+    } catch (err) {
+      console.error('[CollectionsLive] reoptimize :', err);
+    }
+  }, [selectedTourId, livePosition, loadSummary]);
+
+  const decideReoptimization = useCallback(async (reoptId, action) => {
+    if (!selectedTourId || !reoptId) return;
+    try {
+      await api.post(`/tours/${selectedTourId}/reoptimize/${reoptId}/${action}`);
+      loadSummary(selectedTourId);
+    } catch (err) {
+      console.error('[CollectionsLive] reopt decision :', err);
+    }
   }, [selectedTourId, loadSummary]);
 
   // Polling filet de sécurité (20 s) pour remonter incidents/pesées si socket muet
@@ -276,9 +314,30 @@ export default function LiveVehicles() {
   }
 
   const kpis = summary?.kpis || {};
-  const points = summary?.points || [];
+  const allPoints = summary?.points || [];
   const alerts = summary?.alerts || [];
   const tour = summary?.tour;
+  const pendingReopt = summary?.pending_reoptimization || null;
+  const batches = summary?.batches || [];
+
+  // Communes uniques pour le filtre
+  const communes = useMemo(() => {
+    const set = new Set();
+    for (const p of allPoints) { if (p.commune) set.add(p.commune); }
+    return Array.from(set).sort();
+  }, [allPoints]);
+
+  // Application des filtres (carte + liste)
+  const points = useMemo(() => {
+    return allPoints.filter(p => {
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'incident' ? !p.has_incident : p.status !== statusFilter) return false;
+      }
+      if (communeFilter !== 'all' && p.commune !== communeFilter) return false;
+      return true;
+    });
+  }, [allPoints, statusFilter, communeFilter]);
+  const filtersActive = statusFilter !== 'all' || communeFilter !== 'all';
 
   return (
     <Layout>
@@ -300,6 +359,16 @@ export default function LiveVehicles() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={requestReoptimization}
+              disabled={!!pendingReopt}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={pendingReopt ? 'Une proposition est déjà en attente' : 'Proposer une ré-optimisation'}
+            >
+              <Shuffle className="w-4 h-4" />
+              Ré-optimiser
+            </button>
             <label className="text-xs font-medium text-slate-500">Tournée</label>
             <select
               value={selectedTourId || ''}
@@ -315,8 +384,106 @@ export default function LiveVehicles() {
           </div>
         </div>
 
-        {/* Bandeau alertes "Op Solidata" */}
-        <AlertBanner alerts={alerts} />
+        {/* Proposition de ré-optimisation en attente */}
+        {pendingReopt && (
+          <div className="card-modern border-2 border-amber-300 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-amber-100 flex-shrink-0">
+                <Shuffle className="w-5 h-5 text-amber-700" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-900">
+                  Proposition de ré-optimisation de l'ordre des CAV
+                </p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Déclencheur : <strong>{pendingReopt.trigger_reason}</strong>
+                  {' · '}Source : {pendingReopt.triggered_by}
+                  {' · '}Gain estimé :{' '}
+                  <strong>
+                    −{Math.round(((pendingReopt.old_distance_km - pendingReopt.new_distance_km) / Math.max(0.1, pendingReopt.old_distance_km)) * 100)}%
+                    {' '}
+                    ({(pendingReopt.old_distance_km ?? 0).toFixed(1)} km → {(pendingReopt.new_distance_km ?? 0).toFixed(1)} km)
+                  </strong>
+                </p>
+                <p className="text-[11px] text-amber-700 mt-0.5">
+                  Durée : {Math.round(pendingReopt.old_duration_min ?? 0)} min → {Math.round(pendingReopt.new_duration_min ?? 0)} min
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => decideReoptimization(pendingReopt.id, 'reject')}
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Refuser
+                </button>
+                <button
+                  type="button"
+                  onClick={() => decideReoptimization(pendingReopt.id, 'accept')}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
+                >
+                  Accepter
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bandeau alertes "Op Solidata" (alertes live + insights SolidataBot) */}
+        <AlertBanner alerts={[
+          ...alerts,
+          ...botInsights.map(i => ({ level: i.level, category: i.category, message: `💡 ${i.message}` })),
+        ]} />
+
+        {/* Filtres carte & liste (Niveau 2.5) */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex items-center gap-1.5 text-slate-500">
+            <Filter className="w-3.5 h-3.5" />
+            <span className="font-medium">Filtres</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {[
+              { key: 'all', label: 'Tous' },
+              { key: 'pending', label: 'À venir' },
+              { key: 'collected', label: 'Collectés' },
+              { key: 'skipped', label: 'Ignorés' },
+              { key: 'incident', label: 'Incidents' },
+            ].map(s => (
+              <button
+                key={s.key}
+                onClick={() => setStatusFilter(s.key)}
+                className={`px-2 py-1 rounded-md border transition ${
+                  statusFilter === s.key
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          {communes.length > 1 && (
+            <select
+              value={communeFilter}
+              onChange={(e) => setCommuneFilter(e.target.value)}
+              className="px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-700"
+            >
+              <option value="all">Toutes communes</option>
+              {communes.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+          {filtersActive && (
+            <button
+              onClick={() => { setStatusFilter('all'); setCommuneFilter('all'); }}
+              className="text-slate-400 hover:text-slate-600 underline"
+            >
+              Réinitialiser
+            </button>
+          )}
+          <span className="text-slate-400 ml-auto">
+            {points.length} / {allPoints.length} points
+          </span>
+        </div>
 
         {/* KPI row */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -491,16 +658,35 @@ export default function LiveVehicles() {
               ))}
             </div>
 
-            {/* Pied : pesée retour tri si présente */}
-            {summary?.weights?.length > 0 && (
-              <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 text-xs">
-                <span className="text-slate-500">Pesée retour : </span>
-                <span className="font-semibold text-slate-700">
-                  {Math.round((kpis.total_weight_kg || 0) * 10) / 10} kg
-                </span>
-                <span className="text-slate-400 ml-2">
-                  ({summary.weights.length} pesée{summary.weights.length > 1 ? 's' : ''})
-                </span>
+            {/* Pied : pesée retour tri + batches liés (Niveau 2.4) */}
+            {(summary?.weights?.length > 0 || batches.length > 0) && (
+              <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 text-xs space-y-1">
+                {summary?.weights?.length > 0 && (
+                  <div>
+                    <span className="text-slate-500">Pesée retour : </span>
+                    <span className="font-semibold text-slate-700">
+                      {Math.round((kpis.total_weight_kg || 0) * 10) / 10} kg
+                    </span>
+                    <span className="text-slate-400 ml-2">
+                      ({summary.weights.length} pesée{summary.weights.length > 1 ? 's' : ''})
+                    </span>
+                  </div>
+                )}
+                {batches.length > 0 && batches.map(b => (
+                  <div key={b.id} className="flex items-center justify-between">
+                    <span className="text-slate-500">
+                      Batch tri : <span className="font-mono font-semibold text-slate-700">{b.code}</span>
+                      {b.chaine_nom ? <span className="text-slate-400 ml-1">· {b.chaine_nom}</span> : null}
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      b.status === 'termine' ? 'bg-emerald-100 text-emerald-700'
+                      : b.status === 'en_cours' ? 'bg-amber-100 text-amber-700'
+                      : b.status === 'annule' ? 'bg-red-100 text-red-700'
+                      : 'bg-slate-200 text-slate-600'}`}>
+                      {b.status}
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
