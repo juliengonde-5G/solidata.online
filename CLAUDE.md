@@ -2,7 +2,7 @@
 
 > **Ce fichier est le contexte de référence pour tout agent IA (Claude, Copilot, etc.) travaillant sur le projet SOLIDATA.**
 > Il est lu automatiquement par Claude Code au démarrage de chaque session.
-> Dernière mise à jour : 16 avril 2026
+> Dernière mise à jour : 21 avril 2026
 
 ---
 
@@ -335,6 +335,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | 7 avril 2026 | 1.3.2 | Audit quotidien : 15 commits orphelins réintégrés sur main. Repo propre (1 branche). Sécurité **4.5/10** (2 CRITIQUES : injection SQL insertion/index.js, injection shell admin-db + 6 HAUTES dont PCM sans auth). 11 vuln npm (9 HIGH). **36 bugs dont 12 BLOQUANTS** — 10 modules cassés : Mobile GPS (Socket.IO mismatch+auth), Mobile retour (CHECK constraint), WorkHours (triple incompatibilité), Expéditions (champs POST), Commandes Exutoires (status `chargée`), LiveVehicles (Socket.IO), Dashboard KPIs (colonne erronée), ProduitsFinis (JOIN manquant), Reporting (paramètre API), ChaineTri (nb_postes). **8 bugs récurrents ≥3 jours non corrigés**. Note globale **4.8/10**. 143 commits |
 | 11 avril 2026 | 1.3.3 | Stock Original (AdminStockOriginal, InventaireOriginal, grand livre, verrouillage trimestriel Refashion). Fix mobile (navigation incidents, checklist, erreurs silencieuses). Suppression doublon route `GET /api/vehicles/available`. Documentation : LOGIQUE_TOURNEES.md, LOGIQUE_STOCK_INVENTAIRES.md, VARIABLES_APPLICATION.md. 66 pages React, 63 fichiers routes. |
 | 16 avril 2026 | 1.4.0 | **Module Boutiques complet** — Espace performance retail 2nde main textile. 9 tables (boutiques, import_batches, ventes, tickets, commandes, commande_lignes, commande_historique, objectifs, meteo_quotidien). 5 routes API (boutiques, boutique-ventes, boutique-commandes, boutique-objectifs, boutique-meteo). 7 pages React (Hub, Dashboard 3 niveaux jour/mois/année, Ventes, Commandes Kanban 3 colonnes, Planning, Objectifs, Import). Utilitaire partagé `utils/weather.js` (Open-Meteo, WMO). Nouveau rôle `RESP_BTQ`. Import CSV LogicS (séparateur `;`, SHA-256 anti-doublon, reconstruction tickets par minute). Commandes par lot/poids (5 statuts : brouillon→envoyee→ajustee→en_preparation→expediee + annulee). Corrélation météo/CA. Objectifs mensuels avec % atteinte. 2 jobs scheduler (scan CSV auto + collecte météo). Sidebar section Boutiques (pink). Docker volume CSV. Seed St-Sever + L'Hopital. 21 fichiers, +3 298 lignes. 75 pages React, 69 fichiers routes. |
+| 21 avril 2026 | 1.4.0 | Audit & consolidation des branches : 7 branches distantes analysées, 6 sans écart avec main (déjà intégrées ou obsolètes), 1 branche (`claude/inventory-production-workflow-wzNrD`) avec 1 commit unique `a824d01`. Refonte BalancePage obsolète (remplacée sur main par d840360 + 3d0cefa). **Fix vehicles.js récupéré** : null-safe typage `team_id` (parseInt) et `tare_weight_kg` (parseFloat), champs optionnels en null explicite pour éviter "invalid input syntax for type integer" PostgreSQL. Branches obsolètes à nettoyer : add-karpathy-skills-plugin, document-mobile-behavior, fix-pcm-engine-questions, inventory-production-workflow, redesign-layout-kpi, shop-performance-management, update-collection-tracking (toutes déjà fusionnées sur main). |
 
 ---
 
