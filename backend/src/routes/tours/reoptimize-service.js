@@ -14,6 +14,7 @@ const {
 } = require('./geo');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
 const { computeAndStorePlannedPassages } = require('./planned-passage');
+const { sendPushToRoles } = require('../../services/push-notifications');
 
 const REOPT_AVG_SPEED_KMH = 28;
 const MIN_GAIN_PERCENT = 5; // seuil en % pour proposer une ré-optim
@@ -173,6 +174,15 @@ async function proposeReoptimization({
   };
 
   if (io) io.to(`tour-${tourId}`).emit('reoptimization-proposal', proposal);
+
+  // Push manager : proposition disponible à valider
+  sendPushToRoles(['ADMIN', 'MANAGER'], {
+    title: `Ré-optim. proposée — Tournée #${tourId}`,
+    body: `Gain ${proposal.gain_percent}% (${proposal.old_distance_km} → ${proposal.new_distance_km} km) — motif ${triggerReason}`,
+    tag: `reopt-${tourId}`,
+    data: { url: '/collections-live', tourId },
+  }).catch(() => {});
+
   return { created: true, proposal };
 }
 

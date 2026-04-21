@@ -4,6 +4,7 @@ const pool = require('../../config/database');
 const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { ensurePlannedPassages } = require('./planned-passage');
+const { sendPushToRoles } = require('../../services/push-notifications');
 
 // Upload is passed from index.js via router factory
 module.exports = function createExecutionRouter(upload) {
@@ -251,6 +252,20 @@ module.exports = function createExecutionRouter(upload) {
       // Émettre l'événement Socket.io
       const io = req.app.get('io');
       if (io) io.to(`tour-${req.params.id}`).emit('tour-status-update', { tourId: req.params.id, status });
+
+      // Push notification aux managers sur clôture ou annulation
+      if (status === 'completed' || status === 'cancelled') {
+        const tour = result.rows[0];
+        const label = status === 'completed' ? 'terminée' : 'annulée';
+        sendPushToRoles(['ADMIN', 'MANAGER'], {
+          title: `Tournée #${req.params.id} ${label}`,
+          body: tour.total_weight_kg
+            ? `Poids total : ${Math.round(tour.total_weight_kg)} kg`
+            : 'Voir le détail de la tournée',
+          tag: `tour-${req.params.id}-${status}`,
+          data: { url: '/collections-live', tourId: parseInt(req.params.id, 10) },
+        }).catch(() => {});
+      }
 
       res.json(result.rows[0]);
     } catch (err) {

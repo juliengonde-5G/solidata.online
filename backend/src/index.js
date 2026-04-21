@@ -159,6 +159,9 @@ app.use('/api/chat', require('./routes/chat'));
 // Performance : Dashboard KPI consolide et indicateurs industriels
 app.use('/api/performance', require('./routes/performance'));
 
+// Niveau 2.2 : Web Push (abonnement + VAPID + test)
+app.use('/api/push', require('./routes/push'));
+
 // Module Boutiques : gestion de la performance des boutiques retail 2nde main
 app.use('/api/boutiques', require('./routes/boutiques'));
 app.use('/api/boutique-ventes', require('./routes/boutique-ventes'));

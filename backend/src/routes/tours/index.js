@@ -34,6 +34,7 @@ const {
   applyReoptimization,
   rejectReoptimization,
 } = require('./reoptimize-service');
+const { sendPushToRoles } = require('../../services/push-notifications');
 
 // ── Endpoints publics (mobile sans auth) ──────────────────────────────
 
@@ -295,6 +296,14 @@ router.post('/:id/incident-public', async (req, res) => {
       }).catch(err => console.warn('[TOURS] auto-reoptim (incident) échec :', err.message));
     }
 
+    // Push aux managers : nouvel incident sur tournée en cours
+    sendPushToRoles(['ADMIN', 'MANAGER'], {
+      title: 'Incident signalé',
+      body: `Tournée #${req.params.id} — ${type}${description ? ` : ${description.slice(0, 80)}` : ''}`,
+      tag: `incident-${req.params.id}`,
+      data: { url: '/collections-live', tourId: parseInt(req.params.id, 10) },
+    }).catch(() => {});
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[TOURS] Erreur incident-public:', err);
@@ -423,6 +432,21 @@ router.put('/:id/status-public', async (req, res) => {
       `UPDATE tours SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
       params
     );
+
+    // Push notification aux managers sur fin / annulation déclenchée côté mobile
+    if (status === 'completed' || status === 'cancelled') {
+      const label = status === 'completed' ? 'terminée' : 'annulée';
+      const tour = result.rows[0];
+      sendPushToRoles(['ADMIN', 'MANAGER'], {
+        title: `Tournée #${req.params.id} ${label}`,
+        body: tour?.total_weight_kg
+          ? `Poids total : ${Math.round(tour.total_weight_kg)} kg`
+          : 'Déclarée depuis le mobile chauffeur',
+        tag: `tour-${req.params.id}-${status}`,
+        data: { url: '/collections-live', tourId: parseInt(req.params.id, 10) },
+      }).catch(() => {});
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[TOURS] Erreur status-public:', err);

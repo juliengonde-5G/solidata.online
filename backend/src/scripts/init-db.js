@@ -1003,6 +1003,24 @@ async function initDatabase() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_tour ON tour_reoptimizations(tour_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_status ON tour_reoptimizations(status);`);
+
+    // Abonnements push (Web Push API + VAPID) — Niveau 2.2. Un user peut
+    // avoir plusieurs endpoints (poste de travail + mobile perso).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        endpoint TEXT UNIQUE NOT NULL,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        user_agent TEXT,
+        platform VARCHAR(20) DEFAULT 'web'
+          CHECK (platform IN ('web', 'mobile')),
+        created_at TIMESTAMP DEFAULT NOW(),
+        last_used_at TIMESTAMP
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);');
     // Ajouter les colonnes distance/durée/nb_cav à tours si manquantes
     await client.query(`
       DO $$ BEGIN

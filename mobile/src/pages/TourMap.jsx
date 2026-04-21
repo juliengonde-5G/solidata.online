@@ -139,7 +139,14 @@ export default function TourMap() {
     // Proposition de ré-optimisation (Niveau 2.6)
     socket.on('reoptimization-proposal', (data) => {
       if (!data) return;
-      if (parseInt(data.tour_id) === parseInt(tourId)) setReoptProposal(data);
+      if (parseInt(data.tour_id) === parseInt(tourId)) {
+        setReoptProposal(data);
+        // Notification native (feedback visuel hors-modal) si permission accordée
+        notifyDriver(
+          'Nouvel ordre proposé',
+          `Gain ${data.gain_percent}% — ${data.old_distance_km} → ${data.new_distance_km} km`
+        );
+      }
     });
     socket.on('reoptimization-accepted', () => setReoptProposal(null));
     socket.on('reoptimization-rejected', () => setReoptProposal(null));
@@ -184,6 +191,20 @@ export default function TourMap() {
     const cav = cavs[currentCavIndex];
     if (cav?.latitude && cav?.longitude) {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${cav.latitude},${cav.longitude}`, '_blank');
+    }
+  };
+
+  // Notification native pour le chauffeur (fonctionne app ouverte).
+  // Demande la permission la 1re fois, silencieux sinon.
+  const notifyDriver = (title, body) => {
+    if (typeof Notification === 'undefined') return;
+    const show = () => {
+      try { new Notification(title, { body, icon: '/icon-192.png', tag: 'driver' }); }
+      catch (_) { /* ignore */ }
+    };
+    if (Notification.permission === 'granted') show();
+    else if (Notification.permission === 'default') {
+      Notification.requestPermission().then((p) => { if (p === 'granted') show(); }).catch(() => {});
     }
   };
 
