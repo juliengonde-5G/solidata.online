@@ -28,6 +28,7 @@ const eventsAutoRouter = require('./events-auto');
 const statsRouter = require('./stats');
 const liveSummaryRouter = require('./live-summary');
 const reoptimizeRouter = require('./reoptimize');
+const planningRouter = require('./planning');
 const { ensurePlannedPassages } = require('./planned-passage');
 const {
   proposeReoptimization,
@@ -571,6 +572,9 @@ router.use('/', liveSummaryRouter);
 
 // Mount reoptimize routes (manager trigger / accept / reject)
 router.use('/', reoptimizeRouter);
+
+// Mount planning routes (Niveau 2.7 — drag-drop affectation)
+router.use('/', planningRouter);
 
 // Mount execution routes (needs upload for incidents)
 const executionRouter = createExecutionRouter(upload);
