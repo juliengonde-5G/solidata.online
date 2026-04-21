@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, BarChart3, Calculator, CircleDollarSign, Euro, Factory,
-  Landmark, Scale, ShieldCheck, TrendingDown, TrendingUp, Truck, Upload,
+  Landmark, Scale, ShieldCheck, Target, TrendingDown, TrendingUp, Truck, Upload,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
@@ -83,10 +83,13 @@ export default function Finance() {
   const monthlyData = kpis?.monthly || [];
   const treasuryData = kpis?.tresorerie_evolution || [];
 
+  const budgetMonthly = kpis?.budget_monthly || [];
   const chartData = MONTHS.map((m, i) => ({
     mois: m,
     ca: monthlyData[i]?.ca || 0,
     resultat: monthlyData[i]?.resultat || 0,
+    budget_ca: budgetMonthly[i]?.produits || 0,
+    budget_resultat: (budgetMonthly[i]?.produits || 0) - (budgetMonthly[i]?.charges || 0),
   }));
 
   const treasuryChartData = MONTHS.map((m, i) => ({
@@ -154,6 +157,31 @@ export default function Finance() {
           />
         </div>
 
+        {/* Budget — Niveau 1 / Niveau 2 */}
+        <div>
+          <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">Budget {year}</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <KPICard title="Budget Produits" value={fmtK(kpis?.budget_produits_annuel)} unit="EUR" icon={Target} accent="emerald" loading={loading} />
+            <KPICard title="Budget Charges" value={fmtK(kpis?.budget_charges_annuel)} unit="EUR" icon={Target} accent="red" loading={loading} />
+            <KPICard title="Resultat budgete" value={fmtK(kpis?.budget_resultat_annuel)} unit="EUR" icon={Target} accent="primary" loading={loading} />
+            <KPICard
+              title="Ecart CA vs budget YTD"
+              value={fmtK(kpis?.ecart_produits_ytd)}
+              unit="EUR"
+              icon={kpis?.ecart_produits_ytd >= 0 ? TrendingUp : TrendingDown}
+              accent={kpis?.ecart_produits_ytd >= 0 ? 'emerald' : 'red'}
+              loading={loading}
+            />
+            <KPICard
+              title="Conso. charges YTD"
+              value={fmtPct(kpis?.taux_consommation_charges)}
+              icon={Calculator}
+              accent={kpis?.taux_consommation_charges > 105 ? 'red' : 'amber'}
+              loading={loading}
+            />
+          </div>
+        </div>
+
         {/* Graphiques */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* CA + Resultat mensuel */}
@@ -168,13 +196,20 @@ export default function Finance() {
                   <XAxis dataKey="mois" tick={{ fontSize: 12, fill: '#64748b' }} />
                   <YAxis tick={{ fontSize: 12, fill: '#64748b' }} tickFormatter={(v) => fmtK(v)} />
                   <Tooltip
-                    formatter={(value, name) => [fmt(value) + ' EUR', name === 'ca' ? 'CA' : 'Resultat']}
+                    formatter={(value, name) => {
+                      const labels = { ca: 'CA', resultat: 'Resultat', budget_ca: 'Budget CA', budget_resultat: 'Budget Resultat' };
+                      return [fmt(value) + ' EUR', labels[name] || name];
+                    }}
                     labelStyle={{ color: '#334155', fontWeight: 600 }}
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
                   />
-                  <Legend formatter={(v) => v === 'ca' ? 'CA' : 'Resultat'} />
+                  <Legend
+                    formatter={(v) => ({ ca: 'CA', resultat: 'Resultat', budget_ca: 'Budget CA', budget_resultat: 'Budget Resultat' }[v] || v)}
+                  />
                   <Bar dataKey="ca" fill="#0d9488" radius={[4, 4, 0, 0]} name="ca" />
                   <Line type="monotone" dataKey="resultat" stroke="#f59e0b" strokeWidth={2} dot={false} name="resultat" />
+                  <Line type="monotone" dataKey="budget_ca" stroke="#3b82f6" strokeWidth={2} strokeDasharray="4 4" dot={false} name="budget_ca" />
+                  <Line type="monotone" dataKey="budget_resultat" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" dot={false} name="budget_resultat" />
                 </ComposedChart>
               </ResponsiveContainer>
             )}
