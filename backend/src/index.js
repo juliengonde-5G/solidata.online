@@ -312,9 +312,23 @@ io.on('connection', (socket) => {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  // Mise à jour statut CAV collecté
-  socket.on('cav-collected', (data) => {
-    io.to(`tour-${data.tourId}`).emit('cav-status-update', data);
+  // Mise à jour statut CAV collecté — enrichi avec les champs utiles à la
+  // supervision live (fill_level, incidents récents, horodatage serveur).
+  socket.on('cav-collected', async (data) => {
+    const payload = { ...data, broadcastedAt: new Date().toISOString() };
+    if (data?.tourId && data?.cavId) {
+      try {
+        const row = await pool.query(
+          `SELECT tc.status, tc.fill_level, tc.collected_at, tc.notes
+           FROM tour_cav tc WHERE tc.tour_id = $1 AND tc.cav_id = $2`,
+          [data.tourId, data.cavId]
+        );
+        if (row.rows.length > 0) Object.assign(payload, row.rows[0]);
+      } catch (err) {
+        logger.error('Enrichissement cav-collected échoué', { error: err.message });
+      }
+    }
+    io.to(`tour-${data.tourId}`).emit('cav-status-update', payload);
   });
 
   // Mise à jour statut tournée

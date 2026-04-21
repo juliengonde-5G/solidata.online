@@ -139,7 +139,9 @@ function App() {
             <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FillRateMap /></ProtectedRoute>} />
             <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Vehicles /></ProtectedRoute>} />
             <Route path="/vehicle-maintenance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VehicleMaintenance /></ProtectedRoute>} />
-            <Route path="/live-vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
+            <Route path="/collections-live" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
+            {/* Redirection rétro-compatible : ancienne URL /live-vehicles → /collections-live */}
+            <Route path="/live-vehicles" element={<Navigate to="/collections-live" replace />} />
 
             {/* Tri / Production */}
             <Route path="/production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Production /></ProtectedRoute>} />

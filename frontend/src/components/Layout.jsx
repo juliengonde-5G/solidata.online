@@ -57,7 +57,7 @@ const menuSections = [
       { path: '/collection-proposals', label: 'Propositions (IA)', icon: Sparkles, roles: ['ADMIN', 'MANAGER'] },
       { path: '/cav-map', label: 'Carte CAV', icon: Map, roles: ['ADMIN', 'MANAGER'] },
       { path: '/fill-rate', label: 'Remplissage CAV', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
-      { path: '/live-vehicles', label: 'Suivi GPS', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/collections-live', label: 'Suivi des collectes en cours', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },
       { path: '/admin-associations', label: 'Associations', icon: Handshake, roles: ['ADMIN', 'MANAGER'] },
     ],
   },

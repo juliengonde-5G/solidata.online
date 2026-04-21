@@ -26,6 +26,7 @@ const createExecutionRouter = require('./execution');
 const eventsRouter = require('./events');
 const eventsAutoRouter = require('./events-auto');
 const statsRouter = require('./stats');
+const liveSummaryRouter = require('./live-summary');
 
 // ── Endpoints publics (mobile sans auth) ──────────────────────────────
 
@@ -395,6 +396,9 @@ router.get('/:id/summary-public', async (req, res) => {
 
 // All routes below require authentication
 router.use(authenticate);
+
+// Mount live-summary route (supervision d'une tournée en cours)
+router.use('/', liveSummaryRouter);
 
 // Mount execution routes (needs upload for incidents)
 const executionRouter = createExecutionRouter(upload);
