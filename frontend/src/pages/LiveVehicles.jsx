@@ -291,6 +291,24 @@ export default function LiveVehicles() {
     return [49.4231, 1.0993];
   }, [livePosition, summary]);
 
+  // ⚠ Tous les hooks doivent être appelés de façon inconditionnelle
+  // avant les early returns pour respecter la règle des Hooks de React.
+  const allPoints = summary?.points || [];
+  const communes = useMemo(() => {
+    const set = new Set();
+    for (const p of allPoints) { if (p.commune) set.add(p.commune); }
+    return Array.from(set).sort();
+  }, [allPoints]);
+  const filteredPoints = useMemo(() => {
+    return allPoints.filter(p => {
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'incident' ? !p.has_incident : p.status !== statusFilter) return false;
+      }
+      if (communeFilter !== 'all' && p.commune !== communeFilter) return false;
+      return true;
+    });
+  }, [allPoints, statusFilter, communeFilter]);
+
   if (loading) {
     return <Layout><LoadingSpinner size="lg" message="Chargement des tournées en cours…" /></Layout>;
   }
@@ -314,29 +332,11 @@ export default function LiveVehicles() {
   }
 
   const kpis = summary?.kpis || {};
-  const allPoints = summary?.points || [];
   const alerts = summary?.alerts || [];
   const tour = summary?.tour;
   const pendingReopt = summary?.pending_reoptimization || null;
   const batches = summary?.batches || [];
-
-  // Communes uniques pour le filtre
-  const communes = useMemo(() => {
-    const set = new Set();
-    for (const p of allPoints) { if (p.commune) set.add(p.commune); }
-    return Array.from(set).sort();
-  }, [allPoints]);
-
-  // Application des filtres (carte + liste)
-  const points = useMemo(() => {
-    return allPoints.filter(p => {
-      if (statusFilter !== 'all') {
-        if (statusFilter === 'incident' ? !p.has_incident : p.status !== statusFilter) return false;
-      }
-      if (communeFilter !== 'all' && p.commune !== communeFilter) return false;
-      return true;
-    });
-  }, [allPoints, statusFilter, communeFilter]);
+  const points = filteredPoints;
   const filtersActive = statusFilter !== 'all' || communeFilter !== 'all';
 
   return (
