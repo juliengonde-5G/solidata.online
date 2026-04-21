@@ -2062,6 +2062,32 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_maint_alerts_vehicle ON vehicle_maintenance_alerts(vehicle_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_maint_alerts_resolved ON vehicle_maintenance_alerts(is_resolved);');
+
+    // Niveau 2.8 : contrats d'entretien véhicule (prestataire externe)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance_contracts (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        prestataire VARCHAR(150) NOT NULL,
+        type_contrat VARCHAR(20) NOT NULL DEFAULT 'partiel'
+          CHECK (type_contrat IN ('full', 'partiel')),
+        debut DATE NOT NULL,
+        fin DATE NOT NULL,
+        tarif_mensuel_eur DECIMAL(10,2),
+        operations_incluses TEXT[],
+        contact_nom VARCHAR(150),
+        contact_telephone VARCHAR(30),
+        contact_email VARCHAR(150),
+        document_path VARCHAR(500),
+        notes TEXT,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_maint_contracts_vehicle ON vehicle_maintenance_contracts(vehicle_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_maint_contracts_active ON vehicle_maintenance_contracts(active);');
+
     console.log('[INIT-DB] Module Maintenance Véhicules ✓');
 
     // ══════════════════════════════════════════

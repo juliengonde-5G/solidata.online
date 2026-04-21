@@ -255,6 +255,29 @@ router.get('/:id/live-summary', async (req, res) => {
       }
     } catch (_) { /* table absente — on ignore */ }
 
+    // Niveau 2.8 : alerte contrat d'entretien expirant ≤ 30 j
+    try {
+      const contractResult = await pool.query(`
+        SELECT prestataire, fin,
+               (fin - CURRENT_DATE)::int AS days_left
+        FROM vehicle_maintenance_contracts
+        WHERE vehicle_id = $1
+          AND active = true
+          AND fin <= CURRENT_DATE + INTERVAL '30 days'
+        ORDER BY fin ASC LIMIT 1
+      `, [tour.vehicle_id]);
+      for (const c of contractResult.rows) {
+        const days = c.days_left;
+        alerts.push({
+          level: days <= 7 ? 'error' : 'warn',
+          category: 'maintenance',
+          message: days < 0
+            ? `Contrat d'entretien ${c.prestataire} expiré depuis ${-days} j`
+            : `Contrat ${c.prestataire} expire dans ${days} j`,
+        });
+      }
+    } catch (_) { /* table absente — on ignore */ }
+
     res.json({
       tour: {
         id: tour.id,

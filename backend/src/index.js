@@ -77,7 +77,7 @@ app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { e
 // Créer dossiers uploads (évite 502 si multer ne peut pas créer)
 const fs = require('fs');
 const uploadsDir = path.join(__dirname, '..', 'uploads');
-['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents', 'vehicle-docs'].forEach((sub) => {
+['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents', 'vehicle-docs', 'vehicle-contracts'].forEach((sub) => {
   const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -161,6 +161,9 @@ app.use('/api/performance', require('./routes/performance'));
 
 // Niveau 2.2 : Web Push (abonnement + VAPID + test)
 app.use('/api/push', require('./routes/push'));
+
+// Niveau 2.8 : Contrats d'entretien véhicules
+app.use('/api/vehicle-contracts', require('./routes/vehicle-contracts'));
 
 // Module Boutiques : gestion de la performance des boutiques retail 2nde main
 app.use('/api/boutiques', require('./routes/boutiques'));
