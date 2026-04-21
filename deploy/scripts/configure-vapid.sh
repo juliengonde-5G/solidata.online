@@ -44,10 +44,15 @@ if command -v npx >/dev/null 2>&1; then
   OUT=$(npx --yes web-push generate-vapid-keys --json 2>/dev/null || true)
 fi
 
-# Tentative 2 : conteneur solidata-api (si npx local indisponible ou a échoué)
+# Tentative 2 : conteneur backend (si npx local indisponible ou a échoué)
+# Nom du service dans docker-compose.prod.yml : "backend" (container: solidata-api)
 if [ -z "$OUT" ] && command -v docker >/dev/null 2>&1 && [ -f "$COMPOSE_FILE" ]; then
-  log "Fallback : génération via le conteneur solidata-api..."
-  OUT=$(docker compose -f "$COMPOSE_FILE" exec -T solidata-api npx web-push generate-vapid-keys --json 2>/dev/null || true)
+  log "Fallback : génération via le conteneur backend..."
+  OUT=$(docker compose -f "$COMPOSE_FILE" exec -T backend npx web-push generate-vapid-keys --json 2>/dev/null || true)
+  # Fallback ultime : exec direct sur le container par son nom
+  if [ -z "$OUT" ]; then
+    OUT=$(docker exec -i solidata-api npx web-push generate-vapid-keys --json 2>/dev/null || true)
+  fi
 fi
 
 [ -n "$OUT" ] || err "Génération impossible. Déployer d'abord (bash deploy/scripts/deploy.sh update) puis relancer ce script."
@@ -97,4 +102,4 @@ log "  Public prefix : ${PUB:0:20}…"
 log "  Subject       : ${SUBJECT}"
 echo ""
 warn "Redémarrer le backend pour prendre en compte les nouvelles variables :"
-echo "    docker compose -f docker-compose.prod.yml restart solidata-api"
+echo "    docker compose -f docker-compose.prod.yml restart backend"
