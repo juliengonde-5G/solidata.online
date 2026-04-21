@@ -148,6 +148,7 @@ export default function LiveVehicles() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all'); // all | pending | collected | skipped | incident
   const [communeFilter, setCommuneFilter] = useState('all');
+  const [botInsights, setBotInsights] = useState([]);
   const socketRef = useRef(null);
 
   // Initialisation : liste des tournées actives + connexion socket
@@ -183,6 +184,10 @@ export default function LiveVehicles() {
     try {
       const res = await api.get(`/tours/${tourId}/live-summary`);
       setSummary(res.data);
+      // Observations SolidataBot (Niveau 3.4) — best-effort, non bloquant
+      api.get(`/chat/insights/tour/${tourId}`)
+        .then(r => setBotInsights(r.data?.insights || []))
+        .catch(() => setBotInsights([]));
       // Initialiser le trail avec la dernière position si dispo
       if (res.data.last_position) {
         setLivePosition({
@@ -424,8 +429,11 @@ export default function LiveVehicles() {
           </div>
         )}
 
-        {/* Bandeau alertes "Op Solidata" */}
-        <AlertBanner alerts={alerts} />
+        {/* Bandeau alertes "Op Solidata" (alertes live + insights SolidataBot) */}
+        <AlertBanner alerts={[
+          ...alerts,
+          ...botInsights.map(i => ({ level: i.level, category: i.category, message: `💡 ${i.message}` })),
+        ]} />
 
         {/* Filtres carte & liste (Niveau 2.5) */}
         <div className="flex flex-wrap items-center gap-2 text-xs">

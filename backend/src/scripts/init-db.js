@@ -1021,6 +1021,27 @@ async function initDatabase() {
       );
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);');
+
+    // Niveau 3.3 : clés API pour partenaires (Refashion, Métropole Rouen,
+    // associations, etc.). La clé elle-même n'est jamais stockée en clair :
+    // seul le hash SHA-256 l'est. Les scopes limitent les endpoints publics
+    // accessibles (ex: 'cav:read', 'stats:read').
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        key_prefix VARCHAR(12) NOT NULL UNIQUE,
+        key_hash VARCHAR(128) NOT NULL,
+        scopes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        active BOOLEAN DEFAULT true,
+        created_by INTEGER REFERENCES users(id),
+        last_used_at TIMESTAMP,
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(active);');
     // Ajouter les colonnes distance/durée/nb_cav à tours si manquantes
     await client.query(`
       DO $$ BEGIN

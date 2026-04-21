@@ -11,6 +11,8 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
+const { authorize } = require('../../middleware/auth');
+const { generateNextDayDispatchProposals } = require('../../services/dispatch-optimizer');
 
 router.get('/dashboard/summary', async (req, res) => {
   try {
@@ -165,5 +167,21 @@ router.get('/dashboard/summary', async (req, res) => {
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
+
+// POST /api/tours/dashboard/dispatch-next-day — Déclenche manuellement
+// le dispatch automatique J-1 (Niveau 3.1) — utile pour les tests ou
+// quand le scheduler n'est pas actif.
+router.post('/dashboard/dispatch-next-day',
+  authorize('ADMIN', 'MANAGER'),
+  async (req, res) => {
+    try {
+      const result = await generateNextDayDispatchProposals();
+      res.json(result);
+    } catch (err) {
+      console.error('[TOURS] Erreur dispatch manual :', err);
+      res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
+);
 
 module.exports = router;

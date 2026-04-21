@@ -165,6 +165,10 @@ app.use('/api/push', require('./routes/push'));
 // Niveau 2.8 : Contrats d'entretien véhicules
 app.use('/api/vehicle-contracts', require('./routes/vehicle-contracts'));
 
+// Niveau 3.3 : API publique partenaires (X-API-Key) + admin des clés
+app.use('/api/admin/api-keys', require('./routes/admin-api-keys'));
+app.use('/api/public', require('./routes/public-api'));
+
 // Module Boutiques : gestion de la performance des boutiques retail 2nde main
 app.use('/api/boutiques', require('./routes/boutiques'));
 app.use('/api/boutique-ventes', require('./routes/boutique-ventes'));

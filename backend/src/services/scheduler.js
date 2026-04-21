@@ -604,6 +604,15 @@ function startScheduler() {
       console.log('[SCHEDULER] Lancement sync Pennylane quotidienne...');
       await syncPennylaneDaily();
     }
+    // Niveau 3.1 — Dispatch auto J-1 chaque soir à 18h
+    if (now.getHours() === 18 && now.getMinutes() < 30) {
+      try {
+        const { generateNextDayDispatchProposals } = require('./dispatch-optimizer');
+        await generateNextDayDispatchProposals();
+      } catch (err) {
+        console.error('[SCHEDULER] Dispatch J-1 error :', err.message);
+      }
+    }
   }, 60 * 60 * 1000);
 }
 
