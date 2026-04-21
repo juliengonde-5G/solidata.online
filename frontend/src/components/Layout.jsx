@@ -53,6 +53,7 @@ const menuSections = [
     title: 'Collecte',
     hubPath: '/hub-collecte',
     items: [
+      { path: '/dashboard-collecte', label: 'Tableau de bord', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
       { path: '/tours', label: 'Tournées', icon: Truck, roles: ['ADMIN', 'MANAGER'] },
       { path: '/planning-tournees', label: 'Planning tournées', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
       { path: '/collection-proposals', label: 'Propositions (IA)', icon: Sparkles, roles: ['ADMIN', 'MANAGER'] },

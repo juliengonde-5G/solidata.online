@@ -8,7 +8,7 @@ import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
 import {
   MapPin, Truck, Gauge, Clock, Target, TrendingUp, AlertTriangle,
-  CheckCircle2, CircleDashed, XCircle, Wrench, Info, Shuffle,
+  CheckCircle2, CircleDashed, XCircle, Wrench, Info, Shuffle, Filter,
 } from 'lucide-react';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -146,6 +146,8 @@ export default function LiveVehicles() {
   const [trail, setTrail] = useState([]);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all'); // all | pending | collected | skipped | incident
+  const [communeFilter, setCommuneFilter] = useState('all');
   const socketRef = useRef(null);
 
   // Initialisation : liste des tournées actives + connexion socket
@@ -307,10 +309,30 @@ export default function LiveVehicles() {
   }
 
   const kpis = summary?.kpis || {};
-  const points = summary?.points || [];
+  const allPoints = summary?.points || [];
   const alerts = summary?.alerts || [];
   const tour = summary?.tour;
   const pendingReopt = summary?.pending_reoptimization || null;
+  const batches = summary?.batches || [];
+
+  // Communes uniques pour le filtre
+  const communes = useMemo(() => {
+    const set = new Set();
+    for (const p of allPoints) { if (p.commune) set.add(p.commune); }
+    return Array.from(set).sort();
+  }, [allPoints]);
+
+  // Application des filtres (carte + liste)
+  const points = useMemo(() => {
+    return allPoints.filter(p => {
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'incident' ? !p.has_incident : p.status !== statusFilter) return false;
+      }
+      if (communeFilter !== 'all' && p.commune !== communeFilter) return false;
+      return true;
+    });
+  }, [allPoints, statusFilter, communeFilter]);
+  const filtersActive = statusFilter !== 'all' || communeFilter !== 'all';
 
   return (
     <Layout>
@@ -404,6 +426,56 @@ export default function LiveVehicles() {
 
         {/* Bandeau alertes "Op Solidata" */}
         <AlertBanner alerts={alerts} />
+
+        {/* Filtres carte & liste (Niveau 2.5) */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex items-center gap-1.5 text-slate-500">
+            <Filter className="w-3.5 h-3.5" />
+            <span className="font-medium">Filtres</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {[
+              { key: 'all', label: 'Tous' },
+              { key: 'pending', label: 'À venir' },
+              { key: 'collected', label: 'Collectés' },
+              { key: 'skipped', label: 'Ignorés' },
+              { key: 'incident', label: 'Incidents' },
+            ].map(s => (
+              <button
+                key={s.key}
+                onClick={() => setStatusFilter(s.key)}
+                className={`px-2 py-1 rounded-md border transition ${
+                  statusFilter === s.key
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          {communes.length > 1 && (
+            <select
+              value={communeFilter}
+              onChange={(e) => setCommuneFilter(e.target.value)}
+              className="px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-700"
+            >
+              <option value="all">Toutes communes</option>
+              {communes.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+          {filtersActive && (
+            <button
+              onClick={() => { setStatusFilter('all'); setCommuneFilter('all'); }}
+              className="text-slate-400 hover:text-slate-600 underline"
+            >
+              Réinitialiser
+            </button>
+          )}
+          <span className="text-slate-400 ml-auto">
+            {points.length} / {allPoints.length} points
+          </span>
+        </div>
 
         {/* KPI row */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -578,16 +650,35 @@ export default function LiveVehicles() {
               ))}
             </div>
 
-            {/* Pied : pesée retour tri si présente */}
-            {summary?.weights?.length > 0 && (
-              <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 text-xs">
-                <span className="text-slate-500">Pesée retour : </span>
-                <span className="font-semibold text-slate-700">
-                  {Math.round((kpis.total_weight_kg || 0) * 10) / 10} kg
-                </span>
-                <span className="text-slate-400 ml-2">
-                  ({summary.weights.length} pesée{summary.weights.length > 1 ? 's' : ''})
-                </span>
+            {/* Pied : pesée retour tri + batches liés (Niveau 2.4) */}
+            {(summary?.weights?.length > 0 || batches.length > 0) && (
+              <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 text-xs space-y-1">
+                {summary?.weights?.length > 0 && (
+                  <div>
+                    <span className="text-slate-500">Pesée retour : </span>
+                    <span className="font-semibold text-slate-700">
+                      {Math.round((kpis.total_weight_kg || 0) * 10) / 10} kg
+                    </span>
+                    <span className="text-slate-400 ml-2">
+                      ({summary.weights.length} pesée{summary.weights.length > 1 ? 's' : ''})
+                    </span>
+                  </div>
+                )}
+                {batches.length > 0 && batches.map(b => (
+                  <div key={b.id} className="flex items-center justify-between">
+                    <span className="text-slate-500">
+                      Batch tri : <span className="font-mono font-semibold text-slate-700">{b.code}</span>
+                      {b.chaine_nom ? <span className="text-slate-400 ml-1">· {b.chaine_nom}</span> : null}
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      b.status === 'termine' ? 'bg-emerald-100 text-emerald-700'
+                      : b.status === 'en_cours' ? 'bg-amber-100 text-amber-700'
+                      : b.status === 'annule' ? 'bg-red-100 text-red-700'
+                      : 'bg-slate-200 text-slate-600'}`}>
+                      {b.status}
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>

@@ -224,6 +224,22 @@ router.get('/:id/live-summary', async (req, res) => {
       });
     }
 
+    // Niveau 2.4 — batches de tri générés à partir de cette tournée
+    // (chemin : stock_movements.tour_id → batch_tracking.stock_movement_id)
+    let batches = [];
+    try {
+      const batchRes = await pool.query(`
+        SELECT bt.id, bt.code, bt.status, bt.poids_initial_kg, bt.poids_restant_kg,
+               bt.date_debut, bt.date_fin, c.nom AS chaine_nom
+          FROM batch_tracking bt
+          JOIN stock_movements sm ON sm.id = bt.stock_movement_id
+          LEFT JOIN chaines_tri c ON c.id = bt.chaine_id
+         WHERE sm.tour_id = $1
+         ORDER BY bt.created_at DESC
+      `, [tourId]);
+      batches = batchRes.rows;
+    } catch (_) { /* tables absentes — ignore */ }
+
     // Proposition de ré-optimisation pendante (Niveau 2.6)
     let pendingReopt = null;
     try {
@@ -323,6 +339,7 @@ router.get('/:id/live-summary', async (req, res) => {
       alerts,
       planned_source: plannedSource,
       pending_reoptimization: pendingReopt,
+      batches,
     });
   } catch (err) {
     console.error('[TOURS] Erreur live-summary :', err);

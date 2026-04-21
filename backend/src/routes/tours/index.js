@@ -29,6 +29,7 @@ const statsRouter = require('./stats');
 const liveSummaryRouter = require('./live-summary');
 const reoptimizeRouter = require('./reoptimize');
 const planningRouter = require('./planning');
+const dashboardRouter = require('./dashboard');
 const { ensurePlannedPassages } = require('./planned-passage');
 const {
   proposeReoptimization,
@@ -575,6 +576,9 @@ router.use('/', reoptimizeRouter);
 
 // Mount planning routes (Niveau 2.7 — drag-drop affectation)
 router.use('/', planningRouter);
+
+// Mount dashboard collecte (Niveau 2.1 — supervision consolidée)
+router.use('/', dashboardRouter);
 
 // Mount execution routes (needs upload for incidents)
 const executionRouter = createExecutionRouter(upload);
