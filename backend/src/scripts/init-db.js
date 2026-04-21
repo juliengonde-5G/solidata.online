@@ -972,6 +972,37 @@ async function initDatabase() {
     await client.query(`
       ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS planned_passage_time TIMESTAMP;
     `);
+
+    // Historique des ré-optimisations d'une tournée en cours (Niveau 2.6).
+    // Chaque proposition enregistre : motif, ordre avant / après (positions
+    // des CAV restants), état d'acceptation par le chauffeur. Expose
+    // also la trace des propositions auto (incident, retard, plein).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tour_reoptimizations (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+        trigger_reason VARCHAR(40) NOT NULL
+          CHECK (trigger_reason IN ('manual', 'incident', 'skipped', 'full', 'delay', 'inaccessible')),
+        triggered_by VARCHAR(10) NOT NULL DEFAULT 'auto'
+          CHECK (triggered_by IN ('auto', 'manager', 'driver')),
+        current_lat DOUBLE PRECISION,
+        current_lng DOUBLE PRECISION,
+        old_sequence JSONB NOT NULL,
+        new_sequence JSONB NOT NULL,
+        old_distance_km DOUBLE PRECISION,
+        new_distance_km DOUBLE PRECISION,
+        old_duration_min DOUBLE PRECISION,
+        new_duration_min DOUBLE PRECISION,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
+        decided_at TIMESTAMP,
+        decided_by_user_id INTEGER REFERENCES users(id),
+        notes TEXT,
+        triggered_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_tour ON tour_reoptimizations(tour_id);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_status ON tour_reoptimizations(status);`);
     // Ajouter les colonnes distance/durée/nb_cav à tours si manquantes
     await client.query(`
       DO $$ BEGIN

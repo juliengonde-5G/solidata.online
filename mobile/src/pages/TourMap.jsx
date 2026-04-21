@@ -52,9 +52,12 @@ export default function TourMap() {
   const [cavs, setCavs] = useState([]);
   const [currentCavIndex, setCurrentCavIndex] = useState(0);
   const [myPosition, setMyPosition] = useState(null);
+  const [reoptProposal, setReoptProposal] = useState(null);
+  const [reoptProcessing, setReoptProcessing] = useState(false);
   const socketRef = useRef(null);
   const watchRef = useRef(null);
   const intervalRef = useRef(null);
+  const reoptPollRef = useRef(null);
   const positionRef = useRef(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
@@ -64,8 +67,24 @@ export default function TourMap() {
     loadTour();
     startGPS();
     connectSocket();
+    // Polling filet (15s) pour détecter les propositions de ré-optimisation
+    // même quand le socket n'est pas connecté (mobile sans token).
+    const pollReopt = async () => {
+      if (!tourId) return;
+      try {
+        const res = await fetch(`/api/tours/${tourId}/reoptimize/pending-public`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.id) setReoptProposal(data);
+          else setReoptProposal(null);
+        }
+      } catch (_) { /* offline ok */ }
+    };
+    pollReopt();
+    reoptPollRef.current = setInterval(pollReopt, 15000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      if (reoptPollRef.current) clearInterval(reoptPollRef.current);
       if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current);
       if (socketRef.current) socketRef.current.disconnect();
     };
@@ -117,6 +136,14 @@ export default function TourMap() {
       console.warn('[TourMap] Socket.IO connect_error:', err.message);
     });
 
+    // Proposition de ré-optimisation (Niveau 2.6)
+    socket.on('reoptimization-proposal', (data) => {
+      if (!data) return;
+      if (parseInt(data.tour_id) === parseInt(tourId)) setReoptProposal(data);
+    });
+    socket.on('reoptimization-accepted', () => setReoptProposal(null));
+    socket.on('reoptimization-rejected', () => setReoptProposal(null));
+
     // Envoi de la position GPS toutes les 10 secondes
     // Event name aligné sur backend/src/index.js (gps-update)
     intervalRef.current = setInterval(() => {
@@ -160,6 +187,24 @@ export default function TourMap() {
     }
   };
 
+  const decideReopt = async (action) => {
+    if (!reoptProposal || reoptProcessing) return;
+    setReoptProcessing(true);
+    try {
+      await fetch(`/api/tours/${tourId}/reoptimize/${reoptProposal.id}/${action}-public`, {
+        method: 'POST',
+      });
+      setReoptProposal(null);
+      if (action === 'accept') {
+        // Reload la tournée pour prendre le nouvel ordre en compte
+        await loadTour();
+      }
+    } catch (err) {
+      console.error('[TourMap] reopt decision', err);
+    }
+    setReoptProcessing(false);
+  };
+
   const currentCAV = cavs[currentCavIndex];
   const center = myPosition || (currentCAV ? [currentCAV.latitude, currentCAV.longitude] : [49.4231, 1.0993]);
   const hasCoords = currentCAV?.latitude && currentCAV?.longitude;
@@ -200,6 +245,72 @@ export default function TourMap() {
 
   return (
     <div className="h-screen flex flex-col bg-[var(--color-surface-2)]">
+      {/* Modal plein écran : proposition de ré-optimisation (Niveau 2.6) */}
+      {reoptProposal && (
+        <div
+          className="fixed inset-0 z-[1000] bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reopt-title"
+        >
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl overflow-hidden">
+            <div className="bg-amber-500 text-white px-5 py-4">
+              <p className="text-[11px] uppercase tracking-wider opacity-90">Suggestion tournée</p>
+              <h2 id="reopt-title" className="font-bold text-xl mt-0.5">
+                Nouvel ordre proposé
+              </h2>
+              <p className="text-white/90 text-sm mt-1">
+                Déclencheur : {reoptProposal.trigger_reason || '—'}
+              </p>
+            </div>
+
+            <div className="p-5 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className="text-[11px] text-gray-500 uppercase">Distance</p>
+                  <p className="text-base font-bold text-gray-900 mt-0.5">
+                    {(reoptProposal.old_distance_km ?? 0).toFixed(1)} →{' '}
+                    <span className="text-emerald-700">{(reoptProposal.new_distance_km ?? 0).toFixed(1)} km</span>
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className="text-[11px] text-gray-500 uppercase">Durée</p>
+                  <p className="text-base font-bold text-gray-900 mt-0.5">
+                    {Math.round(reoptProposal.old_duration_min ?? 0)} →{' '}
+                    <span className="text-emerald-700">{Math.round(reoptProposal.new_duration_min ?? 0)} min</span>
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500 text-center">
+                {reoptProposal.points?.length
+                  ? `${reoptProposal.points.length} points à réordonner parmi ceux restants`
+                  : `${(reoptProposal.new_sequence || []).length} points à réordonner`}
+              </p>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => decideReopt('reject')}
+                  disabled={reoptProcessing}
+                  className="flex-1 py-3 rounded-xl border border-gray-300 text-gray-700 font-semibold disabled:opacity-50"
+                >
+                  Garder l'ordre actuel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => decideReopt('accept')}
+                  disabled={reoptProcessing}
+                  className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-semibold disabled:opacity-50"
+                >
+                  {reoptProcessing ? '…' : 'Accepter'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="screen-header flex-shrink-0 flex flex-row items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="font-bold text-lg">Tournée #{tourId}</h1>

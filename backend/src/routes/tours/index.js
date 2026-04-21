@@ -27,7 +27,13 @@ const eventsRouter = require('./events');
 const eventsAutoRouter = require('./events-auto');
 const statsRouter = require('./stats');
 const liveSummaryRouter = require('./live-summary');
+const reoptimizeRouter = require('./reoptimize');
 const { ensurePlannedPassages } = require('./planned-passage');
+const {
+  proposeReoptimization,
+  applyReoptimization,
+  rejectReoptimization,
+} = require('./reoptimize-service');
 
 // ── Endpoints publics (mobile sans auth) ──────────────────────────────
 
@@ -264,7 +270,7 @@ router.post('/:id/weigh-public', async (req, res) => {
 // POST /api/tours/:id/incident-public — Signaler un incident (mobile sans auth, sans photo)
 router.post('/:id/incident-public', async (req, res) => {
   try {
-    const { type, description, cav_id, vehicle_id } = req.body;
+    const { type, description, cav_id, vehicle_id, current_lat, current_lng } = req.body;
     if (!type) {
       return res.status(400).json({ error: 'Type d\'incident requis' });
     }
@@ -273,9 +279,92 @@ router.post('/:id/incident-public', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
       [req.params.id, type, description, cav_id || null, vehicle_id || null]
     );
+
+    // Si l'incident bloque un CAV, déclenche une proposition de ré-optim
+    // en arrière-plan (non bloquant) — ordonne les CAV restants depuis la
+    // position GPS actuelle si fournie.
+    if (type === 'cav_problem' || type === 'environment') {
+      const io = req.app.get('io');
+      proposeReoptimization({
+        tourId: parseInt(req.params.id, 10),
+        triggerReason: 'incident',
+        triggeredBy: 'auto',
+        currentLat: typeof current_lat === 'number' ? current_lat : parseFloat(current_lat) || null,
+        currentLng: typeof current_lng === 'number' ? current_lng : parseFloat(current_lng) || null,
+        io,
+      }).catch(err => console.warn('[TOURS] auto-reoptim (incident) échec :', err.message));
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[TOURS] Erreur incident-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/:id/reoptimize-public — Proposer une ré-optim (mobile sans auth)
+router.post('/:id/reoptimize-public', async (req, res) => {
+  try {
+    const io = req.app.get('io');
+    const result = await proposeReoptimization({
+      tourId: parseInt(req.params.id, 10),
+      triggerReason: req.body?.reason || 'manual',
+      triggeredBy: 'driver',
+      currentLat: req.body?.current_lat != null ? parseFloat(req.body.current_lat) : null,
+      currentLng: req.body?.current_lng != null ? parseFloat(req.body.current_lng) : null,
+      io,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur reoptimize-public :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/:id/reoptimize/:reoptId/accept-public — Chauffeur accepte
+router.post('/:id/reoptimize/:reoptId/accept-public', async (req, res) => {
+  try {
+    const result = await applyReoptimization(parseInt(req.params.reoptId, 10), null);
+    if (result.error) return res.status(400).json(result);
+    const io = req.app.get('io');
+    if (io) io.to(`tour-${result.tour_id}`).emit('reoptimization-accepted', {
+      reoptId: parseInt(req.params.reoptId, 10), tour_id: result.tour_id,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur accept-public :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/:id/reoptimize/:reoptId/reject-public — Chauffeur refuse
+router.post('/:id/reoptimize/:reoptId/reject-public', async (req, res) => {
+  try {
+    const result = await rejectReoptimization(parseInt(req.params.reoptId, 10), null);
+    if (result.error) return res.status(400).json(result);
+    const io = req.app.get('io');
+    if (io) io.to(`tour-${result.tour_id}`).emit('reoptimization-rejected', {
+      reoptId: parseInt(req.params.reoptId, 10), tour_id: result.tour_id,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[TOURS] Erreur reject-public :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/:id/reoptimize/pending-public — Proposition en attente (mobile)
+router.get('/:id/reoptimize/pending-public', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT * FROM tour_reoptimizations
+         WHERE tour_id = $1 AND status = 'pending'
+         ORDER BY triggered_at DESC LIMIT 1`,
+      [req.params.id]
+    );
+    res.json(r.rows[0] || null);
+  } catch (err) {
+    console.error('[TOURS] Erreur pending-public :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -455,6 +544,9 @@ router.use(authenticate);
 
 // Mount live-summary route (supervision d'une tournée en cours)
 router.use('/', liveSummaryRouter);
+
+// Mount reoptimize routes (manager trigger / accept / reject)
+router.use('/', reoptimizeRouter);
 
 // Mount execution routes (needs upload for incidents)
 const executionRouter = createExecutionRouter(upload);

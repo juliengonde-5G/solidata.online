@@ -224,6 +224,18 @@ router.get('/:id/live-summary', async (req, res) => {
       });
     }
 
+    // Proposition de ré-optimisation pendante (Niveau 2.6)
+    let pendingReopt = null;
+    try {
+      const reoptRes = await pool.query(
+        `SELECT * FROM tour_reoptimizations
+           WHERE tour_id = $1 AND status = 'pending'
+           ORDER BY triggered_at DESC LIMIT 1`,
+        [tourId]
+      );
+      pendingReopt = reoptRes.rows[0] || null;
+    } catch (_) { /* table absente — on ignore */ }
+
     // Alerte maintenance véhicule proche (si table présente)
     try {
       const maintResult = await pool.query(`
@@ -287,6 +299,7 @@ router.get('/:id/live-summary', async (req, res) => {
       weights: weightsResult.rows,
       alerts,
       planned_source: plannedSource,
+      pending_reoptimization: pendingReopt,
     });
   } catch (err) {
     console.error('[TOURS] Erreur live-summary :', err);

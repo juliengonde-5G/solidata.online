@@ -8,7 +8,7 @@ import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
 import {
   MapPin, Truck, Gauge, Clock, Target, TrendingUp, AlertTriangle,
-  CheckCircle2, CircleDashed, XCircle, Wrench, Info,
+  CheckCircle2, CircleDashed, XCircle, Wrench, Info, Shuffle,
 } from 'lucide-react';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -225,16 +225,47 @@ export default function LiveVehicles() {
       loadSummary(selectedTourId);
     };
     const onTourUpdate = () => loadSummary(selectedTourId);
+    const onReoptUpdate = () => loadSummary(selectedTourId);
 
     socket.on('vehicle-position', onPosition);
     socket.on('cav-status-update', onCavUpdate);
     socket.on('tour-status-update', onTourUpdate);
+    socket.on('reoptimization-proposal', onReoptUpdate);
+    socket.on('reoptimization-accepted', onReoptUpdate);
+    socket.on('reoptimization-rejected', onReoptUpdate);
 
     return () => {
       socket.off('vehicle-position', onPosition);
       socket.off('cav-status-update', onCavUpdate);
       socket.off('tour-status-update', onTourUpdate);
+      socket.off('reoptimization-proposal', onReoptUpdate);
+      socket.off('reoptimization-accepted', onReoptUpdate);
+      socket.off('reoptimization-rejected', onReoptUpdate);
     };
+  }, [selectedTourId, loadSummary]);
+
+  const requestReoptimization = useCallback(async () => {
+    if (!selectedTourId) return;
+    try {
+      await api.post(`/tours/${selectedTourId}/reoptimize`, {
+        current_lat: livePosition?.lat ?? null,
+        current_lng: livePosition?.lng ?? null,
+        reason: 'manual',
+      });
+      loadSummary(selectedTourId);
+    } catch (err) {
+      console.error('[CollectionsLive] reoptimize :', err);
+    }
+  }, [selectedTourId, livePosition, loadSummary]);
+
+  const decideReoptimization = useCallback(async (reoptId, action) => {
+    if (!selectedTourId || !reoptId) return;
+    try {
+      await api.post(`/tours/${selectedTourId}/reoptimize/${reoptId}/${action}`);
+      loadSummary(selectedTourId);
+    } catch (err) {
+      console.error('[CollectionsLive] reopt decision :', err);
+    }
   }, [selectedTourId, loadSummary]);
 
   // Polling filet de sécurité (20 s) pour remonter incidents/pesées si socket muet
@@ -279,6 +310,7 @@ export default function LiveVehicles() {
   const points = summary?.points || [];
   const alerts = summary?.alerts || [];
   const tour = summary?.tour;
+  const pendingReopt = summary?.pending_reoptimization || null;
 
   return (
     <Layout>
@@ -300,6 +332,16 @@ export default function LiveVehicles() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={requestReoptimization}
+              disabled={!!pendingReopt}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={pendingReopt ? 'Une proposition est déjà en attente' : 'Proposer une ré-optimisation'}
+            >
+              <Shuffle className="w-4 h-4" />
+              Ré-optimiser
+            </button>
             <label className="text-xs font-medium text-slate-500">Tournée</label>
             <select
               value={selectedTourId || ''}
@@ -314,6 +356,51 @@ export default function LiveVehicles() {
             </select>
           </div>
         </div>
+
+        {/* Proposition de ré-optimisation en attente */}
+        {pendingReopt && (
+          <div className="card-modern border-2 border-amber-300 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-amber-100 flex-shrink-0">
+                <Shuffle className="w-5 h-5 text-amber-700" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-900">
+                  Proposition de ré-optimisation de l'ordre des CAV
+                </p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Déclencheur : <strong>{pendingReopt.trigger_reason}</strong>
+                  {' · '}Source : {pendingReopt.triggered_by}
+                  {' · '}Gain estimé :{' '}
+                  <strong>
+                    −{Math.round(((pendingReopt.old_distance_km - pendingReopt.new_distance_km) / Math.max(0.1, pendingReopt.old_distance_km)) * 100)}%
+                    {' '}
+                    ({(pendingReopt.old_distance_km ?? 0).toFixed(1)} km → {(pendingReopt.new_distance_km ?? 0).toFixed(1)} km)
+                  </strong>
+                </p>
+                <p className="text-[11px] text-amber-700 mt-0.5">
+                  Durée : {Math.round(pendingReopt.old_duration_min ?? 0)} min → {Math.round(pendingReopt.new_duration_min ?? 0)} min
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => decideReoptimization(pendingReopt.id, 'reject')}
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Refuser
+                </button>
+                <button
+                  type="button"
+                  onClick={() => decideReoptimization(pendingReopt.id, 'accept')}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
+                >
+                  Accepter
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Bandeau alertes "Op Solidata" */}
         <AlertBanner alerts={alerts} />
