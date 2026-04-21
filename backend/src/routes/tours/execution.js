@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../../config/database');
 const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
+const { ensurePlannedPassages } = require('./planned-passage');
 
 // Upload is passed from index.js via router factory
 module.exports = function createExecutionRouter(upload) {
@@ -107,11 +108,14 @@ module.exports = function createExecutionRouter(upload) {
 
       // Creer une tournee a la volee
       const result = await pool.query(
-        `INSERT INTO tours (vehicle_id, driver_employee_id, date, status, created_at, updated_at)
-         VALUES ($1, $2, CURRENT_DATE, 'in_progress', NOW(), NOW())
+        `INSERT INTO tours (vehicle_id, driver_employee_id, date, status, started_at, created_at, updated_at)
+         VALUES ($1, $2, CURRENT_DATE, 'in_progress', NOW(), NOW(), NOW())
          RETURNING *`,
         [vehicle_id, employeeId]
       );
+
+      // Best-effort : calcul OSRM si la tournée est ensuite alimentée avec des CAV
+      ensurePlannedPassages(result.rows[0].id).catch(() => {});
 
       res.json(result.rows[0]);
     } catch (err) {
@@ -144,6 +148,10 @@ module.exports = function createExecutionRouter(upload) {
       if (result.rows.length === 0) {
         return res.status(409).json({ error: 'Ce véhicule a déjà été pris par un autre chauffeur' });
       }
+
+      // Best-effort : calcul des horaires prévisionnels dès le claim (tournée passe in_progress)
+      ensurePlannedPassages(req.params.id).catch(err =>
+        console.warn('[TOURS] planned-passage (claim) échec :', err.message));
 
       res.json(result.rows[0]);
     } catch (err) {
@@ -235,6 +243,9 @@ module.exports = function createExecutionRouter(upload) {
       } else if (status === 'in_progress') {
         const tour = result.rows[0];
         await pool.query("UPDATE vehicles SET status = 'in_use' WHERE id = $1", [tour.vehicle_id]);
+        // Calcul OSRM des horaires prévisionnels (non bloquant, best-effort)
+        ensurePlannedPassages(req.params.id).catch(err =>
+          console.warn('[TOURS] planned-passage (status) échec :', err.message));
       }
 
       // Émettre l'événement Socket.io

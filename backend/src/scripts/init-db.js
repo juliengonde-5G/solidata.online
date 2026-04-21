@@ -966,6 +966,12 @@ async function initDatabase() {
         ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION;
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
+    // Horaire prévisionnel de passage au CAV, calculé au démarrage de la
+    // tournée (OSRM). Sert à comparer prévu/réalisé et à calculer le
+    // décalage par point.
+    await client.query(`
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS planned_passage_time TIMESTAMP;
+    `);
     // Ajouter les colonnes distance/durée/nb_cav à tours si manquantes
     await client.query(`
       DO $$ BEGIN
@@ -2509,6 +2515,9 @@ async function initDatabase() {
       );
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_tour_assoc_tour ON tour_association_point(tour_id);');
+    await client.query(`
+      ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS planned_passage_time TIMESTAMP;
+    `);
 
     // Route standard association (jonction route ↔ points association)
     await client.query(`

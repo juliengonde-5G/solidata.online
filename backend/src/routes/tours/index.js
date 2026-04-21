@@ -27,6 +27,7 @@ const eventsRouter = require('./events');
 const eventsAutoRouter = require('./events-auto');
 const statsRouter = require('./stats');
 const liveSummaryRouter = require('./live-summary');
+const { ensurePlannedPassages } = require('./planned-passage');
 
 // ── Endpoints publics (mobile sans auth) ──────────────────────────────
 
@@ -56,7 +57,7 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
     if (tour.collection_type === 'association') {
       const assoResult = await pool.query(
         `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
-                tap.fill_level, tap.collected_at, tap.notes,
+                tap.fill_level, tap.collected_at, tap.planned_passage_time, tap.notes,
                 ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
                 ap.contact_phone, NULL as nb_containers, NULL as qr_code_data
          FROM tour_association_point tap
@@ -101,7 +102,7 @@ router.get('/:id/public', async (req, res) => {
       // Charger les points association
       const assoResult = await pool.query(
         `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
-                tap.fill_level, tap.collected_at, tap.notes,
+                tap.fill_level, tap.collected_at, tap.planned_passage_time, tap.notes,
                 ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
                 ap.contact_phone, NULL as nb_containers, NULL as qr_code_data
          FROM tour_association_point tap
@@ -157,6 +158,9 @@ router.put('/:id/start-public', async (req, res) => {
       const existing = await pool.query('SELECT id, status FROM tours WHERE id = $1', [req.params.id]);
       return res.json(existing.rows[0] || { error: 'Tournée non trouvée' });
     }
+    // Calculer les horaires prévisionnels en tâche de fond (non bloquant)
+    ensurePlannedPassages(req.params.id).catch(err =>
+      console.warn('[TOURS] planned-passage (start-public) échec :', err.message));
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[TOURS] Erreur start-public:', err);
@@ -306,6 +310,12 @@ router.put('/:id/status-public', async (req, res) => {
     const params = [status];
     if (status === 'in_progress') updates.push('started_at = NOW()');
     if (status === 'completed') updates.push('completed_at = NOW()');
+    // Déclenche le calcul OSRM des horaires prévisionnels une fois la
+    // tournée passée en in_progress (non bloquant).
+    if (status === 'in_progress') {
+      ensurePlannedPassages(req.params.id).catch(err =>
+        console.warn('[TOURS] planned-passage (status-public) échec :', err.message));
+    }
     if (km_start !== undefined && km_start !== null && km_start !== '') {
       params.push(parseInt(km_start, 10));
       updates.push(`km_start = $${params.length}`);
@@ -377,8 +387,54 @@ router.get('/:id/summary-public', async (req, res) => {
       duration_minutes = Math.round((new Date() - new Date(tour.started_at)) / 60000);
     }
 
+    // Liste détaillée des points pour que l'écran récap mobile puisse
+    // afficher la comparaison prévu / réalisé (badges décalage).
+    let cavs = [];
+    if (tour.collection_type === 'association') {
+      const r = await pool.query(
+        `SELECT tap.id, tap.association_point_id AS cav_id, tap.position, tap.status,
+                tap.fill_level, tap.collected_at, tap.planned_passage_time, tap.notes,
+                ap.name AS cav_name, ap.ville AS commune
+           FROM tour_association_point tap
+           JOIN association_points ap ON ap.id = tap.association_point_id
+          WHERE tap.tour_id = $1 ORDER BY tap.position`,
+        [req.params.id]
+      );
+      cavs = r.rows;
+    } else {
+      const r = await pool.query(
+        `SELECT tc.id, tc.cav_id, tc.position, tc.status, tc.fill_level,
+                tc.collected_at, tc.planned_passage_time, tc.notes,
+                c.name AS cav_name, c.commune
+           FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id
+          WHERE tc.tour_id = $1 ORDER BY tc.position`,
+        [req.params.id]
+      );
+      cavs = r.rows;
+    }
+    const enrichedCavs = cavs.map(c => {
+      let delay_minutes = null;
+      if (c.collected_at && c.planned_passage_time) {
+        delay_minutes = Math.round((new Date(c.collected_at) - new Date(c.planned_passage_time)) / 60000);
+      }
+      return { ...c, delay_minutes };
+    });
+
+    const incidentsRows = await pool.query(
+      `SELECT id, type, description, created_at FROM incidents WHERE tour_id = $1 ORDER BY created_at`,
+      [req.params.id]
+    );
+
+    const checklistRes = await pool.query(
+      `SELECT * FROM vehicle_checklists WHERE tour_id = $1 LIMIT 1`,
+      [req.params.id]
+    );
+
     res.json({
       tour,
+      cavs: enrichedCavs,
+      incidents: incidentsRows.rows,
+      checklist: checklistRes.rows[0] || null,
       stats: {
         cavs_collected: stats.cavs_collected,
         cavs_total: stats.cavs_total,

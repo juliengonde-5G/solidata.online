@@ -49,12 +49,15 @@ router.get('/:id/live-summary', async (req, res) => {
     }
     const tour = tourResult.rows[0];
 
-    // Points (CAV ou points association selon type)
+    // Points (CAV ou points association selon type). On récupère
+    // planned_passage_time si la colonne a été peuplée au démarrage de la
+    // tournée (OSRM), sinon on tombera sur une estimation linéaire en aval.
     let points = [];
     if (tour.collection_type === 'association') {
       const r = await pool.query(`
         SELECT tap.id, tap.tour_id, tap.association_point_id AS cav_id,
-               tap.position, tap.status, tap.fill_level, tap.collected_at, tap.notes,
+               tap.position, tap.status, tap.fill_level, tap.collected_at,
+               tap.notes, tap.planned_passage_time,
                ap.name AS cav_name, ap.address, ap.ville AS commune,
                ap.latitude, ap.longitude, NULL::int AS nb_containers
         FROM tour_association_point tap
@@ -131,10 +134,15 @@ router.get('/:id/live-summary', async (req, res) => {
       elapsedMin = Math.round((endRef - new Date(tour.started_at)) / 60000);
     }
 
-    // Construire la liste points enrichie
+    // Construire la liste points enrichie. On privilégie le
+    // planned_passage_time stocké en BDD (calcul OSRM au démarrage de la
+    // tournée) ; sinon on retombe sur l'estimation linéaire naïve.
     const nbPoints = points.length;
+    const plannedSource = points.some(p => p.planned_passage_time) ? 'osrm' : 'estimate';
     const enrichedPoints = points.map((p) => {
-      const planned = plannedPassageAt(tour.started_at, tour.estimated_duration_min, p.position, nbPoints);
+      const planned = p.planned_passage_time
+        ? new Date(p.planned_passage_time).toISOString()
+        : plannedPassageAt(tour.started_at, tour.estimated_duration_min, p.position, nbPoints);
       let delayMinutes = null;
       if (planned && p.collected_at) {
         delayMinutes = Math.round((new Date(p.collected_at) - new Date(planned)) / 60000);
@@ -278,6 +286,7 @@ router.get('/:id/live-summary', async (req, res) => {
       incidents,
       weights: weightsResult.rows,
       alerts,
+      planned_source: plannedSource,
     });
   } catch (err) {
     console.error('[TOURS] Erreur live-summary :', err);
