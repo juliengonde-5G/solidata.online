@@ -360,3 +360,182 @@ même pattern :
   agrégés (ex : HubCollecte).
 
 ---
+
+## 8. Patterns UX
+
+### 8.1 États de page
+
+| État | Composant | Règle |
+|------|-----------|-------|
+| **Chargement** initial | `<LoadingSpinner size="lg" message="…" />` encapsulé dans `<Layout>` | Affiché seulement au 1er chargement, pas à chaque refresh polling |
+| **Chargement partiel** (refresh arrière-plan) | `<LoadingSpinner size="sm" />` inline dans l'en-tête de carte | Ne bloque pas l'UI |
+| **Erreur réseau** | Toast rouge + bouton "Réessayer" | Pas de page blanche ; afficher les dernières données connues |
+| **Données vides** | `<EmptyState icon title description action />` | Toujours un CTA si une action est possible (créer, importer) |
+| **Accès refusé** | Redirection `<Navigate to="/" />` via `ProtectedRoute` | Pas de 403 visuel, l'utilisateur ne voit pas la section |
+| **Offline (mobile)** | `<SyncStatusBanner />` en haut + actions différées via `sync.js` | Jamais de perte de donnée silencieuse |
+
+### 8.2 Feedback utilisateur
+
+- **Action réussie** : `<Toast level="success" message />` (ToastProvider
+  obligatoire dans l'arbre, déjà branché via `App.jsx`).
+- **Action destructive** : `<ConfirmDialog />` avec bouton `btn-danger`. Le
+  libellé répète le nom de l'élément ("Supprimer le contrat Norauto ?").
+- **Auto-save** : indicateur discret "Enregistré il y a N s" sous le champ.
+- **Action asynchrone longue** : `<LoadingOverlay />` pendant la requête,
+  pas juste disable du bouton.
+
+### 8.3 Alertes & bandeaux
+
+| Niveau | Classe fond / bordure | Texte | Icône lucide |
+|--------|----------------------|-------|-------------|
+| `info` | `bg-blue-50 border-blue-100` | `text-blue-800` | `Info` |
+| `warn` | `bg-amber-50 border-amber-100` | `text-amber-800` | `AlertTriangle` ou `Clock` |
+| `error` | `bg-red-50 border-red-100` | `text-red-800` | `AlertTriangle` |
+| `success` | `bg-emerald-50 border-emerald-100` | `text-emerald-800` | `CheckCircle2` |
+
+Structure : `px-4 py-2 rounded-lg border` + icône `w-4 h-4` à gauche + texte
+`text-sm`. Référence : `AlertBanner` dans `LiveVehicles.jsx`.
+
+### 8.4 Tableaux
+
+- En-tête : `text-left text-xs text-slate-500 uppercase bg-slate-50`.
+- Ligne : `border-t border-slate-100 hover:bg-slate-50`.
+- Padding cellule : `px-3 py-2.5` ou `px-4 py-3` selon densité.
+- Colonnes numériques : `text-right tabular-nums`.
+- Actions de ligne : `<Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" />` sans libellé, avec `title` pour l'a11y.
+- État vide : `<tr><td colSpan={N} className="px-4 py-8 text-center text-slate-400 text-sm">Aucune entrée</td></tr>`.
+
+### 8.5 Filtres
+
+- Barre de filtres compacte en haut de la carte/tableau : icône `Filter` +
+  boutons radio style pastille + sélecteurs.
+- Bouton **Réinitialiser** visible dès qu'un filtre est actif.
+- Toujours un compteur à droite : "X / Y résultats".
+- Pattern de référence : `CollectionsLive.jsx` (filtres statut + commune).
+
+### 8.6 Dates et nombres
+
+- **Dates affichées** : `toLocaleDateString('fr-FR', { weekday, day, month })`
+  pour les dates longues. Format court : `DD/MM/YYYY`.
+- **Heures** : `toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })`.
+- **Poids** : entier + " kg" (`Math.round(weight)`), jamais de décimale au
+  delà de 0.1.
+- **Euros** : `toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })`.
+- **Pourcentages** : entier + " %" (espace insécable ` %` si possible).
+- Devant un "—" pour une valeur absente, jamais "null", "N/A", "undefined".
+
+### 8.7 Couleur = jamais seule information
+
+Toujours doubler par :
+- Une icône (`CheckCircle2`, `AlertTriangle`, `CircleDashed`, etc.).
+- Un libellé texte.
+- Un motif visuel différenciant (pointillé, rempli, opacité).
+
+Exemple `DropSlot` de `PlanningTournees.jsx` : le slot vide est en
+`border-dashed` et un slot en conflit en `border-red-300 bg-red-50` + texte
+"Conflit" dans le modal.
+
+---
+
+## 9. Accessibilité et i18n
+
+1. **Langue** : `<html lang="fr">` (déjà posé dans `index.html`). Toute
+   nouvelle copie reste en français.
+2. **Contrastes** : texte principal sur fond blanc = `slate-800` (ratio
+   > 12:1). Texte secondaire = `slate-500` (ratio > 4.5:1 WCAG AA).
+3. **Focus** : préserver `focus:ring-2 focus:ring-emerald-500` par défaut
+   Tailwind + les anneaux déjà inclus dans `.input-modern`, `.btn-*`.
+4. **Aria** : `role="dialog"` + `aria-modal="true"` + `aria-label` sur les
+   modals, `aria-label` sur chaque bouton icône seule.
+5. **Clavier** : `Escape` ferme les modals (déjà implémenté). Tab order
+   naturel, ne pas poser de `tabIndex` positif arbitraire.
+6. **Mobile chauffeur** : taille touch ≥ 60 px, police de base 16 px, pas
+   de hover-only. Classe `.touch-target` disponible.
+7. **Lecteur d'écran** : chaque input doit avoir un `<label>` (classe
+   `.label-modern`) relié au champ.
+8. **Icônes décoratives** : `aria-hidden="true"`. Icônes porteuses de sens
+   sans texte : `aria-label` avec la signification (`"Supprimer"`).
+
+---
+
+## 10. Règles mobile spécifiques
+
+- **Token radius** : 12 / 16 / 20 / 24 (plus généreux que le web).
+- **Pas de hover** : tout état visible au repos. Utiliser `active:scale-[0.98]`
+  pour le feedback tactile.
+- **Scroll** : `overscroll-behavior: none` déjà global pour éviter le bounce
+  sur iOS.
+- **Safe area** : toute barre fixée en bas doit inclure
+  `padding-bottom: calc(var(--safe-bottom) + 12px)` ou utiliser
+  `.primary-action-bar`.
+- **Offline** : pas d'envoi direct vers l'API. Toute action passe par
+  `services/sync.js` qui gère la file IndexedDB et l'idempotence.
+- **Haptique systématique** : scan OK, collecte validée, incident déclaré,
+  tournée terminée.
+
+---
+
+## 11. Checklist création d'une nouvelle page
+
+Avant de merger une nouvelle page web manager :
+
+1. Enveloppée dans `<Layout>{...}</Layout>`.
+2. Route déclarée dans `App.jsx` avec `<ProtectedRoute roles={[…]}>` si
+   restriction.
+3. Entrée ajoutée dans `menuSections` de `Layout.jsx` (icône lucide, rôles,
+   libellé FR court).
+4. Utilise `--color-*` / classes Tailwind existantes, **pas de couleurs en
+   dur** hors status badges déjà mappés.
+5. Tous les hooks (`useState`, `useEffect`, `useMemo`, `useCallback`) sont
+   appelés **avant tout early return** — sinon page blanche (règle Hooks).
+6. Chargement : `<LoadingSpinner>` au 1er render, puis fetch silencieux.
+7. Erreur API : toast `error` + dernières données affichées, jamais écran
+   vide.
+8. État vide : `<EmptyState>` avec action si possible.
+9. Boutons : un seul primaire, actions destructives en `btn-danger` +
+   `<ConfirmDialog>`.
+10. Tableau / liste : `<StatusBadge>` pour tout statut métier.
+11. Modal : `<Modal>` standard avec titre, pas de div positionné à la main.
+12. Dates / nombres formatés en français avec `toLocaleString`.
+13. Pas d'emoji dans les libellés UI (sauf contexte IA explicite).
+14. Build passe (`npx vite build`), pas d'erreur console navigateur.
+
+Pour une nouvelle page **mobile** :
+
+1. Un seul objectif par écran (pas de sous-onglets).
+2. Header dégradé teal via `.screen-header`.
+3. Action principale unique via `<PrimaryActionBar>`.
+4. Toute action persistée via `services/sync.js` (offline-first).
+5. Zones tactiles ≥ 60 px, polices ≥ 16 px.
+6. Haptique sur action principale.
+7. Test sur Chrome DevTools "iPhone 12" + mode hors ligne.
+
+---
+
+## 12. Évolutions et exceptions
+
+- Toute exception à cette charte (nouvelle couleur, nouveau composant
+  global, nouveau token) doit être documentée dans ce fichier avant merge.
+- Les assets marketing (présentations, emails Brevo) peuvent utiliser une
+  palette étendue mais doivent rester cohérents avec la palette primaire.
+- Les maquettes externes (Figma, Excalidraw) ne font pas foi : la vérité
+  est dans ce document + les tokens Tailwind.
+
+---
+
+## 13. Références code
+
+| Concept | Fichier |
+|---------|--------|
+| Tokens CSS | `frontend/src/index.css`, `mobile/src/index.css` |
+| Tokens Tailwind | `frontend/tailwind.config.js`, `mobile/tailwind.config.js` |
+| Composants web | `frontend/src/components/` (+ `index.js`) |
+| Composants mobile | `mobile/src/components/` |
+| Layout web | `frontend/src/components/Layout.jsx` |
+| Menu navigation | `frontend/src/components/Layout.jsx` (`menuSections`) |
+| StatusBadge mapping | `frontend/src/components/StatusBadge.jsx` |
+| Exemple page référence | `frontend/src/pages/LiveVehicles.jsx` (collections-live) |
+| Exemple mobile référence | `mobile/src/pages/TourMap.jsx` |
+
+Pour toute question : commencer par lire les fichiers ci-dessus avant de
+proposer un changement de charte.
