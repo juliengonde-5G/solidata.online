@@ -162,3 +162,201 @@ sont utilisées **que pour la navigation** :
 | `max-w-[1600px] mx-auto` | Contenu principal | Contenu centré desktop |
 
 ---
+
+## 6. Composants de base (web manager)
+
+Tous dans `frontend/src/components/`. Importer via `from '../components'`
+quand ré-exporté dans `index.js`, sinon chemin direct.
+
+### 6.1 Boutons (classes CSS globales, pas de composant React)
+
+| Classe | Rôle | Exemple |
+|--------|------|---------|
+| `.btn-primary` | CTA principal (créer, valider, lancer) | `<button className="btn-primary">Enregistrer</button>` |
+| `.btn-secondary` | Action secondaire (annuler, retour, filtres) | Outline teal, texte slate |
+| `.btn-danger` | Suppression, désactivation critique | Rouge |
+| `.btn-ghost` | Action mineure dans un tableau | Pas de bord, texte slate |
+
+Règles :
+- **Une seule action primaire** visible par zone (formulaire, carte, modal).
+- Tailles : padding par défaut `px-4 py-2.5`. Pour un bouton compact dans un
+  tableau : ajouter `text-sm` et réduire à `px-3 py-1.5` si nécessaire.
+- État disabled : automatique via `:disabled` sur `.btn-*`, opacity 50 %.
+- Icône gauche optionnelle : `<Save className="w-4 h-4 mr-1.5" />` dans le
+  bouton.
+
+### 6.2 Formulaires
+
+| Classe / composant | Rôle |
+|--------------------|------|
+| `.label-modern` | Label au-dessus du champ (obligatoire pour a11y) |
+| `.input-modern` | Input texte / number / date / email |
+| `.select-modern` | Select natif stylisé avec chevron SVG |
+| `.textarea-modern` | Textarea auto-resize (min 5rem) |
+
+Pattern standard :
+
+```jsx
+<div>
+  <label className="label-modern">Nom du contrat *</label>
+  <input
+    required
+    className="input-modern"
+    value={form.name}
+    onChange={(e) => setForm({ ...form, name: e.target.value })}
+  />
+</div>
+```
+
+Validation : afficher l'erreur sous le champ avec
+`<p className="text-xs text-red-600 mt-1">Message</p>`.
+
+### 6.3 Cartes
+
+- Classe utilitaire `.card-modern` = fond blanc + bordure claire + ombre
+  douce + radius 12 + hover.
+- Composant dérivé : `<KPICard title value unit icon accent />` avec
+  variantes `primary | emerald | amber | red | slate`.
+- Patron "section de page" :
+
+```jsx
+<div className="card-modern p-5">
+  <h2 className="text-lg font-semibold text-slate-800 mb-3">Titre</h2>
+  {/* contenu */}
+</div>
+```
+
+### 6.4 StatusBadge
+
+Seule source autorisée pour afficher un statut métier. Le mapping contient
+déjà candidats, commandes, tournées, véhicules, stock, heures, factures.
+
+```jsx
+import { StatusBadge } from '../components';
+<StatusBadge status="in_progress" />
+```
+
+Pour un statut absent du mapping, ajouter son libellé + ses classes dans
+`StatusBadge.jsx` plutôt que de fabriquer un span ad-hoc.
+
+### 6.5 Modal
+
+```jsx
+<Modal isOpen={show} onClose={() => setShow(false)} title="…" size="md">
+  {/* body */}
+  {/* footer optionnel : <Modal footer={<button className="btn-primary">Valider</button>}> */}
+</Modal>
+```
+
+- Tailles : `sm` (448px), `md` (512px), `lg` (672px), `xl` (896px).
+- Fermeture automatique sur `Escape` et clic backdrop.
+- `role="dialog"` + `aria-modal` déjà posés.
+
+### 6.6 Composants secondaires prêts à l'emploi
+
+| Composant | Rôle |
+|-----------|------|
+| `<EmptyState icon title description action={{ label, onClick }} />` | État vide (tableau vide, recherche 0 résultat) |
+| `<LoadingSpinner size="sm\|md\|lg" message />` | Chargement générique |
+| `<LoadingOverlay />` | Voile semi-transparent plein écran pendant save |
+| `<DataTable columns rows />` | Tableau cohérent avec tri / pagination |
+| `<KanbanBoard columns onMove />` | Kanban drag-drop (recrutement, commandes) |
+| `<PageHeader title subtitle actions />` | En-tête standardisé de page |
+| `<HubComponents>` (HubCard, HubGrid) | Pages d'accueil de section |
+| `<ConfirmDialog />` | Confirmation destructive |
+| `<Toast />` (via `<ToastProvider>`) | Messages éphémères bas de page |
+| `<NotificationBell />` | Cloche TopBar + toggle push |
+| `<UserDropdown />` | Menu utilisateur TopBar |
+
+### 6.7 Iconographie
+
+- **Librairie unique** : `lucide-react`. Interdit d'importer d'autres pack
+  d'icônes.
+- Stroke :
+  - Web navigation : `1.8` (IconSidebar).
+  - Web contenus / KPI : défaut lucide (`2`).
+  - Mobile action bar : `2.4` (meilleure visibilité en plein soleil).
+- Tailles courantes :
+  - Dans un bouton : `w-4 h-4`.
+  - KPI, en-tête carte : `w-5 h-5`.
+  - Illustration d'état (EmptyState) : `w-8 h-8`.
+- Remplacer un emoji par une icône lucide dès que la surface n'est pas un
+  écran IA ou récapitulatif.
+
+---
+
+## 7. Layouts
+
+### 7.1 Web manager — shell trois colonnes
+
+Structure imposée par `<Layout>` :
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ IconSidebar (60px)  │ ContentSidebar (240px, collapsible)    │
+│ ─────────────────── │ ─────────────────────────────────────  │
+│                     │                TopBar (56px)           │
+│                     │ ────────────────────────────────────   │
+│                     │                                        │
+│                     │   <main> contenu page                  │
+│                     │   p-4 sm:p-6 lg:p-6 max-w-[1600px]     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- Une page ne déclare **jamais** sa propre sidebar. Elle s'enveloppe dans
+  `<Layout>{...}</Layout>` et c'est tout.
+- Les rubriques du menu sont définies dans `Layout.jsx` (`menuSections`) ;
+  ajouter une page = ajouter une entrée avec `path`, `label`, `icon`,
+  `roles`.
+- `ProtectedRoute` dans `App.jsx` contrôle l'accès par rôle.
+
+### 7.2 Mobile PWA — écrans plein écran
+
+La mobile utilise un pattern **un écran = une tâche**, pas de sidebar.
+
+```
+┌─────────────────────────────────────┐
+│  screen-header (dégradé teal)       │
+│  titre + contexte court             │
+├─────────────────────────────────────┤
+│                                     │
+│  contenu scroll vertical            │
+│  cartes `.card-mobile` (radius 20)  │
+│                                     │
+├─────────────────────────────────────┤
+│  PrimaryActionBar (fixed bottom)    │
+│  1 CTA + 1 action secondaire max    │
+└─────────────────────────────────────┘
+```
+
+Règles spécifiques mobile :
+
+- **Zones tactiles** ≥ 60 px (`--space-touch`). Classe utilitaire
+  `.touch-target` disponible.
+- **Safe area iOS** : classes `.safe-bottom` et header utilise
+  `env(safe-area-inset-*)`.
+- **Gros textes** : taille minimum `text-base` (16 px) pour les champs, pour
+  éviter le zoom iOS.
+- **Une seule CTA visible** par écran (le chauffeur ne doit pas hésiter).
+  Composant `<PrimaryActionBar primaryLabel primaryIcon onPrimary secondaryLabel onSecondary />`.
+- **Mode d'usage** : `<UsageModeBanner />` affiche conduite / arrêt court /
+  arrêt opérationnel, ce qui change le CTA de certains écrans.
+- **Offline-first** : toute action passe par `services/sync.js`. Le
+  `<SyncStatusBanner />` affiche l'état (offline / syncing / erreur /
+  pending).
+- **Haptique** : `vibrateSuccess()`, `vibrateError()`, `vibrateTap()` depuis
+  `services/haptic.js` sur chaque action critique.
+
+### 7.3 Pages hub (accueil section)
+
+Chaque grande section (`/hub-collecte`, `/hub-equipe`, `/hub-tri-production`,
+`/hub-exutoires`, `/hub-boutiques`, `/hub-reporting`, `/hub-admin`) suit le
+même pattern :
+
+- Titre section + description courte.
+- Grille de cartes `<ModuleCard icon title description to />` vers les
+  sous-pages.
+- Optionnel : une ligne de KPI en haut si la section a des chiffres clés
+  agrégés (ex : HubCollecte).
+
+---
