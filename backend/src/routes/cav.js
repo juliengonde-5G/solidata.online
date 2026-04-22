@@ -590,6 +590,41 @@ router.get('/sensors', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
+// GET /api/cav/liveobjects-devices — Liste les devices déclarés côté Orange Live Objects,
+// annotés avec l'assignation SOLIDATA actuelle (si le devEUI est déjà lié à un CAV).
+router.get('/liveobjects-devices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { listLoraDevices } = require('../services/liveobjects-api');
+    const devices = await listLoraDevices();
+
+    // Jointure avec la table cav pour marquer assigned/free
+    const devEuis = devices.map((d) => d.devEui).filter(Boolean);
+    let assignments = {};
+    if (devEuis.length > 0) {
+      const rows = await pool.query(
+        'SELECT id, name, commune, lora_deveui FROM cav WHERE lora_deveui = ANY($1::text[])',
+        [devEuis]
+      );
+      assignments = Object.fromEntries(rows.rows.map((r) => [r.lora_deveui, r]));
+    }
+
+    const enriched = devices.map((d) => ({
+      ...d,
+      assigned_cav: assignments[d.devEui] || null,
+    }));
+
+    res.json({
+      total: enriched.length,
+      assigned: enriched.filter((d) => d.assigned_cav).length,
+      orphans: enriched.filter((d) => !d.assigned_cav).length,
+      devices: enriched,
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur liveobjects-devices :', err);
+    res.status(502).json({ error: err.message || 'Live Objects indisponible' });
+  }
+});
+
 // POST /api/cav/sensors/alerts/:alertId/ack — Acquitter une alerte (déclaré avant /:id)
 router.post('/sensors/alerts/:alertId/ack', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {

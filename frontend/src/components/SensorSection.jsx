@@ -187,6 +187,40 @@ function ProvisionModal({ isOpen, onClose, cavId, onDone }) {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [devices, setDevices] = useState(null);  // null = non chargé, [] = chargé vide
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [devicesError, setDevicesError] = useState(null);
+
+  const loadLiveObjectsDevices = async () => {
+    setDevicesLoading(true);
+    setDevicesError(null);
+    try {
+      const data = await sensorsApi.liveObjectsDevices();
+      setDevices(data.devices || []);
+    } catch (err) {
+      setDevicesError(err.response?.data?.error || err.message);
+      setDevices([]);
+    } finally {
+      setDevicesLoading(false);
+    }
+  };
+
+  // Auto-charger la liste à l'ouverture du modal
+  useEffect(() => {
+    if (isOpen && devices === null) loadLiveObjectsDevices();
+    if (!isOpen) {
+      setDevices(null);
+      setError(null);
+    }
+  }, [isOpen]);
+
+  const selectDevice = (d) => {
+    setForm((f) => ({
+      ...f,
+      dev_eui: d.devEui || '',
+      app_eui: d.appEui || '',
+    }));
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -202,13 +236,93 @@ function ProvisionModal({ isOpen, onClose, cavId, onDone }) {
     }
   };
 
+  const freeDevices = (devices || []).filter((d) => !d.assigned_cav);
+  const assignedDevices = (devices || []).filter((d) => d.assigned_cav);
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Provisionner un capteur LoRaWAN" size="md">
-      <form onSubmit={submit} className="space-y-3 text-sm">
+    <Modal isOpen={isOpen} onClose={onClose} title="Provisionner un capteur LoRaWAN" size="lg">
+      <form onSubmit={submit} className="space-y-4 text-sm">
+        {/* Sélecteur depuis Live Objects */}
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-orange-800">
+              📡 Devices déclarés sur Orange Live Objects
+            </p>
+            <button type="button" onClick={loadLiveObjectsDevices} disabled={devicesLoading}
+              className="text-xs text-orange-700 hover:text-orange-900 underline disabled:opacity-50">
+              {devicesLoading ? 'Chargement…' : '↻ Rafraîchir'}
+            </button>
+          </div>
+          {devicesError && (
+            <p className="text-xs text-red-600 mb-2">
+              {devicesError} — saisie manuelle toujours possible ci-dessous.
+            </p>
+          )}
+          {devicesLoading && <p className="text-xs text-gray-500">Chargement des devices…</p>}
+          {devices !== null && !devicesLoading && devices.length === 0 && !devicesError && (
+            <p className="text-xs text-gray-500">
+              Aucun device LoRa déclaré sur Live Objects. Ajoutez-en depuis la console Orange d'abord.
+            </p>
+          )}
+          {freeDevices.length > 0 && (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              <p className="text-[10px] uppercase text-gray-500 font-semibold">
+                Non assignés ({freeDevices.length})
+              </p>
+              {freeDevices.map((d) => {
+                const selected = form.dev_eui === d.devEui;
+                return (
+                  <button key={d.devEui} type="button" onClick={() => selectDevice(d)}
+                    className={`w-full text-left p-2 rounded border transition ${
+                      selected
+                        ? 'bg-green-100 border-green-400 ring-2 ring-green-300'
+                        : 'bg-white border-gray-200 hover:border-orange-400'
+                    }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-xs font-semibold truncate">{d.devEui}</p>
+                        <p className="text-[10px] text-gray-600 truncate">
+                          {d.name || '(sans nom)'}
+                          {d.profile && ` · ${d.profile}`}
+                        </p>
+                      </div>
+                      {d.lastUplinkAt && (
+                        <span className="text-[10px] text-gray-400 ml-2 shrink-0">
+                          vu {new Date(d.lastUplinkAt).toLocaleDateString('fr-FR')}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {assignedDevices.length > 0 && (
+            <details className="mt-2">
+              <summary className="text-[10px] uppercase text-gray-500 font-semibold cursor-pointer">
+                Déjà assignés ({assignedDevices.length})
+              </summary>
+              <div className="mt-1 space-y-1">
+                {assignedDevices.map((d) => (
+                  <div key={d.devEui} className="p-2 rounded border border-gray-200 bg-gray-50 opacity-75">
+                    <p className="font-mono text-xs truncate">{d.devEui}</p>
+                    <p className="text-[10px] text-gray-600">
+                      → {d.assigned_cav.name} ({d.assigned_cav.commune})
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+
+        <hr />
+
         <p className="text-xs text-gray-500">
-          Saisir les 3 clés imprimées sur l'étiquette du capteur Milesight EM400-MUD
-          (lisibles aussi via l'app ToolBox NFC). La clé applicative (AppKey) est
-          stockée chiffrée (AES-256).
+          Sélectionnez un device ci-dessus ou saisissez manuellement. La clé
+          applicative (AppKey) est <strong>facultative</strong> — Orange ne la restitue
+          jamais via l'API ; elle sert uniquement de backup côté SOLIDATA si vous
+          l'avez conservée (app ToolBox / étiquette capteur).
         </p>
         <Field label="DevEUI" required>
           <input value={form.dev_eui} onChange={(e) => setForm({ ...form, dev_eui: e.target.value.toUpperCase() })}
@@ -218,9 +332,9 @@ function ProvisionModal({ isOpen, onClose, cavId, onDone }) {
           <input value={form.app_eui} onChange={(e) => setForm({ ...form, app_eui: e.target.value.toUpperCase() })}
             className="input-modern font-mono" placeholder="24E124C0..." />
         </Field>
-        <Field label="AppKey">
+        <Field label="AppKey (facultative)">
           <input type="password" value={form.app_key} onChange={(e) => setForm({ ...form, app_key: e.target.value })}
-            className="input-modern font-mono" placeholder="32 caractères hex" />
+            className="input-modern font-mono" placeholder="32 caractères hex — optionnel" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Hauteur vide (cm)" required>

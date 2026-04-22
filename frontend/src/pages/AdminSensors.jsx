@@ -12,6 +12,8 @@ export default function AdminSensors() {
   const [sensors, setSensors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [loInfo, setLoInfo] = useState(null); // { total, assigned, orphans, devices }
+  const [showOrphans, setShowOrphans] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -21,6 +23,13 @@ export default function AdminSensors() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+    // En parallèle : tenter de lister les devices Live Objects (silencieux si l'API n'est pas joignable)
+    try {
+      const lo = await sensorsApi.liveObjectsDevices();
+      setLoInfo(lo);
+    } catch (err) {
+      setLoInfo({ total: 0, assigned: 0, orphans: 0, devices: [], error: err.response?.data?.error || err.message });
     }
   }, []);
 
@@ -58,14 +67,68 @@ export default function AdminSensors() {
   return (
     <Layout>
       <div className="p-6 space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            📡 Capteurs CAV LoRaWAN
-          </h1>
-          <p className="text-gray-500 text-sm">
-            Flotte de sondes de remplissage Milesight EM400-MUD via Orange Live Objects — {counts.total} équipements
-          </p>
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+              📡 Capteurs CAV LoRaWAN
+            </h1>
+            <p className="text-gray-500 text-sm">
+              Flotte de sondes de remplissage Milesight EM400-MUD via Orange Live Objects — {counts.total} équipements
+            </p>
+          </div>
+          {loInfo && loInfo.orphans > 0 && (
+            <button onClick={() => setShowOrphans((v) => !v)}
+              className="bg-orange-50 border border-orange-300 rounded-lg px-4 py-2 text-left hover:bg-orange-100 transition">
+              <p className="text-xs text-orange-700 uppercase font-semibold">
+                Orange Live Objects
+              </p>
+              <p className="text-sm text-orange-900">
+                <strong>{loInfo.orphans}</strong> device{loInfo.orphans > 1 ? 's' : ''} déclaré{loInfo.orphans > 1 ? 's' : ''} mais non assigné{loInfo.orphans > 1 ? 's' : ''} à un CAV
+              </p>
+              <p className="text-[10px] text-orange-600 mt-0.5">
+                {showOrphans ? 'Masquer la liste ▲' : 'Afficher la liste ▼'}
+              </p>
+            </button>
+          )}
         </div>
+
+        {showOrphans && loInfo?.devices && (
+          <div className="card-modern p-4 border-orange-300">
+            <h2 className="font-semibold text-sm mb-3 text-orange-800">
+              Devices Live Objects non assignés
+            </h2>
+            <p className="text-xs text-gray-500 mb-3">
+              Pour assigner un device, ouvrez la fiche d'un CAV dans <em>Administration → Gestion CAV</em>,
+              section « Capteur LoRaWAN », bouton « Provisionner un capteur ».
+            </p>
+            <table className="w-full text-sm">
+              <thead className="text-xs text-gray-500 uppercase border-b">
+                <tr>
+                  <th className="px-2 py-1 text-left">DevEUI</th>
+                  <th className="px-2 py-1 text-left">Nom</th>
+                  <th className="px-2 py-1 text-left">Profil</th>
+                  <th className="px-2 py-1 text-left">Dernier uplink</th>
+                  <th className="px-2 py-1 text-left">Tags</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loInfo.devices.filter((d) => !d.assigned_cav).map((d) => (
+                  <tr key={d.devEui} className="border-b hover:bg-gray-50">
+                    <td className="px-2 py-1 font-mono text-xs">{d.devEui}</td>
+                    <td className="px-2 py-1 text-gray-600">{d.name || '—'}</td>
+                    <td className="px-2 py-1 text-gray-500">{d.profile || '—'}</td>
+                    <td className="px-2 py-1 text-xs text-gray-500">
+                      {d.lastUplinkAt ? new Date(d.lastUplinkAt).toLocaleString('fr-FR') : 'Jamais'}
+                    </td>
+                    <td className="px-2 py-1 text-xs text-gray-500">
+                      {(d.tags || []).join(', ') || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <FilterCard label="Total" value={counts.total} active={filter === 'all'} onClick={() => setFilter('all')} />
