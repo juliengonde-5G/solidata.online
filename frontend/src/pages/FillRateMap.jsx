@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner } from '../components';
 import api from '../services/api';
+import useCavSensorSocket from '../hooks/useCavSensorSocket';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, Cell } from 'recharts';
 import 'leaflet/dist/leaflet.css';
@@ -39,6 +40,28 @@ export default function FillRateMap() {
   const [showAsso, setShowAsso] = useState(true);
 
   useEffect(() => { loadData(); }, []);
+
+  // Mise à jour optimiste sur event capteur temps réel
+  const handleSensorReading = useCallback((reading) => {
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        cavs: prev.cavs.map((c) => (c.id === reading.cav_id
+          ? {
+              ...c,
+              fill_rate: Math.round(reading.fill_level),
+              fill_source: 'sensor',
+              sensor_last_reading: reading.fill_level,
+              sensor_last_reading_at: reading.timestamp,
+              sensor_battery_level: reading.battery,
+              sensor_last_rssi: reading.rssi,
+            }
+          : c)),
+      };
+    });
+  }, []);
+  useCavSensorSocket(handleSensorReading);
 
   // Charger l'histogramme d'activite quand un CAV est selectionne
   useEffect(() => {
@@ -149,39 +172,55 @@ export default function FillRateMap() {
                 );
               })}
 
-              {filtered.map(cav => (
-                <CircleMarker
-                  key={cav.id}
-                  center={[cav.latitude, cav.longitude]}
-                  radius={Math.max(8, Math.min(16, cav.fill_rate / 8))}
-                  pathOptions={{
-                    color: getFillColor(cav.fill_rate),
-                    fillColor: getFillColor(cav.fill_rate),
-                    fillOpacity: 0.7,
-                    weight: 2,
-                  }}
-                  eventHandlers={{ click: () => setSelectedCav(cav) }}
-                >
-                  <Popup>
-                    <div className="text-xs space-y-1">
-                      <p className="font-bold text-sm">{cav.name}</p>
-                      <p className="text-gray-500">{cav.commune}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: getFillColor(cav.fill_rate) }} />
-                        <span className="font-bold">{cav.fill_rate}% rempli</span>
+              {filtered.map(cav => {
+                const isSensor = cav.fill_source === 'sensor';
+                return (
+                  <CircleMarker
+                    key={cav.id}
+                    center={[cav.latitude, cav.longitude]}
+                    radius={Math.max(8, Math.min(16, cav.fill_rate / 8))}
+                    pathOptions={{
+                      color: getFillColor(cav.fill_rate),
+                      fillColor: getFillColor(cav.fill_rate),
+                      fillOpacity: 0.7,
+                      weight: isSensor ? 3 : 2,
+                      dashArray: isSensor ? null : '3 3',
+                    }}
+                    eventHandlers={{ click: () => setSelectedCav(cav) }}
+                  >
+                    <Popup>
+                      <div className="text-xs space-y-1">
+                        <p className="font-bold text-sm flex items-center gap-1">
+                          {cav.name}
+                          {isSensor && <span title="Capteur LoRaWAN actif">📡</span>}
+                        </p>
+                        <p className="text-gray-500">{cav.commune}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: getFillColor(cav.fill_rate) }} />
+                          <span className="font-bold">{cav.fill_rate}% rempli</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${isSensor ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {isSensor ? 'capteur' : 'estimé'}
+                          </span>
+                        </div>
+                        {isSensor && (
+                          <div className="mt-1 text-gray-600">
+                            <p>Batterie : {cav.sensor_battery_level != null ? `${cav.sensor_battery_level}%` : '—'} · RSSI : {cav.sensor_last_rssi != null ? `${cav.sensor_last_rssi} dBm` : '—'}</p>
+                            <p>Lu : {cav.sensor_last_reading_at ? new Date(cav.sensor_last_reading_at).toLocaleString('fr-FR') : '—'}</p>
+                          </div>
+                        )}
+                        <p>Conteneurs : {cav.nb_containers}</p>
+                        <p>Dernière collecte : {cav.last_collection ? new Date(cav.last_collection).toLocaleDateString('fr-FR') : '—'}</p>
+                        <p>Prochain passage : {cav.next_passage === 'en retard'
+                          ? <span className="text-red-600 font-bold">En retard</span>
+                          : cav.next_passage ? new Date(cav.next_passage).toLocaleDateString('fr-FR') : '—'}</p>
+                        {cav.days_to_full != null && cav.days_to_full > 0 && (
+                          <p>Plein dans : <span className="font-bold">{cav.days_to_full}j</span></p>
+                        )}
                       </div>
-                      <p>Conteneurs : {cav.nb_containers}</p>
-                      <p>Dernière collecte : {cav.last_collection ? new Date(cav.last_collection).toLocaleDateString('fr-FR') : '—'}</p>
-                      <p>Prochain passage : {cav.next_passage === 'en retard'
-                        ? <span className="text-red-600 font-bold">En retard</span>
-                        : cav.next_passage ? new Date(cav.next_passage).toLocaleDateString('fr-FR') : '—'}</p>
-                      {cav.days_to_full != null && cav.days_to_full > 0 && (
-                        <p>Plein dans : <span className="font-bold">{cav.days_to_full}j</span></p>
-                      )}
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              ))}
+                    </Popup>
+                  </CircleMarker>
+                );
+              })}
             </MapContainer>
 
             {/* Légende */}
@@ -331,7 +370,10 @@ export default function FillRateMap() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{cav.name}</p>
+                      <p className="font-medium text-sm truncate flex items-center gap-1">
+                        {cav.name}
+                        {cav.fill_source === 'sensor' && <span title="Capteur LoRaWAN">📡</span>}
+                      </p>
                       <p className="text-xs text-gray-400">{cav.commune}</p>
                     </div>
                     <div className="text-right ml-2 flex-shrink-0">

@@ -75,6 +75,13 @@ services:
       CENTRE_TRI_LAT: 49.4231
       CENTRE_TRI_LNG: 1.0993
       BOUTIQUE_CSV_BASE_PATH: /data/boutiques-csv
+      LIVEOBJECTS_ENABLED: ${LIVEOBJECTS_ENABLED:-false}
+      LIVEOBJECTS_MQTT_URL: ${LIVEOBJECTS_MQTT_URL:-mqtts://liveobjects.orange-business.com:8883}
+      LIVEOBJECTS_API_KEY: ${LIVEOBJECTS_API_KEY:-}
+      LIVEOBJECTS_FIFO_NAME: ${LIVEOBJECTS_FIFO_NAME:-solidata-cav-uplinks}
+      LIVEOBJECTS_WEBHOOK_SECRET: ${LIVEOBJECTS_WEBHOOK_SECRET:-}
+      LORA_APPKEY_ENCRYPTION_KEY: ${LORA_APPKEY_ENCRYPTION_KEY:-}
+      SENSOR_FRESHNESS_HOURS: ${SENSOR_FRESHNESS_HOURS:-8}
     volumes:
       - uploads:/app/uploads
       - ./boutiques-csv:/data/boutiques-csv

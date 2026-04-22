@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner } from '../components';
 import api from '../services/api';
+import useCavSensorSocket from '../hooks/useCavSensorSocket';
 import { MapContainer, TileLayer, Marker, Popup, Circle, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -38,6 +39,24 @@ export default function CAVMap() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Mise à jour optimiste des CAV sur event capteur temps réel
+  const handleSensorReading = useCallback((reading) => {
+    setCavs((prev) => prev.map((c) => (
+      c.id === reading.cav_id
+        ? {
+            ...c,
+            fill_rate: Math.round(reading.fill_level),
+            fill_source: 'sensor',
+            sensor_last_reading: reading.fill_level,
+            sensor_last_reading_at: reading.timestamp,
+            sensor_battery_level: reading.battery,
+            sensor_last_rssi: reading.rssi,
+          }
+        : c
+    )));
+  }, []);
+  useCavSensorSocket(handleSensorReading);
 
   const loadData = async () => {
     try {
@@ -76,7 +95,9 @@ export default function CAVMap() {
           <div>
             <h1 className="text-2xl font-bold text-slate-800">Carte des CAV</h1>
             <p className="text-gray-500">{filtered.length} Conteneurs d'Apport Volontaire</p>
-            <p className="text-xs text-amber-600 italic mt-1">Taux de remplissage estimé par calcul algorithmique (remis à zéro après chaque collecte)</p>
+            <p className="text-xs text-amber-600 italic mt-1">
+              Remplissage : <span className="text-green-700">capteur LoRaWAN 📡</span> quand disponible, sinon <span>estimation algorithmique</span>.
+            </p>
           </div>
           <div className="flex gap-2 items-center">
             <select value={filterCommune} onChange={e => setFilterCommune(e.target.value)} className="select-modern w-auto">
@@ -111,7 +132,8 @@ export default function CAVMap() {
 
               {filtered.map(cav => {
                 if (!cav.latitude || !cav.longitude) return null;
-                const fillRate = cav.estimated_fill_rate || 0;
+                const fillRate = cav.fill_rate ?? cav.estimated_fill_rate ?? 0;
+                const isSensor = cav.fill_source === 'sensor';
                 return (
                   <Circle
                     key={`cav-${cav.id}`}
@@ -121,14 +143,31 @@ export default function CAVMap() {
                       color: getFillColor(fillRate),
                       fillColor: getFillColor(fillRate),
                       fillOpacity: 0.5,
+                      weight: isSensor ? 3 : 1,
+                      dashArray: isSensor ? null : '4 4',
                     }}
                     eventHandlers={{ click: () => loadCavDetail(cav.id) }}
                   >
                     <Popup>
                       <div className="text-xs">
-                        <p className="font-bold">{cav.name}</p>
+                        <p className="font-bold flex items-center gap-1">
+                          {cav.name}
+                          {isSensor && <span title="Capteur LoRaWAN actif">📡</span>}
+                        </p>
                         <p>{cav.commune}</p>
-                        <p>Remplissage estimé (algorithme) : {Math.round(fillRate)}%</p>
+                        <p>
+                          Remplissage : <strong>{Math.round(fillRate)}%</strong>{' '}
+                          <span className={isSensor ? 'text-green-700' : 'text-amber-600'}>
+                            ({isSensor ? 'capteur' : 'estimé'})
+                          </span>
+                        </p>
+                        {isSensor && (
+                          <>
+                            <p>Batterie : {cav.sensor_battery_level != null ? `${cav.sensor_battery_level}%` : '—'}</p>
+                            <p>RSSI : {cav.sensor_last_rssi != null ? `${cav.sensor_last_rssi} dBm` : '—'}</p>
+                            <p>Dernière lecture : {cav.sensor_last_reading_at ? new Date(cav.sensor_last_reading_at).toLocaleString('fr-FR') : '—'}</p>
+                          </>
+                        )}
                         <p>Conteneurs : {cav.nb_containers || '—'}</p>
                       </div>
                     </Popup>
@@ -183,25 +222,31 @@ export default function CAVMap() {
             ) : (
               <>
                 <h3 className="font-semibold text-sm text-gray-500">Liste des CAV</h3>
-                {filtered.map(cav => (
-                  <div
-                    key={cav.id}
-                    onClick={() => loadCavDetail(cav.id)}
-                    className="card-modern p-3 cursor-pointer hover:shadow-md transition"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-sm">{cav.name}</p>
-                        <p className="text-xs text-gray-400">{cav.commune}</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-xs font-bold" style={{ color: getFillColor(cav.estimated_fill_rate || 0) }}>
-                          {Math.round(cav.estimated_fill_rate || 0)}%
-                        </span>
+                {filtered.map(cav => {
+                  const fr = cav.fill_rate ?? cav.estimated_fill_rate ?? 0;
+                  return (
+                    <div
+                      key={cav.id}
+                      onClick={() => loadCavDetail(cav.id)}
+                      className="card-modern p-3 cursor-pointer hover:shadow-md transition"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-medium text-sm flex items-center gap-1">
+                            {cav.name}
+                            {cav.fill_source === 'sensor' && <span title="Capteur LoRaWAN">📡</span>}
+                          </p>
+                          <p className="text-xs text-gray-400">{cav.commune}</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-bold" style={{ color: getFillColor(fr) }}>
+                            {Math.round(fr)}%
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             )}
           </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal } from '../components';
+import SensorSection from '../components/SensorSection';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -515,6 +516,9 @@ export default function AdminCAV() {
                   </button>
                 </div>
               </div>
+
+              {/* Capteur LoRaWAN */}
+              <SensorSection cavId={detailCav.id} onUpdated={loadCAVs} />
 
               {/* QR Code */}
               <div className="card-modern overflow-hidden">
