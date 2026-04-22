@@ -75,7 +75,7 @@ async function listLoraDevices() {
   }
   const items = Array.isArray(res.data) ? res.data : (res.data?.devices || []);
   return items
-    .filter((d) => (d.id || '').startsWith('urn:lora:') || d.interface === 'lora')
+    .filter((d) => /^urn:(lo:nsid:)?lora:/i.test(d.id || '') || d.interface === 'lora')
     .map(normalizeGenericDevice);
 }
 
@@ -112,7 +112,8 @@ function normalizeGenericDevice(d) {
 
 function extractDevEui(urn) {
   if (!urn) return null;
-  const m = urn.match(/^urn:lora:([0-9A-Fa-f]+)/);
+  // Formats rencontrés : `urn:lora:<DEVEUI>` (ancien) et `urn:lo:nsid:lora:<DEVEUI>` (actuel Orange)
+  const m = urn.match(/^urn:(?:lo:nsid:)?lora:([0-9A-Fa-f]+)/i);
   return m ? m[1] : null;
 }
 
