@@ -3,7 +3,7 @@
  * Used by Dashboard, HubCollecte, HubEquipe, HubAdmin, etc.
  */
 
-export function KpiCard({ title, value, unit, icon: Icon, accent = 'slate' }) {
+export function KpiCard({ title, value, unit, icon: Icon, accent = 'slate', footer }) {
   const accentStyles = {
     primary: 'bg-primary-surface text-primary',
     slate: 'bg-slate-100 text-slate-600',
@@ -25,6 +25,7 @@ export function KpiCard({ title, value, unit, icon: Icon, accent = 'slate' }) {
         <span className="tile-value">{value}</span>
         {unit && <span className="text-sm text-slate-400">{unit}</span>}
       </div>
+      {footer && <div className="mt-2">{footer}</div>}
     </div>
   );
 }

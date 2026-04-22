@@ -2956,6 +2956,14 @@ async function initDatabase() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_meteo_date ON boutique_meteo_quotidien(boutique_id, date)`);
 
+    // Migration 16/04/2026 : colonne num_ticket (vrai numéro ticket LogicS, nouveau format CSV)
+    // Rayon;Date;Num_Ticket;ID Article;Article;... au lieu de Rayon;Date;ID Article;...
+    // Permet de différencier correctement les tickets qui chevauchent la même minute.
+    await client.query(`ALTER TABLE boutique_tickets ADD COLUMN IF NOT EXISTS num_ticket VARCHAR(32)`);
+    await client.query(`ALTER TABLE boutique_ventes ADD COLUMN IF NOT EXISTS num_ticket VARCHAR(32)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_tickets_num ON boutique_tickets(boutique_id, num_ticket) WHERE num_ticket IS NOT NULL`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_num ON boutique_ventes(boutique_id, num_ticket) WHERE num_ticket IS NOT NULL`);
+
     // Seed : boutique St-Sever (référence géographique : Rouen)
     const btqExist = await client.query("SELECT id FROM boutiques LIMIT 1");
     if (btqExist.rows.length === 0) {
