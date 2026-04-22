@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { fetchOpenMeteoDaily } = require('../utils/weather');
+const { fetchOpenMeteoDaily, fetchOpenMeteoHourly } = require('../utils/weather');
 
 router.use(authenticate);
 
@@ -47,6 +47,50 @@ router.get('/correlation', async (req, res) => {
   } catch (err) {
     console.error('[boutique-meteo] correlation:', err);
     res.status(500).json({ error: 'Erreur' });
+  }
+});
+
+// GET /api/boutique-meteo/hourly?boutique_id=X&date=YYYY-MM-DD
+// Météo heure par heure (cache mémoire 1h dans utils/weather.js).
+// Fallback gracieux : 200 + points=[] en cas d'erreur pour que le front reste fonctionnel.
+router.get('/hourly', async (req, res) => {
+  try {
+    const { boutique_id } = req.query;
+    if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+
+    const btq = await pool.query(
+      'SELECT latitude, longitude FROM boutiques WHERE id = $1',
+      [boutique_id]
+    );
+    if (btq.rows.length === 0) return res.status(404).json({ error: 'Boutique introuvable' });
+
+    const { latitude, longitude } = btq.rows[0];
+    if (latitude == null || longitude == null) {
+      return res.json({
+        boutique_id: Number(boutique_id), date,
+        points: [], warning: 'coordonnées manquantes'
+      });
+    }
+
+    const data = await fetchOpenMeteoHourly(latitude, longitude, date);
+    if (!data) {
+      return res.json({
+        boutique_id: Number(boutique_id), date,
+        points: [], warning: 'open-meteo indisponible'
+      });
+    }
+
+    res.json({
+      boutique_id: Number(boutique_id),
+      date,
+      lat: latitude,
+      lng: longitude,
+      points: data.points,
+    });
+  } catch (err) {
+    console.error('[boutique-meteo] hourly:', err);
+    res.status(500).json({ error: 'Erreur météo horaire', details: err.message });
   }
 });
 

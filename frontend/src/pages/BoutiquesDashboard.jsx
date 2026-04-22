@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, Cloud, CloudRain, Sun, CloudSnow, Zap, TrendingUp, TrendingDown, ShoppingBag, Target, Receipt, Tag, Timer, Percent } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
+import { Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
 import Layout from '../components/Layout';
 import { LoadingSpinner, KpiCard } from '../components';
 import api from '../services/api';
@@ -55,6 +55,7 @@ export default function BoutiquesDashboard() {
   const [dayTickets, setDayTickets] = useState([]);
   const [dayKpis, setDayKpis] = useState(null);
   const [dayEvolution, setDayEvolution] = useState(null);
+  const [dayMeteoHourly, setDayMeteoHourly] = useState([]);
 
   // Mois
   const [mois, setMois] = useState(new Date().getMonth() + 1);
@@ -86,13 +87,14 @@ export default function BoutiquesDashboard() {
   async function loadDay() {
     setLoading(true);
     try {
-      const [v, m, r, t, k, e] = await Promise.all([
+      const [v, m, r, t, k, e, mh] = await Promise.all([
         api.get(`/boutique-ventes/analytics/daily?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
         api.get(`/boutique-meteo?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
         api.get(`/boutique-ventes/analytics/rayons?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
         api.get(`/boutique-ventes/tickets?boutique_id=${boutiqueId}&date=${dayDate}`),
         api.get(`/boutique-ventes/analytics/kpis?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
         api.get(`/boutique-ventes/analytics/evolution?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
+        api.get(`/boutique-meteo/hourly?boutique_id=${boutiqueId}&date=${dayDate}`).catch(() => ({ data: { points: [] } })),
       ]);
       setDayVentes(v.data?.[0] || { ca_ttc: 0, nb_tickets: 0, nb_articles: 0 });
       setDayMeteo(m.data?.[0] || null);
@@ -100,6 +102,7 @@ export default function BoutiquesDashboard() {
       setDayTickets(t.data || []);
       setDayKpis(k.data || null);
       setDayEvolution(e.data || null);
+      setDayMeteoHourly(mh.data?.points || []);
     } catch (err) { console.error(err); }
     setLoading(false);
   }
@@ -184,7 +187,7 @@ export default function BoutiquesDashboard() {
 
         {loading ? <LoadingSpinner size="lg" /> : (
           <>
-            {tab === 'jour' && <DayView date={dayDate} setDate={setDayDate} ventes={dayVentes} meteo={dayMeteo} rayons={dayRayons} tickets={dayTickets} kpis={dayKpis} evolution={dayEvolution} />}
+            {tab === 'jour' && <DayView date={dayDate} setDate={setDayDate} ventes={dayVentes} meteo={dayMeteo} rayons={dayRayons} tickets={dayTickets} kpis={dayKpis} evolution={dayEvolution} meteoHourly={dayMeteoHourly} />}
             {tab === 'mois' && <MonthView mois={mois} annee={annee} setMois={setMois} setAnnee={setAnnee} data={monthData} meteo={monthMeteo} kpis={monthKpis} hourly={monthHourly} evolution={monthEvolution} />}
             {tab === 'annee' && <YearView annee={annee} setAnnee={setAnnee} data={yearData} budget={yearBudget} boutique={selectedBoutique} />}
           </>
@@ -194,21 +197,41 @@ export default function BoutiquesDashboard() {
   );
 }
 
-function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolution }) {
+function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolution, meteoHourly }) {
   const WeatherIcon = weatherIcon(meteo?.weather_code);
   const v = evolution?.variations || {};
 
-  // Répartition horaire (tickets du jour)
+  // Activité par tranche horaire : CA de la tranche + cumul CA + météo
+  // 14 tranches : 8h → 21h (ouverture boutique)
   const hourly = useMemo(() => {
-    const buckets = {};
+    const caByHour = {};
     for (const t of tickets) {
       const h = new Date(t.date_ticket).getHours();
-      if (!buckets[h]) buckets[h] = { heure: `${h}h`, ca: 0, tickets: 0 };
-      buckets[h].ca += Number(t.total_ttc);
-      buckets[h].tickets += 1;
+      caByHour[h] = (caByHour[h] || 0) + Number(t.total_ttc);
     }
-    return Array.from({ length: 14 }, (_, i) => buckets[i + 8] || { heure: `${i + 8}h`, ca: 0, tickets: 0 });
-  }, [tickets]);
+    const meteoByHour = {};
+    for (const p of (meteoHourly || [])) {
+      meteoByHour[p.hour] = p;
+    }
+    let cumul = 0;
+    return Array.from({ length: 14 }, (_, i) => {
+      const h = i + 8;
+      const ca = caByHour[h] || 0;
+      cumul += ca;
+      const m = meteoByHour[h] || {};
+      return {
+        heure: `${h}h`,
+        hour: h,
+        ca,
+        cumulCa: cumul,
+        temp: m.temp != null ? Number(m.temp) : null,
+        precip: m.precipMm != null ? Number(m.precipMm) : 0,
+        code: m.code != null ? m.code : null,
+      };
+    });
+  }, [tickets, meteoHourly]);
+
+  const hasMeteoHourly = (meteoHourly?.length || 0) > 0;
 
   return (
     <>
@@ -255,16 +278,50 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
         </div>
 
         <div className="bg-white rounded-card shadow-card p-4 lg:col-span-2">
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">Répartition horaire du CA</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={hourly}>
+          <h3 className="text-sm font-semibold text-slate-700 mb-3">Avancement du CA de la journée</h3>
+          <ResponsiveContainer width="100%" height={240}>
+            <ComposedChart data={hourly}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="heure" fontSize={11} />
-              <YAxis fontSize={11} />
-              <Tooltip formatter={(v, n) => n === 'ca' ? `${v.toLocaleString('fr-FR')} €` : v} />
-              <Bar dataKey="ca" fill="#EC4899" />
-            </BarChart>
+              <YAxis yAxisId="left" fontSize={11} tickFormatter={(v) => `${v}€`} />
+              {hasMeteoHourly && (
+                <YAxis yAxisId="right" orientation="right" fontSize={11}
+                  tickFormatter={(v) => `${v}°`}
+                  domain={['auto', 'auto']} />
+              )}
+              <Tooltip formatter={(val, name) => {
+                if (name === 'Température') return `${Number(val).toFixed(1)} °C`;
+                return `${Number(val).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+              }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar yAxisId="left" dataKey="ca" fill="#EC4899" fillOpacity={0.35} name="CA horaire" />
+              <Line yAxisId="left" type="monotone" dataKey="cumulCa" stroke="#EC4899" strokeWidth={2.5} dot={false} name="CA cumulé" />
+              {hasMeteoHourly && (
+                <Line yAxisId="right" type="monotone" dataKey="temp" stroke="#F97316" strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="Température" />
+              )}
+            </ComposedChart>
           </ResponsiveContainer>
+          {hasMeteoHourly && (
+            <div className="mt-3 flex gap-1 border-t border-slate-100 pt-3 overflow-x-auto">
+              {hourly.filter(h => h.hour >= 8 && h.hour <= 20).map((h) => {
+                const HIcon = weatherIcon(h.code);
+                return (
+                  <div key={h.hour} className="flex-1 min-w-[42px] text-center">
+                    <div className="text-[10px] text-slate-400 font-medium">{h.hour}h</div>
+                    <HIcon className="w-5 h-5 mx-auto text-sky-500" strokeWidth={1.5} />
+                    <div className="text-[10px] text-slate-600 font-medium">
+                      {h.temp != null ? `${Math.round(h.temp)}°` : '—'}
+                    </div>
+                    {h.precip > 0 && (
+                      <div className="text-[9px] text-blue-600 font-medium">
+                        {h.precip.toFixed(1)} mm
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
