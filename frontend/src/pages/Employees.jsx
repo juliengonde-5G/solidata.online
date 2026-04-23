@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader, Section } from '../components';
 import { Users } from 'lucide-react';
 import api from '../services/api';
 
@@ -195,30 +195,30 @@ export default function Employees() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Collaborateurs</h1>
-            <p className="text-gray-500">{employees.length} collaborateur{employees.length > 1 ? 's' : ''}</p>
+        <PageHeader
+          title="Collaborateurs"
+          subtitle={`${employees.length} collaborateur${employees.length > 1 ? 's' : ''}`}
+          icon={Users}
+          actions={
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+              + Nouveau collaborateur
+            </button>
+          }
+        />
+
+        <Section title="Liste">
+          <div className="flex gap-3 mb-4">
+            <input placeholder="Rechercher..." value={filter.search}
+              onChange={e => setFilter({ ...filter, search: e.target.value })}
+              onKeyDown={e => e.key === 'Enter' && loadData()}
+              className="input-modern w-64" />
+            <select value={filter.team_id} onChange={e => setFilter({ ...filter, team_id: e.target.value })} className="select-modern w-auto">
+              <option value="">Toutes les équipes</option>
+              {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
           </div>
-          <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-            + Nouveau collaborateur
-          </button>
-        </div>
 
-        {/* Filtres */}
-        <div className="flex gap-3 mb-4">
-          <input placeholder="Rechercher..." value={filter.search}
-            onChange={e => setFilter({ ...filter, search: e.target.value })}
-            onKeyDown={e => e.key === 'Enter' && loadData()}
-            className="input-modern w-64" />
-          <select value={filter.team_id} onChange={e => setFilter({ ...filter, team_id: e.target.value })} className="select-modern w-auto">
-            <option value="">Toutes les équipes</option>
-            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </div>
-
-        {/* Table */}
-        <DataTable
+          <DataTable
           columns={[
             { key: 'name', label: 'Collaborateur', sortable: true, render: (emp) => (
               <div className="flex items-center gap-3">
@@ -241,12 +241,13 @@ export default function Employees() {
             { key: 'weekly_hours', label: 'Heures/sem', render: (emp) => `${emp.weekly_hours || 35}h` },
             { key: 'is_active', label: 'Statut', render: (emp) => <StatusBadge status={emp.is_active !== false ? 'active' : 'inactive'} size="sm" /> },
           ]}
-          data={employees}
-          loading={false}
-          onRowClick={openDetail}
-          emptyIcon={Users}
-          emptyMessage="Aucun collaborateur"
-        />
+            data={employees}
+            loading={false}
+            onRowClick={openDetail}
+            emptyIcon={Users}
+            emptyMessage="Aucun collaborateur"
+          />
+        </Section>
 
         {/* Detail Panel */}
         {selected && (

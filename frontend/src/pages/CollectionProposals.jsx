@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Sparkles } from 'lucide-react';
 import Layout from '../components/Layout';
-import { Modal } from '../components';
+import { Modal, PageHeader, Section } from '../components';
 import api from '../services/api';
 
 export default function CollectionProposals() {
@@ -80,27 +81,28 @@ export default function CollectionProposals() {
 
   return (
     <Layout>
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Propositions de collecte</h1>
-            <p className="text-gray-500">Prédictions journalières et hebdomadaires — météo, trafic, apprentissage continu</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setView('daily')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'daily' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'}`}
-            >
-              Jour
-            </button>
-            <button
-              onClick={() => setView('weekly')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'weekly' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'}`}
-            >
-              Semaine
-            </button>
-          </div>
-        </div>
+      <div className="p-6 space-y-6">
+        <PageHeader
+          title="Propositions de collecte"
+          subtitle="Prédictions journalières et hebdomadaires — météo, trafic, apprentissage continu"
+          icon={Sparkles}
+          actions={
+            <div className="flex gap-2">
+              <button
+                onClick={() => setView('daily')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'daily' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                Jour
+              </button>
+              <button
+                onClick={() => setView('weekly')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium ${view === 'weekly' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                Semaine
+              </button>
+            </div>
+          }
+        />
 
         {view === 'daily' && (
           <div className="mb-4 flex items-center gap-4">

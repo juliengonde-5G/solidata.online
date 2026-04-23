@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Factory } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, PageHeader } from '../components';
 import api from '../services/api';
 import DiagrammeFluxTri from '../components/DiagrammeFluxTri';
 
@@ -60,32 +60,33 @@ export default function ChaineTri() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Chaînes de tri</h1>
-            <p className="text-gray-500">Flux de tri, postes de travail et débouchés</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setVue('diagramme')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'diagramme' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
-            >
-              Diagramme des flux
-            </button>
-            <button
-              onClick={() => setVue('chaines')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'chaines' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
-            >
-              Chaînes & catégories
-            </button>
-            <button
-              onClick={() => setVue('production')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'production' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
-            >
-              Production & Effectifs
-            </button>
-          </div>
-        </div>
+        <PageHeader
+          title="Chaînes de tri"
+          subtitle="Flux de tri, postes de travail et débouchés"
+          icon={Factory}
+          actions={
+            <div className="flex gap-2">
+              <button
+                onClick={() => setVue('diagramme')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'diagramme' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                Diagramme des flux
+              </button>
+              <button
+                onClick={() => setVue('chaines')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'chaines' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                Chaînes & catégories
+              </button>
+              <button
+                onClick={() => setVue('production')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'production' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                Production & Effectifs
+              </button>
+            </div>
+          }
+        />
 
         {/* Diagramme des flux (mapping Chaîne Qualité + Recyclage Exclusif) */}
         {vue === 'diagramme' && (

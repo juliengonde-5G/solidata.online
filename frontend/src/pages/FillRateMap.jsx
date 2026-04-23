@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { MapPin } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, Cell } from 'recharts';
@@ -84,15 +85,16 @@ export default function FillRateMap() {
     <Layout>
       <div className="p-6 space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Taux de remplissage CAV</h1>
-            <p className="text-gray-500 text-sm">Estimation en temps réel et prévisions</p>
-          </div>
-          <button onClick={loadData} className="btn-primary text-sm">
-            Actualiser
-          </button>
-        </div>
+        <PageHeader
+          title="Taux de remplissage CAV"
+          subtitle="Estimation en temps réel et prévisions"
+          icon={MapPin}
+          actions={
+            <button onClick={loadData} className="btn-primary text-sm">
+              Actualiser
+            </button>
+          }
+        />
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

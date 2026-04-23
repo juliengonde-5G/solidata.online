@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader, Section } from '../components';
 import api from '../services/api';
 
 // ─── Helpers date ────────────────────────────────────────────
@@ -191,45 +191,41 @@ export default function PlanningTournees() {
         onDragEnd={() => setDragTarget(null)}
       >
         {/* Header + date picker */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 rounded-lg bg-emerald-50">
-              <Calendar className="w-5 h-5 text-emerald-700" />
+        <PageHeader
+          title="Planning tournées"
+          subtitle={formatHuman(date)}
+          icon={Calendar}
+          actions={
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setDate(shiftDays(date, -1))}
+                className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+                aria-label="Jour précédent"
+              >
+                <ChevronLeft className="w-4 h-4 text-slate-600" />
+              </button>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700"
+              />
+              <button
+                onClick={() => setDate(shiftDays(date, 1))}
+                className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+                aria-label="Jour suivant"
+              >
+                <ChevronRight className="w-4 h-4 text-slate-600" />
+              </button>
+              <button
+                onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+                className="ml-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Aujourd'hui
+              </button>
             </div>
-            <div>
-              <h1 className="text-xl md:text-2xl font-bold text-slate-800">Planning tournées</h1>
-              <p className="text-xs text-slate-500 capitalize">{formatHuman(date)}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setDate(shiftDays(date, -1))}
-              className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
-              aria-label="Jour précédent"
-            >
-              <ChevronLeft className="w-4 h-4 text-slate-600" />
-            </button>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700"
-            />
-            <button
-              onClick={() => setDate(shiftDays(date, 1))}
-              className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
-              aria-label="Jour suivant"
-            >
-              <ChevronRight className="w-4 h-4 text-slate-600" />
-            </button>
-            <button
-              onClick={() => setDate(new Date().toISOString().slice(0, 10))}
-              className="ml-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50"
-            >
-              Aujourd'hui
-            </button>
-          </div>
-        </div>
+          }
+        />
 
         {/* Grid : resources pool + tours */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">

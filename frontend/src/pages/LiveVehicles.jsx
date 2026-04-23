@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
@@ -317,10 +317,11 @@ export default function LiveVehicles() {
     return (
       <Layout>
         <div className="p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Truck className="w-6 h-6 text-slate-500" />
-            <h1 className="text-2xl font-bold text-slate-800">Suivi des collectes en cours</h1>
-          </div>
+          <PageHeader
+            title="Suivi des collectes en cours"
+            subtitle="Tournées actives en temps réel"
+            icon={Truck}
+          />
           <div className="card-modern p-12 text-center">
             <CircleDashed className="w-12 h-12 text-slate-300 mx-auto mb-3" />
             <p className="text-slate-500">Aucune tournée en cours pour le moment.</p>
@@ -343,46 +344,37 @@ export default function LiveVehicles() {
     <Layout>
       <div className="p-4 md:p-6 space-y-4">
         {/* Top bar : sélection véhicule/tournée */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 rounded-lg bg-emerald-50">
-              <MapPin className="w-5 h-5 text-emerald-700" />
+        <PageHeader
+          title="Suivi des collectes en cours"
+          subtitle={`${activeTours.length} tournée${activeTours.length > 1 ? 's' : ''} active${activeTours.length > 1 ? 's' : ''} · temps réel via GPS`}
+          icon={MapPin}
+          actions={
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={requestReoptimization}
+                disabled={!!pendingReopt}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={pendingReopt ? 'Une proposition est déjà en attente' : 'Proposer une ré-optimisation'}
+              >
+                <Shuffle className="w-4 h-4" />
+                Ré-optimiser
+              </button>
+              <label className="text-xs font-medium text-slate-500">Tournée</label>
+              <select
+                value={selectedTourId || ''}
+                onChange={(e) => setSelectedTourId(parseInt(e.target.value, 10))}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {activeTours.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.registration || `Tournée #${t.id}`} — {t.driver_name || 'sans chauffeur'}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="min-w-0">
-              <h1 className="text-xl md:text-2xl font-bold text-slate-800">Suivi des collectes en cours</h1>
-              <p className="text-xs text-slate-500">
-                {activeTours.length} tournée{activeTours.length > 1 ? 's' : ''} active{activeTours.length > 1 ? 's' : ''}
-                {' '}· temps réel via GPS
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-2 align-middle" />
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={requestReoptimization}
-              disabled={!!pendingReopt}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={pendingReopt ? 'Une proposition est déjà en attente' : 'Proposer une ré-optimisation'}
-            >
-              <Shuffle className="w-4 h-4" />
-              Ré-optimiser
-            </button>
-            <label className="text-xs font-medium text-slate-500">Tournée</label>
-            <select
-              value={selectedTourId || ''}
-              onChange={(e) => setSelectedTourId(parseInt(e.target.value, 10))}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              {activeTours.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.registration || `Tournée #${t.id}`} — {t.driver_name || 'sans chauffeur'}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+          }
+        />
 
         {/* Proposition de ré-optimisation en attente */}
         {pendingReopt && (

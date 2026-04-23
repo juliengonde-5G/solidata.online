@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, BarChart3, Calculator, CircleDollarSign, Euro, Factory,
   Landmark, Scale, ShieldCheck, Target, TrendingDown, TrendingUp, Truck, Upload,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner, EmptyState } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, Section, ModuleCard } from '../components';
 import {
   ComposedChart, Bar, Line, LineChart, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -38,26 +37,16 @@ const fmtPct = (v) => {
 };
 
 const SUB_PAGES = [
-  { path: '/pennylane', label: 'Pennylane', description: 'Synchroniser GL, transactions, balances', icon: Upload, color: 'blue' },
-  { path: '/finance/operations', label: 'Donnees Operationnelles', description: 'Volumes, couts, marges par centre', icon: Calculator, color: 'emerald' },
-  { path: '/finance/rentabilite', label: 'Rentabilite Matiere', description: 'Cout complet collecte / tri, PV moyen, marge par qualite', icon: TrendingUp, color: 'teal' },
-  { path: '/finance/tresorerie', label: 'Tresorerie', description: 'Position, encaissements, decaissements', icon: Landmark, color: 'teal' },
-  { path: '/finance/pl', label: 'Compte de Resultat', description: 'P&L par centre analytique', icon: BarChart3, color: 'amber' },
-  { path: '/finance/bilan', label: 'Bilan & Ratios', description: 'Actif, passif, SIG, seuil de rentabilite', icon: Scale, color: 'purple' },
-  { path: '/finance/controles', label: 'Controles', description: 'Verifications automatiques', icon: ShieldCheck, color: 'rose' },
+  { path: '/pennylane', title: 'Pennylane', description: 'Synchroniser GL, transactions, balances', icon: Upload, color: 'blue' },
+  { path: '/finance/operations', title: 'Donnees Operationnelles', description: 'Volumes, couts, marges par centre', icon: Calculator, color: 'emerald' },
+  { path: '/finance/rentabilite', title: 'Rentabilite Matiere', description: 'Cout complet collecte / tri, PV moyen, marge par qualite', icon: TrendingUp, color: 'teal' },
+  { path: '/finance/tresorerie', title: 'Tresorerie', description: 'Position, encaissements, decaissements', icon: Landmark, color: 'teal' },
+  { path: '/finance/pl', title: 'Compte de Resultat', description: 'P&L par centre analytique', icon: BarChart3, color: 'amber' },
+  { path: '/finance/bilan', title: 'Bilan & Ratios', description: 'Actif, passif, SIG, seuil de rentabilite', icon: Scale, color: 'purple' },
+  { path: '/finance/controles', title: 'Controles', description: 'Verifications automatiques', icon: ShieldCheck, color: 'red' },
 ];
 
-const COLOR_MAP = {
-  blue: 'bg-blue-50 text-blue-600 border-blue-200',
-  emerald: 'bg-emerald-50 text-emerald-600 border-emerald-200',
-  teal: 'bg-teal-50 text-teal-600 border-teal-200',
-  amber: 'bg-amber-50 text-amber-600 border-amber-200',
-  purple: 'bg-purple-50 text-purple-600 border-purple-200',
-  rose: 'bg-rose-50 text-rose-600 border-rose-200',
-};
-
 export default function Finance() {
-  const navigate = useNavigate();
   const [year, setYear] = useState(new Date().getFullYear());
   const [kpis, setKpis] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -102,7 +91,7 @@ export default function Finance() {
       <div className="space-y-6">
         <PageHeader
           title="Finance"
-          subtitle="Synthese dirigeant"
+          subtitle="Synthèse dirigeant"
           icon={CircleDollarSign}
           breadcrumb={[{ label: 'Accueil', path: '/' }, { label: 'Finance' }]}
           actions={
@@ -143,29 +132,28 @@ export default function Finance() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <KPICard title="CA YTD" value={fmtK(kpis?.ca_ytd)} unit="EUR" icon={Euro} accent="primary" loading={loading} />
+          <KPICard title="CA YTD" value={fmtK(kpis?.ca_ytd)} unit="EUR" icon={Euro} accent="emerald" loading={loading} />
           <KPICard title="Charges YTD" value={fmtK(kpis?.charges_ytd)} unit="EUR" icon={TrendingDown} accent="red" loading={loading} />
-          <KPICard title="Resultat" value={fmtK(kpis?.resultat)} unit="EUR" icon={BarChart3} accent="emerald" loading={loading}
+          <KPICard title="Résultat" value={fmtK(kpis?.resultat)} unit="EUR" icon={BarChart3} accent="emerald" loading={loading}
             trend={kpis?.resultat_trend ? { direction: kpis.resultat_trend > 0 ? 'up' : 'down', value: Math.abs(kpis.resultat_trend) } : undefined}
           />
-          <KPICard title="Tresorerie" value={fmtK(kpis?.tresorerie)} unit="EUR" icon={Landmark} accent="primary" loading={loading} />
+          <KPICard title="Trésorerie" value={fmtK(kpis?.tresorerie)} unit="EUR" icon={Landmark} accent="primary" loading={loading} />
           <KPICard title="BFR" value={fmtK(kpis?.bfr)} unit="EUR" icon={Calculator} accent="amber" loading={loading} />
-          <KPICard title="Cout / tonne collecte" value={fmt(kpis?.cout_tonne_collecte)} unit="EUR/t" icon={Truck} accent="slate" loading={loading} />
-          <KPICard title="Cout / tonne trie" value={fmt(kpis?.cout_tonne_trie)} unit="EUR/t" icon={Factory} accent="slate" loading={loading} />
+          <KPICard title="Coût / tonne collecte" value={fmt(kpis?.cout_tonne_collecte)} unit="EUR/t" icon={Truck} accent="slate" loading={loading} />
+          <KPICard title="Coût / tonne trié" value={fmt(kpis?.cout_tonne_trie)} unit="EUR/t" icon={Factory} accent="slate" loading={loading} />
           <KPICard title="Marge globale" value={fmtPct(kpis?.marge_globale)} icon={TrendingUp} accent="emerald" loading={loading}
             trend={kpis?.marge_trend ? { direction: kpis.marge_trend > 0 ? 'up' : 'down', value: Math.abs(kpis.marge_trend) } : undefined}
           />
         </div>
 
-        {/* Budget — Niveau 1 / Niveau 2 */}
-        <div>
-          <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">Budget {year}</h2>
+        {/* Budget */}
+        <Section title={`Budget ${year}`} icon={Target}>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
             <KPICard title="Budget Produits" value={fmtK(kpis?.budget_produits_annuel)} unit="EUR" icon={Target} accent="emerald" loading={loading} />
             <KPICard title="Budget Charges" value={fmtK(kpis?.budget_charges_annuel)} unit="EUR" icon={Target} accent="red" loading={loading} />
-            <KPICard title="Resultat budgete" value={fmtK(kpis?.budget_resultat_annuel)} unit="EUR" icon={Target} accent="primary" loading={loading} />
+            <KPICard title="Résultat budgété" value={fmtK(kpis?.budget_resultat_annuel)} unit="EUR" icon={Target} accent="primary" loading={loading} />
             <KPICard
-              title="Ecart CA vs budget YTD"
+              title="Écart CA vs budget YTD"
               value={fmtK(kpis?.ecart_produits_ytd)}
               unit="EUR"
               icon={kpis?.ecart_produits_ytd >= 0 ? TrendingUp : TrendingDown}
@@ -180,13 +168,11 @@ export default function Finance() {
               loading={loading}
             />
           </div>
-        </div>
+        </Section>
 
         {/* Graphiques */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* CA + Resultat mensuel */}
-          <div className="card-modern p-6">
-            <h3 className="text-base font-semibold text-slate-800 mb-4">CA et Resultat mensuel</h3>
+          <Section title="CA et Résultat mensuel" icon={BarChart3}>
             {loading ? (
               <div className="flex items-center justify-center h-64"><LoadingSpinner /></div>
             ) : (
@@ -213,11 +199,9 @@ export default function Finance() {
                 </ComposedChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </Section>
 
-          {/* Evolution Tresorerie */}
-          <div className="card-modern p-6">
-            <h3 className="text-base font-semibold text-slate-800 mb-4">Evolution de la tresorerie</h3>
+          <Section title="Évolution de la trésorerie" icon={Landmark}>
             {loading ? (
               <div className="flex items-center justify-center h-64"><LoadingSpinner /></div>
             ) : (
@@ -234,39 +218,19 @@ export default function Finance() {
                 </LineChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </Section>
         </div>
 
         {/* Liens sous-pages */}
         <div>
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">Modules Finance</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-4 tracking-tight">Modules Finance</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {SUB_PAGES.map((page) => {
-              const Icon = page.icon;
-              const colors = COLOR_MAP[page.color];
-              return (
-                <button
-                  key={page.path}
-                  onClick={() => navigate(page.path)}
-                  className="card-modern p-5 text-left group hover:shadow-md transition-all"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <span className={`w-10 h-10 rounded-xl flex items-center justify-center ${colors.split(' ').slice(0, 2).join(' ')}`}>
-                      <Icon className={`w-5 h-5 ${colors.split(' ')[1]}`} />
-                    </span>
-                    <svg className="w-5 h-5 text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                  <h3 className="font-semibold text-slate-800 mb-1">{page.label}</h3>
-                  <p className="text-xs text-slate-500">{page.description}</p>
-                </button>
-              );
-            })}
+            {SUB_PAGES.map((page) => (
+              <ModuleCard key={page.path} {...page} />
+            ))}
           </div>
         </div>
       </div>
     </Layout>
   );
 }
-

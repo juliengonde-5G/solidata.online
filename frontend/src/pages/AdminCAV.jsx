@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Package } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal } from '../components';
+import { LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -257,31 +258,32 @@ export default function AdminCAV() {
         )}
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Gestion des CAV</h1>
-            <p className="text-gray-500">Conteneurs d'Apport Volontaire — {cavList.length} enregistré(s)</p>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {cavWithoutQR > 0 && (
-              <button onClick={generateMissingQR} disabled={qrGenerating}
-                className="border border-amber-300 bg-amber-50 text-amber-700 rounded-lg px-4 py-2 text-sm hover:bg-amber-100 disabled:opacity-50">
-                {qrGenerating ? 'Génération...' : `Générer ${cavWithoutQR} QR manquant(s)`}
+        <PageHeader
+          title="Gestion des CAV"
+          subtitle={`Conteneurs d'Apport Volontaire — ${cavList.length} enregistré(s)`}
+          icon={Package}
+          actions={
+            <div className="flex gap-2 flex-wrap">
+              {cavWithoutQR > 0 && (
+                <button onClick={generateMissingQR} disabled={qrGenerating}
+                  className="border border-amber-300 bg-amber-50 text-amber-700 rounded-lg px-4 py-2 text-sm hover:bg-amber-100 disabled:opacity-50">
+                  {qrGenerating ? 'Génération...' : `Générer ${cavWithoutQR} QR manquant(s)`}
+                </button>
+              )}
+              <button onClick={() => downloadSheet('A7')} disabled={!!sheetDownloading}
+                className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
+                {sheetDownloading === 'A7' ? 'Génération...' : 'Planche QR (A7)'}
               </button>
-            )}
-            <button onClick={() => downloadSheet('A7')} disabled={!!sheetDownloading}
-              className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
-              {sheetDownloading === 'A7' ? 'Génération...' : 'Planche QR (A7)'}
-            </button>
-            <button onClick={() => downloadSheet('A8')} disabled={!!sheetDownloading}
-              className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
-              {sheetDownloading === 'A8' ? 'Génération...' : 'Planche QR (A8)'}
-            </button>
-            <button onClick={openCreate} className="btn-primary text-sm">
-              + Nouveau CAV
-            </button>
-          </div>
-        </div>
+              <button onClick={() => downloadSheet('A8')} disabled={!!sheetDownloading}
+                className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
+                {sheetDownloading === 'A8' ? 'Génération...' : 'Planche QR (A8)'}
+              </button>
+              <button onClick={openCreate} className="btn-primary text-sm">
+                + Nouveau CAV
+              </button>
+            </div>
+          }
+        />
 
         {/* Filters */}
         <div className="flex gap-3 mb-4">

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Inbox, Briefcase, Award, FileText } from 'lucide-react';
+import { Users, Inbox, Briefcase, Award, FileText, Upload, X, Trash2, Pencil } from 'lucide-react';
 import Layout from '../components/Layout';
-import { Modal, KanbanBoard } from '../components';
+import { Modal, KanbanBoard, StatusBadge } from '../components';
 import api from '../services/api';
 
 const STATUSES = ['received', 'interview', 'hired', 'rejected'];
@@ -338,34 +338,49 @@ export default function Candidates() {
 
   // Rendu d'une carte candidat (format ticket)
   const renderCandidateCard = (c) => (
-    <div>
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <span className="text-[10px] font-mono font-semibold text-slate-400 uppercase">
-          #{String(c.id).padStart(4, '0')}
+    <div className="space-y-2.5">
+      <div className="flex items-start gap-2.5">
+        <span className="w-9 h-9 rounded-full bg-gradient-to-br from-teal-100 to-teal-200 flex items-center justify-center text-xs font-bold text-teal-800 flex-shrink-0 ring-1 ring-teal-200/60">
+          {(c.first_name?.[0] || '?').toUpperCase()}{(c.last_name?.[0] || '').toUpperCase()}
         </span>
-        <div className="flex items-center gap-1">
-          {c.cv_file_path && <FileText className="w-3.5 h-3.5 text-emerald-500" />}
-          {(c.pcm_completed || c.pcm_type) && <Award className="w-3.5 h-3.5 text-purple-500" />}
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-sm text-slate-800 leading-tight truncate">
+            {c.first_name || '?'} {c.last_name || '?'}
+          </p>
+          {(c.position_title || c.email) && (
+            <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+              {c.position_title || c.email}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {c.cv_file_path && (
+            <span className="p-1 rounded bg-emerald-50" title="CV disponible">
+              <FileText className="w-3 h-3 text-emerald-600" />
+            </span>
+          )}
+          {(c.pcm_completed || c.pcm_type) && (
+            <span className="p-1 rounded bg-purple-50" title="PCM realise">
+              <Award className="w-3 h-3 text-purple-600" />
+            </span>
+          )}
         </div>
       </div>
-      <p className="font-medium text-sm text-slate-800 leading-tight line-clamp-2">
-        {c.first_name || '?'} {c.last_name || '?'}
-      </p>
-      {(c.position_title || c.email) && (
-        <p className="text-[11px] text-slate-500 mt-1 truncate">
-          {c.position_title || c.email}
-        </p>
-      )}
-      <div className="flex items-center justify-between mt-3">
-        <div className="flex items-center gap-1.5">
-          <span className="w-6 h-6 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center text-[10px] font-semibold text-slate-600">
-            {(c.first_name?.[0] || '?')}{(c.last_name?.[0] || '')}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-1 justify-end">
-          {c.has_permis_b && <Tag text="B" c="blue" />}
+      {(c.has_permis_b || c.has_caces) && (
+        <div className="flex flex-wrap gap-1">
+          {c.has_permis_b && <Tag text="Permis B" c="teal" />}
           {c.has_caces && <Tag text="CACES" c="purple" />}
         </div>
+      )}
+      <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+        <span className="text-[10px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
+          #{String(c.id).padStart(4, '0')}
+        </span>
+        {c.created_at && (
+          <span className="text-[10px] text-slate-400">
+            {new Date(c.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -377,10 +392,17 @@ export default function Candidates() {
         subtitle="Pipeline des candidatures"
         headerActions={
           <>
-            <button onClick={() => setShowPositionModal(true)} className="text-sm border border-slate-200 bg-white text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-50 transition">
+            <button
+              onClick={() => setShowPositionModal(true)}
+              className="inline-flex items-center gap-2 text-sm font-semibold border border-slate-200 bg-white text-slate-700 px-3.5 py-2 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition"
+            >
+              <Briefcase className="w-4 h-4" />
               Postes ({positions.length})
             </button>
-            <button onClick={() => setShowAddModal(true)} className="btn-primary text-sm">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="inline-flex items-center gap-2 text-sm font-semibold bg-primary text-white px-3.5 py-2 rounded-xl hover:bg-primary-dark shadow-sm transition"
+            >
               + Candidat
             </button>
           </>
@@ -528,8 +550,15 @@ export default function Candidates() {
 // ══════════════════════════════════════════
 
 function Tag({ text, c }) {
-  const m = { blue: 'bg-blue-50 text-blue-600', purple: 'bg-purple-50 text-purple-600', green: 'bg-green-50 text-green-600', gray: 'bg-gray-100 text-gray-600', orange: 'bg-orange-50 text-orange-600' };
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${m[c] || m.gray}`}>{text}</span>;
+  const m = {
+    teal: 'bg-teal-50 text-teal-700 ring-1 ring-teal-100',
+    blue: 'bg-blue-50 text-blue-700 ring-1 ring-blue-100',
+    purple: 'bg-purple-50 text-purple-700 ring-1 ring-purple-100',
+    green: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100',
+    orange: 'bg-amber-50 text-amber-700 ring-1 ring-amber-100',
+    gray: 'bg-slate-100 text-slate-600',
+  };
+  return <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${m[c] || m.gray}`}>{text}</span>;
 }
 
 function InfoView({ s, skills, positions, onMove, onConvert }) {
@@ -741,42 +770,42 @@ function InterviewFormView({ candidateId, data, onSaved }) {
             Evaluation : {data.evaluation_globale}
           </div>
         )}
-        <Section title="I. Présentation">
+        <FormSection title="I. Présentation">
           <Field l="Présentation en quelques mots" v={data.presentation_mots} />
           <Field l="Parcours professionnel" v={data.parcours_professionnel} />
           <Field l="Expériences marquantes" v={data.experiences_marquantes} />
-        </Section>
-        <Section title="II. Situation actuelle">
+        </FormSection>
+        <FormSection title="II. Situation actuelle">
           <Field l="Situation" v={{ reconversion: 'En reconversion', retour_emploi: 'En recherche de retour à l\'emploi', autre: data.situation_actuelle_autre || 'Autre' }[data.situation_actuelle]} />
           <Field l="Durée sans emploi" v={{ moins_6_mois: 'Moins de 6 mois', '6_mois_1_an': 'Entre 6 mois et un an', plus_1_an: 'Plus d\'un an' }[data.duree_sans_emploi]} />
           {data.difficultes_recherche?.length > 0 && <Field l="Difficultés de recherche" v={data.difficultes_recherche.join(', ')} />}
-        </Section>
-        <Section title="III. Freins à l'emploi">
+        </FormSection>
+        <FormSection title="III. Freins à l'emploi">
           {data.freins_emploi?.length > 0 && <Field l="Freins" v={data.freins_emploi.join(', ')} />}
           <Field l="Contraintes horaires" v={{ oui: 'Oui', certainement: 'Certainement à l\'avenir', non: 'Non' }[data.contraintes_horaires]} />
           {data.structure_accompagnement?.length > 0 && <Field l="Structure d'accompagnement" v={data.structure_accompagnement.join(', ')} />}
-        </Section>
-        <Section title="IV. Motivation">
+        </FormSection>
+        <FormSection title="IV. Motivation">
           <Field l="Motivation à intégrer le chantier" v={data.motivation_integration} />
           <Field l="Motivation de reprise" v={data.motivation_reprise} />
           {data.attentes?.length > 0 && <Field l="Attentes" v={data.attentes.join(', ')} />}
-        </Section>
-        <Section title="V. Compétences et savoir-être">
+        </FormSection>
+        <FormSection title="V. Compétences et savoir-être">
           {data.experience_activite?.length > 0 && <Field l="Expérience dans l'activité" v={data.experience_activite.join(', ')} />}
           <Field l="Comportement en équipe" v={data.comportement_equipe} />
           <Field l="Réaction aux consignes" v={data.reaction_consigne} />
           <Field l="Travail physique" v={{ oui: 'Oui', non: 'Non', ne_sais_pas: 'Ne sais pas' }[data.travail_physique]} />
-        </Section>
-        <Section title="VI. Organisation">
+        </FormSection>
+        <FormSection title="VI. Organisation">
           <Field l="Disponibilité horaires" v={{ oui: 'Oui', non: 'Non', autre: data.disponibilite_autre || 'Autre' }[data.disponibilite_horaires]} />
           <Field l="Organisation ponctualité" v={data.organisation_ponctualite} />
-        </Section>
-        <Section title="VII. Projet professionnel">
+        </FormSection>
+        <FormSection title="VII. Projet professionnel">
           <Field l="Idée de métier" v={{ oui: 'Oui', non: 'Non', autre: data.idee_metier_detail || 'Autre' }[data.idee_metier]} />
           <Field l="Amélioration souhaitée" v={data.amelioration_souhaitee} />
           <Field l="Question ouverte" v={data.question_ouverte} />
-        </Section>
-        {data.commentaire_evaluateur && <Section title="Commentaire évaluateur"><p className="text-gray-700">{data.commentaire_evaluateur}</p></Section>}
+        </FormSection>
+        {data.commentaire_evaluateur && <FormSection title="Commentaire évaluateur"><p className="text-gray-700">{data.commentaire_evaluateur}</p></FormSection>}
       </div>
     );
   }
@@ -784,13 +813,13 @@ function InterviewFormView({ candidateId, data, onSaved }) {
   return (
     <div className="space-y-4 text-sm">
       <h3 className="font-bold text-base">Trame d'entretien de recrutement</h3>
-      <Section title="I. Questions de présentation">
+      <FormSection title="I. Questions de présentation">
         <TA l="Pouvez-vous vous présenter en quelques mots ?" v={form.presentation_mots || ''} o={v => u('presentation_mots', v)} />
         <TA l="Parcours professionnel ?" v={form.parcours_professionnel || ''} o={v => u('parcours_professionnel', v)} />
         <TA l="Expériences de travail marquantes ?" v={form.experiences_marquantes || ''} o={v => u('experiences_marquantes', v)} />
-      </Section>
+      </FormSection>
 
-      <Section title="II. Situation actuelle">
+      <FormSection title="II. Situation actuelle">
         <p className="text-xs text-gray-500 mb-1">Que faites-vous actuellement ?</p>
         <div className="flex flex-wrap gap-2 mb-2">
           {[['reconversion', 'En reconversion'], ['retour_emploi', 'Retour à l\'emploi'], ['autre', 'Autre']].map(([k, l]) => (
@@ -810,9 +839,9 @@ function InterviewFormView({ candidateId, data, onSaved }) {
             <CB key={d} label={d} checked={(form.difficultes_recherche || []).includes(d)} onChange={() => toggleArr('difficultes_recherche', d)} multi />
           ))}
         </div>
-      </Section>
+      </FormSection>
 
-      <Section title="III. Freins à l'emploi">
+      <FormSection title="III. Freins à l'emploi">
         <p className="text-xs text-gray-500 mb-1">Difficultés particulières</p>
         <div className="flex flex-wrap gap-2 mb-2">
           {['Transport', 'Santé', 'Logement', 'Administratif', 'Langue'].map(f => (
@@ -833,9 +862,9 @@ function InterviewFormView({ candidateId, data, onSaved }) {
             <CB key={s} label={s} checked={(form.structure_accompagnement || []).includes(s)} onChange={() => toggleArr('structure_accompagnement', s)} multi />
           ))}
         </div>
-      </Section>
+      </FormSection>
 
-      <Section title="IV. Motivation">
+      <FormSection title="IV. Motivation">
         <TA l="Pourquoi intégrer ce chantier d'insertion ?" v={form.motivation_integration || ''} o={v => u('motivation_integration', v)} />
         <TA l="Motivation à reprendre une activité ?" v={form.motivation_reprise || ''} o={v => u('motivation_reprise', v)} />
         <p className="text-xs text-gray-500 mt-2 mb-1">Attentes</p>
@@ -844,9 +873,9 @@ function InterviewFormView({ candidateId, data, onSaved }) {
             <CB key={a} label={a} checked={(form.attentes || []).includes(a)} onChange={() => toggleArr('attentes', a)} multi />
           ))}
         </div>
-      </Section>
+      </FormSection>
 
-      <Section title="V. Compétences et savoir-être">
+      <FormSection title="V. Compétences et savoir-être">
         <p className="text-xs text-gray-500 mb-1">Expérience dans ce type d'activité ?</p>
         <div className="flex flex-wrap gap-2 mb-2">
           {['Bâtiment', 'Espaces verts', 'Nettoyage', 'Recyclerie'].map(a => (
@@ -861,9 +890,9 @@ function InterviewFormView({ candidateId, data, onSaved }) {
             <CB key={k} label={l} checked={form.travail_physique === k} onChange={() => u('travail_physique', k)} />
           ))}
         </div>
-      </Section>
+      </FormSection>
 
-      <Section title="VI. Organisation et engagement">
+      <FormSection title="VI. Organisation et engagement">
         <p className="text-xs text-gray-500 mb-1">Disponible aux horaires proposés ?</p>
         <div className="flex flex-wrap gap-2 mb-2">
           {[['oui', 'Oui'], ['non', 'Non'], ['autre', 'Autre']].map(([k, l]) => (
@@ -872,9 +901,9 @@ function InterviewFormView({ candidateId, data, onSaved }) {
         </div>
         {form.disponibilite_horaires === 'autre' && <EF l="Précisez" v={form.disponibilite_autre || ''} o={v => u('disponibilite_autre', v)} />}
         <TA l="Comment vous organisez-vous pour être ponctuel ?" v={form.organisation_ponctualite || ''} o={v => u('organisation_ponctualite', v)} />
-      </Section>
+      </FormSection>
 
-      <Section title="VII. Projet professionnel">
+      <FormSection title="VII. Projet professionnel">
         <p className="text-xs text-gray-500 mb-1">Idée de métier ?</p>
         <div className="flex flex-wrap gap-2 mb-2">
           {[['oui', 'Oui'], ['non', 'Non'], ['autre', 'Autre']].map(([k, l]) => (
@@ -884,16 +913,16 @@ function InterviewFormView({ candidateId, data, onSaved }) {
         {(form.idee_metier === 'oui' || form.idee_metier === 'autre') && <EF l="Précisez" v={form.idee_metier_detail || ''} o={v => u('idee_metier_detail', v)} />}
         <TA l="Qu'aimeriez-vous améliorer à la fin du chantier ?" v={form.amelioration_souhaitee || ''} o={v => u('amelioration_souhaitee', v)} />
         <TA l="Y a-t-il quelque chose d'important dans votre situation ?" v={form.question_ouverte || ''} o={v => u('question_ouverte', v)} />
-      </Section>
+      </FormSection>
 
-      <Section title="Évaluation globale">
+      <FormSection title="Évaluation globale">
         <div className="flex flex-wrap gap-2 mb-3">
           {[['favorable', 'Favorable'], ['reserve', 'Réservé'], ['defavorable', 'Défavorable']].map(([k, l]) => (
             <CB key={k} label={l} checked={form.evaluation_globale === k} onChange={() => u('evaluation_globale', k)} />
           ))}
         </div>
         <TA l="Commentaire de l'évaluateur" v={form.commentaire_evaluateur || ''} o={v => u('commentaire_evaluateur', v)} />
-      </Section>
+      </FormSection>
 
       <div className="flex gap-2 pt-3">
         {data && <button onClick={() => setEditing(false)} className="flex-1 border rounded-lg py-2 text-sm">Annuler</button>}
@@ -1137,8 +1166,13 @@ function DocumentsView({ candidateId, delivered, onDelivered }) {
 // ══════════════════════════════════════════
 // Shared micro-components
 // ══════════════════════════════════════════
-function Section({ title, children }) {
-  return <div className="border-t pt-3"><h4 className="font-semibold text-sm mb-2 text-gray-700">{title}</h4><div className="space-y-2">{children}</div></div>;
+function FormSection({ title, children }) {
+  return (
+    <div className="border-t border-slate-100 pt-3">
+      <h4 className="font-semibold text-sm mb-2 text-slate-700">{title}</h4>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
 }
 
 function CB({ label, checked, onChange, multi }) {

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Package, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function ProduitsFinis() {
