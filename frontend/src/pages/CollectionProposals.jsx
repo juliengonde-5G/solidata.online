@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Sparkles } from 'lucide-react';
 import Layout from '../components/Layout';
-import { Modal, PageHeader, Section } from '../components';
+import { Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function CollectionProposals() {

@@ -41,20 +41,21 @@ export default function Refashion() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Refashion</h1>
-            <p className="text-gray-500">DPAV trimestriel, communes et subventions</p>
-          </div>
-          <div className="flex gap-2">
-            <select value={quarter} onChange={e => setQuarter(e.target.value)} className="input-modern w-auto">
-              {quarters.map(q => <option key={q} value={q}>{q}</option>)}
-            </select>
-            <button onClick={() => setView('dpav')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'dpav' ? 'bg-primary text-white' : 'bg-gray-100'}`}>DPAV</button>
-            <button onClick={() => setView('communes')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'communes' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Communes</button>
-            <button onClick={() => setView('subventions')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'subventions' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Subventions</button>
-          </div>
-        </div>
+        <PageHeader
+          title="Refashion"
+          subtitle="DPAV trimestriel, communes et subventions"
+          icon={Recycle}
+          actions={
+            <>
+              <select value={quarter} onChange={e => setQuarter(e.target.value)} className="input-modern w-auto">
+                {quarters.map(q => <option key={q} value={q}>{q}</option>)}
+              </select>
+              <button onClick={() => setView('dpav')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'dpav' ? 'bg-primary text-white' : 'bg-gray-100'}`}>DPAV</button>
+              <button onClick={() => setView('communes')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'communes' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Communes</button>
+              <button onClick={() => setView('subventions')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'subventions' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Subventions</button>
+            </>
+          }
+        />
 
         {view === 'dpav' && dpav && (
           <div className="space-y-6">

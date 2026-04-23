@@ -76,18 +76,36 @@ export default function TourSummary() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-surface-2)]">
-      <header className="screen-header text-center pb-6">
-        <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center mx-auto mb-4">
+      <header
+        className="text-center text-white"
+        style={{
+          background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%)',
+          padding: 'calc(var(--safe-top) + 32px) 20px 32px',
+        }}
+      >
+        <div
+          className="mx-auto mb-4 flex items-center justify-center"
+          style={{
+            width: 88,
+            height: 88,
+            borderRadius: '50%',
+            background: 'rgba(255,255,255,0.2)',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
+          }}
+        >
           <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h1 className="font-bold text-2xl">Tournée terminée !</h1>
+        <h1 className="font-extrabold text-2xl">Tournée terminée !</h1>
         <p className="text-white/80 text-sm mt-1">Récapitulatif #{tourId}</p>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 pb-6 -mt-2">
-        <div className="bg-white rounded-3xl shadow-[var(--shadow-card)] overflow-hidden">
+        <div
+          className="bg-white overflow-hidden"
+          style={{ borderRadius: 20, boxShadow: '0 2px 10px rgba(15,23,42,0.05)' }}
+        >
           <div className="grid grid-cols-2 gap-px bg-gray-100">
             <StatCard label="CAV collectés" value={`${collected}/${cavs.length}`} icon="📍" />
             <StatCard label="Poids net" value={`${tour?.total_weight_kg || 0} kg`} icon="⚖️" />
@@ -96,11 +114,19 @@ export default function TourSummary() {
           </div>
         </div>
 
-        <div className="card-mobile p-6 mt-4 text-center bg-green-50 border border-green-100">
+        <div
+          className="mt-4 text-center"
+          style={{
+            background: 'linear-gradient(180deg, #F0FDFA 0%, #CCFBF1 100%)',
+            border: '1px solid #99F6E4',
+            borderRadius: 20,
+            padding: 24,
+          }}
+        >
           <p className="text-3xl mb-2">🌿</p>
-          <p className="text-xs text-green-700 uppercase tracking-wider font-medium">Impact environnemental</p>
-          <p className="text-2xl font-bold text-green-800 mt-1">{co2Saved} kg CO₂</p>
-          <p className="text-xs text-green-600 mt-1">équivalent évité grâce à cette collecte</p>
+          <p className="text-xs text-teal-700 uppercase tracking-wider font-bold">Impact environnemental</p>
+          <p className="text-2xl font-extrabold text-teal-900 mt-1">{co2Saved} kg CO₂</p>
+          <p className="text-xs text-teal-700 mt-1">équivalent évité grâce à cette collecte</p>
         </div>
 
         {avgDelay !== null && (
