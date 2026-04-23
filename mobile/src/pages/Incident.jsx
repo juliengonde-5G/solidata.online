@@ -10,21 +10,24 @@ import {
 import { sendIncident, getPendingCount } from '../services/sync';
 
 const INCIDENT_TYPES = [
-  { value: 'vehicle_breakdown', label: 'Panne véhicule', icon: '🚛' },
-  { value: 'accident', label: 'Accident', icon: '💥' },
-  { value: 'cav_problem', label: 'Conteneur / CAV', icon: '📦' },
-  { value: 'environment', label: 'Environnement', icon: '🚫' },
-  { value: 'other', label: 'Autre', icon: '📝' },
+  { value: 'cav_problem',       label: 'CAV dégradée',      sub: 'cassée, tag, dépôt sauvage', icon: '🗑' },
+  { value: 'environment',       label: 'CAV inaccessible',  sub: 'bloquée, fermée, travaux',    icon: '🚧' },
+  { value: 'cav_overflow',      label: 'Débordement',       sub: 'sacs autour, dépôt extérieur', icon: '⚠' },
+  { value: 'vehicle_breakdown', label: 'Problème véhicule', sub: 'panne, hayon, crevaison',     icon: '🚚' },
+  { value: 'security',          label: 'Sécurité',          sub: 'agression, menace, tension',  icon: '🛡' },
+  { value: 'other',             label: 'Autre',             sub: 'à préciser',                  icon: '💬' },
 ];
 const TYPE_LABELS = INCIDENT_TYPES.reduce((acc, t) => { acc[t.value] = t.label; return acc; }, {});
 
 // Phrases prédéfinies par type — couvrent 80% des cas courants et évitent
 // d'imposer une saisie clavier terrain.
 const PRESETS = {
-  vehicle_breakdown: ['Moteur', 'Pneu crevé', 'Freins', 'Batterie', 'Carburant'],
+  vehicle_breakdown: ['Moteur', 'Pneu crevé', 'Freins', 'Batterie', 'Carburant', 'Hayon'],
   accident: ['Tôle froissée', 'Piéton / cycliste', 'Autre véhicule', 'Matériel urbain'],
-  cav_problem: ['Serrure cassée', 'Conteneur endommagé', 'Débordement', 'Accès bloqué'],
-  environment: ['Dépôt sauvage', 'Déchets autour', 'Nuisances / odeurs'],
+  cav_problem: ['Serrure cassée', 'Conteneur endommagé', 'Tag / graffiti', 'Accès bloqué'],
+  cav_overflow: ['Sacs autour', 'Dépôt sauvage', 'Déchets non conformes'],
+  environment: ['Bloquée', 'Travaux', 'Stationnement gênant'],
+  security: ['Agression', 'Menace', 'Tension'],
   other: [],
 };
 

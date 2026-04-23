@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge } from '../components';
-import { MapPin, Coins } from 'lucide-react';
+import { LoadingSpinner, DataTable, StatusBadge, PageHeader } from '../components';
+import { MapPin, Coins, Recycle } from 'lucide-react';
 import api from '../services/api';
 
 export default function Refashion() {

@@ -45,20 +45,21 @@ export default function ReportingMetropole() {
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Reporting Métropole de Rouen</h1>
-            <p className="text-sm text-gray-500">Suivi des indicateurs environnementaux et sociaux</p>
-          </div>
-          <div className="flex gap-2 items-center">
-            <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="input-modern w-auto">
-              {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-            </select>
-            <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="input-modern w-auto">
-              {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-        </div>
+        <PageHeader
+          title="Reporting Métropole de Rouen"
+          subtitle="Suivi des indicateurs environnementaux et sociaux"
+          icon={Building2}
+          actions={
+            <div className="flex gap-2 items-center">
+              <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="input-modern w-auto">
+                {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+              </select>
+              <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="input-modern w-auto">
+                {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          }
+        />
 
         {loading ? (
           <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
@@ -83,8 +84,7 @@ export default function ReportingMetropole() {
 
             {/* Historique mensuel */}
             {d.historique_mensuel?.length > 0 && (
-              <div className="bg-white rounded-xl border p-5">
-                <h3 className="font-semibold mb-4">Évolution mensuelle du tonnage collecté</h3>
+              <Section title="Évolution mensuelle du tonnage collecté" icon={BarChart3}>
                 <div className="flex items-end gap-1 h-48">
                   {d.historique_mensuel.map((h, i) => {
                     const maxKg = Math.max(...d.historique_mensuel.map(x => parseFloat(x.total_kg)));
@@ -99,13 +99,11 @@ export default function ReportingMetropole() {
                     );
                   })}
                 </div>
-              </div>
+              </Section>
             )}
 
             {/* Carte des CAV */}
-            <div className="bg-white rounded-xl border p-5">
-              <h3 className="font-semibold mb-4">Carte des Conteneurs d'Apport Volontaire</h3>
-
+            <Section title="Carte des Conteneurs d'Apport Volontaire" icon={MapIcon}>
               {/* Carte Leaflet */}
               <div className="rounded-lg overflow-hidden border mb-4" style={{ height: '400px' }}>
                 <MapContainer center={[49.4231, 1.0993]} zoom={11} style={{ height: '100%', width: '100%' }}>
@@ -233,7 +231,7 @@ export default function ReportingMetropole() {
                   )}
                 </div>
               </div>
-            </div>
+            </Section>
           </>
         )}
       </div>

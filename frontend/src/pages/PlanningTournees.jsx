@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, PageHeader, Section } from '../components';
+import { LoadingSpinner, PageHeader } from '../components';
 import api from '../services/api';
 
 // ─── Helpers date ────────────────────────────────────────────
