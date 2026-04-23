@@ -108,8 +108,8 @@ export default function ReportingMetropole() {
               <div className="rounded-lg overflow-hidden border mb-4" style={{ height: '400px' }}>
                 <MapContainer center={[49.4231, 1.0993]} zoom={11} style={{ height: '100%', width: '100%' }}>
                   <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                   />
                   {cavList.filter(c => c.latitude && c.longitude).map(c => (
                     <CircleMarker

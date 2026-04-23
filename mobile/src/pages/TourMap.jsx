@@ -368,7 +368,7 @@ export default function TourMap() {
 
       <div className="flex-1 relative">
         <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
 
           {myPosition && (
             <Marker position={[myPosition.lat, myPosition.lng]} icon={myIcon}>
