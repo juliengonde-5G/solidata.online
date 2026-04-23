@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KPICard } from '../components';
+import { LoadingSpinner, KPICard, PageHeader, Section } from '../components';
 import api from '../services/api';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -89,16 +89,11 @@ export default function ReportingRH() {
   return (
     <Layout>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-blue-50">
-            <Users className="w-6 h-6 text-blue-600" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Reporting RH</h1>
-            <p className="text-slate-500 text-sm">Effectifs, recrutement et indicateurs RH</p>
-          </div>
-        </div>
+        <PageHeader
+          title="Reporting RH"
+          subtitle="Effectifs, recrutement et indicateurs RH"
+          icon={Users}
+        />
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -112,8 +107,7 @@ export default function ReportingRH() {
         {/* Charts row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Team bar chart */}
-          <div className="card-modern p-6">
-            <h3 className="font-semibold text-slate-800 mb-4">Effectifs par équipe</h3>
+          <Section title="Effectifs par équipe">
             {teamData.length > 0 ? (
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={teamData} layout="vertical">
@@ -127,11 +121,10 @@ export default function ReportingRH() {
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune équipe</p>
             )}
-          </div>
+          </Section>
 
           {/* Candidate pie chart */}
-          <div className="card-modern p-6">
-            <h3 className="font-semibold text-slate-800 mb-4">Répartition candidatures</h3>
+          <Section title="Répartition candidatures">
             {pieData.length > 0 ? (
               <div>
                 <ResponsiveContainer width="100%" height={200}>
@@ -155,12 +148,11 @@ export default function ReportingRH() {
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune candidature</p>
             )}
-          </div>
+          </Section>
         </div>
 
         {/* Funnel */}
-        <div className="card-modern p-6">
-          <h3 className="font-semibold text-slate-800 mb-4">Entonnoir de recrutement</h3>
+        <Section title="Entonnoir de recrutement">
           {funnelData.length > 0 ? (
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={funnelData}>
@@ -176,15 +168,11 @@ export default function ReportingRH() {
           ) : (
             <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
           )}
-        </div>
+        </Section>
 
         {/* Insertion summary */}
         {insertionStats && (
-          <div className="card-modern p-6">
-            <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Heart className="w-5 h-5 text-rose-500" />
-              Insertion professionnelle
-            </h3>
+          <Section title="Insertion professionnelle" icon={Heart}>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="bg-slate-50 rounded-card p-4 text-center">
                 <p className="text-2xl font-bold text-slate-800">{insertionStats.parcours_actifs}</p>
@@ -203,7 +191,7 @@ export default function ReportingRH() {
                 <p className="text-xs text-slate-500 mt-1">Sorties positives</p>
               </div>
             </div>
-          </div>
+          </Section>
         )}
       </div>
     </Layout>

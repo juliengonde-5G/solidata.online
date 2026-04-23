@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Truck } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal } from '../components';
+import { LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 const LIEUX = {
@@ -205,15 +206,16 @@ export default function ExutoiresPreparation() {
     <Layout>
       <div className="p-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Préparation & Chargement</h1>
-            <p className="text-gray-500 text-sm">Gestion des préparations et chargements</p>
-          </div>
-          <button onClick={openCreate} className="btn-primary text-sm">
-            + Nouvelle préparation
-          </button>
-        </div>
+        <PageHeader
+          title="Préparation & Chargement"
+          subtitle="Gestion des préparations et chargements"
+          icon={Truck}
+          actions={
+            <button onClick={openCreate} className="btn-primary text-sm">
+              + Nouvelle préparation
+            </button>
+          }
+        />
 
         {/* Filters */}
         <div className="card-modern p-4 mb-6">

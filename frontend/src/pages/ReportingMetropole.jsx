@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Building2, Map as MapIcon, BarChart3 } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import { PageHeader, Section } from '../components';
 import 'leaflet/dist/leaflet.css';
 
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];

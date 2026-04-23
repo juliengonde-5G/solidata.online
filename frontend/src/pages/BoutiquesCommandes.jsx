@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ClipboardList, Plus, Send, Edit, Truck, Package, XCircle, CheckCircle } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal, useToast } from '../components';
+import { LoadingSpinner, Modal, useToast, PageHeader } from '../components';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 
@@ -125,20 +125,18 @@ export default function BoutiquesCommandes() {
   return (
     <Layout>
       <div className="p-4 sm:p-6">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-              <ClipboardList className="w-6 h-6 text-pink-600" />
-              Commandes boutiques
-            </h1>
-            <p className="text-slate-500 mt-1 text-sm">Commandes boutique → atelier produits finis (par lot/poids)</p>
-          </div>
-          {canSend && (
-            <button onClick={() => setShowCreate(true)} className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium">
-              <Plus className="w-4 h-4" /> Nouvelle commande
-            </button>
-          )}
-        </div>
+        <PageHeader
+          title="Commandes boutiques"
+          subtitle="Commandes boutique → atelier produits finis (par lot/poids)"
+          icon={ClipboardList}
+          actions={
+            canSend && (
+              <button onClick={() => setShowCreate(true)} className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium">
+                <Plus className="w-4 h-4" /> Nouvelle commande
+              </button>
+            )
+          }
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {COLUMNS.map(col => (

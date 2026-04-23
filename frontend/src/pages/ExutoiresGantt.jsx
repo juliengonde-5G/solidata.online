@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CalendarRange } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader } from '../components';
 import api from '../services/api';
 
 const LIEUX = {
@@ -543,9 +544,10 @@ export default function ExutoiresGantt() {
     <Layout>
       <div className="p-6 max-w-full">
         {/* Header */}
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">
-          Planning Gantt &mdash; Lieux de chargement
-        </h1>
+        <PageHeader
+          title="Planning Gantt — Lieux de chargement"
+          icon={CalendarRange}
+        />
 
         {/* Controls bar */}
         <div className="flex flex-wrap items-center gap-4 mb-6 card-modern p-3">

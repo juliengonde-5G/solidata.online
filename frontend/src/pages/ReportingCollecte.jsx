@@ -106,11 +106,10 @@ export default function ReportingCollecte() {
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
             )}
-          </div>
+          </Section>
 
           {/* Donut tours par statut */}
-          <div className="card-modern p-6">
-            <h3 className="font-semibold text-slate-800 mb-4">Taux de complétion</h3>
+          <Section title="Taux de complétion">
             <div className="flex flex-col items-center">
               <div className="relative">
                 <ResponsiveContainer width={180} height={180}>
@@ -134,13 +133,12 @@ export default function ReportingCollecte() {
                 ))}
               </div>
             </div>
-          </div>
+          </Section>
         </div>
 
         {/* Trend line chart */}
         {chartData.length > 2 && (
-          <div className="card-modern p-6">
-            <h3 className="font-semibold text-slate-800 mb-4">Tendance kg moyen par tour</h3>
+          <Section title="Tendance kg moyen par tour">
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -150,14 +148,11 @@ export default function ReportingCollecte() {
                 <Line type="monotone" dataKey="avg" name="Moy. kg/tour" stroke="#F59E0B" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
-          </div>
+          </Section>
         )}
 
         {/* Table */}
-        <div className="card-modern">
-          <div className="p-4 border-b border-slate-100">
-            <h3 className="font-semibold text-slate-800">Détail par période</h3>
-          </div>
+        <Section title="Détail par période" padded={false}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -194,7 +189,7 @@ export default function ReportingCollecte() {
               )}
             </table>
           </div>
-        </div>
+        </Section>
       </div>
     </Layout>
   );

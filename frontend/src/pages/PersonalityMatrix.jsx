@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { DataTable } from '../components';
+import { DataTable, PageHeader } from '../components';
 import { Brain } from 'lucide-react';
 import api from '../services/api';
 
@@ -226,16 +226,17 @@ export default function PersonalityMatrix() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Matrice PCM</h1>
-            <p className="text-gray-500">Process Communication Model — 6 types de personnalite</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Profils</button>
-            <button onClick={() => setView('types')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'types' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Types PCM</button>
-          </div>
-        </div>
+        <PageHeader
+          title="Matrice PCM"
+          subtitle="Process Communication Model — 6 types de personnalite"
+          icon={Brain}
+          actions={
+            <div className="flex gap-2">
+              <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Profils</button>
+              <button onClick={() => setView('types')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'types' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Types PCM</button>
+            </div>
+          }
+        />
 
         {view === 'list' && (
           <DataTable

@@ -117,8 +117,8 @@ export default function FillLevel() {
         clientId: newClientId(),
         tourId,
         cavId,
-        fillLevel,
-        anomaly,
+        fillLevel: storeLevel,
+        anomaly: effectiveAnomaly,
         notes,
         qrScanned: !tourIsAssociation,
       };
@@ -221,7 +221,7 @@ export default function FillLevel() {
       usageHint="operational_stop"
       footer={
         <PrimaryActionBar
-          primaryLabel="Valider la collecte"
+          primaryLabel="Valider · point suivant"
           onPrimary={submit}
           loading={loading}
           disabled={fillLevel === null}
@@ -231,10 +231,12 @@ export default function FillLevel() {
       }
     >
       <div className="space-y-5">
-        {/* 1. Niveau — gros boutons visuels */}
+        {/* 1. Niveau — grille 3x2 avec CAV iconographique */}
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Niveau</p>
-          <div className="grid grid-cols-5 gap-2">
+          <p className="text-[11px] uppercase tracking-wide text-gray-500 font-bold mb-3">
+            Niveau de remplissage
+          </p>
+          <div className="grid grid-cols-3 gap-2.5">
             {FILL_LEVELS.map(level => {
               const active = fillLevel === level.value;
               return (
@@ -244,24 +246,45 @@ export default function FillLevel() {
                   aria-label={`Remplissage ${level.pct}`}
                   aria-pressed={active}
                   onClick={() => chooseLevel(level.value)}
-                  className={`flex flex-col items-center justify-center rounded-2xl border-2 transition-all min-h-[88px] px-1 ${
-                    active
-                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 shadow-md'
-                      : 'border-gray-200 bg-white'
-                  }`}
+                  className="flex flex-col items-center justify-center gap-1.5 bg-white active:scale-[0.97] transition-all"
+                  style={{
+                    minHeight: 120,
+                    padding: '10px 6px',
+                    borderRadius: 14,
+                    border: active
+                      ? '3px solid var(--color-primary)'
+                      : '2px solid #E2E8F0',
+                    color: active && level.overflow ? '#7F1D1D' : active ? 'var(--color-primary-dark)' : '#334155',
+                    boxShadow: active
+                      ? '0 6px 16px rgba(13,148,136,0.22)'
+                      : 'none',
+                    background: active && level.overflow ? '#FEE2E2' : 'white',
+                  }}
                 >
-                  <span className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${level.color} ${level.fg}`}>
-                    {level.pct === '0%' ? '0' : level.pct === '100%' ? '100' : level.pct.replace('%', '')}
+                  <CAVContainerIcon level={level.visual} size={40} active={active} />
+                  <span className="text-base font-extrabold leading-none">
+                    {level.pct === '++' ? 'Au-delà' : level.pct}
                   </span>
-                  <span className="text-xs font-semibold text-gray-700 mt-1">{level.label}</span>
+                  <span className="text-[11px] font-semibold opacity-70 leading-tight">
+                    {level.label}
+                  </span>
                 </button>
               );
             })}
           </div>
           {selected && (
-            <div className="mt-3 flex items-center justify-between text-sm">
-              <span className="text-gray-500">Choisi</span>
-              <span className="font-bold text-[var(--color-primary)]">{selected.pct} — {selected.label}</span>
+            <div
+              className="mt-3 text-sm font-semibold"
+              style={{
+                background: 'var(--color-primary-surface, #F0FDFA)',
+                border: '1px solid #99F6E4',
+                color: 'var(--color-primary-dark)',
+                borderRadius: 12,
+                padding: '10px 14px',
+              }}
+            >
+              ✓ Niveau enregistré : <b>{selected.label}</b>
+              {' '}({selected.overflow ? 'dépassement' : selected.pct})
             </div>
           )}
         </div>
@@ -328,6 +351,45 @@ export default function FillLevel() {
               )}
             </div>
           )}
+        </div>
+
+        {/* 2bis. Actions secondaires — incident / camion plein */}
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/incident')}
+            className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+            style={{
+              minHeight: 60,
+              padding: '12px 14px',
+              borderRadius: 14,
+              border: '2px solid #FECACA',
+              color: '#B91C1C',
+            }}
+          >
+            <span className="text-xl" aria-hidden="true">⚠</span>
+            <span className="flex-1 font-bold text-[15px]">Déclarer un incident</span>
+            <span aria-hidden="true" className="text-gray-400">→</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.setItem('intermediate_return', 'true');
+              navigate('/weigh-in');
+            }}
+            className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+            style={{
+              minHeight: 60,
+              padding: '12px 14px',
+              borderRadius: 14,
+              border: '2px solid #FDE68A',
+              color: '#B45309',
+            }}
+          >
+            <span className="text-xl" aria-hidden="true">🚚</span>
+            <span className="flex-1 font-bold text-[15px]">Camion plein → centre de tri</span>
+            <span aria-hidden="true" className="text-gray-400">→</span>
+          </button>
         </div>
 
         {/* 3. Notes libres — repliées par défaut */}

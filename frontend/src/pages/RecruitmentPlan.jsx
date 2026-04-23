@@ -78,18 +78,19 @@ export default function RecruitmentPlan() {
   return (
     <Layout>
       <div className="p-4 lg:p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-6 gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Plan de recrutement</h1>
-            <p className="text-sm text-gray-500 mt-1">Planification mensuelle des besoins par poste</p>
-          </div>
-          <button onClick={() => setShowPositionModal(true)} className="btn-primary text-sm">+ Nouveau poste</button>
-        </div>
+        <PageHeader
+          title="Plan de recrutement"
+          subtitle="Planification mensuelle des besoins par poste"
+          icon={ClipboardList}
+          actions={
+            <button onClick={() => setShowPositionModal(true)} className="btn-primary text-sm">+ Nouveau poste</button>
+          }
+        />
 
         {loading ? (
           <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
         ) : (
-          <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+          <Section title="Planification mensuelle" bodyClassName="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -166,7 +167,7 @@ export default function RecruitmentPlan() {
                 <p className="text-xs mt-1">Cliquez sur "Nouveau poste" pour commencer.</p>
               </div>
             )}
-          </div>
+          </Section>
         )}
 
         {/* Modal ajout poste */}
