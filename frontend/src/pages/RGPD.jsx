@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { DataTable, Modal } from '../components';
+import { DataTable, Modal, PageHeader } from '../components';
 import { Shield, ScrollText } from 'lucide-react';
 import api from '../services/api';
 
@@ -100,22 +100,25 @@ export default function RGPD() {
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Conformité RGPD</h1>
-            <p className="text-sm text-gray-500">Gestion de la protection des données personnelles</p>
-          </div>
-          {tab === 'registre' && (
-            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-              Nouveau traitement
-            </button>
-          )}
-          {tab === 'droits' && (
-            <button onClick={handlePurge} className="btn-danger text-sm">
-              Purge auto (24 mois)
-            </button>
-          )}
-        </div>
+        <PageHeader
+          title="Conformité RGPD"
+          subtitle="Gestion de la protection des données personnelles"
+          icon={Shield}
+          actions={
+            <>
+              {tab === 'registre' && (
+                <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+                  Nouveau traitement
+                </button>
+              )}
+              {tab === 'droits' && (
+                <button onClick={handlePurge} className="btn-danger text-sm">
+                  Purge auto (24 mois)
+                </button>
+              )}
+            </>
+          }
+        />
 
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {TABS.map(t => (
