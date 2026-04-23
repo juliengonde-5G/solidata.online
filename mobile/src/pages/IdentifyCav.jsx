@@ -114,50 +114,141 @@ export default function IdentifyCav() {
 
   if (phase === 'scan') {
     return (
-      <div className="min-h-screen flex flex-col bg-gray-900">
-        <header className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-3 bg-gray-900 text-white">
+      <div className="min-h-screen flex flex-col bg-black text-white overflow-hidden">
+        <header
+          className="flex-shrink-0 flex items-center justify-between gap-3"
+          style={{ padding: '50px 14px 14px' }}
+        >
           <button
             type="button"
             aria-label="Retour à la carte"
             onClick={() => { stopScanner(); navigate('/tour-map'); }}
-            className="touch-target flex items-center justify-center rounded-xl text-white/80 hover:bg-white/10 text-sm font-medium px-3"
+            className="touch-target flex items-center justify-center text-white/90 text-base font-medium px-3"
+            style={{
+              borderRadius: 14,
+              background: 'rgba(255,255,255,0.15)',
+              border: '1px solid rgba(255,255,255,0.25)',
+            }}
           >
             ← Carte
           </button>
-          <h1 className="font-bold text-base">Identifier le CAV</h1>
-          <button
-            type="button"
-            aria-label="QR absent, passage en saisie manuelle"
-            onClick={() => setPhase('fallback')}
-            className="touch-target flex items-center justify-center rounded-xl bg-white/20 hover:bg-white/30 text-sm font-medium px-4"
-          >
-            QR absent
-          </button>
+          <div className="text-center">
+            <p className="text-[11px] uppercase tracking-widest opacity-70 font-bold">
+              {expectedCav ? (expectedCav.commune || 'Point en cours') : 'Identifier le CAV'}
+            </p>
+            <p className="text-base font-bold">
+              {expectedCav?.nom || expectedCav?.cav_name || 'Scan QR'}
+            </p>
+          </div>
+          <div className="touch-target w-[72px]" aria-hidden="true" />
         </header>
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
+
+        <div className="px-6 pb-2 text-center">
+          <h1 className="text-2xl font-extrabold">Scanne la CAV</h1>
+          <p className="text-sm text-white/70 mt-1">Approche le QR code du conteneur</p>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center px-5">
           {cameraError ? (
             <div className="text-center max-w-sm">
-              <p className="text-red-400 mb-6">{cameraError}</p>
+              <p className="text-red-300 mb-6 text-sm">{cameraError}</p>
               <button type="button" onClick={() => setPhase('fallback')} className="btn-primary-mobile py-3.5">
                 Choisir dans la liste
               </button>
             </div>
           ) : (
             <>
-              <div className="relative w-full max-w-sm aspect-square rounded-3xl overflow-hidden ring-4 ring-white/20">
+              <div
+                className="relative overflow-hidden"
+                style={{
+                  width: 250,
+                  height: 250,
+                  borderRadius: 28,
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '3px solid rgba(255,255,255,0.25)',
+                }}
+              >
                 <div id="qr-reader" className="w-full h-full" />
-                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-56 h-56 border-4 border-[var(--color-primary)] rounded-2xl" />
-                </div>
+
+                {/* Corner brackets */}
+                {['tl', 'tr', 'bl', 'br'].map(pos => {
+                  const base = {
+                    position: 'absolute',
+                    width: 34,
+                    height: 34,
+                    borderColor: 'var(--color-primary-light, #14B8A6)',
+                    borderStyle: 'solid',
+                    borderWidth: 0,
+                    pointerEvents: 'none',
+                  };
+                  if (pos === 'tl') Object.assign(base, { top: -3, left: -3, borderTopWidth: 5, borderLeftWidth: 5, borderTopLeftRadius: 16 });
+                  if (pos === 'tr') Object.assign(base, { top: -3, right: -3, borderTopWidth: 5, borderRightWidth: 5, borderTopRightRadius: 16 });
+                  if (pos === 'bl') Object.assign(base, { bottom: -3, left: -3, borderBottomWidth: 5, borderLeftWidth: 5, borderBottomLeftRadius: 16 });
+                  if (pos === 'br') Object.assign(base, { bottom: -3, right: -3, borderBottomWidth: 5, borderRightWidth: 5, borderBottomRightRadius: 16 });
+                  return <div key={pos} style={base} />;
+                })}
+
+                {/* Animated scan line */}
+                <div
+                  className="animate-scan-line pointer-events-none"
+                  style={{
+                    position: 'absolute',
+                    top: 12,
+                    left: 20,
+                    right: 20,
+                    height: 2,
+                    background: 'var(--color-primary-light, #14B8A6)',
+                    boxShadow: '0 0 18px rgba(20,184,166,0.8)',
+                    borderRadius: 2,
+                  }}
+                />
               </div>
-              <p className="text-white/60 text-sm mt-6">Visez le QR code du conteneur</p>
+
+              <p className="text-white/60 text-sm mt-6">Cherche le QR code…</p>
               {expectedCav && (
-                <p className="text-white/80 text-sm mt-2 font-medium">
+                <p className="text-white/80 text-sm mt-1 font-medium">
                   Attendu : {expectedCav.nom || expectedCav.cav_name}
                 </p>
               )}
             </>
           )}
+        </div>
+
+        {/* Fallback actions */}
+        <div
+          className="flex-shrink-0 flex flex-col gap-2.5"
+          style={{ padding: '14px 16px calc(var(--safe-bottom) + 16px)' }}
+        >
+          <div className="flex gap-2.5">
+            <button
+              type="button"
+              onClick={() => setPhase('fallback')}
+              className="flex-1 font-semibold text-sm"
+              style={{
+                minHeight: 56,
+                borderRadius: 14,
+                background: 'rgba(255,255,255,0.12)',
+                border: '1px solid rgba(255,255,255,0.25)',
+                color: 'white',
+              }}
+            >
+              ⌨ Saisir le code
+            </button>
+            <button
+              type="button"
+              onClick={() => setPhase('fallback')}
+              className="flex-1 font-semibold text-sm"
+              style={{
+                minHeight: 56,
+                borderRadius: 14,
+                background: 'rgba(220,38,38,0.2)',
+                border: '1px solid rgba(220,38,38,0.4)',
+                color: '#FCA5A5',
+              }}
+            >
+              ⚠ QR indisponible
+            </button>
+          </div>
         </div>
       </div>
     );

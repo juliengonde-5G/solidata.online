@@ -395,20 +395,31 @@ export default function TourMap() {
           {cavs.filter(c => c.latitude && c.longitude).length > 1 && (
             <Polyline
               positions={cavs.filter(c => c.latitude && c.longitude).map(c => [c.latitude, c.longitude])}
-              pathOptions={{ color: '#8BC540', weight: 3, dashArray: '10,6' }}
+              pathOptions={{ color: '#0D9488', weight: 3, dashArray: '10,6' }}
             />
           )}
         </MapContainer>
       </div>
 
       {currentCAV && actionConfig && (
-        <div className="relative z-20 bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] flex-shrink-0">
+        <div
+          className="relative z-20 bg-white flex-shrink-0"
+          style={{
+            borderTopLeftRadius: 22,
+            borderTopRightRadius: 22,
+            boxShadow: '0 -10px 30px rgba(0,0,0,0.1)',
+          }}
+        >
+          {/* Grab handle */}
+          <div className="flex justify-center pt-2.5">
+            <div className="w-10 h-1 rounded-full bg-gray-300" />
+          </div>
           {/* Carte "Prochain point" — version allégée en conduite */}
-          <div className="px-4 pt-3 pb-2">
-            <p className="text-[11px] uppercase tracking-wide text-gray-400">
+          <div className="px-4 pt-2 pb-2">
+            <p className="text-[11px] uppercase tracking-widest text-gray-400 font-bold">
               Prochain point #{currentCavIndex + 1}
             </p>
-            <h3 className="font-bold text-gray-900 truncate text-lg">
+            <h3 className="font-extrabold text-gray-900 truncate text-lg">
               {currentCAV.nom || currentCAV.cav_name}
             </h3>
             {mode !== USAGE_MODES.DRIVING && (

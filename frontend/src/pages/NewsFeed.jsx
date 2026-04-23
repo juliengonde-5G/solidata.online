@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal } from '../components';
+import { LoadingSpinner, Modal, PageHeader } from '../components';
+import { Newspaper } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -76,17 +77,18 @@ export default function NewsFeed() {
   return (
     <Layout>
       <div className="p-6 max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Fil d'actualite</h1>
-            <p className="text-gray-500 text-sm">Veille reglementaire, actualite filiere textile et nouvelles locales</p>
-          </div>
-          {isAdmin && (
-            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-              + Publier
-            </button>
-          )}
-        </div>
+        <PageHeader
+          title="Fil d'actualite"
+          subtitle="Veille reglementaire, actualite filiere textile et nouvelles locales"
+          icon={Newspaper}
+          actions={
+            isAdmin && (
+              <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+                + Publier
+              </button>
+            )
+          }
+        />
 
         {/* Filtres */}
         <div className="flex gap-2 mb-6">

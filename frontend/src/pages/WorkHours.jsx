@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { DataTable, StatusBadge, Modal } from '../components';
+import { DataTable, StatusBadge, Modal, PageHeader, Section } from '../components';
 import { Clock } from 'lucide-react';
 import api from '../services/api';
 
@@ -79,17 +79,17 @@ export default function WorkHours() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Heures de travail</h1>
-            <p className="text-gray-500">Suivi et validation des heures</p>
-          </div>
-          <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-            + Saisir des heures
-          </button>
-        </div>
+        <PageHeader
+          title="Heures de travail"
+          subtitle="Suivi et validation des heures"
+          icon={Clock}
+          actions={
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+              + Saisir des heures
+            </button>
+          }
+        />
 
-        {/* Filtres */}
         <div className="flex gap-3 mb-6">
           <select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} className="select-modern w-auto">
             <option value="">Sélectionner un collaborateur</option>
@@ -98,7 +98,6 @@ export default function WorkHours() {
           <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input-modern w-auto" />
         </div>
 
-        {/* Summary Cards */}
         {summary && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <SummaryCard label="Total heures" value={`${summary.total_hours || 0}h`} color="text-primary" />
@@ -108,16 +107,17 @@ export default function WorkHours() {
           </div>
         )}
 
-        {/* Hours Table */}
         {selectedEmployee && (
-          <DataTable
-            columns={hoursColumns}
-            data={hours}
-            loading={false}
-            emptyIcon={Clock}
-            emptyMessage="Aucune heure saisie pour cette période"
-            dense
-          />
+          <Section title="Liste des heures">
+            <DataTable
+              columns={hoursColumns}
+              data={hours}
+              loading={false}
+              emptyIcon={Clock}
+              emptyMessage="Aucune heure saisie pour cette période"
+              dense
+            />
+          </Section>
         )}
 
         {!selectedEmployee && (

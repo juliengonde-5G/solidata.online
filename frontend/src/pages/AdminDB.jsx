@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Database } from 'lucide-react';
 import Layout from '../components/Layout';
+import { PageHeader } from '../components';
 import api from '../services/api';
 
 export default function AdminDB() {
@@ -89,12 +91,11 @@ export default function AdminDB() {
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Administration Base de Données</h1>
-            <p className="text-sm text-gray-500">Gestion, sauvegarde et maintenance de la base PostgreSQL</p>
-          </div>
-        </div>
+        <PageHeader
+          title="Administration Base de Données"
+          subtitle="Gestion, sauvegarde et maintenance de la base PostgreSQL"
+          icon={Database}
+        />
 
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {TABS.map(t => (

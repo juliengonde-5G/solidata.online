@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KPICard } from '../components';
+import { LoadingSpinner, KPICard, PageHeader, Section } from '../components';
 import api from '../services/api';
 import {
   BarChart, Bar, LineChart, Line, ComposedChart,
@@ -60,19 +60,14 @@ export default function ReportingProduction() {
   return (
     <Layout>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-amber-50">
-              <Factory className="w-6 h-6 text-amber-600" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Reporting Production</h1>
-              <p className="text-slate-500 text-sm">KPI de production, tri et productivité</p>
-            </div>
-          </div>
-          <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input-modern w-auto" />
-        </div>
+        <PageHeader
+          title="Reporting Production"
+          subtitle="KPI de production, tri et productivité"
+          icon={Factory}
+          actions={
+            <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input-modern w-auto" />
+          }
+        />
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
@@ -93,8 +88,7 @@ export default function ReportingProduction() {
         {/* Charts row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Stacked bar: ligne + R3 */}
-          <div className="lg:col-span-2 card-modern p-6">
-            <h3 className="font-semibold text-slate-800 mb-4">Entrées journalières (Ligne + R3)</h3>
+          <Section title="Entrées journalières (Ligne + R3)" className="lg:col-span-2">
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={chartData}>
@@ -110,11 +104,10 @@ export default function ReportingProduction() {
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
             )}
-          </div>
+          </Section>
 
           {/* Gauge */}
-          <div className="card-modern p-6 flex flex-col items-center justify-center">
-            <h3 className="font-semibold text-slate-800 mb-4 self-start">Progression objectif</h3>
+          <Section title="Progression objectif" bodyClassName="flex flex-col items-center justify-center">
             <div className="relative w-40 h-40">
               <svg className="w-40 h-40 transform -rotate-90" viewBox="0 0 120 120">
                 <circle cx="60" cy="60" r="50" fill="none" stroke="#e5e7eb" strokeWidth="10" />
@@ -130,13 +123,12 @@ export default function ReportingProduction() {
             <p className="text-sm text-slate-600 mt-3">
               <span className="font-semibold">{summary.total_mois_t || 0} t</span> / {objectif} t
             </p>
-          </div>
+          </Section>
         </div>
 
         {/* Productivite trend */}
         {chartData.length > 2 && (
-          <div className="card-modern p-6">
-            <h3 className="font-semibold text-slate-800 mb-4">Productivité journalière (kg/pers)</h3>
+          <Section title="Productivité journalière (kg/pers)">
             <ResponsiveContainer width="100%" height={220}>
               <ComposedChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -148,14 +140,11 @@ export default function ReportingProduction() {
                 <Line type="monotone" dataKey="effectif" name="Effectif" stroke="#EC4899" strokeWidth={2} yAxisId={0} dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
-          </div>
+          </Section>
         )}
 
         {/* Table */}
-        <div className="card-modern">
-          <div className="p-4 border-b border-slate-100">
-            <h3 className="font-semibold text-slate-800">Détail journalier</h3>
-          </div>
+        <Section title="Détail journalier" padded={false}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -212,7 +201,7 @@ export default function ReportingProduction() {
               )}
             </table>
           </div>
-        </div>
+        </Section>
       </div>
     </Layout>
   );

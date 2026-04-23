@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Landmark, List } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, DataTable, LoadingSpinner } from '../components';
+import { PageHeader, KPICard, DataTable, LoadingSpinner, Section } from '../components';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine,
@@ -101,8 +101,7 @@ export default function FinanceTresorerie() {
         {/* Graphiques */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Waterfall */}
-          <div className="card-modern p-6">
-            <h3 className="text-base font-semibold text-slate-800 mb-4">Cascade de tresorerie</h3>
+          <Section title="Cascade de tresorerie">
             {loading ? (
               <div className="flex items-center justify-center h-64"><LoadingSpinner /></div>
             ) : waterfallData.length === 0 ? (
@@ -126,11 +125,10 @@ export default function FinanceTresorerie() {
                 </BarChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </Section>
 
           {/* Mensuel double axe */}
-          <div className="card-modern p-6">
-            <h3 className="text-base font-semibold text-slate-800 mb-4">Flux mensuels et solde</h3>
+          <Section title="Flux mensuels et solde">
             {loading ? (
               <div className="flex items-center justify-center h-64"><LoadingSpinner /></div>
             ) : (
@@ -155,15 +153,11 @@ export default function FinanceTresorerie() {
                 </ComposedChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </Section>
         </div>
 
         {/* Tableau flux par categorie */}
-        <div className="card-modern p-6">
-          <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <List className="w-5 h-5 text-slate-400" />
-            Flux de tresorerie par categorie
-          </h3>
+        <Section title="Flux de tresorerie par categorie" icon={List}>
           {loading ? (
             <LoadingSpinner />
           ) : cashFlowGroups.length === 0 ? (
@@ -193,7 +187,7 @@ export default function FinanceTresorerie() {
               </table>
             </div>
           )}
-        </div>
+        </Section>
       </div>
     </Layout>
   );

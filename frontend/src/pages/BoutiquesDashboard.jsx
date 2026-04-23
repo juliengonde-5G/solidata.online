@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, Cloud, CloudRain, Sun, CloudSnow, Zap, TrendingUp, TrendingDown, ShoppingBag, Target, Receipt, Tag, Timer, Percent } from 'lucide-react';
 import { Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KpiCard } from '../components';
+import { LoadingSpinner, KpiCard, PageHeader } from '../components';
 import api from '../services/api';
 
 function formatEuro(v, decimals = 0) {
@@ -26,7 +26,7 @@ function DeltaBadge({ value }) {
   );
 }
 
-const SEGMENT_COLORS = { ventes_courantes: '#2D8C4E', promotions: '#F59E0B', consommables: '#94A3B8' };
+const SEGMENT_COLORS = { ventes_courantes: '#0D9488', promotions: '#F59E0B', consommables: '#94A3B8' };
 const SEGMENT_LABELS = { ventes_courantes: 'Ventes courantes', promotions: 'Promotions', consommables: 'Consommables' };
 const MOIS_COURT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 
@@ -161,18 +161,16 @@ export default function BoutiquesDashboard() {
   return (
     <Layout>
       <div className="p-4 sm:p-6">
-        <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-              <LayoutDashboard className="w-6 h-6 text-pink-600" />
-              Tableau de bord boutique
-            </h1>
-            <p className="text-slate-500 mt-1 text-sm">Pilotage quotidien, mensuel et annuel</p>
-          </div>
-          <select value={boutiqueId} onChange={(e) => setBoutiqueId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
-            {boutiques.map(b => <option key={b.id} value={b.id}>{b.nom}</option>)}
-          </select>
-        </div>
+        <PageHeader
+          title="Tableau de bord boutique"
+          subtitle="Pilotage quotidien, mensuel et annuel"
+          icon={LayoutDashboard}
+          actions={
+            <select value={boutiqueId} onChange={(e) => setBoutiqueId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+              {boutiques.map(b => <option key={b.id} value={b.id}>{b.nom}</option>)}
+            </select>
+          }
+        />
 
         <div className="flex gap-2 mb-6 border-b border-slate-200">
           {[['jour', 'Jour'], ['mois', 'Mois'], ['annee', 'Année']].map(([k, l]) => (

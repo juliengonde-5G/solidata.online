@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal } from '../components';
+import { LoadingSpinner, Modal, PageHeader } from '../components';
+import { Brain } from 'lucide-react';
 import api from '../services/api';
 
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
@@ -221,19 +222,20 @@ export default function AdminPredictive() {
   return (
     <Layout>
       <div className="p-6 max-w-5xl">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Moteur prédictif</h1>
-            <p className="text-gray-500">Variables et paramètres de l'algorithme d'optimisation des tournées</p>
-          </div>
-          <button
-            onClick={save}
-            disabled={saving}
-            className={`px-5 py-2.5 rounded-lg text-white font-medium transition ${saved ? 'bg-green-500' : 'bg-primary hover:bg-primary/90'}`}
-          >
-            {saving ? 'Sauvegarde...' : saved ? 'Sauvegardé !' : 'Sauvegarder'}
-          </button>
-        </div>
+        <PageHeader
+          title="Moteur prédictif"
+          subtitle="Variables et paramètres de l'algorithme d'optimisation des tournées"
+          icon={Brain}
+          actions={
+            <button
+              onClick={save}
+              disabled={saving}
+              className={`px-5 py-2.5 rounded-lg text-white font-medium transition ${saved ? 'bg-green-500' : 'bg-primary hover:bg-primary/90'}`}
+            >
+              {saving ? 'Sauvegarde...' : saved ? 'Sauvegardé !' : 'Sauvegarder'}
+            </button>
+          }
+        />
 
         {/* Centre de tri */}
         <Section title="Centre de tri" desc="Coordonnées du point de départ/retour des tournées">

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader } from '../components';
+import { Heart } from 'lucide-react';
 import api from '../services/api';
 
 const URGENCY_COLORS = {
@@ -571,7 +572,11 @@ export default function InsertionParcours() {
   return (
     <Layout>
       <div className="p-4 max-w-7xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-800 mb-4">Parcours d'insertion</h1>
+        <PageHeader
+          title="Parcours d'insertion"
+          subtitle="Suivi M1/M6/M12, freins périphériques et plans d'action"
+          icon={Heart}
+        />
 
         <div className="grid grid-cols-12 gap-4">
           {/* Liste employes */}

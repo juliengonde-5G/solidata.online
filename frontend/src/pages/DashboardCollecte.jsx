@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, Activity,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader, Section } from '../components';
 import api from '../services/api';
 
 function shiftDays(iso, n) {
@@ -194,36 +194,31 @@ export default function DashboardCollecte() {
   return (
     <Layout>
       <div className="p-4 md:p-6 space-y-4">
-        {/* Header + date */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 rounded-lg bg-emerald-50">
-              <LayoutDashboard className="w-5 h-5 text-emerald-700" />
+        <PageHeader
+          title="Tableau de bord collecte"
+          subtitle={formatHuman(date)}
+          icon={LayoutDashboard}
+          actions={
+            <div className="flex items-center gap-1">
+              <button onClick={() => setDate(shiftDays(date, -1))}
+                className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+                aria-label="Jour précédent">
+                <ChevronLeft className="w-4 h-4 text-slate-600" />
+              </button>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700" />
+              <button onClick={() => setDate(shiftDays(date, 1))}
+                className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+                aria-label="Jour suivant">
+                <ChevronRight className="w-4 h-4 text-slate-600" />
+              </button>
+              <button onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+                className="ml-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50">
+                Aujourd'hui
+              </button>
             </div>
-            <div>
-              <h1 className="text-xl md:text-2xl font-bold text-slate-800">Tableau de bord collecte</h1>
-              <p className="text-xs text-slate-500 capitalize">{formatHuman(date)}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setDate(shiftDays(date, -1))}
-              className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
-              aria-label="Jour précédent">
-              <ChevronLeft className="w-4 h-4 text-slate-600" />
-            </button>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700" />
-            <button onClick={() => setDate(shiftDays(date, 1))}
-              className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
-              aria-label="Jour suivant">
-              <ChevronRight className="w-4 h-4 text-slate-600" />
-            </button>
-            <button onClick={() => setDate(new Date().toISOString().slice(0, 10))}
-              className="ml-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50">
-              Aujourd'hui
-            </button>
-          </div>
-        </div>
+          }
+        />
 
         {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">

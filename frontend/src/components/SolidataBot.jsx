@@ -1,11 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Sparkles, X, Trash2, Send, Mic, ArrowRight } from 'lucide-react';
 import api from '../services/api';
+import { ASSISTANT_OPEN_EVENT } from './TopBar';
 
 // ══════════════════════════════════════════
-// SolidataBot — Widget chat IA (overlay bas-droite)
+// SolidataBot — Assistant IA, panel slide-in droite
+// Ouverture déclenchée par TopBar via événement custom + bouton flottant fallback
 // ══════════════════════════════════════════
 
 const MAX_MSG_LENGTH = 500;
+const FALLBACK_SUGGESTIONS = [
+  { icon: '📊', text: 'Générer le rapport mensuel' },
+  { icon: '🚚', text: 'Où en est la tournée Rouen-Nord ?' },
+  { icon: '💶', text: 'Pourquoi la marge a augmenté ?' },
+  { icon: '👤', text: 'Candidats à relancer aujourd\'hui' },
+];
 
 export default function SolidataBot() {
   const [isOpen, setIsOpen] = useState(false);
@@ -21,42 +30,38 @@ export default function SolidataBot() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const recognitionRef = useRef(null);
-  const panelRef = useRef(null);
+
+  // ── Ouverture déclenchée par TopBar ──────────────────────────────────
+  useEffect(() => {
+    const handler = () => {
+      setIsOpen(true);
+      setHasNewMessage(false);
+    };
+    window.addEventListener(ASSISTANT_OPEN_EVENT, handler);
+    return () => window.removeEventListener(ASSISTANT_OPEN_EVENT, handler);
+  }, []);
 
   // ── Charger suggestions ──────────────────────────────────────────────
   useEffect(() => {
     if (isOpen && suggestions.length === 0) {
       api.get('/chat/suggestions')
-        .then(res => setSuggestions(res.data.suggestions || []))
-        .catch(() => {
-          setSuggestions([
-            { icon: '📦', text: 'Quel est le stock actuel ?' },
-            { icon: '🚛', text: 'Stats collecte du jour' },
-            { icon: '📅', text: 'Mon planning cette semaine' },
-            { icon: '⏰', text: 'Mes heures cette semaine' },
-            { icon: '📍', text: 'Liste des CAV actifs' },
-          ]);
-        });
+        .then((res) => setSuggestions(res.data.suggestions || FALLBACK_SUGGESTIONS))
+        .catch(() => setSuggestions(FALLBACK_SUGGESTIONS));
     }
   }, [isOpen, suggestions.length]);
 
-  // ── Scroll to bottom ─────────────────────────────────────────────────
+  // ── Scroll bottom + focus input à l'ouverture ────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  // ── Focus input on open ──────────────────────────────────────────────
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 200);
-    }
+    if (isOpen) setTimeout(() => inputRef.current?.focus(), 250);
   }, [isOpen]);
 
-  // ── Close on Escape ──────────────────────────────────────────────────
+  // ── Esc ferme ───────────────────────────────────────────────────────
   useEffect(() => {
-    const handleEsc = (e) => {
-      if (e.key === 'Escape' && isOpen) setIsOpen(false);
-    };
+    const handleEsc = (e) => { if (e.key === 'Escape' && isOpen) setIsOpen(false); };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
   }, [isOpen]);
@@ -77,9 +82,7 @@ export default function SolidataBot() {
       setInput(transcript);
       if (e.results[e.results.length - 1].isFinal) {
         setIsListening(false);
-        if (transcript.trim()) {
-          setTimeout(() => sendMessage(transcript.trim()), 300);
-        }
+        if (transcript.trim()) setTimeout(() => sendMessage(transcript.trim()), 300);
       }
     };
     recognition.onerror = () => setIsListening(false);
@@ -88,19 +91,10 @@ export default function SolidataBot() {
   }, []);
 
   const toggleMic = useCallback(() => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-      return;
-    }
-    if (!recognitionRef.current) {
-      recognitionRef.current = initSpeech();
-    }
+    if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return; }
+    if (!recognitionRef.current) recognitionRef.current = initSpeech();
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-      } catch (e) { /* ignore */ }
+      try { recognitionRef.current.start(); setIsListening(true); } catch { /* ignore */ }
     }
   }, [isListening, initSpeech]);
 
@@ -116,7 +110,7 @@ export default function SolidataBot() {
     u.lang = 'fr-FR';
     u.rate = 0.95;
     const voices = window.speechSynthesis.getVoices();
-    const fr = voices.find(v => v.lang.startsWith('fr'));
+    const fr = voices.find((v) => v.lang.startsWith('fr'));
     if (fr) u.voice = fr;
     window.speechSynthesis.speak(u);
   }, []);
@@ -125,270 +119,198 @@ export default function SolidataBot() {
   const sendMessage = useCallback(async (text) => {
     const msg = (text || input).trim().slice(0, MAX_MSG_LENGTH);
     if (!msg || isLoading) return;
-
     setShowSuggestions(false);
     setInput('');
 
-    const userMsg = { id: Date.now(), role: 'user', text: msg, time: new Date() };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages((prev) => [...prev, { id: Date.now(), role: 'user', text: msg, time: new Date() }]);
     setIsLoading(true);
 
     try {
       const res = await api.post('/chat', { message: msg, session_id: sessionId });
       const { reply, session_id: sid } = res.data;
       if (sid) setSessionId(sid);
-
-      const botMsg = { id: Date.now() + 1, role: 'bot', text: reply, time: new Date() };
-      setMessages(prev => [...prev, botMsg]);
+      setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'bot', text: reply, time: new Date() }]);
       speak(reply);
-
       if (!isOpen) setHasNewMessage(true);
     } catch (err) {
       const errorText = err.response?.data?.error || 'Erreur de connexion. Réessaie ! 🔄';
-      setMessages(prev => [...prev, {
-        id: Date.now() + 1, role: 'bot', text: errorText, time: new Date(), isError: true,
-      }]);
+      setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'bot', text: errorText, time: new Date(), isError: true }]);
     } finally {
       setIsLoading(false);
     }
   }, [input, isLoading, sessionId, isOpen, speak]);
 
-  // ── Clear conversation ───────────────────────────────────────────────
-  const clearChat = () => {
-    setMessages([]);
-    setSessionId('');
-    setShowSuggestions(true);
-  };
-
-  // ── Handle open ──────────────────────────────────────────────────────
-  const handleOpen = () => {
-    setIsOpen(true);
-    setHasNewMessage(false);
-  };
-
-  // ── Format time ──────────────────────────────────────────────────────
+  const clearChat = () => { setMessages([]); setSessionId(''); setShowSuggestions(true); };
   const formatTime = (d) => new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
-  // ── Render ────────────────────────────────────────────────────────────
   return (
     <>
-      {/* ── Floating button (bulle) ── */}
+      {/* Overlay */}
+      <div className={`assistant-overlay ${isOpen ? 'open' : ''}`} onClick={() => setIsOpen(false)} aria-hidden="true" />
+
+      {/* Bouton flottant fallback (mobile/tablette quand topbar pas visible) */}
       {!isOpen && (
         <button
-          onClick={handleOpen}
-          className="fixed bottom-5 right-5 z-[9999] w-14 h-14 rounded-full bg-[#2D8C4E] text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center justify-center group"
+          onClick={() => { setIsOpen(true); setHasNewMessage(false); }}
+          className="fixed bottom-5 right-5 z-30 w-14 h-14 rounded-full text-white shadow-elevated transition-all hover:scale-105 lg:hidden grid place-items-center"
+          style={{ background: 'linear-gradient(135deg, var(--color-primary-light), var(--color-primary-dark))' }}
           aria-label="Ouvrir l'assistant SolidataBot"
-          title="SolidataBot — Assistant IA"
         >
-          <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-          {hasNewMessage && (
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse" />
-          )}
-          {/* Tooltip */}
-          <span className="absolute right-full mr-3 whitespace-nowrap bg-slate-800 text-white text-sm px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            SolidataBot
-          </span>
+          <Sparkles className="w-6 h-6" />
+          {hasNewMessage && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse" />}
         </button>
       )}
 
-      {/* ── Chat panel ── */}
-      {isOpen && (
-        <div
-          ref={panelRef}
-          className="fixed bottom-0 right-0 sm:bottom-5 sm:right-5 z-[9999] w-full sm:w-[400px] h-full sm:h-[600px] sm:max-h-[80vh] bg-white sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200/60"
-          role="dialog"
-          aria-label="SolidataBot — Assistant IA"
-        >
-          {/* ── Header ── */}
-          <div className="bg-[#2D8C4E] text-white px-4 py-3 flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
+      {/* Panel slide-in droite */}
+      <aside
+        className={`assistant-panel ${isOpen ? 'open' : ''}`}
+        role="dialog"
+        aria-label="Assistant Solidata"
+        aria-hidden={!isOpen}
+      >
+        {/* Header */}
+        <header className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 flex-shrink-0">
+          <div className="chatbot-avatar w-9 h-9">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-bold text-slate-900 leading-tight">Assistant Solidata</h2>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+              <span className="text-[11px] text-emerald-700 font-medium">En ligne · répond en ~3s</span>
+            </div>
+          </div>
+          <button
+            onClick={clearChat}
+            className="grid place-items-center w-9 h-9 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition"
+            title="Effacer la conversation"
+            aria-label="Effacer"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setIsOpen(false)}
+            className="grid place-items-center w-9 h-9 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition"
+            title="Fermer (Esc)"
+            aria-label="Fermer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </header>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-slate-50/40" role="log" aria-live="polite">
+          {messages.length === 0 && (
+            <div className="text-sm text-slate-700 leading-relaxed bg-white rounded-2xl p-4 border border-slate-100 shadow-card">
+              Bonjour 👋 Je suis l'assistant Solidata. Je peux t'aider à générer un rapport, trouver un candidat, analyser une tournée, ou naviguer dans l'appli.
+            </div>
+          )}
+
+          {showSuggestions && messages.length === 0 && suggestions.length > 0 && (
+            <div className="space-y-2 pt-1">
+              <p className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider px-1">Suggestions</p>
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => sendMessage(s.text)}
+                  className="w-full flex items-center gap-3 px-3.5 py-2.5 bg-white rounded-xl border border-slate-200 hover:border-primary hover:bg-primary-surface transition-all text-left group"
+                >
+                  <span className="text-base flex-shrink-0">{s.icon}</span>
+                  <span className="text-[13px] text-slate-700 group-hover:text-primary-dark font-medium flex-1">{s.text}</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-primary-dark flex-shrink-0" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {messages.map((msg) => (
+            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className="max-w-[85%]">
+                <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+                  msg.role === 'user'
+                    ? 'rounded-br-md text-white'
+                    : msg.isError
+                      ? 'bg-red-50 text-red-700 border border-red-200 rounded-bl-md'
+                      : 'bg-white text-slate-800 shadow-card border border-slate-100 rounded-bl-md'
+                }`}
+                style={msg.role === 'user' ? { background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-dark))' } : undefined}>
+                  {msg.text}
+                </div>
+                <p className={`text-[10px] mt-1 text-slate-400 ${msg.role === 'user' ? 'text-right' : ''}`}>
+                  {formatTime(msg.time)}
+                </p>
               </div>
-              <div>
-                <h2 className="font-bold text-sm leading-tight">SolidataBot</h2>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 bg-green-300 rounded-full animate-pulse" />
-                  <span className="text-xs text-green-100">En ligne</span>
+            </div>
+          ))}
+
+          {isLoading && (
+            <div className="flex items-center gap-2">
+              <div className="bg-white px-4 py-3 rounded-2xl rounded-bl-md shadow-card border border-slate-100">
+                <div className="flex gap-1.5">
+                  <span className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" />
+                  <span className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={clearChat}
-                className="p-2 hover:bg-white/10 rounded-lg transition"
-                aria-label="Effacer la conversation"
-                title="Effacer"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="p-2 hover:bg-white/10 rounded-lg transition"
-                aria-label="Fermer"
-                title="Fermer"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
+          )}
 
-          {/* ── Messages ── */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50" role="log" aria-live="polite">
-            {/* Welcome + suggestions */}
-            {messages.length === 0 && (
-              <div className="text-center py-6">
-                <div className="w-16 h-16 bg-[#2D8C4E]/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-8 h-8 text-[#2D8C4E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                </div>
-                <h3 className="font-bold text-slate-800 mb-1">Salut ! Je suis SolidataBot</h3>
-                <p className="text-sm text-slate-500 mb-5">Ton assistant Solidarité Textiles. Pose-moi une question !</p>
-              </div>
-            )}
-
-            {/* Suggestions */}
-            {showSuggestions && suggestions.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-1">Suggestions</p>
-                <div className="grid grid-cols-1 gap-2">
-                  {suggestions.map((s, i) => (
-                    <button
-                      key={i}
-                      onClick={() => sendMessage(s.text)}
-                      className="flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-slate-200 hover:border-[#2D8C4E] hover:bg-[#2D8C4E]/5 transition-all text-left group"
-                    >
-                      <span className="text-lg flex-shrink-0">{s.icon}</span>
-                      <span className="text-sm text-slate-700 group-hover:text-[#2D8C4E] font-medium">{s.text}</span>
-                      <svg className="w-4 h-4 text-slate-300 group-hover:text-[#2D8C4E] ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Message bubbles */}
-            {messages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] ${msg.role === 'user' ? '' : 'flex gap-2'}`}>
-                  {msg.role === 'bot' && (
-                    <div className="w-7 h-7 bg-[#2D8C4E]/10 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                      <svg className="w-4 h-4 text-[#2D8C4E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                      </svg>
-                    </div>
-                  )}
-                  <div>
-                    <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-                      msg.role === 'user'
-                        ? 'bg-[#2D8C4E] text-white rounded-br-md'
-                        : msg.isError
-                          ? 'bg-red-50 text-red-700 border border-red-200 rounded-bl-md'
-                          : 'bg-white text-slate-800 shadow-sm border border-slate-100 rounded-bl-md'
-                    }`}>
-                      {msg.text}
-                    </div>
-                    <p className={`text-[10px] mt-1 ${msg.role === 'user' ? 'text-right' : ''} text-slate-400`}>
-                      {formatTime(msg.time)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* Typing indicator */}
-            {isLoading && (
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 bg-[#2D8C4E]/10 rounded-full flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 text-[#2D8C4E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                </div>
-                <div className="bg-white px-4 py-3 rounded-2xl rounded-bl-md shadow-sm border border-slate-100">
-                  <div className="flex gap-1.5">
-                    <span className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* ── Input area ── */}
-          <div className="border-t border-slate-200 bg-white px-3 py-3 flex-shrink-0">
-            {isListening && (
-              <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-amber-50 rounded-lg text-sm text-amber-700">
-                <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
-                Ecoute en cours...
-                <button onClick={toggleMic} className="ml-auto text-amber-600 hover:text-amber-800 font-medium">Stop</button>
-              </div>
-            )}
-            <div className="flex items-end gap-2">
-              <div className="flex-1 flex items-end bg-slate-50 rounded-xl border border-slate-200 focus-within:border-[#2D8C4E] focus-within:ring-1 focus-within:ring-[#2D8C4E]/20 transition-all">
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value.slice(0, MAX_MSG_LENGTH))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  placeholder="Écris ton message..."
-                  rows={1}
-                  className="flex-1 bg-transparent border-none outline-none resize-none px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 max-h-24"
-                  aria-label="Message pour SolidataBot"
-                  style={{ height: 'auto', minHeight: '40px' }}
-                  onInput={(e) => {
-                    e.target.style.height = 'auto';
-                    e.target.style.height = Math.min(e.target.scrollHeight, 96) + 'px';
-                  }}
-                />
-                {/* Mic button */}
-                {(window.SpeechRecognition || window.webkitSpeechRecognition) && (
-                  <button
-                    onClick={toggleMic}
-                    className={`p-2 mr-1 mb-0.5 rounded-lg transition ${isListening ? 'text-red-500 bg-red-50' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
-                    aria-label={isListening ? 'Arrêter le micro' : 'Dicter un message'}
-                    title="Micro"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-              {/* Send button */}
-              <button
-                onClick={() => sendMessage()}
-                disabled={!input.trim() || isLoading}
-                className="w-10 h-10 bg-[#2D8C4E] text-white rounded-xl flex items-center justify-center hover:bg-[#246f3e] disabled:opacity-40 disabled:cursor-not-allowed transition-all flex-shrink-0"
-                aria-label="Envoyer"
-                title="Envoyer"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19V5m0 0l-7 7m7-7l7 7" />
-                </svg>
-              </button>
-            </div>
-          </div>
+          <div ref={messagesEndRef} />
         </div>
-      )}
+
+        {/* Footer input */}
+        <footer className="border-t border-slate-200 bg-white px-3 py-3 flex-shrink-0">
+          {isListening && (
+            <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-amber-50 rounded-lg text-sm text-amber-700">
+              <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+              Écoute en cours…
+              <button onClick={toggleMic} className="ml-auto text-amber-600 hover:text-amber-800 font-medium">Stop</button>
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <div className="flex-1 flex items-end bg-slate-50 rounded-xl border border-slate-200 focus-within:border-primary focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/15 transition-all">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value.slice(0, MAX_MSG_LENGTH))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+                }}
+                placeholder="Écris ta question…"
+                rows={1}
+                className="flex-1 bg-transparent border-none outline-none resize-none px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 max-h-24"
+                aria-label="Message pour l'assistant"
+                style={{ height: 'auto', minHeight: '40px' }}
+                onInput={(e) => {
+                  e.target.style.height = 'auto';
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 96)}px`;
+                }}
+              />
+              {(window.SpeechRecognition || window.webkitSpeechRecognition) && (
+                <button
+                  onClick={toggleMic}
+                  className={`p-2 mr-1 mb-0.5 rounded-lg transition ${isListening ? 'text-red-500 bg-red-50' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+                  aria-label={isListening ? 'Arrêter le micro' : 'Dicter un message'}
+                  title="Micro"
+                >
+                  <Mic className="w-4.5 h-4.5" />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => sendMessage()}
+              disabled={!input.trim() || isLoading}
+              className="w-10 h-10 text-white rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed transition-all flex-shrink-0"
+              style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-dark))' }}
+              aria-label="Envoyer"
+              title="Envoyer"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-[10.5px] text-slate-400 text-center mt-2">Propulsé par Claude · tes données restent privées</p>
+        </footer>
+      </aside>
     </>
   );
 }

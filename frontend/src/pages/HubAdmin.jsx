@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Lock, Database, Save, Shield, Settings, Car, ClipboardList, Brain, Map } from 'lucide-react';
 import Layout from '../components/Layout';
-import { KpiCard, NavCard } from '../components';
+import { KPICard, ModuleCard, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function HubAdmin() {
-  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -50,44 +48,40 @@ export default function HubAdmin() {
   const kpis = [
     { title: 'Utilisateurs actifs', value: loading ? '—' : (stats?.utilisateursActifs ?? 0).toLocaleString('fr-FR'), icon: Lock, accent: 'primary' },
     { title: 'Tables BDD', value: loading ? '—' : stats?.tablesBDD, icon: Database, accent: 'slate' },
-    { title: 'Dernière sauvegarde', value: loading ? '—' : formatBackup(stats?.dernierBackup), icon: Save, accent: 'primary' },
+    { title: 'Dernière sauvegarde', value: loading ? '—' : formatBackup(stats?.dernierBackup), icon: Save, accent: 'emerald' },
     { title: 'Traitements RGPD', value: loading ? '—' : stats?.traitementsRGPD, icon: Shield, accent: 'amber' },
   ];
 
   const cards = [
-    { path: '/users', title: 'Utilisateurs', desc: 'Gestion des comptes et rôles utilisateurs', icon: Lock },
-    { path: '/vehicles', title: 'Véhicules', desc: 'Parc véhicules, maintenance et contrôles', icon: Car },
-    { path: '/settings', title: 'Configuration', desc: 'Paramètres généraux de l\'application', icon: Settings },
-    { path: '/referentiels', title: 'Référentiels', desc: 'Associations, débouchés, catalogues', icon: ClipboardList },
-    { path: '/admin-predictive', title: 'Moteur prédictif', desc: 'Configuration du moteur IA prédictif', icon: Brain },
-    { path: '/rgpd', title: 'RGPD', desc: 'Registre des traitements et conformité', icon: Shield },
-    { path: '/admin-cav', title: 'Gestion CAV', desc: 'Administration des conteneurs d\'apport', icon: Map },
-    { path: '/admin-db', title: 'Base de données', desc: 'Backup, restauration et maintenance BDD', icon: Database },
+    { path: '/users', title: 'Utilisateurs', description: 'Gestion des comptes et rôles utilisateurs', icon: Lock, color: 'teal' },
+    { path: '/vehicles', title: 'Véhicules', description: 'Parc véhicules, maintenance et contrôles', icon: Car, color: 'blue' },
+    { path: '/settings', title: 'Configuration', description: 'Paramètres généraux de l\'application', icon: Settings, color: 'purple' },
+    { path: '/referentiels', title: 'Référentiels', description: 'Associations, débouchés, catalogues', icon: ClipboardList, color: 'amber' },
+    { path: '/admin-predictive', title: 'Moteur prédictif', description: 'Configuration du moteur IA prédictif', icon: Brain, color: 'emerald' },
+    { path: '/rgpd', title: 'RGPD', description: 'Registre des traitements et conformité', icon: Shield, color: 'red' },
+    { path: '/admin-cav', title: 'Gestion CAV', description: 'Administration des conteneurs d\'apport', icon: Map, color: 'teal' },
+    { path: '/admin-db', title: 'Base de données', description: 'Backup, restauration et maintenance BDD', icon: Database, color: 'blue' },
   ];
 
   return (
     <Layout>
       <div>
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
-            <span className="w-10 h-10 rounded-card bg-primary-surface flex items-center justify-center">
-              <Settings className="w-5 h-5 text-primary" />
-            </span>
-            Administration — Vue d'ensemble
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm ml-[52px]">Utilisateurs, configuration, sécurité et maintenance</p>
-        </div>
+        <PageHeader
+          title="Administration"
+          subtitle="Utilisateurs, configuration, sécurité et maintenance"
+          icon={Settings}
+        />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {kpis.map((kpi) => (
-            <KpiCard key={kpi.title} {...kpi} />
+            <KPICard key={kpi.title} {...kpi} />
           ))}
         </div>
 
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Accès rapide</h2>
+        <h2 className="text-lg font-bold text-slate-800 mb-4 tracking-tight">Modules d'administration</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {cards.map((card) => (
-            <NavCard key={card.path} {...card} onClick={() => navigate(card.path)} />
+            <ModuleCard key={card.path} {...card} />
           ))}
         </div>
       </div>

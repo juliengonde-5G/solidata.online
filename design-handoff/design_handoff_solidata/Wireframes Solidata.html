@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Wireframes Solidata — exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Patrick+Hand&family=Kalam:wght@300;400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --ink-2: #3d3d3d;
+    --ink-soft: #6b6b6b;
+    --paper: #fbfaf6;
+    --paper-2: #f3f1e8;
+    --rule: #2a2a2a;
+    --rule-soft: #b9b4a5;
+    --accent: #0d9488;
+    --accent-soft: #cdeeea;
+    --accent-wash: #e8f6f4;
+    --highlight: #ffe780;
+    --danger: #c2410c;
+  }
+  html.clean {
+    --paper: #ffffff;
+    --paper-2: #f6f7f9;
+    --ink: #0f172a;
+    --ink-2: #334155;
+    --ink-soft: #64748b;
+    --rule: #cbd5e1;
+    --rule-soft: #e2e8f0;
+  }
+  html.accent-none { --accent: #1a1a1a; --accent-soft: #e5e5e5; --accent-wash: #f0f0f0; }
+  html.accent-indigo { --accent: #4338ca; --accent-soft: #d7d6ff; --accent-wash: #ececff; }
+  html.accent-amber { --accent: #b45309; --accent-soft: #fde7b7; --accent-wash: #fff4dd; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Patrick Hand', 'Kalam', sans-serif;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+  html.clean body { font-family: 'Inter', sans-serif; font-size: 13.5px; }
+
+  /* paper texture */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(rgba(0,0,0,0.025) 1px, transparent 1px);
+    background-size: 3px 3px;
+    pointer-events: none;
+    z-index: 1;
+  }
+  html.clean body::before { display: none; }
+
+  /* =========================
+     TOP BAR
+     ========================= */
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--paper);
+    border-bottom: 1.5px solid var(--rule);
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    backdrop-filter: blur(6px);
+  }
+  html.clean .topbar { background: rgba(255,255,255,0.92); border-bottom-color: var(--rule-soft); }
+  .brand {
+    font-family: 'Caveat', cursive;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: 0.5px;
+  }
+  .brand em {
+    font-style: normal;
+    color: var(--accent);
+    background: var(--accent-wash);
+    padding: 0 8px;
+    border-radius: 3px;
+    transform: rotate(-1deg);
+    display: inline-block;
+  }
+  html.clean .brand { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 18px; letter-spacing: -0.01em;}
+  .brand-sub {
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-left: 4px;
+  }
+  .tweaks {
+    margin-left: auto;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .tweak {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Patrick Hand', sans-serif;
+    font-size: 14px;
+    color: var(--ink-2);
+    background: transparent;
+    border: 1.5px solid var(--rule);
+    border-radius: 20px;
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  html.clean .tweak { font-family: 'Inter', sans-serif; font-size: 12px; border-color: var(--rule-soft); }
+  .tweak:hover { background: var(--paper-2); }
+  .tweak.on { background: var(--accent); color: white; border-color: var(--accent); }
+  .tweak .dot { width:8px; height:8px; border-radius:50%; background: var(--rule); }
+  .tweak.on .dot { background: white; }
+  .accent-picker { display: flex; gap: 4px; padding: 2px; border:1.5px solid var(--rule); border-radius:20px; }
+  .accent-swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+  .accent-swatch.active { border-color: var(--ink); }
+
+  /* =========================
+     INTRO
+     ========================= */
+  .intro {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 40px 32px 8px;
+    position: relative;
+    z-index: 2;
+  }
+  .intro h1 {
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+    font-size: 54px;
+    margin: 0 0 8px;
+    line-height: 1;
+    letter-spacing: 0.5px;
+  }
+  html.clean .intro h1 { font-family: 'Inter', sans-serif; font-size: 36px; letter-spacing: -0.02em; font-weight: 700; }
+  .intro .tag {
+    display: inline-block;
+    font-family: 'Patrick Hand';
+    font-size: 15px;
+    border: 1.5px solid var(--rule);
+    border-radius: 20px;
+    padding: 3px 12px;
+    margin-bottom: 16px;
+    background: var(--paper-2);
+  }
+  html.clean .intro .tag { font-family: 'Inter'; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;}
+  .intro p {
+    max-width: 780px;
+    color: var(--ink-2);
+    font-size: 17px;
+    margin: 0 0 8px;
+  }
+  html.clean .intro p { font-size: 14px; }
+  .intro .legend {
+    margin-top: 22px;
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  html.clean .intro .legend { font-size: 12px; }
+  .intro .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .intro .legend i {
+    width: 14px; height: 14px; border: 1.5px solid var(--ink-2); display:inline-block;
+    font-style: normal;
+  }
+  .intro .legend i.box { border-radius: 2px; }
+  .intro .legend i.chip { border-radius: 10px; background: var(--accent-soft); border-color: var(--accent); }
+  .intro .legend i.placeholder { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--rule-soft) 4px 5px); }
+  .intro .legend i.annot { background: var(--highlight); border:none; border-radius: 2px;}
+
+  /* =========================
+     SECTION & CANVAS
+     ========================= */
+  .section {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 56px 32px 16px;
+    position: relative;
+    z-index: 2;
+  }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    border-bottom: 1.5px dashed var(--rule-soft);
+    padding-bottom: 14px;
+    margin-bottom: 28px;
+  }
+  .section-head .num {
+    font-family: 'Caveat', cursive;
+    font-size: 60px;
+    color: var(--accent);
+    line-height: 1;
+    font-weight: 700;
+  }
+  html.clean .section-head .num { font-family: 'Inter', sans-serif; font-size: 32px; font-weight: 700; }
+  .section-head h2 {
+    font-family: 'Caveat', cursive;
+    font-size: 40px;
+    margin: 0;
+    line-height: 1;
+    font-weight: 700;
+  }
+  html.clean .section-head h2 { font-family: 'Inter', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .section-head .sub {
+    color: var(--ink-soft);
+    font-size: 16px;
+    margin-left: auto;
+    max-width: 540px;
+    text-align: right;
+  }
+  html.clean .section-head .sub { font-size: 13px; }
+
+  .canvas {
+    display: grid;
+    gap: 28px;
+    align-items: start;
+  }
+  .canvas.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .canvas.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .canvas.cols-5 { grid-template-columns: repeat(5, 1fr); }
+  @media (max-width: 1280px) {
+    .canvas.cols-4, .canvas.cols-5 { grid-template-columns: repeat(2, 1fr); }
+    .canvas.cols-3 { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* =========================
+     WIREFRAME CARD
+     ========================= */
+  .wf {
+    position: relative;
+    background: var(--paper);
+    border: 1.5px solid var(--rule);
+    border-radius: 6px;
+    box-shadow: 2px 3px 0 var(--rule);
+    padding: 0;
+    overflow: hidden;
+    cursor: zoom-in;
+    transition: transform .15s;
+  }
+  html.clean .wf { border-radius: 10px; border-color: var(--rule-soft); box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04); }
+  .wf:hover { transform: translate(-1px, -1px); }
+  .wf-head {
+    display:flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 14px 16px 10px;
+    border-bottom: 1.5px dashed var(--rule-soft);
+    background: var(--paper-2);
+  }
+  .wf-head .ver {
+    font-family: 'Caveat', cursive;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+  }
+  html.clean .wf-head .ver { font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700; background: var(--accent-wash); padding: 2px 8px; border-radius: 10px; }
+  .wf-head .ttl { font-weight: 600; font-size: 15px; color: var(--ink); flex: 1; }
+  html.clean .wf-head .ttl { font-size: 13px; }
+  .wf-head .badge {
+    font-family: 'Patrick Hand';
+    font-size: 12px;
+    border: 1.5px solid var(--rule);
+    background: var(--paper);
+    padding: 1px 8px;
+    border-radius: 12px;
+    color: var(--ink-soft);
+  }
+  html.clean .wf-head .badge { font-family: 'Inter'; font-size: 10px; }
+  .wf-body {
+    padding: 14px;
+    aspect-ratio: 16 / 10;
+    position: relative;
+    display: flex;
+  }
+  .wf-note {
+    padding: 10px 16px 14px;
+    border-top: 1px dashed var(--rule-soft);
+    font-family: 'Caveat', cursive;
+    font-size: 18px;
+    color: var(--ink-2);
+    background: linear-gradient(var(--highlight), var(--highlight)) left 16px bottom 12px / calc(100% - 32px) 10px no-repeat;
+  }
+  html.clean .wf-note { font-family: 'Inter', sans-serif; font-size: 12px; background: none; color: var(--ink-soft); }
+  html.no-annot .wf-note { display: none; }
+
+  .wf.focused {
+    position: fixed;
+    inset: 40px 40px 40px 40px;
+    z-index: 80;
+    cursor: zoom-out;
+    transform: none;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.2);
+  }
+  .wf.focused .wf-body { aspect-ratio: auto; flex: 1; }
+  .focus-backdrop {
+    position: fixed; inset: 0; z-index: 79;
+    background: rgba(0,0,0,0.35);
+    display: none;
+  }
+  .focus-backdrop.on { display: block; }
+
+  /* =========================
+     SKETCHY PRIMITIVES
+     ========================= */
+  .fill { flex: 1; display: flex; width: 100%; height: 100%; }
+  .row { display: flex; }
+  .col { display: flex; flex-direction: column; }
+  .gap-1 { gap: 4px; } .gap-2 { gap: 8px; } .gap-3 { gap: 12px; } .gap-4 { gap: 16px; }
+  .p-1 { padding: 4px; } .p-2 { padding: 8px; } .p-3 { padding: 12px; }
+  .flex-1 { flex: 1; } .flex-2 { flex: 2; } .flex-3 { flex: 3; }
+
+  /* "boxes" — sketchy rectangles */
+  .bx {
+    border: 1.5px solid var(--rule);
+    border-radius: 4px;
+    background: var(--paper);
+    padding: 8px;
+    font-size: 12px;
+    color: var(--ink-2);
+    position: relative;
+    font-family: 'Patrick Hand';
+  }
+  html.clean .bx { font-family: 'Inter'; font-size: 10.5px; border-radius: 6px; border-color: var(--rule-soft); }
+  .bx.soft { background: var(--paper-2); }
+  .bx.accent { background: var(--accent-wash); border-color: var(--accent); color: var(--accent); }
+  .bx.accent-solid { background: var(--accent); color: white; border-color: var(--accent); }
+  .bx.ph {
+    background: repeating-linear-gradient(45deg, transparent 0 4px, var(--rule-soft) 4px 5px), var(--paper);
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .bx.dashed { border-style: dashed; }
+  .bx.hd { font-weight: 700; color: var(--ink); }
+  .lbl { font-size: 11px; color: var(--ink-soft); font-family: 'Patrick Hand'; letter-spacing: 0.01em; }
+  html.clean .lbl { font-family: 'Inter'; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .title { font-weight: 700; font-size: 14px; color: var(--ink); }
+  html.clean .title { font-size: 12px; }
+  .chip {
+    display: inline-block;
+    border: 1.5px solid var(--rule);
+    border-radius: 12px;
+    padding: 1px 8px;
+    font-size: 11px;
+    background: var(--paper);
+    color: var(--ink-2);
+  }
+  html.clean .chip { font-size: 10px; border-radius: 10px; border-color: var(--rule-soft); }
+  .chip.a { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .chip.d { background: #fde7dc; border-color: var(--danger); color: var(--danger); }
+  .chip.w { background: #fdf4c7; border-color: #b45309; color: #7c2d12; }
+  .line {
+    height: 6px;
+    background: var(--rule-soft);
+    border-radius: 3px;
+  }
+  .line.t { background: var(--ink-2); height: 3px; border-radius: 2px; }
+  .line.short { width: 50%; }
+  .line.long { width: 85%; }
+  .divider { border-top: 1.5px dashed var(--rule-soft); margin: 4px 0; }
+  .divider.solid { border-top-style: solid; border-top-color: var(--rule); }
+
+  /* circle avatar */
+  .avo {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: 1.5px solid var(--rule);
+    background: var(--paper-2);
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .avo.lg { width: 44px; height: 44px; }
+  .avo.xl { width: 60px; height: 60px; }
+
+  /* sketchy arrow */
+  .arrow::after {
+    content: '→';
+    font-family: 'Caveat';
+    font-size: 22px;
+    color: var(--ink-2);
+  }
+
+  /* mini icon (just hand-drawn boxes) */
+  .ico { width: 14px; height: 14px; border: 1.5px solid var(--ink-2); border-radius: 3px; display: inline-block; flex-shrink: 0; position: relative;}
+  .ico.circle { border-radius: 50%; }
+  .ico.tri { border: none; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--ink-2); border-radius: 0;}
+  .ico.ok { background: var(--accent); border-color: var(--accent); }
+  .ico.ok::after { content: '✓'; position: absolute; color: white; font-size: 10px; top: -4px; left: 1px; font-family: 'Inter'; font-weight: 700;}
+
+  /* =========================
+     SCREEN FRAMES (browser chrome)
+     ========================= */
+  .frame {
+    flex: 1;
+    border: 1.5px solid var(--rule);
+    border-radius: 4px;
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .frame-chrome {
+    height: 18px;
+    border-bottom: 1.5px solid var(--rule-soft);
+    background: var(--paper-2);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    font-size: 10px;
+    color: var(--ink-soft);
+  }
+  .frame-chrome::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--rule); box-shadow: 10px 0 0 var(--rule), 20px 0 0 var(--rule);
+  }
+  .frame-chrome span { margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 9px; }
+
+  .frame-body { flex: 1; display: flex; min-height: 0; }
+
+  /* the classic sidebar */
+  .side {
+    width: 130px;
+    border-right: 1.5px solid var(--rule-soft);
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--paper-2);
+    flex-shrink: 0;
+  }
+  .side .nav { display: flex; align-items:center; gap: 6px; padding: 5px 7px; border-radius: 4px; font-size: 11px; color: var(--ink-2);}
+  .side .nav.active { background: var(--accent-wash); color: var(--accent); font-weight: 700;}
+  .side .nav .ico { width: 10px; height: 10px; border-width: 1.3px; }
+  .side .nav.active .ico { background: var(--accent); border-color: var(--accent); }
+
+  .side.icons-only { width: 46px; padding: 10px 6px; align-items: center; }
+  .side.icons-only .nav { padding: 5px; justify-content: center; }
+  .side.icons-only .nav span:not(.ico) { display: none; }
+
+  .side.wide { width: 160px; }
+
+  /* topnav variant */
+  .topnav {
+    border-bottom: 1.5px solid var(--rule-soft);
+    padding: 6px 12px;
+    display: flex;
+    gap: 10px;
+    background: var(--paper);
+    align-items: center;
+    font-size: 11px;
+    color: var(--ink-2);
+  }
+  .topnav .brandy { font-weight: 700; color: var(--ink); margin-right: 4px; font-size: 12px;}
+  .topnav .nav { padding: 3px 8px; border-radius: 12px; }
+  .topnav .nav.active { background: var(--accent-wash); color: var(--accent); font-weight: 700; border: 1.5px solid var(--accent);}
+
+  .cont {
+    flex: 1;
+    padding: 12px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  .pagehdr {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .pagehdr h3 { margin: 0; font-size: 16px; font-weight: 700; color: var(--ink); font-family: 'Caveat'; }
+  html.clean .pagehdr h3 { font-family: 'Inter'; font-size: 13px; }
+  .pagehdr .lbl { margin-top: 2px; }
+  .pagehdr .spacer { flex: 1; }
+
+  /* =========================
+     ANNOT CALLOUTS (handwritten)
+     ========================= */
+  .callout {
+    position: absolute;
+    font-family: 'Caveat', cursive;
+    font-size: 17px;
+    color: var(--accent);
+    max-width: 140px;
+    pointer-events: none;
+    line-height: 1.1;
+    transform: rotate(-2deg);
+    z-index: 5;
+  }
+  html.clean .callout { font-family: 'Inter'; font-size: 11px; font-weight: 500; transform: none; color: var(--ink-2); }
+  html.no-annot .callout { display: none; }
+  .callout::before {
+    content: '';
+    position: absolute;
+    width: 40px; height: 30px;
+    border: 1.5px solid var(--accent);
+    border-right: none;
+    border-bottom: none;
+    border-top-left-radius: 30px;
+  }
+  html.clean .callout::before { display: none; }
+
+  /* tweak panel for side explorations */
+  .mini-map { font-family: 'Caveat'; font-size: 15px; color: var(--ink-soft); }
+
+  /* Section jump nav */
+  .jumpnav {
+    position: sticky;
+    top: 60px;
+    z-index: 40;
+    background: var(--paper);
+    border-bottom: 1px dashed var(--rule-soft);
+    padding: 8px 32px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    font-family: 'Patrick Hand';
+    font-size: 14px;
+  }
+  html.clean .jumpnav { font-family: 'Inter'; font-size: 12px;}
+  .jumpnav a {
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 4px 10px;
+    border-radius: 14px;
+    border: 1.5px solid transparent;
+    white-space: nowrap;
+  }
+  .jumpnav a:hover { background: var(--paper-2); border-color: var(--rule-soft);}
+
+  /* footer */
+  .foot {
+    max-width: 1400px;
+    margin: 64px auto 40px;
+    padding: 40px 32px;
+    border-top: 1.5px dashed var(--rule-soft);
+    color: var(--ink-soft);
+    font-size: 14px;
+    position: relative; z-index:2;
+  }
+  .foot h4 { font-family: 'Caveat'; font-size: 26px; color: var(--ink); margin: 0 0 8px;}
+  html.clean .foot h4 { font-family: 'Inter'; font-size: 16px;}
+
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Solidata <em>wireframes</em></div>
+  <span class="brand-sub">v0.1 · exploration</span>
+  <div class="tweaks">
+    <button class="tweak on" id="tw-sketchy"><span class="dot"></span>sketchy</button>
+    <button class="tweak on" id="tw-annot"><span class="dot"></span>annotations</button>
+    <button class="tweak" id="tw-lang">FR / EN</button>
+    <div class="accent-picker" title="Accent">
+      <div class="accent-swatch active" data-accent="teal" style="background:#0d9488"></div>
+      <div class="accent-swatch" data-accent="none" style="background:#1a1a1a"></div>
+      <div class="accent-swatch" data-accent="indigo" style="background:#4338ca"></div>
+      <div class="accent-swatch" data-accent="amber" style="background:#b45309"></div>
+    </div>
+  </div>
+</div>
+
+<nav class="jumpnav">
+  <a href="#dashboard">01 · Dashboard</a>
+  <a href="#recrutement">02 · Recrutement</a>
+  <a href="#pcm">03 · Test PCM</a>
+  <a href="#collecte">04 · Collecte</a>
+  <a href="#production">05 · Production</a>
+  <a href="#finances">06 · Finances</a>
+  <a href="#reporting">07 · Reporting</a>
+  <a href="#admin">08 · Administration</a>
+</nav>
+
+<section class="intro">
+  <span class="tag">Exploration · Solidata ERP · avril 2026</span>
+  <h1 data-fr="Wireframes larges — on ouvre la carte des possibles." data-en="Wide wireframes — mapping the possibility space.">Wireframes larges — on ouvre la carte des possibles.</h1>
+  <p data-fr="7 écrans clés, 3 à 5 variations chacun. Posture « go wide » : on mélange les patterns attendus (sidebar + cards) avec des alternatives plus osées (split-view, command-bar, timeline, carte-first). Chaque carte est cliquable pour zoomer. Les Tweaks en haut permettent de basculer propre/sketchy, cacher les annotations, ou changer l'accent." data-en="7 key screens, 3–5 variations each. 'Go wide' stance: familiar patterns (sidebar + cards) sit next to bolder alternatives (split-view, command-bar, timeline, map-first). Click any card to zoom. Use the Tweaks at top to flip clean/sketchy, hide annotations, or change accent.">7 écrans clés, 3 à 5 variations chacun. Posture « go wide » : on mélange les patterns attendus (sidebar + cards) avec des alternatives plus osées (split-view, command-bar, timeline, carte-first). Chaque carte est cliquable pour zoomer. Les Tweaks en haut permettent de basculer propre/sketchy, cacher les annotations, ou changer l'accent.</p>
+  <div class="legend">
+    <span><i class="box"></i> boîte = composant</span>
+    <span><i class="placeholder"></i> zone données</span>
+    <span><i class="chip"></i> accent / action principale</span>
+    <span><i class="annot"></i> note marginale</span>
+  </div>
+</section>
+
+<!-- Sections injected here -->
+<div id="sections"></div>
+
+<section class="foot">
+  <h4>Prochaine étape ?</h4>
+  <p data-fr="Dis-moi quelles variations te parlent (ex : « Dashboard v3 + Kanban v2 + PCM v2 »). Je les reprends en mi-fi ou hi-fi, on ajoute la vraie copy et les composants du design system teal existant." data-en="Tell me which variations resonate (e.g. 'Dashboard v3 + Kanban v2 + PCM v2'). I'll lift those to mid- or hi-fi, with real copy and your existing teal components.">Dis-moi quelles variations te parlent (ex : « Dashboard v3 + Kanban v2 + PCM v2 »). Je les reprends en mi-fi ou hi-fi, on ajoute la vraie copy et les composants du design system teal existant.</p>
+</section>
+
+<div class="focus-backdrop" id="backdrop"></div>
+
+<script src="wireframes/sections.js?v=2"></script>
+<script src="wireframes/interact.js?v=2"></script>
+</body>
+</html>

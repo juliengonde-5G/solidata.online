@@ -10,21 +10,24 @@ import {
 import { sendIncident, getPendingCount } from '../services/sync';
 
 const INCIDENT_TYPES = [
-  { value: 'vehicle_breakdown', label: 'Panne véhicule', icon: '🚛' },
-  { value: 'accident', label: 'Accident', icon: '💥' },
-  { value: 'cav_problem', label: 'Conteneur / CAV', icon: '📦' },
-  { value: 'environment', label: 'Environnement', icon: '🚫' },
-  { value: 'other', label: 'Autre', icon: '📝' },
+  { value: 'cav_problem',       label: 'CAV dégradée',      sub: 'cassée, tag, dépôt sauvage', icon: '🗑' },
+  { value: 'environment',       label: 'CAV inaccessible',  sub: 'bloquée, fermée, travaux',    icon: '🚧' },
+  { value: 'cav_overflow',      label: 'Débordement',       sub: 'sacs autour, dépôt extérieur', icon: '⚠' },
+  { value: 'vehicle_breakdown', label: 'Problème véhicule', sub: 'panne, hayon, crevaison',     icon: '🚚' },
+  { value: 'security',          label: 'Sécurité',          sub: 'agression, menace, tension',  icon: '🛡' },
+  { value: 'other',             label: 'Autre',             sub: 'à préciser',                  icon: '💬' },
 ];
 const TYPE_LABELS = INCIDENT_TYPES.reduce((acc, t) => { acc[t.value] = t.label; return acc; }, {});
 
 // Phrases prédéfinies par type — couvrent 80% des cas courants et évitent
 // d'imposer une saisie clavier terrain.
 const PRESETS = {
-  vehicle_breakdown: ['Moteur', 'Pneu crevé', 'Freins', 'Batterie', 'Carburant'],
+  vehicle_breakdown: ['Moteur', 'Pneu crevé', 'Freins', 'Batterie', 'Carburant', 'Hayon'],
   accident: ['Tôle froissée', 'Piéton / cycliste', 'Autre véhicule', 'Matériel urbain'],
-  cav_problem: ['Serrure cassée', 'Conteneur endommagé', 'Débordement', 'Accès bloqué'],
-  environment: ['Dépôt sauvage', 'Déchets autour', 'Nuisances / odeurs'],
+  cav_problem: ['Serrure cassée', 'Conteneur endommagé', 'Tag / graffiti', 'Accès bloqué'],
+  cav_overflow: ['Sacs autour', 'Dépôt sauvage', 'Déchets non conformes'],
+  environment: ['Bloquée', 'Travaux', 'Stationnement gênant'],
+  security: ['Agression', 'Menace', 'Tension'],
   other: [],
 };
 
@@ -269,39 +272,90 @@ export default function Incident() {
   }
 
   // phase === 'type' (par défaut)
+  const cavName = localStorage.getItem('selected_cav_name');
+  const hhmm = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
   return (
-    <MobileShell
-      title="Signaler un incident"
-      subtitle="Choisissez le type"
-      onBack={backToMap}
-      usageHint="operational_stop"
-    >
-      <div className="space-y-4">
-        <p className="text-sm text-gray-600">
+    <div className="min-h-screen flex flex-col" style={{ background: '#FAFAF9' }}>
+      {/* Red header */}
+      <header
+        className="flex-shrink-0 flex items-center gap-3 text-white"
+        style={{
+          background: '#DC2626',
+          padding: 'calc(var(--safe-top) + 20px) 18px 16px',
+        }}
+      >
+        <button
+          type="button"
+          onClick={backToMap}
+          aria-label="Retour"
+          className="touch-target flex items-center justify-center"
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            background: 'rgba(255,255,255,0.2)',
+            color: 'white',
+            fontSize: 20,
+          }}
+        >
+          ←
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] uppercase tracking-widest font-bold opacity-85">⚠ Nouvel incident</p>
+          <h1 className="font-extrabold text-lg leading-tight">Qu'est-ce qui se passe ?</h1>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-5 pt-5 pb-6 space-y-5">
+        {/* Context pill */}
+        <div
+          className="bg-white flex items-center justify-between text-xs text-gray-600"
+          style={{ borderRadius: 12, padding: '10px 12px', border: '1px solid #E2E8F0' }}
+        >
+          <span>📍 {cavName || 'Position actuelle'}</span>
+          <span className="font-bold text-gray-900">{hhmm}</span>
+        </div>
+
+        <p className="text-sm text-gray-600 leading-snug">
           Un seul tap suffit. Les détails sont optionnels et pourront être ajoutés juste après.
         </p>
-        <div className="grid grid-cols-1 gap-2">
-          {INCIDENT_TYPES.map(t => (
-            <button
-              key={t.value}
-              type="button"
-              aria-label={`Signaler : ${t.label}`}
-              onClick={() => chooseType(t)}
-              className="flex items-center gap-4 card-mobile p-4 text-left active:scale-[0.99] transition-all min-h-[72px]"
-            >
-              <span className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center text-2xl flex-shrink-0" aria-hidden="true">
-                {t.icon}
-              </span>
-              <span className="font-bold text-gray-900">{t.label}</span>
-            </button>
-          ))}
+
+        {/* Type grid 2x3 */}
+        <div>
+          <p className="text-[11px] uppercase tracking-widest text-gray-500 font-bold mb-3">
+            Type d'incident
+          </p>
+          <div className="grid grid-cols-2 gap-2.5">
+            {INCIDENT_TYPES.map(t => (
+              <button
+                key={t.value}
+                type="button"
+                aria-label={`Signaler : ${t.label}`}
+                onClick={() => chooseType(t)}
+                className="flex flex-col items-center justify-center gap-1 text-center bg-white active:scale-[0.97] transition-all"
+                style={{
+                  minHeight: 96,
+                  padding: '12px 10px',
+                  borderRadius: 14,
+                  border: '2px solid #E2E8F0',
+                  color: '#1E293B',
+                }}
+              >
+                <span className="text-[28px] leading-none" aria-hidden="true">{t.icon}</span>
+                <span className="text-[14px] font-extrabold leading-tight">{t.label}</span>
+                <span className="text-[10px] font-medium opacity-60 leading-tight">{t.sub}</span>
+              </button>
+            ))}
+          </div>
         </div>
+
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 font-medium">
             {error}
           </div>
         )}
       </div>
-    </MobileShell>
+    </div>
   );
 }

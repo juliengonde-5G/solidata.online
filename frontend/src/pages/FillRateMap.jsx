@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { MapPin } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, Cell } from 'recharts';
@@ -84,15 +85,16 @@ export default function FillRateMap() {
     <Layout>
       <div className="p-6 space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Taux de remplissage CAV</h1>
-            <p className="text-gray-500 text-sm">Estimation en temps réel et prévisions</p>
-          </div>
-          <button onClick={loadData} className="btn-primary text-sm">
-            Actualiser
-          </button>
-        </div>
+        <PageHeader
+          title="Taux de remplissage CAV"
+          subtitle="Estimation en temps réel et prévisions"
+          icon={MapPin}
+          actions={
+            <button onClick={loadData} className="btn-primary text-sm">
+              Actualiser
+            </button>
+          }
+        />
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -297,7 +299,7 @@ export default function FillRateMap() {
                             {activityData.jours.map((j, i) => (
                               <Cell
                                 key={i}
-                                fill={j.type === 'prevision' ? '#93C5FD' : '#8BC540'}
+                                fill={j.type === 'prevision' ? '#93C5FD' : '#0D9488'}
                                 fillOpacity={j.collecte_kg > 0 ? 1 : 0.7}
                                 stroke={j.collecte_kg > 0 ? '#16A34A' : 'none'}
                                 strokeWidth={j.collecte_kg > 0 ? 2 : 0}
@@ -307,7 +309,7 @@ export default function FillRateMap() {
                         </BarChart>
                       </ResponsiveContainer>
                       <div className="flex items-center justify-center gap-4 text-[10px] text-gray-500 mt-1">
-                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#8BC540]" /> Historique</span>
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-primary" /> Historique</span>
                         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#93C5FD]" /> Prévision</span>
                         <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 bg-red-500" /> Seuil 80%</span>
                       </div>

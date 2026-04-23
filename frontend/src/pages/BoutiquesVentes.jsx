@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { ShoppingBag, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, CartesianGrid } from 'recharts';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KpiCard } from '../components';
+import { LoadingSpinner, KpiCard, PageHeader } from '../components';
 import api from '../services/api';
 
 const SEGMENT_LABELS = {
@@ -11,7 +11,7 @@ const SEGMENT_LABELS = {
   consommables: 'Consommables',
 };
 const SEGMENT_COLORS = {
-  ventes_courantes: '#2D8C4E',
+  ventes_courantes: '#0D9488',
   promotions: '#F59E0B',
   consommables: '#94A3B8',
 };
@@ -80,13 +80,11 @@ export default function BoutiquesVentes() {
   return (
     <Layout>
       <div className="p-4 sm:p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-            <ShoppingBag className="w-6 h-6 text-pink-600" />
-            Analyse des ventes
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm">Performance commerciale par rayon, segment et article</p>
-        </div>
+        <PageHeader
+          title="Analyse des ventes"
+          subtitle="Performance commerciale par rayon, segment et article"
+          icon={ShoppingBag}
+        />
 
         <div className="bg-white rounded-card shadow-card p-4 mb-6 flex flex-wrap items-end gap-4">
           <div>

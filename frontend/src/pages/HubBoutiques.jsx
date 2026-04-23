@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Store, ShoppingBag, ClipboardList, Calendar, Target, Upload, LayoutDashboard } from 'lucide-react';
 import Layout from '../components/Layout';
-import { KpiCard, NavCard } from '../components';
+import { KpiCard, NavCard, PageHeader, Section } from '../components';
 import api from '../services/api';
 
 export default function HubBoutiques() {
@@ -73,28 +73,25 @@ export default function HubBoutiques() {
   return (
     <Layout>
       <div>
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
-            <span className="w-10 h-10 rounded-card bg-pink-50 flex items-center justify-center">
-              <Store className="w-5 h-5 text-pink-600" />
-            </span>
-            Boutiques — Vue d'ensemble
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm ml-[52px]">Performance commerciale, commandes et pilotage retail 2nde main</p>
-        </div>
+        <PageHeader
+          title="Boutiques — Vue d'ensemble"
+          subtitle="Performance commerciale, commandes et pilotage retail 2nde main"
+          icon={Store}
+        />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {kpis.map((kpi) => (
             <KpiCard key={kpi.title} {...kpi} />
           ))}
         </div>
 
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Accès rapide</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cards.map((card) => (
-            <NavCard key={card.path} {...card} onClick={() => navigate(card.path)} />
-          ))}
-        </div>
+        <Section title="Accès rapide">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {cards.map((card) => (
+              <NavCard key={card.path} {...card} onClick={() => navigate(card.path)} />
+            ))}
+          </div>
+        </Section>
       </div>
     </Layout>
   );

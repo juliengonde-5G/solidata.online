@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -206,4 +206,141 @@
   background: var(--color-primary-dark);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   SHELL — sidebar arborescente 2 niveaux + assistant panel
+   (aligné design-handoff/mifi/app.css)
+   ═══════════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* ── Sidebar : item actif gradient teal ─────────────────────── */
+  .nav-item-active {
+    background: linear-gradient(90deg, var(--color-primary), var(--color-primary-light));
+    color: white;
+    font-weight: 600;
+    box-shadow: 0 4px 10px -2px rgba(13, 148, 136, 0.35);
+  }
+  .nav-parent-active {
+    color: var(--color-primary-dark);
+    background: var(--color-primary-surface);
+  }
+
+  /* ── Section card : conteneur standard du nouveau DS ────────── */
+  .section-card {
+    @apply bg-white border border-slate-200/70;
+    border-radius: 14px;
+    box-shadow: var(--shadow-card);
+  }
+  .section-card-header {
+    @apply flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-100;
+  }
+  .section-card-title {
+    @apply text-base font-bold text-slate-900;
+  }
+  .section-card-body {
+    @apply p-5;
+  }
+
+  /* ── Pill / badge compteur sidebar ──────────────────────────── */
+  .nav-pill {
+    @apply inline-flex items-center font-bold;
+    font-size: 10.5px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--color-bg-subtle);
+    color: var(--color-text-muted);
+  }
+  .nav-pill-accent {
+    background: var(--color-primary-muted);
+    color: var(--color-primary-dark);
+  }
+  .nav-item-active .nav-pill,
+  .nav-item-active .nav-pill-accent {
+    background: rgba(255, 255, 255, 0.25);
+    color: white;
+  }
+
+  /* ── Brand mark (logo carré gradient teal) ──────────────────── */
+  .brand-mark {
+    @apply grid place-items-center font-extrabold text-white flex-shrink-0;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    font-size: 17px;
+    background: linear-gradient(135deg, var(--color-primary-light), var(--color-primary-dark));
+    box-shadow: 0 4px 10px -2px rgba(13, 148, 136, 0.35);
+  }
+
+  /* ── Bouton Assistant IA dans la topbar ─────────────────────── */
+  .btn-chatbot {
+    @apply inline-flex items-center gap-2 font-semibold transition-all;
+    padding: 6px 12px 6px 6px;
+    border-radius: 999px;
+    background: var(--color-primary-surface);
+    color: var(--color-primary-dark);
+    font-size: 13px;
+    border: 1px solid var(--color-primary-muted);
+  }
+  .btn-chatbot:hover {
+    background: var(--color-primary-muted);
+  }
+  .chatbot-avatar {
+    @apply grid place-items-center text-white;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, var(--color-primary-light), var(--color-primary-dark));
+  }
+  .chatbot-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22C55E;
+    box-shadow: 0 0 0 2px var(--color-primary-surface);
+    animation: pulse-ring 1.6s ease-out infinite;
+  }
+
+  /* ── Search topbar ──────────────────────────────────────────── */
+  .topbar-search {
+    @apply flex items-center gap-2 transition-colors;
+    background: var(--color-bg-subtle);
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 7px 10px;
+    color: var(--color-text-muted);
+    flex: 1;
+    max-width: 480px;
+  }
+  .topbar-search:focus-within {
+    background: white;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+  }
+  .topbar-search input {
+    @apply flex-1 bg-transparent border-0 outline-none text-sm;
+    color: var(--color-text);
+  }
+  .topbar-search kbd {
+    @apply text-xs font-mono px-1.5 py-0.5 rounded border border-slate-200 bg-white text-slate-400;
+  }
+
+  /* ── Assistant panel (slide-in droite) ──────────────────────── */
+  .assistant-overlay {
+    @apply fixed inset-0 z-40 bg-slate-900/30 opacity-0 pointer-events-none transition-opacity;
+    backdrop-filter: blur(2px);
+  }
+  .assistant-overlay.open {
+    @apply opacity-100 pointer-events-auto;
+  }
+  .assistant-panel {
+    @apply fixed top-0 right-0 z-50 h-screen flex flex-col bg-white shadow-2xl;
+    width: min(380px, 100vw);
+    transform: translateX(100%);
+    transition: transform 0.22s ease-out;
+  }
+  .assistant-panel.open {
+    transform: translateX(0);
+  }
+}
+
 /* Contenu principal responsive — plus besoin de padding-top avec TopBar */
+

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader } from '../components';
+import { ScrollText } from 'lucide-react';
 import api from '../services/api';
 
 const ACTION_LABELS = {
@@ -151,10 +152,11 @@ export default function ActivityLog() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">Journal d'activité</h1>
-          <p className="text-gray-500">Suivi des actions, connexions et sessions utilisateurs</p>
-        </div>
+        <PageHeader
+          title="Journal d'activité"
+          subtitle="Suivi des actions, connexions et sessions utilisateurs"
+          icon={ScrollText}
+        />
 
         {/* Stats rapides */}
         {stats && (

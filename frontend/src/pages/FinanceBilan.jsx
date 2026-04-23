@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, ArrowRight, BarChart3, Scale, ShieldCheck, Target, TrendingUp } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, Section } from '../components';
 
 // ══════════════════════════════════════════
 // FINANCE BILAN — Bilan & SIG
@@ -87,11 +87,7 @@ export default function FinanceBilan() {
         </div>
 
         {/* Compte de resultat (SIG) */}
-        <div className="card-modern p-6">
-          <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-slate-400" />
-            Soldes Intermediaires de Gestion
-          </h3>
+        <Section title="Soldes Intermediaires de Gestion" icon={BarChart3}>
           {loading ? (
             <div className="flex items-center justify-center py-12"><LoadingSpinner /></div>
           ) : sig.length === 0 ? (
@@ -122,16 +118,12 @@ export default function FinanceBilan() {
               </table>
             </div>
           )}
-        </div>
+        </Section>
 
         {/* Bilan simplifie */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Actif */}
-          <div className="card-modern p-6">
-            <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <ArrowRight className="w-5 h-5 text-teal-500" />
-              Actif
-            </h3>
+          <Section title="Actif" icon={ArrowRight}>
             {loading ? (
               <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
             ) : actif.length === 0 ? (
@@ -158,14 +150,10 @@ export default function FinanceBilan() {
                 </table>
               </div>
             )}
-          </div>
+          </Section>
 
           {/* Passif */}
-          <div className="card-modern p-6">
-            <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <ArrowLeft className="w-5 h-5 text-amber-500" />
-              Passif
-            </h3>
+          <Section title="Passif" icon={ArrowLeft}>
             {loading ? (
               <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
             ) : passif.length === 0 ? (
@@ -192,15 +180,11 @@ export default function FinanceBilan() {
                 </table>
               </div>
             )}
-          </div>
+          </Section>
         </div>
 
         {/* Ratios financiers */}
-        <div className="card-modern p-6">
-          <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-slate-400" />
-            Ratios financiers
-          </h3>
+        <Section title="Ratios financiers" icon={TrendingUp}>
           {loading ? (
             <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
           ) : ratios.length === 0 ? (
@@ -224,14 +208,10 @@ export default function FinanceBilan() {
               ))}
             </div>
           )}
-        </div>
+        </Section>
 
         {/* Seuil de rentabilite */}
-        <div className="card-modern p-6">
-          <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <Target className="w-5 h-5 text-slate-400" />
-            Seuil de rentabilite
-          </h3>
+        <Section title="Seuil de rentabilite" icon={Target}>
           {loading ? (
             <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
           ) : !breakeven.ca_seuil ? (
@@ -274,7 +254,7 @@ export default function FinanceBilan() {
               </div>
             </div>
           )}
-        </div>
+        </Section>
       </div>
     </Layout>
   );

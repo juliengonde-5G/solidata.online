@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, Section } from '../components';
 
 // ══════════════════════════════════════════
 // FINANCE P&L — Compte de Resultat
@@ -103,9 +103,7 @@ export default function FinancePL() {
         </div>
 
         {/* Tableau P&L */}
-        <div className="card-modern p-6">
-          <h3 className="text-base font-semibold text-slate-800 mb-4">Detail par affectation analytique</h3>
-
+        <Section title="Detail par affectation analytique" icon={BarChart3}>
           {loading ? (
             <div className="flex items-center justify-center py-16"><LoadingSpinner /></div>
           ) : groups.length === 0 ? (
@@ -157,7 +155,7 @@ export default function FinancePL() {
               </table>
             </div>
           )}
-        </div>
+        </Section>
       </div>
     </Layout>
   );

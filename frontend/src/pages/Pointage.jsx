@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader } from '../components';
+import { Fingerprint } from 'lucide-react';
 import api from '../services/api';
 
 const TABS = ['daily', 'badges', 'manual', 'alerts', 'log', 'monthly'];
@@ -122,10 +123,11 @@ export default function Pointage() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">Pointage</h1>
-          <p className="text-gray-500">Gestion des badgeages et suivi des heures</p>
-        </div>
+        <PageHeader
+          title="Pointage"
+          subtitle="Gestion des badgeages et suivi des heures"
+          icon={Fingerprint}
+        />
 
         {/* Onglets */}
         <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 overflow-x-auto">

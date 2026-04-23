@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BookOpen, CircleDollarSign, Download, ExternalLink, RefreshCw, Zap } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, Modal } from '../components';
+import { LoadingSpinner, DataTable, Modal, PageHeader, Section } from '../components';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -136,34 +136,29 @@ export default function Pennylane() {
   return (
     <Layout>
       <div className="p-6 max-w-5xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
-              <CircleDollarSign className="w-6 h-6 text-indigo-600" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800">Finances — Pennylane</h1>
-              <p className="text-slate-500 text-sm">Connexion comptable avec Pennylane</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {status?.active ? (
-              <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-sm font-medium">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Connecte
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 text-sm font-medium">
-                <span className="w-2 h-2 rounded-full bg-gray-400" /> Deconnecte
-              </span>
-            )}
-            {isAdmin && (
-              <button onClick={() => setShowConfig(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">
-                Configuration
-              </button>
-            )}
-          </div>
-        </div>
+        <PageHeader
+          title="Finances — Pennylane"
+          subtitle="Connexion comptable avec Pennylane"
+          icon={CircleDollarSign}
+          actions={
+            <>
+              {status?.active ? (
+                <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-sm font-medium">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Connecte
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 text-sm font-medium">
+                  <span className="w-2 h-2 rounded-full bg-gray-400" /> Deconnecte
+                </span>
+              )}
+              {isAdmin && (
+                <button onClick={() => setShowConfig(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">
+                  Configuration
+                </button>
+              )}
+            </>
+          }
+        />
 
         {/* KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -188,8 +183,7 @@ export default function Pennylane() {
         </div>
 
         {/* Actions */}
-        <div className="card-modern p-6">
-          <h2 className="font-bold text-slate-800 mb-4">Actions de synchronisation</h2>
+        <Section title="Actions de synchronisation">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Test connexion */}
             <button
@@ -318,7 +312,7 @@ export default function Pennylane() {
               <button onClick={() => setGlDiag(null)} className="text-xs text-slate-400 hover:text-slate-600 underline">Fermer</button>
             </div>
           )}
-        </div>
+        </Section>
 
         {/* Balances comptables */}
         {balances && (
@@ -381,8 +375,7 @@ export default function Pennylane() {
         )}
 
         {/* Historique des syncs */}
-        <div className="card-modern p-6">
-          <h2 className="font-bold text-slate-800 mb-4">Historique des synchronisations</h2>
+        <Section title="Historique des synchronisations">
           {(() => {
             const historyColumns = [
               { key: 'started_at', label: 'Date', sortable: true, render: (h) => formatDate(h.started_at) },
@@ -416,7 +409,7 @@ export default function Pennylane() {
               />
             );
           })()}
-        </div>
+        </Section>
       </div>
 
       {/* Modal configuration */}

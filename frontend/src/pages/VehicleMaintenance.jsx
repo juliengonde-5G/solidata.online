@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Wrench, FileText, CalendarClock, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal } from '../components';
+import { LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 const STATUS_COLORS = { ok: 'bg-green-100 text-green-700', bientot: 'bg-yellow-100 text-yellow-700', depasse: 'bg-red-100 text-red-700' };
@@ -124,21 +124,21 @@ export default function VehicleMaintenance() {
   return (
     <Layout>
       <div className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Maintenance véhicules</h1>
-            <p className="text-slate-500 text-sm">Plans constructeurs, suivi entretien, alertes</p>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {['plans', 'flotte', 'contrats', 'historique'].map(t => (
-              <button key={t} onClick={() => setTab(t)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${tab === t ? 'bg-teal-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-50'}`}>
-                {t === 'plans' ? 'Plans constructeurs' : t === 'flotte' ? 'État flotte' : t === 'contrats' ? `Contrats d'entretien${contracts.length ? ` (${contracts.length})` : ''}` : 'Historique véhicule'}
-              </button>
-            ))}
-          </div>
-        </div>
+        <PageHeader
+          title="Maintenance véhicules"
+          subtitle="Plans constructeurs, suivi entretien, alertes"
+          icon={Wrench}
+          actions={
+            <div className="flex gap-2 flex-wrap">
+              {['plans', 'flotte', 'contrats', 'historique'].map(t => (
+                <button key={t} onClick={() => setTab(t)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${tab === t ? 'bg-teal-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-50'}`}>
+                  {t === 'plans' ? 'Plans constructeurs' : t === 'flotte' ? 'État flotte' : t === 'contrats' ? `Contrats d'entretien${contracts.length ? ` (${contracts.length})` : ''}` : 'Historique véhicule'}
+                </button>
+              ))}
+            </div>
+          }
+        />
 
         {/* ═══ TAB PLANS CONSTRUCTEURS ═══ */}
         {tab === 'plans' && (

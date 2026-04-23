@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Scale, Lock, Unlock, Edit3, History, Search, BookOpen, Download } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, Modal } from '../components';
+import { DataTable, LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 const ORIGINES_LABELS = {
@@ -219,24 +219,22 @@ export default function AdminStockOriginal() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <Scale className="w-6 h-6 text-primary" strokeWidth={1.8} />
-              Administration Stock Original
-            </h1>
-            <p className="text-slate-500">Regularisation, modification et verrouillage trimestriel</p>
-          </div>
-          <div className="flex bg-slate-100 rounded-lg p-0.5">
-            {tabs.map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all ${activeTab === tab.id ? 'bg-white shadow font-medium text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-                <tab.icon className="w-3.5 h-3.5" strokeWidth={1.8} />
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <PageHeader
+          title="Administration Stock Original"
+          subtitle="Regularisation, modification et verrouillage trimestriel"
+          icon={Scale}
+          actions={
+            <div className="flex bg-slate-100 rounded-lg p-0.5">
+              {tabs.map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all ${activeTab === tab.id ? 'bg-white shadow font-medium text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                  <tab.icon className="w-3.5 h-3.5" strokeWidth={1.8} />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          }
+        />
 
         {message && (
           <div className={`mb-4 p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>

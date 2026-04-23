@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Upload, FileText, CheckCircle, XCircle, AlertTriangle, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, useToast } from '../components';
+import { LoadingSpinner, useToast, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function BoutiquesImport() {
@@ -88,13 +88,11 @@ export default function BoutiquesImport() {
   return (
     <Layout>
       <div className="p-4 sm:p-6 max-w-6xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-            <Upload className="w-6 h-6 text-pink-600" />
-            Import CSV des ventes
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm">Upload manuel et suivi des imports automatiques depuis la caisse LogicS</p>
-        </div>
+        <PageHeader
+          title="Import CSV des ventes"
+          subtitle="Upload manuel et suivi des imports automatiques depuis la caisse LogicS"
+          icon={Upload}
+        />
 
         <div className="bg-white rounded-card shadow-card p-6 mb-6">
           <h2 className="text-lg font-semibold text-slate-800 mb-4">Nouvel import</h2>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Package, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function ProduitsFinis() {
@@ -65,20 +65,21 @@ export default function ProduitsFinis() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Produits finis</h1>
-            <p className="text-slate-500">Articles triés et conditionnés</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-primary text-white' : 'bg-slate-100'}`}>Liste</button>
-            <button onClick={() => setView('summary')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'summary' ? 'bg-primary text-white' : 'bg-slate-100'}`}>Synthèse</button>
-            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-              <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-              Ajouter
-            </button>
-          </div>
-        </div>
+        <PageHeader
+          title="Produits finis"
+          subtitle="Articles triés et conditionnés"
+          icon={Package}
+          actions={
+            <div className="flex gap-2">
+              <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-primary text-white' : 'bg-slate-100'}`}>Liste</button>
+              <button onClick={() => setView('summary')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'summary' ? 'bg-primary text-white' : 'bg-slate-100'}`}>Synthèse</button>
+              <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+                <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+                Ajouter
+              </button>
+            </div>
+          }
+        />
 
         {view === 'summary' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
