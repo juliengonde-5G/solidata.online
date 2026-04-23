@@ -375,8 +375,7 @@ export default function Pennylane() {
         )}
 
         {/* Historique des syncs */}
-        <div className="card-modern p-6">
-          <h2 className="font-bold text-slate-800 mb-4">Historique des synchronisations</h2>
+        <Section title="Historique des synchronisations">
           {(() => {
             const historyColumns = [
               { key: 'started_at', label: 'Date', sortable: true, render: (h) => formatDate(h.started_at) },
@@ -410,7 +409,7 @@ export default function Pennylane() {
               />
             );
           })()}
-        </div>
+        </Section>
       </div>
 
       {/* Modal configuration */}

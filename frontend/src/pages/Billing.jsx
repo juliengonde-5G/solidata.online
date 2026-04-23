@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FileText, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function Billing() {
@@ -84,16 +84,17 @@ export default function Billing() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Facturation</h1>
-            <p className="text-slate-500">Gestion des factures</p>
-          </div>
-          <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-            <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-            Nouvelle facture
-          </button>
-        </div>
+        <PageHeader
+          title="Facturation"
+          subtitle="Gestion des factures"
+          icon={FileText}
+          actions={
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+              <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+              Nouvelle facture
+            </button>
+          }
+        />
 
         <DataTable
           columns={columns}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KPICard } from '../components';
+import { LoadingSpinner, KPICard, PageHeader, Section } from '../components';
 import api from '../services/api';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -66,24 +66,19 @@ export default function ReportingCollecte() {
   return (
     <Layout>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-teal-50">
-              <Truck className="w-6 h-6 text-teal-600" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Reporting Collecte</h1>
-              <p className="text-slate-500 text-sm">Tonnages, tournées et indicateurs de collecte</p>
-            </div>
-          </div>
-          <select value={period} onChange={e => setPeriod(e.target.value)} className="select-modern w-auto">
-            <option value="week">Cette semaine</option>
-            <option value="month">Ce mois</option>
-            <option value="quarter">Ce trimestre</option>
-            <option value="year">Cette année</option>
-          </select>
-        </div>
+        <PageHeader
+          title="Reporting Collecte"
+          subtitle="Tonnages, tournées et indicateurs de collecte"
+          icon={Truck}
+          actions={
+            <select value={period} onChange={e => setPeriod(e.target.value)} className="select-modern w-auto">
+              <option value="week">Cette semaine</option>
+              <option value="month">Ce mois</option>
+              <option value="quarter">Ce trimestre</option>
+              <option value="year">Cette année</option>
+            </select>
+          }
+        />
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -97,8 +92,7 @@ export default function ReportingCollecte() {
         {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Bar chart tonnage */}
-          <div className="lg:col-span-2 card-modern p-6">
-            <h3 className="font-semibold text-slate-800 mb-4">Tonnage collecté par période</h3>
+          <Section title="Tonnage collecté par période" className="lg:col-span-2">
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={chartData}>

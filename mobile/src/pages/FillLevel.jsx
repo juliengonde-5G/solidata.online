@@ -4,18 +4,22 @@ import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
 import PrimaryActionBar from '../components/PrimaryActionBar';
 import StepConfirmScreen from '../components/StepConfirmScreen';
+import CAVContainerIcon from '../components/CAVContainerIcon';
 import {
   addPendingCollect, deleteItem, newClientId, STORES,
   draftKey, saveDraft, readDraft, clearDraft,
 } from '../services/db';
 import { sendCollect, getPendingCount } from '../services/sync';
 
+// 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
+// (plein) avec une anomalie 'debordement' automatiquement posée.
 const FILL_LEVELS = [
-  { value: 0, label: 'Vide', pct: '0%', color: 'bg-gray-200', fg: 'text-gray-600' },
-  { value: 1, label: '¼', pct: '25%', color: 'bg-blue-100', fg: 'text-blue-700' },
-  { value: 2, label: '½', pct: '50%', color: 'bg-amber-100', fg: 'text-amber-700' },
-  { value: 3, label: '¾', pct: '75%', color: 'bg-orange-100', fg: 'text-orange-700' },
-  { value: 4, label: 'Plein', pct: '100%', color: 'bg-red-100', fg: 'text-red-700' },
+  { value: 0, label: 'vide',          pct: '0%',   visual: 'empty',         store: 0 },
+  { value: 1, label: 'un peu',        pct: '25%',  visual: 'quarter',       store: 1 },
+  { value: 2, label: 'à moitié',      pct: '50%',  visual: 'half',          store: 2 },
+  { value: 3, label: 'presque plein', pct: '75%',  visual: 'three_quarter', store: 3 },
+  { value: 4, label: 'plein',         pct: '100%', visual: 'full',          store: 4 },
+  { value: 5, label: 'au-delà',       pct: '++',   visual: 'overflow',      store: 4, overflow: true },
 ];
 
 const COMMON_ANOMALIES = [
@@ -73,6 +77,10 @@ export default function FillLevel() {
 
   const submit = async () => {
     if (fillLevel === null) return;
+    // Résout la valeur à envoyer et l'anomalie implicite pour le niveau ++.
+    const levelObj = FILL_LEVELS.find(l => l.value === fillLevel);
+    const storeLevel = levelObj ? levelObj.store : fillLevel;
+    const effectiveAnomaly = levelObj?.overflow && !anomaly ? 'debordement' : anomaly;
     setLoading(true);
     setError('');
     try {

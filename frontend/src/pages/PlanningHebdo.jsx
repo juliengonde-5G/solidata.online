@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle, Filter } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Filter, Calendar } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal } from '../components';
+import { LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 const FILIERE_COLORS = {
@@ -211,19 +211,17 @@ export default function PlanningHebdo() {
   return (
     <Layout>
       <div className="p-4 sm:p-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Planning hebdomadaire</h1>
-            <p className="text-sm text-gray-500">Affectation des salariés par poste et filière — demi-journée</p>
-          </div>
-          <div className="flex items-center gap-2">
+        <PageHeader
+          title="Planning hebdomadaire"
+          subtitle="Affectation des salariés par poste et filière — demi-journée"
+          icon={Calendar}
+          actions={
             <button onClick={confirmerSemaine} disabled={confirming || provisoires === 0}
               className="btn-primary text-sm">
               {confirming ? 'Confirmation...' : `Confirmer (${provisoires})`}
             </button>
-          </div>
-        </div>
+          }
+        />
 
         {/* Bandeau d'alerte postes obligatoires non couverts */}
         {uncoveredAlerts.length > 0 && (

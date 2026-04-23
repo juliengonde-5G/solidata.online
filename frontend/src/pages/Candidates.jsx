@@ -293,7 +293,13 @@ export default function Candidates() {
     return out;
   }, [kanban, searchQuery, activeView, activePosition]);
 
-  if (loading) return <Layout><div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" /></div></Layout>;
+  if (loading) return (
+    <Layout>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+      </div>
+    </Layout>
+  );
 
   // Construction des KPIs
   const kpiList = [
@@ -429,19 +435,29 @@ export default function Candidates() {
         }}
         extraTopBar={
           <div
-            className={`border-2 border-dashed rounded-xl p-3 text-center transition-all cursor-pointer ${cvDragActive ? 'border-primary bg-primary/10' : 'border-slate-200 bg-slate-50 hover:border-primary/40'}`}
+            className={`border-2 border-dashed rounded-2xl p-4 text-center transition-all cursor-pointer ${cvDragActive ? 'border-primary bg-primary-surface' : 'border-slate-200 bg-slate-50 hover:border-primary/40 hover:bg-teal-50/40'}`}
             onDragOver={(e) => { e.preventDefault(); setCvDragActive(true); }}
             onDragLeave={() => setCvDragActive(false)}
             onDrop={(e) => { e.preventDefault(); setCvDragActive(false); handleCVUpload(e.dataTransfer.files[0]); }}
             onClick={() => fileInputRef.current?.click()}
           >
             <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" className="hidden" onChange={(e) => handleCVUpload(e.target.files[0])} />
-            {uploading
-              ? <div className="flex items-center justify-center gap-2 text-primary"><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" /><span className="text-xs font-medium">Analyse du CV en cours…</span></div>
-              : <p className="text-xs text-slate-500"><span className="font-medium text-primary">Glissez un CV ici</span> ou cliquez pour importer (PDF, Word, Image)</p>
-            }
+            {uploading ? (
+              <div className="flex items-center justify-center gap-2 text-primary">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" />
+                <span className="text-xs font-semibold">Analyse du CV en cours...</span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-2.5">
+                <Upload className="w-4 h-4 text-primary" />
+                <p className="text-xs text-slate-600">
+                  <span className="font-semibold text-primary">Glissez un CV ici</span>{' '}
+                  <span className="text-slate-500">ou cliquez pour importer (PDF, Word, Image)</span>
+                </p>
+              </div>
+            )}
             {uploadMsg && (
-              <div className={`mt-2 px-3 py-1.5 rounded-lg text-[11px] ${uploadMsg.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+              <div className={`mt-2 px-3 py-1.5 rounded-lg text-[11px] font-medium ${uploadMsg.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
                 {uploadMsg.text}
               </div>
             )}
@@ -454,23 +470,50 @@ export default function Candidates() {
 
         {/* Detail Panel */}
         {selected && (
-          <div className="fixed inset-0 bg-black/30 flex justify-end z-50" onClick={() => { setSelected(null); setEditing(false); }}>
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex justify-end z-50" onClick={() => { setSelected(null); setEditing(false); }}>
             <div className="bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-              <div className="sticky top-0 bg-white border-b px-5 py-3 flex items-center justify-between z-10">
-                <div>
-                  <h2 className="font-bold text-lg">{selected.first_name || '?'} {selected.last_name || '?'}</h2>
-                  <span className={`inline-block text-xs text-white px-2 py-0.5 rounded mt-1 ${STATUS_COLORS[selected.status]?.badge}`}>{STATUS_LABELS[selected.status]}</span>
+              <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-4 flex items-start justify-between gap-3 z-10">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="w-12 h-12 rounded-full bg-gradient-to-br from-teal-100 to-teal-200 flex items-center justify-center text-sm font-bold text-teal-800 flex-shrink-0 ring-2 ring-white shadow-sm">
+                    {(selected.first_name?.[0] || '?').toUpperCase()}{(selected.last_name?.[0] || '').toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="font-extrabold text-lg text-slate-800 truncate">{selected.first_name || '?'} {selected.last_name || '?'}</h2>
+                    <div className="mt-1">
+                      <StatusBadge status={selected.status} type="candidat" size="sm" />
+                    </div>
+                  </div>
                 </div>
-                <div className="flex gap-1">
-                  {!editing && <button onClick={() => openEdit(selected)} className="btn-primary text-xs">Modifier</button>}
-                  <button onClick={() => deleteCandidate(selected.id)} className="btn-danger text-xs">Suppr.</button>
-                  <button onClick={() => { setSelected(null); setEditing(false); }} className="text-gray-400 hover:text-gray-600 text-xl ml-2">&times;</button>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {!editing && (
+                    <button
+                      onClick={() => openEdit(selected)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold bg-primary text-white px-2.5 py-1.5 rounded-lg hover:bg-primary-dark transition"
+                      title="Modifier"
+                    >
+                      <Pencil className="w-3.5 h-3.5" /> Modifier
+                    </button>
+                  )}
+                  <button
+                    onClick={() => deleteCandidate(selected.id)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-100 transition"
+                    title="Supprimer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => { setSelected(null); setEditing(false); }}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+                    title="Fermer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-              <div className="flex border-b px-5 overflow-x-auto">
+              <div className="flex border-b border-slate-100 px-5 overflow-x-auto">
                 {(TABS_BY_STATUS[selected.status] || ['info', 'history']).map(t => (
                   <button key={t} onClick={() => setDetailTab(t)}
-                    className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition whitespace-nowrap ${detailTab === t ? 'border-primary text-primary' : 'border-transparent text-gray-500'}`}>
+                    className={`px-3 py-2.5 text-sm font-semibold border-b-2 -mb-px transition whitespace-nowrap ${detailTab === t ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                     {TAB_LABELS[t]}
                   </button>
                 ))}
