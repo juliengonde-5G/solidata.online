@@ -395,7 +395,7 @@ export default function TourMap() {
           {cavs.filter(c => c.latitude && c.longitude).length > 1 && (
             <Polyline
               positions={cavs.filter(c => c.latitude && c.longitude).map(c => [c.latitude, c.longitude])}
-              pathOptions={{ color: '#8BC540', weight: 3, dashArray: '10,6' }}
+              pathOptions={{ color: '#0D9488', weight: 3, dashArray: '10,6' }}
             />
           )}
         </MapContainer>

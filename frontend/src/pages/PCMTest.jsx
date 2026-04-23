@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-const BRAND_GREEN = '#2D8C4E';
-const BRAND_GREEN_LIGHT = '#8BC540';
+const BRAND_GREEN = '#0D9488';
+const BRAND_GREEN_LIGHT = '#14B8A6';
 
 const TYPE_LABELS = {
   analyseur: 'Analyseur',

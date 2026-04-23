@@ -26,7 +26,7 @@ function DeltaBadge({ value }) {
   );
 }
 
-const SEGMENT_COLORS = { ventes_courantes: '#2D8C4E', promotions: '#F59E0B', consommables: '#94A3B8' };
+const SEGMENT_COLORS = { ventes_courantes: '#0D9488', promotions: '#F59E0B', consommables: '#94A3B8' };
 const SEGMENT_LABELS = { ventes_courantes: 'Ventes courantes', promotions: 'Promotions', consommables: 'Consommables' };
 const MOIS_COURT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 

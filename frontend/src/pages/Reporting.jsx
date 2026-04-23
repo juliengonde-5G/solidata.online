@@ -4,7 +4,7 @@ import { LoadingSpinner } from '../components';
 import api from '../services/api';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-const COLORS = ['#8BC540', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1', '#14B8A6'];
+const COLORS = ['#0D9488', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1', '#14B8A6'];
 
 export default function Reporting() {
   const [dashboard, setDashboard] = useState(null);
@@ -69,7 +69,7 @@ export default function Reporting() {
                 <XAxis dataKey="period" tick={{ fontSize: 10 }} />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="total_kg" name="Poids (kg)" fill="#8BC540" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="total_kg" name="Poids (kg)" fill="#0D9488" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -105,7 +105,7 @@ export default function Reporting() {
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                   <YAxis />
                   <Tooltip />
-                  <Line type="monotone" dataKey="total_jour_t" name="Total (t)" stroke="#8BC540" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="total_jour_t" name="Total (t)" stroke="#0D9488" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="productivite" name="Productivité" stroke="#6366F1" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>

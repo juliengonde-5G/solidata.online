@@ -19,7 +19,7 @@ L.Icon.Default.mergeOptions({
 });
 
 const truckIcon = new L.DivIcon({
-  html: '<div style="background:#2D8C4E;color:white;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4)">🚛</div>',
+  html: '<div style="background:#0D9488;color:white;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4)">🚛</div>',
   className: '',
   iconSize: [36, 36],
   iconAnchor: [18, 18],
@@ -571,7 +571,7 @@ export default function LiveVehicles() {
 
               {/* Trail GPS */}
               {trail.length > 1 && (
-                <Polyline positions={trail} pathOptions={{ color: '#2D8C4E', weight: 3, opacity: 0.7 }} />
+                <Polyline positions={trail} pathOptions={{ color: '#0D9488', weight: 3, opacity: 0.7 }} />
               )}
 
               {/* Position véhicule live */}

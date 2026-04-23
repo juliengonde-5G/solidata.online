@@ -11,7 +11,7 @@ const SEGMENT_LABELS = {
   consommables: 'Consommables',
 };
 const SEGMENT_COLORS = {
-  ventes_courantes: '#2D8C4E',
+  ventes_courantes: '#0D9488',
   promotions: '#F59E0B',
   consommables: '#94A3B8',
 };

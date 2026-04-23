@@ -45,11 +45,11 @@ function openPrintWindow(title, bodyHtml) {
   @page { size: A4; margin: 15mm 12mm; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; line-height: 1.45; padding: 0; }
-  .header { background: #2D8C4E; color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+  .header { background: #0D9488; color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
   .header h1 { font-size: 18px; font-weight: 700; }
   .header .sub { font-size: 11px; opacity: .85; }
   .section { margin: 12px 0; padding: 0 4px; }
-  .section-title { font-size: 13px; font-weight: 700; color: #2D8C4E; border-bottom: 2px solid #2D8C4E; padding-bottom: 3px; margin-bottom: 8px; }
+  .section-title { font-size: 13px; font-weight: 700; color: #0D9488; border-bottom: 2px solid #0D9488; padding-bottom: 3px; margin-bottom: 8px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 10px; font-weight: 600; }
@@ -151,7 +151,7 @@ function exportTechnicalPDF(profile, rawAnswers) {
 
   let answersHtml = '';
   for (const [cat, answers] of Object.entries(groupedByCategory)) {
-    answersHtml += `<tr><td colspan="4" style="background:#f0fdf4;font-weight:700;color:#2D8C4E;padding:6px">${CATEGORY_LABELS[cat] || cat}</td></tr>`;
+    answersHtml += `<tr><td colspan="4" style="background:#F0FDFA;font-weight:700;color:#0D9488;padding:6px">${CATEGORY_LABELS[cat] || cat}</td></tr>`;
     for (const a of answers) {
       answersHtml += `<tr>
         <td style="width:30px;text-align:center;color:#9ca3af">Q${a.question_number}</td>

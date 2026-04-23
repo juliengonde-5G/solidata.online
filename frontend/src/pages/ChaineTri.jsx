@@ -148,7 +148,7 @@ export default function ChaineTri() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {categories.map(cat => (
               <div key={cat.id} className="card-modern p-4 flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.couleur || '#8BC540' }}></div>
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.couleur || '#0D9488' }}></div>
                 <div className="flex-1">
                   <p className="font-medium text-sm">{cat.nom}</p>
                   <p className="text-xs text-gray-400">{cat.code || '—'}</p>

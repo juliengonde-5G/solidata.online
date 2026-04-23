@@ -15,6 +15,19 @@ export default {
           muted: '#CCFBF1',
           surface: '#F0FDFA',
         },
+        // Palette teal complète (alignée design handoff)
+        teal: {
+          50: '#F0FDFA',
+          100: '#CCFBF1',
+          200: '#99F6E4',
+          300: '#5EEAD4',
+          400: '#2DD4BF',
+          500: '#14B8A6',
+          600: '#0D9488',
+          700: '#0F766E',
+          800: '#115E59',
+          900: '#134E4A',
+        },
         // Convention : slate est la palette neutre officielle.
         // gray est redirigé vers slate pour convergence progressive.
         gray: {
@@ -37,19 +50,42 @@ export default {
         'card': '12px',
         'button': '10px',
         'input': '10px',
+        'xl': '16px',
+        '2xl': '18px',
+        '3xl': '22px',
       },
       boxShadow: {
-        'card': '0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05)',
-        'card-hover': '0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.05)',
-        'elevated': '0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.05)',
-        'sidebar': '2px 0 8px -2px rgb(0 0 0 / 0.04)',
+        'card': '0 1px 3px 0 rgb(15 23 42 / 0.05)',
+        'card-hover': '0 4px 12px -2px rgb(15 23 42 / 0.08)',
+        'elevated': '0 10px 24px -4px rgb(15 23 42 / 0.08)',
+        'sidebar': '2px 0 8px -2px rgb(15 23 42 / 0.04)',
+        'topbar': '0 1px 0 0 rgb(15 23 42 / 0.05)',
+        'teal-glow': '0 4px 10px -2px rgb(13 148 136 / 0.35)',
       },
       spacing: {
-        'sidebar': '16rem',
-        'sidebar-collapsed': '4.5rem',
-        'icon-sidebar': '60px',
-        'content-sidebar': '15rem',
+        'sidebar': '15.5rem',           // 248px (design)
+        'sidebar-collapsed': '4.25rem', // 68px  (design)
         'topbar': '3.5rem',
+      },
+      keyframes: {
+        'slide-in-right': {
+          '0%': { transform: 'translateX(100%)' },
+          '100%': { transform: 'translateX(0)' },
+        },
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        'pulse-ring': {
+          '0%': { boxShadow: '0 0 0 0 rgb(13 148 136 / 0.5)' },
+          '70%': { boxShadow: '0 0 0 6px rgb(13 148 136 / 0)' },
+          '100%': { boxShadow: '0 0 0 0 rgb(13 148 136 / 0)' },
+        },
+      },
+      animation: {
+        'slide-in-right': 'slide-in-right 0.22s ease-out',
+        'fade-in': 'fade-in 0.18s ease-out',
+        'pulse-ring': 'pulse-ring 1.6s ease-out infinite',
       },
     },
   },

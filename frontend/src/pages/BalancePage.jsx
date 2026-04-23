@@ -233,7 +233,7 @@ function Header({ heure, dateLabel }) {
     <header className="bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between shrink-0">
       <div className="flex items-center gap-2">
         <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-sm"
-          style={{ backgroundColor: '#2D8C4E' }}>S</div>
+          style={{ backgroundColor: '#0D9488' }}>S</div>
         <div>
           <p className="font-bold text-gray-800 text-sm leading-none">SOLIDATA</p>
           <p className="text-[10px] text-gray-400 capitalize">{dateLabel}</p>
