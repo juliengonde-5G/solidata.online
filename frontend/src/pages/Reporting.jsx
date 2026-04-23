@@ -32,18 +32,19 @@ export default function Reporting() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Reporting</h1>
-            <p className="text-gray-500">Tableau de bord et indicateurs</p>
-          </div>
-          <select value={period} onChange={e => setPeriod(e.target.value)} className="input-modern w-auto">
-            <option value="week">Cette semaine</option>
-            <option value="month">Ce mois</option>
-            <option value="quarter">Ce trimestre</option>
-            <option value="year">Cette année</option>
-          </select>
-        </div>
+        <PageHeader
+          title="Reporting"
+          subtitle="Tableau de bord et indicateurs"
+          icon={BarChart3}
+          actions={
+            <select value={period} onChange={e => setPeriod(e.target.value)} className="input-modern w-auto">
+              <option value="week">Cette semaine</option>
+              <option value="month">Ce mois</option>
+              <option value="quarter">Ce trimestre</option>
+              <option value="year">Cette année</option>
+            </select>
+          }
+        />
 
         {/* KPI Cards */}
         {dashboard && (
@@ -62,8 +63,7 @@ export default function Reporting() {
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Collecte Chart */}
-          <div className="card-modern p-4">
-            <h3 className="font-semibold mb-3">Collecte par période (kg)</h3>
+          <Section title="Collecte par période (kg)">
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={collecteData}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -73,12 +73,11 @@ export default function Reporting() {
                 <Bar dataKey="total_kg" name="Poids (kg)" fill="#0D9488" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          </div>
+          </Section>
 
           {/* Tours Status */}
           {dashboard?.tours_by_status && (
-            <div className="card-modern p-4">
-              <h3 className="font-semibold mb-3">Répartition des tournées</h3>
+            <Section title="Répartition des tournées">
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
@@ -93,13 +92,12 @@ export default function Reporting() {
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
-            </div>
+            </Section>
           )}
 
           {/* Production Trend */}
           {dashboard?.production_trend && (
-            <div className="card-modern p-4">
-              <h3 className="font-semibold mb-3">Tendance production (t/jour)</h3>
+            <Section title="Tendance production (t/jour)">
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={dashboard.production_trend}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -110,13 +108,12 @@ export default function Reporting() {
                   <Line type="monotone" dataKey="productivite" name="Productivité" stroke="#6366F1" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
-            </div>
+            </Section>
           )}
 
           {/* Candidates by Status */}
           {dashboard?.candidates_by_status && (
-            <div className="card-modern p-4">
-              <h3 className="font-semibold mb-3">Candidatures par statut</h3>
+            <Section title="Candidatures par statut">
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
@@ -131,7 +128,7 @@ export default function Reporting() {
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
-            </div>
+            </Section>
           )}
         </div>
       </div>

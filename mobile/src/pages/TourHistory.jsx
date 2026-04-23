@@ -221,6 +221,15 @@ function iconFor(kind) {
   }
 }
 
+function bgFor(kind) {
+  switch (kind) {
+    case 'collect': return 'var(--color-primary-surface, #F0FDFA)';
+    case 'incident': return '#FEE2E2';
+    case 'weight': return '#FEF3C7';
+    default: return '#F1F5F9';
+  }
+}
+
 function incidentLabel(type) {
   switch (type) {
     case 'vehicle_breakdown': return 'Panne véhicule';

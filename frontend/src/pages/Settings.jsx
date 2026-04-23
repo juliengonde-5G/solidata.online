@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal } from '../components';
+import { LoadingSpinner, Modal, PageHeader } from '../components';
+import { Settings as SettingsIcon } from 'lucide-react';
 import api from '../services/api';
 
 const TARIF_TYPES = [
@@ -234,10 +235,11 @@ export default function Settings() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">Paramètres</h1>
-          <p className="text-gray-500">Configuration de l'application</p>
-        </div>
+        <PageHeader
+          title="Paramètres"
+          subtitle="Configuration de l'application"
+          icon={SettingsIcon}
+        />
 
         {/* État du système */}
         {health && (
