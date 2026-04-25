@@ -106,6 +106,7 @@ router.put('/:id',
         'responsable_id', 'team_id', 'budget_annuel', 'csv_folder_path', 'is_active',
         'ouverture_lundi', 'ouverture_mardi', 'ouverture_mercredi', 'ouverture_jeudi',
         'ouverture_vendredi', 'ouverture_samedi', 'ouverture_dimanche',
+        'logics_mail_folder', 'logics_mail_subject_keyword', 'logics_mail_sender',
       ];
       const updates = [];
       const values = [];

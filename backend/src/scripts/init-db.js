@@ -2964,6 +2964,11 @@ async function initDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_tickets_num ON boutique_tickets(boutique_id, num_ticket) WHERE num_ticket IS NOT NULL`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_num ON boutique_ventes(boutique_id, num_ticket) WHERE num_ticket IS NOT NULL`);
 
+    // Migration 25/04/2026 : configuration import mail LogicS automatique par boutique
+    await client.query(`ALTER TABLE boutiques ADD COLUMN IF NOT EXISTS logics_mail_folder VARCHAR(255) DEFAULT 'INBOX'`);
+    await client.query(`ALTER TABLE boutiques ADD COLUMN IF NOT EXISTS logics_mail_subject_keyword VARCHAR(255)`);
+    await client.query(`ALTER TABLE boutiques ADD COLUMN IF NOT EXISTS logics_mail_sender VARCHAR(255)`);
+
     // Seed : boutique St-Sever (référence géographique : Rouen)
     const btqExist = await client.query("SELECT id FROM boutiques LIMIT 1");
     if (btqExist.rows.length === 0) {

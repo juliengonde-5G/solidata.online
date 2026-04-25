@@ -40,6 +40,10 @@ services:
       OPENAGENDA_API_KEY: ${OPENAGENDA_API_KEY:-}
       CENTRE_TRI_LAT: 49.4231
       CENTRE_TRI_LNG: 1.0993
+      LOGICS_MAIL_HOST: ${LOGICS_MAIL_HOST:-imap.outlook.com}
+      LOGICS_MAIL_PORT: ${LOGICS_MAIL_PORT:-993}
+      LOGICS_MAIL_USER: ${LOGICS_MAIL_USER:-}
+      LOGICS_MAIL_PASS: ${LOGICS_MAIL_PASS:-}
     ports:
       - "3001:3001"
     volumes:
