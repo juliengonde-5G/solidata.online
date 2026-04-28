@@ -7,10 +7,10 @@
  * Référence : Milesight-IoT/SensorDecoders (github.com/Milesight-IoT/SensorDecoders,
  * chemin EM_Series/EM400/EM400-MUD/). Ré-écrit sans dépendance pour être testable unitairement.
  *
- * Canaux supportés (firmware EM400-MUD courant FPort 85) :
+ * Canaux supportés (firmware EM400-MUD courant FPort 85, ref. Milesight officiel) :
  *   0x01 0x75  battery (1 octet, %)
- *   0x03 0x82  distance (2 octets LE, mm)
- *   0x04 0x67  temperature (2 octets LE signed, 0.1 °C)
+ *   0x03 0x67  temperature (2 octets LE signed, 0.1 °C)
+ *   0x04 0x82  distance (2 octets LE, mm)
  *   0x05 0x00  position / tilt (1 octet : 0 normal, 1 tilt)
  *   0x83 0x67  alarm température (2 octets : valeur + 1 octet alarme)
  *   0x84 0x82  alarm distance (2 octets : valeur + 1 octet type)
@@ -71,15 +71,15 @@ function decode(fport, hexPayload) {
       result.battery = bytes[i + 2];
       result.raw.channels[key] = result.battery;
       i += 3;
-    } else if (channelId === 0x03 && channelType === 0x82) {
-      // Distance (mm, uint16 LE)
-      result.distance_mm = readUInt16LE(bytes, i + 2);
-      result.raw.channels[key] = result.distance_mm;
-      i += 4;
-    } else if (channelId === 0x04 && channelType === 0x67) {
+    } else if (channelId === 0x03 && channelType === 0x67) {
       // Temperature (int16 LE, 0.1 °C)
       result.temperature = readInt16LE(bytes, i + 2) / 10;
       result.raw.channels[key] = result.temperature;
+      i += 4;
+    } else if (channelId === 0x04 && channelType === 0x82) {
+      // Distance (mm, uint16 LE)
+      result.distance_mm = readUInt16LE(bytes, i + 2);
+      result.raw.channels[key] = result.distance_mm;
       i += 4;
     } else if (channelId === 0x05 && channelType === 0x00) {
       // Position / tilt (1 octet)
@@ -131,16 +131,16 @@ function computeFillPercent(distance_cm, sensor_height_cm) {
  */
 function encodeTestPayload({ battery = 95, distance_mm = 500, temperature = 18.5, tilt = false }) {
   const bytes = [];
-  // Battery
+  // Battery (channel 0x01, type 0x75)
   bytes.push(0x01, 0x75, battery & 0xff);
-  // Distance (uint16 LE, mm)
-  const d = Math.max(0, Math.min(0xffff, Math.round(distance_mm)));
-  bytes.push(0x03, 0x82, d & 0xff, (d >> 8) & 0xff);
-  // Temperature (int16 LE, 0.1 °C)
+  // Temperature (channel 0x03, type 0x67, int16 LE, 0.1 °C)
   const t = Math.round(temperature * 10);
   const tEnc = t < 0 ? t + 0x10000 : t;
-  bytes.push(0x04, 0x67, tEnc & 0xff, (tEnc >> 8) & 0xff);
-  // Tilt
+  bytes.push(0x03, 0x67, tEnc & 0xff, (tEnc >> 8) & 0xff);
+  // Distance (channel 0x04, type 0x82, uint16 LE, mm)
+  const d = Math.max(0, Math.min(0xffff, Math.round(distance_mm)));
+  bytes.push(0x04, 0x82, d & 0xff, (d >> 8) & 0xff);
+  // Tilt (channel 0x05, type 0x00)
   bytes.push(0x05, 0x00, tilt ? 1 : 0);
   return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
