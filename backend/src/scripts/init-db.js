@@ -417,8 +417,8 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS tours (
         id SERIAL PRIMARY KEY,
         date DATE NOT NULL,
-        vehicle_id INTEGER REFERENCES vehicles(id),
-        driver_employee_id INTEGER REFERENCES employees(id),
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+        driver_employee_id INTEGER NOT NULL REFERENCES employees(id),
         standard_route_id INTEGER REFERENCES standard_routes(id),
         mode VARCHAR(20) NOT NULL CHECK (mode IN ('intelligent', 'standard', 'manual')),
         status VARCHAR(20) DEFAULT 'planned' CHECK (status IN ('planned', 'in_progress', 'paused', 'returning', 'completed', 'cancelled')),
@@ -454,8 +454,8 @@ async function initDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS tour_cav (
         id SERIAL PRIMARY KEY,
-        tour_id INTEGER REFERENCES tours(id) ON DELETE CASCADE,
-        cav_id INTEGER REFERENCES cav(id),
+        tour_id INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+        cav_id INTEGER NOT NULL REFERENCES cav(id) ON DELETE CASCADE,
         position INTEGER NOT NULL,
         status VARCHAR(20) DEFAULT 'pending'
           CHECK (status IN ('pending', 'collected', 'skipped', 'incident')),
@@ -499,8 +499,8 @@ async function initDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS gps_positions (
         id SERIAL PRIMARY KEY,
-        tour_id INTEGER REFERENCES tours(id) ON DELETE CASCADE,
-        vehicle_id INTEGER REFERENCES vehicles(id),
+        tour_id INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
         latitude DOUBLE PRECISION NOT NULL,
         longitude DOUBLE PRECISION NOT NULL,
         speed DOUBLE PRECISION,
@@ -1520,6 +1520,41 @@ async function initDatabase() {
       ALTER TABLE cav ALTER COLUMN latitude DROP NOT NULL;
       ALTER TABLE cav ALTER COLUMN longitude DROP NOT NULL;
     `);
+
+    // Migration : contraintes NOT NULL sur colonnes opérationnelles critiques
+    // Appliquées uniquement si aucune valeur NULL existante (évite les erreurs sur BDD legacy)
+    try {
+      const nullTours = await client.query('SELECT COUNT(*) FROM tours WHERE vehicle_id IS NULL OR driver_employee_id IS NULL');
+      if (parseInt(nullTours.rows[0].count) === 0) {
+        await client.query('ALTER TABLE tours ALTER COLUMN vehicle_id SET NOT NULL');
+        await client.query('ALTER TABLE tours ALTER COLUMN driver_employee_id SET NOT NULL');
+        console.log('[INIT-DB] Migration NOT NULL tours.vehicle_id + driver_employee_id ✓');
+      } else {
+        console.warn('[INIT-DB] Migration NOT NULL tours ignorée : valeurs NULL existantes (' + nullTours.rows[0].count + ' lignes)');
+      }
+    } catch (e) { console.warn('[INIT-DB] Migration NOT NULL tours :', e.message); }
+
+    try {
+      const nullTourCav = await client.query('SELECT COUNT(*) FROM tour_cav WHERE tour_id IS NULL OR cav_id IS NULL');
+      if (parseInt(nullTourCav.rows[0].count) === 0) {
+        await client.query('ALTER TABLE tour_cav ALTER COLUMN tour_id SET NOT NULL');
+        await client.query('ALTER TABLE tour_cav ALTER COLUMN cav_id SET NOT NULL');
+        console.log('[INIT-DB] Migration NOT NULL tour_cav.tour_id + cav_id ✓');
+      } else {
+        console.warn('[INIT-DB] Migration NOT NULL tour_cav ignorée : valeurs NULL existantes (' + nullTourCav.rows[0].count + ' lignes)');
+      }
+    } catch (e) { console.warn('[INIT-DB] Migration NOT NULL tour_cav :', e.message); }
+
+    try {
+      const nullGps = await client.query('SELECT COUNT(*) FROM gps_positions WHERE tour_id IS NULL OR vehicle_id IS NULL');
+      if (parseInt(nullGps.rows[0].count) === 0) {
+        await client.query('ALTER TABLE gps_positions ALTER COLUMN tour_id SET NOT NULL');
+        await client.query('ALTER TABLE gps_positions ALTER COLUMN vehicle_id SET NOT NULL');
+        console.log('[INIT-DB] Migration NOT NULL gps_positions.tour_id + vehicle_id ✓');
+      } else {
+        console.warn('[INIT-DB] Migration NOT NULL gps_positions ignorée : valeurs NULL existantes (' + nullGps.rows[0].count + ' lignes)');
+      }
+    } catch (e) { console.warn('[INIT-DB] Migration NOT NULL gps_positions :', e.message); }
     await client.query(`
       ALTER TABLE tonnage_history ADD COLUMN IF NOT EXISTS route_name VARCHAR(100);
     `);
@@ -2112,25 +2147,41 @@ async function initDatabase() {
     console.log('[INIT-DB] Module Maintenance Véhicules ✓');
 
     // ══════════════════════════════════════════
-    // MODULE : Capteurs ultrasons CAV (LoRaWAN)
+    // MODULE : Capteurs ultrasons CAV (LoRaWAN - Milesight EM400-MUD / Orange Live Objects)
     // ══════════════════════════════════════════
     await client.query(`
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reference VARCHAR(100);
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_type VARCHAR(50) DEFAULT 'ultrasonic';
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_reading DOUBLE PRECISION;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_reading_at TIMESTAMP;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_deveui VARCHAR(23);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_appeui VARCHAR(23);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_appkey_encrypted TEXT;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_height_cm INTEGER;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_install_date DATE;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reporting_interval_min INTEGER DEFAULT 360;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_status VARCHAR(20) DEFAULT 'inactive';
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_battery_level DOUBLE PRECISION;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_rssi INTEGER;
     `);
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_cav_lora_deveui ON cav(lora_deveui) WHERE lora_deveui IS NOT NULL;');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS cav_sensor_readings (
         id SERIAL PRIMARY KEY,
         cav_id INTEGER NOT NULL REFERENCES cav(id) ON DELETE CASCADE,
         sensor_reference VARCHAR(100) NOT NULL,
-        fill_level_percent DOUBLE PRECISION NOT NULL CHECK (fill_level_percent BETWEEN 0 AND 100),
+        fill_level_percent DOUBLE PRECISION NOT NULL CHECK (fill_level_percent BETWEEN 0 AND 120),
         distance_cm DOUBLE PRECISION,
         battery_level DOUBLE PRECISION,
         temperature DOUBLE PRECISION,
         rssi INTEGER,
+        snr DOUBLE PRECISION,
+        sf SMALLINT,
+        fport SMALLINT,
+        fcnt INTEGER,
+        tilt_detected BOOLEAN DEFAULT false,
+        alarm_type VARCHAR(30),
         raw_data JSONB,
         reading_at TIMESTAMP NOT NULL DEFAULT NOW(),
         created_at TIMESTAMP DEFAULT NOW()
@@ -2138,7 +2189,27 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_cav ON cav_sensor_readings(cav_id, reading_at DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_ref ON cav_sensor_readings(sensor_reference);');
-    console.log('[INIT-DB] Module Capteurs CAV ✓');
+
+    // Table des alertes capteur (cycle de vie trigger → ack → résolution)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_sensor_alerts (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER NOT NULL REFERENCES cav(id) ON DELETE CASCADE,
+        reading_id INTEGER REFERENCES cav_sensor_readings(id) ON DELETE SET NULL,
+        alert_type VARCHAR(30) NOT NULL,
+        severity VARCHAR(20) NOT NULL DEFAULT 'warning',
+        message TEXT,
+        triggered_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        acknowledged_at TIMESTAMP,
+        acknowledged_by INTEGER REFERENCES users(id),
+        resolved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_alerts_cav_open ON cav_sensor_alerts(cav_id) WHERE resolved_at IS NULL;');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_alerts_type ON cav_sensor_alerts(alert_type, triggered_at DESC);');
+
+    console.log('[INIT-DB] Module Capteurs CAV (LoRaWAN Milesight) ✓');
 
     // ══════════════════════════════════════════
     // MODULE : Inventaire physique produits finis

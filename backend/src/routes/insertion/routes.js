@@ -12,7 +12,11 @@ const CryptoJS = require('crypto-js');
 const { FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, analyzeInsertion, buildTimeline } = require('./engine');
 const { autoLogActivity } = require('../../middleware/activity-logger');
 
-const PCM_KEY = process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
+const PCM_KEY = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
+if (!PCM_KEY) {
+  console.error('[FATAL] PCM_ENCRYPTION_KEY et JWT_SECRET non définis. Arrêt immédiat.');
+  process.exit(1);
+}
 
 router.use(autoLogActivity('insertion'));
 
@@ -76,7 +80,7 @@ router.get('/', async (req, res) => {
     res.json(employees);
   } catch (err) {
     console.error('[INSERTION] Erreur liste :', err.message, err.detail || '');
-    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
@@ -182,7 +186,7 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic PUT :', err.message, err.detail || '');
-    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
@@ -415,7 +419,7 @@ router.post('/milestones/:employeeId/initialize', async (req, res) => {
     res.status(201).json(results);
   } catch (err) {
     console.error('[INSERTION] Erreur initialize milestones :', err);
-    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

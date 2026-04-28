@@ -55,13 +55,16 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/cav/map — Données carte avec taux de remplissage estimé
+// GET /api/cav/map — Données carte avec remplissage unifié (capteur si frais, sinon heuristique)
 router.get('/map', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT c.id, c.name, c.address, c.commune, c.latitude, c.longitude,
         c.nb_containers, c.avg_fill_rate, c.status, c.unavailable_reason,
         c.route_count,
+        c.lora_deveui, c.sensor_reference,
+        c.sensor_last_reading, c.sensor_last_reading_at,
+        c.sensor_battery_level, c.sensor_last_rssi, c.sensor_status,
         (SELECT MAX(th.date) FROM tonnage_history th WHERE th.cav_id = c.id) as last_collection,
         (SELECT AVG(th.weight_kg) FROM tonnage_history th WHERE th.cav_id = c.id
          AND th.date >= NOW() - INTERVAL '90 days') as avg_weight_90d
@@ -70,26 +73,32 @@ router.get('/map', async (req, res) => {
       ORDER BY c.name
     `);
 
-    // Calcul du taux de remplissage estimé (algorithmique)
-    // Le volume est considéré à zéro après chaque passage de chauffeur (collecte)
-    // L'accumulation repart donc de la date de dernière collecte
     const now = new Date();
     const monthIndex = now.getMonth();
     const seasonalFactors = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
+    const freshnessMs = (parseInt(process.env.SENSOR_FRESHNESS_HOURS, 10) || 8) * 3600 * 1000;
 
     const cavWithFill = result.rows.map(cav => {
-      // Jours depuis dernière collecte = le CAV repart à 0 après chaque collecte
       const daysSinceCollection = cav.last_collection
         ? Math.floor((now - new Date(cav.last_collection)) / (86400000))
         : 30;
       const avgWeight = parseFloat(cav.avg_weight_90d) || 50;
       const dailyAccumulation = avgWeight / 7;
       const rawFill = (daysSinceCollection * dailyAccumulation / (cav.nb_containers || 1)) * 100;
-      const estimatedFill = Math.min(120, rawFill * seasonalFactors[monthIndex]);
+      const calculatedFill = Math.min(120, rawFill * seasonalFactors[monthIndex]);
+
+      // Fusion capteur / heuristique
+      const sensorFresh = cav.sensor_last_reading_at &&
+        (now - new Date(cav.sensor_last_reading_at)) < freshnessMs &&
+        cav.sensor_last_reading != null;
+      const fill_source = sensorFresh ? 'sensor' : 'calculated';
+      const fill_rate = sensorFresh ? Math.round(parseFloat(cav.sensor_last_reading)) : Math.round(calculatedFill);
 
       return {
         ...cav,
-        estimated_fill_rate: Math.round(estimatedFill),
+        fill_rate,
+        fill_source,
+        estimated_fill_rate: Math.round(calculatedFill), // compat frontend existant
         days_since_collection: daysSinceCollection,
         daily_accumulation: Math.round(dailyAccumulation * 10) / 10,
       };
@@ -109,6 +118,9 @@ router.get('/fill-rate', async (req, res) => {
       SELECT c.id, c.name, c.address, c.commune, c.latitude, c.longitude,
         c.nb_containers, c.status, c.tournee, c.jours_collecte, c.freq_passage,
         c.avg_fill_rate, c.route_count,
+        c.lora_deveui, c.sensor_reference,
+        c.sensor_last_reading, c.sensor_last_reading_at,
+        c.sensor_battery_level, c.sensor_last_rssi, c.sensor_status,
         (SELECT MAX(th.date) FROM tonnage_history th WHERE th.cav_id = c.id) as last_collection,
         (SELECT AVG(th.weight_kg) FROM tonnage_history th WHERE th.cav_id = c.id
          AND th.date >= NOW() - INTERVAL '90 days') as avg_weight_90d,
@@ -127,6 +139,7 @@ router.get('/fill-rate', async (req, res) => {
     const now = new Date();
     const monthIndex = now.getMonth();
     const seasonalFactors = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
+    const freshnessMs = (parseInt(process.env.SENSOR_FRESHNESS_HOURS, 10) || 8) * 3600 * 1000;
 
     const JOURS_MAP = { 'lundi': 1, 'mardi': 2, 'mercredi': 3, 'jeudi': 4, 'vendredi': 5, 'samedi': 6, 'dimanche': 0 };
 
@@ -144,7 +157,14 @@ router.get('/fill-rate', async (req, res) => {
       // Le volume repart à zéro après chaque collecte (daysSinceCollection)
       const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
       const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactors[monthIndex];
-      const fillRate = Math.min(120, (accumulatedKg / capacityKg) * 100);
+      const calculatedFill = Math.min(120, (accumulatedKg / capacityKg) * 100);
+
+      // Fusion capteur / heuristique
+      const sensorFresh = cav.sensor_last_reading_at &&
+        (now - new Date(cav.sensor_last_reading_at)) < freshnessMs &&
+        cav.sensor_last_reading != null;
+      const fill_source = sensorFresh ? 'sensor' : 'calculated';
+      const fillRate = sensorFresh ? parseFloat(cav.sensor_last_reading) : calculatedFill;
 
       // Prévision : quand sera-t-il plein (80%)
       const targetKg = capacityKg * 0.8;
@@ -194,6 +214,14 @@ router.get('/fill-rate', async (req, res) => {
         tournee: cav.tournee,
         jours_collecte: cav.jours_collecte,
         fill_rate: Math.round(fillRate),
+        fill_source,
+        calculated_fill_rate: Math.round(calculatedFill),
+        sensor_last_reading: cav.sensor_last_reading != null ? parseFloat(cav.sensor_last_reading) : null,
+        sensor_last_reading_at: cav.sensor_last_reading_at,
+        sensor_battery_level: cav.sensor_battery_level,
+        sensor_last_rssi: cav.sensor_last_rssi,
+        sensor_status: cav.sensor_status,
+        lora_deveui: cav.lora_deveui,
         days_since_collection: daysSinceCollection,
         last_collection: cav.last_collection,
         daily_accumulation_kg: Math.round(dailyAccumulation * 10) / 10,
@@ -528,6 +556,217 @@ router.get('/:id/activity', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// GESTION DE LA FLOTTE DE CAPTEURS LoRaWAN
+// (déclaré avant /:id pour éviter la collision d'URL)
+// ══════════════════════════════════════════
+
+// GET /api/cav/sensors — Liste de la flotte capteurs (+ statut online/offline calculé)
+router.get('/sensors', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        c.id, c.name, c.commune, c.latitude, c.longitude,
+        c.sensor_reference, c.sensor_type, c.lora_deveui,
+        c.sensor_height_cm, c.sensor_install_date, c.sensor_reporting_interval_min,
+        c.sensor_last_reading, c.sensor_last_reading_at,
+        c.sensor_battery_level, c.sensor_last_rssi,
+        CASE
+          WHEN c.sensor_last_reading_at IS NULL THEN 'never'
+          WHEN c.sensor_last_reading_at < NOW() - (COALESCE(c.sensor_reporting_interval_min, 360) * INTERVAL '2 minute') THEN 'offline'
+          WHEN c.sensor_battery_level IS NOT NULL AND c.sensor_battery_level <= 20 THEN 'low_battery'
+          ELSE 'active'
+        END AS computed_status,
+        c.sensor_status,
+        (SELECT COUNT(*) FROM cav_sensor_alerts a WHERE a.cav_id = c.id AND a.resolved_at IS NULL) AS open_alerts
+      FROM cav c
+      WHERE c.lora_deveui IS NOT NULL OR c.sensor_reference IS NOT NULL
+      ORDER BY c.name
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[CAV] Erreur liste sensors :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/cav/liveobjects-devices — Liste les devices déclarés côté Orange Live Objects,
+// annotés avec l'assignation SOLIDATA actuelle (si le devEUI est déjà lié à un CAV).
+router.get('/liveobjects-devices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { listLoraDevices } = require('../services/liveobjects-api');
+    const devices = await listLoraDevices();
+
+    // Jointure avec la table cav pour marquer assigned/free
+    const devEuis = devices.map((d) => d.devEui).filter(Boolean);
+    let assignments = {};
+    if (devEuis.length > 0) {
+      const rows = await pool.query(
+        'SELECT id, name, commune, lora_deveui FROM cav WHERE lora_deveui = ANY($1::text[])',
+        [devEuis]
+      );
+      assignments = Object.fromEntries(rows.rows.map((r) => [r.lora_deveui, r]));
+    }
+
+    const enriched = devices.map((d) => ({
+      ...d,
+      assigned_cav: assignments[d.devEui] || null,
+    }));
+
+    res.json({
+      total: enriched.length,
+      assigned: enriched.filter((d) => d.assigned_cav).length,
+      orphans: enriched.filter((d) => !d.assigned_cav).length,
+      devices: enriched,
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur liveobjects-devices :', err);
+    res.status(502).json({ error: err.message || 'Live Objects indisponible' });
+  }
+});
+
+// POST /api/cav/sensors/alerts/:alertId/ack — Acquitter une alerte (déclaré avant /:id)
+router.post('/sensors/alerts/:alertId/ack', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE cav_sensor_alerts
+       SET acknowledged_at = NOW(), acknowledged_by = $1
+       WHERE id = $2 AND acknowledged_at IS NULL
+       RETURNING *`,
+      [req.user.id, req.params.alertId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Alerte introuvable ou déjà acquittée' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[CAV] Erreur ack alerte :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/cav/:id/sensor/provision — Provisionner un capteur LoRaWAN complet
+router.post('/:id/sensor/provision', authorize('ADMIN', 'MANAGER'), [
+  body('dev_eui').isString().isLength({ min: 8 }).withMessage('DevEUI requis'),
+  body('sensor_height_cm').isInt({ min: 30, max: 500 }).withMessage('Hauteur 30-500 cm requise'),
+], validate, async (req, res) => {
+  try {
+    const { encryptAppKey } = require('../utils/lora-crypto');
+    const {
+      dev_eui, app_eui, app_key,
+      sensor_reference, sensor_type, sensor_height_cm,
+      sensor_install_date, sensor_reporting_interval_min,
+    } = req.body;
+
+    // Unicité du DevEUI
+    const dup = await pool.query(
+      'SELECT id FROM cav WHERE lora_deveui = $1 AND id <> $2',
+      [dev_eui.toUpperCase(), req.params.id]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(409).json({ error: 'Ce DevEUI est déjà associé à un autre CAV', cav_id: dup.rows[0].id });
+    }
+
+    const encrypted = app_key ? encryptAppKey(app_key) : null;
+    const ref = sensor_reference || dev_eui.toUpperCase();
+
+    const result = await pool.query(
+      `UPDATE cav SET
+         lora_deveui = $1,
+         lora_appeui = $2,
+         lora_appkey_encrypted = COALESCE($3, lora_appkey_encrypted),
+         sensor_reference = $4,
+         sensor_type = COALESCE($5, 'ultrasonic'),
+         sensor_height_cm = $6,
+         sensor_install_date = COALESCE($7, CURRENT_DATE),
+         sensor_reporting_interval_min = COALESCE($8, 360),
+         sensor_status = 'active'
+       WHERE id = $9
+       RETURNING id, name, lora_deveui, lora_appeui, sensor_reference, sensor_type,
+                 sensor_height_cm, sensor_install_date, sensor_reporting_interval_min, sensor_status`,
+      [
+        dev_eui.toUpperCase(), app_eui || null, encrypted,
+        ref, sensor_type, sensor_height_cm,
+        sensor_install_date || null, sensor_reporting_interval_min || 360,
+        req.params.id,
+      ]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[CAV] Erreur provision sensor :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/cav/:id/sensor — Déprovisionner un capteur
+router.delete('/:id/sensor', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE cav SET
+         lora_deveui = NULL,
+         lora_appeui = NULL,
+         lora_appkey_encrypted = NULL,
+         sensor_reference = NULL,
+         sensor_height_cm = NULL,
+         sensor_install_date = NULL,
+         sensor_status = 'inactive',
+         sensor_last_reading = NULL,
+         sensor_last_reading_at = NULL,
+         sensor_battery_level = NULL,
+         sensor_last_rssi = NULL
+       WHERE id = $1 RETURNING id, name`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+    // Fermer les alertes ouvertes
+    await pool.query(
+      'UPDATE cav_sensor_alerts SET resolved_at = NOW() WHERE cav_id = $1 AND resolved_at IS NULL',
+      [req.params.id]
+    );
+    res.json({ ok: true, ...result.rows[0] });
+  } catch (err) {
+    console.error('[CAV] Erreur déprovision sensor :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/cav/:id/sensor-status — Statut agrégé (dernière lecture + alertes ouvertes)
+router.get('/:id/sensor-status', async (req, res) => {
+  try {
+    const cav = await pool.query(
+      `SELECT id, name, lora_deveui, sensor_reference, sensor_type,
+              sensor_height_cm, sensor_install_date, sensor_reporting_interval_min,
+              sensor_last_reading, sensor_last_reading_at,
+              sensor_battery_level, sensor_last_rssi, sensor_status
+       FROM cav WHERE id = $1`,
+      [req.params.id]
+    );
+    if (cav.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+
+    const alerts = await pool.query(
+      `SELECT id, alert_type, severity, message, triggered_at, acknowledged_at, acknowledged_by
+       FROM cav_sensor_alerts WHERE cav_id = $1 AND resolved_at IS NULL
+       ORDER BY triggered_at DESC`,
+      [req.params.id]
+    );
+
+    const lastReadings = await pool.query(
+      `SELECT fill_level_percent, distance_cm, battery_level, temperature, rssi, tilt_detected, reading_at
+       FROM cav_sensor_readings WHERE cav_id = $1
+       ORDER BY reading_at DESC LIMIT 10`,
+      [req.params.id]
+    );
+
+    res.json({
+      ...cav.rows[0],
+      open_alerts: alerts.rows,
+      recent_readings: lastReadings.rows,
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur sensor-status :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/cav/:id
 router.get('/:id', async (req, res) => {
   try {
@@ -689,37 +928,23 @@ router.put('/:id/sensor', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
-// POST /api/cav/sensor-reading — Réception d'une lecture capteur (webhook LoRaWAN ou polling)
+// POST /api/cav/sensor-reading — Réception d'une lecture capteur (ancien webhook, auth JWT).
+// Préférer /api/webhooks/liveobjects/uplink côté Orange Live Objects (auth par X-Webhook-Secret).
+// Cette route reste pour les scripts internes et la rétro-compatibilité.
 router.post('/sensor-reading', [
-  body('sensor_reference').notEmpty().withMessage('Référence capteur requise'),
-  body('fill_level_percent').isFloat({ min: 0, max: 120 }).withMessage('Niveau de remplissage invalide'),
+  body('sensor_reference').optional().isString(),
+  body('fill_level_percent').optional().isFloat({ min: 0, max: 120 }),
 ], validate, async (req, res) => {
   try {
-    const { sensor_reference, fill_level_percent, distance_cm, battery_level, temperature, rssi, raw_data } = req.body;
-    if (!sensor_reference || fill_level_percent == null) {
-      return res.status(400).json({ error: 'sensor_reference et fill_level_percent requis' });
+    const { processUplink } = require('../services/liveobjects-processor');
+    const io = req.app.get('io');
+    const result = await processUplink(req.body, io);
+    if (!result) return res.status(400).json({ error: 'Uplink non reconnu' });
+    if (result.error === 'cav_not_found') return res.status(404).json({ error: 'Capteur non associé à un CAV' });
+    if (result.error === 'fill_not_computable') {
+      return res.status(400).json({ error: 'fill_level_percent ou (distance_cm + sensor_height_cm) requis' });
     }
-
-    // Trouver le CAV par référence capteur
-    const cav = await pool.query('SELECT id FROM cav WHERE sensor_reference = $1', [sensor_reference]);
-    if (cav.rows.length === 0) return res.status(404).json({ error: 'Capteur non associé à un CAV' });
-    const cavId = cav.rows[0].id;
-
-    // Enregistrer la lecture
-    await pool.query(
-      `INSERT INTO cav_sensor_readings (cav_id, sensor_reference, fill_level_percent, distance_cm, battery_level, temperature, rssi, raw_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [cavId, sensor_reference, fill_level_percent, distance_cm, battery_level, temperature, rssi, raw_data ? JSON.stringify(raw_data) : null]
-    );
-
-    // Mettre à jour le CAV
-    await pool.query(
-      `UPDATE cav SET sensor_last_reading = $1, sensor_last_reading_at = NOW(),
-       estimated_fill_rate = $1 WHERE id = $2`,
-      [fill_level_percent, cavId]
-    );
-
-    res.json({ ok: true, cav_id: cavId, fill_level_percent });
+    res.json(result);
   } catch (err) {
     console.error('[CAV] Erreur sensor reading :', err);
     res.status(500).json({ error: 'Erreur serveur' });

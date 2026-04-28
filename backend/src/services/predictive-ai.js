@@ -109,6 +109,27 @@ async function getHistoricalData(days = 90) {
     LIMIT 10
   `, [days]);
 
+  // Performances des CAV équipés d'un capteur LoRaWAN (vérité terrain)
+  // Écart heuristique vs mesure réelle + fraîcheur des lectures
+  const sensorStats = await pool.query(`
+    SELECT c.id, c.name, c.commune, c.nb_containers,
+           c.lora_deveui, c.sensor_battery_level, c.sensor_last_rssi,
+           c.sensor_last_reading, c.sensor_last_reading_at,
+           (SELECT COUNT(*) FROM cav_sensor_readings r WHERE r.cav_id = c.id
+             AND r.reading_at >= NOW() - INTERVAL '1 day' * $1) AS nb_readings,
+           (SELECT AVG(ABS(clf.predicted_fill_rate - clf.observed_fill_rate))
+              FROM collection_learning_feedback clf
+              WHERE clf.cav_id = c.id AND clf.source = 'sensor'
+                AND clf.created_at >= NOW() - INTERVAL '1 day' * $1) AS sensor_mae,
+           (SELECT AVG(clf.predicted_fill_rate - clf.observed_fill_rate)
+              FROM collection_learning_feedback clf
+              WHERE clf.cav_id = c.id AND clf.source = 'sensor'
+                AND clf.created_at >= NOW() - INTERVAL '1 day' * $1) AS sensor_bias
+    FROM cav c
+    WHERE c.lora_deveui IS NOT NULL
+    ORDER BY c.name
+  `, [days]).catch(() => ({ rows: [] }));
+
   return {
     feedback: feedback.rows,
     weather: weather.rows,
@@ -117,6 +138,7 @@ async function getHistoricalData(days = 90) {
     accuracyByDay: accuracyByDay.rows,
     accuracyByMonth: accuracyByMonth.rows,
     worstCavs: worstCavs.rows,
+    sensorStats: sensorStats.rows,
     totalFeedback: feedback.rows.length,
     totalTours: tours.rows.length,
   };
@@ -170,6 +192,19 @@ async function analyseHebdomadaire() {
       commune: e.commune,
       bonus: e.bonus_factor,
     })),
+    capteurs_lorawan: data.sensorStats.map(s => ({
+      cav: s.name,
+      commune: s.commune,
+      conteneurs: s.nb_containers,
+      dev_eui: s.lora_deveui,
+      nb_lectures_30j: parseInt(s.nb_readings) || 0,
+      derniere_lecture_percent: s.sensor_last_reading != null ? Math.round(parseFloat(s.sensor_last_reading)) : null,
+      derniere_lecture_at: s.sensor_last_reading_at,
+      battery_pct: s.sensor_battery_level,
+      rssi_dbm: s.sensor_last_rssi,
+      mae_vs_heuristique: s.sensor_mae != null ? Math.round(parseFloat(s.sensor_mae) * 10) / 10 : null,
+      biais_vs_heuristique: s.sensor_bias != null ? Math.round(parseFloat(s.sensor_bias) * 10) / 10 : null,
+    })),
   };
 
   const response = await anthropic.messages.create({
@@ -186,6 +221,11 @@ Ton rôle : produire une synthèse hebdomadaire concise et actionnable en franç
 - Un biais négatif = sous-estimation (on prédit moins rempli que la réalité)
 - MAE = erreur absolue moyenne (objectif < 15 points sur échelle 0-100)
 - observed_fill_level est sur une échelle 0-5 (x20 = pourcentage)
+- capteurs_lorawan : CAV équipés de sondes Milesight EM400-MUD via Orange Live Objects.
+  C'est la VÉRITÉ TERRAIN. mae_vs_heuristique et biais_vs_heuristique mesurent l'écart entre
+  la prédiction heuristique et la mesure capteur réelle (0-100 %).
+  Quand ces capteurs existent, appuie en priorité tes recommandations de coefficients saisonniers
+  et jour-de-semaine sur leurs données (plus fiables que observed_fill_level 0-5 qui est déclaratif).
 
 Réponds en JSON structuré avec les clés : resume, tendances, anomalies, recommandations, cav_actions, score_global (0-100).`,
     messages: [{

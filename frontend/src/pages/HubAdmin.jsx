@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Lock, Database, Save, Shield, Settings, Car, ClipboardList, Brain, Map } from 'lucide-react';
+import { Lock, Database, Save, Shield, Settings, Car, ClipboardList, Brain, Map, Radio } from 'lucide-react';
 import Layout from '../components/Layout';
 import { KPICard, ModuleCard, PageHeader } from '../components';
 import api from '../services/api';
@@ -60,6 +60,7 @@ export default function HubAdmin() {
     { path: '/admin-predictive', title: 'Moteur prédictif', description: 'Configuration du moteur IA prédictif', icon: Brain, color: 'emerald' },
     { path: '/rgpd', title: 'RGPD', description: 'Registre des traitements et conformité', icon: Shield, color: 'red' },
     { path: '/admin-cav', title: 'Gestion CAV', description: 'Administration des conteneurs d\'apport', icon: Map, color: 'teal' },
+    { path: '/admin-sensors', title: 'Capteurs CAV', description: 'Sondes LoRaWAN — flotte, batterie, alertes', icon: Radio, color: 'emerald' },
     { path: '/admin-db', title: 'Base de données', description: 'Backup, restauration et maintenance BDD', icon: Database, color: 'blue' },
   ];
 

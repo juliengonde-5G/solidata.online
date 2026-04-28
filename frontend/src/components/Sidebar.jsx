@@ -1,8 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutGrid, Truck, Users, Settings, ChevronDown, ChevronLeft,
 } from 'lucide-react';
+
+const NAV_SCROLL_KEY = 'solidata_nav_scroll_top';
 
 // 4 parents arborescents qui regroupent les 10 sections existantes
 // (mapping confirmé en plan-mode)
@@ -24,6 +26,20 @@ function readJSON(key, fallback) {
 
 export default function Sidebar({ filteredSections, collapsed, onToggleCollapse, onNavigate, counts = {} }) {
   const location = useLocation();
+  const navRef = useRef(null);
+
+  // Restaurer le scroll de la nav après re-mount de Layout (évite le retour en haut à chaque clic)
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    const saved = parseInt(sessionStorage.getItem(NAV_SCROLL_KEY) || '0', 10);
+    if (saved > 0) el.scrollTop = saved;
+    const onScroll = () => {
+      try { sessionStorage.setItem(NAV_SCROLL_KEY, String(el.scrollTop)); } catch { /* noop */ }
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Map titre section → données filtrées (sections vides retirées par Layout via filteredSections)
   const sectionByTitle = useMemo(() => {
@@ -81,12 +97,19 @@ export default function Sidebar({ filteredSections, collapsed, onToggleCollapse,
     >
       {/* ── Brand ─────────────────────────────────────────────── */}
       <div className={`flex items-center border-b border-slate-100 ${collapsed ? 'justify-center px-2 py-4' : 'gap-3 px-3.5 py-4'}`}>
-        <Link to="/" className="brand-mark" title="SOLIDATA — Accueil" aria-label="Accueil">S</Link>
+        <Link
+          to="/"
+          className="flex items-center justify-center flex-shrink-0 w-10 h-10 rounded-lg bg-white hover:bg-slate-50 transition-colors"
+          title="Solidarité Textiles — Tableau de bord"
+          aria-label="Tableau de bord"
+        >
+          <img src="/logo.png" alt="Solidarité Textiles" className="w-9 h-9 object-contain" />
+        </Link>
         {!collapsed && (
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-extrabold text-slate-900 tracking-wide truncate">SOLIDATA</div>
-            <div className="text-[11px] text-slate-500 truncate">ERP Textile</div>
-          </div>
+          <Link to="/" className="flex-1 min-w-0 group" aria-label="Tableau de bord">
+            <div className="text-sm font-extrabold text-slate-900 tracking-wide truncate group-hover:text-teal-700 transition-colors">Solidarité Textiles</div>
+            <div className="text-[11px] text-slate-500 truncate">ERP SOLIDATA</div>
+          </Link>
         )}
         {!collapsed && (
           <button
@@ -113,7 +136,7 @@ export default function Sidebar({ filteredSections, collapsed, onToggleCollapse,
       )}
 
       {/* ── Nav arborescente ─────────────────────────────────── */}
-      <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3">
+      <nav ref={navRef} className="flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3">
         {NAV_TREE.map((parent) => {
           // ne montrer que les sections visibles (filtrage par rôle)
           const childSections = parent.sections
