@@ -10,7 +10,6 @@ import Employees from './pages/Employees';
 import WorkHours from './pages/WorkHours';
 import Skills from './pages/Skills';
 import Tours from './pages/Tours';
-import CAVMap from './pages/CAVMap';
 import Vehicles from './pages/Vehicles';
 import VehicleMaintenance from './pages/VehicleMaintenance';
 import LiveVehicles from './pages/LiveVehicles';
@@ -138,7 +137,7 @@ function App() {
             {/* Collecte */}
             <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />
             <Route path="/collection-proposals" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CollectionProposals /></ProtectedRoute>} />
-            <Route path="/cav-map" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CAVMap /></ProtectedRoute>} />
+            <Route path="/cav-map" element={<Navigate to="/fill-rate" replace />} />
             <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FillRateMap /></ProtectedRoute>} />
             <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Vehicles /></ProtectedRoute>} />
             <Route path="/vehicle-maintenance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VehicleMaintenance /></ProtectedRoute>} />

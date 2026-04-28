@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Truck, Map, Scale, Car, Sparkles, BarChart3, MapPin } from 'lucide-react';
+import { Truck, Map, Scale, Car, Sparkles, MapPin } from 'lucide-react';
 import Layout from '../components/Layout';
 import { KpiCard, NavCard, PageHeader, Section } from '../components';
 import api from '../services/api';
@@ -49,8 +49,7 @@ export default function HubCollecte() {
   const cards = [
     { path: '/tours', title: 'Tournées', desc: 'Planification et suivi des tournées de collecte', icon: Truck },
     { path: '/collection-proposals', title: 'Propositions IA', desc: 'Suggestions intelligentes de tournées optimisées', icon: Sparkles },
-    { path: '/cav-map', title: 'Carte CAV', desc: 'Localisation géographique des conteneurs', icon: Map },
-    { path: '/fill-rate', title: 'Remplissage CAV', desc: 'Taux de remplissage et prédictions IA', icon: BarChart3 },
+    { path: '/fill-rate', title: 'Carte des CAV', desc: 'Localisation, remplissage temps réel (capteurs LoRaWAN) et prédictions IA', icon: Map },
     { path: '/live-vehicles', title: 'Suivi GPS', desc: 'Position des véhicules en temps réel', icon: MapPin },
   ];
 
