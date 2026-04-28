@@ -1090,8 +1090,9 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
       details: {},
       issues: [],
     };
+    let orangeLastUplinkAt = null;
     try {
-      const { findLoraDeviceByDevEui } = require('../services/liveobjects-api');
+      const { findLoraDeviceByDevEui, getLastDataMessage } = require('../services/liveobjects-api');
       if (!process.env.LIVEOBJECTS_API_KEY) {
         layer2.status = 'error';
         layer2.issues.push('LIVEOBJECTS_API_KEY non configuré côté SOLIDATA — impossible d\'interroger Live Objects');
@@ -1099,25 +1100,33 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
         layer2.status = 'warning';
         layer2.issues.push('Pas de DevEUI à chercher dans Live Objects');
       } else {
+        // 1. Présence du device
         const device = await findLoraDeviceByDevEui(cav.lora_deveui);
-        if (!device) {
+        // 2. Dernier dataMessage réel (source de vérité — `/lora/devices` peut
+        //    avoir lastActivity=null même quand des uplinks arrivent)
+        let lastMsg = null;
+        try { lastMsg = await getLastDataMessage(cav.lora_deveui); } catch (_) { /* ignore */ }
+
+        if (!device && !lastMsg) {
           layer2.status = 'error';
           layer2.issues.push(`Le DevEUI ${cav.lora_deveui} n'existe pas (ou n'est pas visible) côté Live Objects — provisioning Orange manquant ou clé API limitée`);
         } else {
           layer2.details = {
-            id: device.id,
-            name: device.name,
-            tags: device.tags,
-            group: device.group,
-            profile: device.profile,
-            status: device.status,
-            lastUplinkAt: device.lastUplinkAt,
+            id: device?.id || `urn:lo:nsid:lora:${cav.lora_deveui}`,
+            name: device?.name,
+            tags: device?.tags,
+            group: device?.group,
+            profile: device?.profile,
+            status: device?.status,
+            device_lastActivity: device?.lastUplinkAt || null,
+            last_data_message: lastMsg,
           };
-          if (!device.lastUplinkAt) {
+          orangeLastUplinkAt = lastMsg?.timestamp || device?.lastUplinkAt || null;
+          if (!orangeLastUplinkAt) {
             layer2.status = 'error';
             layer2.issues.push('Aucun uplink reçu côté Live Objects — la sonde ne transmet pas (couverture LoRa, batterie HS, ou non activée)');
           } else {
-            const ageMs = Date.now() - new Date(device.lastUplinkAt).getTime();
+            const ageMs = Date.now() - new Date(orangeLastUplinkAt).getTime();
             const ageMin = Math.round(ageMs / 60000);
             layer2.details.minutes_since_last_uplink = ageMin;
             if (ageMin > expectedGapMin) {
@@ -1195,8 +1204,8 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
       layer3.status = 'error';
       layer3.issues = layer3Issues;
     }
-    if (layer2.details?.lastUplinkAt && dbRow.last_reading_at) {
-      const orangeAge = Date.now() - new Date(layer2.details.lastUplinkAt).getTime();
+    if (orangeLastUplinkAt && dbRow.last_reading_at) {
+      const orangeAge = Date.now() - new Date(orangeLastUplinkAt).getTime();
       const dbAge = Date.now() - new Date(dbRow.last_reading_at).getTime();
       if (dbAge - orangeAge > 30 * 60 * 1000) {
         // décalage > 30 min entre Orange et SOLIDATA
@@ -1204,6 +1213,12 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
         if (layer3.status === 'ok') layer3.status = 'warning';
         layer3.issues = layer3Issues;
       }
+    }
+    if (orangeLastUplinkAt && dbRow.total === 0) {
+      // Cas critique : Orange a des uplinks, BDD vide → connecteur HTTP/MQTT manquant côté Orange
+      layer3.status = 'error';
+      const msg = `Orange a reçu ${layer2.details?.last_data_message?.fcnt != null ? `un uplink fcnt=${layer2.details.last_data_message.fcnt}` : 'des uplinks'} mais SOLIDATA n'a enregistré aucune transaction — le pont Live Objects → SOLIDATA est manquant`;
+      if (!layer3.issues.includes(msg)) layer3.issues.push(msg);
     }
 
     const layer4 = {
@@ -1235,8 +1250,10 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
       } else if (mqttStatus.enabled && !mqttStatus.connected) {
         recommendations.push('Vérifier le compte Live Objects et le nom de FIFO. Logs serveur : grep "LiveObjects MQTT" backend logs.');
       }
-      if (layer2.status === 'ok' && dbRow.total === 0) {
-        recommendations.push("Côté Orange : créer un connector HTTP Push vers https://solidata.online/api/webhooks/liveobjects/uplink avec header X-Webhook-Secret = LIVEOBJECTS_WEBHOOK_SECRET, ou s'abonner à la FIFO LIVEOBJECTS_FIFO_NAME via MQTT.");
+      if (orangeLastUplinkAt && dbRow.total === 0) {
+        recommendations.push("Côté Orange Live Objects : créer un canal de sortie vers SOLIDATA :");
+        recommendations.push("  • Option A (recommandée) : créer un HTTP Push connector → URL https://solidata.online/api/webhooks/liveobjects/uplink, header X-Webhook-Secret = LIVEOBJECTS_WEBHOOK_SECRET, méthode POST, format JSON brut.");
+        recommendations.push(`  • Option B : créer une FIFO MQTT (nom à reporter dans LIVEOBJECTS_FIFO_NAME), s'abonner aux messages du device, puis activer LIVEOBJECTS_ENABLED=true côté SOLIDATA.`);
       }
     }
     if (layer4.status === 'ok' && layer1.status === 'ok' && layer2.status === 'ok' && layer3.status === 'ok') {

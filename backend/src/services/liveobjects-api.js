@@ -124,4 +124,55 @@ async function findLoraDeviceByDevEui(devEui) {
   return all.find((d) => d.devEui === target) || null;
 }
 
-module.exports = { listLoraDevices, findLoraDeviceByDevEui };
+/**
+ * Récupère le dernier dataMessage stocké côté Live Objects pour un devEUI donné.
+ * `/lora/devices` ne remplit pas toujours `lastActivity` — la vraie source de
+ * vérité est l'API data search.
+ *
+ * @returns {Promise<{ id, timestamp, payload, fcnt, rssi, snr, sf, port, gatewayCnt } | null>}
+ */
+async function getLastDataMessage(devEui) {
+  const apiKey = process.env.LIVEOBJECTS_API_KEY;
+  if (!apiKey) throw new Error('LIVEOBJECTS_API_KEY non configurée');
+  if (!devEui) return null;
+  const streamId = `urn:lo:nsid:lora:${devEui.toUpperCase()}`;
+
+  const tryEndpoints = [
+    `${API_BASE}/data/search/hits?q=streamId:%22${encodeURIComponent(streamId)}%22&size=1&sort=timestamp:desc`,
+    `${API_BASE}/data/search/hits?q=metadata.source:%22${encodeURIComponent(streamId)}%22&size=1&sort=timestamp:desc`,
+    `${API_BASE}/data/streams/${encodeURIComponent(streamId)}?limit=1`,
+  ];
+
+  for (const path of tryEndpoints) {
+    try {
+      const res = await httpsRequest(path, apiKey);
+      if (res.status === 200) {
+        const items = Array.isArray(res.data) ? res.data : (res.data?.hits || res.data?.data || []);
+        if (items.length > 0) {
+          const m = items[0]._source || items[0];
+          const lora = m.metadata?.network?.lora || {};
+          return {
+            id: m.id,
+            timestamp: m.timestamp || m.created || null,
+            payload: m.value?.payload || null,
+            model: m.model,
+            fcnt: lora.fcnt ?? null,
+            port: lora.port ?? null,
+            rssi: lora.rssi ?? null,
+            snr: lora.snr ?? null,
+            sf: lora.sf ?? null,
+            frequency: lora.frequency ?? null,
+            gatewayCnt: lora.gatewayCnt ?? null,
+            messageType: lora.messageType ?? null,
+            raw: m,
+          };
+        }
+      }
+    } catch (err) {
+      logger.debug(`Live Objects data search failed on ${path}`, { error: err.message });
+    }
+  }
+  return null;
+}
+
+module.exports = { listLoraDevices, findLoraDeviceByDevEui, getLastDataMessage };
