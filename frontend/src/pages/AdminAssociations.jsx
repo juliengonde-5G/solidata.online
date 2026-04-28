@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Users } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal } from '../components';
+import { LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -180,15 +181,16 @@ export default function AdminAssociations() {
         )}
 
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Points de collecte associatifs</h1>
-            <p className="text-sm text-slate-500">{list.length} associations</p>
-          </div>
-          <button onClick={openCreate} className="btn-primary text-sm font-medium">
-            + Nouveau point
-          </button>
-        </div>
+        <PageHeader
+          title="Points de collecte associatifs"
+          subtitle={`${list.length} associations`}
+          icon={Users}
+          actions={
+            <button onClick={openCreate} className="btn-primary text-sm font-medium">
+              + Nouveau point
+            </button>
+          }
+        />
 
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-2">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Truck, Plus, Pencil, FileText, Download, Trash2, Lightbulb, AlertTriangle } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, StatusBadge, Modal } from '../components';
+import { LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 const EVENT_TYPES = [
@@ -252,28 +252,28 @@ export default function Vehicles() {
   return (
     <Layout>
       <div className="p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Véhicules</h1>
-            <p className="text-slate-500">Gestion de la flotte — {vehicles.length} véhicule{vehicles.length > 1 ? 's' : ''}</p>
-          </div>
-          <div className="flex gap-2">
-            <div className="flex bg-slate-100 rounded-lg p-0.5">
-              {tabs.map(t => (
-                <button key={t.key} onClick={() => setActiveTab(t.key)} className={`px-3 py-1.5 rounded-md text-sm ${activeTab === t.key ? 'bg-white shadow font-medium' : 'text-slate-500'}`}>
-                  {t.label}
+        <PageHeader
+          title="Véhicules"
+          subtitle={`Gestion de la flotte — ${vehicles.length} véhicule${vehicles.length > 1 ? 's' : ''}`}
+          icon={Truck}
+          actions={
+            <>
+              <div className="flex bg-slate-100 rounded-lg p-0.5">
+                {tabs.map(t => (
+                  <button key={t.key} onClick={() => setActiveTab(t.key)} className={`px-3 py-1.5 rounded-md text-sm ${activeTab === t.key ? 'bg-white shadow font-medium' : 'text-slate-500'}`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              {activeTab === 'fleet' && (
+                <button onClick={openCreate} className="btn-primary text-sm">
+                  <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+                  Nouveau véhicule
                 </button>
-              ))}
-            </div>
-            {activeTab === 'fleet' && (
-              <button onClick={openCreate} className="btn-primary text-sm">
-                <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-                Nouveau véhicule
-              </button>
-            )}
-          </div>
-        </div>
+              )}
+            </>
+          }
+        />
 
         {/* Onglet Flotte */}
         {activeTab === 'fleet' && (

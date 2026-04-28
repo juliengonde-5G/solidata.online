@@ -604,7 +604,119 @@ function startScheduler() {
       console.log('[SCHEDULER] Lancement sync Pennylane quotidienne...');
       await syncPennylaneDaily();
     }
+    // Niveau 3.1 — Dispatch auto J-1 chaque soir à 18h
+    if (now.getHours() === 18 && now.getMinutes() < 30) {
+      try {
+        const { generateNextDayDispatchProposals } = require('./dispatch-optimizer');
+        await generateNextDayDispatchProposals();
+      } catch (err) {
+        console.error('[SCHEDULER] Dispatch J-1 error :', err.message);
+      }
+    }
+    // Import quotidien Logic'S à 20h (récupération mail + import CSV)
+    if (now.getHours() === 20 && now.getMinutes() < 30) {
+      console.log('[SCHEDULER] Import quotidien Logic\'S 20h...');
+      await checkLogicsEmailsAndScan();
+    }
   }, 60 * 60 * 1000);
+}
+
+// ══════════════════════════════════════════
+// MODULE BOUTIQUES : récupération mail LogicS (IMAP) → dossier CSV
+// ══════════════════════════════════════════
+async function checkLogicsEmails() {
+  const host = process.env.LOGICS_MAIL_HOST;
+  const user = process.env.LOGICS_MAIL_USER;
+  const pass = process.env.LOGICS_MAIL_PASS;
+  const port = parseInt(process.env.LOGICS_MAIL_PORT || '993');
+
+  if (!host || !user || !pass) {
+    console.log('[SCHEDULER] checkLogicsEmails: LOGICS_MAIL_* non configurés, skip');
+    return;
+  }
+
+  const { ImapFlow } = require('imapflow');
+  const { simpleParser } = require('mailparser');
+  const fs = require('fs');
+  const path = require('path');
+
+  const client = new ImapFlow({
+    host,
+    port,
+    secure: true,
+    auth: { user, pass },
+    logger: false
+  });
+
+  try {
+    await client.connect();
+
+    const boutiques = await pool.query(
+      `SELECT id, nom, csv_folder_path, logics_mail_folder,
+              logics_mail_subject_keyword, logics_mail_sender
+       FROM boutiques
+       WHERE is_active = true AND csv_folder_path IS NOT NULL`
+    );
+
+    for (const btq of boutiques.rows) {
+      const folder = btq.logics_mail_folder || 'INBOX';
+      const subjectKw = btq.logics_mail_subject_keyword;
+      const sender = btq.logics_mail_sender;
+
+      try {
+        await client.mailboxOpen(folder);
+      } catch (e) {
+        console.error(`[SCHEDULER] checkLogicsEmails: impossible d'ouvrir le dossier "${folder}" pour ${btq.nom}:`, e.message);
+        continue;
+      }
+
+      const searchCriteria = { seen: false, subject: "Logic'S" };
+      if (sender) searchCriteria.from = sender;
+
+      const uids = await client.search(searchCriteria, { uid: true });
+      if (!uids || uids.length === 0) {
+        console.log(`[SCHEDULER] checkLogicsEmails: aucun mail non lu pour ${btq.nom}`);
+        continue;
+      }
+
+      let nbSauvegardes = 0;
+      for await (const msg of client.fetch(uids, { source: true }, { uid: true })) {
+        const parsed = await simpleParser(msg.source);
+
+        if (subjectKw && !parsed.subject?.includes(subjectKw)) continue;
+
+        for (const att of parsed.attachments || []) {
+          if (!att.filename?.toLowerCase().endsWith('.csv')) continue;
+
+          if (!fs.existsSync(btq.csv_folder_path)) {
+            fs.mkdirSync(btq.csv_folder_path, { recursive: true });
+          }
+
+          const dest = path.join(btq.csv_folder_path, att.filename);
+          if (!fs.existsSync(dest)) {
+            fs.writeFileSync(dest, att.content);
+            nbSauvegardes++;
+            console.log(`[SCHEDULER] checkLogicsEmails: CSV sauvegardé pour ${btq.nom}: ${att.filename}`);
+          }
+        }
+
+        await client.messageFlagsAdd(msg.uid, ['\\Seen'], { uid: true });
+      }
+
+      if (nbSauvegardes === 0) {
+        console.log(`[SCHEDULER] checkLogicsEmails: aucun nouveau CSV pour ${btq.nom}`);
+      }
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] checkLogicsEmails:', err.message);
+  } finally {
+    await client.logout().catch(() => {});
+  }
+}
+
+async function checkLogicsEmailsAndScan() {
+  await checkLogicsEmails();
+  await scanBoutiqueCSVFolders();
 }
 
 // ══════════════════════════════════════════
@@ -725,4 +837,4 @@ function stopScheduler() {
   }
 }
 
-module.exports = { startScheduler, stopScheduler, runAllJobs };
+module.exports = { startScheduler, stopScheduler, runAllJobs, checkLogicsEmailsAndScan };

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Ship, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, Modal } from '../components';
+import { DataTable, LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function Expeditions() {
@@ -59,16 +59,17 @@ export default function Expeditions() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Expéditions</h1>
-            <p className="text-slate-500">Suivi des expéditions et livraisons</p>
-          </div>
-          <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-            <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-            Nouvelle expédition
-          </button>
-        </div>
+        <PageHeader
+          title="Expéditions"
+          subtitle="Suivi des expéditions et livraisons"
+          icon={Ship}
+          actions={
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+              <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+              Nouvelle expédition
+            </button>
+          }
+        />
 
         {/* Monthly Summary */}
         {summary.length > 0 && (

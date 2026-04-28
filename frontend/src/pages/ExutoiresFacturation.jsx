@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader } from '../components';
 import { Scale, FileText } from 'lucide-react';
 import api from '../services/api';
 
@@ -194,12 +194,11 @@ export default function ExutoiresFacturation() {
     <Layout>
       <div className="p-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Facturation & Contrôles</h1>
-            <p className="text-gray-500 text-sm">Contrôles de pesée et gestion des factures logistiques</p>
-          </div>
-        </div>
+        <PageHeader
+          title="Facturation & Contrôles"
+          subtitle="Contrôles de pesée et gestion des factures logistiques"
+          icon={FileText}
+        />
 
         {/* Tabs */}
         <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">

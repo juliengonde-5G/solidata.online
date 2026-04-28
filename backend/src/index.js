@@ -77,7 +77,7 @@ app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { e
 // Créer dossiers uploads (évite 502 si multer ne peut pas créer)
 const fs = require('fs');
 const uploadsDir = path.join(__dirname, '..', 'uploads');
-['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents', 'vehicle-docs'].forEach((sub) => {
+['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents', 'vehicle-docs', 'vehicle-contracts'].forEach((sub) => {
   const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -158,6 +158,16 @@ app.use('/api/chat', require('./routes/chat'));
 
 // Performance : Dashboard KPI consolide et indicateurs industriels
 app.use('/api/performance', require('./routes/performance'));
+
+// Niveau 2.2 : Web Push (abonnement + VAPID + test)
+app.use('/api/push', require('./routes/push'));
+
+// Niveau 2.8 : Contrats d'entretien véhicules
+app.use('/api/vehicle-contracts', require('./routes/vehicle-contracts'));
+
+// Niveau 3.3 : API publique partenaires (X-API-Key) + admin des clés
+app.use('/api/admin/api-keys', require('./routes/admin-api-keys'));
+app.use('/api/public', require('./routes/public-api'));
 
 // Module Boutiques : gestion de la performance des boutiques retail 2nde main
 app.use('/api/boutiques', require('./routes/boutiques'));
@@ -312,9 +322,23 @@ io.on('connection', (socket) => {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  // Mise à jour statut CAV collecté
-  socket.on('cav-collected', (data) => {
-    io.to(`tour-${data.tourId}`).emit('cav-status-update', data);
+  // Mise à jour statut CAV collecté — enrichi avec les champs utiles à la
+  // supervision live (fill_level, incidents récents, horodatage serveur).
+  socket.on('cav-collected', async (data) => {
+    const payload = { ...data, broadcastedAt: new Date().toISOString() };
+    if (data?.tourId && data?.cavId) {
+      try {
+        const row = await pool.query(
+          `SELECT tc.status, tc.fill_level, tc.collected_at, tc.notes
+           FROM tour_cav tc WHERE tc.tour_id = $1 AND tc.cav_id = $2`,
+          [data.tourId, data.cavId]
+        );
+        if (row.rows.length > 0) Object.assign(payload, row.rows[0]);
+      } catch (err) {
+        logger.error('Enrichissement cav-collected échoué', { error: err.message });
+      }
+    }
+    io.to(`tour-${data.tourId}`).emit('cav-status-update', payload);
   });
 
   // Mise à jour statut tournée

@@ -966,6 +966,82 @@ async function initDatabase() {
         ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION;
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
+    // Horaire prévisionnel de passage au CAV, calculé au démarrage de la
+    // tournée (OSRM). Sert à comparer prévu/réalisé et à calculer le
+    // décalage par point.
+    await client.query(`
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS planned_passage_time TIMESTAMP;
+    `);
+
+    // Historique des ré-optimisations d'une tournée en cours (Niveau 2.6).
+    // Chaque proposition enregistre : motif, ordre avant / après (positions
+    // des CAV restants), état d'acceptation par le chauffeur. Expose
+    // also la trace des propositions auto (incident, retard, plein).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tour_reoptimizations (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+        trigger_reason VARCHAR(40) NOT NULL
+          CHECK (trigger_reason IN ('manual', 'incident', 'skipped', 'full', 'delay', 'inaccessible')),
+        triggered_by VARCHAR(10) NOT NULL DEFAULT 'auto'
+          CHECK (triggered_by IN ('auto', 'manager', 'driver')),
+        current_lat DOUBLE PRECISION,
+        current_lng DOUBLE PRECISION,
+        old_sequence JSONB NOT NULL,
+        new_sequence JSONB NOT NULL,
+        old_distance_km DOUBLE PRECISION,
+        new_distance_km DOUBLE PRECISION,
+        old_duration_min DOUBLE PRECISION,
+        new_duration_min DOUBLE PRECISION,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
+        decided_at TIMESTAMP,
+        decided_by_user_id INTEGER REFERENCES users(id),
+        notes TEXT,
+        triggered_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_tour ON tour_reoptimizations(tour_id);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_status ON tour_reoptimizations(status);`);
+
+    // Abonnements push (Web Push API + VAPID) — Niveau 2.2. Un user peut
+    // avoir plusieurs endpoints (poste de travail + mobile perso).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        endpoint TEXT UNIQUE NOT NULL,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        user_agent TEXT,
+        platform VARCHAR(20) DEFAULT 'web'
+          CHECK (platform IN ('web', 'mobile')),
+        created_at TIMESTAMP DEFAULT NOW(),
+        last_used_at TIMESTAMP
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);');
+
+    // Niveau 3.3 : clés API pour partenaires (Refashion, Métropole Rouen,
+    // associations, etc.). La clé elle-même n'est jamais stockée en clair :
+    // seul le hash SHA-256 l'est. Les scopes limitent les endpoints publics
+    // accessibles (ex: 'cav:read', 'stats:read').
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        key_prefix VARCHAR(12) NOT NULL UNIQUE,
+        key_hash VARCHAR(128) NOT NULL,
+        scopes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        active BOOLEAN DEFAULT true,
+        created_by INTEGER REFERENCES users(id),
+        last_used_at TIMESTAMP,
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(active);');
     // Ajouter les colonnes distance/durée/nb_cav à tours si manquantes
     await client.query(`
       DO $$ BEGIN
@@ -2007,6 +2083,32 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_maint_alerts_vehicle ON vehicle_maintenance_alerts(vehicle_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_maint_alerts_resolved ON vehicle_maintenance_alerts(is_resolved);');
+
+    // Niveau 2.8 : contrats d'entretien véhicule (prestataire externe)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_maintenance_contracts (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        prestataire VARCHAR(150) NOT NULL,
+        type_contrat VARCHAR(20) NOT NULL DEFAULT 'partiel'
+          CHECK (type_contrat IN ('full', 'partiel')),
+        debut DATE NOT NULL,
+        fin DATE NOT NULL,
+        tarif_mensuel_eur DECIMAL(10,2),
+        operations_incluses TEXT[],
+        contact_nom VARCHAR(150),
+        contact_telephone VARCHAR(30),
+        contact_email VARCHAR(150),
+        document_path VARCHAR(500),
+        notes TEXT,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_maint_contracts_vehicle ON vehicle_maintenance_contracts(vehicle_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_maint_contracts_active ON vehicle_maintenance_contracts(active);');
+
     console.log('[INIT-DB] Module Maintenance Véhicules ✓');
 
     // ══════════════════════════════════════════
@@ -2509,6 +2611,9 @@ async function initDatabase() {
       );
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_tour_assoc_tour ON tour_association_point(tour_id);');
+    await client.query(`
+      ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS planned_passage_time TIMESTAMP;
+    `);
 
     // Route standard association (jonction route ↔ points association)
     await client.query(`
@@ -2850,6 +2955,19 @@ async function initDatabase() {
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_btq_meteo_date ON boutique_meteo_quotidien(boutique_id, date)`);
+
+    // Migration 16/04/2026 : colonne num_ticket (vrai numéro ticket LogicS, nouveau format CSV)
+    // Rayon;Date;Num_Ticket;ID Article;Article;... au lieu de Rayon;Date;ID Article;...
+    // Permet de différencier correctement les tickets qui chevauchent la même minute.
+    await client.query(`ALTER TABLE boutique_tickets ADD COLUMN IF NOT EXISTS num_ticket VARCHAR(32)`);
+    await client.query(`ALTER TABLE boutique_ventes ADD COLUMN IF NOT EXISTS num_ticket VARCHAR(32)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_tickets_num ON boutique_tickets(boutique_id, num_ticket) WHERE num_ticket IS NOT NULL`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_num ON boutique_ventes(boutique_id, num_ticket) WHERE num_ticket IS NOT NULL`);
+
+    // Migration 25/04/2026 : configuration import mail LogicS automatique par boutique
+    await client.query(`ALTER TABLE boutiques ADD COLUMN IF NOT EXISTS logics_mail_folder VARCHAR(255) DEFAULT 'INBOX'`);
+    await client.query(`ALTER TABLE boutiques ADD COLUMN IF NOT EXISTS logics_mail_subject_keyword VARCHAR(255)`);
+    await client.query(`ALTER TABLE boutiques ADD COLUMN IF NOT EXISTS logics_mail_sender VARCHAR(255)`);
 
     // Seed : boutique St-Sever (référence géographique : Rouen)
     const btqExist = await client.query("SELECT id FROM boutiques LIMIT 1");

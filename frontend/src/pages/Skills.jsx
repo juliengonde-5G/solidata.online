@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, PageHeader, Section } from '../components';
+import { Star } from 'lucide-react';
 import api from '../services/api';
 
 const SKILL_CATEGORIES = {
@@ -60,22 +61,24 @@ export default function Skills() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Compétences</h1>
-            <p className="text-gray-500">Matrice des compétences — {employees.length} collaborateurs</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setView('matrix')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'matrix' ? 'bg-primary text-white' : 'bg-gray-100'}`}>
-              Matrice
-            </button>
-            <button onClick={() => setView('bySkill')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'bySkill' ? 'bg-primary text-white' : 'bg-gray-100'}`}>
-              Par compétence
-            </button>
-          </div>
-        </div>
+        <PageHeader
+          title="Compétences"
+          subtitle={`Matrice des compétences — ${employees.length} collaborateurs`}
+          icon={Star}
+          actions={
+            <div className="flex gap-2">
+              <button onClick={() => setView('matrix')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'matrix' ? 'bg-primary text-white' : 'bg-gray-100'}`}>
+                Matrice
+              </button>
+              <button onClick={() => setView('bySkill')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'bySkill' ? 'bg-primary text-white' : 'bg-gray-100'}`}>
+                Par compétence
+              </button>
+            </div>
+          }
+        />
 
         {view === 'bySkill' && (
+          <Section title="Répartition par compétence">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {Object.entries(SKILL_CATEGORIES).map(([key, cat]) => (
               <div
@@ -103,10 +106,12 @@ export default function Skills() {
               </div>
             ))}
           </div>
+          </Section>
         )}
 
         {view === 'matrix' && (
-          <div className="card-modern overflow-x-auto">
+          <Section title="Matrice" bodyClassName="p-0">
+          <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50">
                 <tr>
@@ -144,6 +149,7 @@ export default function Skills() {
               </tbody>
             </table>
           </div>
+          </Section>
         )}
       </div>
     </Layout>

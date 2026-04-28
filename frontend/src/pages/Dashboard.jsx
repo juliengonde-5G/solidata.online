@@ -2,16 +2,17 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
+import { PageHeader, Section } from '../components';
 import api from '../services/api';
 import {
   Truck, ArrowDownWideNarrow, Users, Factory, Ship, BarChart3,
   Settings, UserPlus, Package, Heart, Lock, Clock, Sparkles,
-  AlertTriangle, Info, Target, ChevronRight
+  AlertTriangle, Info, Target, ChevronRight, LayoutGrid
 } from 'lucide-react';
 
 // ══════════════════════════════════════════
-// DASHBOARD — Accueil combinée
-// KPI globaux + Grille modules + Activité récente
+// DASHBOARD — Accueil combinee
+// KPI globaux + Grille modules + Activite recente
 // ══════════════════════════════════════════
 
 const MODULE_CARDS = [
@@ -28,7 +29,7 @@ const MODULE_CARDS = [
   },
   {
     key: 'equipe',
-    title: 'Gestion Équipe',
+    title: 'Gestion Equipe',
     description: 'Collaborateurs, heures, insertion',
     path: '/hub-equipe',
     icon: Users,
@@ -40,29 +41,29 @@ const MODULE_CARDS = [
   {
     key: 'collecte',
     title: 'Collecte',
-    description: 'Tournées, CAV, GPS temps réel',
+    description: 'Tournees, CAV, GPS temps reel',
     path: '/hub-collecte',
     icon: Truck,
     color: 'teal',
     roles: ['ADMIN', 'MANAGER'],
     kpiKey: 'tours_aujourdhui',
-    kpiLabel: 'tournées',
+    kpiLabel: 'tournees',
   },
   {
     key: 'tri',
     title: 'Tri & Production',
-    description: 'Chaînes de tri, stock, expéditions',
+    description: 'Chaines de tri, stock, expeditions',
     path: '/hub-tri-production',
     icon: Factory,
     color: 'amber',
     roles: ['ADMIN', 'MANAGER'],
     kpiKey: 'kg_trie_aujourdhui',
-    kpiLabel: 'kg triés',
+    kpiLabel: 'kg tries',
   },
   {
     key: 'exutoires',
     title: 'Logistique',
-    description: 'Commandes, préparation, facturation',
+    description: 'Commandes, preparation, facturation',
     path: '/hub-exutoires',
     icon: Ship,
     color: 'purple',
@@ -183,44 +184,25 @@ export default function Dashboard() {
     return icons[type] || { icon: Info, color: 'text-slate-500 bg-slate-50' };
   };
 
+  const firstName = user?.first_name || user?.username || '';
+  const dateComplete = new Date().toLocaleDateString('fr-FR', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+
   return (
     <Layout>
-      <div className="space-y-8">
-        {/* Header avec salutation */}
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
-            Bonjour, {user?.first_name || user?.username}
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm">
-            {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
-        </div>
+      <div className="space-y-6">
+        {/* Header salutation */}
+        <PageHeader
+          title={`Bonjour, ${firstName}`}
+          subtitle={dateComplete.charAt(0).toUpperCase() + dateComplete.slice(1)}
+        />
 
         {/* Alertes */}
         {alertes.length > 0 && (
           <div className="space-y-2">
             {alertes.map((alerte, i) => (
-              <div
-                key={i}
-                className={`flex items-center gap-3 px-4 py-3 rounded-card text-sm ${
-                  alerte.type === 'warning'
-                    ? 'bg-amber-50 border border-amber-200 text-amber-800'
-                    : alerte.type === 'error'
-                    ? 'bg-red-50 border border-red-200 text-red-800'
-                    : 'bg-blue-50 border border-blue-200 text-blue-800'
-                }`}
-              >
-                <span className={`flex-shrink-0 w-5 h-5 ${
-                  alerte.type === 'warning' ? 'text-amber-500' : alerte.type === 'error' ? 'text-red-500' : 'text-blue-500'
-                }`}>
-                  {alerte.type === 'warning' || alerte.type === 'error' ? (
-                    <AlertTriangle className="w-5 h-5" />
-                  ) : (
-                    <Info className="w-5 h-5" />
-                  )}
-                </span>
-                <span>{alerte.message}</span>
-              </div>
+              <AlertBanner key={i} alerte={alerte} />
             ))}
           </div>
         )}
@@ -228,16 +210,16 @@ export default function Dashboard() {
         {/* KPIs globaux */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <KpiTile
-            label="Collecté ce mois"
-            value={loading ? '—' : formatTonnage(kpis?.collecte?.tonnage_mois)}
+            label="Collecte ce mois"
+            value={loading ? '-' : formatTonnage(kpis?.collecte?.tonnage_mois)}
             unit="kg"
             icon={Truck}
             color="teal"
             trend={kpis?.collecte?.trend_7j}
           />
           <KpiTile
-            label="Trié ce mois"
-            value={loading ? '—' : formatTonnage(kpis?.production?.kg_trie_mois)}
+            label="Trie ce mois"
+            value={loading ? '-' : formatTonnage(kpis?.production?.kg_trie_mois)}
             unit="kg"
             icon={ArrowDownWideNarrow}
             color="emerald"
@@ -245,7 +227,7 @@ export default function Dashboard() {
           />
           <KpiTile
             label="Collaborateurs"
-            value={loading ? '—' : (kpis?.rh?.employes_actifs || 0)}
+            value={loading ? '-' : (kpis?.rh?.employes_actifs || 0)}
             unit="actifs"
             icon={Users}
             color="blue"
@@ -253,7 +235,7 @@ export default function Dashboard() {
           />
           <KpiTile
             label="Alertes"
-            value={loading ? '—' : alertes.length}
+            value={loading ? '-' : alertes.length}
             unit=""
             icon={AlertTriangle}
             color={alertes.length > 0 ? 'amber' : 'slate'}
@@ -261,24 +243,27 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Objectifs vs Réalisé (jauges) — ADMIN uniquement */}
+        {/* Objectifs vs Realise (jauges) - ADMIN uniquement */}
         {user?.role === 'ADMIN' && objectifs.length > 0 && (
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Target className="w-5 h-5 text-slate-400" />
-              Objectifs vs Réalisé
-            </h2>
+          <Section
+            title="Objectifs vs Realise"
+            icon={Target}
+            subtitle="Performance par indicateur vs cible"
+          >
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {objectifs.map((obj) => (
                 <GaugeCard key={obj.id} objectif={obj} />
               ))}
             </div>
-          </div>
+          </Section>
         )}
 
         {/* Grille des modules */}
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">Modules</h2>
+        <Section
+          title="Modules"
+          icon={LayoutGrid}
+          subtitle={`${allCards.length} modules disponibles`}
+        >
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {allCards.map(card => {
               const colors = COLOR_MAP[card.color];
@@ -301,7 +286,7 @@ export default function Dashboard() {
                   <p className="text-xs text-slate-500 mb-3">{card.description}</p>
                   {kpiVal !== null && (
                     <div className="flex items-baseline gap-1.5">
-                      <span className={`text-xl font-bold ${colors.text}`}>
+                      <span className={`text-xl font-extrabold ${colors.text}`}>
                         {typeof kpiVal === 'number' ? kpiVal.toLocaleString('fr-FR') : kpiVal}
                       </span>
                       <span className="text-xs text-slate-400">{card.kpiLabel}</span>
@@ -311,25 +296,20 @@ export default function Dashboard() {
               );
             })}
           </div>
-        </div>
+        </Section>
 
-        {/* Fil d'actualité + Activité récente */}
+        {/* Activite recente + Actions rapides */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Activité récente */}
-          <div className="card-modern p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-slate-400" />
-              Activité récente
-            </h2>
+          <Section title="Activite recente" icon={Clock} padded={false}>
             {activites.length === 0 ? (
-              <p className="text-sm text-slate-400 py-4 text-center">Aucune activité récente</p>
+              <p className="text-sm text-slate-400 py-8 text-center">Aucune activite recente</p>
             ) : (
-              <div className="space-y-1">
+              <ul className="divide-y divide-slate-100">
                 {activites.slice(0, 8).map((act, i) => {
                   const ai = activityIcon(act.type);
                   const AIcon = ai.icon;
                   return (
-                    <div key={i} className="flex items-center gap-3 py-2.5 px-2 rounded-lg hover:bg-slate-50 transition-colors">
+                    <li key={i} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors">
                       <span className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${ai.color}`}>
                         <AIcon className="w-4 h-4" />
                       </span>
@@ -337,19 +317,14 @@ export default function Dashboard() {
                         <p className="text-sm text-slate-700 truncate">{act.message}</p>
                       </div>
                       <span className="text-xs text-slate-400 flex-shrink-0">{dateFormat(act.date)}</span>
-                    </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             )}
-          </div>
+          </Section>
 
-          {/* Raccourcis rapides */}
-          <div className="card-modern p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-slate-400" />
-              Actions rapides
-            </h2>
+          <Section title="Actions rapides" icon={Sparkles} subtitle="Raccourcis vers les ecrans cles">
             <div className="grid grid-cols-2 gap-3">
               {getQuickActions(user?.role).map((action, i) => (
                 <button
@@ -358,11 +333,11 @@ export default function Dashboard() {
                   className="flex items-center gap-3 px-4 py-3 rounded-card bg-slate-50 hover:bg-primary-surface hover:text-primary border border-slate-100 hover:border-primary/20 transition-all text-left group"
                 >
                   <action.icon className="w-5 h-5 text-slate-400 group-hover:text-primary transition-colors" />
-                  <span className="text-sm font-medium text-slate-700 group-hover:text-primary transition-colors">{action.label}</span>
+                  <span className="text-sm font-semibold text-slate-700 group-hover:text-primary transition-colors">{action.label}</span>
                 </button>
               ))}
             </div>
-          </div>
+          </Section>
         </div>
       </div>
     </Layout>
@@ -383,7 +358,7 @@ function formatTonnage(val) {
 function getQuickActions(role) {
   const actions = [];
   if (['ADMIN', 'MANAGER'].includes(role)) {
-    actions.push({ label: 'Nouvelle tournée', path: '/tours', icon: Truck });
+    actions.push({ label: 'Nouvelle tournee', path: '/tours', icon: Truck });
     actions.push({ label: 'Saisir production', path: '/production', icon: Factory });
   }
   if (['ADMIN', 'RH'].includes(role)) {
@@ -399,6 +374,26 @@ function getQuickActions(role) {
     actions.push({ label: 'Configuration', path: '/settings', icon: Settings });
   }
   return actions.slice(0, 6);
+}
+
+// ══════════════════════════════════════════
+// Alert banner — teintes cohérentes design system
+// ══════════════════════════════════════════
+
+function AlertBanner({ alerte }) {
+  const styles = {
+    warning: { wrap: 'bg-amber-50 border-amber-200 text-amber-800', ico: 'text-amber-500', Icon: AlertTriangle },
+    error:   { wrap: 'bg-red-50 border-red-200 text-red-800',       ico: 'text-red-500',   Icon: AlertTriangle },
+    info:    { wrap: 'bg-blue-50 border-blue-200 text-blue-800',    ico: 'text-blue-500',  Icon: Info },
+  };
+  const s = styles[alerte.type] || styles.info;
+  const Icon = s.Icon;
+  return (
+    <div className={`flex items-center gap-3 px-4 py-3 rounded-card border text-sm ${s.wrap}`}>
+      <Icon className={`w-5 h-5 flex-shrink-0 ${s.ico}`} />
+      <span className="font-medium">{alerte.message}</span>
+    </div>
+  );
 }
 
 // ══════════════════════════════════════════
@@ -429,40 +424,41 @@ function Sparkline({ data, color }) {
   return (
     <div className="flex items-center gap-2 mt-2">
       <svg width={w} height={h} className="flex-shrink-0">
-        <polyline points={points} fill="none" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />
+        <polyline points={points} fill="none" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.65" />
       </svg>
-      <span className={`text-xs font-medium ${isUp ? 'text-emerald-600' : 'text-red-500'}`}>
-        {isUp ? '\u2191' : '\u2193'}
+      <span className={`text-xs font-semibold ${isUp ? 'text-emerald-600' : 'text-red-500'}`}>
+        {isUp ? '↑' : '↓'}
       </span>
     </div>
   );
 }
 
 // ══════════════════════════════════════════
-// KPI Tile component
+// KPI Tile — variante Dashboard avec sparkline
 // ══════════════════════════════════════════
 
 function KpiTile({ label, value, unit, icon: Icon, color, trend }) {
   const colorStyles = {
-    teal: 'bg-teal-50 text-teal-600',
-    emerald: 'bg-emerald-50 text-emerald-600',
-    blue: 'bg-blue-50 text-blue-600',
-    amber: 'bg-amber-50 text-amber-600',
-    slate: 'bg-slate-50 text-slate-500',
-    red: 'bg-red-50 text-red-600',
+    teal: { bubble: 'bg-teal-50 text-teal-600', value: 'text-teal-700' },
+    emerald: { bubble: 'bg-emerald-50 text-emerald-600', value: 'text-emerald-700' },
+    blue: { bubble: 'bg-blue-50 text-blue-600', value: 'text-blue-700' },
+    amber: { bubble: 'bg-amber-50 text-amber-600', value: 'text-amber-700' },
+    slate: { bubble: 'bg-slate-100 text-slate-500', value: 'text-slate-800' },
+    red: { bubble: 'bg-red-50 text-red-600', value: 'text-red-700' },
   };
+  const s = colorStyles[color] || colorStyles.slate;
 
   return (
-    <div className="card-modern p-4 sm:p-5">
+    <div className="card-modern p-4 sm:p-5 hover:shadow-card-hover transition-shadow">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs sm:text-sm font-medium text-slate-500 leading-tight">{label}</span>
-        <span className={`w-8 h-8 sm:w-9 sm:h-9 rounded-card flex items-center justify-center ${colorStyles[color]}`}>
-          <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
+        <span className="text-xs sm:text-sm font-semibold text-slate-500 leading-tight truncate">{label}</span>
+        <span className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${s.bubble}`}>
+          <Icon className="w-5 h-5" />
         </span>
       </div>
-      <div className="flex items-baseline gap-1">
-        <span className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">{value}</span>
-        {unit && <span className="text-xs text-slate-400">{unit}</span>}
+      <div className="flex items-baseline gap-1.5">
+        <span className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${s.value}`}>{value}</span>
+        {unit && <span className="text-xs font-medium text-slate-400">{unit}</span>}
       </div>
       {trend && trend.length > 1 && <Sparkline data={trend} color={color} />}
     </div>
@@ -470,7 +466,7 @@ function KpiTile({ label, value, unit, icon: Icon, color, trend }) {
 }
 
 // ══════════════════════════════════════════
-// Gauge Card — Jauge circulaire objectif vs réalisé
+// Gauge Card — Jauge circulaire objectif vs realise
 // ══════════════════════════════════════════
 
 function GaugeCard({ objectif }) {
@@ -480,8 +476,8 @@ function GaugeCard({ objectif }) {
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (pourcentage / 100) * circumference;
 
-  const gaugeColor = pourcentage >= 80 ? '#10b981' : pourcentage >= 50 ? '#f59e0b' : '#ef4444';
-  const periodLabel = { mensuel: 'Mois', trimestriel: 'Trim.', annuel: 'Année' }[periode] || periode;
+  const gaugeColor = pourcentage >= 80 ? '#0D9488' : pourcentage >= 50 ? '#f59e0b' : '#ef4444';
+  const periodLabel = { mensuel: 'Mois', trimestriel: 'Trim.', annuel: 'Annee' }[periode] || periode;
 
   const fmtVal = (v) => {
     if (v >= 1000) return `${(v / 1000).toFixed(1)}t`;
@@ -489,7 +485,7 @@ function GaugeCard({ objectif }) {
   };
 
   return (
-    <div className="card-modern p-4 flex flex-col items-center">
+    <div className="card-modern p-4 flex flex-col items-center hover:shadow-card-hover transition-shadow">
       <div className="relative w-20 h-20 mb-2">
         <svg className="w-20 h-20 -rotate-90" viewBox="0 0 80 80">
           <circle cx="40" cy="40" r={radius} fill="none" stroke="#e2e8f0" strokeWidth={stroke} />
@@ -502,15 +498,14 @@ function GaugeCard({ objectif }) {
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-lg font-bold text-slate-800">{pourcentage}%</span>
+          <span className="text-lg font-extrabold text-slate-800">{pourcentage}%</span>
         </div>
       </div>
-      <p className="text-xs font-medium text-slate-700 text-center leading-tight mb-1">{indicateur}</p>
+      <p className="text-xs font-semibold text-slate-700 text-center leading-tight mb-1">{indicateur}</p>
       <p className="text-xs text-slate-500">
         {fmtVal(realise)} / {fmtVal(valeur_cible)} {unite}
       </p>
-      <span className="mt-1 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">{periodLabel}</span>
+      <span className="mt-1 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold uppercase tracking-wide">{periodLabel}</span>
     </div>
   );
 }
-

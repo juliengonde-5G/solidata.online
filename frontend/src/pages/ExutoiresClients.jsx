@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Building2, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 const TYPE_LABELS = { recycleur: 'Recycleur', negociant: 'Négociant', industriel: 'Industriel', autre: 'Autre' };
@@ -93,16 +93,17 @@ export default function ExutoiresClients() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Clients Logistiques</h1>
-            <p className="text-slate-500">Gestion des clients et débouchés</p>
-          </div>
-          <button onClick={openCreate} className="btn-primary text-sm">
-            <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-            Nouveau client
-          </button>
-        </div>
+        <PageHeader
+          title="Clients Logistiques"
+          subtitle="Gestion des clients et débouchés"
+          icon={Building2}
+          actions={
+            <button onClick={openCreate} className="btn-primary text-sm">
+              <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+              Nouveau client
+            </button>
+          }
+        />
 
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="card-modern p-4"><p className="text-xs text-slate-500 font-medium">Total clients actifs</p><p className="text-2xl font-bold text-slate-800">{stats.total}</p></div>

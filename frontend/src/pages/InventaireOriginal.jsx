@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Warehouse, Scale, TrendingUp, ArrowDownUp, Plus, Lock } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, PageHeader } from '../components';
 import api from '../services/api';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -146,24 +146,22 @@ export default function InventaireOriginal() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <Warehouse className="w-6 h-6 text-primary" strokeWidth={1.8} />
-              Inventaire Original
-            </h1>
-            <p className="text-slate-500">Stock brut de collecte : <span className="font-semibold text-slate-700">{(stockActuel / 1000).toFixed(2)} tonnes</span></p>
-          </div>
-          <div className="flex bg-slate-100 rounded-lg p-0.5">
-            {tabs.map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all ${activeTab === tab.id ? 'bg-white shadow font-medium text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-                <tab.icon className="w-3.5 h-3.5" strokeWidth={1.8} />
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <PageHeader
+          title="Inventaire Original"
+          subtitle={`Stock brut de collecte : ${(stockActuel / 1000).toFixed(2)} tonnes`}
+          icon={Warehouse}
+          actions={
+            <div className="flex bg-slate-100 rounded-lg p-0.5">
+              {tabs.map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-all ${activeTab === tab.id ? 'bg-white shadow font-medium text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                  <tab.icon className="w-3.5 h-3.5" strokeWidth={1.8} />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          }
+        />
 
         {/* Onglet Historique */}
         {activeTab === 'historique' && (

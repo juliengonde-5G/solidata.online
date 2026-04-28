@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Warehouse, Plus, ArrowDownUp } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge, Modal } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function Stock() {
@@ -118,24 +118,25 @@ export default function Stock() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Gestion des stocks</h1>
-            <p className="text-slate-500">Stock total : {(totalStock / 1000).toFixed(1)} tonnes</p>
-          </div>
-          <div className="flex gap-2">
-            <div className="flex bg-slate-100 rounded-lg p-0.5">
-              <button onClick={() => setActiveTab('stock')} className={`px-3 py-1.5 rounded-md text-sm ${activeTab === 'stock' ? 'bg-white shadow font-medium' : 'text-slate-500'}`}>Stock</button>
-              <button onClick={() => setActiveTab('inventaire')} className={`px-3 py-1.5 rounded-md text-sm ${activeTab === 'inventaire' ? 'bg-white shadow font-medium' : 'text-slate-500'}`}>Inventaire</button>
+        <PageHeader
+          title="Gestion des stocks"
+          subtitle={`Stock total : ${(totalStock / 1000).toFixed(1)} tonnes`}
+          icon={Warehouse}
+          actions={
+            <div className="flex gap-2">
+              <div className="flex bg-slate-100 rounded-lg p-0.5">
+                <button onClick={() => setActiveTab('stock')} className={`px-3 py-1.5 rounded-md text-sm ${activeTab === 'stock' ? 'bg-white shadow font-medium' : 'text-slate-500'}`}>Stock</button>
+                <button onClick={() => setActiveTab('inventaire')} className={`px-3 py-1.5 rounded-md text-sm ${activeTab === 'inventaire' ? 'bg-white shadow font-medium' : 'text-slate-500'}`}>Inventaire</button>
+              </div>
+              {activeTab === 'stock' && (
+                <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+                  <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+                  Mouvement de stock
+                </button>
+              )}
             </div>
-            {activeTab === 'stock' && (
-              <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-                <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-                Mouvement de stock
-              </button>
-            )}
-          </div>
-        </div>
+          }
+        />
 
         {activeTab === 'stock' && (
           <>

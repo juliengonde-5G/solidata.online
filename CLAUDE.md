@@ -2,7 +2,7 @@
 
 > **Ce fichier est le contexte de référence pour tout agent IA (Claude, Copilot, etc.) travaillant sur le projet SOLIDATA.**
 > Il est lu automatiquement par Claude Code au démarrage de chaque session.
-> Dernière mise à jour : 16 avril 2026
+> Dernière mise à jour : 22 avril 2026
 
 ---
 
@@ -235,7 +235,9 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | **LogicS** | Logiciel de caisse des boutiques — export CSV quotidien des ventes |
 | **RESP_BTQ** | Responsable Boutique — 6ème rôle, gère les ventes et commandes de sa boutique |
 | **Panier moyen** | CA TTC / nombre de tickets — indicateur clé retail |
-| **Minute key** | Clé de reconstitution ticket (YYYY-MM-DD HH:MM) — pas d'ID ticket dans le CSV LogicS |
+| **IPT** | Indice Panier Ticket — articles vendus / nombre de tickets (items per transaction) |
+| **Num_Ticket** | Vrai numéro de ticket LogicS (nouveau format CSV, 11 colonnes, depuis 21/04/2026) |
+| **Minute key** | Clé de reconstitution ticket (YYYY-MM-DD HH:MM) — fallback pour l'ancien format CSV à 10 colonnes |
 
 ### Parties prenantes externes
 - **Refashion** : éco-organisme, subventions trimestrielles
@@ -335,6 +337,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | 7 avril 2026 | 1.3.2 | Audit quotidien : 15 commits orphelins réintégrés sur main. Repo propre (1 branche). Sécurité **4.5/10** (2 CRITIQUES : injection SQL insertion/index.js, injection shell admin-db + 6 HAUTES dont PCM sans auth). 11 vuln npm (9 HIGH). **36 bugs dont 12 BLOQUANTS** — 10 modules cassés : Mobile GPS (Socket.IO mismatch+auth), Mobile retour (CHECK constraint), WorkHours (triple incompatibilité), Expéditions (champs POST), Commandes Exutoires (status `chargée`), LiveVehicles (Socket.IO), Dashboard KPIs (colonne erronée), ProduitsFinis (JOIN manquant), Reporting (paramètre API), ChaineTri (nb_postes). **8 bugs récurrents ≥3 jours non corrigés**. Note globale **4.8/10**. 143 commits |
 | 11 avril 2026 | 1.3.3 | Stock Original (AdminStockOriginal, InventaireOriginal, grand livre, verrouillage trimestriel Refashion). Fix mobile (navigation incidents, checklist, erreurs silencieuses). Suppression doublon route `GET /api/vehicles/available`. Documentation : LOGIQUE_TOURNEES.md, LOGIQUE_STOCK_INVENTAIRES.md, VARIABLES_APPLICATION.md. 66 pages React, 63 fichiers routes. |
 | 16 avril 2026 | 1.4.0 | **Module Boutiques complet** — Espace performance retail 2nde main textile. 9 tables (boutiques, import_batches, ventes, tickets, commandes, commande_lignes, commande_historique, objectifs, meteo_quotidien). 5 routes API (boutiques, boutique-ventes, boutique-commandes, boutique-objectifs, boutique-meteo). 7 pages React (Hub, Dashboard 3 niveaux jour/mois/année, Ventes, Commandes Kanban 3 colonnes, Planning, Objectifs, Import). Utilitaire partagé `utils/weather.js` (Open-Meteo, WMO). Nouveau rôle `RESP_BTQ`. Import CSV LogicS (séparateur `;`, SHA-256 anti-doublon, reconstruction tickets par minute). Commandes par lot/poids (5 statuts : brouillon→envoyee→ajustee→en_preparation→expediee + annulee). Corrélation météo/CA. Objectifs mensuels avec % atteinte. 2 jobs scheduler (scan CSV auto + collecte météo). Sidebar section Boutiques (pink). Docker volume CSV. Seed St-Sever + L'Hopital. 21 fichiers, +3 298 lignes. 75 pages React, 69 fichiers routes. |
+| 22 avril 2026 | 1.4.1 | **Boutiques — nouveau format CSV LogicS + KPIs retail enrichis.** CSV LogicS à 11 colonnes avec `Num_Ticket` réel (un fichier par boutique par jour, ex : `LogicS_Ventes_20260421.csv`). Migration DB : ajout `num_ticket VARCHAR(32)` sur `boutique_tickets` et `boutique_ventes` (index partiels). Import auto-détecte le format (10 ou 11 col) et privilégie le vrai ticket LogicS — les tickets chevauchant la même minute sont désormais distingués. 3 nouveaux endpoints analytics : `/kpis` (CA TTC/HT, TVA collectée, panier moyen, IPT, prix moyen article, part promo CA/volume, durée moyenne ticket, taux attache sac), `/hourly` (fréquentation par heure + heatmap jour-semaine × heure), `/evolution` (comparaison période vs période équivalente N-1 avec deltas %). Dashboard boutique enrichi : 8 cartes KPI retail sur vues Jour & Mois avec badges de variation (± vs J-1 / M-1), heatmap de fréquentation hebdomadaire, graphique combiné CA/tickets par heure. Composant `KpiCard` étendu avec prop `footer`. Rétrocompatible ancien format CSV. |
 
 ---
 

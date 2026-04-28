@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KPICard } from '../components';
+import { LoadingSpinner, KPICard, PageHeader, Section } from '../components';
 import api from '../services/api';
 import {
   AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar,
@@ -72,16 +72,11 @@ export default function PerformanceDashboard() {
   return (
     <Layout>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-primary-surface">
-            <Activity className="w-6 h-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Performance</h1>
-            <p className="text-slate-500 text-sm">Indicateurs de performance — contrôle de gestion</p>
-          </div>
-        </div>
+        <PageHeader
+          title="Performance"
+          subtitle="Indicateurs de performance — contrôle de gestion"
+          icon={Activity}
+        />
 
         {/* ═══ ROW 1: KPI Cards ═══ */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -140,11 +135,7 @@ export default function PerformanceDashboard() {
         {/* ═══ ROW 2: Evolution tonnage + Donut tri ═══ */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Evolution tonnage */}
-          <div className="lg:col-span-2 card-modern p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-slate-400" />
-              Évolution tonnage (6 mois)
-            </h2>
+          <Section title="Évolution tonnage (6 mois)" icon={TrendingUp} className="lg:col-span-2">
             {tonnageData.length > 0 ? (
               <ResponsiveContainer width="100%" height={280}>
                 <AreaChart data={tonnageData.map(d => ({
@@ -165,14 +156,10 @@ export default function PerformanceDashboard() {
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune donnée disponible</p>
             )}
-          </div>
+          </Section>
 
           {/* Donut distribution tri */}
-          <div className="card-modern p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Package className="w-5 h-5 text-slate-400" />
-              Répartition sorties
-            </h2>
+          <Section title="Répartition sorties" icon={Package}>
             {triDistrib.length > 0 ? (
               <div>
                 <ResponsiveContainer width="100%" height={200}>
@@ -209,30 +196,22 @@ export default function PerformanceDashboard() {
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
             )}
-          </div>
+          </Section>
         </div>
 
         {/* ═══ ROW 3: Heatmap + KPIs industriels ═══ */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Heatmap */}
-          <div className="card-modern p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-slate-400" />
-              Activité hebdomadaire
-            </h2>
+          <Section title="Activité hebdomadaire" icon={BarChart3}>
             {heatmap ? (
               <HeatmapGrid matrix={heatmap.matrix} />
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
             )}
-          </div>
+          </Section>
 
           {/* KPIs industriels */}
-          <div className="card-modern p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Target className="w-5 h-5 text-slate-400" />
-              Indicateurs industriels
-            </h2>
+          <Section title="Indicateurs industriels" icon={Target}>
             {industrialKpis ? (
               <div className="grid grid-cols-2 gap-4">
                 <IndustrialTile label="Kg / tour" value={industrialKpis.collecte.kg_par_tour} unit="kg" />
@@ -247,16 +226,12 @@ export default function PerformanceDashboard() {
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
             )}
-          </div>
+          </Section>
         </div>
 
         {/* ═══ ROW 4: Scorecard ═══ */}
         {scorecard.length > 0 && (
-          <div className="card-modern p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Target className="w-5 h-5 text-slate-400" />
-              Scorecard — Objectifs vs Réalisé
-            </h2>
+          <Section title="Scorecard — Objectifs vs Réalisé" icon={Target}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -297,7 +272,7 @@ export default function PerformanceDashboard() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </Section>
         )}
       </div>
     </Layout>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Calendar, ChevronLeft, ChevronRight, UserCheck } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, useToast } from '../components';
+import { LoadingSpinner, useToast, PageHeader } from '../components';
 import api from '../services/api';
 
 const JOURS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
@@ -72,22 +72,20 @@ export default function BoutiquesPlanning() {
   return (
     <Layout>
       <div className="p-4 sm:p-6">
-        <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-              <Calendar className="w-6 h-6 text-pink-600" />
-              Planning boutiques
-            </h1>
-            <p className="text-slate-500 mt-1 text-sm">Affectation vendeurs et caissiers (extrait du planning hebdo)</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronLeft className="w-4 h-4" /></button>
-            <span className="font-medium text-sm">
-              Semaine du {weekStart.toLocaleDateString('fr-FR')}
-            </span>
-            <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronRight className="w-4 h-4" /></button>
-          </div>
-        </div>
+        <PageHeader
+          title="Planning boutiques"
+          subtitle="Affectation vendeurs et caissiers (extrait du planning hebdo)"
+          icon={Calendar}
+          actions={
+            <div className="flex items-center gap-2">
+              <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronLeft className="w-4 h-4" /></button>
+              <span className="font-medium text-sm">
+                Semaine du {weekStart.toLocaleDateString('fr-FR')}
+              </span>
+              <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronRight className="w-4 h-4" /></button>
+            </div>
+          }
+        />
 
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-800">
           <UserCheck className="inline w-4 h-4 mr-1" />

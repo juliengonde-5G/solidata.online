@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, FileText, CheckCircle, XCircle, AlertTriangle, Trash2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle, XCircle, AlertTriangle, Trash2, Mail, Settings, RefreshCw } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, useToast } from '../components';
+import { LoadingSpinner, useToast, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function BoutiquesImport() {
@@ -12,9 +12,24 @@ export default function BoutiquesImport() {
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [checkingMail, setCheckingMail] = useState(false);
+  const [mailConfig, setMailConfig] = useState({});
+  const [savingMailConfig, setSavingMailConfig] = useState(false);
 
   useEffect(() => { load(); }, []);
-  useEffect(() => { if (selectedBoutiqueId) loadBatches(); }, [selectedBoutiqueId]);
+  useEffect(() => {
+    if (selectedBoutiqueId) {
+      loadBatches();
+      const btq = boutiques.find(b => String(b.id) === String(selectedBoutiqueId));
+      if (btq) {
+        setMailConfig({
+          logics_mail_folder: btq.logics_mail_folder || 'INBOX',
+          logics_mail_subject_keyword: btq.logics_mail_subject_keyword || '',
+          logics_mail_sender: btq.logics_mail_sender || '',
+        });
+      }
+    }
+  }, [selectedBoutiqueId, boutiques]);
 
   async function load() {
     setLoading(true);
@@ -60,6 +75,31 @@ export default function BoutiquesImport() {
     if (fileInput.current) fileInput.current.value = '';
   }
 
+  async function checkMail() {
+    setCheckingMail(true);
+    try {
+      await api.post('/boutique-ventes/check-email');
+      toast.success("Vérification des mails lancée — les imports apparaîtront dans l'historique dans quelques instants");
+      setTimeout(() => loadBatches(), 5000);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur vérification mail');
+    }
+    setCheckingMail(false);
+  }
+
+  async function saveMailConfig() {
+    setSavingMailConfig(true);
+    try {
+      await api.put(`/boutiques/${selectedBoutiqueId}`, mailConfig);
+      toast.success('Configuration mail sauvegardée');
+      const res = await api.get('/boutiques?active=true');
+      setBoutiques(res.data || []);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur sauvegarde');
+    }
+    setSavingMailConfig(false);
+  }
+
   async function deleteBatch(id) {
     if (!confirm('Supprimer ce batch et toutes ses ventes ?')) return;
     try {
@@ -88,16 +128,88 @@ export default function BoutiquesImport() {
   return (
     <Layout>
       <div className="p-4 sm:p-6 max-w-6xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-            <Upload className="w-6 h-6 text-pink-600" />
-            Import CSV des ventes
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm">Upload manuel et suivi des imports automatiques depuis la caisse LogicS</p>
+        <PageHeader
+          title="Import CSV des ventes"
+          subtitle="Upload manuel et suivi des imports automatiques depuis la caisse LogicS"
+          icon={Upload}
+        />
+
+        {/* Import automatique par mail */}
+        <div className="bg-white rounded-card shadow-card p-6 mb-6 border-l-4 border-pink-500">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-pink-600" />
+              <h2 className="text-lg font-semibold text-slate-800">Import automatique Logic'S</h2>
+            </div>
+            <button
+              onClick={checkMail}
+              disabled={checkingMail}
+              className="flex items-center gap-2 bg-pink-600 hover:bg-pink-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${checkingMail ? 'animate-spin' : ''}`} />
+              {checkingMail ? 'Vérification...' : 'Vérifier les mails maintenant'}
+            </button>
+          </div>
+          <p className="text-sm text-slate-500 mb-4">
+            Le serveur vérifie automatiquement les mails Logic'S chaque jour à <strong>20h</strong> et importe les CSV en arrière-plan.
+            Utilisez le bouton ci-dessus pour forcer une vérification immédiate.
+          </p>
+
+          {/* Configuration email par boutique */}
+          <details className="border border-slate-200 rounded-lg">
+            <summary className="flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <Settings className="w-4 h-4" />
+              Configuration mail pour la boutique sélectionnée
+            </summary>
+            <div className="p-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Dossier IMAP</label>
+                <input
+                  type="text"
+                  value={mailConfig.logics_mail_folder || ''}
+                  onChange={e => setMailConfig(c => ({ ...c, logics_mail_folder: e.target.value }))}
+                  placeholder="INBOX"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                />
+                <p className="text-xs text-slate-400 mt-1">Sous-dossier Outlook (ex : LogicS)</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Mot-clé dans le sujet</label>
+                <input
+                  type="text"
+                  value={mailConfig.logics_mail_subject_keyword || ''}
+                  onChange={e => setMailConfig(c => ({ ...c, logics_mail_subject_keyword: e.target.value }))}
+                  placeholder="Ex : St-Sever"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                />
+                <p className="text-xs text-slate-400 mt-1">Pour distinguer les mails de chaque boutique</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Email expéditeur (filtre)</label>
+                <input
+                  type="email"
+                  value={mailConfig.logics_mail_sender || ''}
+                  onChange={e => setMailConfig(c => ({ ...c, logics_mail_sender: e.target.value }))}
+                  placeholder="noreply@logics.fr"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                />
+                <p className="text-xs text-slate-400 mt-1">Optionnel — filtrer par expéditeur</p>
+              </div>
+              <div className="sm:col-span-3 flex justify-end">
+                <button
+                  onClick={saveMailConfig}
+                  disabled={savingMailConfig}
+                  className="bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {savingMailConfig ? 'Sauvegarde...' : 'Sauvegarder la configuration'}
+                </button>
+              </div>
+            </div>
+          </details>
         </div>
 
         <div className="bg-white rounded-card shadow-card p-6 mb-6">
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">Nouvel import</h2>
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">Import manuel</h2>
           <div className="flex flex-col sm:flex-row gap-4 items-end">
             <div className="flex-1">
               <label className="block text-sm font-medium text-slate-600 mb-1">Boutique</label>

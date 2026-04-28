@@ -6,7 +6,7 @@ import {
 const IconPL = BarChart3;
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner, EmptyState } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, EmptyState, Section } from '../components';
 
 // ══════════════════════════════════════════
 // FINANCE OPERATIONS — Donnees operationnelles
@@ -152,11 +152,7 @@ export default function FinanceOperations() {
         {CATEGORIES.map((cat) => {
           const CatIcon = cat.icon;
           return (
-            <div key={cat.key} className="card-modern p-6">
-              <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <CatIcon className="w-5 h-5 text-slate-400" />
-                {cat.label}
-              </h3>
+            <Section key={cat.key} title={cat.label} icon={CatIcon}>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -190,17 +186,13 @@ export default function FinanceOperations() {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </Section>
           );
         })}
 
         {/* Resultat par centre */}
         {results?.centres && results.centres.length > 0 && (
-          <div className="card-modern p-6">
-            <h3 className="text-base font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <IconPL className="w-5 h-5 text-slate-400" />
-              Resultat par centre (avec allocation FG et transferts internes)
-            </h3>
+          <Section title="Resultat par centre (avec allocation FG et transferts internes)" icon={IconPL}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -246,7 +238,7 @@ export default function FinanceOperations() {
                 )}
               </table>
             </div>
-          </div>
+          </Section>
         )}
       </div>
     </Layout>

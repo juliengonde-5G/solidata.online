@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Solidata — Parcours chauffeur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="mifi/app.css?v=4">
+<style>
+  :root { --teal-800: #115E59; }
+  body { background: #EAE6DD; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; margin: 0; }
+
+  /* Reuse mobile screen shell */
+  .mob-screen { width: 100%; height: 100%; overflow: hidden; background: var(--slate-50); display: flex; flex-direction: column; font-size: 15px; position: relative;}
+  .mob-body { flex: 1; overflow-y: auto; }
+  .big-btn { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 64px; padding: 16px 22px; background: var(--teal-600); color: white; font-size: 18px; font-weight: 700; border-radius: 16px; width: 100%; border: none; box-shadow: 0 4px 14px -2px rgba(13,148,136,0.4); cursor: pointer;}
+  .big-btn.ghost { background: white; color: var(--slate-800); border: 2px solid var(--slate-200); box-shadow: none; }
+  .big-btn.danger { background: var(--red-600); }
+  .big-btn.amber { background: var(--amber-700); }
+  .big-btn.dark { background: var(--slate-900); }
+  .mob-top { background: white; padding: 12px 18px; border-bottom: 1px solid var(--slate-200); display: flex; align-items: center; gap: 10px; }
+  .mob-top-back { width: 40px; height: 40px; border-radius: 12px; background: var(--slate-100); display: grid; place-items: center; color: var(--slate-700); font-size: 20px; border: none; cursor: pointer; }
+  .mob-top h2 { margin: 0; font-size: 17px; font-weight: 800; color: var(--slate-900); flex: 1; }
+
+  .stage-dots {
+    display: flex; gap: 4px;
+    background: rgba(0,0,0,0.3);
+    padding: 6px 10px;
+    border-radius: 99px;
+    backdrop-filter: blur(10px);
+  }
+  .stage-dots span { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.4); }
+  .stage-dots span.active { background: white; width: 14px; border-radius: 3px; }
+
+  /* Step indicator in main canvas */
+  .step-nav {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    background: white; border-radius: 99px; padding: 6px;
+    display: flex; gap: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    z-index: 100; border: 1px solid var(--slate-200);
+  }
+  .step-nav button {
+    min-height: 36px; padding: 0 14px;
+    border-radius: 99px; border: none; background: transparent;
+    font-family: inherit; font-weight: 700; font-size: 13px;
+    color: var(--slate-500); cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .step-nav button.active { background: var(--slate-900); color: white; }
+  .step-nav .num { width: 20px; height: 20px; border-radius: 50%; background: var(--slate-200); color: var(--slate-600); font-size: 11px; display: grid; place-items: center; }
+  .step-nav button.active .num { background: var(--teal-400); color: var(--slate-900); }
+  .step-nav .done .num { background: var(--green-500); color: white; }
+
+  .phone-stage {
+    min-height: 100vh;
+    display: grid; place-items: center;
+    padding: 80px 20px 40px;
+  }
+  .arrow-hint {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--slate-900); color: white;
+    padding: 10px 16px; border-radius: 99px;
+    font-size: 13px; font-weight: 600;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+    z-index: 100;
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; border: none;
+    font-family: inherit;
+  }
+  .arrow-hint:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<div id="root"></div>
+
+<script type="text/babel" src="mobile/ios-frame.jsx"></script>
+<script type="text/babel" src="parcours/screens.jsx"></script>
+<script type="text/babel" src="parcours/app.jsx"></script>
+</body>
+</html>

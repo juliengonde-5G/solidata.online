@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { vibrateSuccess, vibrateError } from '../services/haptic';
-import MobileShell, { TourStepBar } from '../components/MobileShell';
-import PrimaryActionBar from '../components/PrimaryActionBar';
+import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import StepConfirmScreen from '../components/StepConfirmScreen';
 import OfflineActionBadge from '../components/OfflineActionBadge';
 import { addPendingWeight, deleteItem, newClientId, STORES } from '../services/db';
@@ -31,6 +29,15 @@ export default function WeighIn() {
   }, []);
 
   const netWeight = Math.max(0, (parseFloat(grossWeight) || 0) - (parseFloat(tareWeight) || 0));
+
+  const step = (delta) => {
+    vibrateTap();
+    setGrossWeight(prev => {
+      const current = parseFloat(prev) || 0;
+      const next = Math.max(0, current + delta);
+      return String(next);
+    });
+  };
 
   const submit = async () => {
     setLoading(true);
@@ -61,8 +68,6 @@ export default function WeighIn() {
           status = 'sent';
         } catch (e) {
           if (e?.response?.status >= 400 && e?.response?.status < 500) {
-            // Rejet 4xx → suppression pour éviter la boucle, l'utilisateur
-            // verra le statut "à renvoyer" (incohérence à corriger manuellement).
             try { await deleteItem(STORES.pendingWeights, pendingId); } catch {}
             status = 'retry';
           } else {
@@ -73,8 +78,6 @@ export default function WeighIn() {
 
       await getPendingCount();
       vibrateSuccess();
-      // Nettoie le flag intermediate seulement APRES l'affichage de la
-      // confirmation pour que l'écran suivant aille au bon endroit.
       setConfirm({ status, pendingId, gross, tare, net: netWeight });
     } catch (err) {
       vibrateError();
@@ -117,67 +120,190 @@ export default function WeighIn() {
     );
   }
 
+  const canSubmit = !loading && grossWeight !== '' && tareWeight !== '';
+  const now = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
   return (
-    <MobileShell
-      usageHint="operational_stop"
-      title={isIntermediate ? 'Pesée intermédiaire' : 'Pesée du véhicule'}
-      subtitle={isIntermediate ? 'Déchargement partiel — pesez puis reprenez' : 'Enregistrez les données de pesée'}
-      onBack={() => {
-        if (isIntermediate) { localStorage.removeItem('intermediate_return'); navigate('/tour-map'); }
-        else { navigate('/return-centre'); }
-      }}
-      footer={
-        <PrimaryActionBar
-          primaryLabel={isIntermediate ? 'Enregistrer et reprendre' : 'Valider la pesée'}
-          onPrimary={submit}
-          loading={loading}
-          disabled={!grossWeight || !tareWeight}
-          error={error || null}
-          pendingOffline={!online}
-        />
-      }
-    >
-      <div className="mb-4">
-        <TourStepBar currentPath="/weigh-in" />
-      </div>
-      <div className="space-y-4">
-        <div className="card-mobile p-6 text-center">
-          <p className="text-4xl mb-2">⚖️</p>
-          <p className="text-gray-600 text-sm">Poids brut − Tare = Poids net collecté</p>
+    <div className="min-h-screen flex flex-col bg-[var(--color-surface-2)]">
+      {/* Amber header */}
+      <header
+        className="flex-shrink-0 flex items-center gap-3 text-white"
+        style={{
+          background: '#B45309',
+          padding: 'calc(var(--safe-top) + 20px) 18px 16px',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            if (isIntermediate) { localStorage.removeItem('intermediate_return'); navigate('/tour-map'); }
+            else { navigate('/return-centre'); }
+          }}
+          aria-label="Retour"
+          className="touch-target flex items-center justify-center"
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            background: 'rgba(255,255,255,0.2)',
+            color: 'white',
+            fontSize: 20,
+          }}
+        >
+          ←
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] uppercase tracking-widest font-bold opacity-85">🏭 Centre de tri Rouen</p>
+          <h1 className="font-extrabold text-lg leading-tight">
+            {isIntermediate ? 'Pesée intermédiaire' : 'Pesée du chargement'}
+          </h1>
         </div>
-        <div className="card-mobile p-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Poids brut (kg)</label>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={grossWeight}
-            onChange={e => setGrossWeight(e.target.value)}
-            placeholder="Véhicule chargé"
-            className="input-mobile text-center text-lg font-semibold"
-          />
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-5 pt-5 pb-6 space-y-4">
+        <p className="text-[11px] uppercase tracking-widest text-gray-500 font-bold">
+          Poids net sur bascule
+        </p>
+
+        {/* Readout card */}
+        <div
+          className="bg-white text-center"
+          style={{
+            borderRadius: 20,
+            padding: '26px 20px',
+            border: '1px solid #E2E8F0',
+            boxShadow: '0 2px 10px rgba(15,23,42,0.04)',
+          }}
+        >
+          <div
+            className="font-extrabold text-gray-900"
+            style={{ fontSize: 72, lineHeight: 1, letterSpacing: '-0.03em' }}
+          >
+            {netWeight.toFixed(0)}
+            <span className="text-gray-400 ml-2" style={{ fontSize: 28 }}>kg</span>
+          </div>
+
+          <div className="flex justify-center gap-2.5 mt-5">
+            {[-5, -1, +1, +5].map(d => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => step(d)}
+                aria-label={`Ajuster poids de ${d > 0 ? '+' : ''}${d} kg`}
+                className="font-extrabold active:scale-95 transition-transform"
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 14,
+                  background: '#F1F5F9',
+                  color: '#1E293B',
+                  border: 'none',
+                  fontSize: 20,
+                }}
+              >
+                {d > 0 ? `+${d}` : `${d}`}
+              </button>
+            ))}
+          </div>
+
+          <div
+            className="inline-flex items-center gap-2 mt-4"
+            style={{
+              background: 'var(--color-primary-surface, #F0FDFA)',
+              color: 'var(--color-primary-dark)',
+              padding: '10px 14px',
+              borderRadius: 10,
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            🔗 Bascule connectée · auto-lecture
+          </div>
         </div>
-        <div className="card-mobile p-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Tare véhicule (kg)</label>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={tareWeight}
-            onChange={e => setTareWeight(e.target.value)}
-            placeholder="Véhicule à vide"
-            className="input-mobile text-center text-lg font-semibold"
-          />
+
+        {/* Manual inputs */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <div
+            className="bg-white"
+            style={{ borderRadius: 14, padding: 12, border: '1px solid #E2E8F0' }}
+          >
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Poids brut (kg)</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={grossWeight}
+              onChange={e => setGrossWeight(e.target.value)}
+              placeholder="Chargé"
+              className="w-full bg-transparent outline-none text-center text-lg font-bold text-gray-900"
+            />
+          </div>
+          <div
+            className="bg-white"
+            style={{ borderRadius: 14, padding: 12, border: '1px solid #E2E8F0' }}
+          >
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Tare (kg)</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={tareWeight}
+              onChange={e => setTareWeight(e.target.value)}
+              placeholder="À vide"
+              className="w-full bg-transparent outline-none text-center text-lg font-bold text-gray-900"
+            />
+          </div>
         </div>
-        <div className="card-mobile p-6 text-center bg-[var(--color-primary)]/10 border-2 border-[var(--color-primary)]/30 rounded-2xl">
-          <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Poids net collecté</p>
-          <p className="text-4xl font-black text-[var(--color-primary)]">{netWeight.toFixed(0)}</p>
-          <p className="text-sm text-gray-500">kg ({(netWeight / 1000).toFixed(2)} t)</p>
+
+        {/* Recap déchargement */}
+        <div
+          className="bg-white"
+          style={{ borderRadius: 14, padding: 14, border: '1px solid #E2E8F0' }}
+        >
+          <p className="text-xs font-semibold text-gray-500 mb-2">Récap déchargement</p>
+          <div className="flex justify-between items-baseline text-sm mb-1">
+            <span className="text-gray-600">Tournée</span>
+            <span className="font-bold text-gray-900">#{tourId || '—'}</span>
+          </div>
+          <div className="flex justify-between items-baseline text-sm mb-1">
+            <span className="text-gray-600">Type</span>
+            <span className="font-bold text-gray-900">
+              {isIntermediate ? 'Intermédiaire' : 'Finale'}
+            </span>
+          </div>
+          <div className="flex justify-between items-baseline text-sm">
+            <span className="text-gray-600">Heure</span>
+            <span className="font-bold text-gray-900">{now}</span>
+          </div>
         </div>
+
         {!online && (
           <div className="flex items-center justify-center">
             <OfflineActionBadge status="pending" label="Hors ligne — sera envoyé" />
           </div>
         )}
       </div>
-    </MobileShell>
+
+      <div className="primary-action-bar flex flex-col gap-2">
+        {error && (
+          <div className="primary-action-hint primary-action-hint--error" role="alert">{error}</div>
+        )}
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!canSubmit}
+          className="w-full flex items-center justify-center gap-2 font-extrabold text-lg text-white bg-[var(--color-primary)] active:scale-[0.98] transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{
+            minHeight: 72,
+            borderRadius: 18,
+            boxShadow: '0 8px 22px rgba(13,148,136,0.28)',
+          }}
+        >
+          {loading
+            ? 'Enregistrement…'
+            : isIntermediate
+              ? '✓ Valider et reprendre la tournée'
+              : '✓ Valider et voir le récap'}
+        </button>
+      </div>
+    </div>
   );
 }

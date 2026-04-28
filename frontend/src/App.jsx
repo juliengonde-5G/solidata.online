@@ -30,6 +30,8 @@ import AdminPredictive from './pages/AdminPredictive';
 import CollectionProposals from './pages/CollectionProposals';
 import InsertionParcours from './pages/InsertionParcours';
 import PlanningHebdo from './pages/PlanningHebdo';
+import PlanningTournees from './pages/PlanningTournees';
+import DashboardCollecte from './pages/DashboardCollecte';
 import PCMTest from './pages/PCMTest';
 import RGPD from './pages/RGPD';
 import AdminDB from './pages/AdminDB';
@@ -139,7 +141,11 @@ function App() {
             <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FillRateMap /></ProtectedRoute>} />
             <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Vehicles /></ProtectedRoute>} />
             <Route path="/vehicle-maintenance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VehicleMaintenance /></ProtectedRoute>} />
-            <Route path="/live-vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
+            <Route path="/collections-live" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
+            <Route path="/planning-tournees" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PlanningTournees /></ProtectedRoute>} />
+            <Route path="/dashboard-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><DashboardCollecte /></ProtectedRoute>} />
+            {/* Redirection rétro-compatible : ancienne URL /live-vehicles → /collections-live */}
+            <Route path="/live-vehicles" element={<Navigate to="/collections-live" replace />} />
 
             {/* Tri / Production */}
             <Route path="/production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Production /></ProtectedRoute>} />

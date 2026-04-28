@@ -332,30 +332,58 @@ router.post('/import/budget', upload.single('file'), async (req, res) => {
     });
 
     let catCol = null;
+    let niv1Col = null;
+    let niv2Col = null;
+    let concatCol = null;
     headerRow.eachCell((cell, colNumber) => {
       const n = normalizeHeader(cell.value);
-      if (n.includes('categorie') || n.includes('type') || n.includes('poste')) catCol = colNumber;
+      if (n.includes('niveau 1') || n === 'niveau1' || n === 'niveau_1') niv1Col = colNumber;
+      else if (n.includes('niveau 2') || n === 'niveau2' || n === 'niveau_2') niv2Col = colNumber;
+      else if (n.includes('concat')) concatCol = colNumber;
+      else if (n.includes('categorie') || n.includes('type') || n.includes('poste')) catCol = colNumber;
     });
-    if (!catCol) catCol = 1;
+    if (!catCol && !niv1Col && !concatCol) catCol = 1;
 
     const budgetRows = [];
     sheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return;
-      const category = row.getCell(catCol).value;
+
+      const niveau1 = niv1Col ? String(row.getCell(niv1Col).value || '').trim() : null;
+      const niveau2 = niv2Col ? String(row.getCell(niv2Col).value || '').trim() : null;
+      let category;
+      if (concatCol) {
+        category = String(row.getCell(concatCol).value || '').trim();
+      } else if (niveau1 || niveau2) {
+        category = [niveau1, niveau2].filter(Boolean).join(' ');
+      } else {
+        category = String(row.getCell(catCol).value || '').trim();
+      }
       if (!category) return;
 
       for (const [col, month] of Object.entries(monthCols)) {
         const amount = parseNum(row.getCell(parseInt(col)).value);
         if (amount !== 0) {
-          budgetRows.push({ category: String(category).trim(), month, amount });
+          budgetRows.push({
+            niveau_1: niveau1 || null,
+            niveau_2: niveau2 || null,
+            category,
+            month,
+            amount,
+          });
         }
       }
     });
 
     for (const item of budgetRows) {
       await pool.query(
-        'INSERT INTO financial_budgets (exercise_id, category, month, amount, created_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (exercise_id, category, month) DO UPDATE SET amount = $4',
-        [exerciseId, item.category, item.month, item.amount, req.user.id]
+        `INSERT INTO financial_budgets (exercise_id, niveau_1, niveau_2, category, month, amount, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (exercise_id, category, month)
+         DO UPDATE SET amount = EXCLUDED.amount,
+                       niveau_1 = EXCLUDED.niveau_1,
+                       niveau_2 = EXCLUDED.niveau_2,
+                       updated_at = NOW()`,
+        [exerciseId, item.niveau_1, item.niveau_2, item.category, item.month, item.amount, req.user.id]
       );
     }
     const count = budgetRows.length;
@@ -855,11 +883,18 @@ router.get('/budget/:year', async (req, res) => {
 router.put('/budget/:year', async (req, res) => {
   try {
     const year = parseInt(req.params.year);
-    const { category, month, amount } = req.body;
+    const { niveau_1, niveau_2, category, month, amount } = req.body;
+    const cat = category || [niveau_1, niveau_2].filter(Boolean).join(' ');
     const exerciseId = await getOrCreateExercise(year);
     await pool.query(
-      'INSERT INTO financial_budgets (exercise_id, category, month, amount, created_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (exercise_id, category, month) DO UPDATE SET amount = $4, updated_at = NOW()',
-      [exerciseId, category, month, amount, req.user.id]
+      `INSERT INTO financial_budgets (exercise_id, niveau_1, niveau_2, category, month, amount, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (exercise_id, category, month)
+       DO UPDATE SET amount = EXCLUDED.amount,
+                     niveau_1 = EXCLUDED.niveau_1,
+                     niveau_2 = EXCLUDED.niveau_2,
+                     updated_at = NOW()`,
+      [exerciseId, niveau_1 || null, niveau_2 || null, cat, month, amount, req.user.id]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -1047,6 +1082,58 @@ router.get('/kpis/:year', async (req, res) => {
       ORDER BY month
     `, [year]);
 
+    // ══════════════════════════════════════════
+    // BUDGET (hiérarchie Niveau 1 / Niveau 2)
+    // Convention de signe : charges > 0, produits < 0
+    // ══════════════════════════════════════════
+    const budgetRows = await pool.query(`
+      SELECT b.month,
+        SUM(CASE WHEN b.amount < 0 THEN -b.amount ELSE 0 END) AS produits,
+        SUM(CASE WHEN b.amount >= 0 THEN b.amount ELSE 0 END) AS charges
+      FROM financial_budgets b
+      JOIN financial_exercises e ON b.exercise_id = e.id
+      WHERE e.year = $1
+      GROUP BY b.month
+      ORDER BY b.month
+    `, [year]);
+
+    const budgetMonthly = Array.from({ length: 12 }, () => ({ produits: 0, charges: 0, resultat: 0 }));
+    for (const r of budgetRows.rows) {
+      const idx = parseInt(r.month);
+      if (idx >= 0 && idx < 12) {
+        const p = parseFloat(r.produits) || 0;
+        const c = parseFloat(r.charges) || 0;
+        budgetMonthly[idx] = { produits: p, charges: c, resultat: p - c };
+      }
+    }
+
+    const budgetProduitsAnnuel = budgetMonthly.reduce((s, m) => s + m.produits, 0);
+    const budgetChargesAnnuel = budgetMonthly.reduce((s, m) => s + m.charges, 0);
+    const budgetResultatAnnuel = budgetProduitsAnnuel - budgetChargesAnnuel;
+
+    // YTD budget = somme jusqu'au mois courant (ou total annuel si année passée)
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonthIdx = now.getMonth();
+    const ytdLimit = year < currentYear ? 12 : year === currentYear ? currentMonthIdx + 1 : 0;
+
+    let budgetProduitsYtd = 0;
+    let budgetChargesYtd = 0;
+    for (let i = 0; i < ytdLimit; i++) {
+      budgetProduitsYtd += budgetMonthly[i].produits;
+      budgetChargesYtd += budgetMonthly[i].charges;
+    }
+    const budgetResultatYtd = budgetProduitsYtd - budgetChargesYtd;
+
+    const ecartProduitsYtd = produits - budgetProduitsYtd;
+    const ecartChargesYtd = charges - budgetChargesYtd;
+    const tauxConsommationCharges = budgetChargesYtd > 0
+      ? (charges / budgetChargesYtd) * 100
+      : 0;
+    const tauxRealisationProduits = budgetProduitsYtd > 0
+      ? (produits / budgetProduitsYtd) * 100
+      : 0;
+
     res.json({
       produits, charges, resultat: produits - charges,
       // Aliases attendus par Finance.jsx (dashboard)
@@ -1081,6 +1168,22 @@ router.get('/kpis/:year', async (req, res) => {
         return monthlyArr;
       })(),
       marge: produits - charges,
+      // Budget (Niveau 1 / Niveau 2)
+      budget_produits_annuel: Math.round(budgetProduitsAnnuel * 100) / 100,
+      budget_charges_annuel: Math.round(budgetChargesAnnuel * 100) / 100,
+      budget_resultat_annuel: Math.round(budgetResultatAnnuel * 100) / 100,
+      budget_produits_ytd: Math.round(budgetProduitsYtd * 100) / 100,
+      budget_charges_ytd: Math.round(budgetChargesYtd * 100) / 100,
+      budget_resultat_ytd: Math.round(budgetResultatYtd * 100) / 100,
+      ecart_produits_ytd: Math.round(ecartProduitsYtd * 100) / 100,
+      ecart_charges_ytd: Math.round(ecartChargesYtd * 100) / 100,
+      taux_consommation_charges: Math.round(tauxConsommationCharges * 10) / 10,
+      taux_realisation_produits: Math.round(tauxRealisationProduits * 10) / 10,
+      budget_monthly: budgetMonthly.map((m) => ({
+        produits: Math.round(m.produits * 100) / 100,
+        charges: Math.round(m.charges * 100) / 100,
+        resultat: Math.round(m.resultat * 100) / 100,
+      })),
       // Alertes automatiques
       alertes: (() => {
         const a = [];
@@ -1088,6 +1191,12 @@ router.get('/kpis/:year', async (req, res) => {
         if (tresorerie < 0) a.push({ type: 'error', message: `Tresorerie negative : ${Math.round(tresorerie).toLocaleString()} EUR` });
         if (bfr > produits * 0.3 && produits > 0) a.push({ type: 'warning', message: `BFR eleve (${Math.round(bfr / produits * 100)}% du CA)` });
         if (charges > 0 && produits > 0 && (produits - charges) / produits < 0.05) a.push({ type: 'warning', message: 'Marge inferieure a 5%' });
+        if (budgetChargesYtd > 0 && charges > budgetChargesYtd * 1.05) {
+          a.push({ type: 'warning', message: `Charges YTD ${Math.round((charges / budgetChargesYtd - 1) * 100)}% au-dessus du budget` });
+        }
+        if (budgetProduitsYtd > 0 && produits < budgetProduitsYtd * 0.9) {
+          a.push({ type: 'warning', message: `Produits YTD ${Math.round((1 - produits / budgetProduitsYtd) * 100)}% en dessous du budget` });
+        }
         return a;
       })(),
     });

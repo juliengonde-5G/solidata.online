@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { BadgeCheck, BarChart3, Euro, Factory, Target, Truck } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, Section } from '../components';
 
 // ══════════════════════════════════════════
 // FINANCE RENTABILITE MATIERE
@@ -134,15 +134,7 @@ export default function FinanceRentabilite() {
             </div>
 
             {/* Rentabilité par qualité */}
-            <div className="card-modern p-6">
-              <h3 className="text-base font-semibold text-slate-800 mb-1 flex items-center gap-2">
-                <BadgeCheck className="w-5 h-5 text-slate-400" />
-                Rentabilite par qualite de matiere
-              </h3>
-              <p className="text-xs text-slate-500 mb-4">
-                Cout complet tri applique a chaque qualite, compare au prix de vente moyen
-              </p>
-
+            <Section title="Rentabilite par qualite de matiere" subtitle="Cout complet tri applique a chaque qualite, compare au prix de vente moyen" icon={BadgeCheck}>
               {qualites.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-8">Aucune donnee d'expedition disponible. Renseignez les expeditions pour voir la marge par qualite.</p>
               ) : (
@@ -175,7 +167,7 @@ export default function FinanceRentabilite() {
                   </table>
                 </div>
               )}
-            </div>
+            </Section>
 
             {/* Note méthodologique */}
             <div className="card-modern p-5 bg-slate-50 border-slate-200">

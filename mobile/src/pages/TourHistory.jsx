@@ -105,13 +105,31 @@ export default function TourHistory() {
         ) : (
           <ul className="space-y-2">
             {items.map(it => (
-              <li key={it.key} className="card-mobile p-3 flex items-start gap-3">
-                <span className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-base" aria-hidden="true">
+              <li
+                key={it.key}
+                className="flex items-start gap-3 bg-white"
+                style={{
+                  borderRadius: 20,
+                  padding: 14,
+                  border: '1px solid #E2E8F0',
+                  boxShadow: '0 1px 3px rgba(15,23,42,0.04)',
+                }}
+              >
+                <span
+                  className="flex-shrink-0 flex items-center justify-center text-lg"
+                  aria-hidden="true"
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    background: bgFor(it.kind),
+                  }}
+                >
                   {iconFor(it.kind)}
                 </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold text-gray-900 truncate">{it.label}</p>
+                    <p className="font-bold text-gray-900 truncate">{it.label}</p>
                     <OfflineActionBadge status={it.status} />
                   </div>
                   {it.sub && <p className="text-xs text-gray-500 truncate mt-0.5">{it.sub}</p>}
@@ -200,6 +218,15 @@ function iconFor(kind) {
     case 'incident': return '⚠️';
     case 'weight': return '⚖️';
     default: return '•';
+  }
+}
+
+function bgFor(kind) {
+  switch (kind) {
+    case 'collect': return 'var(--color-primary-surface, #F0FDFA)';
+    case 'incident': return '#FEE2E2';
+    case 'weight': return '#FEF3C7';
+    default: return '#F1F5F9';
   }
 }
 

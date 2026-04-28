@@ -75,6 +75,11 @@ services:
       CENTRE_TRI_LAT: 49.4231
       CENTRE_TRI_LNG: 1.0993
       BOUTIQUE_CSV_BASE_PATH: /data/boutiques-csv
+      LOGICS_MAIL_HOST: ${LOGICS_MAIL_HOST:-imap.outlook.com}
+      LOGICS_MAIL_PORT: ${LOGICS_MAIL_PORT:-993}
+      LOGICS_MAIL_USER: ${LOGICS_MAIL_USER:-}
+      LOGICS_MAIL_PASS: ${LOGICS_MAIL_PASS:-}
+      BOUTIQUE_WEBHOOK_SECRET: ${BOUTIQUE_WEBHOOK_SECRET:-}
     volumes:
       - uploads:/app/uploads
       - ./boutiques-csv:/data/boutiques-csv

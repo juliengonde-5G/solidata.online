@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Truck, Leaf, BarChart3, Users, BarChart2, Recycle } from 'lucide-react';
 import Layout from '../components/Layout';
-import { KpiCard, NavCard } from '../components';
+import { KPICard, ModuleCard, PageHeader } from '../components';
 import api from '../services/api';
 
 export default function HubReporting() {
-  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -45,42 +43,38 @@ export default function HubReporting() {
 
   const kpis = [
     { title: 'Tonnage collecté (mois)', value: loading ? '—' : stats?.tonnageCollecte, unit: 't', icon: Truck, accent: 'primary' },
-    { title: 'CO2 évité', value: loading ? '—' : stats?.co2Evite, unit: 't', icon: Leaf, accent: 'primary' },
+    { title: 'CO2 évité', value: loading ? '—' : stats?.co2Evite, unit: 't', icon: Leaf, accent: 'emerald' },
     { title: 'Taux valorisation', value: loading ? '—' : (typeof stats?.tauxValorisation === 'number' ? stats.tauxValorisation : stats?.tauxValorisation), unit: typeof stats?.tauxValorisation === 'number' ? '%' : '', icon: BarChart3, accent: 'slate' },
     { title: 'Employés actifs', value: loading ? '—' : (stats?.employesActifs ?? 0).toLocaleString('fr-FR'), icon: Users, accent: 'amber' },
   ];
 
   const cards = [
-    { path: '/reporting-collecte', title: 'Collecte', desc: 'Reporting tonnages et tournées de collecte', icon: Truck },
-    { path: '/reporting-rh', title: 'RH', desc: 'Indicateurs ressources humaines et insertion', icon: Users },
-    { path: '/reporting-production', title: 'Production', desc: 'KPI production, tri et productivité', icon: BarChart2 },
-    { path: '/refashion', title: 'Refashion', desc: 'Déclarations DPAV et subventions éco-organisme', icon: Recycle },
-    { path: '/reporting-metropole', title: 'Métropole Rouen', desc: 'Reporting territorial pour la Métropole', icon: BarChart3 },
+    { path: '/reporting-collecte', title: 'Collecte', description: 'Reporting tonnages et tournées de collecte', icon: Truck, color: 'teal' },
+    { path: '/reporting-rh', title: 'RH', description: 'Indicateurs ressources humaines et insertion', icon: Users, color: 'blue' },
+    { path: '/reporting-production', title: 'Production', description: 'KPI production, tri et productivité', icon: BarChart2, color: 'amber' },
+    { path: '/refashion', title: 'Refashion', description: 'Déclarations DPAV et subventions éco-organisme', icon: Recycle, color: 'emerald' },
+    { path: '/reporting-metropole', title: 'Métropole Rouen', description: 'Reporting territorial pour la Métropole', icon: BarChart3, color: 'purple' },
   ];
 
   return (
     <Layout>
       <div>
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
-            <span className="w-10 h-10 rounded-card bg-primary-surface flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-primary" />
-            </span>
-            Reporting — Vue d'ensemble
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm ml-[52px]">Indicateurs de performance, rapports et déclarations</p>
-        </div>
+        <PageHeader
+          title="Reporting"
+          subtitle="Indicateurs de performance, rapports et déclarations"
+          icon={BarChart3}
+        />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {kpis.map((kpi) => (
-            <KpiCard key={kpi.title} {...kpi} />
+            <KPICard key={kpi.title} {...kpi} />
           ))}
         </div>
 
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Accès rapide</h2>
+        <h2 className="text-lg font-bold text-slate-800 mb-4 tracking-tight">Accès rapide</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {cards.map((card) => (
-            <NavCard key={card.path} {...card} onClick={() => navigate(card.path)} />
+            <ModuleCard key={card.path} {...card} />
           ))}
         </div>
       </div>

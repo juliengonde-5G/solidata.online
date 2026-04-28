@@ -74,7 +74,7 @@ export default function VehicleSelect() {
         <TourStepBar currentPath="/vehicle-select" />
       </div>
 
-      <h2 className="font-semibold text-gray-800 text-lg mb-4">Choisir votre véhicule</h2>
+      <h2 className="font-extrabold text-gray-900 text-xl mb-4">Choisir votre véhicule</h2>
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
@@ -82,11 +82,11 @@ export default function VehicleSelect() {
           <span className="text-sm">Chargement...</span>
         </div>
       ) : tours.length === 0 ? (
-        <div className="card-mobile p-8 text-center">
+        <div className="card-mobile p-8 text-center" style={{ borderRadius: 20 }}>
           <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4 text-3xl">
             🚛
           </div>
-          <p className="font-medium text-gray-700">Aucun véhicule disponible</p>
+          <p className="font-semibold text-gray-800">Aucun véhicule disponible</p>
           <p className="text-sm text-gray-500 mt-1">Aucune tournée n'est planifiée pour aujourd'hui.</p>
         </div>
       ) : (
@@ -102,32 +102,58 @@ export default function VehicleSelect() {
                 key={tourKey}
                 type="button"
                 onClick={() => setSelectedTour(tour)}
-                className={`w-full card-mobile text-left transition-all ${
-                  isSelected
-                    ? 'ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5'
-                    : 'hover:shadow-[var(--shadow-card-hover)]'
+                className={`w-full bg-white text-left transition-all active:scale-[0.99] ${
+                  isSelected ? 'ring-2 ring-[var(--color-primary)]' : ''
                 }`}
+                style={{
+                  borderRadius: 20,
+                  padding: 16,
+                  boxShadow: isSelected
+                    ? '0 8px 22px rgba(13,148,136,0.18)'
+                    : '0 2px 6px rgba(15,23,42,0.06)',
+                }}
               >
                 <div className="flex items-center gap-4">
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0 ${tour.is_free_vehicle ? 'bg-green-100' : 'bg-gray-100'}`}>
+                  <div
+                    className="w-14 h-14 flex items-center justify-center text-2xl flex-shrink-0"
+                    style={{
+                      borderRadius: 16,
+                      background: tour.is_free_vehicle ? 'var(--color-primary-surface, #F0FDFA)' : '#F1F5F9',
+                    }}
+                  >
                     {tour.is_free_vehicle ? '\u{1F697}' : '\u{1F69B}'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-bold text-gray-900 text-lg">{tour.registration || 'Vehicule'}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-extrabold text-gray-900 text-lg leading-tight">{tour.registration || 'Vehicule'}</p>
                       {tour.is_assigned_vehicle && (
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Mon véhicule</span>
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                          Mon véhicule
+                        </span>
                       )}
                     </div>
-                    {tour.vehicle_name && <p className="text-sm text-gray-600">{tour.vehicle_name}</p>}
-                    <p className="text-sm text-gray-500 mt-1">
+                    {tour.vehicle_name && <p className="text-sm text-gray-600 truncate mt-0.5">{tour.vehicle_name}</p>}
+                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                       {tour.is_free_vehicle ? (
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">Vehicule disponible</span>
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                          Vehicule disponible
+                        </span>
                       ) : (
-                        <>{tour.nb_cav || 0} points de collecte
-                        {tour.mode === 'intelligent' && <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">IA</span>}</>
+                        <>
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800">
+                            Tournée planifiée
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {tour.nb_cav || 0} points
+                          </span>
+                          {tour.mode === 'intelligent' && (
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                              IA
+                            </span>
+                          )}
+                        </>
                       )}
-                    </p>
+                    </div>
                   </div>
                 </div>
               </button>
@@ -142,9 +168,15 @@ export default function VehicleSelect() {
             type="button"
             onClick={startTour}
             disabled={claiming}
-            className="btn-primary-mobile py-4 text-lg disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 font-extrabold text-lg text-white bg-[var(--color-primary)] active:scale-[0.98] transition-transform disabled:opacity-50"
+            style={{
+              minHeight: 84,
+              borderRadius: 20,
+              boxShadow: '0 8px 22px rgba(13,148,136,0.28)',
+            }}
           >
-            {claiming ? 'Prise en charge...' : `Prendre ${selectedTour.registration || 'ce véhicule'}`}
+            <span aria-hidden="true">▶</span>
+            {claiming ? 'Prise en charge…' : `Prendre ${selectedTour.registration || 'ce véhicule'}`}
           </button>
         </div>
       )}

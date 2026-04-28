@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Tag } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, Modal } from '../components';
+import { LoadingSpinner, DataTable, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -115,16 +115,17 @@ export default function ExutoiresTarifs() {
     <Layout>
       <div className="p-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Grille Tarifaire Logistique</h1>
-            <p className="text-slate-500">Gestion des prix de référence et négociés</p>
-          </div>
-          <button onClick={openCreate} className="btn-primary text-sm">
-            <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-            Nouveau tarif
-          </button>
-        </div>
+        <PageHeader
+          title="Grille Tarifaire Logistique"
+          subtitle="Gestion des prix de référence et négociés"
+          icon={Tag}
+          actions={
+            <button onClick={openCreate} className="btn-primary text-sm">
+              <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+              Nouveau tarif
+            </button>
+          }
+        />
 
         {/* Prix de référence */}
         <div className="mb-8">

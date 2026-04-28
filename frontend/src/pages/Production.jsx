@@ -612,7 +612,7 @@ export default function Production() {
                   <YAxis />
                   <Tooltip />
                   <ReferenceLine y={900} stroke="#EF4444" strokeDasharray="5 5" label={{ value: 'Obj. 900kg', fill: '#EF4444', fontSize: 10 }} />
-                  <Bar dataKey="ligne" name="Ligne R1&R2" fill="#8BC540" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="ligne" name="Ligne R1&R2" fill="#0D9488" radius={[2, 2, 0, 0]} />
                   <Bar dataKey="r3" name="Recyclage R3" fill="#6366F1" radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>

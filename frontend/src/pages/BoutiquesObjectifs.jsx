@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Target, Save } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 import Layout from '../components/Layout';
-import { LoadingSpinner, useToast } from '../components';
+import { LoadingSpinner, useToast, PageHeader } from '../components';
 import api from '../services/api';
 
 const MOIS = ['Janv', 'Févr', 'Mars', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sept', 'Oct', 'Nov', 'Déc'];
@@ -82,13 +82,11 @@ export default function BoutiquesObjectifs() {
   return (
     <Layout>
       <div className="p-4 sm:p-6 max-w-6xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-            <Target className="w-6 h-6 text-pink-600" />
-            Objectifs de vente
-          </h1>
-          <p className="text-slate-500 mt-1 text-sm">Budget annuel ventilé en objectifs mensuels de CA TTC</p>
-        </div>
+        <PageHeader
+          title="Objectifs de vente"
+          subtitle="Budget annuel ventilé en objectifs mensuels de CA TTC"
+          icon={Target}
+        />
 
         <div className="bg-white rounded-card shadow-card p-4 mb-4 flex flex-wrap gap-4">
           <div>

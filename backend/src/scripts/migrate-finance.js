@@ -156,6 +156,14 @@ async function migrateFinance() {
     console.log('[MIGRATE-FINANCE] Index créés ✓');
 
     // ══════════════════════════════════════════
+    // MIGRATION : Hiérarchie budget (Niveau 1 / Niveau 2)
+    // ══════════════════════════════════════════
+    await client.query(`ALTER TABLE financial_budgets ADD COLUMN IF NOT EXISTS niveau_1 VARCHAR(255)`);
+    await client.query(`ALTER TABLE financial_budgets ADD COLUMN IF NOT EXISTS niveau_2 VARCHAR(255)`);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_fin_budget_niveau_1 ON financial_budgets(niveau_1)');
+    console.log('[MIGRATE-FINANCE] Hiérarchie budget niveau_1/niveau_2 ✓');
+
+    // ══════════════════════════════════════════
     // MIGRATION : Élargir colonnes GL si trop courtes (Pennylane)
     // ══════════════════════════════════════════
     const glWidenings = [

@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import SolidataBot from './SolidataBot';
-import IconSidebar from './IconSidebar';
-import ContentSidebar from './ContentSidebar';
+import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import {
   LayoutDashboard, Newspaper, UserPlus, Brain, Users, Clock, Star, Heart,
@@ -11,12 +9,12 @@ import {
   ArrowUpDown, Package, Tag, Ship, CircleDollarSign, PieChart, BarChart2,
   RefreshCw, Lock, Settings, Car,
   Handshake, Warehouse, Scale, Activity,
-  Store, ShoppingBag, Target, Upload, Calendar,
+  ShoppingBag, Target, Upload, Calendar,
 } from 'lucide-react';
 import api from '../services/api';
 
 // ══════════════════════════════════════════
-// MENU CONFIG
+// MENU CONFIG (10 sections — regroupées par 4 parents dans Sidebar.jsx)
 // ══════════════════════════════════════════
 
 const menuSections = [
@@ -53,11 +51,13 @@ const menuSections = [
     title: 'Collecte',
     hubPath: '/hub-collecte',
     items: [
+      { path: '/dashboard-collecte', label: 'Tableau de bord', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
       { path: '/tours', label: 'Tournées', icon: Truck, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/planning-tournees', label: 'Planning tournées', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
       { path: '/collection-proposals', label: 'Propositions (IA)', icon: Sparkles, roles: ['ADMIN', 'MANAGER'] },
       { path: '/cav-map', label: 'Carte CAV', icon: Map, roles: ['ADMIN', 'MANAGER'] },
       { path: '/fill-rate', label: 'Remplissage CAV', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
-      { path: '/live-vehicles', label: 'Suivi GPS', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/collections-live', label: 'Suivi des collectes en cours', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },
       { path: '/admin-associations', label: 'Associations', icon: Handshake, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
@@ -143,152 +143,89 @@ const menuSections = [
   },
 ];
 
-// ══════════════════════════════════════════
-// Persist sidebar state across Layout re-mounts
-// (Layout re-mounts on every page navigation because each page wraps in <Layout>)
-// ══════════════════════════════════════════
-const persistedState = { contentOpen: true, mobileOpen: false };
-
-// Map hub paths to their section titles for proper active section detection
-const HUB_PATH_MAP = {};
-menuSections.forEach(s => {
-  if (s.hubPath && s.hubPath !== '/') {
-    HUB_PATH_MAP[s.hubPath] = s.title;
-  }
-  // Also map sub-paths that start with a known prefix (e.g. /finance/import → Finances)
-  s.items.forEach(item => {
-    HUB_PATH_MAP[item.path] = s.title;
-  });
-});
-
-function findActiveSection(pathname, filteredSections) {
-  // 1. Exact match on item path
-  for (const section of filteredSections) {
-    if (section.items.some(item => item.path === pathname)) {
-      return section.title;
-    }
-  }
-  // 2. Match on hub path
-  for (const section of filteredSections) {
-    if (section.hubPath && section.hubPath === pathname) {
-      return section.title;
-    }
-  }
-  // 3. Match on path prefix (e.g. /finance/import → Finances)
-  for (const section of filteredSections) {
-    if (section.hubPath && section.hubPath !== '/' && pathname.startsWith(section.hubPath)) {
-      return section.title;
-    }
-    for (const item of section.items) {
-      if (pathname.startsWith(item.path) && item.path !== '/') {
-        return section.title;
-      }
-    }
-  }
-  return 'Accueil';
-}
+// Persist sidebar collapse state across Layout re-mounts
+const persistedState = {
+  collapsed: (() => {
+    try { return localStorage.getItem('solidata_sidebar_collapsed') === '1'; } catch { return false; }
+  })(),
+};
 
 export default function Layout({ children }) {
   const { user } = useAuth();
-  const location = useLocation();
 
-  // Use persisted state so sidebar doesn't reset on re-mount
-  const [contentSidebarOpen, setContentSidebarOpen] = useState(persistedState.contentOpen);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(persistedState.collapsed);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [alerts, setAlerts] = useState([]);
+  const [counts, setCounts] = useState({});
 
-  // Sync persisted state
-  useEffect(() => { persistedState.contentOpen = contentSidebarOpen; }, [contentSidebarOpen]);
-
-  // Stabilize filteredSections with useMemo
-  const filteredSections = useMemo(() =>
-    menuSections.map(section => ({
-      ...section,
-      items: section.items.filter(item => !item.roles || item.roles.includes(user?.role)),
-    })).filter(section => section.items.length > 0),
-    [user?.role]
-  );
-
-  const visibleSectionTitles = useMemo(() => filteredSections.map(s => s.title), [filteredSections]);
-
-  // Active section derived from URL (for icon highlight)
-  const urlSection = useMemo(
-    () => findActiveSection(location.pathname, filteredSections),
-    [location.pathname, filteredSections]
-  );
-
-  // Selected section = user can click icons to switch, but follows URL on navigation
-  const [selectedSection, setSelectedSection] = useState(urlSection);
-
-  // When URL changes, sync selected section to match
+  // Sync persisted collapse state
   useEffect(() => {
-    setSelectedSection(urlSection);
-  }, [urlSection]);
+    persistedState.collapsed = collapsed;
+    try { localStorage.setItem('solidata_sidebar_collapsed', collapsed ? '1' : '0'); } catch { /* noop */ }
+  }, [collapsed]);
 
-  // Load alerts for notification bell (only once)
+  // Sections visibles par rôle
+  const filteredSections = useMemo(
+    () => menuSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => !item.roles || item.roles.includes(user?.role)),
+      }))
+      .filter((section) => section.items.length > 0),
+    [user?.role],
+  );
+
+  // Charger alertes + compteurs sidebar
   useEffect(() => {
     api.get('/dashboard/kpis')
-      .then(res => setAlerts(res.data?.alertes || []))
-      .catch(() => {});
+      .then((res) => {
+        setAlerts(res.data?.alertes || []);
+        // Pills compteurs (best-effort, silencieux si non dispo)
+        const k = res.data?.kpis || res.data || {};
+        setCounts({
+          '/candidates': k.candidates_actifs ?? k.candidats ?? null,
+          '/tours': k.tours_today ?? k.tournees_du_jour ?? null,
+        });
+      })
+      .catch(() => { /* silencieux */ });
   }, []);
 
-  const activeSectionData = filteredSections.find(s => s.title === selectedSection);
-
-  // Click icon: if same section and content open → close; otherwise switch and open
-  const handleSelectSection = useCallback((sectionTitle) => {
-    if (sectionTitle === selectedSection && contentSidebarOpen) {
-      setContentSidebarOpen(false);
-    } else {
-      setSelectedSection(sectionTitle);
-      setContentSidebarOpen(true);
-    }
-  }, [selectedSection, contentSidebarOpen]);
-
   const handleMobileNav = useCallback(() => {
-    if (window.innerWidth < 1024) setMobileMenuOpen(false);
+    if (window.innerWidth < 1024) setMobileOpen(false);
   }, []);
 
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
       {/* Mobile overlay */}
-      {mobileMenuOpen && (
+      {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/20 z-40 lg:hidden"
-          onClick={() => setMobileMenuOpen(false)}
+          className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+          onClick={() => setMobileOpen(false)}
           aria-hidden="true"
         />
       )}
 
-      {/* === SIDEBARS (desktop: always visible / mobile: overlay) === */}
-      <div className={`
-        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        fixed lg:relative z-50 lg:z-auto flex h-full flex-shrink-0 transition-transform duration-300
-      `}>
-        {/* Icon sidebar — always visible on desktop */}
-        <IconSidebar
-          activeSection={selectedSection}
-          visibleSections={visibleSectionTitles}
-          onSelectSection={handleSelectSection}
+      {/* Sidebar (desktop visible / mobile en overlay slide) */}
+      <div
+        className={`${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        } fixed lg:relative z-50 lg:z-auto h-full transition-transform duration-300`}
+      >
+        <Sidebar
+          filteredSections={filteredSections}
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((c) => !c)}
+          onNavigate={handleMobileNav}
+          counts={counts}
         />
-
-        {/* Content sidebar — collapsible */}
-        {contentSidebarOpen && activeSectionData && (
-          <ContentSidebar
-            section={activeSectionData}
-            onClose={() => setContentSidebarOpen(false)}
-            onNavigate={handleMobileNav}
-          />
-        )}
       </div>
 
-      {/* === MAIN AREA (top bar + content) === */}
+      {/* Main area (topbar + content) */}
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar
           menuSections={filteredSections}
           alerts={alerts}
-          sidebarOpen={contentSidebarOpen}
-          onToggleSidebar={() => setContentSidebarOpen(prev => !prev)}
-          onMobileMenu={() => setMobileMenuOpen(prev => !prev)}
+          onMobileMenu={() => setMobileOpen((o) => !o)}
         />
 
         <main className="flex-1 overflow-y-auto min-h-0">
@@ -298,7 +235,7 @@ export default function Layout({ children }) {
         </main>
       </div>
 
-      {/* SolidataBot — Agent IA conversationnel */}
+      {/* Assistant IA (panel slide droite) */}
       <SolidataBot />
     </div>
   );

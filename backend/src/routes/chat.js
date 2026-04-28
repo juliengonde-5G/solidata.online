@@ -565,4 +565,135 @@ router.get('/history/stats', authenticate, authorize('ADMIN'), async (req, res) 
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════
+// GET /api/chat/insights/tour/:id — Observations SolidataBot (Niveau 3.4)
+// ══════════════════════════════════════════════════════════════════════
+// Génère 1 à N messages courts (texte + niveau + catégorie) synthétisant
+// l'état d'une tournée en cours : météo défavorable, remplissage anormal,
+// retards, incidents, rendement. Approche règles déterministes (pas
+// d'appel LLM à chaque requête — budget et latence maîtrisés).
+router.get('/insights/tour/:id', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const tourId = parseInt(req.params.id, 10);
+    const tour = await pool.query(
+      `SELECT t.*, v.registration
+         FROM tours t LEFT JOIN vehicles v ON v.id = t.vehicle_id
+        WHERE t.id = $1`,
+      [tourId]
+    );
+    if (tour.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
+    const t = tour.rows[0];
+
+    const [pointsRes, weightsRes, incidentsRes, contextRes] = await Promise.all([
+      pool.query(
+        `SELECT status, fill_level, collected_at, planned_passage_time
+           FROM tour_cav WHERE tour_id = $1`,
+        [tourId]
+      ).catch(() => ({ rows: [] })),
+      pool.query(
+        `SELECT COALESCE(SUM(weight_kg), 0)::float AS total
+           FROM tour_weights WHERE tour_id = $1 AND COALESCE(is_intermediate, FALSE) = FALSE`,
+        [tourId]
+      ),
+      pool.query(
+        `SELECT type, status FROM incidents WHERE tour_id = $1`,
+        [tourId]
+      ),
+      pool.query(
+        `SELECT weather_label, temp_max, precip_mm FROM collection_context WHERE date = $1`,
+        [t.date]
+      ).catch(() => ({ rows: [] })),
+    ]);
+
+    const points = pointsRes.rows;
+    const collected = points.filter(p => p.status === 'collected');
+    const nbCollected = collected.length;
+    const nbTotal = points.length;
+    const avgFill = nbCollected > 0
+      ? (collected.reduce((s, p) => s + (p.fill_level || 0), 0) / nbCollected) * 20
+      : null;
+
+    const delays = collected
+      .filter(p => p.planned_passage_time && p.collected_at)
+      .map(p => (new Date(p.collected_at) - new Date(p.planned_passage_time)) / 60000);
+    const avgDelay = delays.length > 0 ? delays.reduce((s, d) => s + d, 0) / delays.length : null;
+
+    const totalWeight = parseFloat(weightsRes.rows[0]?.total || 0);
+    const openIncidents = incidentsRes.rows.filter(i => i.status === 'open').length;
+    const weather = contextRes.rows[0] || null;
+
+    const insights = [];
+
+    if (weather) {
+      const label = (weather.weather_label || '').toLowerCase();
+      if (/pluie|orage|neige|averse/.test(label)) {
+        insights.push({
+          level: 'warn', category: 'weather',
+          message: `Météo défavorable (${weather.weather_label}${weather.precip_mm ? `, ${weather.precip_mm} mm` : ''}) — vigilance glissance et retards.`,
+        });
+      } else if (weather.temp_max != null && weather.temp_max >= 25) {
+        insights.push({
+          level: 'info', category: 'weather',
+          message: `Forte chaleur (${Math.round(weather.temp_max)}°C) — prévoir hydratation et pauses supplémentaires.`,
+        });
+      }
+    }
+
+    if (avgFill !== null) {
+      if (avgFill >= 90) {
+        insights.push({
+          level: 'warn', category: 'fill',
+          message: `Remplissage moyen très élevé (${Math.round(avgFill)} %) — risque de débordement, envisager un retour intermédiaire au centre.`,
+        });
+      } else if (avgFill <= 25 && nbCollected >= 5) {
+        insights.push({
+          level: 'info', category: 'fill',
+          message: `Remplissage moyen faible (${Math.round(avgFill)} %) — la fréquence de collecte pourrait être réduite sur ce secteur.`,
+        });
+      }
+    }
+
+    if (avgDelay !== null && avgDelay > 20) {
+      insights.push({
+        level: 'warn', category: 'delay',
+        message: `Retard moyen de ${Math.round(avgDelay)} min par CAV — envisager une ré-optimisation de l'ordre restant.`,
+      });
+    }
+
+    if (openIncidents >= 2) {
+      insights.push({
+        level: 'error', category: 'incidents',
+        message: `${openIncidents} incidents non résolus — priorité avant clôture.`,
+      });
+    }
+
+    if (totalWeight > 0 && t.estimated_distance_km > 0) {
+      const ratio = totalWeight / t.estimated_distance_km;
+      if (nbCollected >= 10 && ratio < 8) {
+        insights.push({
+          level: 'info', category: 'efficiency',
+          message: `Rendement bas : ${ratio.toFixed(1)} kg/km parcouru — revoir ciblage ou fréquence de passage.`,
+        });
+      }
+    }
+
+    if (nbTotal > 0 && nbCollected / nbTotal >= 0.8 && openIncidents === 0) {
+      insights.push({
+        level: 'info', category: 'progress',
+        message: `Tournée bien avancée (${nbCollected}/${nbTotal}) sans incident — projection favorable.`,
+      });
+    }
+
+    res.json({
+      tour_id: tourId,
+      generated_at: new Date().toISOString(),
+      source: 'rules',
+      insights,
+    });
+  } catch (err) {
+    console.error('[CHAT] insights error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

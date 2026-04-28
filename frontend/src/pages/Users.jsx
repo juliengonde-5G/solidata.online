@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { UserPlus } from 'lucide-react';
+import { UserPlus, Users as UsersIcon } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, StatusBadge, LoadingSpinner, Modal } from '../components';
+import { DataTable, StatusBadge, LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
 const ROLE_LABELS = { ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines', COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité' };
@@ -91,16 +91,17 @@ export default function Users() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Utilisateurs</h1>
-            <p className="text-slate-500">Gestion des comptes — {users.length} utilisateur{users.length > 1 ? 's' : ''}</p>
-          </div>
-          <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-            <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-            Nouvel utilisateur
-          </button>
-        </div>
+        <PageHeader
+          title="Utilisateurs"
+          subtitle={`Gestion des comptes — ${users.length} utilisateur${users.length > 1 ? 's' : ''}`}
+          icon={UsersIcon}
+          actions={
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+              <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+              Nouvel utilisateur
+            </button>
+          }
+        />
 
         <DataTable
           columns={columns}

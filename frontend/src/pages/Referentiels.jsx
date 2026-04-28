@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge, Modal } from '../components';
-import { Building2, Truck } from 'lucide-react';
+import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader } from '../components';
+import { Building2, Truck, BookOpen } from 'lucide-react';
 import api from '../services/api';
 
 export default function Referentiels() {
@@ -56,17 +56,18 @@ export default function Referentiels() {
   return (
     <Layout>
       <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Référentiels</h1>
-            <p className="text-gray-500">Données de référence</p>
-          </div>
-          {view !== 'conteneurs' && (
-            <button onClick={() => { setForm({}); setShowForm(true); }} className="btn-primary text-sm">
-              + Ajouter
-            </button>
-          )}
-        </div>
+        <PageHeader
+          title="Référentiels"
+          subtitle="Données de référence"
+          icon={BookOpen}
+          actions={
+            view !== 'conteneurs' && (
+              <button onClick={() => { setForm({}); setShowForm(true); }} className="btn-primary text-sm">
+                + Ajouter
+              </button>
+            )
+          }
+        />
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6">
