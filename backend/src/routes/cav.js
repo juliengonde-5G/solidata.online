@@ -455,9 +455,13 @@ router.get('/:id/activity', async (req, res) => {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     // 1. Verifier que le CAV existe
-    const cavResult = await pool.query('SELECT id, name, nb_containers, avg_fill_rate FROM cav WHERE id = $1', [cavId]);
+    const cavResult = await pool.query(
+      'SELECT id, name, nb_containers, avg_fill_rate, lora_deveui, sensor_reference FROM cav WHERE id = $1',
+      [cavId]
+    );
     if (cavResult.rows.length === 0) return res.status(404).json({ error: 'CAV non trouve' });
     const cav = cavResult.rows[0];
+    const hasSensor = !!(cav.lora_deveui || cav.sensor_reference);
 
     // 2. Historique des 10 derniers jours — collectes reelles
     const tenDaysAgo = new Date(today);
@@ -473,6 +477,33 @@ router.get('/:id/activity', async (req, res) => {
     const collectsByDate = {};
     for (const row of historyResult.rows) {
       collectsByDate[new Date(row.date).toISOString().slice(0, 10)] = parseFloat(row.poids_kg);
+    }
+
+    // 2b. Si capteur LoRaWAN provisionné : récupérer la moyenne quotidienne réelle
+    //     du fill_level_percent sur les 10 derniers jours (issue de cav_sensor_readings)
+    const sensorByDate = {};
+    if (hasSensor) {
+      const sensorRows = await pool.query(
+        `SELECT
+           DATE(reading_at) AS d,
+           AVG(fill_level_percent) AS avg_fill,
+           MAX(fill_level_percent) AS max_fill,
+           COUNT(*) AS nb_readings
+         FROM cav_sensor_readings
+         WHERE cav_id = $1
+           AND reading_at >= $2::date
+           AND reading_at < ($3::date + INTERVAL '1 day')
+         GROUP BY DATE(reading_at)
+         ORDER BY d`,
+        [cavId, tenDaysAgo.toISOString().slice(0, 10), today.toISOString().slice(0, 10)]
+      );
+      for (const row of sensorRows.rows) {
+        sensorByDate[new Date(row.d).toISOString().slice(0, 10)] = {
+          fill_pct: Math.min(120, Math.round(parseFloat(row.avg_fill))),
+          max_fill: Math.min(120, Math.round(parseFloat(row.max_fill))),
+          nb_readings: parseInt(row.nb_readings, 10),
+        };
+      }
     }
 
     // 3. Parametres de prediction
@@ -509,21 +540,39 @@ router.get('/:id/activity', async (req, res) => {
       if (i <= 0) {
         // Passe : donnees reelles ou estimation
         const collected = collectsByDate[dateStr] || 0;
+        const sensorDay = sensorByDate[dateStr];
         if (collected > 0) {
           // Jour de collecte : on enregistre le poids collecte puis on remet a zero
           days.push({
             date: dateStr,
             type: 'historique',
+            source: sensorDay ? 'sensor' : 'estimated',
             collecte_kg: Math.round(collected * 10) / 10,
             accumulation_kg: Math.round(accumulatedKg * 10) / 10,
-            fill_pct: Math.min(120, Math.round((accumulatedKg / capacityKg) * 100)),
+            fill_pct: sensorDay ? sensorDay.fill_pct : Math.min(120, Math.round((accumulatedKg / capacityKg) * 100)),
+            ...(sensorDay ? { sensor_max_fill: sensorDay.max_fill, sensor_nb_readings: sensorDay.nb_readings } : {}),
           });
           accumulatedKg = 0; // reset apres collecte
+        } else if (sensorDay) {
+          // Capteur LoRaWAN : valeur réelle du jour (moyenne des relevés)
+          days.push({
+            date: dateStr,
+            type: 'historique',
+            source: 'sensor',
+            collecte_kg: 0,
+            accumulation_kg: Math.round((sensorDay.fill_pct / 100) * capacityKg * 10) / 10,
+            fill_pct: sensorDay.fill_pct,
+            sensor_max_fill: sensorDay.max_fill,
+            sensor_nb_readings: sensorDay.nb_readings,
+          });
+          // Synchroniser l'accumulation pour la prévision future
+          accumulatedKg = (sensorDay.fill_pct / 100) * capacityKg;
         } else {
           accumulatedKg += dailyRate;
           days.push({
             date: dateStr,
             type: 'historique',
+            source: 'estimated',
             collecte_kg: 0,
             accumulation_kg: Math.round(accumulatedKg * 10) / 10,
             fill_pct: Math.min(120, Math.round((accumulatedKg / capacityKg) * 100)),
@@ -548,6 +597,8 @@ router.get('/:id/activity', async (req, res) => {
       cav_name: cav.name,
       capacite_kg: capacityKg,
       accumulation_quotidienne_kg: Math.round(dailyAccumulation * 10) / 10,
+      has_sensor: hasSensor,
+      sensor_days_with_data: Object.keys(sensorByDate).length,
       jours: days,
     });
   } catch (err) {
@@ -966,6 +1017,121 @@ router.get('/:id/sensor-history', async (req, res) => {
   } catch (err) {
     console.error('[CAV] Erreur sensor history :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/cav/:id/sensor-readings-raw — Historique brut (toutes colonnes + payload JSON)
+router.get('/:id/sensor-readings-raw', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const result = await pool.query(
+      `SELECT id, sensor_reference, fill_level_percent, distance_cm,
+              battery_level, temperature, rssi, snr, sf, fport, fcnt,
+              tilt_detected, alarm_type, raw_data, reading_at, created_at
+       FROM cav_sensor_readings WHERE cav_id = $1
+       ORDER BY reading_at DESC LIMIT $2`,
+      [req.params.id, limit]
+    );
+    res.json({ count: result.rows.length, readings: result.rows });
+  } catch (err) {
+    console.error('[CAV] Erreur sensor raw history :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/cav/sensors/reassign — Déplacer un capteur du CAV source vers un CAV cible
+// Conserve devEUI/appKey/référence, ne touche pas l'historique des lectures (cav_id reste sur source)
+router.post('/sensors/reassign', authorize('ADMIN', 'MANAGER'), [
+  body('source_cav_id').isInt().withMessage('source_cav_id requis'),
+  body('target_cav_id').isInt().withMessage('target_cav_id requis'),
+], validate, async (req, res) => {
+  const { source_cav_id, target_cav_id } = req.body;
+  if (source_cav_id === target_cav_id) {
+    return res.status(400).json({ error: 'CAV source et cible identiques' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Charger l'état du capteur sur source
+    const src = await client.query(
+      `SELECT lora_deveui, lora_appeui, lora_appkey_encrypted, sensor_reference,
+              sensor_type, sensor_height_cm, sensor_install_date, sensor_reporting_interval_min
+       FROM cav WHERE id = $1`,
+      [source_cav_id]
+    );
+    if (src.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'CAV source introuvable' });
+    }
+    if (!src.rows[0].lora_deveui && !src.rows[0].sensor_reference) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Aucun capteur provisionné sur le CAV source' });
+    }
+    const sensor = src.rows[0];
+
+    // 2. Vérifier que le CAV cible existe et n'a pas déjà un capteur
+    const tgt = await client.query(
+      'SELECT id, lora_deveui, sensor_reference FROM cav WHERE id = $1',
+      [target_cav_id]
+    );
+    if (tgt.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'CAV cible introuvable' });
+    }
+    if (tgt.rows[0].lora_deveui || tgt.rows[0].sensor_reference) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Le CAV cible a déjà un capteur — déprovisionner d\'abord' });
+    }
+
+    // 3. Détacher du source (ne réinitialise PAS sensor_last_*, on les déplace)
+    await client.query(
+      `UPDATE cav SET
+         lora_deveui = NULL, lora_appeui = NULL, lora_appkey_encrypted = NULL,
+         sensor_reference = NULL, sensor_type = NULL,
+         sensor_height_cm = NULL, sensor_install_date = NULL,
+         sensor_reporting_interval_min = NULL, sensor_status = 'inactive',
+         sensor_last_reading = NULL, sensor_last_reading_at = NULL,
+         sensor_battery_level = NULL, sensor_last_rssi = NULL
+       WHERE id = $1`,
+      [source_cav_id]
+    );
+    // Fermer alertes ouvertes côté source
+    await client.query(
+      'UPDATE cav_sensor_alerts SET resolved_at = NOW() WHERE cav_id = $1 AND resolved_at IS NULL',
+      [source_cav_id]
+    );
+
+    // 4. Attacher au cible
+    const result = await client.query(
+      `UPDATE cav SET
+         lora_deveui = $1, lora_appeui = $2, lora_appkey_encrypted = $3,
+         sensor_reference = $4, sensor_type = $5,
+         sensor_height_cm = $6, sensor_install_date = $7,
+         sensor_reporting_interval_min = $8, sensor_status = 'active'
+       WHERE id = $9
+       RETURNING id, name, lora_deveui, sensor_reference, sensor_type, sensor_height_cm`,
+      [
+        sensor.lora_deveui, sensor.lora_appeui, sensor.lora_appkey_encrypted,
+        sensor.sensor_reference, sensor.sensor_type,
+        sensor.sensor_height_cm, sensor.sensor_install_date,
+        sensor.sensor_reporting_interval_min, target_cav_id,
+      ]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      message: 'Capteur réaffecté',
+      source: { id: source_cav_id },
+      target: result.rows[0],
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[CAV] Erreur reassign sensor :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

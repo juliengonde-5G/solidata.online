@@ -278,7 +278,34 @@ export default function CollectionProposals() {
                 </div>
               ))}
               {(!daily.proposals || daily.proposals.length === 0) && (
-                <p className="text-gray-500 text-center py-8">Aucune proposition pour cette date (vérifier les véhicules disponibles).</p>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+                  <p className="font-semibold text-amber-900">Aucune proposition pour cette date</p>
+                  {daily.diagnostics && (
+                    <ul className="text-sm text-amber-800 space-y-1 list-disc pl-5">
+                      <li>Véhicules totaux : <strong>{daily.diagnostics.totalVehicles}</strong></li>
+                      <li>Déjà affectés à une tournée non terminée : <strong>{daily.diagnostics.usedVehicles}</strong></li>
+                      <li>Candidats restants : <strong>{daily.diagnostics.candidateVehicles}</strong></li>
+                      <li>Tentatives effectuées : <strong>{daily.diagnostics.attemptedVehicles}</strong></li>
+                      <li>Échecs : <strong>{daily.diagnostics.skippedCount}</strong></li>
+                    </ul>
+                  )}
+                  {daily.skipped && daily.skipped.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-amber-900 mb-1">Détail des échecs :</p>
+                      <ul className="text-xs text-amber-700 space-y-1">
+                        {daily.skipped.map((s, i) => (
+                          <li key={i}>• <strong>{s.vehicle_name}</strong> : {s.reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {daily.diagnostics?.candidateVehicles === 0 && (
+                    <p className="text-xs text-amber-800 italic">
+                      Tous les véhicules sont déjà affectés à des tournées non terminées ou non annulées pour cette date.
+                      Annuler ou clôturer une tournée existante pour libérer un véhicule.
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           </div>

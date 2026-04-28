@@ -175,7 +175,8 @@ export default function FillRateMap() {
               })}
 
               {filtered.map(cav => {
-                const isSensor = cav.fill_source === 'sensor';
+                const isSensorFresh = cav.fill_source === 'sensor';
+                const hasSensor = !!(cav.lora_deveui || cav.sensor_reference);
                 return (
                   <CircleMarker
                     key={cav.id}
@@ -185,8 +186,8 @@ export default function FillRateMap() {
                       color: getFillColor(cav.fill_rate),
                       fillColor: getFillColor(cav.fill_rate),
                       fillOpacity: 0.7,
-                      weight: isSensor ? 3 : 2,
-                      dashArray: isSensor ? null : '3 3',
+                      weight: hasSensor ? 3 : 2,
+                      dashArray: hasSensor && !isSensorFresh ? '6 3' : (hasSensor ? null : '3 3'),
                     }}
                     eventHandlers={{ click: () => setSelectedCav(cav) }}
                   >
@@ -194,17 +195,17 @@ export default function FillRateMap() {
                       <div className="text-xs space-y-1">
                         <p className="font-bold text-sm flex items-center gap-1">
                           {cav.name}
-                          {isSensor && <span title="Capteur LoRaWAN actif">📡</span>}
+                          {hasSensor && <span title={isSensorFresh ? 'Capteur LoRaWAN actif' : 'Capteur LoRaWAN provisionné (donnée stale)'}>📡</span>}
                         </p>
                         <p className="text-gray-500">{cav.commune}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: getFillColor(cav.fill_rate) }} />
                           <span className="font-bold">{cav.fill_rate}% rempli</span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${isSensor ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {isSensor ? 'capteur' : 'estimé'}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${isSensorFresh ? 'bg-green-100 text-green-700' : hasSensor ? 'bg-amber-50 text-amber-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {isSensorFresh ? 'capteur (frais)' : hasSensor ? 'capteur (stale)' : 'estimé'}
                           </span>
                         </div>
-                        {isSensor && (
+                        {hasSensor && (
                           <div className="mt-1 text-gray-600">
                             <p>Batterie : {cav.sensor_battery_level != null ? `${cav.sensor_battery_level}%` : '—'} · RSSI : {cav.sensor_last_rssi != null ? `${cav.sensor_last_rssi} dBm` : '—'}</p>
                             <p>Lu : {cav.sensor_last_reading_at ? new Date(cav.sensor_last_reading_at).toLocaleString('fr-FR') : '—'}</p>
@@ -331,15 +332,25 @@ export default function FillRateMap() {
                               if (name === 'collecte_kg') return [`${value} kg`, 'Collecte'];
                               return [value, name];
                             }}
-                            labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
+                            labelFormatter={(_, payload) => {
+                              const p = payload?.[0]?.payload;
+                              if (!p) return '';
+                              const tag = p.type === 'prevision' ? ' (prévision)' :
+                                          p.source === 'sensor' ? ' (capteur LoRaWAN)' : ' (estimé)';
+                              return (p.label || '') + tag;
+                            }}
                           />
                           <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="3 3" strokeWidth={1} />
                           <Bar dataKey="fill_pct" radius={[2, 2, 0, 0]} maxBarSize={12}>
                             {activityData.jours.map((j, i) => (
                               <Cell
                                 key={i}
-                                fill={j.type === 'prevision' ? '#93C5FD' : '#0D9488'}
-                                fillOpacity={j.collecte_kg > 0 ? 1 : 0.7}
+                                fill={
+                                  j.type === 'prevision' ? '#93C5FD'
+                                    : j.source === 'sensor' ? '#0D9488'   // teal-600 (donnée capteur réelle)
+                                    : '#94A3B8'                            // slate-400 (estimé)
+                                }
+                                fillOpacity={j.collecte_kg > 0 ? 1 : 0.85}
                                 stroke={j.collecte_kg > 0 ? '#16A34A' : 'none'}
                                 strokeWidth={j.collecte_kg > 0 ? 2 : 0}
                               />
@@ -347,11 +358,17 @@ export default function FillRateMap() {
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
-                      <div className="flex items-center justify-center gap-4 text-[10px] text-gray-500 mt-1">
-                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-primary" /> Historique</span>
+                      <div className="flex items-center justify-center gap-3 text-[10px] text-gray-500 mt-1 flex-wrap">
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-teal-600" /> Capteur 📡</span>
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-slate-400" /> Estimé</span>
                         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#93C5FD]" /> Prévision</span>
                         <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 bg-red-500" /> Seuil 80%</span>
                       </div>
+                      {activityData.has_sensor && activityData.sensor_days_with_data === 0 && (
+                        <p className="text-[10px] text-amber-600 italic mt-1 text-center">
+                          Capteur provisionné mais aucune transaction reçue sur les 10 derniers jours — affichage estimé.
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <p className="text-xs text-gray-400 text-center py-2">Données non disponibles</p>
@@ -374,7 +391,9 @@ export default function FillRateMap() {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate flex items-center gap-1">
                         {cav.name}
-                        {cav.fill_source === 'sensor' && <span title="Capteur LoRaWAN">📡</span>}
+                        {(cav.lora_deveui || cav.sensor_reference) && (
+                          <span title={cav.fill_source === 'sensor' ? 'Capteur LoRaWAN actif' : 'Capteur LoRaWAN provisionné (donnée stale)'}>📡</span>
+                        )}
                       </p>
                       <p className="text-xs text-gray-400">{cav.commune}</p>
                     </div>

@@ -41,7 +41,14 @@ async function getContextForDate(dateStr) {
     const lat = CENTRE_TRI_LAT;
     const lng = CENTRE_TRI_LNG;
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weather_code,temperature_2m_max,precipitation_sum&timezone=Europe/Paris&start_date=${dateStr}&end_date=${dateStr}`;
-    const response = await globalThis.fetch(url);
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 3000);
+    let response;
+    try {
+      response = await globalThis.fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(t);
+    }
     const data = await response.json();
     const code = data.daily?.weather_code?.[0];
     const tempMax = data.daily?.temperature_2m_max?.[0] ?? null;

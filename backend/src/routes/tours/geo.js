@@ -5,6 +5,19 @@
 // URL du serveur OSRM — utilise le serveur de démo par défaut
 // En production, pointer vers un serveur OSRM self-hosted pour la fiabilité
 const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
+const OSRM_TIMEOUT_MS = parseInt(process.env.OSRM_TIMEOUT_MS, 10) || 4000;
+
+// fetch avec AbortController — évite que le moteur de propositions reste
+// bloqué indéfiniment quand le serveur OSRM public est lent ou injoignable
+async function fetchWithTimeout(url, timeoutMs = OSRM_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // ── Distance Haversine (fallback si OSRM indisponible) ──────
 function haversineDistance(lat1, lon1, lat2, lon2) {
@@ -22,7 +35,7 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 async function osrmRouteSegment(lat1, lon1, lat2, lon2) {
   try {
     const url = `${OSRM_BASE_URL}/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     const data = await response.json();
     if (data.code === 'Ok' && data.routes?.[0]) {
       return {
@@ -44,7 +57,7 @@ async function osrmDistanceMatrix(points) {
   try {
     const coords = points.map(p => `${p.longitude},${p.latitude}`).join(';');
     const url = `${OSRM_BASE_URL}/table/v1/driving/${coords}?annotations=distance,duration`;
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     const data = await response.json();
     if (data.code === 'Ok') {
       return {
@@ -66,7 +79,7 @@ async function osrmOptimizedTrip(points, centreLat, centreLng) {
     // Centre en premier (source=first, roundtrip=true)
     const allCoords = [`${centreLng},${centreLat}`, ...points.map(p => `${p.longitude},${p.latitude}`)];
     const url = `${OSRM_BASE_URL}/trip/v1/driving/${allCoords.join(';')}?source=first&roundtrip=true&overview=false`;
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     const data = await response.json();
     if (data.code === 'Ok' && data.waypoints && data.trips?.[0]) {
       // Réordonner les points selon l'optimisation OSRM
