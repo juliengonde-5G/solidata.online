@@ -44,9 +44,7 @@
     "web-push": "^3.6.7",
     "winston": "^3.19.0",
     "xlsx": "^0.18.5",
-    "xml2js": "^0.6.2",
-    "imapflow": "^1.0.169",
-    "mailparser": "^3.7.2"
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "jest": "^30.3.0",

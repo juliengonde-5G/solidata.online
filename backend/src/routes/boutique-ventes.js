@@ -755,17 +755,5 @@ router.post('/webhook-email', async (req, res) => {
   }
 });
 
-// POST /api/boutique-ventes/check-email — déclenchement manuel de la vérification des mails LogicS
-router.post('/check-email', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
-  try {
-    res.json({ message: "Vérification des mails Logic'S lancée en arrière-plan" });
-    const { checkLogicsEmailsAndScan } = require('../services/scheduler');
-    checkLogicsEmailsAndScan().catch(err => console.error('[boutique-ventes] check-email:', err.message));
-  } catch (err) {
-    console.error('[boutique-ventes] check-email:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 module.exports = router;
 module.exports.importCSVContent = importCSVContent;
