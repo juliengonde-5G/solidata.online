@@ -710,6 +710,51 @@ router.get('/tickets', async (req, res) => {
   }
 });
 
+// POST /api/boutique-ventes/webhook-email — réception CSV depuis Power Automate
+// Authentifié par clé secrète (header X-Webhook-Secret), sans JWT
+router.post('/webhook-email', async (req, res) => {
+  const secret = process.env.BOUTIQUE_WEBHOOK_SECRET;
+  if (!secret) return res.status(503).json({ error: 'Webhook non configuré (BOUTIQUE_WEBHOOK_SECRET manquant)' });
+
+  const provided = req.headers['x-webhook-secret'];
+  if (!provided || provided !== secret) {
+    return res.status(401).json({ error: 'Clé secrète invalide' });
+  }
+
+  const { boutique_id, boutique_code, filename, content_base64 } = req.body;
+  if (!content_base64 || !filename) {
+    return res.status(400).json({ error: 'Champs requis : filename, content_base64' });
+  }
+  if (!boutique_id && !boutique_code) {
+    return res.status(400).json({ error: 'Champs requis : boutique_id ou boutique_code' });
+  }
+
+  try {
+    let btqId = boutique_id;
+    if (!btqId && boutique_code) {
+      const r = await pool.query('SELECT id FROM boutiques WHERE code = $1 AND is_active = true LIMIT 1', [boutique_code]);
+      if (r.rows.length === 0) return res.status(404).json({ error: `Boutique introuvable (code: ${boutique_code})` });
+      btqId = r.rows[0].id;
+    }
+
+    const csvContent = Buffer.from(content_base64, 'base64').toString('utf-8');
+    const result = await importCSVContent(btqId, csvContent, filename, null, 'auto');
+
+    if (result.duplicate) {
+      return res.json({ status: 'duplicate', message: 'Fichier déjà importé' });
+    }
+    res.json({
+      status: 'ok',
+      nb_lignes_importees: result.nb_lignes_importees,
+      nb_tickets: result.nb_tickets,
+      ca_total_ttc: result.ca_total_ttc,
+    });
+  } catch (err) {
+    console.error('[boutique-ventes] webhook-email:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/boutique-ventes/check-email — déclenchement manuel de la vérification des mails LogicS
 router.post('/check-email', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
