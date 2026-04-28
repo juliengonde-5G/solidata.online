@@ -223,10 +223,35 @@ router.post('/purge', async (req, res) => {
 
     const retention = Math.max(parseInt(months) || config.min_months, config.min_months);
 
-    const result = await pool.query(
-      `DELETE FROM ${table} WHERE ${config.column} < NOW() - make_interval(months => $1)`,
-      [retention]
-    );
+    let result;
+    switch (table) {
+      case 'gps_positions':
+        result = await pool.query(
+          'DELETE FROM gps_positions WHERE recorded_at < NOW() - make_interval(months => $1)',
+          [retention]
+        );
+        break;
+      case 'tonnage_history':
+        result = await pool.query(
+          'DELETE FROM tonnage_history WHERE date < NOW() - make_interval(months => $1)',
+          [retention]
+        );
+        break;
+      case 'candidate_history':
+        result = await pool.query(
+          'DELETE FROM candidate_history WHERE created_at < NOW() - make_interval(months => $1)',
+          [retention]
+        );
+        break;
+      case 'collection_learning_feedback':
+        result = await pool.query(
+          'DELETE FROM collection_learning_feedback WHERE created_at < NOW() - make_interval(months => $1)',
+          [retention]
+        );
+        break;
+      default:
+        return res.status(400).json({ error: 'Table non autorisée' });
+    }
 
     await pool.query(
       'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',

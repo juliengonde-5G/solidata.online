@@ -60,6 +60,21 @@ const INDEXES = [
 
   // PCM reports
   'CREATE INDEX IF NOT EXISTS idx_pcm_reports_candidate ON pcm_reports(candidate_id)',
+
+  // Stock movements — FK manquants (reporting collecte/stock)
+  'CREATE INDEX IF NOT EXISTS idx_stock_movements_vehicle ON stock_movements(vehicle_id)',
+  'CREATE INDEX IF NOT EXISTS idx_stock_movements_tour ON stock_movements(tour_id)',
+  'CREATE INDEX IF NOT EXISTS idx_stock_movements_matiere ON stock_movements(matiere_id)',
+
+  // GPS positions — vehicle_id pour les requêtes de traçabilité véhicule
+  'CREATE INDEX IF NOT EXISTS idx_gps_vehicle_date ON gps_positions(vehicle_id, recorded_at DESC)',
+
+  // Incidents — FK pour les rapports collecte
+  'CREATE INDEX IF NOT EXISTS idx_incidents_tour ON incidents(tour_id)',
+  'CREATE INDEX IF NOT EXISTS idx_incidents_employee ON incidents(employee_id)',
+
+  // Tonnage history — CAV pour les rapports de remplissage
+  'CREATE INDEX IF NOT EXISTS idx_tonnage_history_cav ON tonnage_history(cav_id, date DESC)',
 ];
 
 async function migrateIndexes() {

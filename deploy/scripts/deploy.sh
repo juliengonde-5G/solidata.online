@@ -270,10 +270,12 @@ case "${ACTION}" in
     # ── Étape 5: Initialisation base de données ──
     log "Étape 5/7 — Initialisation base de données..."
     sleep 5
-    if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/init-db.js 2>/dev/null; then
+    if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/init-db.js; then
         log "Base de données initialisée (tables + seeds)."
     else
-        warn "init-db.js a échoué ou n'existe pas. Exécutez manuellement : docker compose -f ${COMPOSE_FILE} exec backend node src/scripts/init-db.js"
+        log "FATAL : init-db.js a échoué. Déploiement annulé."
+        log "Diagnostic : docker compose -f ${COMPOSE_FILE} logs backend"
+        exit 1
     fi
     if [ -f "backend/src/scripts/migrate-v2.js" ]; then
         if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/migrate-v2.js 2>/dev/null; then
@@ -335,10 +337,12 @@ case "${ACTION}" in
     # Migrations base de données
     log "Étape 5/6 — Migrations base de données..."
     sleep 5
-    if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/init-db.js 2>/dev/null; then
+    if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/init-db.js; then
         log "init-db.js exécuté (tables + migrations)."
     else
-        warn "init-db.js a échoué. Vérifiez les logs : docker compose -f ${COMPOSE_FILE} logs backend"
+        log "FATAL : init-db.js a échoué. Mise à jour annulée."
+        log "Diagnostic : docker compose -f ${COMPOSE_FILE} logs backend"
+        exit 1
     fi
 
     # Cleanup + Health check

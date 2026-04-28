@@ -16,7 +16,7 @@ check_service() {
     local url=$2
     local expected=$3
 
-    HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 "${url}" 2>/dev/null || echo "000")
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${url}" 2>/dev/null || echo "000")
 
     if [ "${HTTP_CODE}" = "${expected}" ]; then
         echo "[OK] ${name} (HTTP ${HTTP_CODE})"
