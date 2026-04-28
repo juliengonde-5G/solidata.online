@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { LoadingSpinner } from '../components';
+import { LoadingSpinner, Modal } from '../components';
 import { sensorsApi } from '../services/api';
+import api from '../services/api';
 import useCavSensorSocket from '../hooks/useCavSensorSocket';
 
 /**
@@ -14,6 +15,8 @@ export default function AdminSensors() {
   const [filter, setFilter] = useState('all');
   const [loInfo, setLoInfo] = useState(null); // { total, assigned, orphans, devices }
   const [showOrphans, setShowOrphans] = useState(false);
+  const [reassignFrom, setReassignFrom] = useState(null); // sensor row pour réaffectation
+  const [rawHistoryFor, setRawHistoryFor] = useState(null); // sensor row pour historique brut
 
   const load = useCallback(async () => {
     try {
@@ -151,6 +154,7 @@ export default function AdminSensors() {
                 <th className="px-3 py-2 text-left">Dernière lecture</th>
                 <th className="px-3 py-2 text-left">Statut</th>
                 <th className="px-3 py-2 text-right">Alertes</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -181,16 +185,232 @@ export default function AdminSensors() {
                       </span>
                     ) : '—'}
                   </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => setRawHistoryFor(s)}
+                      className="text-xs px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 mr-1"
+                      title="Historique brut des transactions"
+                    >
+                      Logs
+                    </button>
+                    <button
+                      onClick={() => setReassignFrom(s)}
+                      className="text-xs px-2 py-1 rounded border border-teal-300 text-teal-700 hover:bg-teal-50"
+                      title="Réaffecter le capteur à un autre CAV"
+                    >
+                      Réaffecter
+                    </button>
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">Aucun capteur dans cette vue</td></tr>
+                <tr><td colSpan={10} className="px-3 py-6 text-center text-gray-400">Aucun capteur dans cette vue</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {reassignFrom && (
+        <ReassignModal
+          sensor={reassignFrom}
+          onClose={() => setReassignFrom(null)}
+          onSuccess={() => { setReassignFrom(null); load(); }}
+        />
+      )}
+      {rawHistoryFor && (
+        <RawHistoryModal
+          sensor={rawHistoryFor}
+          onClose={() => setRawHistoryFor(null)}
+        />
+      )}
     </Layout>
+  );
+}
+
+// ─── Modal de réaffectation ─────────────────────────────────
+function ReassignModal({ sensor, onClose, onSuccess }) {
+  const [cavs, setCavs] = useState([]);
+  const [search, setSearch] = useState('');
+  const [targetId, setTargetId] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    api.get('/cav', { params: { status: 'active' } })
+      .then((r) => setCavs((r.data || []).filter((c) => c.id !== sensor.id && !c.lora_deveui && !c.sensor_reference)))
+      .catch(() => setCavs([]));
+  }, [sensor.id]);
+
+  const filteredCavs = cavs.filter((c) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (c.name || '').toLowerCase().includes(q) || (c.commune || '').toLowerCase().includes(q);
+  }).slice(0, 50);
+
+  const handleSubmit = async () => {
+    if (!targetId) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await sensorsApi.reassign(sensor.id, parseInt(targetId, 10));
+      onSuccess();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Réaffecter le capteur de "${sensor.name}"`}>
+      <div className="space-y-3">
+        <div className="text-sm text-slate-600 bg-slate-50 rounded p-3 space-y-1">
+          <div><span className="text-slate-500">DevEUI :</span> <span className="font-mono">{sensor.lora_deveui || '—'}</span></div>
+          <div><span className="text-slate-500">Référence :</span> {sensor.sensor_reference || '—'}</div>
+          <div className="text-xs text-amber-700 mt-2">
+            ⚠ Le capteur sera détaché du CAV actuel et rattaché au CAV cible. Les lectures historiques restent associées au CAV d'origine.
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Rechercher un CAV cible</label>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Nom ou commune..."
+            className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+          />
+          <p className="text-[11px] text-slate-400 mt-1">
+            Seuls les CAV actifs sans capteur sont listés ({filteredCavs.length} affiché{filteredCavs.length > 1 ? 's' : ''} sur {cavs.length}).
+          </p>
+        </div>
+
+        <div className="border border-slate-200 rounded max-h-64 overflow-y-auto">
+          {filteredCavs.map((c) => (
+            <label key={c.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 border-b border-slate-100 last:border-0 ${String(targetId) === String(c.id) ? 'bg-teal-50' : ''}`}>
+              <input
+                type="radio"
+                name="target_cav"
+                value={c.id}
+                checked={String(targetId) === String(c.id)}
+                onChange={() => setTargetId(c.id)}
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{c.name}</p>
+                <p className="text-xs text-slate-500 truncate">{c.commune || '—'}</p>
+              </div>
+            </label>
+          ))}
+          {filteredCavs.length === 0 && (
+            <p className="text-sm text-slate-400 text-center py-4">Aucun CAV correspondant</p>
+          )}
+        </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Annuler</button>
+          <button
+            onClick={handleSubmit}
+            disabled={!targetId || submitting}
+            className="px-4 py-2 text-sm rounded bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50"
+          >
+            {submitting ? 'Réaffectation…' : 'Réaffecter'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modal historique brut ──────────────────────────────────
+function RawHistoryModal({ sensor, onClose }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showRaw, setShowRaw] = useState({});
+
+  useEffect(() => {
+    sensorsApi.rawReadings(sensor.id, 200)
+      .then(setData)
+      .catch((err) => setData({ count: 0, readings: [], error: err.response?.data?.error || err.message }))
+      .finally(() => setLoading(false));
+  }, [sensor.id]);
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Historique brut — ${sensor.name}`} size="xl">
+      <div className="space-y-3">
+        <p className="text-xs text-slate-500">
+          {data?.count || 0} dernière{(data?.count || 0) > 1 ? 's' : ''} transaction{(data?.count || 0) > 1 ? 's' : ''} reçue{(data?.count || 0) > 1 ? 's' : ''} (max 200).
+          DevEUI : <span className="font-mono">{sensor.lora_deveui || '—'}</span>
+        </p>
+        {loading ? (
+          <LoadingSpinner size="md" message="Chargement…" />
+        ) : data?.error ? (
+          <p className="text-sm text-red-600">{data.error}</p>
+        ) : (
+          <div className="overflow-x-auto max-h-[60vh] overflow-y-auto border border-slate-200 rounded">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 sticky top-0">
+                <tr className="border-b text-[11px] uppercase text-slate-500">
+                  <th className="px-2 py-1.5 text-left">Reçu</th>
+                  <th className="px-2 py-1.5 text-right">Remplissage</th>
+                  <th className="px-2 py-1.5 text-right">Distance</th>
+                  <th className="px-2 py-1.5 text-right">Batt.</th>
+                  <th className="px-2 py-1.5 text-right">Temp.</th>
+                  <th className="px-2 py-1.5 text-right">RSSI</th>
+                  <th className="px-2 py-1.5 text-right">SNR</th>
+                  <th className="px-2 py-1.5 text-right">SF</th>
+                  <th className="px-2 py-1.5 text-right">FCnt</th>
+                  <th className="px-2 py-1.5 text-left">Alarme</th>
+                  <th className="px-2 py-1.5 text-left">Payload</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.readings || []).map((r) => (
+                  <tr key={r.id} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className="px-2 py-1 whitespace-nowrap">{new Date(r.reading_at).toLocaleString('fr-FR')}</td>
+                    <td className="px-2 py-1 text-right font-semibold">{r.fill_level_percent != null ? `${Math.round(r.fill_level_percent)}%` : '—'}</td>
+                    <td className="px-2 py-1 text-right">{r.distance_cm != null ? `${r.distance_cm} cm` : '—'}</td>
+                    <td className="px-2 py-1 text-right">{r.battery_level != null ? `${r.battery_level}%` : '—'}</td>
+                    <td className="px-2 py-1 text-right">{r.temperature != null ? `${r.temperature}°C` : '—'}</td>
+                    <td className="px-2 py-1 text-right">{r.rssi != null ? `${r.rssi}` : '—'}</td>
+                    <td className="px-2 py-1 text-right">{r.snr != null ? r.snr.toFixed(1) : '—'}</td>
+                    <td className="px-2 py-1 text-right">{r.sf ?? '—'}</td>
+                    <td className="px-2 py-1 text-right font-mono text-[10px]">{r.fcnt ?? '—'}</td>
+                    <td className="px-2 py-1">
+                      {r.alarm_type ? <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px]">{r.alarm_type}</span> : '—'}
+                      {r.tilt_detected && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px]">tilt</span>}
+                    </td>
+                    <td className="px-2 py-1">
+                      {r.raw_data ? (
+                        <button
+                          onClick={() => setShowRaw((prev) => ({ ...prev, [r.id]: !prev[r.id] }))}
+                          className="text-[10px] text-teal-700 hover:underline"
+                        >
+                          {showRaw[r.id] ? 'Masquer' : 'Voir JSON'}
+                        </button>
+                      ) : '—'}
+                      {showRaw[r.id] && (
+                        <pre className="mt-1 p-2 bg-slate-900 text-slate-100 rounded text-[10px] overflow-x-auto max-w-md whitespace-pre-wrap">
+                          {JSON.stringify(r.raw_data, null, 2)}
+                        </pre>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {(!data?.readings || data.readings.length === 0) && (
+                  <tr><td colSpan={11} className="px-3 py-6 text-center text-slate-400">Aucune transaction enregistrée</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="flex justify-end pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Fermer</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

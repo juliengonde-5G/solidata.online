@@ -969,4 +969,119 @@ router.get('/:id/sensor-history', async (req, res) => {
   }
 });
 
+// GET /api/cav/:id/sensor-readings-raw — Historique brut (toutes colonnes + payload JSON)
+router.get('/:id/sensor-readings-raw', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const result = await pool.query(
+      `SELECT id, sensor_reference, fill_level_percent, distance_cm,
+              battery_level, temperature, rssi, snr, sf, fport, fcnt,
+              tilt_detected, alarm_type, raw_data, reading_at, created_at
+       FROM cav_sensor_readings WHERE cav_id = $1
+       ORDER BY reading_at DESC LIMIT $2`,
+      [req.params.id, limit]
+    );
+    res.json({ count: result.rows.length, readings: result.rows });
+  } catch (err) {
+    console.error('[CAV] Erreur sensor raw history :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/cav/sensors/reassign — Déplacer un capteur du CAV source vers un CAV cible
+// Conserve devEUI/appKey/référence, ne touche pas l'historique des lectures (cav_id reste sur source)
+router.post('/sensors/reassign', authorize('ADMIN', 'MANAGER'), [
+  body('source_cav_id').isInt().withMessage('source_cav_id requis'),
+  body('target_cav_id').isInt().withMessage('target_cav_id requis'),
+], validate, async (req, res) => {
+  const { source_cav_id, target_cav_id } = req.body;
+  if (source_cav_id === target_cav_id) {
+    return res.status(400).json({ error: 'CAV source et cible identiques' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Charger l'état du capteur sur source
+    const src = await client.query(
+      `SELECT lora_deveui, lora_appeui, lora_appkey_encrypted, sensor_reference,
+              sensor_type, sensor_height_cm, sensor_install_date, sensor_reporting_interval_min
+       FROM cav WHERE id = $1`,
+      [source_cav_id]
+    );
+    if (src.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'CAV source introuvable' });
+    }
+    if (!src.rows[0].lora_deveui && !src.rows[0].sensor_reference) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Aucun capteur provisionné sur le CAV source' });
+    }
+    const sensor = src.rows[0];
+
+    // 2. Vérifier que le CAV cible existe et n'a pas déjà un capteur
+    const tgt = await client.query(
+      'SELECT id, lora_deveui, sensor_reference FROM cav WHERE id = $1',
+      [target_cav_id]
+    );
+    if (tgt.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'CAV cible introuvable' });
+    }
+    if (tgt.rows[0].lora_deveui || tgt.rows[0].sensor_reference) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Le CAV cible a déjà un capteur — déprovisionner d\'abord' });
+    }
+
+    // 3. Détacher du source (ne réinitialise PAS sensor_last_*, on les déplace)
+    await client.query(
+      `UPDATE cav SET
+         lora_deveui = NULL, lora_appeui = NULL, lora_appkey_encrypted = NULL,
+         sensor_reference = NULL, sensor_type = NULL,
+         sensor_height_cm = NULL, sensor_install_date = NULL,
+         sensor_reporting_interval_min = NULL, sensor_status = 'inactive',
+         sensor_last_reading = NULL, sensor_last_reading_at = NULL,
+         sensor_battery_level = NULL, sensor_last_rssi = NULL
+       WHERE id = $1`,
+      [source_cav_id]
+    );
+    // Fermer alertes ouvertes côté source
+    await client.query(
+      'UPDATE cav_sensor_alerts SET resolved_at = NOW() WHERE cav_id = $1 AND resolved_at IS NULL',
+      [source_cav_id]
+    );
+
+    // 4. Attacher au cible
+    const result = await client.query(
+      `UPDATE cav SET
+         lora_deveui = $1, lora_appeui = $2, lora_appkey_encrypted = $3,
+         sensor_reference = $4, sensor_type = $5,
+         sensor_height_cm = $6, sensor_install_date = $7,
+         sensor_reporting_interval_min = $8, sensor_status = 'active'
+       WHERE id = $9
+       RETURNING id, name, lora_deveui, sensor_reference, sensor_type, sensor_height_cm`,
+      [
+        sensor.lora_deveui, sensor.lora_appeui, sensor.lora_appkey_encrypted,
+        sensor.sensor_reference, sensor.sensor_type,
+        sensor.sensor_height_cm, sensor.sensor_install_date,
+        sensor.sensor_reporting_interval_min, target_cav_id,
+      ]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      message: 'Capteur réaffecté',
+      source: { id: source_cav_id },
+      target: result.rows[0],
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[CAV] Erreur reassign sensor :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
