@@ -1282,6 +1282,36 @@ function formatDuration(minutes) {
   return `${days}j${hours % 24 ? ` ${hours % 24}h` : ''}`;
 }
 
+// PATCH /api/cav/:id/sensor-calibration — Mise à jour de la calibration du capteur
+// (sans toucher au DevEUI / AppKey, contrairement à /sensor/provision)
+router.patch('/:id/sensor-calibration', authorize('ADMIN', 'MANAGER'), [
+  body('sensor_height_cm').optional().isInt({ min: 30, max: 500 }).withMessage('Hauteur 30-500 cm'),
+  body('sensor_reporting_interval_min').optional().isInt({ min: 5, max: 1440 }).withMessage('Intervalle 5-1440 min'),
+  body('sensor_install_date').optional().isISO8601().withMessage('Date ISO8601 attendue'),
+], validate, async (req, res) => {
+  try {
+    const { sensor_height_cm, sensor_reporting_interval_min, sensor_install_date } = req.body;
+    const fields = [];
+    const values = [];
+    let i = 1;
+    if (sensor_height_cm !== undefined) { fields.push(`sensor_height_cm = $${i++}`); values.push(sensor_height_cm); }
+    if (sensor_reporting_interval_min !== undefined) { fields.push(`sensor_reporting_interval_min = $${i++}`); values.push(sensor_reporting_interval_min); }
+    if (sensor_install_date !== undefined) { fields.push(`sensor_install_date = $${i++}`); values.push(sensor_install_date); }
+    if (fields.length === 0) return res.status(400).json({ error: 'Aucun champ à mettre à jour' });
+    values.push(req.params.id);
+    const result = await pool.query(
+      `UPDATE cav SET ${fields.join(', ')} WHERE id = $${i}
+       RETURNING id, name, sensor_height_cm, sensor_reporting_interval_min, sensor_install_date`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[CAV] Erreur sensor-calibration :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // POST /api/cav/sensors/reassign — Déplacer un capteur du CAV source vers un CAV cible
 // Conserve devEUI/appKey/référence, ne touche pas l'historique des lectures (cav_id reste sur source)
 router.post('/sensors/reassign', authorize('ADMIN', 'MANAGER'), [

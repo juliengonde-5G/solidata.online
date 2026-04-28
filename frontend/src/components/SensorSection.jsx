@@ -11,6 +11,7 @@ export default function SensorSection({ cavId, onUpdated }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [provisionOpen, setProvisionOpen] = useState(false);
+  const [calibrationOpen, setCalibrationOpen] = useState(false);
   const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
@@ -68,9 +69,14 @@ export default function SensorSection({ cavId, onUpdated }) {
           📡 Capteur LoRaWAN
         </h3>
         {provisioned && (
-          <button onClick={deprovision} className="text-red-400 hover:text-red-600 text-xs">
-            Déprovisionner
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setCalibrationOpen(true)} className="text-teal-600 hover:text-teal-800 text-xs">
+              Modifier calibration
+            </button>
+            <button onClick={deprovision} className="text-red-400 hover:text-red-600 text-xs">
+              Déprovisionner
+            </button>
+          </div>
         )}
       </div>
       <div className="p-4">
@@ -152,7 +158,85 @@ export default function SensorSection({ cavId, onUpdated }) {
         cavId={cavId}
         onDone={async () => { setProvisionOpen(false); await load(); if (onUpdated) onUpdated(); }}
       />
+      <CalibrationModal
+        isOpen={calibrationOpen}
+        onClose={() => setCalibrationOpen(false)}
+        cavId={cavId}
+        current={status}
+        onDone={async () => { setCalibrationOpen(false); await load(); if (onUpdated) onUpdated(); }}
+      />
     </div>
+  );
+}
+
+function CalibrationModal({ isOpen, onClose, cavId, current, onDone }) {
+  const [form, setForm] = useState({
+    sensor_height_cm: 200,
+    sensor_reporting_interval_min: 360,
+    sensor_install_date: new Date().toISOString().split('T')[0],
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (isOpen && current) {
+      setForm({
+        sensor_height_cm: current.sensor_height_cm || 200,
+        sensor_reporting_interval_min: current.sensor_reporting_interval_min || 360,
+        sensor_install_date: current.sensor_install_date
+          ? new Date(current.sensor_install_date).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0],
+      });
+      setError(null);
+    }
+  }, [isOpen, current]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await sensorsApi.updateCalibration(cavId, form);
+      if (onDone) onDone();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Modifier la calibration du capteur" size="md">
+      <form onSubmit={submit} className="space-y-4 text-sm">
+        <p className="text-xs text-slate-500">
+          Calibration physique du capteur — ne touche pas au DevEUI / clés LoRa.
+          La <strong>hauteur vide</strong> est la distance entre la sonde et le fond du conteneur quand il est vide.
+          C'est la valeur de référence pour calculer le pourcentage de remplissage.
+        </p>
+        <Field label="Hauteur vide (cm)" required>
+          <input type="number" min={30} max={500} value={form.sensor_height_cm}
+            onChange={(e) => setForm({ ...form, sensor_height_cm: parseInt(e.target.value, 10) })}
+            className="input-modern" required />
+        </Field>
+        <Field label="Intervalle de reporting (min)">
+          <input type="number" min={5} max={1440} value={form.sensor_reporting_interval_min}
+            onChange={(e) => setForm({ ...form, sensor_reporting_interval_min: parseInt(e.target.value, 10) })}
+            className="input-modern" />
+        </Field>
+        <Field label="Date d'installation">
+          <input type="date" value={form.sensor_install_date}
+            onChange={(e) => setForm({ ...form, sensor_install_date: e.target.value })}
+            className="input-modern" />
+        </Field>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">Annuler</button>
+          <button type="submit" disabled={saving} className="btn-primary text-sm disabled:opacity-50">
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
