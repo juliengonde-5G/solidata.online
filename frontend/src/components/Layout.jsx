@@ -8,7 +8,7 @@ import {
   ClipboardList, IdCard, Truck, Sparkles, Map, BarChart3, MapPin, Factory,
   ArrowUpDown, Package, Tag, Ship, CircleDollarSign, PieChart, BarChart2,
   RefreshCw, Lock, Settings, Car,
-  Handshake, Warehouse, Scale, Activity,
+  Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar,
 } from 'lucide-react';
 import api from '../services/api';
@@ -136,7 +136,7 @@ const menuSections = [
       { path: '/admin-predictive', label: 'Moteur prédictif', icon: Brain, roles: ['ADMIN'] },
       { path: '/rgpd', label: 'RGPD', icon: Lock, roles: ['ADMIN'] },
       { path: '/admin-cav', label: 'Gestion CAV', icon: Map, roles: ['ADMIN'] },
-      { path: '/admin-sensors', label: 'Capteurs CAV', icon: Map, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/admin-sensors', label: 'Capteurs CAV', icon: Radio, roles: ['ADMIN', 'MANAGER'] },
       { path: '/admin-db', label: 'Base de données', icon: Settings, roles: ['ADMIN'] },
       { path: '/admin-stock-original', label: 'Stock Original', icon: Scale, roles: ['ADMIN'] },
       { path: '/activity-log', label: 'Journal d\'activité', icon: ClipboardList, roles: ['ADMIN'] },
