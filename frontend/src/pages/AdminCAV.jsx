@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Package } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
+import SensorSection from '../components/SensorSection';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -477,8 +478,8 @@ export default function AdminCAV() {
                       scrollWheelZoom={false}
                     >
                       <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                       />
                       <Marker position={[detailCav.latitude, detailCav.longitude]} />
                     </MapContainer>
@@ -517,6 +518,9 @@ export default function AdminCAV() {
                   </button>
                 </div>
               </div>
+
+              {/* Capteur LoRaWAN */}
+              <SensorSection cavId={detailCav.id} onUpdated={loadCAVs} />
 
               {/* QR Code */}
               <div className="card-modern overflow-hidden">
@@ -629,8 +633,8 @@ export default function AdminCAV() {
                         style={{ height: '100%', width: '100%' }}
                       >
                         <TileLayer
-                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                         />
                         <LocationPicker position={mapPos} onPick={handleMapPick} />
                       </MapContainer>

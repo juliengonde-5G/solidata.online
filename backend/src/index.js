@@ -56,7 +56,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
-      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://unpkg.com'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://*.basemaps.cartocdn.com', 'https://unpkg.com'],
       connectSrc: ["'self'", 'wss:', 'ws:', 'https://api.open-meteo.com'],
       frameSrc: ["'none'"],
       objectSrc: ["'none'"],
@@ -94,6 +94,11 @@ app.set('io', io);
 // ══════════════════════════════════════════
 // ROUTES API
 // ══════════════════════════════════════════
+
+// Webhooks M2M — DOIT être monté AVANT les routers protégés par JWT utilisateur.
+// Auth via X-Webhook-Secret (Orange Live Objects).
+app.use('/api/webhooks', require('./routes/webhooks'));
+
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/settings', require('./routes/settings'));
@@ -394,6 +399,13 @@ async function initOnStartup() {
         logger.info('Migration Finance vérifiée');
       } catch (e) { logger.warn('Migration Finance warning', { error: e.message }); }
 
+      // Migration module Capteurs CAV LoRaWAN (idempotent)
+      try {
+        const { migrateCavSensors } = require('./scripts/migrate-cav-sensors');
+        await migrateCavSensors();
+        logger.info('Migration CAV Sensors vérifiée');
+      } catch (e) { logger.warn('Migration CAV Sensors warning', { error: e.message }); }
+
       // Migration module Collecte Association (idempotent — création tables si absentes)
       try {
         await pool.query('CREATE EXTENSION IF NOT EXISTS postgis');
@@ -552,6 +564,14 @@ server.listen(PORT, async () => {
     await initQueues();
   } catch (err) {
     logger.warn('Job-queue initialisation optionnelle échouée', { error: err.message });
+  }
+
+  // Démarrer le worker MQTT Orange Live Objects (capteurs CAV)
+  try {
+    const { startLiveObjectsMqtt } = require('./services/liveobjects-mqtt');
+    startLiveObjectsMqtt(io);
+  } catch (err) {
+    logger.warn('LiveObjects MQTT : démarrage échoué', { error: err.message });
   }
 });
 

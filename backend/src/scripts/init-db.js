@@ -2147,25 +2147,41 @@ async function initDatabase() {
     console.log('[INIT-DB] Module Maintenance Véhicules ✓');
 
     // ══════════════════════════════════════════
-    // MODULE : Capteurs ultrasons CAV (LoRaWAN)
+    // MODULE : Capteurs ultrasons CAV (LoRaWAN - Milesight EM400-MUD / Orange Live Objects)
     // ══════════════════════════════════════════
     await client.query(`
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reference VARCHAR(100);
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_type VARCHAR(50) DEFAULT 'ultrasonic';
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_reading DOUBLE PRECISION;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_reading_at TIMESTAMP;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_deveui VARCHAR(23);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_appeui VARCHAR(23);
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_appkey_encrypted TEXT;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_height_cm INTEGER;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_install_date DATE;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reporting_interval_min INTEGER DEFAULT 360;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_status VARCHAR(20) DEFAULT 'inactive';
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_battery_level DOUBLE PRECISION;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_rssi INTEGER;
     `);
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_cav_lora_deveui ON cav(lora_deveui) WHERE lora_deveui IS NOT NULL;');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS cav_sensor_readings (
         id SERIAL PRIMARY KEY,
         cav_id INTEGER NOT NULL REFERENCES cav(id) ON DELETE CASCADE,
         sensor_reference VARCHAR(100) NOT NULL,
-        fill_level_percent DOUBLE PRECISION NOT NULL CHECK (fill_level_percent BETWEEN 0 AND 100),
+        fill_level_percent DOUBLE PRECISION NOT NULL CHECK (fill_level_percent BETWEEN 0 AND 120),
         distance_cm DOUBLE PRECISION,
         battery_level DOUBLE PRECISION,
         temperature DOUBLE PRECISION,
         rssi INTEGER,
+        snr DOUBLE PRECISION,
+        sf SMALLINT,
+        fport SMALLINT,
+        fcnt INTEGER,
+        tilt_detected BOOLEAN DEFAULT false,
+        alarm_type VARCHAR(30),
         raw_data JSONB,
         reading_at TIMESTAMP NOT NULL DEFAULT NOW(),
         created_at TIMESTAMP DEFAULT NOW()
@@ -2173,7 +2189,27 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_cav ON cav_sensor_readings(cav_id, reading_at DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_ref ON cav_sensor_readings(sensor_reference);');
-    console.log('[INIT-DB] Module Capteurs CAV ✓');
+
+    // Table des alertes capteur (cycle de vie trigger → ack → résolution)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cav_sensor_alerts (
+        id SERIAL PRIMARY KEY,
+        cav_id INTEGER NOT NULL REFERENCES cav(id) ON DELETE CASCADE,
+        reading_id INTEGER REFERENCES cav_sensor_readings(id) ON DELETE SET NULL,
+        alert_type VARCHAR(30) NOT NULL,
+        severity VARCHAR(20) NOT NULL DEFAULT 'warning',
+        message TEXT,
+        triggered_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        acknowledged_at TIMESTAMP,
+        acknowledged_by INTEGER REFERENCES users(id),
+        resolved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_alerts_cav_open ON cav_sensor_alerts(cav_id) WHERE resolved_at IS NULL;');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_alerts_type ON cav_sensor_alerts(alert_type, triggered_at DESC);');
+
+    console.log('[INIT-DB] Module Capteurs CAV (LoRaWAN Milesight) ✓');
 
     // ══════════════════════════════════════════
     // MODULE : Inventaire physique produits finis

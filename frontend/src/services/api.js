@@ -75,4 +75,15 @@ api.interceptors.response.use(
   }
 );
 
+// ─── API capteurs LoRaWAN CAV ──────────────────────────
+export const sensorsApi = {
+  list: () => api.get('/cav/sensors').then((r) => r.data),
+  status: (cavId) => api.get(`/cav/${cavId}/sensor-status`).then((r) => r.data),
+  history: (cavId, days = 30) => api.get(`/cav/${cavId}/sensor-history`, { params: { days } }).then((r) => r.data),
+  provision: (cavId, payload) => api.post(`/cav/${cavId}/sensor/provision`, payload).then((r) => r.data),
+  deprovision: (cavId) => api.delete(`/cav/${cavId}/sensor`).then((r) => r.data),
+  ackAlert: (alertId) => api.post(`/cav/sensors/alerts/${alertId}/ack`).then((r) => r.data),
+  liveObjectsDevices: () => api.get('/cav/liveobjects-devices').then((r) => r.data),
+};
+
 export default api;

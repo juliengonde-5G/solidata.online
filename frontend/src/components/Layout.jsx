@@ -136,6 +136,7 @@ const menuSections = [
       { path: '/admin-predictive', label: 'Moteur prédictif', icon: Brain, roles: ['ADMIN'] },
       { path: '/rgpd', label: 'RGPD', icon: Lock, roles: ['ADMIN'] },
       { path: '/admin-cav', label: 'Gestion CAV', icon: Map, roles: ['ADMIN'] },
+      { path: '/admin-sensors', label: 'Capteurs CAV', icon: Map, roles: ['ADMIN', 'MANAGER'] },
       { path: '/admin-db', label: 'Base de données', icon: Settings, roles: ['ADMIN'] },
       { path: '/admin-stock-original', label: 'Stock Original', icon: Scale, roles: ['ADMIN'] },
       { path: '/activity-log', label: 'Journal d\'activité', icon: ClipboardList, roles: ['ADMIN'] },

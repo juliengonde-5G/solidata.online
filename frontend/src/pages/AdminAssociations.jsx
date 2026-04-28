@@ -275,7 +275,7 @@ export default function AdminAssociations() {
               {detailItem.latitude && detailItem.longitude && (
                 <div className="h-48 rounded-lg overflow-hidden border">
                   <MapContainer center={[detailItem.latitude, detailItem.longitude]} zoom={15} style={{ height: '100%' }} zoomControl={false}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
                     <Marker position={[detailItem.latitude, detailItem.longitude]} />
                   </MapContainer>
                 </div>
@@ -355,7 +355,7 @@ export default function AdminAssociations() {
                 style={{ height: '100%' }}
                 zoomControl={false}
               >
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
                 <LocationPicker
                   position={mapPos}
                   onPick={(pos) => {
