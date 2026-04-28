@@ -33,6 +33,7 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
     const availableVehicles = vehiclesResult.rows.filter(v => !usedVehicleIds.has(v.id));
 
     const proposals = [];
+    const skipped = [];
     for (const vehicle of availableVehicles.slice(0, 5)) {
       try {
         const result = await generateIntelligentTour(vehicle.id, date);
@@ -43,6 +44,11 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
         });
       } catch (err) {
         console.warn('[TOURS] Proposition ignorée pour véhicule', vehicle.id, err.message);
+        skipped.push({
+          vehicle_id: vehicle.id,
+          vehicle_name: vehicle.name || vehicle.registration,
+          reason: err.message,
+        });
       }
     }
 
@@ -90,6 +96,15 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
       availableVehicles: availableVehicles.length,
       drivers: driversResult.rows,
       proposals,
+      skipped,
+      diagnostics: {
+        totalVehicles: vehiclesResult.rows.length,
+        usedVehicles: usedVehicleIds.size,
+        candidateVehicles: availableVehicles.length,
+        attemptedVehicles: Math.min(5, availableVehicles.length),
+        successCount: proposals.length,
+        skippedCount: skipped.length,
+      },
     });
   } catch (err) {
     console.error('[TOURS] Erreur propositions journalières :', err);
