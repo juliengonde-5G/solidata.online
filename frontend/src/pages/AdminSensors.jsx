@@ -17,6 +17,7 @@ export default function AdminSensors() {
   const [showOrphans, setShowOrphans] = useState(false);
   const [reassignFrom, setReassignFrom] = useState(null); // sensor row pour réaffectation
   const [rawHistoryFor, setRawHistoryFor] = useState(null); // sensor row pour historique brut
+  const [diagnoseFor, setDiagnoseFor] = useState(null); // sensor row pour diagnostic
 
   const load = useCallback(async () => {
     try {
@@ -187,6 +188,13 @@ export default function AdminSensors() {
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <button
+                      onClick={() => setDiagnoseFor(s)}
+                      className="text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-50 mr-1"
+                      title="Diagnostiquer la chaîne sonde → BDD"
+                    >
+                      Diagnostic
+                    </button>
+                    <button
                       onClick={() => setRawHistoryFor(s)}
                       className="text-xs px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 mr-1"
                       title="Historique brut des transactions"
@@ -222,6 +230,12 @@ export default function AdminSensors() {
         <RawHistoryModal
           sensor={rawHistoryFor}
           onClose={() => setRawHistoryFor(null)}
+        />
+      )}
+      {diagnoseFor && (
+        <DiagnosticModal
+          sensor={diagnoseFor}
+          onClose={() => setDiagnoseFor(null)}
         />
       )}
     </Layout>
@@ -446,4 +460,136 @@ function StatusBadge({ status }) {
   };
   const [cls, label] = map[status] || ['bg-gray-100 text-gray-500', status || '—'];
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>{label}</span>;
+}
+
+// ─── Modal diagnostic 4 couches ─────────────────────────────
+function DiagnosticModal({ sensor, onClose }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const run = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    sensorsApi.diagnostic(sensor.id)
+      .then(setData)
+      .catch((err) => setError(err.response?.data?.error || err.message))
+      .finally(() => setLoading(false));
+  }, [sensor.id]);
+
+  useEffect(() => { run(); }, [run]);
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Diagnostic chaîne de bout en bout — ${sensor.name}`} size="xl">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-slate-500">
+            DevEUI : <span className="font-mono">{sensor.lora_deveui || '—'}</span>
+          </p>
+          <button
+            onClick={run}
+            disabled={loading}
+            className="text-xs px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {loading ? 'Diagnostic en cours…' : 'Relancer le diagnostic'}
+          </button>
+        </div>
+
+        {loading && <LoadingSpinner size="md" message="Interrogation Live Objects + BDD…" />}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">{error}</div>
+        )}
+
+        {data && (
+          <>
+            {/* Schéma de chaîne */}
+            <div className="bg-slate-50 rounded-lg p-4">
+              <div className="grid grid-cols-4 gap-2 items-stretch">
+                {data.layers.map((layer, idx) => (
+                  <LayerCard key={layer.name} layer={layer} arrow={idx < 3} />
+                ))}
+              </div>
+            </div>
+
+            {/* Détail par couche */}
+            {data.layers.map((layer) => (
+              <LayerDetail key={layer.name} layer={layer} />
+            ))}
+
+            {/* Recommandations */}
+            {data.recommendations.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded p-3 space-y-1">
+                <p className="text-xs font-semibold text-blue-900 uppercase">Recommandations</p>
+                <ul className="text-sm text-blue-800 list-disc pl-5 space-y-1">
+                  {data.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="flex justify-end pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Fermer</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function statusColor(status) {
+  return {
+    ok: 'bg-emerald-500 text-white',
+    warning: 'bg-amber-500 text-white',
+    error: 'bg-red-500 text-white',
+    unknown: 'bg-slate-400 text-white',
+  }[status] || 'bg-slate-400 text-white';
+}
+
+function statusIcon(status) {
+  return { ok: '✓', warning: '!', error: '✕', unknown: '?' }[status] || '?';
+}
+
+function LayerCard({ layer, arrow }) {
+  return (
+    <div className="relative">
+      <div className="bg-white border border-slate-200 rounded-lg p-3 h-full flex flex-col items-center text-center">
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl font-bold mb-2 ${statusColor(layer.status)}`}>
+          {statusIcon(layer.status)}
+        </div>
+        <p className="text-xs font-semibold text-slate-700">{layer.label}</p>
+        <p className="text-[11px] text-slate-500 mt-1">
+          {layer.status === 'ok' ? 'OK' : layer.status === 'warning' ? 'Attention' : layer.status === 'error' ? 'Bloqué' : 'Inconnu'}
+        </p>
+      </div>
+      {arrow && (
+        <div className="hidden md:block absolute -right-1 top-1/2 -translate-y-1/2 text-slate-400 text-xl z-10">→</div>
+      )}
+    </div>
+  );
+}
+
+function LayerDetail({ layer }) {
+  return (
+    <details className="border border-slate-200 rounded-lg overflow-hidden" open={layer.status !== 'ok'}>
+      <summary className="cursor-pointer px-3 py-2 bg-slate-50 hover:bg-slate-100 flex items-center justify-between">
+        <span className="text-sm font-semibold flex items-center gap-2">
+          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${statusColor(layer.status)}`}>
+            {statusIcon(layer.status)}
+          </span>
+          {layer.label}
+        </span>
+        <span className="text-[11px] text-slate-500">{layer.issues?.length || 0} alerte{(layer.issues?.length || 0) > 1 ? 's' : ''}</span>
+      </summary>
+      <div className="p-3 space-y-2 text-sm">
+        {layer.issues && layer.issues.length > 0 && (
+          <ul className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 space-y-1 list-disc pl-5">
+            {layer.issues.map((i, idx) => <li key={idx}>{i}</li>)}
+          </ul>
+        )}
+        <pre className="text-[11px] bg-slate-900 text-slate-100 rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap">
+          {JSON.stringify(layer.details, null, 2)}
+        </pre>
+      </div>
+    </details>
+  );
 }

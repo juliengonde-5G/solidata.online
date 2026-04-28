@@ -117,4 +117,11 @@ function extractDevEui(urn) {
   return m ? m[1] : null;
 }
 
-module.exports = { listLoraDevices };
+async function findLoraDeviceByDevEui(devEui) {
+  if (!devEui) return null;
+  const target = devEui.toUpperCase();
+  const all = await listLoraDevices();
+  return all.find((d) => d.devEui === target) || null;
+}
+
+module.exports = { listLoraDevices, findLoraDeviceByDevEui };

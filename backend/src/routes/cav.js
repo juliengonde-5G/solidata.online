@@ -1039,6 +1039,232 @@ router.get('/:id/sensor-readings-raw', authorize('ADMIN', 'MANAGER'), async (req
   }
 });
 
+// GET /api/cav/:id/sensor-diagnostic — Diagnostic 4 couches : sonde / Live Objects / Solidata / BDD
+router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const cavResult = await pool.query(
+      `SELECT id, name, commune, lora_deveui, sensor_reference, sensor_type,
+              sensor_height_cm, sensor_install_date, sensor_reporting_interval_min,
+              sensor_status, sensor_last_reading_at, sensor_battery_level
+       FROM cav WHERE id = $1`,
+      [req.params.id]
+    );
+    if (cavResult.rows.length === 0) return res.status(404).json({ error: 'CAV introuvable' });
+    const cav = cavResult.rows[0];
+
+    if (!cav.lora_deveui && !cav.sensor_reference) {
+      return res.status(400).json({ error: 'Aucun capteur provisionné sur ce CAV' });
+    }
+
+    const reportingMin = cav.sensor_reporting_interval_min || 360; // défaut 6h
+    const expectedGapMin = reportingMin * 2; // tolérance ×2
+
+    // ───── Couche 1 : Sonde (config locale) ─────
+    const layer1Issues = [];
+    if (!cav.lora_deveui) layer1Issues.push('DevEUI manquant');
+    if (!cav.sensor_height_cm) layer1Issues.push('Hauteur capteur non calibrée — fill_level ne peut pas être calculé');
+    if (!cav.sensor_install_date) layer1Issues.push('Date d\'installation non renseignée');
+    if (cav.sensor_status === 'inactive') layer1Issues.push('Statut configuré sur "inactive"');
+
+    const layer1 = {
+      name: 'Sonde',
+      label: '1. Configuration sonde (SOLIDATA)',
+      status: layer1Issues.length === 0 ? 'ok' : 'warning',
+      details: {
+        devEui: cav.lora_deveui,
+        sensor_reference: cav.sensor_reference,
+        sensor_type: cav.sensor_type,
+        sensor_height_cm: cav.sensor_height_cm,
+        sensor_install_date: cav.sensor_install_date,
+        reporting_interval_min: reportingMin,
+        sensor_status: cav.sensor_status,
+      },
+      issues: layer1Issues,
+    };
+
+    // ───── Couche 2 : Plateforme Orange Live Objects ─────
+    let layer2 = {
+      name: 'Live Objects',
+      label: '2. Plateforme Orange Live Objects',
+      status: 'unknown',
+      details: {},
+      issues: [],
+    };
+    try {
+      const { findLoraDeviceByDevEui } = require('../services/liveobjects-api');
+      if (!process.env.LIVEOBJECTS_API_KEY) {
+        layer2.status = 'error';
+        layer2.issues.push('LIVEOBJECTS_API_KEY non configuré côté SOLIDATA — impossible d\'interroger Live Objects');
+      } else if (!cav.lora_deveui) {
+        layer2.status = 'warning';
+        layer2.issues.push('Pas de DevEUI à chercher dans Live Objects');
+      } else {
+        const device = await findLoraDeviceByDevEui(cav.lora_deveui);
+        if (!device) {
+          layer2.status = 'error';
+          layer2.issues.push(`Le DevEUI ${cav.lora_deveui} n'existe pas (ou n'est pas visible) côté Live Objects — provisioning Orange manquant ou clé API limitée`);
+        } else {
+          layer2.details = {
+            id: device.id,
+            name: device.name,
+            tags: device.tags,
+            group: device.group,
+            profile: device.profile,
+            status: device.status,
+            lastUplinkAt: device.lastUplinkAt,
+          };
+          if (!device.lastUplinkAt) {
+            layer2.status = 'error';
+            layer2.issues.push('Aucun uplink reçu côté Live Objects — la sonde ne transmet pas (couverture LoRa, batterie HS, ou non activée)');
+          } else {
+            const ageMs = Date.now() - new Date(device.lastUplinkAt).getTime();
+            const ageMin = Math.round(ageMs / 60000);
+            layer2.details.minutes_since_last_uplink = ageMin;
+            if (ageMin > expectedGapMin) {
+              layer2.status = 'warning';
+              layer2.issues.push(`Dernier uplink Orange il y a ${formatDuration(ageMin)} (>${formatDuration(expectedGapMin)}, attendu toutes les ${formatDuration(reportingMin)})`);
+            } else {
+              layer2.status = 'ok';
+            }
+          }
+        }
+      }
+    } catch (err) {
+      layer2.status = 'error';
+      layer2.issues.push(`API Live Objects injoignable : ${err.message}`);
+    }
+
+    // ───── Couche 3 : Réception SOLIDATA (webhook + MQTT) ─────
+    const layer3Issues = [];
+    const webhookConfigured = !!process.env.LIVEOBJECTS_WEBHOOK_SECRET;
+    let mqttStatus;
+    try {
+      const { getMqttStatus } = require('../services/liveobjects-mqtt');
+      mqttStatus = getMqttStatus();
+    } catch (_) {
+      mqttStatus = { error: 'service mqtt indisponible' };
+    }
+    if (!webhookConfigured && !(mqttStatus.enabled && mqttStatus.connected)) {
+      layer3Issues.push('Aucun canal de réception actif (ni webhook, ni MQTT)');
+    } else {
+      if (!webhookConfigured) layer3Issues.push('Webhook HTTP désactivé (LIVEOBJECTS_WEBHOOK_SECRET manquant)');
+      if (mqttStatus.enabled) {
+        if (!mqttStatus.has_api_key) layer3Issues.push('MQTT activé mais LIVEOBJECTS_API_KEY manquant');
+        else if (!mqttStatus.fifo_name) layer3Issues.push('MQTT activé mais LIVEOBJECTS_FIFO_NAME manquant');
+        else if (!mqttStatus.connected) layer3Issues.push(`MQTT non connecté (tentatives: ${mqttStatus.reconnect_attempts}${mqttStatus.last_error ? ', dernière erreur: ' + mqttStatus.last_error.message : ''})`);
+      }
+    }
+    const layer3 = {
+      name: 'Réception SOLIDATA',
+      label: '3. Réception SOLIDATA (webhook HTTP / MQTT FIFO)',
+      status: layer3Issues.length === 0 ? 'ok' : 'warning',
+      details: {
+        webhook_configured: webhookConfigured,
+        webhook_url_path: '/api/webhooks/liveobjects/uplink',
+        mqtt: mqttStatus,
+      },
+      issues: layer3Issues,
+    };
+
+    // ───── Couche 4 : Stockage & affichage (BDD cav_sensor_readings) ─────
+    const dbStats = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE reading_at >= NOW() - INTERVAL '24 hours')::int AS last_24h,
+         COUNT(*) FILTER (WHERE reading_at >= NOW() - INTERVAL '7 days')::int AS last_7d,
+         MAX(reading_at) AS last_reading_at,
+         MIN(reading_at) AS first_reading_at,
+         MAX(fcnt) AS last_fcnt
+       FROM cav_sensor_readings WHERE cav_id = $1`,
+      [cav.id]
+    );
+    const dbRow = dbStats.rows[0];
+    const layer4Issues = [];
+    if (dbRow.total === 0) {
+      layer4Issues.push('Aucune transaction enregistrée en BDD — vérifier les couches 2 et 3');
+    } else if (dbRow.last_reading_at) {
+      const ageMin = Math.round((Date.now() - new Date(dbRow.last_reading_at).getTime()) / 60000);
+      if (ageMin > expectedGapMin) {
+        layer4Issues.push(`Dernière transaction reçue il y a ${formatDuration(ageMin)} (>${formatDuration(expectedGapMin)} attendu)`);
+      }
+    }
+
+    // Cohérence Live Objects vs BDD : si Orange a un uplink récent mais nous non, le pipeline 2→3 a un souci
+    if (layer2.status === 'ok' && dbRow.total === 0) {
+      layer3Issues.push('Live Objects reçoit des uplinks mais aucune transaction n\'arrive en BDD : webhook non configuré côté Orange ou MQTT FIFO non abonnée');
+      layer3.status = 'error';
+      layer3.issues = layer3Issues;
+    }
+    if (layer2.details?.lastUplinkAt && dbRow.last_reading_at) {
+      const orangeAge = Date.now() - new Date(layer2.details.lastUplinkAt).getTime();
+      const dbAge = Date.now() - new Date(dbRow.last_reading_at).getTime();
+      if (dbAge - orangeAge > 30 * 60 * 1000) {
+        // décalage > 30 min entre Orange et SOLIDATA
+        layer3Issues.push(`Décalage entre dernier uplink Orange et BDD : ${formatDuration(Math.round((dbAge - orangeAge) / 60000))} de retard côté SOLIDATA`);
+        if (layer3.status === 'ok') layer3.status = 'warning';
+        layer3.issues = layer3Issues;
+      }
+    }
+
+    const layer4 = {
+      name: 'Stockage & affichage',
+      label: '4. Stockage BDD cav_sensor_readings',
+      status: layer4Issues.length === 0 && dbRow.total > 0 ? 'ok' : (dbRow.total === 0 ? 'error' : 'warning'),
+      details: {
+        total: dbRow.total,
+        last_24h: dbRow.last_24h,
+        last_7d: dbRow.last_7d,
+        first_reading_at: dbRow.first_reading_at,
+        last_reading_at: dbRow.last_reading_at,
+        last_fcnt: dbRow.last_fcnt,
+      },
+      issues: layer4Issues,
+    };
+
+    // ───── Recommandations ─────
+    const recommendations = [];
+    if (layer1.status !== 'ok') recommendations.push("Compléter la calibration côté SOLIDATA (hauteur capteur, date d'installation).");
+    if (layer2.status === 'error') {
+      if (layer2.issues.some((i) => i.includes('API_KEY'))) recommendations.push('Renseigner LIVEOBJECTS_API_KEY dans /opt/solidata.online/.env puis redémarrer le backend.');
+      else if (layer2.issues.some((i) => i.includes('n\'existe pas'))) recommendations.push('Provisionner le device dans Orange Live Objects (Devices → Create) ou vérifier le DevEUI.');
+      else if (layer2.issues.some((i) => i.includes('Aucun uplink'))) recommendations.push('Vérifier la sonde sur site : alimentation, couverture LoRa du gateway le plus proche, activation OTAA (AppKey/AppEUI corrects).');
+    }
+    if (layer3.status !== 'ok') {
+      if (!webhookConfigured && !mqttStatus.enabled) {
+        recommendations.push('Activer un canal de réception : soit le webhook HTTP (LIVEOBJECTS_WEBHOOK_SECRET) soit MQTT (LIVEOBJECTS_ENABLED=true + LIVEOBJECTS_API_KEY + LIVEOBJECTS_FIFO_NAME).');
+      } else if (mqttStatus.enabled && !mqttStatus.connected) {
+        recommendations.push('Vérifier le compte Live Objects et le nom de FIFO. Logs serveur : grep "LiveObjects MQTT" backend logs.');
+      }
+      if (layer2.status === 'ok' && dbRow.total === 0) {
+        recommendations.push("Côté Orange : créer un connector HTTP Push vers https://solidata.online/api/webhooks/liveobjects/uplink avec header X-Webhook-Secret = LIVEOBJECTS_WEBHOOK_SECRET, ou s'abonner à la FIFO LIVEOBJECTS_FIFO_NAME via MQTT.");
+      }
+    }
+    if (layer4.status === 'ok' && layer1.status === 'ok' && layer2.status === 'ok' && layer3.status === 'ok') {
+      recommendations.push('Chaîne de bout en bout fonctionnelle. Si l\'UI ne montre pas les données, recharger /admin-sensors (Ctrl+F5).');
+    }
+
+    res.json({
+      cav_id: cav.id,
+      cav_name: cav.name,
+      cav_commune: cav.commune,
+      generated_at: new Date(),
+      layers: [layer1, layer2, layer3, layer4],
+      recommendations,
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur sensor-diagnostic :', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+});
+
+function formatDuration(minutes) {
+  if (minutes < 60) return `${minutes}min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${minutes % 60 ? ` ${minutes % 60}min` : ''}`;
+  const days = Math.floor(hours / 24);
+  return `${days}j${hours % 24 ? ` ${hours % 24}h` : ''}`;
+}
+
 // POST /api/cav/sensors/reassign — Déplacer un capteur du CAV source vers un CAV cible
 // Conserve devEUI/appKey/référence, ne touche pas l'historique des lectures (cav_id reste sur source)
 router.post('/sensors/reassign', authorize('ADMIN', 'MANAGER'), [

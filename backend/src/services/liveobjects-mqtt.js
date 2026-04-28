@@ -13,6 +13,10 @@ const { processUplink } = require('./liveobjects-processor');
 
 let client = null;
 let reconnectAttempts = 0;
+let connectedAt = null;
+let lastMessageAt = null;
+let lastError = null;
+let totalMessages = 0;
 
 function startLiveObjectsMqtt(io) {
   if (process.env.LIVEOBJECTS_ENABLED !== 'true') {
@@ -51,6 +55,8 @@ function startLiveObjectsMqtt(io) {
 
   client.on('connect', () => {
     reconnectAttempts = 0;
+    connectedAt = new Date();
+    lastError = null;
     logger.info('LiveObjects MQTT : connecté');
     client.subscribe(topic, { qos: 1 }, (err) => {
       if (err) logger.error('LiveObjects MQTT : échec subscribe', { error: err.message, topic });
@@ -66,14 +72,18 @@ function startLiveObjectsMqtt(io) {
   });
 
   client.on('error', (err) => {
+    lastError = { message: err.message, at: new Date() };
     logger.error('LiveObjects MQTT : erreur', { error: err.message });
   });
 
   client.on('close', () => {
+    connectedAt = null;
     logger.debug('LiveObjects MQTT : connexion fermée');
   });
 
   client.on('message', async (receivedTopic, payloadBuf) => {
+    lastMessageAt = new Date();
+    totalMessages += 1;
     let raw;
     try {
       raw = JSON.parse(payloadBuf.toString('utf8'));
@@ -95,7 +105,26 @@ function stopLiveObjectsMqtt() {
   if (client) {
     client.end(true);
     client = null;
+    connectedAt = null;
   }
 }
 
-module.exports = { startLiveObjectsMqtt, stopLiveObjectsMqtt };
+function getMqttStatus() {
+  const enabled = process.env.LIVEOBJECTS_ENABLED === 'true';
+  const apiKey = !!process.env.LIVEOBJECTS_API_KEY;
+  const fifoName = process.env.LIVEOBJECTS_FIFO_NAME || null;
+  return {
+    enabled,
+    has_api_key: apiKey,
+    fifo_name: fifoName,
+    client_initialized: !!client,
+    connected: !!(client && client.connected),
+    connected_at: connectedAt,
+    reconnect_attempts: reconnectAttempts,
+    last_message_at: lastMessageAt,
+    total_messages: totalMessages,
+    last_error: lastError,
+  };
+}
+
+module.exports = { startLiveObjectsMqtt, stopLiveObjectsMqtt, getMqttStatus };

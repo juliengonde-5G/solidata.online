@@ -81,6 +81,7 @@ export const sensorsApi = {
   status: (cavId) => api.get(`/cav/${cavId}/sensor-status`).then((r) => r.data),
   history: (cavId, days = 30) => api.get(`/cav/${cavId}/sensor-history`, { params: { days } }).then((r) => r.data),
   rawReadings: (cavId, limit = 100) => api.get(`/cav/${cavId}/sensor-readings-raw`, { params: { limit } }).then((r) => r.data),
+  diagnostic: (cavId) => api.get(`/cav/${cavId}/sensor-diagnostic`).then((r) => r.data),
   provision: (cavId, payload) => api.post(`/cav/${cavId}/sensor/provision`, payload).then((r) => r.data),
   deprovision: (cavId) => api.delete(`/cav/${cavId}/sensor`).then((r) => r.data),
   reassign: (sourceCavId, targetCavId) => api.post('/cav/sensors/reassign', { source_cav_id: sourceCavId, target_cav_id: targetCavId }).then((r) => r.data),
