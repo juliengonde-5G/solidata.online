@@ -2189,6 +2189,10 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_cav ON cav_sensor_readings(cav_id, reading_at DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_sensor_readings_ref ON cav_sensor_readings(sensor_reference);');
+    // Anti-doublon : un uplink LoRaWAN identifié par (cav_id, fcnt) ne doit être stocké
+    // qu'une fois, même si webhook HTTP + MQTT sont actifs en parallèle. Index partiel
+    // (fcnt peut être NULL pour les payloads aplatis via /api/cav/sensor-reading).
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_sensor_readings_cav_fcnt ON cav_sensor_readings(cav_id, fcnt) WHERE fcnt IS NOT NULL;');
 
     // Table des alertes capteur (cycle de vie trigger → ack → résolution)
     await client.query(`

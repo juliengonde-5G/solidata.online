@@ -1082,6 +1082,22 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
       issues: layer1Issues,
     };
 
+    // ───── Stats BDD (calculées tôt pour servir de fallback à la couche 2) ─────
+    const dbStats = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE reading_at >= NOW() - INTERVAL '24 hours')::int AS last_24h,
+         COUNT(*) FILTER (WHERE reading_at >= NOW() - INTERVAL '7 days')::int AS last_7d,
+         MAX(reading_at) AS last_reading_at,
+         MIN(reading_at) AS first_reading_at,
+         MAX(fcnt) AS last_fcnt
+       FROM cav_sensor_readings WHERE cav_id = $1`,
+      [cav.id]
+    );
+    const dbRow = dbStats.rows[0];
+    const dbHasRecent = dbRow.last_reading_at &&
+      (Date.now() - new Date(dbRow.last_reading_at).getTime()) < expectedGapMin * 60 * 1000;
+
     // ───── Couche 2 : Plateforme Orange Live Objects ─────
     let layer2 = {
       name: 'Live Objects',
@@ -1102,12 +1118,12 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
       } else {
         // 1. Présence du device
         const device = await findLoraDeviceByDevEui(cav.lora_deveui);
-        // 2. Dernier dataMessage réel (source de vérité — `/lora/devices` peut
-        //    avoir lastActivity=null même quand des uplinks arrivent)
+        // 2. Dernier dataMessage réel (peut être null si l'endpoint /data/search
+        //    n'est pas accessible avec la clé API courante)
         let lastMsg = null;
         try { lastMsg = await getLastDataMessage(cav.lora_deveui); } catch (_) { /* ignore */ }
 
-        if (!device && !lastMsg) {
+        if (!device && !lastMsg && !dbHasRecent) {
           layer2.status = 'error';
           layer2.issues.push(`Le DevEUI ${cav.lora_deveui} n'existe pas (ou n'est pas visible) côté Live Objects — provisioning Orange manquant ou clé API limitée`);
         } else {
@@ -1123,8 +1139,19 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
           };
           orangeLastUplinkAt = lastMsg?.timestamp || device?.lastUplinkAt || null;
           if (!orangeLastUplinkAt) {
-            layer2.status = 'error';
-            layer2.issues.push('Aucun uplink reçu côté Live Objects — la sonde ne transmet pas (couverture LoRa, batterie HS, ou non activée)');
+            // L'API data Orange ne nous renvoie rien, mais SOLIDATA peut avoir reçu via webhook/MQTT.
+            // Utiliser la BDD comme source de vérité de transit.
+            if (dbHasRecent) {
+              layer2.status = 'ok';
+              layer2.details.inferred_from_db = true;
+              layer2.details.note = 'Endpoint /data/search Orange muet (probablement permission API key insuffisante), mais des uplinks récents arrivent en BDD via webhook/MQTT — donc Orange transmet bien.';
+              layer2.details.minutes_since_last_uplink = Math.round(
+                (Date.now() - new Date(dbRow.last_reading_at).getTime()) / 60000
+              );
+            } else {
+              layer2.status = 'error';
+              layer2.issues.push('Aucun uplink reçu côté Live Objects — la sonde ne transmet pas (couverture LoRa, batterie HS, ou non activée)');
+            }
           } else {
             const ageMs = Date.now() - new Date(orangeLastUplinkAt).getTime();
             const ageMin = Math.round(ageMs / 60000);
@@ -1139,8 +1166,18 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
         }
       }
     } catch (err) {
-      layer2.status = 'error';
-      layer2.issues.push(`API Live Objects injoignable : ${err.message}`);
+      // Si l'API Orange est complètement injoignable mais qu'on reçoit des données : OK quand même
+      if (dbHasRecent) {
+        layer2.status = 'ok';
+        layer2.details = {
+          inferred_from_db: true,
+          note: `API Orange injoignable (${err.message}), mais des uplinks récents arrivent en BDD via webhook/MQTT.`,
+          minutes_since_last_uplink: Math.round((Date.now() - new Date(dbRow.last_reading_at).getTime()) / 60000),
+        };
+      } else {
+        layer2.status = 'error';
+        layer2.issues.push(`API Live Objects injoignable : ${err.message}`);
+      }
     }
 
     // ───── Couche 3 : Réception SOLIDATA (webhook + MQTT) ─────
@@ -1176,18 +1213,6 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
     };
 
     // ───── Couche 4 : Stockage & affichage (BDD cav_sensor_readings) ─────
-    const dbStats = await pool.query(
-      `SELECT
-         COUNT(*)::int AS total,
-         COUNT(*) FILTER (WHERE reading_at >= NOW() - INTERVAL '24 hours')::int AS last_24h,
-         COUNT(*) FILTER (WHERE reading_at >= NOW() - INTERVAL '7 days')::int AS last_7d,
-         MAX(reading_at) AS last_reading_at,
-         MIN(reading_at) AS first_reading_at,
-         MAX(fcnt) AS last_fcnt
-       FROM cav_sensor_readings WHERE cav_id = $1`,
-      [cav.id]
-    );
-    const dbRow = dbStats.rows[0];
     const layer4Issues = [];
     if (dbRow.total === 0) {
       layer4Issues.push('Aucune transaction enregistrée en BDD — vérifier les couches 2 et 3');

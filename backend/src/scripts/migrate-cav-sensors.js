@@ -94,6 +94,20 @@ async function migrateCavSensors() {
       );
     }
 
+    // Anti-doublon : (cav_id, fcnt) unique pour empêcher webhook+MQTT d'insérer le même uplink deux fois.
+    // Avant de créer l'index, supprimer les doublons existants en gardant le plus ancien (id min).
+    await client.query(`
+      DELETE FROM cav_sensor_readings r1
+      USING cav_sensor_readings r2
+      WHERE r1.cav_id = r2.cav_id
+        AND r1.fcnt = r2.fcnt
+        AND r1.fcnt IS NOT NULL
+        AND r1.id > r2.id
+    `);
+    await client.query(
+      'CREATE UNIQUE INDEX IF NOT EXISTS uq_sensor_readings_cav_fcnt ON cav_sensor_readings(cav_id, fcnt) WHERE fcnt IS NOT NULL'
+    );
+
     logger.info('Migration CAV Sensors (LoRaWAN) appliquée');
   } finally {
     client.release();

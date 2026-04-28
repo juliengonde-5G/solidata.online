@@ -177,6 +177,23 @@ async function processUplink(rawUplink, io) {
   try {
     await client.query('BEGIN');
 
+    // Déduplication : si on a déjà une lecture avec ce (cav_id, fcnt), on ignore.
+    // Cas typique : webhook HTTP Push + MQTT FIFO actifs en même temps → chaque uplink
+    // arrive en double. Le fcnt LoRaWAN est un compteur monotone unique par device.
+    if (uplink.fcnt != null) {
+      const dup = await client.query(
+        'SELECT id FROM cav_sensor_readings WHERE cav_id = $1 AND fcnt = $2 LIMIT 1',
+        [cav.id, uplink.fcnt]
+      );
+      if (dup.rows.length > 0) {
+        await client.query('COMMIT');
+        logger.debug('LiveObjects: uplink déjà reçu (dedup fcnt)', {
+          cavId: cav.id, fcnt: uplink.fcnt,
+        });
+        return { ok: true, deduplicated: true, cav_id: cav.id, reading_id: dup.rows[0].id, fill_level: fillPercent };
+      }
+    }
+
     const readingResult = await client.query(
       `INSERT INTO cav_sensor_readings
         (cav_id, sensor_reference, fill_level_percent, distance_cm, battery_level, temperature,
