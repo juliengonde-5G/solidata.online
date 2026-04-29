@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, PageHeader } from '../components';
+import { LoadingSpinner, PageHeader, DateRangePicker } from '../components';
 import { Fingerprint } from 'lucide-react';
 import api from '../services/api';
 
@@ -143,7 +143,7 @@ export default function Pointage() {
         {tab === 'daily' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
+              <DateRangePicker mode="single" value={{ from: date, to: date }} onChange={(r) => setDate(r.from)} />
               <button onClick={loadDaily} className="btn-primary text-sm">Actualiser</button>
             </div>
 
@@ -325,7 +325,7 @@ export default function Pointage() {
         {tab === 'alerts' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
+              <DateRangePicker mode="single" value={{ from: date, to: date }} onChange={(r) => setDate(r.from)} />
               <button onClick={loadAlerts} className="btn-primary text-sm">Actualiser</button>
             </div>
 
@@ -367,7 +367,7 @@ export default function Pointage() {
         {tab === 'log' && (
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input-modern w-auto" />
+              <DateRangePicker mode="single" value={{ from: date, to: date }} onChange={(r) => setDate(r.from)} />
               <button onClick={loadLog} className="btn-primary text-sm">Actualiser</button>
             </div>
 

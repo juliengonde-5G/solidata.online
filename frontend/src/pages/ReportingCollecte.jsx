@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KPICard, PageHeader, Section } from '../components';
+import { LoadingSpinner, KPICard, PageHeader, Section, DateRangePicker } from '../components';
 import api from '../services/api';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -14,26 +14,30 @@ import { Truck, Leaf, MapPin, Target, BarChart3 } from 'lucide-react';
 
 const STATUS_COLORS = { completed: '#0D9488', in_progress: '#F59E0B', cancelled: '#EF4444', planned: '#6366F1' };
 
+function defaultRange(days = 30) {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - (days - 1));
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
+
 export default function ReportingCollecte() {
-  const [period, setPeriod] = useState('month');
+  const [range, setRange] = useState(() => defaultRange(30));
   const [dashboard, setDashboard] = useState(null);
   const [collecteData, setCollecteData] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadData(); }, [period]);
+  useEffect(() => { loadData(); }, [range.from, range.to]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const periodDays = period === 'week' ? 7 : period === 'month' ? 30 : period === 'quarter' ? 90 : 365;
-      const groupBy = period === 'year' ? 'month' : 'day';
-      const today = new Date();
-      const dateFrom = new Date(today);
-      dateFrom.setDate(today.getDate() - periodDays);
-
+      const periodDays = Math.max(1, Math.round((new Date(range.to) - new Date(range.from)) / 86400000) + 1);
+      // Plus de 100 jours → on agrège par mois pour ne pas exploser le graphique.
+      const groupBy = periodDays > 100 ? 'month' : 'day';
       const [dashRes, collecteRes] = await Promise.all([
         api.get(`/reporting/dashboard?period=${periodDays}`),
-        api.get(`/reporting/collecte?group_by=${groupBy}&date_from=${dateFrom.toISOString().slice(0, 10)}&date_to=${today.toISOString().slice(0, 10)}`),
+        api.get(`/reporting/collecte?group_by=${groupBy}&date_from=${range.from}&date_to=${range.to}`),
       ]);
       setDashboard(dashRes.data);
       setCollecteData(collecteRes.data);
@@ -71,12 +75,13 @@ export default function ReportingCollecte() {
           subtitle="Tonnages, tournées et indicateurs de collecte"
           icon={Truck}
           actions={
-            <select value={period} onChange={e => setPeriod(e.target.value)} className="select-modern w-auto">
-              <option value="week">Cette semaine</option>
-              <option value="month">Ce mois</option>
-              <option value="quarter">Ce trimestre</option>
-              <option value="year">Cette année</option>
-            </select>
+            <DateRangePicker
+              mode="range"
+              allowSingleToggle
+              value={range}
+              onChange={setRange}
+              align="right"
+            />
           }
         />
 

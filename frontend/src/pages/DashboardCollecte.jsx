@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, Activity,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, PageHeader, Section } from '../components';
+import { LoadingSpinner, PageHeader, Section, DateRangePicker } from '../components';
 import api from '../services/api';
 
 function shiftDays(iso, n) {
@@ -205,16 +205,11 @@ export default function DashboardCollecte() {
                 aria-label="Jour précédent">
                 <ChevronLeft className="w-4 h-4 text-slate-600" />
               </button>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700" />
+              <DateRangePicker mode="single" value={{ from: date, to: date }} onChange={(r) => setDate(r.from)} />
               <button onClick={() => setDate(shiftDays(date, 1))}
                 className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
                 aria-label="Jour suivant">
                 <ChevronRight className="w-4 h-4 text-slate-600" />
-              </button>
-              <button onClick={() => setDate(new Date().toISOString().slice(0, 10))}
-                className="ml-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50">
-                Aujourd'hui
               </button>
             </div>
           }
