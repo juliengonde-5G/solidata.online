@@ -1,12 +1,26 @@
-import { useState, useEffect, useCallback } from 'react';
-import { MapPin } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { MapPin, Search } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
 import api from '../services/api';
 import useCavSensorSocket from '../hooks/useCavSensorSocket';
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, Cell } from 'recharts';
 import 'leaflet/dist/leaflet.css';
+
+// Force le recalcul de la taille Leaflet quand le conteneur change (sidebar ouverte/fermée).
+function MapSizeFix() {
+  const map = useMap();
+  useEffect(() => {
+    const fix = () => map.invalidateSize();
+    const t1 = setTimeout(fix, 50);
+    const t2 = setTimeout(fix, 250);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fix) : null;
+    if (ro) ro.observe(map.getContainer());
+    return () => { clearTimeout(t1); clearTimeout(t2); if (ro) ro.disconnect(); };
+  }, [map]);
+  return null;
+}
 
 function getFillColor(rate) {
   if (rate >= 80) return '#EF4444'; // Rouge — critique
@@ -39,8 +53,17 @@ export default function FillRateMap() {
   const [sortBy, setSortBy] = useState('fill_rate'); // fill_rate, days_to_full, name
   const [assoPoints, setAssoPoints] = useState([]);
   const [showAsso, setShowAsso] = useState(true);
+  const [citySearch, setCitySearch] = useState('');
 
   useEffect(() => { loadData(); }, []);
+
+  // Polling 60s : garantit la mise à jour côté capteur même si le socket est coupé
+  // (proxy WebSocket, onglet en arrière-plan, etc.). N'a pas d'impact perçu côté UX
+  // — la requête /fill-rate est légère.
+  useEffect(() => {
+    const id = setInterval(() => { loadData({ silent: true }); }, 60000);
+    return () => clearInterval(id);
+  }, []);
 
   // Mise à jour optimiste sur event capteur temps réel
   const handleSensorReading = useCallback((reading) => {
@@ -76,7 +99,7 @@ export default function FillRateMap() {
     return () => { cancelled = true; };
   }, [selectedCav?.id]);
 
-  const loadData = async () => {
+  const loadData = async ({ silent = false } = {}) => {
     try {
       const [res, assoRes] = await Promise.all([
         api.get('/cav/fill-rate'),
@@ -85,13 +108,16 @@ export default function FillRateMap() {
       setData(res.data);
       setAssoPoints(assoRes.data);
     } catch (err) { console.error(err); }
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la carte..." /></Layout>;
   if (!data) return <Layout><div className="p-6 text-red-500">Erreur de chargement</div></Layout>;
 
+  const cityQuery = citySearch.trim().toLowerCase();
   const filtered = data.cavs.filter(c => {
+    if (cityQuery && !(c.commune || '').toLowerCase().includes(cityQuery)
+        && !(c.address || '').toLowerCase().includes(cityQuery)) return false;
     if (filter === 'critical') return c.fill_rate >= 80;
     if (filter === 'warning') return c.fill_rate >= 40 && c.fill_rate < 80;
     if (filter === 'ok') return c.fill_rate < 40;
@@ -101,6 +127,20 @@ export default function FillRateMap() {
     if (sortBy === 'days_to_full') return (a.days_to_full ?? 999) - (b.days_to_full ?? 999);
     return a.name.localeCompare(b.name);
   });
+
+  // Stats serveur figées à T0 — on les recalcule côté client pour qu'elles
+  // suivent les updates Socket.IO et la recherche par ville.
+  const liveStats = (() => {
+    const base = cityQuery
+      ? data.cavs.filter(c => (c.commune || '').toLowerCase().includes(cityQuery) || (c.address || '').toLowerCase().includes(cityQuery))
+      : data.cavs;
+    return {
+      total: base.length,
+      critical: base.filter(c => c.fill_rate >= 80).length,
+      warning: base.filter(c => c.fill_rate >= 40 && c.fill_rate < 80).length,
+      ok: base.filter(c => c.fill_rate < 40).length,
+    };
+  })();
 
   const center = [49.4231, 1.0993];
 
@@ -119,27 +159,48 @@ export default function FillRateMap() {
           }
         />
 
+        {/* Recherche par ville / commune */}
+        <div className="relative max-w-md">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="search"
+            value={citySearch}
+            onChange={(e) => setCitySearch(e.target.value)}
+            placeholder="Rechercher une commune ou une adresse…"
+            className="w-full pl-9 pr-9 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
+          />
+          {citySearch && (
+            <button
+              onClick={() => setCitySearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm px-2"
+              aria-label="Effacer"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <button onClick={() => setFilter('all')}
             className={`rounded-xl border p-4 text-left transition ${filter === 'all' ? 'ring-2 ring-primary' : ''}`}>
             <p className="text-xs text-gray-500 uppercase font-medium">Total CAV</p>
-            <p className="text-3xl font-bold mt-1">{data.stats.total}</p>
+            <p className="text-3xl font-bold mt-1">{liveStats.total}</p>
           </button>
           <button onClick={() => setFilter('critical')}
             className={`rounded-xl border p-4 text-left bg-red-50 border-red-200 transition ${filter === 'critical' ? 'ring-2 ring-red-500' : ''}`}>
             <p className="text-xs text-red-600 uppercase font-medium">Critique (&gt;80%)</p>
-            <p className="text-3xl font-bold text-red-700 mt-1">{data.stats.critical}</p>
+            <p className="text-3xl font-bold text-red-700 mt-1">{liveStats.critical}</p>
           </button>
           <button onClick={() => setFilter('warning')}
             className={`rounded-xl border p-4 text-left bg-amber-50 border-amber-200 transition ${filter === 'warning' ? 'ring-2 ring-amber-500' : ''}`}>
             <p className="text-xs text-amber-600 uppercase font-medium">Attention (40-80%)</p>
-            <p className="text-3xl font-bold text-amber-700 mt-1">{data.stats.warning}</p>
+            <p className="text-3xl font-bold text-amber-700 mt-1">{liveStats.warning}</p>
           </button>
           <button onClick={() => setFilter('ok')}
             className={`rounded-xl border p-4 text-left bg-green-50 border-green-200 transition ${filter === 'ok' ? 'ring-2 ring-green-500' : ''}`}>
             <p className="text-xs text-green-600 uppercase font-medium">OK (&lt;40%)</p>
-            <p className="text-3xl font-bold text-green-700 mt-1">{data.stats.ok}</p>
+            <p className="text-3xl font-bold text-green-700 mt-1">{liveStats.ok}</p>
           </button>
         </div>
 
@@ -147,17 +208,20 @@ export default function FillRateMap() {
           {/* Carte */}
           <div className="lg:col-span-2 card-modern overflow-hidden relative" style={{ height: '65vh' }}>
             <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
+              <MapSizeFix />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               />
               {/* Association points */}
               {showAsso && assoPoints.map(ap => {
-                if (!ap.latitude || !ap.longitude) return null;
+                const lat = parseFloat(ap.latitude);
+                const lng = parseFloat(ap.longitude);
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
                 return (
                   <CircleMarker
                     key={`asso-${ap.id}`}
-                    center={[ap.latitude, ap.longitude]}
+                    center={[lat, lng]}
                     radius={7}
                     pathOptions={{ color: '#EA580C', fillColor: '#FB923C', fillOpacity: 0.85, weight: 2 }}
                   >
@@ -177,10 +241,13 @@ export default function FillRateMap() {
               {filtered.map(cav => {
                 const isSensorFresh = cav.fill_source === 'sensor';
                 const hasSensor = !!(cav.lora_deveui || cav.sensor_reference);
+                const lat = parseFloat(cav.latitude);
+                const lng = parseFloat(cav.longitude);
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
                 return (
                   <CircleMarker
                     key={cav.id}
-                    center={[cav.latitude, cav.longitude]}
+                    center={[lat, lng]}
                     radius={Math.max(8, Math.min(16, cav.fill_rate / 8))}
                     pathOptions={{
                       color: getFillColor(cav.fill_rate),

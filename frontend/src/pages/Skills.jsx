@@ -60,7 +60,7 @@ export default function Skills() {
 
   return (
     <Layout>
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <PageHeader
           title="Compétences"
           subtitle={`Matrice des compétences — ${employees.length} collaborateurs`}

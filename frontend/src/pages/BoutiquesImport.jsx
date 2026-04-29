@@ -37,29 +37,58 @@ export default function BoutiquesImport() {
     } catch (e) { console.error(e); }
   }
 
+  async function postImport(file, force) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('boutique_id', selectedBoutiqueId);
+    if (force) formData.append('force', 'true');
+    return api.post('/boutique-ventes/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    });
+  }
+
   async function handleUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!selectedBoutiqueId) { toast.error('Sélectionnez une boutique'); return; }
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('boutique_id', selectedBoutiqueId);
-      const res = await api.post('/boutique-ventes/import', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      if (res.data.duplicate) {
-        toast.warning(res.data.message || 'Fichier déjà importé');
+      let res = await postImport(file, false);
+      let data = res.data || {};
+      if (data.duplicate) {
+        if (data.reason === 'file_hash') {
+          toast.warning(data.message || 'Fichier déjà importé (hash identique)');
+        } else if (data.reason === 'date_overlap') {
+          const c = data.conflict || {};
+          const ok = window.confirm(
+            `Un import existe déjà pour cette boutique sur la période ${c.date_debut} → ${c.date_fin} ` +
+            `(fichier: ${c.filename}).\n\nÉcraser malgré tout ? L'ancien batch sera conservé en historique mais ` +
+            `les ventes/tickets en doublon de période seront ajoutés.`
+          );
+          if (ok) {
+            res = await postImport(file, true);
+            data = res.data || {};
+            const ca = Number(data.ca_total_ttc || 0).toFixed(2);
+            toast.success(`Import forcé : ${data.nb_lignes_importees ?? 0} lignes, ${data.nb_tickets ?? 0} tickets, ${ca} €`);
+          } else {
+            toast.warning('Import annulé (doublon de période)');
+          }
+        } else {
+          toast.warning(data.message || 'Doublon détecté');
+        }
       } else {
-        toast.success(`Import réussi : ${res.data.nb_lignes_importees} lignes, ${res.data.nb_tickets} tickets, ${res.data.ca_total_ttc.toFixed(2)} €`);
+        const ca = Number(data.ca_total_ttc || 0).toFixed(2);
+        toast.success(`Import réussi : ${data.nb_lignes_importees ?? 0} lignes, ${data.nb_tickets ?? 0} tickets, ${ca} €`);
       }
-      await loadBatches();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur import');
+      toast.error(err.response?.data?.error || err.message || 'Erreur import');
+    } finally {
+      // Toujours rafraîchir la liste et libérer l'input, même si le toast lève une erreur.
+      try { await loadBatches(); } catch (_) { /* silencieux */ }
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = '';
     }
-    setUploading(false);
-    if (fileInput.current) fileInput.current.value = '';
   }
 
   async function deleteBatch(id) {
@@ -110,6 +139,26 @@ export default function BoutiquesImport() {
           <p className="text-xs text-slate-500">
             Un scan de secours du dossier CSV s'exécute aussi chaque soir à 20h pour rattraper les fichiers déposés en local. Les imports apparaissent dans l'historique ci-dessous.
           </p>
+          <details className="mt-3 text-xs text-slate-600">
+            <summary className="cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+              ⚠ Erreur Power Automate « base64 expects ... type 'Null' » ?
+            </summary>
+            <div className="mt-2 pl-3 border-l-2 border-amber-300 space-y-2">
+              <p>
+                Cette erreur survient côté <strong>Power Automate</strong> (et non côté SOLIDATA) quand l'expression
+                <code className="mx-1 px-1 bg-slate-100 rounded">base64(...)</code> reçoit une valeur nulle.
+                Le webhook attend un body JSON :
+                <code className="block mt-1 px-2 py-1 bg-slate-100 rounded">{`{ "boutique_code": "st_sever", "filename": "...csv", "content_base64": "..." }`}</code>
+              </p>
+              <p>Vérifications côté flow :</p>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>Le déclencheur « Quand un nouveau message arrive » filtre bien les mails <em>avec pièce jointe</em> (<code>HasAttachment = true</code>).</li>
+                <li>L'action « Pour chaque pièce jointe » utilise <code>items('Apply_to_each')?['contentBytes']</code> et non un <code>triggerBody()?['attachments']</code> qui peut être null.</li>
+                <li>Si vous utilisez l'action HTTP, le champ Body doit ressembler à <code>{`{ ..., "content_base64": "@{items('Apply_to_each')?['contentBytes']}" }`}</code> — déjà encodé en base64 par Outlook, sans <code>base64()</code> autour.</li>
+              </ul>
+              <p>En mode dégradé, déposez le CSV via le formulaire « Import manuel » ci-dessous : la planification automatique du soir prendra le relais.</p>
+            </div>
+          </details>
         </div>
 
         <div className="bg-white rounded-card shadow-card p-6 mb-6">

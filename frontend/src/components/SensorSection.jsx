@@ -171,7 +171,7 @@ export default function SensorSection({ cavId, onUpdated }) {
 
 function CalibrationModal({ isOpen, onClose, cavId, current, onDone }) {
   const [form, setForm] = useState({
-    sensor_height_cm: 200,
+    sensor_height_cm: 260,
     sensor_reporting_interval_min: 360,
     sensor_install_date: new Date().toISOString().split('T')[0],
   });
@@ -181,7 +181,7 @@ function CalibrationModal({ isOpen, onClose, cavId, current, onDone }) {
   useEffect(() => {
     if (isOpen && current) {
       setForm({
-        sensor_height_cm: current.sensor_height_cm || 200,
+        sensor_height_cm: current.sensor_height_cm || 260,
         sensor_reporting_interval_min: current.sensor_reporting_interval_min || 360,
         sensor_install_date: current.sensor_install_date
           ? new Date(current.sensor_install_date).toISOString().split('T')[0]
@@ -265,7 +265,7 @@ function ProvisionModal({ isOpen, onClose, cavId, onDone }) {
     dev_eui: '',
     app_eui: '',
     app_key: '',
-    sensor_height_cm: 200,
+    sensor_height_cm: 260,
     sensor_reporting_interval_min: 360,
     sensor_install_date: new Date().toISOString().split('T')[0],
   });

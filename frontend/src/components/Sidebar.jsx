@@ -85,10 +85,25 @@ export default function Sidebar({ filteredSections, collapsed, onToggleCollapse,
     setOpenMap((m) => ({ ...m, [id]: !m[id] }));
   }, [collapsed, onToggleCollapse]);
 
-  const isItemActive = useCallback((path) => {
-    if (path === '/') return location.pathname === '/';
-    return location.pathname === path || location.pathname.startsWith(path + '/');
-  }, [location.pathname]);
+  // Sélectionne l'item dont le path est le préfixe le plus long de l'URL courante,
+  // parmi tous les items de toutes les sections visibles. Évite que `/boutiques`
+  // ET `/boutiques/planning` soient simultanément "actifs" sur /boutiques/planning.
+  const activePath = useMemo(() => {
+    const allPaths = filteredSections.flatMap((s) => s.items.map((it) => it.path));
+    let best = null;
+    for (const p of allPaths) {
+      if (p === '/') {
+        if (location.pathname === '/' && (!best || best.length < 1)) best = p;
+        continue;
+      }
+      if (location.pathname === p || location.pathname.startsWith(p + '/')) {
+        if (!best || p.length > best.length) best = p;
+      }
+    }
+    return best;
+  }, [filteredSections, location.pathname]);
+
+  const isItemActive = useCallback((path) => path === activePath, [activePath]);
 
   return (
     <aside

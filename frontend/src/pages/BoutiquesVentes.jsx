@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { ShoppingBag, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, CartesianGrid } from 'recharts';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KpiCard, PageHeader } from '../components';
+import { LoadingSpinner, KpiCard, PageHeader, DateRangePicker } from '../components';
 import api from '../services/api';
 
 const SEGMENT_LABELS = {
@@ -94,12 +94,13 @@ export default function BoutiquesVentes() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Du</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Au</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <label className="block text-xs font-medium text-slate-600 mb-1">Période</label>
+            <DateRangePicker
+              mode="range"
+              allowSingleToggle
+              value={{ from: dateFrom, to: dateTo }}
+              onChange={(r) => { setDateFrom(r.from); setDateTo(r.to); }}
+            />
           </div>
         </div>
 

@@ -12,3 +12,4 @@ export { default as ConfirmDialog } from './ConfirmDialog';
 export { default as LoadingOverlay } from './LoadingOverlay';
 export { default as KanbanBoard } from './KanbanBoard';
 export { default as Section } from './Section';
+export { default as DateRangePicker } from './DateRangePicker';

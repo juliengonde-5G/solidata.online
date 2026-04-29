@@ -3044,6 +3044,25 @@ async function initDatabase() {
     await client.query(`ALTER TABLE boutiques ADD COLUMN IF NOT EXISTS logics_mail_subject_keyword VARCHAR(255)`);
     await client.query(`ALTER TABLE boutiques ADD COLUMN IF NOT EXISTS logics_mail_sender VARCHAR(255)`);
 
+    // Migration 29/04/2026 : ON DELETE CASCADE sur boutique_tickets.batch_id
+    // pour que la suppression d'un batch d'import retire aussi ses tickets reconstitués
+    // (sinon FK NO ACTION bloque la suppression côté UI Import).
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_name = 'boutique_tickets'
+            AND constraint_name = 'boutique_tickets_batch_id_fkey'
+        ) THEN
+          ALTER TABLE boutique_tickets DROP CONSTRAINT boutique_tickets_batch_id_fkey;
+        END IF;
+        ALTER TABLE boutique_tickets
+          ADD CONSTRAINT boutique_tickets_batch_id_fkey
+          FOREIGN KEY (batch_id) REFERENCES boutique_import_batches(id) ON DELETE CASCADE;
+      END$$;
+    `);
+
     // Seed : boutique St-Sever (référence géographique : Rouen)
     const btqExist = await client.query("SELECT id FROM boutiques LIMIT 1");
     if (btqExist.rows.length === 0) {

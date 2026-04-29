@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, Cloud, CloudRain, Sun, CloudSnow, Zap, TrendingUp, TrendingDown, ShoppingBag, Target, Receipt, Tag, Timer, Percent } from 'lucide-react';
 import { Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
 import Layout from '../components/Layout';
-import { LoadingSpinner, KpiCard, PageHeader } from '../components';
+import { LoadingSpinner, KpiCard, PageHeader, DateRangePicker } from '../components';
 import api from '../services/api';
 
 function formatEuro(v, decimals = 0) {
@@ -233,8 +233,15 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
 
   return (
     <>
-      <div className="mb-4">
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+      <div className="mb-4 flex items-end gap-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Date</label>
+          <DateRangePicker
+            mode="single"
+            value={{ from: date, to: date }}
+            onChange={(r) => setDate(r.from)}
+          />
+        </div>
       </div>
 
       {/* Bloc 1 : KPIs principaux avec deltas vs J-1 */}

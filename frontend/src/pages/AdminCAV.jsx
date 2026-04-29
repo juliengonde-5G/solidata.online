@@ -4,9 +4,32 @@ import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
 import SensorSection from '../components/SensorSection';
 import api from '../services/api';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+
+// Leaflet ne calcule la taille du conteneur que lors du `mount` initial.
+// Quand la carte apparaît dans un panneau (fiche détail) qui était démonté
+// ou dans un parent qui change de largeur, les tuiles ne se chargent pas.
+// On force `invalidateSize` après mount + observe les redimensionnements.
+function MapSizeFix() {
+  const map = useMap();
+  useEffect(() => {
+    const fix = () => map.invalidateSize();
+    const t1 = setTimeout(fix, 50);
+    const t2 = setTimeout(fix, 250);
+    const t3 = setTimeout(fix, 600);
+    const ro = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(fix)
+      : null;
+    if (ro) ro.observe(map.getContainer());
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+      if (ro) ro.disconnect();
+    };
+  }, [map]);
+  return null;
+}
 
 // Fix default marker icon
 delete L.Icon.Default.prototype._getIconUrl;
@@ -464,28 +487,36 @@ export default function AdminCAV() {
               </div>
 
               {/* Carte GPS */}
-              {detailCav.latitude && detailCav.longitude && (
-                <div className="card-modern overflow-hidden">
-                  <div className="px-4 py-2 bg-gray-50 border-b">
-                    <h3 className="text-xs font-medium text-gray-500 uppercase">Localisation</h3>
+              {(() => {
+                // Les coords arrivent en number depuis pg (DOUBLE PRECISION) mais on
+                // sécurise au cas où un autre code path renvoie des strings.
+                const lat = parseFloat(detailCav.latitude);
+                const lng = parseFloat(detailCav.longitude);
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+                return (
+                  <div className="card-modern overflow-hidden">
+                    <div className="px-4 py-2 bg-gray-50 border-b">
+                      <h3 className="text-xs font-medium text-gray-500 uppercase">Localisation</h3>
+                    </div>
+                    <div style={{ height: '200px' }}>
+                      <MapContainer
+                        key={`detail-${detailCav.id}`}
+                        center={[lat, lng]}
+                        zoom={15}
+                        style={{ height: '100%', width: '100%' }}
+                        scrollWheelZoom={false}
+                      >
+                        <MapSizeFix />
+                        <TileLayer
+                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                        />
+                        <Marker position={[lat, lng]} />
+                      </MapContainer>
+                    </div>
                   </div>
-                  <div style={{ height: '200px' }}>
-                    <MapContainer
-                      key={`detail-${detailCav.id}`}
-                      center={[detailCav.latitude, detailCav.longitude]}
-                      zoom={15}
-                      style={{ height: '100%', width: '100%' }}
-                      scrollWheelZoom={false}
-                    >
-                      <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                      />
-                      <Marker position={[detailCav.latitude, detailCav.longitude]} />
-                    </MapContainer>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Photo CAV */}
               <div className="card-modern overflow-hidden">
@@ -632,6 +663,7 @@ export default function AdminCAV() {
                         zoom={mapPos ? 15 : 11}
                         style={{ height: '100%', width: '100%' }}
                       >
+                        <MapSizeFix />
                         <TileLayer
                           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"

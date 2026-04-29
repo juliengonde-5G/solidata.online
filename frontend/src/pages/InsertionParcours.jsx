@@ -571,7 +571,7 @@ export default function InsertionParcours() {
 
   return (
     <Layout>
-      <div className="p-4 max-w-7xl mx-auto">
+      <div className="p-4 sm:p-6">
         <PageHeader
           title="Parcours d'insertion"
           subtitle="Suivi M1/M6/M12, freins périphériques et plans d'action"

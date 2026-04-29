@@ -122,7 +122,7 @@ export default function Pointage() {
 
   return (
     <Layout>
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <PageHeader
           title="Pointage"
           subtitle="Gestion des badgeages et suivi des heures"

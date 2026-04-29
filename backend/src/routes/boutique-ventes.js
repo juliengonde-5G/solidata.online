@@ -53,9 +53,30 @@ function minuteKey(date) {
   return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+// Pré-scan rapide du CSV pour extraire la plage de dates couverte (sans
+// dérouler toute la logique d'import). Retourne { from: 'YYYY-MM-DD', to: ... }
+// ou null si on ne trouve aucune date exploitable.
+function extractCSVDateRange(content) {
+  let min = null, max = null;
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith('Rayon;')) continue;
+    const parts = line.split(';');
+    // Date est en col 1 (les 2 formats CSV LogicS la placent au même index)
+    const d = parseCSVDate(parts[1]?.trim());
+    if (!d) continue;
+    const iso = d.toISOString().slice(0, 10);
+    if (!min || iso < min) min = iso;
+    if (!max || iso > max) max = iso;
+  }
+  if (!min || !max) return null;
+  return { from: min, to: max };
+}
+
 // Core CSV import function (reusable by manual upload + scheduler)
 // Returns { batch_id, nb_lignes_total, nb_lignes_importees, nb_lignes_erreur, nb_tickets, ca_total_ttc }
-async function importCSVContent(boutiqueId, content, filename, userId = null, source = 'manuel') {
+async function importCSVContent(boutiqueId, content, filename, userId = null, source = 'manuel', { force = false } = {}) {
   const fileHash = crypto.createHash('sha256').update(content).digest('hex');
 
   const existing = await pool.query(
@@ -65,9 +86,45 @@ async function importCSVContent(boutiqueId, content, filename, userId = null, so
   if (existing.rows.length > 0) {
     return {
       duplicate: true,
+      reason: 'file_hash',
       batch_id: existing.rows[0].id,
       message: 'Ce fichier a déjà été importé (hash identique).'
     };
+  }
+
+  // Détection doublon métier : pour la même boutique, on cherche l'overlap de la
+  // plage de dates couverte. On parse rapidement la 1ère et dernière date du CSV
+  // pour comparer aux batches existants. Évite d'importer 2 fois les ventes du
+  // même jour (cas Power Automate qui re-déclenche un mail déjà reçu).
+  if (!force) {
+    const dates = extractCSVDateRange(content);
+    if (dates) {
+      const overlap = await pool.query(
+        `SELECT id, filename, date_debut, date_fin, created_at
+           FROM boutique_import_batches
+          WHERE boutique_id = $1
+            AND statut IN ('termine', 'en_cours')
+            AND date_debut IS NOT NULL AND date_fin IS NOT NULL
+            AND daterange(date_debut, date_fin, '[]') && daterange($2::date, $3::date, '[]')
+          ORDER BY created_at DESC LIMIT 1`,
+        [boutiqueId, dates.from, dates.to]
+      );
+      if (overlap.rows.length > 0) {
+        const o = overlap.rows[0];
+        return {
+          duplicate: true,
+          reason: 'date_overlap',
+          batch_id: o.id,
+          conflict: {
+            filename: o.filename,
+            date_debut: o.date_debut,
+            date_fin: o.date_fin,
+            created_at: o.created_at,
+          },
+          message: `Un import existe déjà pour cette boutique entre ${o.date_debut} et ${o.date_fin} (fichier: ${o.filename}).`,
+        };
+      }
+    }
   }
 
   const batchRes = await pool.query(
@@ -245,8 +302,11 @@ router.post('/import',
       const boutiqueId = parseInt(req.body.boutique_id);
       if (!boutiqueId) return res.status(400).json({ error: 'boutique_id requis' });
 
+      const force = req.body.force === 'true' || req.body.force === '1';
       const content = fs.readFileSync(req.file.path, 'utf-8');
-      const result = await importCSVContent(boutiqueId, content, req.file.originalname, req.user.id, 'manuel');
+      const result = await importCSVContent(
+        boutiqueId, content, req.file.originalname, req.user.id, 'manuel', { force }
+      );
       fs.unlinkSync(req.file.path);
       res.json(result);
     } catch (err) {
@@ -294,16 +354,27 @@ router.get('/batches/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/boutique-ventes/batches/:id — supprime le batch et ses ventes (cascade)
+// DELETE /api/boutique-ventes/batches/:id — supprime le batch et ses ventes
+// boutique_ventes.batch_id a déjà ON DELETE CASCADE ; pour boutique_tickets.batch_id
+// la migration ON DELETE CASCADE peut ne pas être appliquée sur d'anciennes bases,
+// d'où le DELETE explicite avant pour éviter une violation FK.
 router.delete('/batches/:id',
   authorize('ADMIN', 'MANAGER'),
   async (req, res) => {
+    const client = await pool.connect();
     try {
-      await pool.query('DELETE FROM boutique_import_batches WHERE id = $1', [req.params.id]);
+      await client.query('BEGIN');
+      await client.query('DELETE FROM boutique_tickets WHERE batch_id = $1', [req.params.id]);
+      const r = await client.query('DELETE FROM boutique_import_batches WHERE id = $1', [req.params.id]);
+      await client.query('COMMIT');
+      if (r.rowCount === 0) return res.status(404).json({ error: 'Batch introuvable' });
       res.json({ success: true });
     } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
       console.error('[boutique-ventes] DELETE batch:', err);
-      res.status(500).json({ error: 'Erreur suppression' });
+      res.status(500).json({ error: 'Erreur suppression', details: err.message });
+    } finally {
+      client.release();
     }
   }
 );

@@ -194,7 +194,7 @@ export default function Employees() {
 
   return (
     <Layout>
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <PageHeader
           title="Collaborateurs"
           subtitle={`${employees.length} collaborateur${employees.length > 1 ? 's' : ''}`}

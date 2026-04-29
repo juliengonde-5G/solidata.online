@@ -141,7 +141,18 @@ export function useToast() {
   if (!context) {
     throw new Error('useToast doit etre utilise dans un ToastProvider');
   }
-  return context;
+  // Raccourcis success/error/warning/info — utilisés dans la majorité des pages
+  // (BoutiquesImport, BoutiquesCommandes, BoutiquesObjectifs, etc.).
+  // Sans ces alias, `toast.success(...)` levait un TypeError silencieux qui bloquait
+  // les rafraîchissements post-action (ex. liste des imports).
+  const { addToast } = context;
+  return {
+    addToast,
+    success: (msg) => addToast(msg, 'success'),
+    error: (msg) => addToast(msg, 'error'),
+    warning: (msg) => addToast(msg, 'warning'),
+    info: (msg) => addToast(msg, 'info'),
+  };
 }
 
 export default ToastProvider;

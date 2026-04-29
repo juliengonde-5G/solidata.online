@@ -139,7 +139,11 @@ router.get('/fill-rate', async (req, res) => {
     const now = new Date();
     const monthIndex = now.getMonth();
     const seasonalFactors = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
-    const freshnessMs = (parseInt(process.env.SENSOR_FRESHNESS_HOURS, 10) || 8) * 3600 * 1000;
+    // Fenêtre "fraîcheur" capteur élargie à 48h par défaut (était 8h) — beaucoup
+    // de capteurs Milesight EM400-MUD sont configurés à 1 uplink/24h pour économiser
+    // la batterie ; passé 8h on retombait sur l'heuristique alors que la donnée
+    // capteur restait pertinente.
+    const freshnessMs = (parseInt(process.env.SENSOR_FRESHNESS_HOURS, 10) || 48) * 3600 * 1000;
 
     const JOURS_MAP = { 'lundi': 1, 'mardi': 2, 'mercredi': 3, 'jeudi': 4, 'vendredi': 5, 'samedi': 6, 'dimanche': 0 };
 
@@ -159,12 +163,13 @@ router.get('/fill-rate', async (req, res) => {
       const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactors[monthIndex];
       const calculatedFill = Math.min(120, (accumulatedKg / capacityKg) * 100);
 
-      // Fusion capteur / heuristique
-      const sensorFresh = cav.sensor_last_reading_at &&
-        (now - new Date(cav.sensor_last_reading_at)) < freshnessMs &&
-        cav.sensor_last_reading != null;
-      const fill_source = sensorFresh ? 'sensor' : 'calculated';
-      const fillRate = sensorFresh ? parseFloat(cav.sensor_last_reading) : calculatedFill;
+      // Fusion capteur / heuristique : si on a une lecture capteur on l'utilise toujours
+      // (même au-delà de la fenêtre de fraîcheur). Au-delà on tague la source `sensor_stale`
+      // pour que le front affiche le badge approprié — mais le chiffre reste le bon.
+      const hasReading = cav.sensor_last_reading != null && cav.sensor_last_reading_at;
+      const sensorFresh = hasReading && (now - new Date(cav.sensor_last_reading_at)) < freshnessMs;
+      const fill_source = sensorFresh ? 'sensor' : (hasReading ? 'sensor_stale' : 'calculated');
+      const fillRate = hasReading ? parseFloat(cav.sensor_last_reading) : calculatedFill;
 
       // Prévision : quand sera-t-il plein (80%)
       const targetKg = capacityKg * 0.8;
