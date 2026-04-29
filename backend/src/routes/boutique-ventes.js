@@ -803,8 +803,17 @@ router.post('/webhook-email', async (req, res) => {
   if (!secret) return res.status(503).json({ error: 'Webhook non configuré (BOUTIQUE_WEBHOOK_SECRET manquant)' });
 
   const provided = req.headers['x-webhook-secret'];
-  if (!provided || provided !== secret) {
-    return res.status(401).json({ error: 'Clé secrète invalide' });
+  if (!provided) {
+    return res.status(401).json({
+      error: 'Header X-Webhook-Secret manquant',
+      hint: 'Ajouter le header X-Webhook-Secret avec la valeur de BOUTIQUE_WEBHOOK_SECRET dans l\'action HTTP Power Automate',
+    });
+  }
+  if (provided !== secret) {
+    return res.status(401).json({
+      error: 'Clé secrète invalide',
+      hint: 'La valeur du header X-Webhook-Secret ne correspond pas à BOUTIQUE_WEBHOOK_SECRET côté serveur',
+    });
   }
 
   const body = req.body || {};
