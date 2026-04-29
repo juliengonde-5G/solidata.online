@@ -143,20 +143,43 @@ export default function BoutiquesImport() {
             <summary className="cursor-pointer font-medium text-slate-700 hover:text-slate-900">
               ⚠ Erreur Power Automate « base64 expects ... type 'Null' » ?
             </summary>
-            <div className="mt-2 pl-3 border-l-2 border-amber-300 space-y-2">
+            <div className="mt-2 pl-3 border-l-2 border-amber-300 space-y-3">
               <p>
-                Cette erreur survient côté <strong>Power Automate</strong> (et non côté SOLIDATA) quand l'expression
-                <code className="mx-1 px-1 bg-slate-100 rounded">base64(...)</code> reçoit une valeur nulle.
-                Le webhook attend un body JSON :
-                <code className="block mt-1 px-2 py-1 bg-slate-100 rounded">{`{ "boutique_code": "st_sever", "filename": "...csv", "content_base64": "..." }`}</code>
+                Cette erreur vient toujours du flow Power Automate : l'expression
+                <code className="mx-1 px-1 bg-slate-100 rounded">base64(...)</code> reçoit Null parce que la
+                pièce jointe référencée n'existe pas / n'est pas trouvée à ce point du flow.
               </p>
-              <p>Vérifications côté flow :</p>
+              <p className="font-semibold text-slate-700">✅ Body HTTP correct (à coller dans l'action HTTP, à l'intérieur du « Apply to each » sur les attachments) :</p>
+              <pre className="bg-slate-900 text-slate-100 rounded p-2 text-[11px] overflow-x-auto whitespace-pre">{`POST https://solidata.online/api/boutique-ventes/webhook-email
+Headers:
+  Content-Type: application/json
+  X-Webhook-Secret: <ton secret>
+
+Body:
+{
+  "boutique_code": "st_sever",
+  "filename": "@{items('Apply_to_each')?['name']}",
+  "content_base64": "@{items('Apply_to_each')?['contentBytes']}"
+}`}</pre>
+              <p>
+                <strong>Pas de <code>base64(...)</code> autour de <code>contentBytes</code></strong> — le connecteur Outlook fournit déjà la valeur en base64.
+                Wrapper avec <code>base64()</code> double l'encodage et plante si la pièce jointe est absente.
+              </p>
+              <p className="font-semibold text-slate-700">Alternative encore plus simple (pas besoin de Apply_to_each) :</p>
+              <pre className="bg-slate-900 text-slate-100 rounded p-2 text-[11px] overflow-x-auto whitespace-pre">{`{
+  "boutique_code": "st_sever",
+  "attachments": "@{triggerOutputs()?['body/attachments']}"
+}`}</pre>
+              <p>
+                Le webhook accepte désormais aussi cette forme native Outlook : il itère lui-même sur les pièces jointes,
+                ne garde que les <code>.csv</code> et lance l'import. Plus aucune expression <code>base64()</code> dans le flow.
+              </p>
+              <p>Vérifications complémentaires :</p>
               <ul className="list-disc pl-5 space-y-1">
-                <li>Le déclencheur « Quand un nouveau message arrive » filtre bien les mails <em>avec pièce jointe</em> (<code>HasAttachment = true</code>).</li>
-                <li>L'action « Pour chaque pièce jointe » utilise <code>items('Apply_to_each')?['contentBytes']</code> et non un <code>triggerBody()?['attachments']</code> qui peut être null.</li>
-                <li>Si vous utilisez l'action HTTP, le champ Body doit ressembler à <code>{`{ ..., "content_base64": "@{items('Apply_to_each')?['contentBytes']}" }`}</code> — déjà encodé en base64 par Outlook, sans <code>base64()</code> autour.</li>
+                <li>Le déclencheur filtre bien les mails <em>avec pièce jointe</em> (<code>Has Attachment = Yes</code>).</li>
+                <li>Le path <code>contentBytes</code> est sensible à la casse — selon la version du connecteur, c'est <code>contentBytes</code> ou <code>ContentBytes</code> ; les deux sont gérés côté serveur.</li>
               </ul>
-              <p>En mode dégradé, déposez le CSV via le formulaire « Import manuel » ci-dessous : la planification automatique du soir prendra le relais.</p>
+              <p>En mode dégradé, dépose le CSV via le formulaire « Import manuel » ci-dessous : le scan auto du soir prendra le relais.</p>
             </div>
           </details>
         </div>

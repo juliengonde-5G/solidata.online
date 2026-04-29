@@ -782,7 +782,22 @@ router.get('/tickets', async (req, res) => {
 });
 
 // POST /api/boutique-ventes/webhook-email — réception CSV depuis Power Automate
-// Authentifié par clé secrète (header X-Webhook-Secret), sans JWT
+// Authentifié par clé secrète (header X-Webhook-Secret), sans JWT.
+//
+// Tolère 4 formes de payload pour s'adapter à la complexité Power Automate :
+//
+//  1) Forme historique (CSV en base64 dans content_base64) :
+//     { boutique_code, filename, content_base64 }
+//
+//  2) Forme native Outlook (Apply to each → on passe l'attachement entier) :
+//     { boutique_code, attachment: { name, contentBytes } }
+//     ou { boutique_code, attachment: { Name, ContentBytes } }   (V3 connector)
+//
+//  3) Liste d'attachements directe (sans Apply to each côté flow) :
+//     { boutique_code, attachments: [ { name, contentBytes }, ... ] }
+//
+//  4) Contenu en clair (sans encodage), pratique en debug curl :
+//     { boutique_code, filename, content }
 router.post('/webhook-email', async (req, res) => {
   const secret = process.env.BOUTIQUE_WEBHOOK_SECRET;
   if (!secret) return res.status(503).json({ error: 'Webhook non configuré (BOUTIQUE_WEBHOOK_SECRET manquant)' });
@@ -792,12 +807,38 @@ router.post('/webhook-email', async (req, res) => {
     return res.status(401).json({ error: 'Clé secrète invalide' });
   }
 
-  const { boutique_id, boutique_code, filename, content_base64 } = req.body;
-  if (!content_base64 || !filename) {
-    return res.status(400).json({ error: 'Champs requis : filename, content_base64' });
-  }
+  const body = req.body || {};
+  const { boutique_id, boutique_code } = body;
   if (!boutique_id && !boutique_code) {
     return res.status(400).json({ error: 'Champs requis : boutique_id ou boutique_code' });
+  }
+
+  // Normalise les différentes formes possibles vers une liste { filename, csv }
+  const items = [];
+  const pushFromAttachment = (a) => {
+    if (!a) return;
+    const name = a.name || a.Name || body.filename || 'logics.csv';
+    const b64 = a.contentBytes || a.ContentBytes;
+    if (b64) items.push({ filename: name, csv: Buffer.from(b64, 'base64').toString('utf-8') });
+  };
+
+  if (Array.isArray(body.attachments)) {
+    body.attachments.forEach(pushFromAttachment);
+  } else if (body.attachment) {
+    pushFromAttachment(body.attachment);
+  } else if (body.content_base64) {
+    items.push({
+      filename: body.filename || 'logics.csv',
+      csv: Buffer.from(body.content_base64, 'base64').toString('utf-8'),
+    });
+  } else if (body.content) {
+    items.push({ filename: body.filename || 'logics.csv', csv: String(body.content) });
+  }
+
+  if (items.length === 0) {
+    return res.status(400).json({
+      error: "Aucun CSV exploitable dans le payload — fournir content_base64, content, attachment, ou attachments[]",
+    });
   }
 
   try {
@@ -808,18 +849,24 @@ router.post('/webhook-email', async (req, res) => {
       btqId = r.rows[0].id;
     }
 
-    const csvContent = Buffer.from(content_base64, 'base64').toString('utf-8');
-    const result = await importCSVContent(btqId, csvContent, filename, null, 'auto');
-
-    if (result.duplicate) {
-      return res.json({ status: 'duplicate', message: 'Fichier déjà importé' });
+    const results = [];
+    for (const it of items) {
+      // .csv only — on évite d'importer une signature ou un PDF par erreur
+      if (!/\.csv$/i.test(it.filename)) continue;
+      const r = await importCSVContent(btqId, it.csv, it.filename, null, 'auto');
+      results.push({ filename: it.filename, ...r });
     }
-    res.json({
-      status: 'ok',
-      nb_lignes_importees: result.nb_lignes_importees,
-      nb_tickets: result.nb_tickets,
-      ca_total_ttc: result.ca_total_ttc,
-    });
+
+    if (results.length === 0) {
+      return res.status(400).json({ error: 'Aucune pièce jointe .csv détectée' });
+    }
+    if (results.length === 1) {
+      const r = results[0];
+      return res.json(r.duplicate
+        ? { status: 'duplicate', message: r.message || 'Fichier déjà importé', reason: r.reason }
+        : { status: 'ok', nb_lignes_importees: r.nb_lignes_importees, nb_tickets: r.nb_tickets, ca_total_ttc: r.ca_total_ttc });
+    }
+    res.json({ status: 'ok', count: results.length, results });
   } catch (err) {
     console.error('[boutique-ventes] webhook-email:', err);
     res.status(500).json({ error: err.message });
