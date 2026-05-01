@@ -167,7 +167,7 @@ router.get('/:id/budget', async (req, res) => {
 
     // Objectifs par mois
     const objectifs = await pool.query(`
-      SELECT mois, ca_objectif_ttc::FLOAT AS ca_objectif_ttc,
+      SELECT mois, ca_objectif_ht::FLOAT AS ca_objectif_ht,
              nb_tickets_objectif, panier_moyen_objectif::FLOAT AS panier_moyen_objectif
       FROM boutique_objectifs
       WHERE boutique_id = $1 AND annee = $2 AND segment = 'global'
@@ -180,7 +180,7 @@ router.get('/:id/budget', async (req, res) => {
       realise_par_mois: realise.rows,
       objectifs_par_mois: objectifs.rows,
       ca_total_realise: realise.rows.reduce((s, r) => s + r.ca_ttc, 0),
-      ca_total_objectif: objectifs.rows.reduce((s, r) => s + Number(r.ca_objectif_ttc), 0),
+      ca_total_objectif: objectifs.rows.reduce((s, r) => s + Number(r.ca_objectif_ht), 0),
     });
   } catch (err) {
     console.error('[boutiques] GET /:id/budget:', err);

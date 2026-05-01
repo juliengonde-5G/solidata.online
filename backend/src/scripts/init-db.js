@@ -3077,6 +3077,26 @@ async function initDatabase() {
       console.log("[INIT-DB] Seed boutiques (St-Sever, L'Hopital) ✓");
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // MIGRATION : Renommer objectifs TTC → HT (objectifs définis en HT)
+    // ══════════════════════════════════════════════════════════════════
+    // Les objectifs sont définis par l'utilisateur en HT, pas en TTC
+    // Renommer ca_objectif_ttc → ca_objectif_ht pour clarifier
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'boutique_objectifs'
+            AND column_name = 'ca_objectif_ttc'
+        ) THEN
+          ALTER TABLE boutique_objectifs
+            RENAME COLUMN ca_objectif_ttc TO ca_objectif_ht;
+          RAISE NOTICE '[INIT-DB] Migration: boutique_objectifs.ca_objectif_ttc → ca_objectif_ht ✓';
+        END IF;
+      END$$;
+    `);
+
     console.log('[INIT-DB] Module Boutiques ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');

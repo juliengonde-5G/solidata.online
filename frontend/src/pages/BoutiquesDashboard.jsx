@@ -358,7 +358,7 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
 
 function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, evolution }) {
   if (!data) return null;
-  const objectifCA = Number(data.objectif?.ca_objectif_ttc || 0);
+  const objectifCA = Number(data.objectif?.ca_objectif_ht || 0);
   const realiseCA = data.realise?.ca_ttc || 0;
   const pctAtteinte = objectifCA > 0 ? (realiseCA / objectifCA) * 100 : null;
   const ev = evolution?.variations || {};
@@ -494,7 +494,7 @@ function YearView({ annee, setAnnee, data, budget, boutique }) {
     return {
       mois: m,
       realise: v?.ca_ttc || 0,
-      objectif: Number(o?.ca_objectif_ttc || 0),
+      objectif: Number(o?.ca_objectif_ht || 0),
     };
   });
 
@@ -549,7 +549,7 @@ function YearView({ annee, setAnnee, data, budget, boutique }) {
             {MOIS_COURT.map((m, i) => {
               const v = data.find(d => d.mois === i + 1);
               const o = budget.objectifs_par_mois.find(o => o.mois === i + 1);
-              const objNum = Number(o?.ca_objectif_ttc || 0);
+              const objNum = Number(o?.ca_objectif_ht || 0);
               const realise = v?.ca_ttc || 0;
               const pct = objNum > 0 ? (realise / objNum) * 100 : null;
               return (

@@ -33,7 +33,7 @@ router.get('/compare', async (req, res) => {
     const year = annee || new Date().getFullYear();
 
     const objs = await pool.query(
-      `SELECT mois, segment, ca_objectif_ttc::FLOAT AS ca_objectif_ttc,
+      `SELECT mois, segment, ca_objectif_ht::FLOAT AS ca_objectif_ht,
               nb_tickets_objectif, panier_moyen_objectif::FLOAT AS panier_moyen_objectif
        FROM boutique_objectifs
        WHERE boutique_id = $1 AND annee = $2`,
@@ -83,24 +83,24 @@ router.post('/',
     body('boutique_id').isInt(),
     body('annee').isInt({ min: 2020, max: 2100 }),
     body('mois').isInt({ min: 1, max: 12 }),
-    body('ca_objectif_ttc').isFloat({ min: 0 }),
+    body('ca_objectif_ht').isFloat({ min: 0 }),
   ],
   validate,
   async (req, res) => {
     try {
-      const { boutique_id, annee, mois, ca_objectif_ttc, nb_tickets_objectif, panier_moyen_objectif, segment, notes } = req.body;
+      const { boutique_id, annee, mois, ca_objectif_ht, nb_tickets_objectif, panier_moyen_objectif, segment, notes } = req.body;
       const result = await pool.query(`
         INSERT INTO boutique_objectifs
-          (boutique_id, annee, mois, ca_objectif_ttc, nb_tickets_objectif, panier_moyen_objectif, segment, notes, created_by)
+          (boutique_id, annee, mois, ca_objectif_ht, nb_tickets_objectif, panier_moyen_objectif, segment, notes, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (boutique_id, annee, mois, segment) DO UPDATE SET
-          ca_objectif_ttc = EXCLUDED.ca_objectif_ttc,
+          ca_objectif_ht = EXCLUDED.ca_objectif_ht,
           nb_tickets_objectif = EXCLUDED.nb_tickets_objectif,
           panier_moyen_objectif = EXCLUDED.panier_moyen_objectif,
           notes = EXCLUDED.notes,
           updated_at = NOW()
         RETURNING *
-      `, [boutique_id, annee, mois, ca_objectif_ttc, nb_tickets_objectif || null,
+      `, [boutique_id, annee, mois, ca_objectif_ht, nb_tickets_objectif || null,
           panier_moyen_objectif || null, segment || 'global', notes || null, req.user.id]);
       res.json(result.rows[0]);
     } catch (err) {
@@ -123,14 +123,14 @@ router.post('/bulk',
       for (const o of objectifs) {
         await client.query(`
           INSERT INTO boutique_objectifs
-            (boutique_id, annee, mois, ca_objectif_ttc, nb_tickets_objectif, panier_moyen_objectif, segment, created_by)
+            (boutique_id, annee, mois, ca_objectif_ht, nb_tickets_objectif, panier_moyen_objectif, segment, created_by)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
           ON CONFLICT (boutique_id, annee, mois, segment) DO UPDATE SET
-            ca_objectif_ttc = EXCLUDED.ca_objectif_ttc,
+            ca_objectif_ht = EXCLUDED.ca_objectif_ht,
             nb_tickets_objectif = EXCLUDED.nb_tickets_objectif,
             panier_moyen_objectif = EXCLUDED.panier_moyen_objectif,
             updated_at = NOW()
-        `, [boutique_id, annee, o.mois, o.ca_objectif_ttc || 0,
+        `, [boutique_id, annee, o.mois, o.ca_objectif_ht || 0,
             o.nb_tickets_objectif || null, o.panier_moyen_objectif || null,
             segment || 'global', req.user.id]);
       }

@@ -36,7 +36,7 @@ export default function BoutiquesObjectifs() {
         const existing = objs.find(o => o.mois === i + 1);
         return {
           mois: i + 1,
-          ca_objectif_ttc: existing?.ca_objectif_ttc || '',
+          ca_objectif_ht: existing?.ca_objectif_ht || '',
           nb_tickets_objectif: existing?.nb_tickets_objectif || '',
           panier_moyen_objectif: existing?.panier_moyen_objectif || '',
         };
@@ -51,10 +51,10 @@ export default function BoutiquesObjectifs() {
     setSaving(true);
     try {
       const payload = objectifs
-        .filter(o => o.ca_objectif_ttc !== '' && o.ca_objectif_ttc !== null)
+        .filter(o => o.ca_objectif_ht !== '' && o.ca_objectif_ht !== null)
         .map(o => ({
           mois: o.mois,
-          ca_objectif_ttc: parseFloat(o.ca_objectif_ttc) || 0,
+          ca_objectif_ht: parseFloat(o.ca_objectif_ht) || 0,
           nb_tickets_objectif: o.nb_tickets_objectif ? parseInt(o.nb_tickets_objectif) : null,
           panier_moyen_objectif: o.panier_moyen_objectif ? parseFloat(o.panier_moyen_objectif) : null,
         }));
@@ -72,7 +72,7 @@ export default function BoutiquesObjectifs() {
     const v = ventes.find(x => x.mois === i + 1);
     return {
       mois: m,
-      objectif: parseFloat(obj?.ca_objectif_ttc) || 0,
+      objectif: parseFloat(obj?.ca_objectif_ht) || 0,
       realise: v?.ca_ttc || 0,
     };
   });
@@ -120,14 +120,14 @@ export default function BoutiquesObjectifs() {
                   {objectifs.map((o, i) => {
                     const v = ventes.find(x => x.mois === o.mois);
                     const realise = v?.ca_ttc || 0;
-                    const objNum = parseFloat(o.ca_objectif_ttc) || 0;
+                    const objNum = parseFloat(o.ca_objectif_ht) || 0;
                     const pct = objNum > 0 ? (realise / objNum) * 100 : null;
                     return (
                       <tr key={i} className="border-b border-slate-100">
                         <td className="py-2 px-2 font-medium">{MOIS[i]}</td>
                         <td className="py-2 px-2">
-                          <input type="number" step="100" value={o.ca_objectif_ttc} onChange={(e) => {
-                            const n = [...objectifs]; n[i].ca_objectif_ttc = e.target.value; setObjectifs(n);
+                          <input type="number" step="100" value={o.ca_objectif_ht} onChange={(e) => {
+                            const n = [...objectifs]; n[i].ca_objectif_ht = e.target.value; setObjectifs(n);
                           }} className="w-28 border border-slate-300 rounded px-2 py-1 text-right" />
                         </td>
                         <td className="py-2 px-2">
