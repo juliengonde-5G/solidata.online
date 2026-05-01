@@ -436,10 +436,11 @@ router.get('/analytics/monthly', async (req, res) => {
     const result = await pool.query(`
       SELECT EXTRACT(MONTH FROM date_vente)::INT AS mois,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
+             COALESCE(SUM(total_ht), 0)::FLOAT AS ca_ht,
              COUNT(DISTINCT ticket_id)::INT AS nb_tickets,
              COALESCE(SUM(quantite), 0)::INT AS nb_articles,
              CASE WHEN COUNT(DISTINCT ticket_id) > 0
-                  THEN (SUM(total_ttc) / COUNT(DISTINCT ticket_id))::FLOAT
+                  THEN (SUM(total_ht) / COUNT(DISTINCT ticket_id))::FLOAT
                   ELSE 0 END AS panier_moyen
       FROM boutique_ventes
       WHERE boutique_id = $1 AND EXTRACT(YEAR FROM date_vente) = $2
@@ -485,6 +486,7 @@ router.get('/analytics/segments', async (req, res) => {
     const result = await pool.query(`
       SELECT segment,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
+             COALESCE(SUM(total_ht), 0)::FLOAT AS ca_ht,
              COUNT(*)::INT AS nb_lignes,
              COALESCE(SUM(quantite), 0)::INT AS nb_articles
       FROM boutique_ventes
@@ -508,9 +510,10 @@ router.get('/analytics/articles', async (req, res) => {
     const result = await pool.query(`
       SELECT article, rayon,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
+             COALESCE(SUM(total_ht), 0)::FLOAT AS ca_ht,
              COALESCE(SUM(quantite), 0)::INT AS nb_articles,
              CASE WHEN SUM(quantite) > 0
-                  THEN (SUM(total_ttc) / SUM(quantite))::FLOAT
+                  THEN (SUM(total_ht) / SUM(quantite))::FLOAT
                   ELSE 0 END AS prix_moyen
       FROM boutique_ventes
       WHERE boutique_id = $1
@@ -582,7 +585,7 @@ router.get('/analytics/kpis', async (req, res) => {
     // Agrégats tickets (nb tickets réels, durée moyenne, % avec sac)
     const tq = await pool.query(`
       WITH tickets_periode AS (
-        SELECT t.id, t.total_ttc
+        SELECT t.id, t.total_ht, t.total_ttc
         FROM boutique_tickets t
         WHERE t.boutique_id = $1
           AND ($2::DATE IS NULL OR DATE(t.date_ticket) >= $2::DATE)
@@ -603,7 +606,7 @@ router.get('/analytics/kpis', async (req, res) => {
       )
       SELECT
         COUNT(*)::INT                                                        AS nb_tickets,
-        COALESCE(AVG(tp.total_ttc),0)::FLOAT                                 AS panier_moyen,
+        COALESCE(AVG(tp.total_ht),0)::FLOAT                                  AS panier_moyen,
         COALESCE(AVG(td.duree_sec),0)::FLOAT                                 AS duree_moy_sec,
         (SELECT COUNT(*) FROM ticket_sac)::INT                               AS nb_tickets_avec_sac
       FROM tickets_periode tp
@@ -624,7 +627,7 @@ router.get('/analytics/kpis', async (req, res) => {
       nb_articles: nbArticles,
       panier_moyen: t.panier_moyen,
       ipt: nbTickets > 0 ? nbArticles / nbTickets : 0,            // Indice Panier Ticket (articles/ticket)
-      prix_moyen_article: nbArticles > 0 ? v.ca_ttc / nbArticles : 0,
+      prix_moyen_article: nbArticles > 0 ? v.ca_ht / nbArticles : 0,
       ca_courantes: v.ca_courantes,
       ca_promo: v.ca_promo,
       ca_consommables: v.ca_consommables,
@@ -707,12 +710,13 @@ router.get('/analytics/evolution', async (req, res) => {
       const vr = await pool.query(`
         SELECT
           COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
+          COALESCE(SUM(total_ht),0)::FLOAT  AS ca_ht,
           COALESCE(SUM(quantite),0)::INT    AS nb_articles
         FROM boutique_ventes
         WHERE boutique_id=$1 AND DATE(date_vente) BETWEEN $2::DATE AND $3::DATE
       `, [boutique_id, from, to]);
       const tr = await pool.query(`
-        SELECT COUNT(*)::INT AS nb_tickets, COALESCE(AVG(total_ttc),0)::FLOAT AS panier_moyen
+        SELECT COUNT(*)::INT AS nb_tickets, COALESCE(AVG(total_ht),0)::FLOAT AS panier_moyen
         FROM boutique_tickets
         WHERE boutique_id=$1 AND DATE(date_ticket) BETWEEN $2::DATE AND $3::DATE
       `, [boutique_id, from, to]);
@@ -720,11 +724,12 @@ router.get('/analytics/evolution', async (req, res) => {
       const t = tr.rows[0];
       return {
         ca_ttc: v.ca_ttc,
+        ca_ht: v.ca_ht,
         nb_tickets: t.nb_tickets,
         nb_articles: v.nb_articles,
         panier_moyen: t.panier_moyen,
         ipt: t.nb_tickets > 0 ? v.nb_articles / t.nb_tickets : 0,
-        prix_moyen_article: v.nb_articles > 0 ? v.ca_ttc / v.nb_articles : 0,
+        prix_moyen_article: v.nb_articles > 0 ? v.ca_ht / v.nb_articles : 0,
       };
     }
 
@@ -738,6 +743,7 @@ router.get('/analytics/evolution', async (req, res) => {
       periode_precedente: { date_from: prevFromStr, date_to: prevToStr, ...previous },
       variations: {
         ca_ttc: delta(current.ca_ttc, previous.ca_ttc),
+        ca_ht: delta(current.ca_ht, previous.ca_ht),
         nb_tickets: delta(current.nb_tickets, previous.nb_tickets),
         nb_articles: delta(current.nb_articles, previous.nb_articles),
         panier_moyen: delta(current.panier_moyen, previous.panier_moyen),
