@@ -2,11 +2,18 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { cacheMiddleware } = require('../middleware/cache');
 
 router.use(authenticate);
 
+// Cache 120s par tranche de minute — invalidation naturelle quand le bucket change
+const dashboardKey = (suffix) => (req) => {
+  const minute = new Date().toISOString().slice(0, 16);
+  return `dashboard:${suffix}:${minute}`;
+};
+
 // GET /api/dashboard/kpis — KPIs agrégés pour la page d'accueil
-router.get('/kpis', async (req, res) => {
+router.get('/kpis', cacheMiddleware(dashboardKey('kpis'), 120), async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const monthStart = today.substring(0, 7) + '-01';
@@ -340,7 +347,7 @@ router.get('/kpis', async (req, res) => {
 
 // GET /api/dashboard/objectifs — Objectifs vs réalisé (jauges)
 // Retourne les objectifs du mois/trimestre/année en cours avec le réalisé calculé
-router.get('/objectifs', async (req, res) => {
+router.get('/objectifs', cacheMiddleware(dashboardKey('objectifs'), 120), async (req, res) => {
   try {
     const now = new Date();
     const year = now.getFullYear();
@@ -363,56 +370,74 @@ router.get('/objectifs', async (req, res) => {
       ORDER BY domaine, indicateur
     `, [year, month, trimestre]);
 
-    const objectifs = [];
+    if (objResult.rows.length === 0) return res.json([]);
 
-    for (const obj of objResult.rows) {
+    // Perf : pré-agrégation en 3 requêtes parallèles (vs N+1 par objectif).
+    // On agrège par les 3 dates de début (mensuel/trimestriel/annuel) en une seule passe.
+    const periodes = { mensuel: monthStart, trimestriel: trimestreStart, annuel: yearStart };
+    const [collecteRows, productionRows, postesRows] = await Promise.all([
+      pool.query(`
+        SELECT
+          CASE WHEN date >= $1 THEN 'mensuel'
+               WHEN date >= $2 THEN 'trimestriel'
+               ELSE 'annuel' END AS periode,
+          COALESCE(SUM(total_weight_kg), 0)::float AS total
+        FROM tours
+        WHERE date >= $3 AND status = 'completed'
+        GROUP BY 1
+      `, [monthStart, trimestreStart, yearStart]),
+      pool.query(`
+        SELECT
+          CASE WHEN date >= $1 THEN 'mensuel'
+               WHEN date >= $2 THEN 'trimestriel'
+               ELSE 'annuel' END AS periode,
+          COALESCE(SUM(kg_entree), 0)::float AS total
+        FROM production_daily
+        WHERE date >= $3
+        GROUP BY 1
+      `, [monthStart, trimestreStart, yearStart]),
+      pool.query(`
+        SELECT
+          CASE WHEN oe.date >= $1 THEN 'mensuel'
+               WHEN oe.date >= $2 THEN 'trimestriel'
+               ELSE 'annuel' END AS periode,
+          LOWER(ot.name) AS poste,
+          COALESCE(SUM(oe.quantity_kg), 0)::float AS total
+        FROM operation_executions oe
+        JOIN operations_tri ot ON ot.id = oe.operation_id
+        WHERE oe.date >= $3
+        GROUP BY 1, 2
+      `, [monthStart, trimestreStart, yearStart]).catch(() => ({ rows: [] })),
+    ]);
+
+    // Indexation pour lookup O(1) lors du mapping
+    const totalCollecte = Object.fromEntries(collecteRows.rows.map(r => [r.periode, r.total]));
+    const totalProduction = Object.fromEntries(productionRows.rows.map(r => [r.periode, r.total]));
+    const totalParPoste = postesRows.rows.reduce((acc, r) => {
+      acc[r.periode] = acc[r.periode] || [];
+      acc[r.periode].push({ poste: r.poste, total: r.total });
+      return acc;
+    }, {});
+
+    const objectifs = objResult.rows.map((obj) => {
       let realise = 0;
-      const dateDebut = obj.periode === 'mensuel' ? monthStart
-        : obj.periode === 'trimestriel' ? trimestreStart
-        : yearStart;
+      const indicLower = (obj.indicateur || '').toLowerCase();
 
-      // Calculer le réalisé selon le domaine et l'indicateur
-      if (obj.domaine === 'collecte' && obj.indicateur.toLowerCase().includes('tonnage')) {
-        const r = await pool.query(
-          `SELECT COALESCE(SUM(total_weight_kg), 0) as total
-           FROM tours WHERE date >= $1 AND status = 'completed'`,
-          [dateDebut]
-        );
-        realise = parseFloat(r.rows[0].total) || 0;
-
+      if (obj.domaine === 'collecte' && indicLower.includes('tonnage')) {
+        realise = totalCollecte[obj.periode] || 0;
       } else if (obj.domaine === 'tri' || obj.domaine === 'production') {
-        // Par poste de travail si l'indicateur contient le nom du poste
-        const indicLower = obj.indicateur.toLowerCase();
-        if (indicLower.includes('crackage') || indicLower.includes('tri fin') || indicLower.includes('catégorisation') || indicLower.includes('conditionnement')) {
-          // Chercher dans operation_executions par poste
-          const posteSearch = indicLower.includes('crackage') ? '%crack%'
-            : indicLower.includes('tri fin') ? '%tri fin%'
-            : indicLower.includes('catégorisation') ? '%catégor%'
-            : '%condition%';
-          try {
-            const r = await pool.query(
-              `SELECT COALESCE(SUM(oe.quantity_kg), 0) as total
-               FROM operation_executions oe
-               JOIN operations_tri ot ON ot.id = oe.operation_id
-               WHERE oe.date >= $1 AND LOWER(ot.name) LIKE $2`,
-              [dateDebut, posteSearch]
-            );
-            realise = parseFloat(r.rows[0].total) || 0;
-          } catch { /* table peut ne pas exister */ }
+        const posteKeywords = ['crack', 'tri fin', 'catégor', 'condition'];
+        const matchedPoste = posteKeywords.find(k => indicLower.includes(k));
+        if (matchedPoste) {
+          const found = (totalParPoste[obj.periode] || []).find(p => p.poste.includes(matchedPoste));
+          realise = found ? found.total : 0;
         } else {
-          // Tonnage trié global
-          const r = await pool.query(
-            `SELECT COALESCE(SUM(kg_entree), 0) as total
-             FROM production_daily WHERE date >= $1`,
-            [dateDebut]
-          );
-          realise = parseFloat(r.rows[0].total) || 0;
+          realise = totalProduction[obj.periode] || 0;
         }
       }
 
       const pct = obj.valeur_cible > 0 ? Math.min(Math.round((realise / obj.valeur_cible) * 100), 100) : 0;
-
-      objectifs.push({
+      return {
         id: obj.id,
         domaine: obj.domaine,
         indicateur: obj.indicateur,
@@ -424,8 +449,8 @@ router.get('/objectifs', async (req, res) => {
         realise: Math.round(realise),
         pourcentage: pct,
         commentaire: obj.commentaire,
-      });
-    }
+      };
+    });
 
     res.json(objectifs);
   } catch (err) {

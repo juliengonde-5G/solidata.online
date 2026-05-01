@@ -12,8 +12,9 @@ export default function ProduitsFinis() {
   const [showForm, setShowForm] = useState(false);
   const [catalogue, setCatalogue] = useState([]);
   const [form, setForm] = useState({
-    produit_catalogue_id: '', barcode: '', poids_kg: '', qualite: 'A', notes: '',
+    catalogue_id: '', code_barre: '', poids_kg: '', gamme: 'A', date_fabrication: '',
   });
+  const [submitError, setSubmitError] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
@@ -33,27 +34,32 @@ export default function ProduitsFinis() {
 
   const createProduct = async (e) => {
     e.preventDefault();
+    setSubmitError(null);
     try {
       await api.post('/produits-finis', form);
       setShowForm(false);
-      setForm({ produit_catalogue_id: '', barcode: '', poids_kg: '', qualite: 'A', notes: '' });
+      setForm({ catalogue_id: '', code_barre: '', poids_kg: '', gamme: 'A', date_fabrication: '' });
       loadData();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      const msg = err?.response?.data?.error || 'Erreur lors de la création du produit fini';
+      setSubmitError(msg);
+      console.error(err);
+    }
   };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des produits finis..." /></Layout>;
 
   const columns = [
-    { key: 'barcode', label: 'Code-barres', sortable: true, render: (p) => <span className="font-mono text-sm">{p.barcode || '—'}</span> },
+    { key: 'code_barre', label: 'Code-barres', sortable: true, render: (p) => <span className="font-mono text-sm">{p.code_barre || '—'}</span> },
     { key: 'produit_nom', label: 'Produit', sortable: true, render: (p) => p.produit_nom || '—' },
     { key: 'poids_kg', label: 'Poids (kg)', sortable: true, render: (p) => <span className="font-medium">{p.poids_kg}</span> },
     {
-      key: 'qualite',
-      label: 'Qualité',
+      key: 'gamme',
+      label: 'Gamme',
       sortable: true,
-      render: (p) => <StatusBadge status={p.qualite} size="sm" />,
+      render: (p) => <StatusBadge status={p.gamme} size="sm" />,
     },
-    { key: 'created_at', label: 'Date', sortable: true, render: (p) => <span className="text-xs text-slate-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</span> },
+    { key: 'date_fabrication', label: 'Fabriqué le', sortable: true, render: (p) => <span className="text-xs text-slate-500">{p.date_fabrication ? new Date(p.date_fabrication).toLocaleDateString('fr-FR') : '—'}</span> },
     {
       key: 'is_shipped',
       label: 'Statut',
@@ -119,18 +125,23 @@ export default function ProduitsFinis() {
           </>}
         >
           <form id="produits-finis-form" onSubmit={createProduct} className="space-y-3">
-            <select value={form.produit_catalogue_id} onChange={e => setForm({ ...form, produit_catalogue_id: e.target.value })} className="input-modern" required>
+            {submitError && (
+              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {submitError}
+              </div>
+            )}
+            <select value={form.catalogue_id} onChange={e => setForm({ ...form, catalogue_id: e.target.value })} className="input-modern" required aria-label="Produit catalogue">
               <option value="">Produit catalogue *</option>
               {catalogue.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
             </select>
-            <input placeholder="Code-barres" value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} className="input-modern" />
-            <input type="number" step="0.1" placeholder="Poids (kg)" value={form.poids_kg} onChange={e => setForm({ ...form, poids_kg: e.target.value })} className="input-modern" />
-            <select value={form.qualite} onChange={e => setForm({ ...form, qualite: e.target.value })} className="input-modern">
-              <option value="A">Qualité A — Premium</option>
-              <option value="B">Qualité B — Standard</option>
-              <option value="C">Qualité C — Déclassé</option>
+            <input placeholder="Code-barres *" value={form.code_barre} onChange={e => setForm({ ...form, code_barre: e.target.value })} className="input-modern" required aria-label="Code-barres" />
+            <input type="number" step="0.1" min="0" placeholder="Poids (kg) *" value={form.poids_kg} onChange={e => setForm({ ...form, poids_kg: e.target.value })} className="input-modern" required aria-label="Poids en kg" />
+            <select value={form.gamme} onChange={e => setForm({ ...form, gamme: e.target.value })} className="input-modern" aria-label="Gamme du produit">
+              <option value="A">Gamme A — Premium</option>
+              <option value="B">Gamme B — Standard</option>
+              <option value="C">Gamme C — Déclassé</option>
             </select>
-            <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="input-modern" rows="2" />
+            <input type="date" value={form.date_fabrication} onChange={e => setForm({ ...form, date_fabrication: e.target.value })} className="input-modern" aria-label="Date de fabrication" />
           </form>
         </Modal>
       </div>

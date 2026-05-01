@@ -1782,6 +1782,17 @@ async function initDatabase() {
     // Index on tours
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_date ON tours(date);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_status ON tours(status);');
+
+    // Perf P0 #4 — Index FK manquants sur tables time-series et chemins critiques
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tour_cav_tour_id ON tour_cav(tour_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tour_cav_cav_id ON tour_cav(cav_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_incidents_tour_id ON incidents(tour_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_gps_positions_vehicle_recorded ON gps_positions(vehicle_id, recorded_at DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_stock_movements_matiere ON stock_movements(matiere_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tour_weights_tour ON tour_weights(tour_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tours_driver_date ON tours(driver_employee_id, date DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employees_insertion_status ON employees(insertion_status);');
     // Schedule poste_code column for planning hebdo
     await client.query(`
       DO $$ BEGIN ALTER TABLE schedule ADD COLUMN poste_code VARCHAR(50); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
