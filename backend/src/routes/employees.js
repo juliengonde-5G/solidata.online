@@ -595,4 +595,122 @@ router.put('/:id/availability', authorize('ADMIN', 'RH'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// IMPORT COLLABORATEURS
+// ══════════════════════════════════════════
+
+// POST /api/employees/import/csv — Import collaborateurs depuis CSV
+router.post('/import/csv', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { collaborators } = req.body; // Array of collaborators
+
+    if (!Array.isArray(collaborators) || collaborators.length === 0) {
+      return res.status(400).json({ error: 'Tableau de collaborateurs requis' });
+    }
+
+    const positionToTeamMap = {
+      'Encadrante Technique': 'tri',
+      'Conseillère En Insertion Principale / Référente': 'administration',
+      'Salarie Polyvalent Cddi': 'tri',
+      'Operateur De Tri Cddi': 'tri',
+      'Operatrice De Tri Cddi': 'tri',
+      'Chauffeur / Suiveur / Manutentionnaire Cddi': 'collecte',
+      'Chauffeur Suiveur Polyvalent': 'collecte',
+      'Chauffeur / Suiveur Cddi': 'collecte',
+      'Operateur De Presse / Manutentionnaire Cddi': 'tri',
+      'Conducteur De Presse / Manutentionnaire Cddi': 'tri',
+      'Responsable Logistique': 'logistique',
+      'Operatrice De Production': 'tri',
+      'Cariste Manutentionnaire': 'logistique',
+      'Assistant technique': 'administration',
+      'Directeur des Opérations': 'administration',
+      'Assistant Technique': 'administration',
+      'Assistante Administrative': 'administration',
+      'Apprenti CIP': 'administration',
+    };
+
+    const contractTypeMap = {
+      'CDI': 'CDI',
+      'CDD': 'CDD',
+      'Apprentissage': 'apprentissage',
+    };
+
+    const created = [];
+    const errors = [];
+
+    for (const collab of collaborators) {
+      try {
+        const position = collab.position || '';
+        const contractType = contractTypeMap[collab.contract_type] || 'CDD';
+        const teamType = positionToTeamMap[position] || 'administration';
+
+        // Récupérer l'ID de l'équipe
+        const teamResult = await pool.query(
+          'SELECT id FROM teams WHERE type = $1 LIMIT 1',
+          [teamType]
+        );
+        const team_id = teamResult.rows[0]?.id || null;
+
+        // Créer l'employé
+        const employeeResult = await pool.query(
+          `INSERT INTO employees (first_name, last_name, team_id, position, contract_type, is_active)
+           VALUES ($1, $2, $3, $4, $5, true)
+           RETURNING id`,
+          [collab.first_name, collab.last_name, team_id, position, contractType]
+        );
+
+        const employee_id = employeeResult.rows[0].id;
+
+        // Créer le contrat
+        const today = new Date().toISOString().split('T')[0];
+        await pool.query(
+          `INSERT INTO employee_contracts (employee_id, contract_type, start_date, team_id, is_current)
+           VALUES ($1, $2, $3, $4, true)`,
+          [employee_id, contractType, today, team_id]
+        );
+
+        created.push({
+          id: employee_id,
+          first_name: collab.first_name,
+          last_name: collab.last_name,
+          position,
+          contract_type: contractType,
+        });
+      } catch (err) {
+        errors.push({
+          collaborator: `${collab.first_name} ${collab.last_name}`,
+          error: err.message,
+        });
+      }
+    }
+
+    res.json({
+      message: `${created.length} collaborateurs importés`,
+      created,
+      errors,
+      total: created.length + errors.length,
+    });
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur import :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/employees/clear — Supprimer tous les employés (ADMIN only)
+router.delete('/clear', authorize('ADMIN'), async (req, res) => {
+  try {
+    // Supprimer en cascade (contraintes FK)
+    await pool.query('DELETE FROM work_hours');
+    await pool.query('DELETE FROM schedule');
+    await pool.query('DELETE FROM employee_availability');
+    await pool.query('DELETE FROM employee_contracts');
+    await pool.query('DELETE FROM employees');
+
+    res.json({ message: 'Tous les employés ont été supprimés' });
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur suppression :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;
