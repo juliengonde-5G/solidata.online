@@ -84,7 +84,7 @@ export default function BoutiquesObjectifs() {
       <div className="p-4 sm:p-6 max-w-6xl">
         <PageHeader
           title="Objectifs de vente"
-          subtitle="Budget annuel ventilé en objectifs mensuels de CA TTC"
+          subtitle="Budget annuel ventilé en objectifs mensuels de CA HT"
           icon={Target}
         />
 
@@ -109,7 +109,7 @@ export default function BoutiquesObjectifs() {
                 <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
                   <tr>
                     <th className="text-left py-2 px-2">Mois</th>
-                    <th className="text-right py-2 px-2">CA objectif TTC (€)</th>
+                    <th className="text-right py-2 px-2">CA objectif HT (€)</th>
                     <th className="text-right py-2 px-2">Nb tickets</th>
                     <th className="text-right py-2 px-2">Panier moy. (€)</th>
                     <th className="text-right py-2 px-2">CA réalisé</th>

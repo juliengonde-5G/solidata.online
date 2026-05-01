@@ -107,7 +107,7 @@ export default function BoutiquesVentes() {
         {loading ? <LoadingSpinner size="lg" /> : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <KpiCard title="CA TTC" value={`${kpis.total.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`} icon={TrendingUp} accent="primary" />
+              <KpiCard title="CA HT" value={`${kpis.total.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`} icon={TrendingUp} accent="primary" />
               <KpiCard title="Nb tickets" value={kpis.nbTickets.toLocaleString('fr-FR')} icon={ShoppingBag} accent="slate" />
               <KpiCard title="Nb articles" value={kpis.nbArticles.toLocaleString('fr-FR')} icon={ShoppingBag} accent="slate" />
               <KpiCard title="Panier moyen" value={`${kpis.panier.toFixed(2)} €`} icon={TrendingUp} accent="amber" />
@@ -115,7 +115,7 @@ export default function BoutiquesVentes() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
               <div className="bg-white rounded-card shadow-card p-4">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">CA quotidien (TTC)</h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">CA quotidien (HT)</h3>
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={dailyChart}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -145,7 +145,7 @@ export default function BoutiquesVentes() {
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">Par segment</h3>
                 <table className="w-full text-sm">
                   <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
-                    <tr><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA TTC</th></tr>
+                    <tr><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA HT</th></tr>
                   </thead>
                   <tbody>
                     {segments.map(s => (
