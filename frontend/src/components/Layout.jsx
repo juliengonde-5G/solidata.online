@@ -92,7 +92,6 @@ const menuSections = [
       { path: '/boutiques', label: 'Tableau de bord', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
       { path: '/boutiques/ventes', label: 'Ventes', icon: ShoppingBag, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
       { path: '/boutiques/commandes', label: 'Commandes', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
-      { path: '/boutiques/planning', label: 'Planning', icon: Calendar, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
       { path: '/boutiques/objectifs', label: 'Objectifs', icon: Target, roles: ['ADMIN', 'MANAGER'] },
       { path: '/boutiques/import', label: 'Import CSV', icon: Upload, roles: ['ADMIN', 'MANAGER'] },
     ],
@@ -139,6 +138,7 @@ const menuSections = [
       { path: '/admin-db', label: 'Base de données', icon: Settings, roles: ['ADMIN'] },
       { path: '/admin-stock-original', label: 'Stock Original', icon: Scale, roles: ['ADMIN'] },
       { path: '/activity-log', label: 'Journal d\'activité', icon: ClipboardList, roles: ['ADMIN'] },
+      { path: '/admin-collaborators-import', label: 'Importer collaborateurs', icon: UserPlus, roles: ['ADMIN'] },
     ],
   },
 ];

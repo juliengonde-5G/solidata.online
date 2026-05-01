@@ -81,7 +81,6 @@ import HubBoutiques from './pages/HubBoutiques';
 import BoutiquesDashboard from './pages/BoutiquesDashboard';
 import BoutiquesVentes from './pages/BoutiquesVentes';
 import BoutiquesCommandes from './pages/BoutiquesCommandes';
-import BoutiquesPlanning from './pages/BoutiquesPlanning';
 import BoutiquesObjectifs from './pages/BoutiquesObjectifs';
 import BoutiquesImport from './pages/BoutiquesImport';
 
@@ -118,7 +117,6 @@ function App() {
             <Route path="/boutiques" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesDashboard /></ProtectedRoute>} />
             <Route path="/boutiques/ventes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesVentes /></ProtectedRoute>} />
             <Route path="/boutiques/commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesCommandes /></ProtectedRoute>} />
-            <Route path="/boutiques/planning" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesPlanning /></ProtectedRoute>} />
             <Route path="/boutiques/objectifs" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><BoutiquesObjectifs /></ProtectedRoute>} />
             <Route path="/boutiques/import" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><BoutiquesImport /></ProtectedRoute>} />
 
