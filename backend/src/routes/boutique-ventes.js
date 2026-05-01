@@ -655,7 +655,8 @@ router.get('/analytics/hourly', async (req, res) => {
       SELECT EXTRACT(HOUR FROM t.date_ticket)::INT AS heure,
              COUNT(*)::INT AS nb_tickets,
              COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc,
-             COALESCE(AVG(t.total_ttc),0)::FLOAT AS panier_moyen
+             COALESCE(SUM(t.total_ht),0)::FLOAT AS ca_ht,
+             COALESCE(AVG(t.total_ht),0)::FLOAT AS panier_moyen
       FROM boutique_tickets t
       WHERE t.boutique_id = $1
         AND ($2::DATE IS NULL OR DATE(t.date_ticket) >= $2::DATE)
@@ -668,7 +669,8 @@ router.get('/analytics/hourly', async (req, res) => {
       SELECT EXTRACT(DOW FROM t.date_ticket)::INT  AS jour_semaine,
              EXTRACT(HOUR FROM t.date_ticket)::INT AS heure,
              COUNT(*)::INT AS nb_tickets,
-             COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc
+             COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc,
+             COALESCE(SUM(t.total_ht),0)::FLOAT AS ca_ht
       FROM boutique_tickets t
       WHERE t.boutique_id = $1
         AND ($2::DATE IS NULL OR DATE(t.date_ticket) >= $2::DATE)
