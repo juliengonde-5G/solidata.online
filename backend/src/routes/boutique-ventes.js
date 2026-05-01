@@ -355,20 +355,23 @@ router.get('/batches/:id', async (req, res) => {
 });
 
 // DELETE /api/boutique-ventes/batches/:id — supprime le batch et ses ventes
-// boutique_ventes.batch_id a déjà ON DELETE CASCADE ; pour boutique_tickets.batch_id
-// la migration ON DELETE CASCADE peut ne pas être appliquée sur d'anciennes bases,
-// d'où le DELETE explicite avant pour éviter une violation FK.
+// Ordre critique pour éviter violations FK :
+// 1. DELETE ventes (référencent tickets et batch)
+// 2. DELETE tickets (référencent batch)
+// 3. DELETE batch
 router.delete('/batches/:id',
   authorize('ADMIN', 'MANAGER'),
   async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // Supprimer les ventes AVANT les tickets (FK ventes.ticket_id → tickets.id)
+      await client.query('DELETE FROM boutique_ventes WHERE batch_id = $1', [req.params.id]);
       await client.query('DELETE FROM boutique_tickets WHERE batch_id = $1', [req.params.id]);
       const r = await client.query('DELETE FROM boutique_import_batches WHERE id = $1', [req.params.id]);
       await client.query('COMMIT');
       if (r.rowCount === 0) return res.status(404).json({ error: 'Batch introuvable' });
-      res.json({ success: true });
+      res.json({ success: true, message: 'Batch supprimé avec toutes ses données' });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('[boutique-ventes] DELETE batch:', err);
