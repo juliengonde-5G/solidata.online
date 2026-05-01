@@ -246,7 +246,7 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
 
       {/* Bloc 1 : KPIs principaux avec deltas vs J-1 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <KpiCard title="CA TTC du jour" value={formatEuro(kpis?.ca_ttc)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={v.ca_ttc} />} />
+        <KpiCard title="CA HT du jour" value={formatEuro(kpis?.ca_ttc)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={v.ca_ttc} />} />
         <KpiCard title="Nb tickets" value={(kpis?.nb_tickets || 0).toLocaleString('fr-FR')} icon={Receipt} accent="slate" footer={<DeltaBadge value={v.nb_tickets} />} />
         <KpiCard title="Panier moyen" value={formatEuro(kpis?.panier_moyen, 2)} icon={Target} accent="amber" footer={<DeltaBadge value={v.panier_moyen} />} />
         <KpiCard title="IPT (articles/ticket)" value={(kpis?.ipt || 0).toFixed(2)} icon={ShoppingBag} accent="slate" footer={<DeltaBadge value={v.ipt} />} />
@@ -337,7 +337,7 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
         ) : (
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
-              <tr><th className="text-left py-2">Rayon</th><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA TTC</th></tr>
+              <tr><th className="text-left py-2">Rayon</th><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA HT</th></tr>
             </thead>
             <tbody>
               {rayons.map((r, i) => (
@@ -388,7 +388,7 @@ function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, 
 
       {/* KPIs budgétaires */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <KpiCard title="CA TTC réalisé" value={formatEuro(realiseCA)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={ev.ca_ttc} />} />
+        <KpiCard title="CA HT réalisé" value={formatEuro(realiseCA)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={ev.ca_ttc} />} />
         <KpiCard title="Objectif CA" value={formatEuro(objectifCA)} icon={Target} accent="slate" />
         <KpiCard title="% atteinte" value={pctAtteinte !== null ? `${pctAtteinte.toFixed(0)}%` : '—'} icon={TrendingUp} accent={pctAtteinte >= 100 ? 'primary' : pctAtteinte >= 80 ? 'amber' : 'slate'} />
         <KpiCard title="Nb tickets" value={(kpis?.nb_tickets ?? data.realise?.nb_tickets ?? 0).toLocaleString('fr-FR')} icon={Receipt} accent="slate" footer={<DeltaBadge value={ev.nb_tickets} />} />
@@ -452,7 +452,7 @@ function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, 
               <YAxis yAxisId="right" orientation="right" fontSize={11} />
               <Tooltip formatter={(v, n) => n === 'CA (€)' ? formatEuro(v, 2) : v} />
               <Legend />
-              <Bar yAxisId="left" dataKey="ca_ttc" fill="#EC4899" name="CA (€)" />
+              <Bar yAxisId="left" dataKey="ca_ttc" fill="#EC4899" name="CA HT (€)" />
               <Line yAxisId="right" type="monotone" dataKey="nb_tickets" stroke="#0EA5E9" name="Tickets" dot={{ r: 3 }} />
             </ComposedChart>
           </ResponsiveContainer>
