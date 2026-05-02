@@ -5,20 +5,20 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const stateMachine = require('../services/state-machine');
 
 router.use(authenticate);
 router.use(autoLogActivity('boutique_commande'));
 
 const STATUTS = ['brouillon', 'envoyee', 'ajustee', 'en_preparation', 'expediee', 'annulee'];
 
-const TRANSITIONS = {
-  brouillon: ['envoyee', 'annulee'],
-  envoyee: ['ajustee', 'annulee'],
-  ajustee: ['en_preparation', 'annulee'],
-  en_preparation: ['expediee', 'annulee'],
-  expediee: [],
-  annulee: [],
-};
+// V5.3 — Adoption pilote du moteur de state machine centralisé
+// (cf docs/STATE_MACHINES.md). La constante TRANSITIONS locale est
+// retirée ; les règles sont définies dans services/state-machines.js
+// (machine 'boutique_commande'). Le moteur valide les transitions et
+// écrit dans state_transitions_audit. La table boutique_commande_historique
+// reste alimentée pour conserver la traçabilité métier riche
+// (commentaire utilisateur, ancien/nouveau statut).
 
 async function generateReference() {
   const year = new Date().getFullYear();
@@ -41,16 +41,24 @@ async function logHistory(client, commandeId, ancien, nouveau, userId, commentai
   );
 }
 
-async function checkAndTransition(commandeId, targetStatut, userId, extra = {}) {
+async function checkAndTransition(commandeId, targetStatut, userId, userRole, extra = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const r = await client.query('SELECT * FROM boutique_commandes WHERE id = $1 FOR UPDATE', [commandeId]);
     if (r.rows.length === 0) throw new Error('Commande introuvable');
     const commande = r.rows[0];
-    const allowed = TRANSITIONS[commande.statut] || [];
-    if (!allowed.includes(targetStatut)) {
-      throw new Error(`Transition ${commande.statut} → ${targetStatut} non autorisée`);
+
+    // Validation via le moteur centralisé (V5.3) — vérifie l'enum, les
+    // transitions autorisées ET le rôle utilisateur.
+    const check = stateMachine.canTransition({
+      machine: 'boutique_commande',
+      fromState: commande.statut,
+      toState: targetStatut,
+      userRole,
+    });
+    if (!check.ok) {
+      throw new Error(check.reason);
     }
 
     const updates = ['statut = $1', 'updated_at = NOW()'];
@@ -103,6 +111,21 @@ async function checkAndTransition(commandeId, targetStatut, userId, extra = {}) 
     }
 
     await client.query('COMMIT');
+
+    // Audit centralisé state machine (post-commit, best effort).
+    // L'audit métier (boutique_commande_historique) est déjà écrit dans
+    // la transaction via logHistory().
+    stateMachine.transition({
+      machine: 'boutique_commande',
+      entityType: 'boutique_commandes',
+      entityId: commandeId,
+      fromState: commande.statut,
+      toState: targetStatut,
+      userId,
+      userRole,
+      reason: extra.commentaire || null,
+    }).catch(() => { /* best effort, déjà loggé en métier */ });
+
     return { ok: true };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -300,7 +323,7 @@ router.put('/:id',
 // PATCH /api/boutique-commandes/:id/envoyer (RESP_BTQ, MANAGER, ADMIN)
 router.patch('/:id/envoyer', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (req, res) => {
   try {
-    await checkAndTransition(req.params.id, 'envoyee', req.user.id, { commentaire: req.body?.commentaire });
+    await checkAndTransition(req.params.id, 'envoyee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
@@ -328,7 +351,7 @@ router.patch('/:id/ajuster', authorize('ADMIN', 'MANAGER'), async (req, res) => 
     }
 
     await client.query('COMMIT');
-    await checkAndTransition(req.params.id, 'ajustee', req.user.id, { commentaire: req.body?.commentaire });
+    await checkAndTransition(req.params.id, 'ajustee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -340,21 +363,21 @@ router.patch('/:id/ajuster', authorize('ADMIN', 'MANAGER'), async (req, res) => 
 
 router.patch('/:id/preparer', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    await checkAndTransition(req.params.id, 'en_preparation', req.user.id, { commentaire: req.body?.commentaire });
+    await checkAndTransition(req.params.id, 'en_preparation', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 router.patch('/:id/expedier', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    await checkAndTransition(req.params.id, 'expediee', req.user.id, { commentaire: req.body?.commentaire });
+    await checkAndTransition(req.params.id, 'expediee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 router.patch('/:id/annuler', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (req, res) => {
   try {
-    await checkAndTransition(req.params.id, 'annulee', req.user.id, { commentaire: req.body?.commentaire });
+    await checkAndTransition(req.params.id, 'annulee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
