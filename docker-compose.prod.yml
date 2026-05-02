@@ -29,7 +29,11 @@ services:
     image: redis:7-alpine
     container_name: solidata-redis
     restart: always
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save 60 1000
+    # volatile-lru : n'évince QUE les clés avec TTL (= clés de cache via
+    # cacheMiddleware utilisant setex). BullMQ stocke ses jobs SANS TTL,
+    # donc jamais évincés — conforme à l'exigence BullMQ d'avoir une
+    # policy non-éviction sur les clés persistantes.
+    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru --save 60 1000
     networks:
       - internal
     healthcheck:
