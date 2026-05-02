@@ -3110,6 +3110,163 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Module Boutiques ✓');
 
+    // ══════════════════════════════════════════
+    // V2 — Référentiel unifié `partners` (Enterprise Architect Ch1)
+    //
+    // Fusion exutoires + clients_exutoires + boutiques (côté aval) en une
+    // table maître. Les associations (collecte) restent dans leur table
+    // dédiée (collecte = points d'apport, sémantique différente).
+    //
+    // Approche additive : la table `partners` est la nouvelle source de
+    // vérité, les anciennes tables sont conservées en lecture seule
+    // (rollback possible). Les colonnes source_table/source_id permettent
+    // de tracer l'origine. Les FK partner_id sont ajoutées en parallèle
+    // sur expeditions/commandes_exutoires/produits_finis/factures_exutoires.
+    // ══════════════════════════════════════════
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS partners (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(30) NOT NULL CHECK (type IN (
+          'exutoire_recycleur', 'exutoire_negociant', 'exutoire_industriel',
+          'exutoire_autre', 'boutique'
+        )),
+        nom VARCHAR(255) NOT NULL,
+        siret VARCHAR(14),
+        adresse TEXT,
+        code_postal VARCHAR(10),
+        ville VARCHAR(100),
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        contact_nom VARCHAR(150),
+        contact_email VARCHAR(255),
+        contact_tel VARCHAR(30),
+        actif BOOLEAN DEFAULT true,
+        notes TEXT,
+        -- Origine pour rétrocompat (rollback) — drop après migration finale
+        source_table VARCHAR(50),
+        source_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT uq_partner_source UNIQUE (source_table, source_id)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_partners_type ON partners(type);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_partners_actif ON partners(actif) WHERE actif = true;');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_partners_nom ON partners(nom);');
+
+    // Backfill 1 : exutoires (table simple type) → partners
+    // Les anciens "exutoires" couvrent recycleurs/négociants/industriels avec
+    // le champ libre 'type'. On mappe vers les enum :
+    //   recycl* → exutoire_recycleur, negoc* → exutoire_negociant,
+    //   industr* → exutoire_industriel, sinon → exutoire_autre
+    await client.query(`
+      INSERT INTO partners (type, nom, adresse, contact_nom, contact_email,
+                            contact_tel, actif, source_table, source_id)
+      SELECT
+        CASE
+          WHEN LOWER(COALESCE(e.type, '')) LIKE '%recycl%'  THEN 'exutoire_recycleur'
+          WHEN LOWER(COALESCE(e.type, '')) LIKE '%negoc%'   THEN 'exutoire_negociant'
+          WHEN LOWER(COALESCE(e.type, '')) LIKE '%industr%' THEN 'exutoire_industriel'
+          ELSE 'exutoire_autre'
+        END AS type,
+        e.nom, e.adresse, e.contact_nom, e.contact_email, e.contact_tel,
+        COALESCE(e.is_active, true) AS actif,
+        'exutoires' AS source_table, e.id AS source_id
+      FROM exutoires e
+      ON CONFLICT (source_table, source_id) DO NOTHING;
+    `);
+
+    // Backfill 2 : clients_exutoires (table riche) → partners
+    // type_client mappe directement aux enum exutoire_*.
+    await client.query(`
+      INSERT INTO partners (type, nom, siret, adresse, code_postal, ville,
+                            contact_nom, contact_email, contact_tel, actif,
+                            source_table, source_id)
+      SELECT
+        CASE c.type_client
+          WHEN 'recycleur'  THEN 'exutoire_recycleur'
+          WHEN 'negociant'  THEN 'exutoire_negociant'
+          WHEN 'industriel' THEN 'exutoire_industriel'
+          ELSE 'exutoire_autre'
+        END AS type,
+        c.raison_sociale, c.siret, c.adresse, c.code_postal, c.ville,
+        c.contact_nom, c.contact_email, c.contact_telephone,
+        COALESCE(c.actif, true),
+        'clients_exutoires', c.id
+      FROM clients_exutoires c
+      ON CONFLICT (source_table, source_id) DO NOTHING;
+    `);
+
+    // Backfill 3 : boutiques → partners (côté aval = exutoire de produits triés)
+    await client.query(`
+      INSERT INTO partners (type, nom, adresse, code_postal, ville,
+                            latitude, longitude, contact_tel, actif,
+                            source_table, source_id)
+      SELECT
+        'boutique', b.nom, b.adresse, b.code_postal, b.ville,
+        b.latitude, b.longitude, b.telephone,
+        COALESCE(b.is_active, true),
+        'boutiques', b.id
+      FROM boutiques b
+      ON CONFLICT (source_table, source_id) DO NOTHING;
+    `);
+
+    // Ajouter les FK partner_id en parallèle des anciennes (additive)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE expeditions ADD COLUMN partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE commandes_exutoires ADD COLUMN partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE factures_exutoires ADD COLUMN partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Backfill FK partner_id (lookup via source_table + source_id)
+    await client.query(`
+      UPDATE expeditions e SET partner_id = p.id
+      FROM partners p
+      WHERE p.source_table = 'exutoires' AND p.source_id = e.exutoire_id
+        AND e.partner_id IS NULL;
+    `);
+    await client.query(`
+      UPDATE produits_finis pf SET partner_id = p.id
+      FROM partners p
+      WHERE p.source_table = 'exutoires' AND p.source_id = pf.exutoire_id
+        AND pf.partner_id IS NULL;
+    `);
+    await client.query(`
+      UPDATE commandes_exutoires c SET partner_id = p.id
+      FROM partners p
+      WHERE p.source_table = 'clients_exutoires' AND p.source_id = c.client_id
+        AND c.partner_id IS NULL;
+    `);
+    await client.query(`
+      UPDATE factures_exutoires f SET partner_id = p.id
+      FROM partners p
+      WHERE p.source_table = 'clients_exutoires' AND p.source_id = f.client_id
+        AND f.partner_id IS NULL;
+    `);
+
+    await client.query('CREATE INDEX IF NOT EXISTS idx_expeditions_partner ON expeditions(partner_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_commandes_exutoires_partner ON commandes_exutoires(partner_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_produits_finis_partner ON produits_finis(partner_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_factures_exutoires_partner ON factures_exutoires(partner_id);');
+
+    console.log('[INIT-DB] Référentiel unifié `partners` + migration ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');
