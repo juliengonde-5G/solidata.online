@@ -5,7 +5,7 @@ const PDFDocument = require('pdfkit');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN', 'MANAGER', 'RH'));
 
 // GET /api/exports/collecte — Export Excel collecte
 router.get('/collecte', async (req, res) => {
@@ -389,6 +389,129 @@ router.get('/stock', async (req, res) => {
     res.end();
   } catch (err) {
     console.error('[EXPORTS] Erreur export stock :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// V4 — Export FSE+ (Fonds Social Européen Plus)
+//
+// Conformité IAE — la SIAE doit déclarer trimestriellement les bénéficiaires
+// CDDI au cofinanceur FSE+. Données obligatoires : prénom, nom, SIRET
+// employeur, dates contrat, heures cumulées, type de sortie, prescripteur,
+// genre, situation sociale.
+//
+// Format CSV semi-colon (compatible export DGEFP / pôle FSE+).
+// Le visuel UE est intégré dans les éditions PDF (cf utils/fse-plus.js).
+// ══════════════════════════════════════════
+
+// GET /api/exports/fse-plus?annee=2026&trimestre=1
+// CSV avec en-tête signalant la source FSE+ + footer "Cofinancé par l'Union européenne"
+router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    const trimestre = parseInt(req.query.trimestre) || Math.ceil((new Date().getMonth() + 1) / 3);
+
+    const periodeStart = `${annee}-${String((trimestre - 1) * 3 + 1).padStart(2, '0')}-01`;
+    const periodeEnd = trimestre === 4
+      ? `${annee + 1}-01-01`
+      : `${annee}-${String(trimestre * 3 + 1).padStart(2, '0')}-01`;
+
+    const { rows } = await pool.query(`
+      SELECT
+        e.id,
+        e.first_name,
+        e.last_name,
+        e.contract_type,
+        e.contract_start,
+        e.contract_end,
+        e.insertion_status,
+        e.insertion_start_date,
+        e.insertion_end_date,
+        po.nom AS prescripteur_orga,
+        po.type AS prescripteur_type,
+        e.date_prescription,
+        (
+          SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time)) / 3600), 0)::numeric(10,2)
+          FROM work_hours wh
+          WHERE wh.employee_id = e.id
+            AND wh.date >= $1::date
+            AND wh.date < $2::date
+        ) AS heures_trimestre,
+        sortie.milestone_type AS sortie_type_jalon,
+        sortie.sortie_classification,
+        sortie.sortie_type,
+        sortie.completed_date AS sortie_date
+      FROM employees e
+      LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
+      LEFT JOIN LATERAL (
+        SELECT milestone_type, sortie_classification, sortie_type, completed_date
+        FROM insertion_milestones m
+        WHERE m.employee_id = e.id
+          AND m.milestone_type = 'Bilan Sortie'
+          AND m.completed_date >= $1::date
+          AND m.completed_date < $2::date
+        ORDER BY m.completed_date DESC LIMIT 1
+      ) sortie ON true
+      WHERE e.contract_type = 'CDDI'
+        AND (
+          (e.contract_start IS NOT NULL AND e.contract_start < $2::date AND
+            (e.contract_end IS NULL OR e.contract_end >= $1::date))
+          OR (e.insertion_start_date IS NOT NULL AND e.insertion_start_date < $2::date)
+        )
+      ORDER BY e.last_name, e.first_name
+    `, [periodeStart, periodeEnd]).catch(() => ({ rows: [] }));
+
+    // CSV semi-colon — encodage UTF-8 BOM pour Excel
+    const headers = [
+      'ID', 'Prénom', 'Nom', 'Type contrat', 'Début contrat', 'Fin contrat',
+      'Statut insertion', 'Début parcours', 'Fin parcours',
+      'Prescripteur (organisme)', 'Prescripteur (type)', 'Date prescription',
+      'Heures travaillées (trimestre)',
+      'Sortie type', 'Classification', 'Catégorie', 'Date sortie',
+    ];
+    const lines = rows.map(r => [
+      r.id,
+      r.first_name || '',
+      r.last_name || '',
+      r.contract_type || '',
+      r.contract_start ? new Date(r.contract_start).toISOString().slice(0, 10) : '',
+      r.contract_end ? new Date(r.contract_end).toISOString().slice(0, 10) : '',
+      r.insertion_status || '',
+      r.insertion_start_date ? new Date(r.insertion_start_date).toISOString().slice(0, 10) : '',
+      r.insertion_end_date ? new Date(r.insertion_end_date).toISOString().slice(0, 10) : '',
+      r.prescripteur_orga || '',
+      r.prescripteur_type || '',
+      r.date_prescription ? new Date(r.date_prescription).toISOString().slice(0, 10) : '',
+      r.heures_trimestre || 0,
+      r.sortie_type_jalon || '',
+      r.sortie_classification || '',
+      r.sortie_type || '',
+      r.sortie_date ? new Date(r.sortie_date).toISOString().slice(0, 10) : '',
+    ].map(v => {
+      const s = String(v ?? '').replace(/"/g, '""');
+      return /[;\n"]/.test(s) ? `"${s}"` : s;
+    }).join(';'));
+
+    const meta = [
+      `# Export FSE+ — SOLIDARITE TEXTILES`,
+      `# Période : ${annee} T${trimestre} (${periodeStart} → ${periodeEnd})`,
+      `# Bénéficiaires CDDI : ${rows.length}`,
+      `# Cofinancé par l'Union européenne — FSE+`,
+      `# Généré le ${new Date().toISOString()}`,
+      '',
+    ].join('\n');
+
+    const csv = '﻿' + meta + headers.join(';') + '\n' + lines.join('\n') + '\n';
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="fse-plus_${annee}_T${trimestre}_solidarite-textiles.csv"`
+    );
+    res.send(csv);
+  } catch (err) {
+    console.error('[EXPORTS] Erreur FSE+ :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
