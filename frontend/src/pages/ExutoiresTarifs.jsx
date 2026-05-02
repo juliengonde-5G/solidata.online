@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Tag } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, DataTable, Modal, PageHeader } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -25,6 +26,7 @@ const TYPE_COLORS = {
 };
 
 export default function ExutoiresTarifs() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [tarifs, setTarifs] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -94,7 +96,13 @@ export default function ExutoiresTarifs() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Supprimer ce tarif ?')) return;
+    const ok = await confirm({
+      title: 'Supprimer ce tarif ?',
+      message: 'Cette action est définitive.',
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/tarifs-exutoires/${id}`);
       loadData();
@@ -113,6 +121,7 @@ export default function ExutoiresTarifs() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="p-6">
         {/* Header */}
         <PageHeader

@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 export default function AdminCollaboratorsImport() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [csvText, setCsvText] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -43,9 +45,12 @@ export default function AdminCollaboratorsImport() {
       }
 
       // Supprimer les employés existants
-      const confirmDelete = window.confirm(
-        `Vous allez supprimer tous les employés existants et importer ${collaborators.length} nouveaux collaborateurs. Continuer ?`
-      );
+      const confirmDelete = await confirm({
+        title: 'Remplacer tous les collaborateurs ?',
+        message: `Vous allez supprimer tous les employés existants et importer ${collaborators.length} nouveaux collaborateurs. Cette action est irréversible.`,
+        confirmLabel: 'Remplacer',
+        confirmVariant: 'danger',
+      });
 
       if (!confirmDelete) return;
 
@@ -66,6 +71,7 @@ export default function AdminCollaboratorsImport() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
+      {ConfirmDialogElement}
       <h1 className="text-3xl font-bold mb-6">Import de Collaborateurs</h1>
 
       <div className="bg-white rounded-lg shadow p-6 mb-6">

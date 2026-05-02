@@ -2,11 +2,18 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { cacheMiddleware } = require('../middleware/cache');
 
 router.use(authenticate);
 
+// Cache 120s par tranche de minute — invalidation naturelle quand le bucket change
+const dashboardKey = (suffix) => (req) => {
+  const minute = new Date().toISOString().slice(0, 16);
+  return `dashboard:${suffix}:${minute}`;
+};
+
 // GET /api/dashboard/kpis — KPIs agrégés pour la page d'accueil
-router.get('/kpis', async (req, res) => {
+router.get('/kpis', cacheMiddleware(dashboardKey('kpis'), 120), async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const monthStart = today.substring(0, 7) + '-01';
@@ -177,13 +184,24 @@ router.get('/kpis', async (req, res) => {
     ]);
 
     // ══════════════════════════════════════════
-    // Calcul du taux de valorisation
+    // Calcul du taux de valorisation (audit Direction D3)
+    //
+    // Formule : sorties valorisées / entrées brutes — bornée à 100% car
+    // physiquement impossible de "valoriser" plus que ce qui est entré (sauf
+    // saisie incohérente). On capait avant à NaN → désormais on cap à 100
+    // et on logge un avertissement si > 100% pour traçabilité audit.
     // ══════════════════════════════════════════
     const totalTrieT = parseFloat(totalTrieMois.rows[0].total) || 0;
     const totalEntreeKg = parseFloat(totalEntreeMois.rows[0].total) || 0;
-    const tauxValorisation = totalEntreeKg > 0
-      ? Math.round((totalTrieT * 1000 / totalEntreeKg) * 1000) / 10
-      : 0;
+    let tauxValorisation = 0;
+    if (totalEntreeKg > 0) {
+      const raw = (totalTrieT * 1000 / totalEntreeKg) * 100;
+      if (raw > 100) {
+        console.warn('[DASHBOARD] taux_valorisation > 100% (raw=' + raw.toFixed(1) +
+          ') — entrées/sorties incohérentes', { totalTrieT, totalEntreeKg });
+      }
+      tauxValorisation = Math.min(100, Math.round(raw * 10) / 10);
+    }
 
     // ══════════════════════════════════════════
     // Construction des alertes
@@ -340,7 +358,7 @@ router.get('/kpis', async (req, res) => {
 
 // GET /api/dashboard/objectifs — Objectifs vs réalisé (jauges)
 // Retourne les objectifs du mois/trimestre/année en cours avec le réalisé calculé
-router.get('/objectifs', async (req, res) => {
+router.get('/objectifs', cacheMiddleware(dashboardKey('objectifs'), 120), async (req, res) => {
   try {
     const now = new Date();
     const year = now.getFullYear();
@@ -363,56 +381,74 @@ router.get('/objectifs', async (req, res) => {
       ORDER BY domaine, indicateur
     `, [year, month, trimestre]);
 
-    const objectifs = [];
+    if (objResult.rows.length === 0) return res.json([]);
 
-    for (const obj of objResult.rows) {
+    // Perf : pré-agrégation en 3 requêtes parallèles (vs N+1 par objectif).
+    // On agrège par les 3 dates de début (mensuel/trimestriel/annuel) en une seule passe.
+    const periodes = { mensuel: monthStart, trimestriel: trimestreStart, annuel: yearStart };
+    const [collecteRows, productionRows, postesRows] = await Promise.all([
+      pool.query(`
+        SELECT
+          CASE WHEN date >= $1 THEN 'mensuel'
+               WHEN date >= $2 THEN 'trimestriel'
+               ELSE 'annuel' END AS periode,
+          COALESCE(SUM(total_weight_kg), 0)::float AS total
+        FROM tours
+        WHERE date >= $3 AND status = 'completed'
+        GROUP BY 1
+      `, [monthStart, trimestreStart, yearStart]),
+      pool.query(`
+        SELECT
+          CASE WHEN date >= $1 THEN 'mensuel'
+               WHEN date >= $2 THEN 'trimestriel'
+               ELSE 'annuel' END AS periode,
+          COALESCE(SUM(kg_entree), 0)::float AS total
+        FROM production_daily
+        WHERE date >= $3
+        GROUP BY 1
+      `, [monthStart, trimestreStart, yearStart]),
+      pool.query(`
+        SELECT
+          CASE WHEN oe.date >= $1 THEN 'mensuel'
+               WHEN oe.date >= $2 THEN 'trimestriel'
+               ELSE 'annuel' END AS periode,
+          LOWER(ot.name) AS poste,
+          COALESCE(SUM(oe.quantity_kg), 0)::float AS total
+        FROM operation_executions oe
+        JOIN operations_tri ot ON ot.id = oe.operation_id
+        WHERE oe.date >= $3
+        GROUP BY 1, 2
+      `, [monthStart, trimestreStart, yearStart]).catch(() => ({ rows: [] })),
+    ]);
+
+    // Indexation pour lookup O(1) lors du mapping
+    const totalCollecte = Object.fromEntries(collecteRows.rows.map(r => [r.periode, r.total]));
+    const totalProduction = Object.fromEntries(productionRows.rows.map(r => [r.periode, r.total]));
+    const totalParPoste = postesRows.rows.reduce((acc, r) => {
+      acc[r.periode] = acc[r.periode] || [];
+      acc[r.periode].push({ poste: r.poste, total: r.total });
+      return acc;
+    }, {});
+
+    const objectifs = objResult.rows.map((obj) => {
       let realise = 0;
-      const dateDebut = obj.periode === 'mensuel' ? monthStart
-        : obj.periode === 'trimestriel' ? trimestreStart
-        : yearStart;
+      const indicLower = (obj.indicateur || '').toLowerCase();
 
-      // Calculer le réalisé selon le domaine et l'indicateur
-      if (obj.domaine === 'collecte' && obj.indicateur.toLowerCase().includes('tonnage')) {
-        const r = await pool.query(
-          `SELECT COALESCE(SUM(total_weight_kg), 0) as total
-           FROM tours WHERE date >= $1 AND status = 'completed'`,
-          [dateDebut]
-        );
-        realise = parseFloat(r.rows[0].total) || 0;
-
+      if (obj.domaine === 'collecte' && indicLower.includes('tonnage')) {
+        realise = totalCollecte[obj.periode] || 0;
       } else if (obj.domaine === 'tri' || obj.domaine === 'production') {
-        // Par poste de travail si l'indicateur contient le nom du poste
-        const indicLower = obj.indicateur.toLowerCase();
-        if (indicLower.includes('crackage') || indicLower.includes('tri fin') || indicLower.includes('catégorisation') || indicLower.includes('conditionnement')) {
-          // Chercher dans operation_executions par poste
-          const posteSearch = indicLower.includes('crackage') ? '%crack%'
-            : indicLower.includes('tri fin') ? '%tri fin%'
-            : indicLower.includes('catégorisation') ? '%catégor%'
-            : '%condition%';
-          try {
-            const r = await pool.query(
-              `SELECT COALESCE(SUM(oe.quantity_kg), 0) as total
-               FROM operation_executions oe
-               JOIN operations_tri ot ON ot.id = oe.operation_id
-               WHERE oe.date >= $1 AND LOWER(ot.name) LIKE $2`,
-              [dateDebut, posteSearch]
-            );
-            realise = parseFloat(r.rows[0].total) || 0;
-          } catch { /* table peut ne pas exister */ }
+        const posteKeywords = ['crack', 'tri fin', 'catégor', 'condition'];
+        const matchedPoste = posteKeywords.find(k => indicLower.includes(k));
+        if (matchedPoste) {
+          const found = (totalParPoste[obj.periode] || []).find(p => p.poste.includes(matchedPoste));
+          realise = found ? found.total : 0;
         } else {
-          // Tonnage trié global
-          const r = await pool.query(
-            `SELECT COALESCE(SUM(kg_entree), 0) as total
-             FROM production_daily WHERE date >= $1`,
-            [dateDebut]
-          );
-          realise = parseFloat(r.rows[0].total) || 0;
+          realise = totalProduction[obj.periode] || 0;
         }
       }
 
       const pct = obj.valeur_cible > 0 ? Math.min(Math.round((realise / obj.valeur_cible) * 100), 100) : 0;
-
-      objectifs.push({
+      return {
         id: obj.id,
         domaine: obj.domaine,
         indicateur: obj.indicateur,
@@ -424,12 +460,261 @@ router.get('/objectifs', async (req, res) => {
         realise: Math.round(realise),
         pourcentage: pct,
         commentaire: obj.commentaire,
-      });
-    }
+      };
+    });
 
     res.json(objectifs);
   } catch (err) {
     console.error('[DASHBOARD] Erreur objectifs :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// V3 — Dashboard exécutif (8 KPI essentiels)
+//
+// Audit Direction (action 11 du plan d'action) — vue stratégique 1 page
+// avec comparaison N/N-1 lissée et seuils d'alerte configurables.
+//
+// 8 KPI confirmés par la Direction :
+//   1. Tonnage mois (collecte brute, kg)
+//   2. Taux valorisation (sortie tri / entrée tri, %)
+//   3. Productivité tri (kg/pers/jour)
+//   4. CA boutique mois (HT, €)
+//   5. Sorties positives M12 (% des sorties insertion)
+//   6. CO2 évité (tonnes équivalent CO2)
+//   7. Subvention Refashion trimestre (€)
+//   8. Trésorerie (placeholder Pennylane si sync absente)
+// ══════════════════════════════════════════
+
+// Helper : pourcentage de variation entre deux valeurs (null-safe)
+function pctVariation(current, previous) {
+  if (previous == null || previous === 0) return null;
+  return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
+router.get('/executive', cacheMiddleware(dashboardKey('executive'), 300), async (req, res) => {
+  try {
+    const now = new Date();
+    const year = now.getFullYear();
+    const monthStart = now.toISOString().slice(0, 7) + '-01';
+    const today = now.toISOString().split('T')[0];
+    const dayOfMonth = now.getDate();
+    const trimestre = Math.ceil((now.getMonth() + 1) / 3);
+
+    // N-1 même période (jour exact pour comparaison lissée)
+    const n1MonthStart = `${year - 1}-${(now.getMonth() + 1).toString().padStart(2, '0')}-01`;
+    const n1Today = `${year - 1}-${today.slice(5)}`;
+
+    const [
+      collecteN, collecteN1,
+      triEntreeN, triEntreeN1,
+      triSortieN, triSortieN1,
+      productiviteN, productiviteN1,
+      boutiqueCAN, boutiqueCAN1,
+      sortiesInsertion12m,
+      refashionTrimestre,
+      seuils,
+    ] = await Promise.all([
+      // 1. Collecte brute mois (kg)
+      pool.query(
+        `SELECT COALESCE(SUM(total_weight_kg), 0) AS total
+         FROM tours WHERE status = 'completed' AND date >= $1 AND date <= $2`,
+        [monthStart, today]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(total_weight_kg), 0) AS total
+         FROM tours WHERE status = 'completed' AND date >= $1 AND date <= $2`,
+        [n1MonthStart, n1Today]
+      ),
+      // 2 + 3. Tri (entrée + productivité)
+      pool.query(
+        `SELECT COALESCE(SUM(entree_ligne_kg), 0) AS entree,
+                COALESCE(AVG(productivite_kg_per), 0) AS prod
+         FROM production_daily WHERE date >= $1 AND date <= $2`,
+        [monthStart, today]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(entree_ligne_kg), 0) AS entree,
+                COALESCE(AVG(productivite_kg_per), 0) AS prod
+         FROM production_daily WHERE date >= $1 AND date <= $2`,
+        [n1MonthStart, n1Today]
+      ),
+      // tri sortie (tonnes valorisées)
+      pool.query(
+        `SELECT COALESCE(SUM(total_jour_t), 0) AS total
+         FROM production_daily WHERE date >= $1 AND date <= $2`,
+        [monthStart, today]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(total_jour_t), 0) AS total
+         FROM production_daily WHERE date >= $1 AND date <= $2`,
+        [n1MonthStart, n1Today]
+      ),
+      // 3. productivité (déjà retournée par triEntreeN)
+      pool.query(`SELECT 1 AS placeholder`),
+      pool.query(`SELECT 1 AS placeholder`),
+      // 4. CA boutiques mois
+      pool.query(
+        `SELECT COALESCE(SUM(total_ht), 0) AS total
+         FROM boutique_ventes WHERE date_vente >= $1 AND date_vente <= $2`,
+        [monthStart, today]
+      ).catch(() => ({ rows: [{ total: 0 }] })),
+      pool.query(
+        `SELECT COALESCE(SUM(total_ht), 0) AS total
+         FROM boutique_ventes WHERE date_vente >= $1 AND date_vente <= $2`,
+        [n1MonthStart, n1Today]
+      ).catch(() => ({ rows: [{ total: 0 }] })),
+      // 5. Sorties insertion 12 derniers mois
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE sortie_classification = 'positive')::int AS positives,
+          COUNT(*) FILTER (WHERE sortie_classification IS NOT NULL)::int AS total
+        FROM insertion_milestones
+        WHERE milestone_type = 'Bilan Sortie'
+          AND completed_date >= NOW() - INTERVAL '12 months'
+      `).catch(() => ({ rows: [{ positives: 0, total: 0 }] })),
+      // 7. Subvention Refashion trimestre (en cours)
+      pool.query(`
+        SELECT COALESCE(montant_total, 0)::float AS total
+        FROM refashion_subventions
+        WHERE annee = $1 AND trimestre = $2
+        LIMIT 1
+      `, [year, trimestre]).catch(() => ({ rows: [{ total: 0 }] })),
+      // Seuils configurés
+      pool.query(`
+        SELECT indicateur, seuil_min, seuil_max, severite
+        FROM alert_thresholds WHERE actif = true
+      `).catch(() => ({ rows: [] })),
+    ]);
+
+    // Calcul des KPI
+    const collecte = parseFloat(collecteN.rows[0].total);
+    const collecteN1Val = parseFloat(collecteN1.rows[0].total);
+
+    const triEntree = parseFloat(triEntreeN.rows[0].entree);
+    const triEntreeN1Val = parseFloat(triEntreeN1.rows[0].entree);
+    const productivite = Math.round(parseFloat(triEntreeN.rows[0].prod));
+    const productiviteN1Val = Math.round(parseFloat(triEntreeN1.rows[0].prod));
+
+    const triSortie = parseFloat(triSortieN.rows[0].total) * 1000;
+    const triSortieN1Val = parseFloat(triSortieN1.rows[0].total) * 1000;
+    const tauxValorisation = triEntree > 0 ? Math.min(100, Math.round((triSortie / triEntree) * 1000) / 10) : 0;
+    const tauxValorisationN1 = triEntreeN1Val > 0 ? Math.min(100, Math.round((triSortieN1Val / triEntreeN1Val) * 1000) / 10) : 0;
+
+    const boutiqueCA = parseFloat(boutiqueCAN.rows[0].total);
+    const boutiqueCAN1Val = parseFloat(boutiqueCAN1.rows[0].total);
+
+    const sorties = sortiesInsertion12m.rows[0];
+    const tauxSortiesPositives = sorties.total > 0
+      ? Math.round((sorties.positives / sorties.total) * 1000) / 10
+      : null;
+
+    // CO2 évité : facteur ADEME mix textile = 1.567 t CO2 évitées par t collectée
+    // (devra être enrichi par exutoire_type quand disponible — runbook).
+    const co2EvitedT = Math.round((collecte / 1000) * 1.567 * 10) / 10;
+    const co2EvitedN1T = Math.round((collecteN1Val / 1000) * 1.567 * 10) / 10;
+
+    const refashionEur = parseFloat(refashionTrimestre.rows[0].total);
+
+    // Trésorerie : placeholder (à brancher sur Pennylane si sync OK)
+    const tresorerie = null; // null = "à connecter"
+
+    // Évaluer les seuils
+    const seuilsMap = Object.fromEntries(
+      seuils.rows.map((s) => [s.indicateur, { min: s.seuil_min, max: s.seuil_max, severite: s.severite }])
+    );
+    function evaluerSeuil(indicateur, valeur) {
+      const seuil = seuilsMap[indicateur];
+      if (!seuil || valeur == null) return null;
+      if (seuil.min != null && valeur < seuil.min) return seuil.severite || 'warning';
+      if (seuil.max != null && valeur > seuil.max) return seuil.severite || 'warning';
+      return 'ok';
+    }
+
+    res.json({
+      asOf: new Date().toISOString(),
+      periode: { mois: monthStart, jour: today, trimestre, jourMois: dayOfMonth },
+      kpis: [
+        {
+          id: 'tonnage_collecte_mois',
+          label: 'Tonnage collecté ce mois',
+          value: Math.round(collecte),
+          unite: 'kg',
+          variation_pct: pctVariation(collecte, collecteN1Val),
+          previous: Math.round(collecteN1Val),
+          alerte: evaluerSeuil('tonnage_collecte_mois', collecte),
+        },
+        {
+          id: 'taux_valorisation',
+          label: 'Taux de valorisation',
+          value: tauxValorisation,
+          unite: '%',
+          variation_pct: pctVariation(tauxValorisation, tauxValorisationN1),
+          previous: tauxValorisationN1,
+          alerte: evaluerSeuil('taux_valorisation', tauxValorisation),
+        },
+        {
+          id: 'productivite_tri',
+          label: 'Productivité tri',
+          value: productivite,
+          unite: 'kg/pers/j',
+          variation_pct: pctVariation(productivite, productiviteN1Val),
+          previous: productiviteN1Val,
+          alerte: evaluerSeuil('productivite_tri', productivite),
+        },
+        {
+          id: 'ca_boutique_mois',
+          label: 'CA boutiques ce mois (HT)',
+          value: Math.round(boutiqueCA),
+          unite: '€',
+          variation_pct: pctVariation(boutiqueCA, boutiqueCAN1Val),
+          previous: Math.round(boutiqueCAN1Val),
+          alerte: evaluerSeuil('ca_boutique_mois', boutiqueCA),
+        },
+        {
+          id: 'sorties_positives_12m',
+          label: 'Sorties positives insertion (12 mois glissants)',
+          value: tauxSortiesPositives,
+          unite: '%',
+          variation_pct: null,
+          previous: null,
+          context: { positives: sorties.positives, total: sorties.total },
+          alerte: evaluerSeuil('sorties_positives_12m', tauxSortiesPositives),
+        },
+        {
+          id: 'co2_evited_t',
+          label: 'CO2 évité ce mois',
+          value: co2EvitedT,
+          unite: 't éq.CO2',
+          variation_pct: pctVariation(co2EvitedT, co2EvitedN1T),
+          previous: co2EvitedN1T,
+          alerte: null,
+          context: { facteur_ademe: 1.567, source: 'mix textile générique — à raffiner par exutoire_type' },
+        },
+        {
+          id: 'subvention_refashion_trimestre',
+          label: `Subvention Refashion ${year} T${trimestre}`,
+          value: Math.round(refashionEur),
+          unite: '€',
+          variation_pct: null,
+          previous: null,
+          alerte: refashionEur === 0 ? 'info' : null,
+        },
+        {
+          id: 'tresorerie',
+          label: 'Trésorerie (instant)',
+          value: tresorerie,
+          unite: '€',
+          variation_pct: null,
+          previous: null,
+          alerte: 'unavailable',
+          context: { reason: 'Sync Pennylane à brancher (cf RUNBOOK_INFRA_ROADMAP §8)' },
+        },
+      ],
+    });
+  } catch (err) {
+    console.error('[DASHBOARD] Erreur executive :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

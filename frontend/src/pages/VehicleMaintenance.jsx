@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { Wrench, FileText, CalendarClock, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 const STATUS_COLORS = { ok: 'bg-green-100 text-green-700', bientot: 'bg-yellow-100 text-yellow-700', depasse: 'bg-red-100 text-red-700' };
 const STATUS_LABELS = { ok: 'OK', bientot: 'Bientôt', depasse: 'Dépassé' };
 
 export default function VehicleMaintenance() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [tab, setTab] = useState('plans');
   const [profiles, setProfiles] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -76,7 +78,13 @@ export default function VehicleMaintenance() {
   };
 
   const deleteContract = async (id) => {
-    if (!window.confirm('Supprimer ce contrat ?')) return;
+    const ok = await confirm({
+      title: 'Supprimer ce contrat ?',
+      message: 'Cette action est définitive.',
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/vehicle-contracts/${id}`);
       loadAll();
@@ -108,7 +116,13 @@ export default function VehicleMaintenance() {
   };
 
   const deleteProfile = async (id) => {
-    if (!window.confirm('Supprimer ce profil constructeur ?')) return;
+    const ok = await confirm({
+      title: 'Supprimer ce profil constructeur ?',
+      message: 'Le plan d\'entretien associé sera également supprimé.',
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/vehicles/maintenance/profiles-db/${id}`);
       loadAll();
@@ -123,6 +137,7 @@ export default function VehicleMaintenance() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="p-6 max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Maintenance véhicules"

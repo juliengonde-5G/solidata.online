@@ -65,31 +65,54 @@ router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, re
       [id, 'hired', 'converted', `Converti en employé #${employee.rows[0].id}`, req.user.id]
     );
 
-    // Créer automatiquement le diagnostic insertion initial (parcours bénéficiaire)
+    // Créer le squelette du parcours d'insertion : diagnostic vide à compléter
+    // par le CIP au premier entretien d'accueil + jalons standards CDDI.
+    //
+    // Important : si l'une de ces étapes échoue, on rollback la conversion
+    // entière (vs ancienne version qui avalait silencieusement l'erreur,
+    // laissant un employé sans parcours d'insertion).
     const empId = employee.rows[0].id;
-    try {
+
+    // Diagnostic skeleton : employee_id + created_by suffisent. Les freins
+    // gardent leur DEFAULT 1 (= "pas de frein" — neutre, à ajuster par CIP).
+    // Aucune valeur sentinelle (l'ancien code mettait 3 partout, biaisant les
+    // plans d'action). Le CIP doit explicitement saisir au premier entretien.
+    await client.query(
+      `INSERT INTO insertion_diagnostics (employee_id, created_by)
+       VALUES ($1, $2)
+       ON CONFLICT (employee_id) DO NOTHING`,
+      [empId, req.user.id]
+    );
+
+    // Jalons standards CDDI : Diagnostic accueil (J+30), Bilan M+3, M+6, M+10.
+    // La sortie est créée manuellement par le CIP à la fin du contrat.
+    // Schéma canonique : milestone_type / due_date / status.
+    const startDate = new Date(contract_start || Date.now());
+    const milestones = [
+      { type: 'Diagnostic accueil', daysOffset: 30 },
+      { type: 'Bilan M+3', daysOffset: 90 },
+      { type: 'Bilan M+6', daysOffset: 180 },
+      { type: 'Bilan M+10', daysOffset: 300 },
+    ];
+    for (const m of milestones) {
+      const dueDate = new Date(startDate);
+      dueDate.setDate(dueDate.getDate() + m.daysOffset);
       await client.query(
-        `INSERT INTO insertion_diagnostics (employee_id, date_entree, statut,
-         mobilite, sante, finances, famille, linguistique, administratif, numerique,
-         created_by)
-         VALUES ($1, $2, 'actif', 3, 3, 3, 3, 3, 3, 3, $3)
-         ON CONFLICT (employee_id) DO NOTHING`,
-        [empId, contract_start || new Date().toISOString().split('T')[0], req.user.id]
+        `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, status)
+         VALUES ($1, $2, $3, 'a_planifier')
+         ON CONFLICT (employee_id, milestone_type) DO NOTHING`,
+        [empId, m.type, dueDate.toISOString().split('T')[0]]
       );
-      // Créer les jalons M1, M6, M12
-      const startDate = new Date(contract_start || Date.now());
-      for (const [label, months] of [['M1', 1], ['M6', 6], ['M12', 12]]) {
-        const milestoneDate = new Date(startDate);
-        milestoneDate.setMonth(milestoneDate.getMonth() + months);
-        await client.query(
-          `INSERT INTO insertion_milestones (employee_id, label, date_prevue, statut)
-           VALUES ($1, $2, $3, 'a_planifier') ON CONFLICT DO NOTHING`,
-          [empId, label, milestoneDate.toISOString().split('T')[0]]
-        );
-      }
-    } catch (insErr) {
-      console.warn('[CANDIDATES] Insertion auto-diagnostic skipped:', insErr.message);
     }
+
+    // Marquer l'employé comme en parcours d'insertion + dates indicatives
+    await client.query(
+      `UPDATE employees
+       SET insertion_status = 'en_parcours',
+           insertion_start_date = $1
+       WHERE id = $2`,
+      [contract_start || new Date().toISOString().split('T')[0], empId]
+    );
 
     await client.query('COMMIT');
 

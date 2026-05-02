@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, KanbanBoard, StatusBadge } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 const TYPES_PRODUIT = {
@@ -85,6 +86,7 @@ const STATUS_TRANSITIONS = {
 };
 
 export default function ExutoiresCommandes() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [commandes, setCommandes] = useState([]);
   const [clients, setClients] = useState([]);
   const [stats, setStats] = useState({ actives: 0, tonnage_prevu: 0, ca_previsionnel: 0, en_attente: 0 });
@@ -235,7 +237,13 @@ export default function ExutoiresCommandes() {
   };
 
   const handleCancel = async (commande) => {
-    if (!window.confirm(`Annuler la commande "${commande.reference}" ?`)) return;
+    const ok = await confirm({
+      title: 'Annuler cette commande ?',
+      message: `Confirmer l'annulation de la commande "${commande.reference}". Cette action ne peut pas être inversée.`,
+      confirmLabel: 'Annuler la commande',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.patch(`/commandes-exutoires/${commande.id}/annuler`);
       loadCommandes();
@@ -377,6 +385,7 @@ export default function ExutoiresCommandes() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <KanbanBoard
         title="Commandes Logistiques"
         subtitle="Pipeline des commandes clients → expéditions"

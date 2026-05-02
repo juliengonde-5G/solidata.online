@@ -40,6 +40,44 @@
     color: var(--color-text);
     -webkit-font-smoothing: antialiased;
   }
+
+  /* A11y — focus visible cohérent pour navigation clavier (WCAG 2.4.7).
+     Le navigateur n'affiche le ring que pour le focus clavier (pas la souris). */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Skip-link pour utilisateurs clavier / lecteur d'écran */
+  .skip-link {
+    position: absolute;
+    top: -40px;
+    left: 8px;
+    z-index: 100;
+    background: var(--color-primary);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .skip-link:focus {
+    top: 8px;
+  }
+
+  /* Classe utilitaire pour les contenus uniquement lecteurs d'écran */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
 }
 
 @layer components {

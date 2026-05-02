@@ -3,6 +3,7 @@ import { Package } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
 import SensorSection from '../components/SensorSection';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -52,6 +53,7 @@ const EMPTY_FORM = { name: '', address: '', commune: '', latitude: '', longitude
   communaute_communes: '', surface: '', ref_refashion: '', entite_detentrice: '', code_postal: '' };
 
 export default function AdminCAV() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [cavList, setCavList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -181,7 +183,13 @@ export default function AdminCAV() {
   };
 
   const deleteCav = async (cav) => {
-    if (!window.confirm(`Supprimer définitivement "${cav.name}" ? Cette action est irréversible.`)) return;
+    const ok = await confirm({
+      title: 'Supprimer ce CAV ?',
+      message: `Supprimer définitivement "${cav.name}" ? Cette action est irréversible.`,
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/cav/${cav.id}`);
       showAlert('CAV supprimé');
@@ -271,6 +279,7 @@ export default function AdminCAV() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="p-6">
         {/* Alert */}
         {alert && (

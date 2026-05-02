@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Truck } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 const LIEUX = {
@@ -34,6 +35,7 @@ const EMPTY_FORM = {
 };
 
 export default function ExutoiresPreparation() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [preparations, setPreparations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -157,7 +159,13 @@ export default function ExutoiresPreparation() {
   };
 
   const deletePrep = async (id) => {
-    if (!window.confirm('Supprimer cette préparation ?')) return;
+    const ok = await confirm({
+      title: 'Supprimer cette préparation ?',
+      message: 'Cette action est définitive. La commande associée reviendra à l\'étape précédente.',
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/preparations/${id}`);
       loadPreparations();
@@ -204,6 +212,7 @@ export default function ExutoiresPreparation() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="p-6">
         {/* Header */}
         <PageHeader

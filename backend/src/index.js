@@ -69,6 +69,9 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Logging HTTP corrélé (request-id, durée, statut, user)
+app.use(require('./middleware/request-logger'));
+
 // Rate limiting global
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false }));
 // Rate limiting strict pour auth
@@ -108,6 +111,7 @@ app.use('/api/candidates', require('./routes/candidates'));
 app.use('/api/pcm', require('./routes/pcm'));
 app.use('/api/teams', require('./routes/teams'));
 app.use('/api/employees', require('./routes/employees'));
+app.use('/api/prescripteurs', require('./routes/prescripteurs'));
 
 // Lot 3 : Collecte + Tournées IA + GPS
 app.use('/api/cav', require('./routes/cav'));
@@ -136,6 +140,8 @@ app.use('/api/activity-log', require('./routes/activity-log'));
 app.use('/api/news', require('./routes/newsfeed'));
 
 // Lot 5 : Logistique Exutoires
+app.use('/api/state-machines', require('./routes/state-machines'));
+app.use('/api/partners', require('./routes/partners'));
 app.use('/api/clients-exutoires', require('./routes/clients-exutoires'));
 app.use('/api/tarifs-exutoires', require('./routes/tarifs-exutoires'));
 app.use('/api/commandes-exutoires', require('./routes/commandes-exutoires'));
@@ -145,6 +151,7 @@ app.use('/api/factures-exutoires', require('./routes/factures-exutoires'));
 app.use('/api/calendrier-logistique', require('./routes/calendrier-logistique'));
 app.use('/api/planning-hebdo', require('./routes/planning-hebdo'));
 app.use('/api/dashboard', require('./routes/dashboard'));
+app.use('/api/alert-thresholds', require('./routes/alert-thresholds'));
 
 // Module Finances / Pennylane
 app.use('/api/pennylane', require('./routes/pennylane'));
@@ -184,48 +191,8 @@ app.use('/api/boutique-meteo', require('./routes/boutique-meteo'));
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 
-// Health check
-app.get('/api/health', async (req, res) => {
-  try {
-    const dbResult = await pool.query('SELECT NOW() as time, version() as version');
-    const postgis = await pool.query("SELECT PostGIS_Version() as postgis_version");
-    res.json({
-      status: 'ok',
-      timestamp: dbResult.rows[0].time,
-      database: {
-        connected: true,
-        version: dbResult.rows[0].version,
-        postgis: postgis.rows[0].postgis_version,
-      },
-      modules: {
-        auth: true,
-        users: true,
-        settings: true,
-        candidates: true,
-        pcm: true,
-        teams: true,
-        employees: true,
-        cav: true,
-        vehicles: true,
-        tours: true,
-        stock: true,
-        production: true,
-        billing: true,
-        reporting: true,
-        tri: true,
-        refashion: true,
-        metropole: true,
-        rgpd: true,
-        adminDb: true,
-        exutoires: true,
-        pennylane: true,
-        associationPoints: true,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ status: 'error', error: 'Service indisponible' });
-  }
-});
+// Health check (router dédié : /api/health, /api/health/live, /api/health/ready)
+app.use('/api/health', require('./routes/health'));
 
 // 404 + Global error handler (DOIT être après toutes les routes)
 app.use('/api', notFoundHandler);
@@ -265,7 +232,11 @@ io.on('connection', (socket) => {
   });
 
   // Position GPS du chauffeur — avec détection proximité CAV pour historiser le temps de collecte
-  const cavProximity = new Map(); // clé: `${tourId}-${cavId}`, valeur: { arrivedAt }
+  const cavProximity = new Map();           // clé: `${tourId}-${cavId}`, valeur: { arrivedAt }
+  const tourCavsCache = new Map();          // clé: tourId, valeur: { cavs: [...], cachedAt: ms }
+  const lastProximityCheck = new Map();     // clé: tourId, valeur: ms — throttle 1×/5s
+  const TOUR_CAVS_TTL_MS = 60_000;          // les CAVs de tournée ne changent quasi jamais en cours
+  const PROXIMITY_THROTTLE_MS = 5_000;      // -90% requêtes (10/s -> 0.2/s par tournée)
 
   socket.on('gps-update', async (data) => {
     const { tourId, vehicleId, latitude, longitude, speed } = data;
@@ -274,48 +245,58 @@ io.on('connection', (socket) => {
         'INSERT INTO gps_positions (tour_id, vehicle_id, latitude, longitude, speed) VALUES ($1, $2, $3, $4, $5)',
         [tourId, vehicleId, latitude, longitude, speed]
       );
-      // Broadcast aux managers qui suivent cette tournée
       io.to(`tour-${tourId}`).emit('vehicle-position', {
         tourId, vehicleId, latitude, longitude, speed, timestamp: new Date(),
       });
 
-      // ── Détection proximité CAV pour mesurer le temps de collecte réel ──
-      if (tourId && latitude && longitude) {
-        try {
-          const tourCavs = await pool.query(
+      // ── Détection proximité CAV (throttlée + CAVs de tournée mémoïsés) ──
+      if (!tourId || latitude == null || longitude == null) return;
+
+      const now = Date.now();
+      if ((now - (lastProximityCheck.get(tourId) || 0)) < PROXIMITY_THROTTLE_MS) return;
+      lastProximityCheck.set(tourId, now);
+
+      try {
+        let cached = tourCavsCache.get(tourId);
+        if (!cached || (now - cached.cachedAt) > TOUR_CAVS_TTL_MS) {
+          const r = await pool.query(
             `SELECT tc.cav_id, c.latitude as cav_lat, c.longitude as cav_lng
              FROM tour_cav tc JOIN cav c ON tc.cav_id = c.id
              WHERE tc.tour_id = $1 AND c.latitude IS NOT NULL`,
             [tourId]
           );
-          const PROXIMITY_RADIUS = 0.1; // 100m en km
-          for (const tc of tourCavs.rows) {
-            const dist = haversineDistanceSimple(latitude, longitude, parseFloat(tc.cav_lat), parseFloat(tc.cav_lng));
-            const key = `${tourId}-${tc.cav_id}`;
-            if (dist <= PROXIMITY_RADIUS) {
-              // Arrivée près du CAV
-              if (!cavProximity.has(key)) {
-                cavProximity.set(key, { arrivedAt: new Date() });
-              }
-            } else if (cavProximity.has(key)) {
-              // Départ du CAV — enregistrer le temps de collecte
-              const entry = cavProximity.get(key);
-              const duration = Math.round((Date.now() - entry.arrivedAt.getTime()) / 1000);
-              if (duration > 30 && duration < 3600) { // entre 30s et 1h
-                pool.query(
-                  `INSERT INTO cav_collection_times (cav_id, tour_id, vehicle_id, arrived_at, departed_at, duration_seconds)
-                   VALUES ($1, $2, $3, $4, NOW(), $5)`,
-                  [tc.cav_id, tourId, vehicleId, entry.arrivedAt, duration]
-                ).catch(err => logger.error('Erreur enregistrement temps collecte:', err.message));
-              }
-              cavProximity.delete(key);
+          cached = { cavs: r.rows, cachedAt: now };
+          tourCavsCache.set(tourId, cached);
+        }
+
+        const PROXIMITY_RADIUS = 0.1; // 100m
+        for (const tc of cached.cavs) {
+          const dist = haversineDistanceSimple(latitude, longitude, parseFloat(tc.cav_lat), parseFloat(tc.cav_lng));
+          const key = `${tourId}-${tc.cav_id}`;
+          if (dist <= PROXIMITY_RADIUS) {
+            if (!cavProximity.has(key)) cavProximity.set(key, { arrivedAt: new Date() });
+          } else if (cavProximity.has(key)) {
+            const entry = cavProximity.get(key);
+            const duration = Math.round((Date.now() - entry.arrivedAt.getTime()) / 1000);
+            if (duration > 30 && duration < 3600) {
+              pool.query(
+                `INSERT INTO cav_collection_times (cav_id, tour_id, vehicle_id, arrived_at, departed_at, duration_seconds)
+                 VALUES ($1, $2, $3, $4, NOW(), $5)`,
+                [tc.cav_id, tourId, vehicleId, entry.arrivedAt, duration]
+              ).catch(err => logger.error('Erreur enregistrement temps collecte:', err.message));
             }
+            cavProximity.delete(key);
           }
-        } catch (_) { /* table pas encore créée, pas grave */ }
-      }
+        }
+      } catch (_) { /* table pas encore créée, pas grave */ }
     } catch (err) {
       logger.error('Erreur GPS Socket.IO', { error: err.message });
     }
+  });
+
+  socket.on('disconnect', () => {
+    tourCavsCache.clear();
+    lastProximityCheck.clear();
   });
 
   // Fonction haversine simplifiée pour la détection de proximité (en km)
