@@ -3466,6 +3466,67 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_state_audit_user ON state_transitions_audit(user_id);');
     console.log('[INIT-DB] Audit state-machine ✓');
 
+    // ══════════════════════════════════════════
+    // HOTFIX 2026-05 — Resync des séquences SERIAL
+    //
+    // Symptôme observé en prod : INSERT INTO employees échoue avec
+    //   "duplicate key value violates unique constraint employees_pkey
+    //    Key (id)=(1) already exists."
+    // Cause : import/seed avec IDs explicites n'ayant pas mis à jour
+    // pg_get_serial_sequence. La séquence retourne 1 alors que les
+    // lignes existantes occupent déjà 1, 2, 3, …
+    //
+    // setval(seq, max(id)) est idempotent et sans effet de bord si la
+    // séquence est déjà cohérente.
+    // ══════════════════════════════════════════
+    const tablesAResyncer = [
+      'employees', 'candidates', 'tours', 'cav', 'vehicles',
+      'expeditions', 'commandes_exutoires', 'preparations_expedition',
+      'factures_exutoires', 'clients_exutoires', 'tarifs_exutoires',
+      'invoices', 'invoice_lines', 'stock_movements', 'tonnage_history',
+      'production_daily', 'produits_finis', 'batch_tracking',
+      'insertion_diagnostics', 'insertion_milestones', 'cip_action_plans',
+      'recruitment_interviews', 'recruitment_documents', 'recruitment_plan',
+      'mise_en_situation', 'pcm_sessions', 'pcm_reports',
+      'employee_contracts', 'schedule', 'work_hours', 'positions', 'teams',
+      'incidents', 'gps_positions', 'tour_cav', 'tour_weights',
+      'partners', 'prescripteur_orgas', 'alert_thresholds',
+      'boutiques', 'boutique_ventes', 'boutique_tickets',
+      'boutique_commandes', 'boutique_commande_lignes',
+      'boutique_objectifs', 'boutique_meteo_quotidien',
+      'association_points', 'cav_sensor_readings', 'refashion_dpav',
+      'refashion_communes', 'refashion_subventions', 'historique_mensuel',
+    ];
+    // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
+    // (la liste est statique, mais on protège quand même contre une
+    // injection via un futur refactor).
+    const SAFE_TABLE = /^[a-z_][a-z0-9_]*$/;
+    let resyncCount = 0;
+    for (const t of tablesAResyncer) {
+      if (!SAFE_TABLE.test(t)) continue;
+      try {
+        await client.query(`
+          DO $$
+          DECLARE seq_name text;
+          DECLARE max_id bigint;
+          BEGIN
+            seq_name := pg_get_serial_sequence('${t}', 'id');
+            IF seq_name IS NOT NULL THEN
+              EXECUTE 'SELECT COALESCE(MAX(id), 0) FROM ${t}' INTO max_id;
+              PERFORM setval(seq_name, max_id + 1, false);
+            END IF;
+          EXCEPTION WHEN undefined_table OR undefined_column THEN
+            -- Table absente ou pas de colonne id : ignorer.
+            NULL;
+          END $$;
+        `);
+        resyncCount++;
+      } catch (_) {
+        // Garde-fou supplémentaire : on continue silencieusement.
+      }
+    }
+    console.log(`[INIT-DB] Séquences SERIAL resynchronisées (${resyncCount} tables) ✓`);
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

@@ -106,10 +106,12 @@ router.get('/kpis', cacheMiddleware(dashboardKey('kpis'), 120), async (req, res)
         `SELECT COUNT(*)::int as count FROM candidates
          WHERE status IN ('received', 'interview')`
       ),
-      // Parcours insertion actifs
+      // Parcours insertion actifs — basé sur employees.insertion_status
+      // (la table insertion_diagnostics n'a pas de colonne 'status' ; le
+      // statut de parcours est maintenu sur la fiche employé).
       pool.query(
-        `SELECT COUNT(*)::int as count FROM insertion_diagnostics
-         WHERE status = 'active' OR status IS NULL`
+        `SELECT COUNT(*)::int as count FROM employees
+         WHERE insertion_status = 'en_parcours'`
       ),
       // Contrats arrivant à échéance dans 30 jours
       pool.query(
