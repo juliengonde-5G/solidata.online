@@ -9,7 +9,7 @@
  *
  * Usage: node src/scripts/seed-historique.js
  */
-const XLSX = require('xlsx');
+const XLSX = require('../utils/xlsx-compat');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
@@ -256,7 +256,7 @@ async function seedHistorique(externalPool) {
         continue;
       }
       console.log(`\n[IMPORT] ${file.name} (${file.year})...`);
-      const wb = XLSX.readFile(filePath);
+      const wb = await XLSX.readFile(filePath);
 
       await importTonnages(client, wb, file.year);
       await importProduits(client, wb, file.year);

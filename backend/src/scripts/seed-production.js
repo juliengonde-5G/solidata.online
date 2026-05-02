@@ -3,7 +3,7 @@
  * SOLIDATA — Import KPI Production depuis KPI_Production 2026.xlsx
  * Usage: node src/scripts/seed-production.js [path/to/file.xlsx]
  */
-const XLSX = require('xlsx');
+const XLSX = require('../utils/xlsx-compat');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
@@ -32,7 +32,7 @@ async function seedProduction() {
   const filePath = process.argv[2] || DEFAULT_FILE;
   console.log(`[SEED-PROD] Lecture de ${filePath}...`);
 
-  const wb = XLSX.readFile(filePath);
+  const wb = await XLSX.readFile(filePath);
   const monthSheets = wb.SheetNames.filter(n => /\d{4}$/.test(n) && n !== 'Production Annuel 2026' && n !== 'Feuil1');
 
   console.log(`[SEED-PROD] Feuilles mensuelles: ${monthSheets.join(', ')}`);

@@ -15,7 +15,7 @@
  *   - tournee.xlsx                   → table cav (metadata : adresse, GPS, tournée, fréquence)
  */
 require('dotenv').config();
-const XLSX = require('xlsx');
+const XLSX = require('../utils/xlsx-compat');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
@@ -62,7 +62,7 @@ async function importCAV() {
     const file = findFile(`CAV ${year}.xlsx`);
     if (!file) { console.log(`  [SKIP] CAV ${year}.xlsx non trouvé`); continue; }
 
-    const wb = XLSX.readFile(file);
+    const wb = await XLSX.readFile(file);
     const ws = wb.Sheets['M1'];
     if (!ws) { console.log(`  [SKIP] Feuille M1 non trouvée dans CAV ${year}.xlsx`); continue; }
 
@@ -140,7 +140,7 @@ async function importCAV() {
   // Aussi importer depuis tournee.xlsx pour les métadonnées manquantes
   const tourneeFile = findFile('tournee.xlsx');
   if (tourneeFile) {
-    const wb = XLSX.readFile(tourneeFile);
+    const wb = await XLSX.readFile(tourneeFile);
     const ws = wb.Sheets['TournéesCAV'];
     if (ws) {
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
@@ -185,7 +185,7 @@ async function importTonnages() {
     const file = findFile(fileName);
     if (!file) { console.log(`  [SKIP] ${fileName} non trouvé`); continue; }
 
-    const wb = XLSX.readFile(file);
+    const wb = await XLSX.readFile(file);
     const ws = wb.Sheets['SaisiesT'];
     if (!ws) { console.log(`  [SKIP] Feuille SaisiesT absente`); continue; }
 
@@ -247,7 +247,7 @@ async function importProduction() {
   const file = findFile('KPI_Production 2026.xlsx');
   if (!file) { console.log('  [SKIP] KPI_Production 2026.xlsx non trouvé'); return; }
 
-  const wb = XLSX.readFile(file);
+  const wb = await XLSX.readFile(file);
 
   // Créer la table si elle n'existe pas
   await pool.query(`
@@ -326,7 +326,7 @@ async function importStock() {
   // Mvmt Invent 2025 → stock_movements (même structure que tonnages)
   const mvmt2025 = findFile('Mvmt Invent 2025.xlsx');
   if (mvmt2025) {
-    const wb = XLSX.readFile(mvmt2025);
+    const wb = await XLSX.readFile(mvmt2025);
     const ws = wb.Sheets['SaisiesT'];
     if (ws) {
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
@@ -362,7 +362,7 @@ async function importStock() {
   // Mvmt Invent 2026 → produits_finis
   const mvmt2026 = findFile('Mvmt Invent 2026.xlsx');
   if (mvmt2026) {
-    const wb = XLSX.readFile(mvmt2026);
+    const wb = await XLSX.readFile(mvmt2026);
     const ws = wb.Sheets['SaisiesP'];
     if (ws) {
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });

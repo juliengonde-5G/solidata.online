@@ -15,7 +15,7 @@
  *   - Désactiver les PAV absents de la liste (status = 'unavailable')
  *   - Générer les QR codes manquants
  */
-const XLSX = require('xlsx');
+const XLSX = require('../utils/xlsx-compat');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
@@ -43,8 +43,8 @@ function findFile(filename) {
  *           F=Ville, G=Latitude, H=Longitude, I=Communauté de communes,
  *           J=Surface, K=Reference Refashion, L=Entité détentrice
  */
-function parseListePAV(filePath) {
-  const wb = XLSX.readFile(filePath);
+async function parseListePAV(filePath) {
+  const wb = await XLSX.readFile(filePath);
   const ws = wb.Sheets[wb.SheetNames[0]];
   if (!ws) return [];
 
@@ -225,8 +225,8 @@ function parseKML(filePath) {
 /**
  * Parse Excel file for additional CAV data (tournee.xlsx)
  */
-function parseTourneeExcel(filePath) {
-  const wb = XLSX.readFile(filePath);
+async function parseTourneeExcel(filePath) {
+  const wb = await XLSX.readFile(filePath);
   const ws = wb.Sheets['TournéesCAV'];
   if (!ws) return [];
 
@@ -296,7 +296,7 @@ async function seedCAV(externalPool) {
   // Liste PAV.xlsx est la source prioritaire
   if (listePavPath) {
     console.log(`[SEED-CAV] Lecture Liste PAV.xlsx: ${listePavPath}`);
-    cavs = parseListePAV(listePavPath);
+    cavs = await parseListePAV(listePavPath);
     const activePavCount = cavs.filter(c => c.nb_containers > 0).length;
     const inactivePavCount = cavs.filter(c => c.nb_containers === 0).length;
     const totalCavCount = cavs.reduce((sum, c) => sum + c.nb_containers, 0);
@@ -333,7 +333,7 @@ async function seedCAV(externalPool) {
   // Merge avec tournee.xlsx si disponible (données complémentaires : tournée, jours collecte)
   if (xlsPath) {
     console.log(`[SEED-CAV] Lecture Excel complémentaire: ${xlsPath}`);
-    const xlsCavs = parseTourneeExcel(xlsPath);
+    const xlsCavs = await parseTourneeExcel(xlsPath);
     console.log(`[SEED-CAV] ${xlsCavs.length} CAV trouvés dans tournee.xlsx`);
 
     const existingNames = new Set(cavs.map(c => c.name.toLowerCase()));

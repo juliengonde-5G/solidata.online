@@ -6,7 +6,7 @@
  * Importe les pesées dans stock_movements (entrées collecte)
  * et met à jour tonnage_history par CAV avec agrégation journalière.
  */
-const XLSX = require('xlsx');
+const XLSX = require('../utils/xlsx-compat');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
@@ -39,7 +39,7 @@ async function seedData() {
   const filePath = process.argv[2] || DEFAULT_FILE;
   console.log(`[SEED-DATA] Lecture de ${filePath}...`);
 
-  const wb = XLSX.readFile(filePath);
+  const wb = await XLSX.readFile(filePath);
   const ws = wb.Sheets['SaisiesT'];
   if (!ws) {
     console.error('[SEED-DATA] Feuille "SaisiesT" introuvable');
