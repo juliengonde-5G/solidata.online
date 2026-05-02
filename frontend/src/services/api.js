@@ -46,16 +46,12 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        // Send refresh request — cookie will be sent automatically via withCredentials
-        // Also send refreshToken from localStorage as fallback for backward compatibility
-        const refreshToken = localStorage.getItem('refreshToken');
-        const res = await axios.post('/api/auth/refresh', { refreshToken: refreshToken || undefined }, { withCredentials: true });
-        const { accessToken, refreshToken: newRefresh } = res.data;
+        // Refresh token est exclusivement transporté via cookie HttpOnly.
+        // withCredentials assure son envoi automatique. Aucun stockage localStorage.
+        const res = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
+        const { accessToken } = res.data;
 
         localStorage.setItem('accessToken', accessToken);
-        if (newRefresh) {
-          localStorage.setItem('refreshToken', newRefresh);
-        }
 
         processQueue(null, accessToken);
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
@@ -63,6 +59,7 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         localStorage.removeItem('accessToken');
+        // Nettoyage défensif d'éventuels résidus de l'ancien stockage
         localStorage.removeItem('refreshToken');
         window.location.href = '/login';
         return Promise.reject(refreshError);

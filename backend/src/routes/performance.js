@@ -267,7 +267,7 @@ router.get('/industrial-kpis', async (req, res) => {
       pool.query(`
         SELECT COALESCE(AVG(productivite_kg_per), 0) as productivite_avg,
           COALESCE(AVG(effectif_reel), 0) as effectif_moyen,
-          COALESCE(SUM(kg_entree), 0) as total_entree_kg,
+          COALESCE(SUM(entree_ligne_kg), 0) as total_entree_kg,
           COALESCE(SUM(total_jour_t * 1000), 0) as total_sortie_kg,
           COUNT(*)::int as jours_travailles
         FROM production_daily WHERE date >= $1
