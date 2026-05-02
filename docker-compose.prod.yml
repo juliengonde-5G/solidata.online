@@ -29,7 +29,7 @@ services:
     image: redis:7-alpine
     container_name: solidata-redis
     restart: always
-    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru --save 60 1000
+    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --save 60 1000
     networks:
       - internal
     healthcheck:
