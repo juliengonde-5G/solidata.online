@@ -90,7 +90,7 @@ router.get('/hourly', async (req, res) => {
     });
   } catch (err) {
     console.error('[boutique-meteo] hourly:', err);
-    res.status(500).json({ error: 'Erreur météo horaire', details: err.message });
+    res.status(500).json({ error: 'Erreur météo horaire' });
   }
 });
 
@@ -128,7 +128,7 @@ router.post('/collect', authorize('ADMIN'), async (req, res) => {
     res.json({ success: true, data });
   } catch (err) {
     console.error('[boutique-meteo] collect:', err);
-    res.status(500).json({ error: 'Erreur collecte', details: err.message });
+    res.status(500).json({ error: 'Erreur collecte' });
   }
 });
 
