@@ -8,6 +8,7 @@ const path = require('path');
 const { Server } = require('socket.io');
 const pool = require('./config/database');
 const logger = require('./config/logger');
+const tourService = require('./services/TourService');
 
 const cookieParser = require('cookie-parser');
 
@@ -259,19 +260,16 @@ io.on('connection', (socket) => {
       try {
         let cached = tourCavsCache.get(tourId);
         if (!cached || (now - cached.cachedAt) > TOUR_CAVS_TTL_MS) {
-          const r = await pool.query(
-            `SELECT tc.cav_id, c.latitude as cav_lat, c.longitude as cav_lng
-             FROM tour_cav tc JOIN cav c ON tc.cav_id = c.id
-             WHERE tc.tour_id = $1 AND c.latitude IS NOT NULL`,
-            [tourId]
-          );
-          cached = { cavs: r.rows, cachedAt: now };
+          // V6.2 — TourService.loadTourCAVs centralise la requête SQL
+          // (auparavant dupliquée ici et dans 4 fichiers de routes/tours/).
+          const cavs = await tourService.loadTourCAVs(pool, tourId);
+          cached = { cavs, cachedAt: now };
           tourCavsCache.set(tourId, cached);
         }
 
         const PROXIMITY_RADIUS = 0.1; // 100m
         for (const tc of cached.cavs) {
-          const dist = haversineDistanceSimple(latitude, longitude, parseFloat(tc.cav_lat), parseFloat(tc.cav_lng));
+          const dist = tourService.haversineDistance(latitude, longitude, tc.latitude, tc.longitude);
           const key = `${tourId}-${tc.cav_id}`;
           if (dist <= PROXIMITY_RADIUS) {
             if (!cavProximity.has(key)) cavProximity.set(key, { arrivedAt: new Date() });
@@ -299,14 +297,8 @@ io.on('connection', (socket) => {
     lastProximityCheck.clear();
   });
 
-  // Fonction haversine simplifiée pour la détection de proximité (en km)
-  function haversineDistanceSimple(lat1, lon1, lat2, lon2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
+  // V6.2 — haversineDistanceSimple retiré, déplacé vers
+  // services/TourService.haversineDistance (suppression duplication code).
 
   // Mise à jour statut CAV collecté — enrichi avec les champs utiles à la
   // supervision live (fill_level, incidents récents, horodatage serveur).
