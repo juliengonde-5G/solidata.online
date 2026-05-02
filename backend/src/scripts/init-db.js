@@ -1842,6 +1842,75 @@ async function initDatabase() {
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS prescripteur VARCHAR(100);
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
     `);
+
+    // ── Conformité IAE — Prescripteurs (P1#14)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS prescripteur_orgas (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(150) NOT NULL,
+        type VARCHAR(20) NOT NULL CHECK (type IN ('PE', 'FT', 'ML', 'CD', 'CCAS', 'CAP_EMPLOI', 'AUTRE_ASSO', 'DIRECT')),
+        contact_nom VARCHAR(100),
+        contact_email VARCHAR(150),
+        contact_phone VARCHAR(30),
+        region VARCHAR(50),
+        siret VARCHAR(14),
+        actif BOOLEAN DEFAULT true,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_prescripteur_orgas_type ON prescripteur_orgas(type);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_prescripteur_orgas_actif ON prescripteur_orgas(actif);');
+
+    // FK structurée employee → prescripteur (en plus du free text 'prescripteur'
+    // gardé pour rétrocompat). Permet le reporting Pôle Emploi / FSE+.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN prescripteur_id INTEGER REFERENCES prescripteur_orgas(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN date_prescription DATE;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employees_prescripteur ON employees(prescripteur_id);');
+
+    // ── Conformité droit du travail — Visite médicale post-embauche (P1#13)
+    // Légalement : visite d'information et de prévention dans les 3 mois (CDDI 2 mois).
+    // On enregistre la date prévisionnelle (auto J+90) + la date réalisée + résultat.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN visite_medicale_due_date DATE;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN visite_medicale_resultat VARCHAR(30)
+          CHECK (visite_medicale_resultat IN ('conforme', 'restrictions', 'inapte', 'a_revoir'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN visite_medicale_notes TEXT;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    // Index partiel sur les visites en retard (pour scheduler alertes)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_employees_visite_due
+      ON employees(visite_medicale_due_date)
+      WHERE visite_medicale_date IS NULL AND visite_medicale_due_date IS NOT NULL;
+    `);
+
+    // Backfill visite_medicale_due_date pour les employés existants : J+90 après contract_start.
+    await client.query(`
+      UPDATE employees
+      SET visite_medicale_due_date = contract_start + INTERVAL '90 days'
+      WHERE contract_start IS NOT NULL
+        AND visite_medicale_due_date IS NULL
+        AND visite_medicale_date IS NULL;
+    `);
     // Purge expired refresh tokens (cleanup)
     await client.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
 
