@@ -1284,7 +1284,17 @@ async function initDatabase() {
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
 
-    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages) ✓');
+    // FK batch_id : traçabilité produit fini ↔ lot matière entrant
+    // (P1#11 — audit Refashion DPAV : audit traçabilité éco-organisme).
+    // Optionnel pour rétro-compat (les anciens PF n'ont pas de batch).
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN batch_id INTEGER REFERENCES batch_tracking(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_produits_finis_batch ON produits_finis(batch_id);');
+
+    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF) ✓');
 
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)
