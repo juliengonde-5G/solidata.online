@@ -140,6 +140,7 @@ app.use('/api/activity-log', require('./routes/activity-log'));
 app.use('/api/news', require('./routes/newsfeed'));
 
 // Lot 5 : Logistique Exutoires
+app.use('/api/state-machines', require('./routes/state-machines'));
 app.use('/api/partners', require('./routes/partners'));
 app.use('/api/clients-exutoires', require('./routes/clients-exutoires'));
 app.use('/api/tarifs-exutoires', require('./routes/tarifs-exutoires'));

@@ -3409,6 +3409,29 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Référentiel unifié `partners` + migration ✓');
 
+    // ══════════════════════════════════════════
+    // V2 — State machine centralisée (Enterprise Architect Ch2)
+    // Audit transverse de toutes les transitions d'état métier.
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS state_transitions_audit (
+        id BIGSERIAL PRIMARY KEY,
+        machine VARCHAR(50) NOT NULL,
+        entity_type VARCHAR(80) NOT NULL,
+        entity_id INTEGER NOT NULL,
+        from_state VARCHAR(40),
+        to_state VARCHAR(40) NOT NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        user_role VARCHAR(20),
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_state_audit_entity ON state_transitions_audit(entity_type, entity_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_state_audit_machine ON state_transitions_audit(machine, created_at DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_state_audit_user ON state_transitions_audit(user_id);');
+    console.log('[INIT-DB] Audit state-machine ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');
