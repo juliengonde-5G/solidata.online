@@ -24,8 +24,9 @@ export function AuthProvider({ children }) {
 
   const login = async (username, password) => {
     const res = await api.post('/auth/login', { username, password });
+    // Le refresh token est posé par le backend en cookie HttpOnly
+    // (résistant à XSS). Seul l'access token (8h) reste en localStorage.
     localStorage.setItem('accessToken', res.data.accessToken);
-    localStorage.setItem('refreshToken', res.data.refreshToken);
     setUser(res.data.user);
     return res.data.user;
   };
