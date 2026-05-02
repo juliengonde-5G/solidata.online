@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { DataTable, Modal, PageHeader } from '../components';
 import { Shield, ScrollText } from 'lucide-react';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 export default function RGPD() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [tab, setTab] = useState('registre');
   const [registre, setRegistre] = useState([]);
   const [audit, setAudit] = useState([]);
@@ -52,7 +54,13 @@ export default function RGPD() {
     if (!searchEntity.id) return alert('ID requis');
     const reason = prompt('Motif d\'anonymisation (obligatoire) :');
     if (!reason) return;
-    if (!window.confirm(`ATTENTION : Anonymiser définitivement les données ${searchEntity.type} #${searchEntity.id} ?`)) return;
+    const ok = await confirm({
+      title: 'Anonymisation définitive',
+      message: `ATTENTION : Anonymiser définitivement les données ${searchEntity.type} #${searchEntity.id} ? Conformité RGPD : action irréversible.`,
+      confirmLabel: 'Anonymiser',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.post(`/rgpd/anonymize/${searchEntity.type}/${searchEntity.id}`, { reason });
       alert('Données anonymisées');
@@ -61,7 +69,13 @@ export default function RGPD() {
   };
 
   const handlePurge = async () => {
-    if (!window.confirm('Purger les candidatures non recrutées de plus de 24 mois ?')) return;
+    const ok = await confirm({
+      title: 'Purger les anciennes candidatures ?',
+      message: 'Purger définitivement les candidatures non recrutées de plus de 24 mois ? Conforme RGPD (durée légale dépassée).',
+      confirmLabel: 'Purger',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       const r = await api.post('/rgpd/purge-expired');
       alert(r.data.message);
@@ -99,6 +113,7 @@ export default function RGPD() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="space-y-6">
         <PageHeader
           title="Conformité RGPD"

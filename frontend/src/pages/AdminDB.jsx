@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { Database } from 'lucide-react';
 import Layout from '../components/Layout';
 import { PageHeader } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 export default function AdminDB() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [tab, setTab] = useState('info');
   const [info, setInfo] = useState(null);
   const [backups, setBackups] = useState([]);
@@ -42,7 +44,13 @@ export default function AdminDB() {
   };
 
   const restoreBackup = async (filename) => {
-    if (!window.confirm(`ATTENTION : Restaurer la sauvegarde ${filename} ? Les données actuelles seront écrasées.`)) return;
+    const ok = await confirm({
+      title: 'Restaurer la sauvegarde ?',
+      message: `ATTENTION : Restaurer "${filename}" écrasera toutes les données actuelles. Cette opération est irréversible.`,
+      confirmLabel: 'Restaurer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     setActionLoading(true);
     try {
       await api.post('/admin-db/restore', { filename });
@@ -52,7 +60,13 @@ export default function AdminDB() {
   };
 
   const deleteBackup = async (filename) => {
-    if (!window.confirm(`Supprimer la sauvegarde ${filename} ?`)) return;
+    const ok = await confirm({
+      title: 'Supprimer cette sauvegarde ?',
+      message: `Supprimer le fichier ${filename} ? Cette action est définitive.`,
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/admin-db/backups/${filename}`);
       loadData();
@@ -60,7 +74,13 @@ export default function AdminDB() {
   };
 
   const runVacuum = async () => {
-    if (!window.confirm('Lancer l\'optimisation de la base (VACUUM ANALYZE) ?')) return;
+    const ok = await confirm({
+      title: 'Optimiser la base ?',
+      message: 'Lancer VACUUM ANALYZE sur la base de données ? L\'opération peut prendre plusieurs minutes.',
+      confirmLabel: 'Optimiser',
+      confirmVariant: 'primary',
+    });
+    if (!ok) return;
     setActionLoading(true);
     try {
       const r = await api.post('/admin-db/vacuum');
@@ -72,7 +92,13 @@ export default function AdminDB() {
   const purgeTable = async (table) => {
     const months = prompt(`Supprimer les données de "${table}" plus anciennes que combien de mois ?`, '12');
     if (!months) return;
-    if (!window.confirm(`Confirmer la purge de "${table}" (> ${months} mois) ? Cette action est irréversible.`)) return;
+    const ok = await confirm({
+      title: 'Purger les données anciennes ?',
+      message: `Confirmer la purge de "${table}" (> ${months} mois). Cette action est irréversible.`,
+      confirmLabel: 'Purger',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       const r = await api.post('/admin-db/purge', { table, months: parseInt(months), confirm: 'CONFIRMER_PURGE' });
       alert(r.data.message);
@@ -90,6 +116,7 @@ export default function AdminDB() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="space-y-6">
         <PageHeader
           title="Administration Base de Données"

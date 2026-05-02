@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { Upload, FileText, CheckCircle, XCircle, AlertTriangle, Trash2, Zap } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, useToast, PageHeader } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 export default function BoutiquesImport() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const toast = useToast();
   const fileInput = useRef(null);
   const [boutiques, setBoutiques] = useState([]);
@@ -61,11 +63,12 @@ export default function BoutiquesImport() {
           toast.warning(data.message || 'Fichier déjà importé (hash identique)');
         } else if (data.reason === 'date_overlap') {
           const c = data.conflict || {};
-          const ok = window.confirm(
-            `Un import existe déjà pour cette boutique sur la période ${c.date_debut} → ${c.date_fin} ` +
-            `(fichier: ${c.filename}).\n\nÉcraser malgré tout ? L'ancien batch sera conservé en historique mais ` +
-            `les ventes/tickets en doublon de période seront ajoutés.`
-          );
+          const ok = await confirm({
+            title: 'Import déjà existant',
+            message: `Un import existe déjà pour cette boutique sur la période ${c.date_debut} → ${c.date_fin} (fichier: ${c.filename}). Écraser malgré tout ? L'ancien batch sera conservé en historique mais les ventes/tickets en doublon de période seront ajoutés.`,
+            confirmLabel: 'Forcer l\'import',
+            confirmVariant: 'danger',
+          });
           if (ok) {
             res = await postImport(file, true);
             data = res.data || {};
@@ -118,6 +121,7 @@ export default function BoutiquesImport() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="p-4 sm:p-6 max-w-6xl">
         <PageHeader
           title="Import CSV des ventes"

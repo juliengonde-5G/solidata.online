@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Modal from './Modal';
+import useConfirm from '../hooks/useConfirm';
 import { sensorsApi } from '../services/api';
 
 /**
@@ -8,6 +9,7 @@ import { sensorsApi } from '../services/api';
  * et le déprovisionnement d'un capteur Milesight EM400-MUD.
  */
 export default function SensorSection({ cavId, onUpdated }) {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [provisionOpen, setProvisionOpen] = useState(false);
@@ -30,7 +32,13 @@ export default function SensorSection({ cavId, onUpdated }) {
   useEffect(() => { load(); }, [load]);
 
   const deprovision = async () => {
-    if (!window.confirm('Déprovisionner le capteur ? Les données historiques sont conservées mais le CAV repassera sur le remplissage estimé.')) return;
+    const ok = await confirm({
+      title: 'Déprovisionner le capteur ?',
+      message: 'Les données historiques sont conservées, mais le CAV repassera sur le remplissage estimé jusqu\'au prochain provisioning.',
+      confirmLabel: 'Déprovisionner',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await sensorsApi.deprovision(cavId);
       await load();
@@ -64,6 +72,7 @@ export default function SensorSection({ cavId, onUpdated }) {
 
   return (
     <div className="card-modern overflow-hidden">
+      {ConfirmDialogElement}
       <div className="px-4 py-2 bg-gray-50 border-b flex items-center justify-between">
         <h3 className="text-xs font-medium text-gray-500 uppercase flex items-center gap-2">
           📡 Capteur LoRaWAN
