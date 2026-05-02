@@ -677,7 +677,7 @@ router.get('/liveobjects-devices', authorize('ADMIN', 'MANAGER'), async (req, re
     });
   } catch (err) {
     console.error('[CAV] Erreur liveobjects-devices :', err);
-    res.status(502).json({ error: err.message || 'Live Objects indisponible' });
+    res.status(502).json({ error: 'Live Objects indisponible' });
   }
 });
 
@@ -1300,7 +1300,7 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
     });
   } catch (err) {
     console.error('[CAV] Erreur sensor-diagnostic :', err);
-    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

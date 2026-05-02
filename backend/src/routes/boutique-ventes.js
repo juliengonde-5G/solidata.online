@@ -312,7 +312,7 @@ router.post('/import',
     } catch (err) {
       console.error('[boutique-ventes] import:', err);
       if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      res.status(500).json({ error: 'Erreur import CSV', details: err.message });
+      res.status(500).json({ error: 'Erreur import CSV' });
     }
   }
 );
@@ -375,7 +375,7 @@ router.delete('/batches/:id',
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('[boutique-ventes] DELETE batch:', err);
-      res.status(500).json({ error: 'Erreur suppression', details: err.message });
+      res.status(500).json({ error: 'Erreur suppression' });
     } finally {
       client.release();
     }
