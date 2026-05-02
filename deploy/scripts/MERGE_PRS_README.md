@@ -2,106 +2,120 @@
 
 > Outils pour merger les 10 PRs (V1 → V4) du plan d'action multi-agents
 > de façon ordonnée et sûre. Cible par défaut : `claude/design-app-architecture-hGVgg`.
+>
+> **Pas besoin de `gh` CLI** — les scripts utilisent uniquement `curl`,
+> `jq`, `git`, `node` (universellement disponibles ou triviaux à installer)
+> et un **token GitHub personnel** que tu génères en 30 secondes.
 
-## Pré-requis
+## 1. Génération du token GitHub (1×)
 
-Sur la machine d'où tu lances les merges (poste local ou serveur de déploiement) :
+1. Aller sur : https://github.com/settings/tokens/new?scopes=repo&description=solidata-merge
+2. Le scope `repo` est pré-coché
+3. Définir une expiration (90 jours recommandé)
+4. Cliquer **Generate token**
+5. Copier le token (commence par `ghp_…`) — **il ne sera plus affiché après**
+
+Puis l'exporter dans ton shell :
 
 ```bash
-# gh CLI (GitHub)
-# Linux Debian/Ubuntu :
-type -p curl >/dev/null || sudo apt-get install -y curl
-curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-sudo apt-get update && sudo apt-get install -y gh
-
-# jq (parser JSON)
-sudo apt-get install -y jq
-
-# Authentification gh (browser-based, fait une fois)
-gh auth login
-
-# Vérification
-gh auth status
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-> **Note** : si l'installation `gh` te déconnecte du SSH, lance les merges
-> depuis ton poste local plutôt que sur le serveur prod. Le merge se fait
-> côté GitHub via API ; aucune action serveur n'est nécessaire au moment
-> du merge. Le serveur prod ne doit être touché qu'après le merge pour
-> rebuild les conteneurs (cf §5).
+> Pour le rendre persistant (optionnel) : ajouter la ligne ci-dessus
+> dans `~/.bashrc` ou `~/.zshrc` (avec une expiration courte sur le token).
 
-## Scripts disponibles
+## 2. Vérification des dépendances
 
-| Script | Usage |
-|---|---|
-| `merge-prs.sh <pr-num>` | merge **une seule** PR avec validations (test merge à blanc + syntax check) |
-| `merge-all-prs.sh [--auto]` | orchestrateur des **10 PRs** dans l'ordre, avec pauses |
+```bash
+# Outils nécessaires (tous standards)
+command -v curl >/dev/null && echo "curl OK"
+command -v jq   >/dev/null && echo "jq OK"
+command -v git  >/dev/null && echo "git OK"
+command -v node >/dev/null && echo "node OK"
+```
 
-## Procédure standard (interactive)
+Si `jq` est absent (rare) :
+
+```bash
+# Linux — apt
+sudo apt-get install -y jq
+
+# macOS — brew
+brew install jq
+
+# OU sans permission root, binaire statique :
+mkdir -p ~/.local/bin
+curl -L -o ~/.local/bin/jq \
+    https://github.com/jqlang/jq/releases/latest/download/jq-linux-amd64
+chmod +x ~/.local/bin/jq
+export PATH="$HOME/.local/bin:$PATH"
+jq --version
+```
+
+## 3. Lancer les merges
+
+### Procédure standard (interactive)
 
 ```bash
 cd /chemin/vers/solidata.online
 git pull origin claude/design-app-architecture-hGVgg
 
-# Lance l'orchestrateur — il va merger les 10 PRs en demandant
-# confirmation entre chacune.
+export GITHUB_TOKEN=ghp_xxxxx
+
+# Lance l'orchestrateur — il merge les 10 PRs en pausant entre chaque.
 bash deploy/scripts/merge-all-prs.sh
 ```
 
 L'orchestrateur :
 1. Lance le merge de **PR #31** (V1.1 — sécurité)
-2. Pause si demandé
+2. Pause si demandé (Entrée pour continuer)
 3. Lance **#32**, **#33** (vague V1)
-4. **Pause critique** après #33 (init-db modifié) — proposition de rebuild prod
+4. **Pause critique** après #33 (init-db modifié) — propose le rebuild prod
 5. Continue avec **#34** → **#40** dans l'ordre
 6. Affiche les rappels (rebuild docker, smoke tests…)
 
-## Mode automatique (sans pause)
+### Mode automatique (sans pause)
 
 ```bash
-bash deploy/scripts/merge-all-prs.sh --auto
+GITHUB_TOKEN=ghp_xxxxx bash deploy/scripts/merge-all-prs.sh --auto
 ```
 
-Utile si tu as déjà une fenêtre de maintenance et veux enchaîner.
+### Reprise après échec
 
-## Reprise après échec
-
-Si une PR échoue (conflit non détecté, syntax error…) :
+Si une PR échoue (conflit, syntax error…) :
 
 ```bash
 # Corrige le problème (ex : résoudre les conflits via UI GitHub)
-# puis relance à partir de la PR suivante :
-FROM_PR=37 bash deploy/scripts/merge-all-prs.sh
+# puis relance à partir de la PR :
+GITHUB_TOKEN=ghp_xxxxx FROM_PR=37 bash deploy/scripts/merge-all-prs.sh
 ```
 
-## Merge d'une seule PR
+### Merge d'une seule PR
 
 ```bash
-bash deploy/scripts/merge-prs.sh 31
+GITHUB_TOKEN=ghp_xxxxx bash deploy/scripts/merge-prs.sh 31
 
 # Avec options :
-MERGE_METHOD=squash bash deploy/scripts/merge-prs.sh 31
-BASE_BRANCH=main bash deploy/scripts/merge-prs.sh 41
+GITHUB_TOKEN=ghp_xxxxx MERGE_METHOD=squash bash deploy/scripts/merge-prs.sh 31
+GITHUB_TOKEN=ghp_xxxxx BASE_BRANCH=main   bash deploy/scripts/merge-prs.sh 41
 ```
 
-## Contrôles effectués par le script
+## 4. Contrôles effectués automatiquement
 
-Pour chaque PR :
+Pour chaque PR, le script :
 
-1. **Pré-requis** : gh + jq disponibles, gh authentifié
-2. **PR ouverte** et état mergeable (refus si CONFLICTING)
+1. **Pré-requis** : `curl`, `jq`, `git`, `node` disponibles + token valide
+2. **PR ouverte** et état mergeable (refus si conflits)
 3. **Base correcte** (refuse si la PR ne pointe pas vers la base attendue)
-4. **Merge à blanc local** : test git merge sans commit
-5. **Syntax check Node** sur tous les `.js` backend modifiés (via worktree temporaire)
-6. **Merge GitHub** via `gh pr merge` (méthode `merge` par défaut)
+4. **Merge à blanc local** : test `git merge --no-commit --no-ff`
+5. **Syntax check Node** sur tous les `.js` backend modifiés (via worktree temporaire — sans polluer ta branche courante)
+6. **Merge GitHub** via API REST (`PUT /repos/.../pulls/N/merge`)
 7. **Pull local** avec `--ff-only`
 8. **Rappels post-merge** automatiques (init-db, docker, frontend)
 
 Si une étape échoue, le script s'arrête et nettoie ses artefacts (worktrees, branches temp).
 
-## Plan d'enchaînement
+## 5. Plan d'enchaînement des 10 PRs
 
 | # | PR | Vague | Description | Critique |
 |---|---|---|---|---|
@@ -116,7 +130,7 @@ Si une étape échoue, le script s'arrête et nettoie ses artefacts (worktrees, 
 | 9 | #39 | V3.3 | useAsyncData + Stock pilote | |
 | 10 | #40 | V4 | Tests Jest + FSE+ + runbook restore | |
 
-## Après les 10 merges — rebuild prod
+## 6. Après les 10 merges — rebuild prod
 
 ```bash
 # Sur le serveur prod (51.159.144.100) :
@@ -130,23 +144,33 @@ curl -fsS https://solidata.online/api/health | jq .
 curl -fsS https://solidata.online/api/health/ready
 ```
 
-## PR finale feature → main
+## 7. PR finale feature → main
 
-Une fois la branche feature stabilisée et validée en prod, merger vers `main` :
+Une fois la branche feature stabilisée et validée en prod :
 
 ```bash
-gh pr create \
-    --repo juliengonde-5G/solidata.online \
-    --base main \
-    --head claude/design-app-architecture-hGVgg \
-    --title "[feature] Plan d'action multi-agents — V1 à V4 consolidées" \
-    --body "Voir docs/RUNBOOK_INFRA_ROADMAP.md pour le détail"
-
-# Après revue, merger :
-gh pr merge <num> --repo juliengonde-5G/solidata.online --merge
+# Création via API (équivalent gh pr create)
+curl -fsSL -X POST \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    https://api.github.com/repos/juliengonde-5G/solidata.online/pulls \
+    -d '{
+        "title": "[feature] Plan d action multi-agents — V1 a V4 consolidees",
+        "head":  "claude/design-app-architecture-hGVgg",
+        "base":  "main",
+        "body":  "Voir docs/RUNBOOK_INFRA_ROADMAP.md pour le detail"
+    }'
 ```
 
-## Nettoyage des branches feature après stabilisation
+Puis merger via le même script :
+
+```bash
+GITHUB_TOKEN=$GITHUB_TOKEN BASE_BRANCH=main \
+    bash deploy/scripts/merge-prs.sh <pr-finale-num>
+```
+
+## 8. Nettoyage des branches feature après stabilisation
 
 Après 1-2 semaines de stabilisation en prod, supprimer les 10 branches feature (gardées par défaut pour rollback) :
 
@@ -159,3 +183,31 @@ for branch in fix/security-quick-wins-2026-05 fix/data-quick-wins-2026-05 \
     git push origin --delete "$branch"
 done
 ```
+
+## 9. Sécurité du token
+
+- Ne jamais committer `GITHUB_TOKEN` dans le repo
+- Préférer une expiration courte (90 jours)
+- Si le token est compromis, le révoquer immédiatement sur :
+  https://github.com/settings/tokens
+- Ne pas le partager — chaque collaborateur génère le sien
+
+## 10. Dépannage
+
+### `Token GitHub invalide ou expiré`
+→ Régénérer un token avec scope `repo` et exporter à nouveau.
+
+### `PR #X non mergeable (CONFLICTING)`
+→ Résoudre via UI GitHub puis relancer.
+
+### Le script ne trouve pas `node`
+→ Le syntax check requiert Node. Installer via `nvm` ou `apt`. Si pas
+  possible, commenter la section "Syntax check" dans `merge-prs.sh`.
+
+### `git fetch` échoue
+→ Vérifier les credentials git (HTTPS ou SSH). Le token GitHub n'est
+  pas utilisé pour `git`, seulement pour l'API. Pour `git`, utiliser
+  un SSH key ou un credential helper séparé.
+
+### Rate-limit GitHub
+→ L'API authentifiée donne 5000 req/h. Largement suffisant pour 10 PRs.

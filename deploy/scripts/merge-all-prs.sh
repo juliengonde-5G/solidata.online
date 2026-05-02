@@ -2,22 +2,42 @@
 # ============================================================
 # SOLIDATA — Orchestrateur de merge des 10 PRs (V1 → V4)
 #
-# Usage : bash deploy/scripts/merge-all-prs.sh [--auto]
+# Usage : GITHUB_TOKEN=ghp_xxx bash deploy/scripts/merge-all-prs.sh [--auto]
 #
 #   sans --auto  : pause entre chaque PR pour validation manuelle (par défaut)
 #   avec --auto  : enchaîne les 10 PRs sans pause
+#
+# Pré-requis :
+#   - GITHUB_TOKEN exporté (scope 'repo') — voir MERGE_PRS_README.md §1
+#   - curl, jq, git, node disponibles
 #
 # Le script s'appuie sur deploy/scripts/merge-prs.sh pour chaque PR.
 # Si une PR échoue (conflit, syntax, etc.), le script s'arrête —
 # corriger puis relancer en passant la PR de reprise via FROM_PR=<n>.
 #
 # Exemples :
-#   bash deploy/scripts/merge-all-prs.sh                  # interactif, depuis PR #31
-#   bash deploy/scripts/merge-all-prs.sh --auto           # auto, sans pause
-#   FROM_PR=37 bash deploy/scripts/merge-all-prs.sh       # reprend à PR #37
+#   GITHUB_TOKEN=ghp_xxx bash deploy/scripts/merge-all-prs.sh                  # interactif
+#   GITHUB_TOKEN=ghp_xxx bash deploy/scripts/merge-all-prs.sh --auto           # auto
+#   GITHUB_TOKEN=ghp_xxx FROM_PR=37 bash deploy/scripts/merge-all-prs.sh       # reprise
 # ============================================================
 
 set -euo pipefail
+
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    cat <<EOF >&2
+✗ GITHUB_TOKEN absent.
+
+Génère un token sur :
+    https://github.com/settings/tokens/new?scopes=repo&description=solidata-merge
+
+Puis exporte-le :
+    export GITHUB_TOKEN=ghp_xxxxx
+
+Et relance :
+    bash $0
+EOF
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MERGE_SCRIPT="${SCRIPT_DIR}/merge-prs.sh"
