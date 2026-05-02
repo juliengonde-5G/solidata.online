@@ -5,22 +5,10 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const billingService = require('../services/BillingService');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 router.use(autoLogActivity('billing'));
-
-// Générer numéro de facture auto
-async function generateInvoiceNumber() {
-  const year = new Date().getFullYear();
-  const result = await pool.query(
-    "SELECT MAX(invoice_number) as last FROM invoices WHERE invoice_number LIKE $1",
-    [`FAC-${year}-%`]
-  );
-  const last = result.rows[0].last;
-  if (!last) return `FAC-${year}-0001`;
-  const num = parseInt(last.split('-')[2]) + 1;
-  return `FAC-${year}-${String(num).padStart(4, '0')}`;
-}
 
 // GET /api/billing/invoices (+ alias /api/billing)
 router.get('/invoices', async (req, res) => {
@@ -71,51 +59,49 @@ router.post('/invoices', [
   body('client_name').notEmpty().withMessage('Nom du client requis'),
   body('date').notEmpty().withMessage('Date requise'),
 ], validate, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { client_name, client_address, client_email, date, due_date, notes, lines } = req.body;
     if (!client_name || !date) return res.status(400).json({ error: 'Client et date requis' });
 
-    const invoiceNumber = await generateInvoiceNumber();
+    await client.query('BEGIN');
 
-    // Calcul totaux
-    let totalHT = 0;
-    if (lines?.length) {
-      totalHT = lines.reduce((sum, l) => sum + (l.quantity || 1) * (l.unit_price || 0), 0);
-    }
-    const tvaRate = 0.20;
-    const totalTVA = totalHT * tvaRate;
-    const totalTTC = totalHT + totalTVA;
+    // Numérotation + totaux via BillingService (V5.4)
+    const invoiceNumber = await billingService.generateInvoiceNumber(
+      client, 'FAC', 'invoices', 'invoice_number'
+    );
+    const { totalHT, totalTVA, totalTTC, lineDetails } = billingService.calculateTotals(lines);
 
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO invoices (invoice_number, client_name, client_address, client_email,
        date, due_date, total_ht, total_tva, total_ttc, notes, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
       [invoiceNumber, client_name, client_address, client_email,
-       date, due_date, Math.round(totalHT * 100) / 100,
-       Math.round(totalTVA * 100) / 100, Math.round(totalTTC * 100) / 100,
-       notes, req.user.id]
+       date, due_date, totalHT, totalTVA, totalTTC, notes, req.user.id]
     );
     const invoiceId = result.rows[0].id;
 
-    // Lignes
-    if (lines?.length) {
-      for (let i = 0; i < lines.length; i++) {
-        const l = lines[i];
-        const lineTotal = (l.quantity || 1) * (l.unit_price || 0);
-        await pool.query(
-          'INSERT INTO invoice_lines (invoice_id, position, description, quantity, unit_price, total) VALUES ($1, $2, $3, $4, $5, $6)',
-          [invoiceId, i + 1, l.description, l.quantity || 1, l.unit_price || 0, Math.round(lineTotal * 100) / 100]
-        );
-      }
+    // Lignes (déjà arrondies par calculateTotals)
+    for (let i = 0; i < lineDetails.length; i++) {
+      const l = lineDetails[i];
+      await client.query(
+        'INSERT INTO invoice_lines (invoice_id, position, description, quantity, unit_price, total) VALUES ($1, $2, $3, $4, $5, $6)',
+        [invoiceId, i + 1, l.description, l.quantity, l.unit_price, l.total]
+      );
     }
+
+    await client.query('COMMIT');
 
     const full = await pool.query('SELECT * FROM invoices WHERE id = $1', [invoiceId]);
     const insertedLines = await pool.query('SELECT * FROM invoice_lines WHERE invoice_id = $1 ORDER BY position', [invoiceId]);
 
     res.status(201).json({ ...full.rows[0], lines: insertedLines.rows });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[BILLING] Erreur création :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
@@ -125,8 +111,13 @@ router.put('/invoices/:id/status', [
 ], validate, async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['draft', 'sent', 'paid', 'overdue', 'cancelled'];
-    if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
+
+    // Récupère le statut actuel pour valider la transition (V5.4)
+    const current = await pool.query('SELECT status FROM invoices WHERE id = $1', [req.params.id]);
+    if (current.rows.length === 0) return res.status(404).json({ error: 'Facture non trouvée' });
+
+    const check = billingService.canTransitionStatus(current.rows[0].status, status);
+    if (!check.ok) return res.status(409).json({ error: check.reason });
 
     const updates = ['status = $1', 'updated_at = NOW()'];
     if (status === 'paid') updates.push('paid_at = NOW()');
@@ -135,7 +126,6 @@ router.put('/invoices/:id/status', [
       `UPDATE invoices SET ${updates.join(', ')} WHERE id = $2 RETURNING *`,
       [status, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Facture non trouvée' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[BILLING] Erreur statut :', err);
