@@ -111,6 +111,7 @@ app.use('/api/candidates', require('./routes/candidates'));
 app.use('/api/pcm', require('./routes/pcm'));
 app.use('/api/teams', require('./routes/teams'));
 app.use('/api/employees', require('./routes/employees'));
+app.use('/api/prescripteurs', require('./routes/prescripteurs'));
 
 // Lot 3 : Collecte + Tournées IA + GPS
 app.use('/api/cav', require('./routes/cav'));
@@ -139,6 +140,7 @@ app.use('/api/activity-log', require('./routes/activity-log'));
 app.use('/api/news', require('./routes/newsfeed'));
 
 // Lot 5 : Logistique Exutoires
+app.use('/api/partners', require('./routes/partners'));
 app.use('/api/clients-exutoires', require('./routes/clients-exutoires'));
 app.use('/api/tarifs-exutoires', require('./routes/tarifs-exutoires'));
 app.use('/api/commandes-exutoires', require('./routes/commandes-exutoires'));

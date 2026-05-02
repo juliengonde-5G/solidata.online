@@ -660,7 +660,70 @@ async function initDatabase() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
-    console.log('[INIT-DB] Module 8 (Production) ✓');
+
+    // ══════════════════════════════════════════
+    // V2 — Réconciliation tonnage (collecte ↔ tri ↔ Refashion DPAV)
+    //
+    // Audit Direction (D2 + D7) + Enterprise Architect (Rupture #1) :
+    // 3 sources de poids actuellement non rapprochées en SQL :
+    //   (a) tours.total_weight_kg (kg pesés à la bascule du centre)
+    //   (b) production_daily.entree_ligne_kg (kg déclarés entrant ligne tri)
+    //   (c) production_daily.total_jour_t × 1000 (sortie tri valorisée)
+    //
+    // La déclaration Refashion DPAV exige (a) ET (b) — décision métier
+    // confirmée par la Direction. La sortie (c) sert au calcul du taux
+    // de valorisation.
+    // ══════════════════════════════════════════
+
+    // Vue par jour : facilite le diagnostic des écarts (alertes >2%)
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_tonnage_reconciliation_jour AS
+      SELECT
+        COALESCE(t.date, pd.date)                          AS date,
+        COALESCE(t.collecte_brut_kg, 0)::FLOAT             AS collecte_brut_kg,
+        COALESCE(pd.entree_ligne_kg, 0)::FLOAT             AS tri_entree_kg,
+        COALESCE(pd.total_jour_t, 0)::FLOAT * 1000         AS tri_sortie_kg,
+        (COALESCE(t.collecte_brut_kg, 0) - COALESCE(pd.entree_ligne_kg, 0))::FLOAT
+                                                            AS ecart_collecte_tri_kg,
+        CASE WHEN COALESCE(t.collecte_brut_kg, 0) > 0
+          THEN ROUND(((COALESCE(t.collecte_brut_kg, 0) - COALESCE(pd.entree_ligne_kg, 0))
+                     / t.collecte_brut_kg * 100)::numeric, 2)
+          ELSE NULL
+        END                                                 AS ecart_pct
+      FROM (
+        SELECT date, SUM(total_weight_kg) AS collecte_brut_kg
+        FROM tours WHERE status = 'completed'
+        GROUP BY date
+      ) t
+      FULL OUTER JOIN production_daily pd ON pd.date = t.date;
+    `);
+
+    // Vue Refashion DPAV (trimestriel) — pré-remplissage formulaire conforme
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_refashion_dpav_source AS
+      SELECT
+        EXTRACT(YEAR FROM d)::INT                           AS annee,
+        EXTRACT(QUARTER FROM d)::INT                        AS trimestre,
+        TO_CHAR(d, 'YYYY-"Q"Q')                             AS periode,
+        ROUND(SUM(collecte_brut_kg) / 1000.0, 3)::FLOAT     AS collecte_brut_t,
+        ROUND(SUM(tri_entree_kg) / 1000.0, 3)::FLOAT        AS tri_entree_t,
+        ROUND(SUM(tri_sortie_kg) / 1000.0, 3)::FLOAT        AS tri_sortie_t,
+        ROUND(SUM(ecart_collecte_tri_kg) / 1000.0, 3)::FLOAT AS ecart_t,
+        CASE WHEN SUM(collecte_brut_kg) > 0
+          THEN ROUND((SUM(ecart_collecte_tri_kg) / SUM(collecte_brut_kg) * 100)::numeric, 2)
+          ELSE NULL
+        END                                                  AS ecart_pct,
+        CASE WHEN SUM(tri_entree_kg) > 0
+          THEN ROUND((SUM(tri_sortie_kg) / SUM(tri_entree_kg) * 100)::numeric, 2)
+          ELSE NULL
+        END                                                  AS taux_valorisation_pct
+      FROM vw_tonnage_reconciliation_jour, LATERAL (SELECT date AS d) sub
+      WHERE date IS NOT NULL
+      GROUP BY EXTRACT(YEAR FROM d), EXTRACT(QUARTER FROM d), TO_CHAR(d, 'YYYY-"Q"Q')
+      ORDER BY annee DESC, trimestre DESC;
+    `);
+
+    console.log('[INIT-DB] Module 8 (Production + vues réconciliation Refashion) ✓');
 
     // ══════════════════════════════════════════
     // MODULE V2 : Référentiels & Tri
@@ -1284,7 +1347,17 @@ async function initDatabase() {
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
 
-    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages) ✓');
+    // FK batch_id : traçabilité produit fini ↔ lot matière entrant
+    // (P1#11 — audit Refashion DPAV : audit traçabilité éco-organisme).
+    // Optionnel pour rétro-compat (les anciens PF n'ont pas de batch).
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN batch_id INTEGER REFERENCES batch_tracking(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_produits_finis_batch ON produits_finis(batch_id);');
+
+    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF) ✓');
 
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)
@@ -1841,6 +1914,75 @@ async function initDatabase() {
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_end_date DATE;
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS prescripteur VARCHAR(100);
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
+    `);
+
+    // ── Conformité IAE — Prescripteurs (P1#14)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS prescripteur_orgas (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(150) NOT NULL,
+        type VARCHAR(20) NOT NULL CHECK (type IN ('PE', 'FT', 'ML', 'CD', 'CCAS', 'CAP_EMPLOI', 'AUTRE_ASSO', 'DIRECT')),
+        contact_nom VARCHAR(100),
+        contact_email VARCHAR(150),
+        contact_phone VARCHAR(30),
+        region VARCHAR(50),
+        siret VARCHAR(14),
+        actif BOOLEAN DEFAULT true,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_prescripteur_orgas_type ON prescripteur_orgas(type);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_prescripteur_orgas_actif ON prescripteur_orgas(actif);');
+
+    // FK structurée employee → prescripteur (en plus du free text 'prescripteur'
+    // gardé pour rétrocompat). Permet le reporting Pôle Emploi / FSE+.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN prescripteur_id INTEGER REFERENCES prescripteur_orgas(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN date_prescription DATE;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employees_prescripteur ON employees(prescripteur_id);');
+
+    // ── Conformité droit du travail — Visite médicale post-embauche (P1#13)
+    // Légalement : visite d'information et de prévention dans les 3 mois (CDDI 2 mois).
+    // On enregistre la date prévisionnelle (auto J+90) + la date réalisée + résultat.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN visite_medicale_due_date DATE;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN visite_medicale_resultat VARCHAR(30)
+          CHECK (visite_medicale_resultat IN ('conforme', 'restrictions', 'inapte', 'a_revoir'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN visite_medicale_notes TEXT;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    // Index partiel sur les visites en retard (pour scheduler alertes)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_employees_visite_due
+      ON employees(visite_medicale_due_date)
+      WHERE visite_medicale_date IS NULL AND visite_medicale_due_date IS NOT NULL;
+    `);
+
+    // Backfill visite_medicale_due_date pour les employés existants : J+90 après contract_start.
+    await client.query(`
+      UPDATE employees
+      SET visite_medicale_due_date = contract_start + INTERVAL '90 days'
+      WHERE contract_start IS NOT NULL
+        AND visite_medicale_due_date IS NULL
+        AND visite_medicale_date IS NULL;
     `);
     // Purge expired refresh tokens (cleanup)
     await client.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
@@ -3143,6 +3285,163 @@ async function initDatabase() {
       ON CONFLICT (indicateur) DO NOTHING;
     `);
     console.log('[INIT-DB] Alert thresholds Dashboard exécutif ✓');
+
+    // ══════════════════════════════════════════
+    // V2 — Référentiel unifié `partners` (Enterprise Architect Ch1)
+    //
+    // Fusion exutoires + clients_exutoires + boutiques (côté aval) en une
+    // table maître. Les associations (collecte) restent dans leur table
+    // dédiée (collecte = points d'apport, sémantique différente).
+    //
+    // Approche additive : la table `partners` est la nouvelle source de
+    // vérité, les anciennes tables sont conservées en lecture seule
+    // (rollback possible). Les colonnes source_table/source_id permettent
+    // de tracer l'origine. Les FK partner_id sont ajoutées en parallèle
+    // sur expeditions/commandes_exutoires/produits_finis/factures_exutoires.
+    // ══════════════════════════════════════════
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS partners (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(30) NOT NULL CHECK (type IN (
+          'exutoire_recycleur', 'exutoire_negociant', 'exutoire_industriel',
+          'exutoire_autre', 'boutique'
+        )),
+        nom VARCHAR(255) NOT NULL,
+        siret VARCHAR(14),
+        adresse TEXT,
+        code_postal VARCHAR(10),
+        ville VARCHAR(100),
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        contact_nom VARCHAR(150),
+        contact_email VARCHAR(255),
+        contact_tel VARCHAR(30),
+        actif BOOLEAN DEFAULT true,
+        notes TEXT,
+        -- Origine pour rétrocompat (rollback) — drop après migration finale
+        source_table VARCHAR(50),
+        source_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT uq_partner_source UNIQUE (source_table, source_id)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_partners_type ON partners(type);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_partners_actif ON partners(actif) WHERE actif = true;');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_partners_nom ON partners(nom);');
+
+    // Backfill 1 : exutoires (table simple type) → partners
+    // Les anciens "exutoires" couvrent recycleurs/négociants/industriels avec
+    // le champ libre 'type'. On mappe vers les enum :
+    //   recycl* → exutoire_recycleur, negoc* → exutoire_negociant,
+    //   industr* → exutoire_industriel, sinon → exutoire_autre
+    await client.query(`
+      INSERT INTO partners (type, nom, adresse, contact_nom, contact_email,
+                            contact_tel, actif, source_table, source_id)
+      SELECT
+        CASE
+          WHEN LOWER(COALESCE(e.type, '')) LIKE '%recycl%'  THEN 'exutoire_recycleur'
+          WHEN LOWER(COALESCE(e.type, '')) LIKE '%negoc%'   THEN 'exutoire_negociant'
+          WHEN LOWER(COALESCE(e.type, '')) LIKE '%industr%' THEN 'exutoire_industriel'
+          ELSE 'exutoire_autre'
+        END AS type,
+        e.nom, e.adresse, e.contact_nom, e.contact_email, e.contact_tel,
+        COALESCE(e.is_active, true) AS actif,
+        'exutoires' AS source_table, e.id AS source_id
+      FROM exutoires e
+      ON CONFLICT (source_table, source_id) DO NOTHING;
+    `);
+
+    // Backfill 2 : clients_exutoires (table riche) → partners
+    // type_client mappe directement aux enum exutoire_*.
+    await client.query(`
+      INSERT INTO partners (type, nom, siret, adresse, code_postal, ville,
+                            contact_nom, contact_email, contact_tel, actif,
+                            source_table, source_id)
+      SELECT
+        CASE c.type_client
+          WHEN 'recycleur'  THEN 'exutoire_recycleur'
+          WHEN 'negociant'  THEN 'exutoire_negociant'
+          WHEN 'industriel' THEN 'exutoire_industriel'
+          ELSE 'exutoire_autre'
+        END AS type,
+        c.raison_sociale, c.siret, c.adresse, c.code_postal, c.ville,
+        c.contact_nom, c.contact_email, c.contact_telephone,
+        COALESCE(c.actif, true),
+        'clients_exutoires', c.id
+      FROM clients_exutoires c
+      ON CONFLICT (source_table, source_id) DO NOTHING;
+    `);
+
+    // Backfill 3 : boutiques → partners (côté aval = exutoire de produits triés)
+    await client.query(`
+      INSERT INTO partners (type, nom, adresse, code_postal, ville,
+                            latitude, longitude, contact_tel, actif,
+                            source_table, source_id)
+      SELECT
+        'boutique', b.nom, b.adresse, b.code_postal, b.ville,
+        b.latitude, b.longitude, b.telephone,
+        COALESCE(b.is_active, true),
+        'boutiques', b.id
+      FROM boutiques b
+      ON CONFLICT (source_table, source_id) DO NOTHING;
+    `);
+
+    // Ajouter les FK partner_id en parallèle des anciennes (additive)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE expeditions ADD COLUMN partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE commandes_exutoires ADD COLUMN partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE factures_exutoires ADD COLUMN partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Backfill FK partner_id (lookup via source_table + source_id)
+    await client.query(`
+      UPDATE expeditions e SET partner_id = p.id
+      FROM partners p
+      WHERE p.source_table = 'exutoires' AND p.source_id = e.exutoire_id
+        AND e.partner_id IS NULL;
+    `);
+    await client.query(`
+      UPDATE produits_finis pf SET partner_id = p.id
+      FROM partners p
+      WHERE p.source_table = 'exutoires' AND p.source_id = pf.exutoire_id
+        AND pf.partner_id IS NULL;
+    `);
+    await client.query(`
+      UPDATE commandes_exutoires c SET partner_id = p.id
+      FROM partners p
+      WHERE p.source_table = 'clients_exutoires' AND p.source_id = c.client_id
+        AND c.partner_id IS NULL;
+    `);
+    await client.query(`
+      UPDATE factures_exutoires f SET partner_id = p.id
+      FROM partners p
+      WHERE p.source_table = 'clients_exutoires' AND p.source_id = f.client_id
+        AND f.partner_id IS NULL;
+    `);
+
+    await client.query('CREATE INDEX IF NOT EXISTS idx_expeditions_partner ON expeditions(partner_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_commandes_exutoires_partner ON commandes_exutoires(partner_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_produits_finis_partner ON produits_finis(partner_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_factures_exutoires_partner ON factures_exutoires(partner_id);');
+
+    console.log('[INIT-DB] Référentiel unifié `partners` + migration ✓');
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');

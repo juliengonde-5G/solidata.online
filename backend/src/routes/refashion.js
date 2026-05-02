@@ -217,4 +217,63 @@ router.post('/subventions', [
   }
 });
 
+// ══════════════════════════════════════════
+// V2 — Auto-sourcing DPAV depuis ERP
+//
+// Audit Direction (D2 + D7) + Enterprise Architect (Rupture #1).
+// La déclaration trimestrielle Refashion s'appuie désormais sur les vues
+// SQL `vw_tonnage_reconciliation_jour` et `vw_refashion_dpav_source` qui
+// agrègent automatiquement (a) la collecte brute (tours.total_weight_kg)
+// et (b) le tri brut entré (production_daily.entree_ligne_kg).
+// La déclaration manuelle reste possible (cf. POST /dpav) mais peut être
+// pré-remplie depuis cet endpoint puis validée par la Direction.
+// ══════════════════════════════════════════
+
+// GET /api/refashion/dpav-source?annee=2026&trimestre=1
+// Retourne les valeurs ERP brutes pour pré-remplir le formulaire DPAV.
+// Si annee/trimestre absents, retourne tous les trimestres disponibles.
+router.get('/dpav-source', async (req, res) => {
+  try {
+    const { annee, trimestre } = req.query;
+    let query = 'SELECT * FROM vw_refashion_dpav_source WHERE 1=1';
+    const params = [];
+    if (annee) { params.push(parseInt(annee)); query += ` AND annee = $${params.length}`; }
+    if (trimestre) { params.push(parseInt(trimestre)); query += ` AND trimestre = $${params.length}`; }
+    const result = await pool.query(query, params);
+
+    // Détecter les écarts importants (>2 % ou >5 %) pour signaler à la Direction
+    const decorated = result.rows.map((r) => ({
+      ...r,
+      ecart_severite:
+        r.ecart_pct === null ? 'inconnu'
+        : Math.abs(r.ecart_pct) <= 2 ? 'ok'
+        : Math.abs(r.ecart_pct) <= 5 ? 'attention'
+        : 'critique',
+    }));
+
+    res.json(decorated);
+  } catch (err) {
+    console.error('[REFASHION] Erreur dpav-source :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/refashion/reconciliation-jour?date_from=&date_to=
+// Diagnostic fin : écart collecte ↔ tri jour par jour
+router.get('/reconciliation-jour', async (req, res) => {
+  try {
+    const { date_from, date_to } = req.query;
+    let query = 'SELECT * FROM vw_tonnage_reconciliation_jour WHERE 1=1';
+    const params = [];
+    if (date_from) { params.push(date_from); query += ` AND date >= $${params.length}`; }
+    if (date_to)   { params.push(date_to);   query += ` AND date <= $${params.length}`; }
+    query += ' ORDER BY date DESC LIMIT 365';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[REFASHION] Erreur reconciliation-jour :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

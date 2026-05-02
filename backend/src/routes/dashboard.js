@@ -184,13 +184,24 @@ router.get('/kpis', cacheMiddleware(dashboardKey('kpis'), 120), async (req, res)
     ]);
 
     // ══════════════════════════════════════════
-    // Calcul du taux de valorisation
+    // Calcul du taux de valorisation (audit Direction D3)
+    //
+    // Formule : sorties valorisées / entrées brutes — bornée à 100% car
+    // physiquement impossible de "valoriser" plus que ce qui est entré (sauf
+    // saisie incohérente). On capait avant à NaN → désormais on cap à 100
+    // et on logge un avertissement si > 100% pour traçabilité audit.
     // ══════════════════════════════════════════
     const totalTrieT = parseFloat(totalTrieMois.rows[0].total) || 0;
     const totalEntreeKg = parseFloat(totalEntreeMois.rows[0].total) || 0;
-    const tauxValorisation = totalEntreeKg > 0
-      ? Math.round((totalTrieT * 1000 / totalEntreeKg) * 1000) / 10
-      : 0;
+    let tauxValorisation = 0;
+    if (totalEntreeKg > 0) {
+      const raw = (totalTrieT * 1000 / totalEntreeKg) * 100;
+      if (raw > 100) {
+        console.warn('[DASHBOARD] taux_valorisation > 100% (raw=' + raw.toFixed(1) +
+          ') — entrées/sorties incohérentes', { totalTrieT, totalEntreeKg });
+      }
+      tauxValorisation = Math.min(100, Math.round(raw * 10) / 10);
+    }
 
     // ══════════════════════════════════════════
     // Construction des alertes
