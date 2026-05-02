@@ -713,4 +713,86 @@ router.delete('/clear', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// VISITE MÉDICALE POST-EMBAUCHE (P1#13 — conformité droit du travail IAE)
+//
+// Visite d'information et de prévention obligatoire dans les 3 mois suivant
+// l'embauche (article R4624-10 du Code du travail). Pour CDDI, contrôle plus
+// strict (2 mois). On gère J+90 par défaut, ajustable au cas par cas.
+// ══════════════════════════════════════════
+
+// GET /api/employees/visite-medicale/alertes
+// Liste les visites en retard ou à venir dans les 30 jours
+router.get('/visite-medicale/alertes', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT e.id, e.first_name, e.last_name, e.contract_start, e.contract_type,
+             e.visite_medicale_due_date, e.visite_medicale_date,
+             CASE
+               WHEN e.visite_medicale_date IS NOT NULL THEN 'realisee'
+               WHEN e.visite_medicale_due_date < CURRENT_DATE THEN 'en_retard'
+               WHEN e.visite_medicale_due_date <= CURRENT_DATE + INTERVAL '14 days' THEN 'imminente'
+               ELSE 'a_planifier'
+             END AS etat,
+             (e.visite_medicale_due_date - CURRENT_DATE) AS jours_restants
+      FROM employees e
+      WHERE e.visite_medicale_date IS NULL
+        AND e.visite_medicale_due_date IS NOT NULL
+        AND (e.is_active IS NULL OR e.is_active = true)
+        AND e.visite_medicale_due_date <= CURRENT_DATE + INTERVAL '30 days'
+      ORDER BY e.visite_medicale_due_date
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[EMPLOYEES] visite-medicale/alertes :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/employees/:id/visite-medicale — Enregistrer la visite réalisée
+// Body : { date, resultat: 'conforme'|'restrictions'|'inapte'|'a_revoir', notes }
+router.put('/:id/visite-medicale', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { date, resultat, notes } = req.body;
+    if (!date) return res.status(400).json({ error: 'date requise' });
+    const validResultats = ['conforme', 'restrictions', 'inapte', 'a_revoir'];
+    if (resultat && !validResultats.includes(resultat)) {
+      return res.status(400).json({ error: `resultat invalide. Valeurs : ${validResultats.join(', ')}` });
+    }
+    const result = await pool.query(
+      `UPDATE employees
+       SET visite_medicale_date = $1,
+           visite_medicale_resultat = $2,
+           visite_medicale_notes = $3
+       WHERE id = $4
+       RETURNING id, visite_medicale_date, visite_medicale_resultat, visite_medicale_notes, visite_medicale_due_date`,
+      [date, resultat || 'conforme', notes || null, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Employé introuvable' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[EMPLOYEES] PUT visite-medicale :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/employees/:id/visite-medicale/programmer — Replanifier la due_date
+// Utilisé si le médecin du travail a un délai. Body : { due_date }
+router.put('/:id/visite-medicale/programmer', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { due_date } = req.body;
+    if (!due_date) return res.status(400).json({ error: 'due_date requise' });
+    const result = await pool.query(
+      `UPDATE employees SET visite_medicale_due_date = $1 WHERE id = $2
+       RETURNING id, visite_medicale_due_date`,
+      [due_date, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Employé introuvable' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[EMPLOYEES] programmer visite-medicale :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;
