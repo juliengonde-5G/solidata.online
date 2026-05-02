@@ -3110,6 +3110,40 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Module Boutiques ✓');
 
+    // ══════════════════════════════════════════
+    // V3 — Seuils d'alerte configurables (Direction D6 / action 11)
+    // Dashboard exécutif : la Direction définit ses propres seuils min/max.
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS alert_thresholds (
+        id SERIAL PRIMARY KEY,
+        domaine VARCHAR(30) NOT NULL,
+        indicateur VARCHAR(80) NOT NULL UNIQUE,
+        libelle VARCHAR(150) NOT NULL,
+        seuil_min DOUBLE PRECISION,
+        seuil_max DOUBLE PRECISION,
+        unite VARCHAR(20),
+        severite VARCHAR(20) DEFAULT 'warning' CHECK (severite IN ('info', 'warning', 'error', 'critical')),
+        actif BOOLEAN DEFAULT true,
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_alert_thresholds_actif ON alert_thresholds(actif) WHERE actif = true;');
+
+    await client.query(`
+      INSERT INTO alert_thresholds (domaine, indicateur, libelle, seuil_min, seuil_max, unite, severite, notes)
+      VALUES
+        ('collecte',  'tonnage_collecte_mois',  'Tonnage collecte mois',     5000, null, 'kg',          'warning', 'Cible mensuelle indicative.'),
+        ('tri',       'taux_valorisation',      'Taux de valorisation',      75,   null, '%',           'warning', 'Objectif Refashion >75%.'),
+        ('tri',       'productivite_tri',       'Productivité tri',          600,  null, 'kg/pers/j',   'warning', 'Cible productivité historique.'),
+        ('boutique',  'ca_boutique_mois',       'CA boutiques mois',         5000, null, '€',           'warning', 'À calibrer selon objectifs.'),
+        ('insertion', 'sorties_positives_12m',  'Sorties positives 12 mois', 55,   null, '%',           'warning', 'Cible IAE >55%.')
+      ON CONFLICT (indicateur) DO NOTHING;
+    `);
+    console.log('[INIT-DB] Alert thresholds Dashboard exécutif ✓');
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');

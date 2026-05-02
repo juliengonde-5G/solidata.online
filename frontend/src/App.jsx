@@ -69,6 +69,8 @@ const FinanceBilan = lazy(() => import('./pages/FinanceBilan'));
 const FinanceControles = lazy(() => import('./pages/FinanceControles'));
 
 const PerformanceDashboard = lazy(() => import('./pages/PerformanceDashboard'));
+const DashboardExecutif = lazy(() => import('./pages/DashboardExecutif'));
+const AdminAlertThresholds = lazy(() => import('./pages/AdminAlertThresholds'));
 
 const HubRecrutement = lazy(() => import('./pages/HubRecrutement'));
 const HubEquipe = lazy(() => import('./pages/HubEquipe'));
@@ -174,6 +176,7 @@ function App() {
 
               {/* Reporting */}
               <Route path="/performance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PerformanceDashboard /></ProtectedRoute>} />
+              <Route path="/dashboard-executif" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><DashboardExecutif /></ProtectedRoute>} />
               <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingCollecte /></ProtectedRoute>} />
               <Route path="/reporting-rh" element={<ProtectedRoute roles={['ADMIN', 'RH']}><ReportingRH /></ProtectedRoute>} />
               <Route path="/reporting-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingProduction /></ProtectedRoute>} />
@@ -200,6 +203,7 @@ function App() {
               <Route path="/settings" element={<ProtectedRoute roles={['ADMIN']}><Settings /></ProtectedRoute>} />
               <Route path="/referentiels" element={<ProtectedRoute roles={['ADMIN']}><Referentiels /></ProtectedRoute>} />
               <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />
+              <Route path="/admin-alert-thresholds" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAlertThresholds /></ProtectedRoute>} />
               <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN']}><RGPD /></ProtectedRoute>} />
               <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
               <Route path="/activity-log" element={<ProtectedRoute roles={['ADMIN']}><ActivityLog /></ProtectedRoute>} />
