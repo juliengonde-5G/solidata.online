@@ -660,7 +660,70 @@ async function initDatabase() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
-    console.log('[INIT-DB] Module 8 (Production) ✓');
+
+    // ══════════════════════════════════════════
+    // V2 — Réconciliation tonnage (collecte ↔ tri ↔ Refashion DPAV)
+    //
+    // Audit Direction (D2 + D7) + Enterprise Architect (Rupture #1) :
+    // 3 sources de poids actuellement non rapprochées en SQL :
+    //   (a) tours.total_weight_kg (kg pesés à la bascule du centre)
+    //   (b) production_daily.entree_ligne_kg (kg déclarés entrant ligne tri)
+    //   (c) production_daily.total_jour_t × 1000 (sortie tri valorisée)
+    //
+    // La déclaration Refashion DPAV exige (a) ET (b) — décision métier
+    // confirmée par la Direction. La sortie (c) sert au calcul du taux
+    // de valorisation.
+    // ══════════════════════════════════════════
+
+    // Vue par jour : facilite le diagnostic des écarts (alertes >2%)
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_tonnage_reconciliation_jour AS
+      SELECT
+        COALESCE(t.date, pd.date)                          AS date,
+        COALESCE(t.collecte_brut_kg, 0)::FLOAT             AS collecte_brut_kg,
+        COALESCE(pd.entree_ligne_kg, 0)::FLOAT             AS tri_entree_kg,
+        COALESCE(pd.total_jour_t, 0)::FLOAT * 1000         AS tri_sortie_kg,
+        (COALESCE(t.collecte_brut_kg, 0) - COALESCE(pd.entree_ligne_kg, 0))::FLOAT
+                                                            AS ecart_collecte_tri_kg,
+        CASE WHEN COALESCE(t.collecte_brut_kg, 0) > 0
+          THEN ROUND(((COALESCE(t.collecte_brut_kg, 0) - COALESCE(pd.entree_ligne_kg, 0))
+                     / t.collecte_brut_kg * 100)::numeric, 2)
+          ELSE NULL
+        END                                                 AS ecart_pct
+      FROM (
+        SELECT date, SUM(total_weight_kg) AS collecte_brut_kg
+        FROM tours WHERE status = 'completed'
+        GROUP BY date
+      ) t
+      FULL OUTER JOIN production_daily pd ON pd.date = t.date;
+    `);
+
+    // Vue Refashion DPAV (trimestriel) — pré-remplissage formulaire conforme
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_refashion_dpav_source AS
+      SELECT
+        EXTRACT(YEAR FROM d)::INT                           AS annee,
+        EXTRACT(QUARTER FROM d)::INT                        AS trimestre,
+        TO_CHAR(d, 'YYYY-"Q"Q')                             AS periode,
+        ROUND(SUM(collecte_brut_kg) / 1000.0, 3)::FLOAT     AS collecte_brut_t,
+        ROUND(SUM(tri_entree_kg) / 1000.0, 3)::FLOAT        AS tri_entree_t,
+        ROUND(SUM(tri_sortie_kg) / 1000.0, 3)::FLOAT        AS tri_sortie_t,
+        ROUND(SUM(ecart_collecte_tri_kg) / 1000.0, 3)::FLOAT AS ecart_t,
+        CASE WHEN SUM(collecte_brut_kg) > 0
+          THEN ROUND((SUM(ecart_collecte_tri_kg) / SUM(collecte_brut_kg) * 100)::numeric, 2)
+          ELSE NULL
+        END                                                  AS ecart_pct,
+        CASE WHEN SUM(tri_entree_kg) > 0
+          THEN ROUND((SUM(tri_sortie_kg) / SUM(tri_entree_kg) * 100)::numeric, 2)
+          ELSE NULL
+        END                                                  AS taux_valorisation_pct
+      FROM vw_tonnage_reconciliation_jour, LATERAL (SELECT date AS d) sub
+      WHERE date IS NOT NULL
+      GROUP BY EXTRACT(YEAR FROM d), EXTRACT(QUARTER FROM d), TO_CHAR(d, 'YYYY-"Q"Q')
+      ORDER BY annee DESC, trimestre DESC;
+    `);
+
+    console.log('[INIT-DB] Module 8 (Production + vues réconciliation Refashion) ✓');
 
     // ══════════════════════════════════════════
     // MODULE V2 : Référentiels & Tri
