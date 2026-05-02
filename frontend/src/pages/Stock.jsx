@@ -1,15 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Warehouse, Plus, ArrowDownUp } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, ErrorState } from '../components';
+import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
 
 export default function Stock() {
-  const [summary, setSummary] = useState([]);
-  const [movements, setMovements] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [categories, setCategories] = useState([]);
   const [activeTab, setActiveTab] = useState('stock');
   const [inventories, setInventories] = useState([]);
   const [selectedInv, setSelectedInv] = useState(null);
@@ -18,28 +15,34 @@ export default function Stock() {
     categorie_sortante_id: '', type: 'entree', quantity_kg: '', source: '', notes: '',
   });
 
-  useEffect(() => { loadData(); }, []);
-  useEffect(() => { if (activeTab === 'inventaire') loadInventories(); }, [activeTab]);
+  // Pattern useAsyncData (cf docs/UX_PATTERNS.md) — supprime ~10 lignes de
+  // boilerplate useState + useEffect + try/catch silencieux.
+  const fetchStock = useCallback(async () => {
+    const [sumRes, movRes, catRes] = await Promise.all([
+      api.get('/stock/summary'),
+      api.get('/stock?limit=100'),
+      api.get('/tri/categories'),
+    ]);
+    return {
+      summary: sumRes.data?.byCategory || sumRes.data || [],
+      movements: movRes.data || [],
+      categories: catRes.data || [],
+    };
+  }, []);
+  const { data: stockData, loading, error, reload } = useAsyncData(fetchStock, {
+    initialData: { summary: [], movements: [], categories: [] },
+  });
+  const { summary = [], movements = [], categories = [] } = stockData || {};
 
-  const loadData = async () => {
-    try {
-      const [sumRes, movRes, catRes] = await Promise.all([
-        api.get('/stock/summary'),
-        api.get('/stock?limit=100'),
-        api.get('/tri/categories'),
-      ]);
-      setSummary(sumRes.data?.byCategory || sumRes.data || []);
-      setMovements(movRes.data);
-      setCategories(catRes.data);
-    } catch (err) { console.error(err); }
-    setLoading(false);
-  };
+  useEffect(() => { if (activeTab === 'inventaire') loadInventories(); }, [activeTab]);
 
   const loadInventories = async () => {
     try {
       const res = await api.get('/stock/inventories');
       setInventories(res.data);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error('[STOCK] inventories:', err);
+    }
   };
 
   const createMovement = async (e) => {
@@ -54,7 +57,7 @@ export default function Stock() {
         notes: form.notes || null,
       });
       setShowForm(false);
-      loadData();
+      reload();
     } catch (err) { console.error(err); }
   };
 
@@ -98,6 +101,18 @@ export default function Stock() {
   };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des stocks..." /></Layout>;
+  if (error) return (
+    <Layout>
+      <div className="p-6">
+        <ErrorState
+          title="Impossible de charger les stocks"
+          message="Vérifiez la connexion au serveur et réessayez."
+          onRetry={reload}
+          variant="card"
+        />
+      </div>
+    </Layout>
+  );
 
   const totalStock = summary.reduce((acc, s) => acc + (parseFloat(s.solde_kg || s.stock_kg) || 0), 0);
 
