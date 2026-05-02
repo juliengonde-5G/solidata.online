@@ -239,7 +239,7 @@ router.post('/',
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('[boutique-commandes] POST /:', err);
-      res.status(500).json({ error: 'Erreur création', details: err.message });
+      res.status(500).json({ error: 'Erreur création' });
     } finally {
       client.release();
     }
