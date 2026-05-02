@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const stateMachine = require('../services/state-machine');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 router.use(autoLogActivity('commande_exutoire'));
@@ -318,7 +319,7 @@ router.put('/:id', async (req, res) => {
 
 // PATCH /api/commandes-exutoires/:id/statut
 router.patch('/:id/statut', [
-  body('statut').isIn(['en_attente', 'confirmee', 'en_preparation', 'expediee', 'pesee_recue', 'facturee', 'cloturee', 'annulee']).withMessage('Statut invalide'),
+  body('statut').isIn(['en_attente', 'confirmee', 'en_preparation', 'chargee', 'expediee', 'pesee_recue', 'facturee', 'cloturee', 'annulee']).withMessage('Statut invalide'),
 ], validate, async (req, res) => {
   const client = await pool.connect();
   try {
@@ -331,7 +332,7 @@ router.patch('/:id/statut', [
 
     await client.query('BEGIN');
 
-    const current = await client.query('SELECT statut FROM commandes_exutoires WHERE id = $1', [req.params.id]);
+    const current = await client.query('SELECT statut FROM commandes_exutoires WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (current.rows.length === 0) {
       await client.query('ROLLBACK');
       client.release();
@@ -339,6 +340,22 @@ router.patch('/:id/statut', [
     }
 
     const ancienStatut = current.rows[0].statut;
+
+    // V6.1 — Validation transition via le moteur centralisé.
+    // Avant : tout statut accepté tant qu'il était dans STATUTS_VALIDES,
+    // ce qui permettait des sauts illégaux (ex: en_attente → expediee
+    // direct, sautant confirmation/préparation/chargement).
+    const check = stateMachine.canTransition({
+      machine: 'commande_exutoire',
+      fromState: ancienStatut,
+      toState: statut,
+      userRole: req.user?.role,
+    });
+    if (!check.ok) {
+      await client.query('ROLLBACK');
+      client.release();
+      return res.status(409).json({ error: check.reason, code: check.code });
+    }
 
     const result = await client.query(
       'UPDATE commandes_exutoires SET statut = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
@@ -352,6 +369,19 @@ router.patch('/:id/statut', [
     );
 
     await client.query('COMMIT');
+
+    // Audit centralisé state machine (post-commit, best effort).
+    stateMachine.transition({
+      machine: 'commande_exutoire',
+      entityType: 'commandes_exutoires',
+      entityId: parseInt(req.params.id, 10),
+      fromState: ancienStatut,
+      toState: statut,
+      userId: req.user.id,
+      userRole: req.user?.role,
+      reason: commentaire || null,
+    }).catch(() => { /* déjà loggé en métier */ });
+
     res.json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
