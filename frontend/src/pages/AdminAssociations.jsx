@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Users } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -42,6 +43,7 @@ const STATUS_COLORS = {
 };
 
 export default function AdminAssociations() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -116,7 +118,13 @@ export default function AdminAssociations() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Supprimer ce point association ?')) return;
+    const ok = await confirm({
+      title: 'Supprimer ce point association ?',
+      message: 'Cette action est définitive.',
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/association-points/${id}`);
       showAlertMsg('Point supprimé');
@@ -172,6 +180,7 @@ export default function AdminAssociations() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="p-4 sm:p-6 space-y-4">
         {/* Alert */}
         {alert && (

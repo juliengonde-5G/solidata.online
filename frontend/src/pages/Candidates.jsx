@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Users, Inbox, Briefcase, Award, FileText, Upload, X, Trash2, Pencil } from 'lucide-react';
 import Layout from '../components/Layout';
 import { Modal, KanbanBoard, StatusBadge } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 const STATUSES = ['received', 'interview', 'hired', 'rejected'];
@@ -44,6 +45,7 @@ const TAB_LABELS = {
 
 export default function Candidates() {
   const navigate = useNavigate();
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [kanban, setKanban] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -117,7 +119,13 @@ export default function Candidates() {
   };
 
   const handleConvertToEmployee = async (candidate) => {
-    if (!window.confirm(`Convertir ${candidate.first_name} ${candidate.last_name} en employé ?`)) return;
+    const ok = await confirm({
+      title: 'Convertir en employé',
+      message: `Confirmer la conversion de ${candidate.first_name} ${candidate.last_name} en employé ? Un parcours d'insertion sera créé.`,
+      confirmLabel: 'Convertir',
+      confirmVariant: 'primary',
+    });
+    if (!ok) return;
     try {
       const res = await api.post(`/candidates/${candidate.id}/convert-to-employee`, {
         contract_type: 'CDD',
@@ -181,7 +189,13 @@ export default function Candidates() {
   };
 
   const deleteCandidate = async (id) => {
-    if (!window.confirm('Supprimer ce candidat ?')) return;
+    const ok = await confirm({
+      title: 'Supprimer ce candidat ?',
+      message: 'Cette action est définitive (CV, historique, scores PCM compris).',
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/candidates/${id}`);
       setSelected(null);
@@ -393,6 +407,7 @@ export default function Candidates() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <KanbanBoard
         title="Recrutement"
         subtitle="Pipeline des candidatures"

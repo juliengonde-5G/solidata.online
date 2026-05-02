@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Building2, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
 import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
+import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
 const TYPE_LABELS = { recycleur: 'Recycleur', negociant: 'Négociant', industriel: 'Industriel', autre: 'Autre' };
@@ -12,6 +13,7 @@ const EMPTY_FORM = {
 };
 
 export default function ExutoiresClients() {
+  const { confirm, ConfirmDialogElement } = useConfirm();
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -63,7 +65,13 @@ export default function ExutoiresClients() {
   };
 
   const handleDisable = async (client) => {
-    if (!window.confirm(`Désactiver le client "${client.raison_sociale}" ?`)) return;
+    const ok = await confirm({
+      title: 'Désactiver ce client ?',
+      message: `Désactiver "${client.raison_sociale}" ? Le client sera masqué des nouvelles commandes mais l'historique reste intact.`,
+      confirmLabel: 'Désactiver',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try { await api.delete(`/clients-exutoires/${client.id}`); loadClients(); } catch (err) { console.error(err); }
   };
 
@@ -92,6 +100,7 @@ export default function ExutoiresClients() {
 
   return (
     <Layout>
+      {ConfirmDialogElement}
       <div className="p-6">
         <PageHeader
           title="Clients Logistiques"
