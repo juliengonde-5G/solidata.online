@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader, Section } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader, Section, ErrorState } from '../components';
 import { Users } from 'lucide-react';
+import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
 
 const CONTRACT_LABELS = {
@@ -11,10 +12,6 @@ const CONTRACT_LABELS = {
 const DAYS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 
 export default function Employees() {
-  const [employees, setEmployees] = useState([]);
-  const [teams, setTeams] = useState([]);
-  const [positions, setPositions] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState({ team_id: '', search: '' });
@@ -40,24 +37,26 @@ export default function Employees() {
     weekly_hours: 35, team_id: '', position_id: '',
   });
 
-  useEffect(() => { loadData(); }, [filter.team_id]);
-
-  const loadData = async () => {
-    try {
-      const params = new URLSearchParams();
-      if (filter.team_id) params.append('team_id', filter.team_id);
-      if (filter.search) params.append('search', filter.search);
-      const [empRes, teamRes, posRes] = await Promise.all([
-        api.get(`/employees?${params}`),
-        api.get('/teams'),
-        api.get('/referentiels/positions').catch(() => ({ data: [] })),
-      ]);
-      setEmployees(empRes.data);
-      setTeams(teamRes.data);
-      setPositions(posRes.data || []);
-    } catch (err) { console.error(err); }
-    setLoading(false);
-  };
+  // Pattern useAsyncData (cf docs/UX_PATTERNS.md)
+  const fetchData = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (filter.team_id) params.append('team_id', filter.team_id);
+    if (filter.search) params.append('search', filter.search);
+    const [empRes, teamRes, posRes] = await Promise.all([
+      api.get(`/employees?${params}`),
+      api.get('/teams'),
+      api.get('/referentiels/positions').catch(() => ({ data: [] })),
+    ]);
+    return {
+      employees: empRes.data || [],
+      teams: teamRes.data || [],
+      positions: posRes.data || [],
+    };
+  }, [filter.team_id, filter.search]);
+  const { data, loading, error, reload: loadData } = useAsyncData(fetchData, {
+    initialData: { employees: [], teams: [], positions: [] },
+  });
+  const { employees = [], teams = [], positions = [] } = data || {};
 
   const openDetail = async (emp) => {
     setSelected(emp);
@@ -191,6 +190,7 @@ export default function Employees() {
   };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des employés..." /></Layout>;
+  if (error) return <Layout><div className="p-6"><ErrorState title="Impossible de charger les employés" onRetry={loadData} variant="card" /></div></Layout>;
 
   return (
     <Layout>

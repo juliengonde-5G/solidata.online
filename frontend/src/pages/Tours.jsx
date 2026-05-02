@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Route, Plus, Truck, Sparkles, Navigation, MapPin, Clock, ArrowRight } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, Section, EmptyState } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, Section, EmptyState, ErrorState } from '../components';
+import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
 
 const MODE_LABELS = { intelligent: 'IA', standard: 'Standard', manual: 'Manuel' };
 const STATUS_LABELS = { planned: 'Planifiée', in_progress: 'En cours', completed: 'Terminée' };
 
 export default function Tours() {
-  const [tours, setTours] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
   const [vehicles, setVehicles] = useState([]);
@@ -29,15 +28,11 @@ export default function Tours() {
   const [selectedAssoRoute, setSelectedAssoRoute] = useState('');
   const [selectedAssoPoints, setSelectedAssoPoints] = useState([]);
 
-  useEffect(() => { loadTours(); }, []);
-
-  const loadTours = async () => {
-    try {
-      const res = await api.get('/tours');
-      setTours(res.data);
-    } catch (err) { console.error(err); }
-    setLoading(false);
-  };
+  // Pattern useAsyncData (cf docs/UX_PATTERNS.md)
+  const fetchTours = useCallback(() => api.get('/tours').then(r => r.data), []);
+  const { data: tours = [], loading, error, reload: loadTours } = useAsyncData(fetchTours, {
+    initialData: [],
+  });
 
   const openWizard = async () => {
     try {
@@ -101,6 +96,7 @@ export default function Tours() {
   };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des tournées..." /></Layout>;
+  if (error) return <Layout><div className="p-6"><ErrorState title="Impossible de charger les tournées" onRetry={loadTours} variant="card" /></div></Layout>;
 
   // KPIs / stats
   const plannedCount = tours.filter(t => t.status === 'planned').length;
