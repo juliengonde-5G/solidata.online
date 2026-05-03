@@ -61,10 +61,14 @@ export default function ExutoiresControleFacturation() {
       setOrphans(orphansRes.data || []);
     } catch (err) {
       console.error(err);
+      // toast retiré des deps de useCallback car useToast() retourne un objet
+      // recréé à chaque render → bouclerait à l'infini. On l'appelle ici sans
+      // l'inclure dans le tableau de dépendances (eslint-disable ci-dessous).
       toast.error('Erreur chargement');
     }
     setLoading(false);
-  }, [filter, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
 
   useEffect(() => { load(); }, [load]);
 
