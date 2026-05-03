@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Truck, Plus, Pencil, FileText, Download, Trash2, Lightbulb, AlertTriangle } from 'lucide-react';
+import { Truck, Plus, Pencil, FileText, Download, Trash2, Lightbulb, AlertTriangle, Archive, ArchiveRestore } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import api from '../services/api';
@@ -74,15 +74,34 @@ export default function Vehicles() {
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [generatedPlan, setGeneratedPlan] = useState(null);
 
-  useEffect(() => { loadVehicles(); loadMaintenanceProfiles(); }, []);
+  // useEffect loadVehicles déplacé après includeArchived (voir plus bas)
   useEffect(() => { if (activeTab === 'maintenance') loadMaintenance(); }, [activeTab]);
+
+  const [includeArchived, setIncludeArchived] = useState(false);
+
+  useEffect(() => { loadVehicles(); loadMaintenanceProfiles(); }, [includeArchived]);
 
   const loadVehicles = async () => {
     try {
-      const res = await api.get('/vehicles');
+      const res = await api.get(`/vehicles${includeArchived ? '?include_archived=true' : ''}`);
       setVehicles(res.data);
     } catch (err) { console.error(err); }
     setLoading(false);
+  };
+
+  const archiveVehicle = async (v) => {
+    if (!window.confirm(`Archiver le véhicule ${v.registration} ? Il ne sera plus proposé dans les nouvelles tournées (mais l'historique reste préservé).`)) return;
+    try {
+      await api.patch(`/vehicles/${v.id}/archive`);
+      loadVehicles();
+    } catch (err) { console.error(err); alert('Erreur archivage'); }
+  };
+
+  const restoreVehicle = async (v) => {
+    try {
+      await api.patch(`/vehicles/${v.id}/restore`);
+      loadVehicles();
+    } catch (err) { console.error(err); alert('Erreur restauration'); }
   };
 
   const loadMaintenanceProfiles = async () => {
@@ -243,9 +262,9 @@ export default function Vehicles() {
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des véhicules..." /></Layout>;
 
+  // Onglet Maintenance retiré : voir page dédiée /vehicle-maintenance
   const tabs = [
     { key: 'fleet', label: 'Flotte' },
-    { key: 'maintenance', label: 'Maintenance' },
     ...(selectedVehicle ? [{ key: 'detail', label: selectedVehicle.name || selectedVehicle.registration }] : []),
   ];
 
@@ -266,10 +285,16 @@ export default function Vehicles() {
                 ))}
               </div>
               {activeTab === 'fleet' && (
-                <button onClick={openCreate} className="btn-primary text-sm">
-                  <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
-                  Nouveau véhicule
-                </button>
+                <>
+                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
+                    <input type="checkbox" checked={includeArchived} onChange={(e) => setIncludeArchived(e.target.checked)} className="rounded" />
+                    Inclure archivés
+                  </label>
+                  <button onClick={openCreate} className="btn-primary text-sm">
+                    <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
+                    Nouveau véhicule
+                  </button>
+                </>
               )}
             </>
           }
@@ -279,22 +304,36 @@ export default function Vehicles() {
         {activeTab === 'fleet' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {vehicles.map(v => (
-              <div key={v.id} className="card-modern p-5 cursor-pointer hover:shadow-md transition" onClick={() => selectVehicle(v)}>
+              <div key={v.id} className={`card-modern p-5 cursor-pointer hover:shadow-md transition ${v.is_archived ? 'opacity-60 ring-1 ring-amber-200 bg-amber-50/30' : ''}`} onClick={() => selectVehicle(v)}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-lg">
                       {v.type === 'camion' ? '🚛' : v.type === 'utilitaire' ? '🚐' : '🚗'}
                     </div>
                     <div>
-                      <h3 className="font-bold">{v.registration}</h3>
+                      <h3 className="font-bold flex items-center gap-2">
+                        {v.registration}
+                        {v.is_archived && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 uppercase tracking-wide">Archivé</span>}
+                      </h3>
                       <p className="text-xs text-slate-400">{v.brand} {v.model}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={v.status} size="sm" />
-                    <button onClick={(e) => { e.stopPropagation(); openEdit(v); }} className="text-slate-400 hover:text-primary p-1" title="Modifier">
-                      <Pencil className="w-4 h-4" strokeWidth={1.8} />
-                    </button>
+                    {!v.is_archived ? (
+                      <>
+                        <button onClick={(e) => { e.stopPropagation(); openEdit(v); }} className="text-slate-400 hover:text-primary p-1" title="Modifier">
+                          <Pencil className="w-4 h-4" strokeWidth={1.8} />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); archiveVehicle(v); }} className="text-slate-400 hover:text-amber-600 p-1" title="Archiver">
+                          <Archive className="w-4 h-4" strokeWidth={1.8} />
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={(e) => { e.stopPropagation(); restoreVehicle(v); }} className="text-amber-600 hover:text-emerald-600 p-1" title="Restaurer">
+                        <ArchiveRestore className="w-4 h-4" strokeWidth={1.8} />
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-1 text-xs text-slate-600">

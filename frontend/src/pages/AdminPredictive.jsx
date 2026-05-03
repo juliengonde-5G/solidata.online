@@ -805,8 +805,25 @@ export default function AdminPredictive() {
 
 function EventRow({ evt, onDelete, past }) {
   const typeLabel = EVENT_TYPES.find(t => t.value === evt.type)?.label || evt.type;
-  const dateDebut = new Date(evt.date_debut + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-  const dateFin = new Date(evt.date_fin + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+  // Postgres renvoie la DATE soit en ISO 'YYYY-MM-DD' (string), soit en
+  // objet Date sérialisé. Le concat '+T00:00:00' cassait dans le 2e cas
+  // (donnait 'Invalid Date'). Solution robuste : parser quel que soit le format.
+  const fmtFR = (v, withYear) => {
+    if (!v) return '';
+    let d;
+    if (typeof v === 'string') {
+      // Si déjà un timestamp ISO complet, on garde tel quel
+      d = v.length <= 10 ? new Date(`${v}T00:00:00`) : new Date(v);
+    } else {
+      d = new Date(v);
+    }
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('fr-FR', withYear
+      ? { day: 'numeric', month: 'short', year: 'numeric' }
+      : { day: 'numeric', month: 'short' });
+  };
+  const dateDebut = fmtFR(evt.date_debut, false);
+  const dateFin = fmtFR(evt.date_fin, true);
 
   return (
     <div className={`flex items-center justify-between p-3 rounded-lg border ${past ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-white border-gray-200'}`}>

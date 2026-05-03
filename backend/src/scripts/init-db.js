@@ -3621,6 +3621,16 @@ async function initDatabase() {
       console.error('[INIT-DB] Erreur migration categories_sortantes :', e.message);
     }
 
+    // V1.8.3 — Archivage véhicules (soft-delete pour véhicules retirés du service)
+    try {
+      await client.query("ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false");
+      await client.query("ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP");
+      await client.query("CREATE INDEX IF NOT EXISTS idx_vehicles_archived ON vehicles(is_archived)");
+      console.log('[INIT-DB] Vehicles : colonne is_archived ajoutée ✓');
+    } catch (e) {
+      console.error('[INIT-DB] Erreur ALTER vehicles is_archived :', e.message);
+    }
+
 
     // ══════════════════════════════════════════
     // V2 — State machine centralisée (Enterprise Architect Ch2)
