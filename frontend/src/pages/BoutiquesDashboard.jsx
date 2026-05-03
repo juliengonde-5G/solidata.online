@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, Cloud, CloudRain, Sun, CloudSnow, Zap, TrendingUp, TrendingDown, ShoppingBag, Target, Receipt, Tag, Timer, Percent } from 'lucide-react';
+import { LayoutDashboard, Cloud, CloudRain, Sun, CloudSnow, Zap, TrendingUp, TrendingDown, ShoppingBag, Target, Receipt, Tag, Percent } from 'lucide-react';
 import { Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
 import Layout from '../components/Layout';
 import { LoadingSpinner, KpiCard, PageHeader, DateRangePicker } from '../components';
@@ -56,6 +56,7 @@ export default function BoutiquesDashboard() {
   const [dayKpis, setDayKpis] = useState(null);
   const [dayEvolution, setDayEvolution] = useState(null);
   const [dayMeteoHourly, setDayMeteoHourly] = useState([]);
+  const [dayObjectifJour, setDayObjectifJour] = useState(null);
 
   // Mois
   const [mois, setMois] = useState(new Date().getMonth() + 1);
@@ -87,7 +88,11 @@ export default function BoutiquesDashboard() {
   async function loadDay() {
     setLoading(true);
     try {
-      const [v, m, r, t, k, e, mh] = await Promise.all([
+      const dDate = new Date(dayDate);
+      const moisDay = dDate.getMonth() + 1;
+      const anneeDay = dDate.getFullYear();
+      const nbJoursMois = new Date(anneeDay, moisDay, 0).getDate();
+      const [v, m, r, t, k, e, mh, obj] = await Promise.all([
         api.get(`/boutique-ventes/analytics/daily?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
         api.get(`/boutique-meteo?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
         api.get(`/boutique-ventes/analytics/rayons?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
@@ -95,6 +100,7 @@ export default function BoutiquesDashboard() {
         api.get(`/boutique-ventes/analytics/kpis?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
         api.get(`/boutique-ventes/analytics/evolution?boutique_id=${boutiqueId}&date_from=${dayDate}&date_to=${dayDate}`),
         api.get(`/boutique-meteo/hourly?boutique_id=${boutiqueId}&date=${dayDate}`).catch(() => ({ data: { points: [] } })),
+        api.get(`/boutique-objectifs/compare?boutique_id=${boutiqueId}&annee=${anneeDay}`).catch(() => ({ data: { objectifs: [] } })),
       ]);
       setDayVentes(v.data?.[0] || { ca_ttc: 0, nb_tickets: 0, nb_articles: 0 });
       setDayMeteo(m.data?.[0] || null);
@@ -103,6 +109,9 @@ export default function BoutiquesDashboard() {
       setDayKpis(k.data || null);
       setDayEvolution(e.data || null);
       setDayMeteoHourly(mh.data?.points || []);
+      const objMois = (obj.data?.objectifs || []).find(o => o.mois === moisDay && o.segment === 'global');
+      const caMensuel = Number(objMois?.ca_objectif_ht || 0);
+      setDayObjectifJour(caMensuel > 0 ? caMensuel / nbJoursMois : null);
     } catch (err) { console.error(err); }
     setLoading(false);
   }
@@ -185,7 +194,7 @@ export default function BoutiquesDashboard() {
 
         {loading ? <LoadingSpinner size="lg" /> : (
           <>
-            {tab === 'jour' && <DayView date={dayDate} setDate={setDayDate} ventes={dayVentes} meteo={dayMeteo} rayons={dayRayons} tickets={dayTickets} kpis={dayKpis} evolution={dayEvolution} meteoHourly={dayMeteoHourly} />}
+            {tab === 'jour' && <DayView date={dayDate} setDate={setDayDate} ventes={dayVentes} meteo={dayMeteo} rayons={dayRayons} tickets={dayTickets} kpis={dayKpis} evolution={dayEvolution} meteoHourly={dayMeteoHourly} objectifJour={dayObjectifJour} />}
             {tab === 'mois' && <MonthView mois={mois} annee={annee} setMois={setMois} setAnnee={setAnnee} data={monthData} meteo={monthMeteo} kpis={monthKpis} hourly={monthHourly} evolution={monthEvolution} />}
             {tab === 'annee' && <YearView annee={annee} setAnnee={setAnnee} data={yearData} budget={yearBudget} boutique={selectedBoutique} />}
           </>
@@ -195,7 +204,7 @@ export default function BoutiquesDashboard() {
   );
 }
 
-function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolution, meteoHourly }) {
+function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolution, meteoHourly, objectifJour }) {
   const WeatherIcon = weatherIcon(meteo?.weather_code);
   const v = evolution?.variations || {};
 
@@ -253,11 +262,10 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
       </div>
 
       {/* Bloc 2 : KPIs retail avancés */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
         <KpiCard title="Prix moyen article" value={formatEuro(kpis?.prix_moyen_article, 2)} icon={Tag} accent="slate" footer={<DeltaBadge value={v.prix_moyen_article} />} />
         <KpiCard title="Part promo (CA)" value={`${(kpis?.taux_promo_ca || 0).toFixed(1)}%`} icon={Percent} accent="amber" />
         <KpiCard title="TVA collectée" value={formatEuro(kpis?.tva_collectee, 2)} icon={Percent} accent="slate" />
-        <KpiCard title="Durée moy. ticket" value={kpis?.duree_moy_ticket_sec ? `${Math.round(kpis.duree_moy_ticket_sec / 60)} min` : '—'} icon={Timer} accent="slate" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
@@ -283,50 +291,28 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
         </div>
 
         <div className="bg-white rounded-card shadow-card p-4 lg:col-span-2">
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">Avancement du CA de la journée</h3>
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-700">Avancement du CA de la journée</h3>
+            {objectifJour != null && (
+              <span className="text-xs text-slate-500">
+                Objectif jour : <span className="font-semibold text-pink-600">{formatEuro(objectifJour)}</span>
+              </span>
+            )}
+          </div>
           <ResponsiveContainer width="100%" height={240}>
             <ComposedChart data={hourly}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="heure" fontSize={11} />
-              <YAxis yAxisId="left" fontSize={11} tickFormatter={(v) => `${v}€`} />
-              {hasMeteoHourly && (
-                <YAxis yAxisId="right" orientation="right" fontSize={11}
-                  tickFormatter={(v) => `${v}°`}
-                  domain={['auto', 'auto']} />
-              )}
-              <Tooltip formatter={(val, name) => {
-                if (name === 'Température') return `${Number(val).toFixed(1)} °C`;
-                return `${Number(val).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-              }} />
+              <YAxis fontSize={11} tickFormatter={(v) => `${v}€`} />
+              <Tooltip formatter={(val) => `${Number(val).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar yAxisId="left" dataKey="ca" fill="#EC4899" fillOpacity={0.35} name="CA horaire" />
-              <Line yAxisId="left" type="monotone" dataKey="cumulCa" stroke="#EC4899" strokeWidth={2.5} dot={false} name="CA cumulé" />
-              {hasMeteoHourly && (
-                <Line yAxisId="right" type="monotone" dataKey="temp" stroke="#F97316" strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="Température" />
+              {objectifJour != null && (
+                <ReferenceLine y={objectifJour} stroke="#EC4899" strokeDasharray="4 4" strokeWidth={1.5} label={{ value: 'Objectif', position: 'right', fontSize: 10, fill: '#EC4899' }} />
               )}
+              <Bar dataKey="ca" fill="#EC4899" fillOpacity={0.35} name="CA horaire" />
+              <Line type="monotone" dataKey="cumulCa" stroke="#EC4899" strokeWidth={2.5} dot={false} name="CA cumulé" />
             </ComposedChart>
           </ResponsiveContainer>
-          {hasMeteoHourly && (
-            <div className="mt-3 flex gap-1 border-t border-slate-100 pt-3 overflow-x-auto">
-              {hourly.filter(h => h.hour >= 8 && h.hour <= 20).map((h) => {
-                const HIcon = weatherIcon(h.code);
-                return (
-                  <div key={h.hour} className="flex-1 min-w-[42px] text-center">
-                    <div className="text-[10px] text-slate-400 font-medium">{h.hour}h</div>
-                    <HIcon className="w-5 h-5 mx-auto text-sky-500" strokeWidth={1.5} />
-                    <div className="text-[10px] text-slate-600 font-medium">
-                      {h.temp != null ? `${Math.round(h.temp)}°` : '—'}
-                    </div>
-                    {h.precip > 0 && (
-                      <div className="text-[9px] text-blue-600 font-medium">
-                        {h.precip.toFixed(1)} mm
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
 

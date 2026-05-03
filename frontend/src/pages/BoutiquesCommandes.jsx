@@ -173,7 +173,7 @@ export default function BoutiquesCommandes() {
 
       {/* Modale création */}
       {showCreate && (
-        <Modal onClose={() => setShowCreate(false)} title="Nouvelle commande">
+        <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Nouvelle commande" size="lg">
           <div className="space-y-4 p-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -233,7 +233,7 @@ export default function BoutiquesCommandes() {
 
       {/* Modale détail */}
       {showDetail && detailData && (
-        <Modal onClose={() => { setShowDetail(null); setDetailData(null); }} title={`Commande ${detailData.reference}`}>
+        <Modal isOpen={!!showDetail} onClose={() => { setShowDetail(null); setDetailData(null); }} title={`Commande ${detailData.reference}`} size="lg">
           <CommandeDetail
             commande={detailData}
             canAdjust={canAdjust}

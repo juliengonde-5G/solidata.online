@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Factory, Scissors, Package, Tag, Ship } from 'lucide-react';
+import { Factory, Scissors, Package, Tag } from 'lucide-react';
 import Layout from '../components/Layout';
 import { KpiCard, NavCard, PageHeader, Section } from '../components';
 import api from '../services/api';
@@ -54,7 +54,6 @@ export default function HubTriProduction() {
     { path: '/chaine-tri', title: 'Chaînes de tri', desc: 'Gestion des chaînes et opérations de tri', icon: Scissors },
     { path: '/stock', title: 'Stock MP', desc: 'Mouvements de stock et inventaire matières premières', icon: Package },
     { path: '/produits-finis', title: 'Produits finis', desc: 'Catalogue et suivi des produits fabriqués', icon: Tag },
-    { path: '/expeditions', title: 'Expéditions', desc: 'Expéditions et bons de livraison', icon: Ship },
   ];
 
   return (

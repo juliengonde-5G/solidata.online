@@ -49,7 +49,7 @@ export default function HubExutoires() {
   const cards = [
     { path: '/exutoires-commandes', title: 'Commandes', desc: 'Suivi des commandes logistiques (8 statuts)', icon: ClipboardList },
     { path: '/exutoires-preparation', title: 'Préparation', desc: 'Préparation des expéditions et colisage', icon: Truck },
-    { path: '/exutoires-gantt', title: 'Gantt Chargement', desc: 'Planning Gantt des chargements', icon: BarChart3 },
+    { path: '/exutoires-gantt', title: 'Occupation zone de chargement', desc: 'Planning de l\'occupation des quais', icon: BarChart3 },
     { path: '/exutoires-facturation', title: 'Facturation', desc: 'Gestion des factures logistiques', icon: DollarSign },
     { path: '/exutoires-calendrier', title: 'Calendrier', desc: 'Calendrier logistique des expéditions', icon: Calendar },
     { path: '/exutoires-clients', title: 'Clients', desc: 'Gestion des clients et débouchés', icon: Users },

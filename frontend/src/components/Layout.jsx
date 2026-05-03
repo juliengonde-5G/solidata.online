@@ -52,7 +52,7 @@ const menuSections = [
     hubPath: '/hub-collecte',
     items: [
       { path: '/dashboard-collecte', label: 'Tableau de bord', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
-      { path: '/tours', label: 'Tournées', icon: Truck, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/tours', label: 'Historique des tournées', icon: Truck, roles: ['ADMIN', 'MANAGER'] },
       { path: '/planning-tournees', label: 'Planning tournées', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
       { path: '/collection-proposals', label: 'Propositions (IA)', icon: Sparkles, roles: ['ADMIN', 'MANAGER'] },
       { path: '/fill-rate', label: 'Carte des CAV', icon: Map, roles: ['ADMIN', 'MANAGER'] },
@@ -68,7 +68,6 @@ const menuSections = [
       { path: '/chaine-tri', label: 'Chaînes de tri', icon: ArrowUpDown, roles: ['ADMIN', 'MANAGER'] },
       { path: '/stock', label: 'Stock MP', icon: Package, roles: ['ADMIN', 'MANAGER'] },
       { path: '/produits-finis', label: 'Produits finis', icon: Tag, roles: ['ADMIN', 'MANAGER'] },
-      { path: '/expeditions', label: 'Expéditions', icon: Ship, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {
@@ -77,7 +76,7 @@ const menuSections = [
     items: [
       { path: '/exutoires-commandes', label: 'Commandes', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-preparation', label: 'Préparation', icon: Truck, roles: ['ADMIN', 'MANAGER'] },
-      { path: '/exutoires-gantt', label: 'Gantt Chargement', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
+      { path: '/exutoires-gantt', label: 'Occupation zone de chargement', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-facturation', label: 'Facturation', icon: CircleDollarSign, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-calendrier', label: 'Calendrier', icon: Clock, roles: ['ADMIN', 'MANAGER'] },
       { path: '/exutoires-clients', label: 'Clients', icon: Users, roles: ['ADMIN', 'MANAGER'] },

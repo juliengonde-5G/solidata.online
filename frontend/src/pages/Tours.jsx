@@ -150,8 +150,8 @@ export default function Tours() {
     <Layout>
       <div className="p-4 sm:p-6">
         <PageHeader
-          title="Tournées"
-          subtitle="Planification et suivi des tournées de collecte"
+          title="Historique des tournées"
+          subtitle="Consultation, suivi et archives des tournées de collecte"
           icon={Truck}
           actions={
             <button

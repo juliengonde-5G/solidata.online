@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, PageHeader } from '../components';
+import { LoadingSpinner, PageHeader, MapSizeFix } from '../components';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
@@ -525,6 +525,7 @@ export default function LiveVehicles() {
           {/* Carte */}
           <div className="lg:col-span-2 card-modern overflow-hidden" style={{ height: '70vh' }}>
             <MapContainer center={mapCenter} zoom={12} style={{ height: '100%', width: '100%' }}>
+              <MapSizeFix />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"

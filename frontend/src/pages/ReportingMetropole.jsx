@@ -3,7 +3,7 @@ import { Building2, Map as MapIcon, BarChart3 } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
-import { PageHeader, Section } from '../components';
+import { PageHeader, Section, MapSizeFix } from '../components';
 import 'leaflet/dist/leaflet.css';
 
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
@@ -107,6 +107,7 @@ export default function ReportingMetropole() {
               {/* Carte Leaflet */}
               <div className="rounded-lg overflow-hidden border mb-4" style={{ height: '400px' }}>
                 <MapContainer center={[49.4231, 1.0993]} zoom={11} style={{ height: '100%', width: '100%' }}>
+                  <MapSizeFix />
                   <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                     url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
