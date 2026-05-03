@@ -135,8 +135,6 @@ router.get('/kpis', cacheMiddleware(dashboardKey('kpis'), 120), async (req, res)
       ),
 
       // === EXUTOIRES ===
-      // Commandes en cours (ni fermées ni annulées ni brouillon)
-      pool.query(
       // Commandes exutoires en cours (colonne réelle = statut FR)
       pool.query(
         `SELECT COUNT(*)::int as count FROM commandes_exutoires
