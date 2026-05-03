@@ -54,7 +54,8 @@ function encryptApiKey(plaintext) {
  * @param {number} timeout - timeout en ms (défaut 15000)
  * @returns {Promise<{status: number, data: any}>}
  */
-function pennylaneRequest(method, path, apiKey, body = null, timeout = 15000) {
+// Appel HTTP brut sans retry — utilisé en interne par pennylaneRequest()
+function pennylaneRequestRaw(method, path, apiKey, body = null, timeout = 15000) {
   return new Promise((resolve, reject) => {
     const postData = body ? JSON.stringify(body) : null;
     const options = {
@@ -76,8 +77,9 @@ function pennylaneRequest(method, path, apiKey, body = null, timeout = 15000) {
       let data = '';
       response.on('data', chunk => data += chunk);
       response.on('end', () => {
-        try { resolve({ status: response.statusCode, data: JSON.parse(data) }); }
-        catch { resolve({ status: response.statusCode, data }); }
+        const headers = response.headers || {};
+        try { resolve({ status: response.statusCode, headers, data: JSON.parse(data) }); }
+        catch { resolve({ status: response.statusCode, headers, data }); }
       });
     });
     request.on('error', reject);
@@ -85,6 +87,39 @@ function pennylaneRequest(method, path, apiKey, body = null, timeout = 15000) {
     if (postData) request.write(postData);
     request.end();
   });
+}
+
+// Extrait le délai de retry à partir du body Pennylane ou du header Retry-After
+function extractRetryAfterMs(result) {
+  // 1) Header HTTP standard
+  const ra = result?.headers?.['retry-after'];
+  if (ra) {
+    const sec = parseInt(ra, 10);
+    if (Number.isFinite(sec) && sec > 0) return Math.min(sec * 1000, 30000);
+  }
+  // 2) Message dans le body : "retry in N seconds"
+  const msg = typeof result?.data === 'string' ? result.data : (result?.data?.error || result?.data?.message || '');
+  const m = String(msg).match(/retry\s+in\s+(\d+)\s+second/i);
+  if (m) return Math.min(parseInt(m[1], 10) * 1000, 30000);
+  return null;
+}
+
+// Wrapper avec retry automatique sur 429 (Rate limit exceeded).
+// Respecte le délai indiqué par Pennylane (header ou body), sinon backoff
+// exponentiel 1s → 2s → 4s → 8s → 16s. Max 5 retries.
+async function pennylaneRequest(method, path, apiKey, body = null, timeout = 15000) {
+  const MAX_RETRIES = 5;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const result = await pennylaneRequestRaw(method, path, apiKey, body, timeout);
+    if (result.status !== 429 || attempt === MAX_RETRIES) {
+      return result;
+    }
+    const hint = extractRetryAfterMs(result);
+    const wait = hint != null ? hint + 250 : Math.min(1000 * Math.pow(2, attempt), 16000);
+    console.warn(`[PENNYLANE] 429 reçu sur ${method} ${path} — retry dans ${wait}ms (tentative ${attempt + 1}/${MAX_RETRIES})`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  // unreachable
 }
 
 /**
@@ -132,8 +167,8 @@ async function fetchAllPages(path, apiKey, params = {}) {
     }
     pages++;
     if (pages > 200) break;
-    // Rate limit Pennylane : 5 req/s
-    await new Promise(r => setTimeout(r, 250));
+    // Throttle Pennylane : ~3 req/s (le 429 reste retry-é par pennylaneRequest)
+    await new Promise(r => setTimeout(r, 350));
   }
   return allItems;
 }
@@ -199,11 +234,11 @@ async function enrichGLCategories(exerciseId, apiKey) {
         enriched++;
       }
     } catch (err) {
-      // Rate limit ou erreur réseau — continuer
+      // Erreur réseau (le 429 est désormais retry-é dans pennylaneRequest)
       if (i > 0 && i % 100 === 0) console.log(`[PENNYLANE] Catégories : ${i}/${lines.rows.length} traitées, ${enriched} enrichies`);
     }
-    // Rate limit Pennylane : 5 req/s
-    await new Promise(r => setTimeout(r, 220));
+    // Throttle Pennylane : ~3 req/s pour rester confortable sous la limite (était 220ms)
+    await new Promise(r => setTimeout(r, 350));
   }
 
   console.log(`[PENNYLANE] Enrichissement terminé : ${enriched}/${lines.rows.length} lignes enrichies`);
