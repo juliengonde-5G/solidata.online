@@ -705,10 +705,10 @@ async function initDatabase() {
         EXTRACT(YEAR FROM d)::INT                           AS annee,
         EXTRACT(QUARTER FROM d)::INT                        AS trimestre,
         TO_CHAR(d, 'YYYY-"Q"Q')                             AS periode,
-        ROUND(SUM(collecte_brut_kg) / 1000.0, 3)::FLOAT     AS collecte_brut_t,
-        ROUND(SUM(tri_entree_kg) / 1000.0, 3)::FLOAT        AS tri_entree_t,
-        ROUND(SUM(tri_sortie_kg) / 1000.0, 3)::FLOAT        AS tri_sortie_t,
-        ROUND(SUM(ecart_collecte_tri_kg) / 1000.0, 3)::FLOAT AS ecart_t,
+        ROUND((SUM(collecte_brut_kg) / 1000.0)::numeric, 3)::FLOAT     AS collecte_brut_t,
+        ROUND((SUM(tri_entree_kg) / 1000.0)::numeric, 3)::FLOAT        AS tri_entree_t,
+        ROUND((SUM(tri_sortie_kg) / 1000.0)::numeric, 3)::FLOAT        AS tri_sortie_t,
+        ROUND((SUM(ecart_collecte_tri_kg) / 1000.0)::numeric, 3)::FLOAT AS ecart_t,
         CASE WHEN SUM(collecte_brut_kg) > 0
           THEN ROUND((SUM(ecart_collecte_tri_kg) / SUM(collecte_brut_kg) * 100)::numeric, 2)
           ELSE NULL
