@@ -685,11 +685,28 @@ router.post('/import/csv', authorize('ADMIN'), async (req, res) => {
     const contractTypeMap = {
       'CDI': 'CDI',
       'CDD': 'CDD',
+      'CDDI': 'CDDI',
       'Apprentissage': 'apprentissage',
     };
 
     const created = [];
     const errors = [];
+
+    // Normalise un sexe arbitraire vers F / M (laisse tel quel sinon)
+    const normalizeGender = (g) => {
+      if (!g) return null;
+      const u = String(g).trim().toUpperCase();
+      if (u === 'F' || u === 'FEMME' || u === 'FEMININ') return 'F';
+      if (u === 'M' || u === 'H' || u === 'HOMME' || u === 'MASCULIN') return 'M';
+      return u || null;
+    };
+
+    // Accepte une date au format YYYY-MM-DD (déjà parsé côté front) ou null/empty
+    const safeDate = (d) => {
+      if (!d) return null;
+      const s = String(d).trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+    };
 
     for (const collab of collaborators) {
       try {
@@ -704,12 +721,30 @@ router.post('/import/csv', authorize('ADMIN'), async (req, res) => {
         );
         const team_id = teamResult.rows[0]?.id || null;
 
-        // Créer l'employé
+        // Créer l'employé avec tous les champs Malibou
         const employeeResult = await pool.query(
-          `INSERT INTO employees (first_name, last_name, team_id, position, contract_type, is_active)
-           VALUES ($1, $2, $3, $4, $5, true)
+          `INSERT INTO employees (
+             first_name, last_name, team_id, position, contract_type, is_active,
+             malibou_id, birth_name, gender, birth_date, nationality, qualification,
+             personal_email, visite_medicale_date
+           )
+           VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id`,
-          [collab.first_name, collab.last_name, team_id, position, contractType]
+          [
+            collab.first_name,
+            collab.last_name,
+            team_id,
+            position,
+            contractType,
+            collab.malibou_id || null,
+            collab.birth_name || null,
+            normalizeGender(collab.gender),
+            safeDate(collab.birth_date),
+            collab.nationality || null,
+            collab.qualification || null,
+            collab.personal_email || null,
+            safeDate(collab.last_medical_visit),
+          ]
         );
 
         const employee_id = employeeResult.rows[0].id;
@@ -724,6 +759,7 @@ router.post('/import/csv', authorize('ADMIN'), async (req, res) => {
 
         created.push({
           id: employee_id,
+          malibou_id: collab.malibou_id || null,
           first_name: collab.first_name,
           last_name: collab.last_name,
           position,

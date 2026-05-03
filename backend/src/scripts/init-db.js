@@ -1916,6 +1916,18 @@ async function initDatabase() {
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
     `);
 
+    // V1.8+ : Champs étendus pour import Malibou (CSV 12 colonnes)
+    await client.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS malibou_id VARCHAR(50);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_name VARCHAR(100);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS gender VARCHAR(10);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_date DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS nationality VARCHAR(100);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS qualification TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS personal_email VARCHAR(255);
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_employees_malibou_id ON employees(malibou_id) WHERE malibou_id IS NOT NULL`);
+
     // ── Conformité IAE — Prescripteurs (P1#14)
     await client.query(`
       CREATE TABLE IF NOT EXISTS prescripteur_orgas (
