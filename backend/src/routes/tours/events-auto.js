@@ -719,4 +719,80 @@ router.get('/events-auto/stats', authorize('ADMIN', 'MANAGER'), async (req, res)
   }
 });
 
+// ══════════════════════════════════════════
+// V1.8.4 — Découverte par CAV/Association + sync holidays + last-runs
+// ══════════════════════════════════════════
+
+// POST /api/tours/events-auto/discover-by-cav — découverte autour de chaque CAV
+router.post('/events-auto/discover-by-cav', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { discoverNearAllCAVs } = require('../../services/event-discovery');
+    const result = await discoverNearAllCAVs({ triggeredBy: 'manual' });
+    res.json(result);
+  } catch (err) {
+    console.error('[EVENTS-AUTO] discover-by-cav :', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/events-auto/discover-by-association
+router.post('/events-auto/discover-by-association', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { discoverNearAllAssociations } = require('../../services/event-discovery');
+    const result = await discoverNearAllAssociations({ triggeredBy: 'manual' });
+    res.json(result);
+  } catch (err) {
+    console.error('[EVENTS-AUTO] discover-by-association :', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/events-auto/sync-holidays — jours fériés + vacances scolaires
+router.post('/events-auto/sync-holidays', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { syncAllHolidays } = require('../../services/holidays');
+    const result = await syncAllHolidays();
+    res.json(result);
+  } catch (err) {
+    console.error('[EVENTS-AUTO] sync-holidays :', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/events-auto/recalc-seasonal — recalcul facteurs saisonniers
+router.post('/events-auto/recalc-seasonal', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { recalcSeasonalFactors } = require('../../services/predictive-ai');
+    const result = await recalcSeasonalFactors();
+    res.json({ message: 'Facteurs saisonniers recalculés', ...result });
+  } catch (err) {
+    console.error('[EVENTS-AUTO] recalc-seasonal :', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/events-auto/last-runs — dernières exécutions par scope/source
+router.get('/events-auto/last-runs', async (req, res) => {
+  try {
+    const runs = await pool.query(`
+      SELECT DISTINCT ON (scope, source) id, source, scope, started_at, completed_at, status,
+             events_found, events_inserted, events_skipped, triggered_by
+      FROM event_discovery_runs
+      ORDER BY scope, source, started_at DESC
+    `);
+    const feries = await pool.query(`SELECT MAX(imported_at) AS last_at, COUNT(*) AS total FROM jours_feries`);
+    const vacances = await pool.query(`SELECT MAX(imported_at) AS last_at, COUNT(*) AS total FROM vacances_scolaires`);
+    const seasonal = await pool.query(`SELECT MAX(computed_at) AS last_at, COUNT(*) AS total FROM predictive_seasonal_factors`).catch(() => ({ rows: [{ last_at: null, total: 0 }] }));
+    res.json({
+      discovery_runs: runs.rows,
+      jours_feries: feries.rows[0],
+      vacances_scolaires: vacances.rows[0],
+      seasonal_factors: seasonal.rows[0],
+    });
+  } catch (err) {
+    console.error('[EVENTS-AUTO] last-runs :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

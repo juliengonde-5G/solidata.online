@@ -621,6 +621,39 @@ function startScheduler() {
       console.log('[SCHEDULER] Scan quotidien CSV boutiques 20h...');
       await scanBoutiqueCSVFolders();
     }
+
+    // ══ V1.8.4 — Auto-discovery événements + jours fériés ══
+
+    // Mensuel : le 1er à 04h00 → découverte events + recalcul facteurs saisonniers
+    if (now.getDate() === 1 && now.getHours() === 4 && now.getMinutes() < 30) {
+      console.log('[SCHEDULER] Mensuel 1er 04h : découverte events + recalcul facteurs saisonniers');
+      try {
+        const { discoverNearAllCAVs, discoverNearAllAssociations } = require('./event-discovery');
+        await discoverNearAllCAVs({ triggeredBy: 'cron' });
+        await discoverNearAllAssociations({ triggeredBy: 'cron' });
+      } catch (err) {
+        console.error('[SCHEDULER] Erreur découverte events mensuelle :', err.message);
+      }
+      try {
+        const { recalcSeasonalFactors } = require('./predictive-ai');
+        if (typeof recalcSeasonalFactors === 'function') {
+          await recalcSeasonalFactors();
+        }
+      } catch (err) {
+        console.error('[SCHEDULER] Erreur recalcul facteurs saisonniers :', err.message);
+      }
+    }
+
+    // Annuel : 1er janvier à 02h00 → sync jours fériés + vacances scolaires
+    if (now.getMonth() === 0 && now.getDate() === 1 && now.getHours() === 2 && now.getMinutes() < 30) {
+      console.log('[SCHEDULER] 1er janvier 02h : sync jours fériés + vacances scolaires');
+      try {
+        const { syncAllHolidays } = require('./holidays');
+        await syncAllHolidays();
+      } catch (err) {
+        console.error('[SCHEDULER] Erreur sync holidays :', err.message);
+      }
+    }
   }, 60 * 60 * 1000);
 }
 

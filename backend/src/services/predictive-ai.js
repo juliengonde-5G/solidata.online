@@ -399,9 +399,82 @@ Réponds en JSON : { prediction: number, confiance: number, analyse: string, fac
   }
 }
 
+/**
+ * V1.8.4 — Recalcul des facteurs saisonniers à partir des données réelles.
+ * Met à jour la table `predictive_seasonal_factors` (créée si absente).
+ * Calcul : pour chaque mois m, facteur = (kg moyen ce mois sur N années) /
+ * (kg moyen annuel sur N années). 1.0 = neutre, >1 = pic, <1 = creux.
+ */
+async function recalcSeasonalFactors() {
+  const startedAt = new Date();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS predictive_seasonal_factors (
+      id SERIAL PRIMARY KEY,
+      type VARCHAR(20) NOT NULL,
+      key INTEGER NOT NULL,
+      factor DOUBLE PRECISION NOT NULL,
+      sample_size INTEGER DEFAULT 0,
+      computed_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE (type, key)
+    )
+  `);
+
+  const factors = { monthly: [], dow: [] };
+
+  // Facteurs mensuels (12 mois)
+  const monthlyData = await pool.query(`
+    WITH monthly_kg AS (
+      SELECT EXTRACT(MONTH FROM date)::int AS m, SUM(weight_kg)::float AS total_kg
+      FROM tonnage_history
+      WHERE date >= NOW() - INTERVAL '24 months'
+      GROUP BY 1
+    ),
+    avg_kg AS (SELECT AVG(total_kg) AS moy FROM monthly_kg)
+    SELECT m, total_kg / NULLIF((SELECT moy FROM avg_kg), 0) AS factor, total_kg
+    FROM monthly_kg ORDER BY m
+  `);
+  for (const row of monthlyData.rows) {
+    const factor = parseFloat(row.factor) || 1.0;
+    await pool.query(
+      `INSERT INTO predictive_seasonal_factors (type, key, factor, sample_size, computed_at)
+       VALUES ('monthly', $1, $2, $3, NOW())
+       ON CONFLICT (type, key) DO UPDATE SET factor = EXCLUDED.factor, sample_size = EXCLUDED.sample_size, computed_at = NOW()`,
+      [parseInt(row.m), Math.round(factor * 1000) / 1000, parseInt(row.total_kg) || 0]
+    );
+    factors.monthly.push({ month: parseInt(row.m), factor });
+  }
+
+  // Facteurs jour de semaine (0-6 dim-sam Postgres)
+  const dowData = await pool.query(`
+    WITH dow_kg AS (
+      SELECT EXTRACT(DOW FROM date)::int AS d, SUM(weight_kg)::float AS total_kg
+      FROM tonnage_history
+      WHERE date >= NOW() - INTERVAL '12 months'
+      GROUP BY 1
+    ),
+    avg_kg AS (SELECT AVG(total_kg) AS moy FROM dow_kg)
+    SELECT d, total_kg / NULLIF((SELECT moy FROM avg_kg), 0) AS factor, total_kg
+    FROM dow_kg ORDER BY d
+  `);
+  for (const row of dowData.rows) {
+    const factor = parseFloat(row.factor) || 1.0;
+    await pool.query(
+      `INSERT INTO predictive_seasonal_factors (type, key, factor, sample_size, computed_at)
+       VALUES ('dow', $1, $2, $3, NOW())
+       ON CONFLICT (type, key) DO UPDATE SET factor = EXCLUDED.factor, sample_size = EXCLUDED.sample_size, computed_at = NOW()`,
+      [parseInt(row.d), Math.round(factor * 1000) / 1000, parseInt(row.total_kg) || 0]
+    );
+    factors.dow.push({ dow: parseInt(row.d), factor });
+  }
+
+  console.log(`[PREDICTIVE-AI] Facteurs saisonniers recalculés en ${Date.now() - startedAt.getTime()}ms`);
+  return factors;
+}
+
 module.exports = {
   analyseHebdomadaire,
   recommanderAjustements,
   predictionEnrichie,
   getHistoricalData,
+  recalcSeasonalFactors,
 };

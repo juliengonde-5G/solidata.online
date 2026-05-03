@@ -3631,6 +3631,68 @@ async function initDatabase() {
       console.error('[INIT-DB] Erreur ALTER vehicles is_archived :', e.message);
     }
 
+    // V1.8.4 — Auto-discovery événements + jours fériés/vacances scolaires
+    try {
+      // Étendre evenements_locaux pour traçabilité source + lien CAV/association
+      await client.query("ALTER TABLE evenements_locaux ADD COLUMN IF NOT EXISTS source VARCHAR(40)");
+      await client.query("ALTER TABLE evenements_locaux ADD COLUMN IF NOT EXISTS external_id VARCHAR(120)");
+      await client.query("ALTER TABLE evenements_locaux ADD COLUMN IF NOT EXISTS cav_id INTEGER REFERENCES cav(id) ON DELETE SET NULL");
+      await client.query("ALTER TABLE evenements_locaux ADD COLUMN IF NOT EXISTS association_point_id INTEGER");
+      await client.query("ALTER TABLE evenements_locaux ADD COLUMN IF NOT EXISTS imported_at TIMESTAMP DEFAULT NOW()");
+      // Index unique anti-doublon par source + external_id (events auto-découverts uniquement)
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_evenements_locaux_external
+        ON evenements_locaux(source, external_id)
+        WHERE external_id IS NOT NULL
+      `);
+      // Audit des runs de découverte (date de dernière mise à jour visible côté UI)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS event_discovery_runs (
+          id SERIAL PRIMARY KEY,
+          source VARCHAR(40) NOT NULL,
+          scope VARCHAR(40) DEFAULT 'all',
+          started_at TIMESTAMP DEFAULT NOW(),
+          completed_at TIMESTAMP,
+          events_found INTEGER DEFAULT 0,
+          events_inserted INTEGER DEFAULT 0,
+          events_skipped INTEGER DEFAULT 0,
+          status VARCHAR(20) DEFAULT 'running',
+          error TEXT,
+          triggered_by VARCHAR(20) DEFAULT 'manual'
+        )
+      `);
+      await client.query("CREATE INDEX IF NOT EXISTS idx_event_runs_source_completed ON event_discovery_runs(source, completed_at DESC)");
+
+      // Jours fériés (FR métropole — api.gouv.fr)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS jours_feries (
+          id SERIAL PRIMARY KEY,
+          date DATE UNIQUE NOT NULL,
+          nom VARCHAR(100) NOT NULL,
+          zone VARCHAR(20) DEFAULT 'metropole',
+          source VARCHAR(40) DEFAULT 'api.gouv.fr',
+          imported_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      // Vacances scolaires zone B (Rouen) — opendata.education.gouv.fr
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS vacances_scolaires (
+          id SERIAL PRIMARY KEY,
+          zone VARCHAR(10) NOT NULL DEFAULT 'B',
+          description VARCHAR(100) NOT NULL,
+          date_debut DATE NOT NULL,
+          date_fin DATE NOT NULL,
+          annee_scolaire VARCHAR(20),
+          source VARCHAR(40) DEFAULT 'opendata.education.gouv.fr',
+          imported_at TIMESTAMP DEFAULT NOW(),
+          UNIQUE (zone, date_debut, description)
+        )
+      `);
+      console.log('[INIT-DB] Auto-discovery + jours fériés + vacances scolaires ✓');
+    } catch (e) {
+      console.error('[INIT-DB] Erreur migration auto-discovery :', e.message);
+    }
+
 
     // ══════════════════════════════════════════
     // V2 — State machine centralisée (Enterprise Architect Ch2)

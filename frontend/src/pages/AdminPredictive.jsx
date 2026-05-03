@@ -9,9 +9,12 @@ const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 const EVENT_TYPES = [
   { value: 'brocante', label: 'Brocante' },
   { value: 'vide_grenier', label: 'Vide-grenier' },
+  { value: 'vide_maison', label: 'Vide-maison' },
+  { value: 'foire_a_tout', label: 'Foire à tout' },
   { value: 'marche', label: 'Marché' },
   { value: 'foire', label: 'Foire' },
   { value: 'festival', label: 'Festival' },
+  { value: 'vente_au_kilo', label: 'Vente au kilo Solidarité Textiles' },
   { value: 'autre', label: 'Autre' },
 ];
 
@@ -132,6 +135,67 @@ export default function AdminPredictive() {
     }
     setDiscovering(false);
   };
+
+  // V1.8.4 — synchronisations dédiées (par CAV / association / holidays / facteurs)
+  const [syncing, setSyncing] = useState(null);
+  const [lastRuns, setLastRuns] = useState(null);
+
+  const loadLastRuns = async () => {
+    try {
+      const r = await api.get('/tours/events-auto/last-runs');
+      setLastRuns(r.data);
+    } catch (err) { /* silencieux */ }
+  };
+
+  useEffect(() => { loadLastRuns(); }, []);
+
+  const syncByCAV = async () => {
+    setSyncing('cav');
+    try {
+      const r = await api.post('/tours/events-auto/discover-by-cav');
+      setDiscoveryResult({ message: `Découverte par CAV : ${r.data.inserted} nouveaux events (sur ${r.data.found} trouvés)` });
+      loadEvents(); loadAutoStats(); loadLastRuns();
+    } catch (err) {
+      setDiscoveryResult({ error: err.response?.data?.error || 'Erreur' });
+    }
+    setSyncing(null);
+  };
+  const syncByAssociation = async () => {
+    setSyncing('asso');
+    try {
+      const r = await api.post('/tours/events-auto/discover-by-association');
+      setDiscoveryResult({ message: `Découverte par association : ${r.data.inserted} nouveaux events (sur ${r.data.found} trouvés)` });
+      loadEvents(); loadAutoStats(); loadLastRuns();
+    } catch (err) {
+      setDiscoveryResult({ error: err.response?.data?.error || 'Erreur' });
+    }
+    setSyncing(null);
+  };
+  const syncHolidays = async () => {
+    setSyncing('holidays');
+    try {
+      const r = await api.post('/tours/events-auto/sync-holidays');
+      setDiscoveryResult({ message: `Jours fériés + vacances scolaires synchronisés` });
+      loadLastRuns();
+    } catch (err) {
+      setDiscoveryResult({ error: err.response?.data?.error || 'Erreur' });
+    }
+    setSyncing(null);
+  };
+  const recalcSeasonal = async () => {
+    setSyncing('seasonal');
+    try {
+      const r = await api.post('/tours/events-auto/recalc-seasonal');
+      setDiscoveryResult({ message: `Facteurs saisonniers recalculés (${r.data.monthly?.length || 0} mois, ${r.data.dow?.length || 0} jours)` });
+      loadLastRuns();
+    } catch (err) {
+      setDiscoveryResult({ error: err.response?.data?.error || 'Erreur' });
+    }
+    setSyncing(null);
+  };
+
+  const fmtRunDate = (iso) => iso ? new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Jamais';
+  const findRun = (scope) => (lastRuns?.discovery_runs || []).find(r => r.scope === scope);
 
   const loadWeatherPreview = async () => {
     try {
@@ -346,6 +410,74 @@ export default function AdminPredictive() {
         </Section>
 
         {/* ══════════ DÉCOUVERTE AUTOMATIQUE IA ══════════ */}
+        {/* ═══ V1.8.4 — Panneau synchronisation automatique ═══ */}
+        <Section title="Synchronisation IA" desc="Lance manuellement les flux de découverte (cron mensuel/annuel actif en parallèle). Sources : OpenAgenda, vide-greniers.fr, brocabrac.fr">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* CAV — rayon 500m */}
+            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div>
+                  <p className="font-semibold text-sm text-slate-700">📍 Découverte par CAV</p>
+                  <p className="text-xs text-slate-500">Brocantes, vide-greniers, foires à proximité de chaque CAV (rayon 500m).</p>
+                </div>
+                <button onClick={syncByCAV} disabled={syncing === 'cav'} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
+                  {syncing === 'cav' ? 'Sync…' : 'Lancer'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400">Dernière exécution : {fmtRunDate(findRun('cav')?.completed_at)} {findRun('cav')?.events_inserted != null && `· ${findRun('cav').events_inserted} ajoutés`}</p>
+            </div>
+
+            {/* Associations partenaires */}
+            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div>
+                  <p className="font-semibold text-sm text-slate-700">🤝 Découverte par association partenaire</p>
+                  <p className="text-xs text-slate-500">Mêmes sources, autour de chaque association partenaire.</p>
+                </div>
+                <button onClick={syncByAssociation} disabled={syncing === 'asso'} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
+                  {syncing === 'asso' ? 'Sync…' : 'Lancer'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400">Dernière exécution : {fmtRunDate(findRun('association')?.completed_at)} {findRun('association')?.events_inserted != null && `· ${findRun('association').events_inserted} ajoutés`}</p>
+            </div>
+
+            {/* Jours fériés + vacances scolaires */}
+            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div>
+                  <p className="font-semibold text-sm text-slate-700">📆 Jours fériés + vacances scolaires zone B</p>
+                  <p className="text-xs text-slate-500">Sources : api.gouv.fr + opendata.education.gouv.fr (cron 1er janvier auto).</p>
+                </div>
+                <button onClick={syncHolidays} disabled={syncing === 'holidays'} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
+                  {syncing === 'holidays' ? 'Sync…' : 'Lancer'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Jours fériés : {fmtRunDate(lastRuns?.jours_feries?.last_at)} · {lastRuns?.jours_feries?.total || 0} entrées
+                <br />
+                Vacances scolaires : {fmtRunDate(lastRuns?.vacances_scolaires?.last_at)} · {lastRuns?.vacances_scolaires?.total || 0} entrées
+              </p>
+            </div>
+
+            {/* Recalcul facteurs saisonniers */}
+            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div>
+                  <p className="font-semibold text-sm text-slate-700">📊 Recalcul facteurs saisonniers</p>
+                  <p className="text-xs text-slate-500">Analyse historique des 24 derniers mois → ajuste les coefs SEASONAL/DOW (cron mensuel auto).</p>
+                </div>
+                <button onClick={recalcSeasonal} disabled={syncing === 'seasonal'} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
+                  {syncing === 'seasonal' ? 'Calcul…' : 'Recalculer'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400">Dernière exécution : {fmtRunDate(lastRuns?.seasonal_factors?.last_at)} · {lastRuns?.seasonal_factors?.total || 0} facteurs</p>
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-400 italic mt-3">
+            Crons automatiques : <strong>1er du mois 04h00</strong> (découverte par CAV + association + recalcul saisonnier) · <strong>1er janvier 02h00</strong> (jours fériés + vacances scolaires).
+          </p>
+        </Section>
+
         <Section title="Decouverte automatique IA" desc="Recherche multi-sources dans les agendas publics et analyse predictive saisonniere">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
             <div className="bg-indigo-50 rounded-lg p-3 text-center">
