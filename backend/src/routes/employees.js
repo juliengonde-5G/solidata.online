@@ -536,19 +536,45 @@ router.get('/absenteeism/monthly', authorize('ADMIN', 'RH', 'MANAGER'), async (r
   }
 });
 
-// DELETE /api/employees/clear — Supprimer tous les employés (ADMIN only)
+// DELETE /api/employees/clear — Désactive tous les employés actifs (ADMIN only)
 // IMPORTANT : déclarée AVANT /:id pour qu'Express ne matche pas :id="clear"
+//
+// Soft-delete au lieu de DELETE dur car plusieurs tables ont des FK NOT NULL
+// vers employees (tours.driver_employee_id, preparation_collaborateurs, etc.)
+// qui interdisent un DELETE sans casser l'historique métier.
+//
+// Les tables légères (work_hours, schedule, etc. en ON DELETE CASCADE) sont
+// purgées comme avant. Le malibou_id est libéré pour éviter les conflits si
+// le réimport contient les mêmes matricules.
 router.delete('/clear', authorize('ADMIN'), async (req, res) => {
+  const client = await pool.connect();
   try {
-    await pool.query('DELETE FROM work_hours');
-    await pool.query('DELETE FROM schedule');
-    await pool.query('DELETE FROM employee_availability');
-    await pool.query('DELETE FROM employee_contracts');
-    await pool.query('DELETE FROM employees');
-    res.json({ message: 'Tous les employés ont été supprimés' });
+    await client.query('BEGIN');
+    // Purge des données satellites (CASCADE depuis employees)
+    await client.query('DELETE FROM work_hours');
+    await client.query('DELETE FROM schedule');
+    await client.query('DELETE FROM employee_availability');
+    await client.query('DELETE FROM employee_contracts');
+    // Soft-delete + libération du malibou_id (anti-doublon au réimport)
+    const r = await client.query(`
+      UPDATE employees
+      SET is_active = false,
+          malibou_id = NULL,
+          updated_at = NOW()
+      WHERE is_active = true
+      RETURNING id
+    `);
+    await client.query('COMMIT');
+    res.json({
+      message: `${r.rows.length} collaborateur(s) désactivé(s). L'historique métier (tournées, expéditions…) est préservé.`,
+      deactivated: r.rows.length,
+    });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[EMPLOYEES] Erreur suppression /clear :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
