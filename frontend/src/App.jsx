@@ -47,7 +47,7 @@ const Pointage = lazy(() => import('./pages/Pointage'));
 const ExutoiresCommandes = lazy(() => import('./pages/ExutoiresCommandes'));
 const ExutoiresPreparation = lazy(() => import('./pages/ExutoiresPreparation'));
 const ExutoiresGantt = lazy(() => import('./pages/ExutoiresGantt'));
-const ExutoiresFacturation = lazy(() => import('./pages/ExutoiresFacturation'));
+const ExutoiresControleFacturation = lazy(() => import('./pages/ExutoiresControleFacturation'));
 const ExutoiresCalendrier = lazy(() => import('./pages/ExutoiresCalendrier'));
 const ExutoiresClients = lazy(() => import('./pages/ExutoiresClients'));
 const ExutoiresTarifs = lazy(() => import('./pages/ExutoiresTarifs'));
@@ -150,7 +150,7 @@ function App() {
               <Route path="/exutoires-commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCommandes /></ProtectedRoute>} />
               <Route path="/exutoires-preparation" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresPreparation /></ProtectedRoute>} />
               <Route path="/exutoires-gantt" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresGantt /></ProtectedRoute>} />
-              <Route path="/exutoires-facturation" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresFacturation /></ProtectedRoute>} />
+              <Route path="/exutoires-controle-facturation" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresControleFacturation /></ProtectedRoute>} />
               <Route path="/exutoires-calendrier" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCalendrier /></ProtectedRoute>} />
               <Route path="/exutoires-clients" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresClients /></ProtectedRoute>} />
               <Route path="/exutoires-tarifs" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresTarifs /></ProtectedRoute>} />

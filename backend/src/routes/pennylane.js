@@ -376,104 +376,259 @@ router.post('/test', authorize('ADMIN'), async (req, res) => {
 });
 
 // ══════════════════════════════════════════
-// SYNCHRONISATION — PUSH FACTURES
+// SYNCHRONISATION — PULL FACTURES CLIENTS (V1.8+)
+// L'outil ne génère pas de factures : il importe celles émises sur
+// Pennylane et les rapproche des commandes_exutoires pour contrôle.
 // ══════════════════════════════════════════
 
-// POST /api/pennylane/sync/invoices — Synchroniser les factures vers Pennylane
-router.post('/sync/invoices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+// Extrait la quantité totale d'une facture Pennylane (en tonnes par défaut)
+// en sommant les invoice_lines. Conversion kg→t si l'unité ressemble à "kg".
+function extractInvoiceQuantity(invoiceData) {
+  const lines = invoiceData?.invoice_lines || invoiceData?.lines || [];
+  if (!Array.isArray(lines) || lines.length === 0) return { qty: null, unit: 't' };
+  let totalT = 0;
+  for (const line of lines) {
+    const qty = parseFloat(line.quantity ?? line.qty ?? 0) || 0;
+    const unit = String(line.unit || line.unit_label || 't').toLowerCase();
+    if (unit.includes('kg')) totalT += qty / 1000;
+    else if (unit.includes('tonne') || unit === 't') totalT += qty;
+    else totalT += qty; // Défaut : on suppose tonnes
+  }
+  return { qty: Math.round(totalT * 1000) / 1000, unit: 't' };
+}
+
+// Tente de retrouver une commande_exutoires depuis les libellés/external_reference de la facture
+async function autoMatchCommande(invoiceData) {
+  const candidates = [
+    invoiceData?.external_reference,
+    invoiceData?.reference,
+    invoiceData?.invoice_number,
+    invoiceData?.label,
+    invoiceData?.customer_reference,
+    ...((invoiceData?.invoice_lines || []).map((l) => l.label || l.description).filter(Boolean)),
+  ].filter(Boolean).map(String);
+  if (candidates.length === 0) return null;
+
+  // 1. Match strict sur reference exacte
+  for (const candidate of candidates) {
+    const m = candidate.match(/CMD-?\d{4,}|EX-?\d{4,}|\b\d{4,8}\b/i);
+    if (!m) continue;
+    const ref = m[0].toUpperCase();
+    const r = await pool.query(
+      `SELECT id, reference, statut FROM commandes_exutoires
+       WHERE UPPER(reference) = $1 OR UPPER(reference) LIKE $2
+       LIMIT 1`,
+      [ref, `%${ref}%`]
+    );
+    if (r.rows.length > 0) return r.rows[0];
+  }
+  // 2. Recherche libre dans les libellés
+  for (const candidate of candidates) {
+    const r = await pool.query(
+      `SELECT id, reference, statut FROM commandes_exutoires
+       WHERE $1::text ILIKE '%' || reference || '%'
+       LIMIT 1`,
+      [candidate]
+    );
+    if (r.rows.length > 0) return r.rows[0];
+  }
+  return null;
+}
+
+// Calcule + persiste l'écart pour une facture liée
+async function recomputeFactureEcart(client, factureId) {
+  const r = await client.query(
+    `SELECT f.id, f.commande_id, f.quantite_facturee, f.montant_ht,
+            cp.pesee_client AS pesee_client_t,
+            c.tonnage_prevu, c.prix_tonne
+     FROM factures_exutoires f
+     LEFT JOIN commandes_exutoires c ON c.id = f.commande_id
+     LEFT JOIN LATERAL (
+       SELECT pesee_client FROM controles_pesee WHERE commande_id = f.commande_id
+       ORDER BY id DESC LIMIT 1
+     ) cp ON true
+     WHERE f.id = $1`,
+    [factureId]
+  );
+  if (r.rows.length === 0) return null;
+  const f = r.rows[0];
+  const peseeClientT = parseFloat(f.pesee_client_t) || null; // pesee_client est en tonnes (DECIMAL(10,3))
+  const qtyFacturee = parseFloat(f.quantite_facturee) || null;
+  let ecart = null;
+  let ecartPct = null;
+  if (peseeClientT != null && qtyFacturee != null) {
+    ecart = Math.round((qtyFacturee - peseeClientT) * 1000) / 1000;
+    ecartPct = peseeClientT > 0
+      ? Math.round((ecart / peseeClientT) * 10000) / 100
+      : null;
+  }
+  // Montant attendu : pesee_client × prix_tonne
+  const prix = parseFloat(f.prix_tonne) || 0;
+  const montantAttendu = peseeClientT != null ? Math.round(peseeClientT * prix * 100) / 100 : null;
+  const ecartMontant = (montantAttendu != null && f.montant_ht != null)
+    ? Math.round((parseFloat(f.montant_ht) - montantAttendu) * 100) / 100
+    : null;
+
+  await client.query(
+    `UPDATE factures_exutoires
+     SET pesee_client_kg = $1,
+         ecart_quantite = $2,
+         ecart_quantite_pct = $3,
+         montant_attendu = $4,
+         ecart_montant = $5
+     WHERE id = $6`,
+    [peseeClientT, ecart, ecartPct, montantAttendu, ecartMontant, factureId]
+  );
+  return { ecart, ecartPct, montantAttendu, ecartMontant };
+}
+
+// POST /api/pennylane/sync/customer-invoices — Importer les factures clients
+// émises sur Pennylane (incrémental : depuis last_sync_at)
+router.post('/sync/customer-invoices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  let syncLogId = null;
   try {
     const { apiKey } = await getActiveApiKey();
 
-    // Récupérer les factures non synchronisées
-    const invoices = await pool.query(`
-      SELECT i.*, il.description as line_desc, il.quantity, il.unit_price, il.total as line_total
-      FROM invoices i
-      LEFT JOIN invoice_lines il ON il.invoice_id = i.id
-      LEFT JOIN pennylane_mappings pm ON pm.local_type = 'invoice' AND pm.local_id = i.id
-      WHERE pm.id IS NULL AND i.status != 'draft'
-      ORDER BY i.date DESC
-    `);
+    // Date de référence : depuis le dernier sync, ou {since} forcé en body
+    const cfg = await pool.query('SELECT last_sync_at FROM pennylane_config LIMIT 1');
+    const since = req.body?.since || (cfg.rows[0]?.last_sync_at
+      ? new Date(cfg.rows[0].last_sync_at).toISOString().split('T')[0]
+      : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
 
-    // Log de sync
     const syncLog = await pool.query(
       `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count, created_by)
-       VALUES ('invoices', 'push', 'in_progress', $1, $2) RETURNING id`,
-      [invoices.rows.length, req.user.id]
+       VALUES ('customer_invoices', 'pull', 'in_progress', 0, $1) RETURNING id`,
+      [req.user.id]
     );
+    syncLogId = syncLog.rows[0].id;
 
-    const results = { synced: 0, errors: 0, details: [] };
+    const filter = JSON.stringify([
+      { field: 'date', operator: 'gteq', value: since },
+    ]);
+    const allInvoices = await fetchAllPages('/customer_invoices', apiKey, { filter });
 
-    // Grouper par facture
-    const invoiceMap = {};
-    invoices.rows.forEach(row => {
-      if (!invoiceMap[row.id]) {
-        invoiceMap[row.id] = { ...row, lines: [] };
-      }
-      if (row.line_desc) {
-        invoiceMap[row.id].lines.push({
-          description: row.line_desc,
-          quantity: row.quantity,
-          unit_price: row.unit_price,
-          total: row.line_total,
-        });
-      }
-    });
-
-    for (const invoice of Object.values(invoiceMap)) {
-      try {
-        // Mapping Solidata → Pennylane API v2
-        const pennylanePayload = {
-          date: invoice.date ? new Date(invoice.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          deadline: invoice.due_date ? new Date(invoice.due_date).toISOString().split('T')[0] : null,
-          external_reference: invoice.invoice_number || null,
-          currency: 'EUR',
-          draft: false,
-          invoice_lines: invoice.lines.map(l => ({
-            label: l.description || 'Prestation',
-            quantity: l.quantity || 1,
-            unit: 'piece',
-            vat_rate: 'FR_200',
-            raw_currency_unit_price: String(parseFloat(l.unit_price) || 0),
-          })),
-        };
-
-        const plResult = await pennylaneRequest('POST', '/customer_invoices', apiKey, pennylanePayload);
-
-        if (plResult.status >= 200 && plResult.status < 300) {
-          const plId = plResult.data?.invoice?.id || plResult.data?.id || `PL-${invoice.invoice_number}`;
-          await pool.query(
-            `INSERT INTO pennylane_mappings (local_type, local_id, pennylane_type, pennylane_id)
-             VALUES ('invoice', $1, 'customer_invoice', $2)
-             ON CONFLICT (local_type, local_id) DO UPDATE SET pennylane_id = $2, last_synced_at = NOW()`,
-            [invoice.id, String(plId)]
+    const results = { imported: 0, updated: 0, matched: 0, unmatched: 0, errors: 0, details: [] };
+    const client = await pool.connect();
+    try {
+      for (const inv of allInvoices) {
+        const invId = String(inv.id || inv.invoice_id || '');
+        if (!invId) { results.errors++; continue; }
+        try {
+          await client.query('BEGIN');
+          // Skip si déjà importée (basé sur pennylane_invoice_id)
+          const existing = await client.query(
+            'SELECT id, commande_id FROM factures_exutoires WHERE pennylane_invoice_id = $1 LIMIT 1',
+            [invId]
           );
-          results.synced++;
-          results.details.push({ invoice_number: invoice.invoice_number, status: 'ok', pennylane_id: plId });
-        } else {
-          const errMsg = plResult.data?.error || plResult.data?.message || `HTTP ${plResult.status}`;
+
+          // Extraction des champs Pennylane
+          const number = inv.invoice_number || inv.number || inv.external_reference || `PL-${invId}`;
+          const date = inv.date ? String(inv.date).slice(0, 10) : null;
+          const customerId = String(inv.customer?.id || inv.customer_id || '');
+          const customerName = inv.customer?.name || inv.customer_name || null;
+          const externalRef = inv.external_reference || null;
+          const montantHt = parseFloat(inv.amount_ht ?? inv.subtotal ?? inv.amount_excl_tax ?? 0) || null;
+          const montantTtc = parseFloat(inv.amount_ttc ?? inv.total ?? inv.amount ?? 0) || null;
+          const { qty: quantite, unit: unite } = extractInvoiceQuantity(inv);
+
+          // Matching automatique sur libellé / external_reference
+          const matched = await autoMatchCommande(inv);
+          const commandeId = matched ? matched.id : null;
+
+          if (existing.rows.length === 0) {
+            const ins = await client.query(
+              `INSERT INTO factures_exutoires (
+                 commande_id, source, statut_facture,
+                 pennylane_invoice_id, pennylane_invoice_number, pennylane_external_reference,
+                 pennylane_customer_id, pennylane_customer_name, pennylane_data,
+                 date_facture, montant_ht, montant_ttc,
+                 quantite_facturee, unite_quantite,
+                 rapprochement_mode
+               ) VALUES (
+                 $1, 'pennylane', $2,
+                 $3, $4, $5,
+                 $6, $7, $8,
+                 $9, $10, $11,
+                 $12, $13,
+                 $14
+               ) RETURNING id`,
+              [
+                commandeId,
+                commandeId ? 'recue' : 'recue',
+                invId, number, externalRef,
+                customerId || null, customerName, JSON.stringify(inv),
+                date, montantHt, montantTtc,
+                quantite, unite,
+                commandeId ? 'auto' : null,
+              ]
+            );
+            const factureId = ins.rows[0].id;
+            if (commandeId) {
+              await recomputeFactureEcart(client, factureId);
+              // Bascule statut commande → cloturee (Q5 : peu importe l'écart)
+              await client.query(
+                `UPDATE commandes_exutoires SET statut = 'cloturee', updated_at = NOW() WHERE id = $1`,
+                [commandeId]
+              );
+              await client.query(
+                `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, motif)
+                 VALUES ($1, NULL, 'cloturee', 'Facture Pennylane rapprochée automatiquement')`,
+                [commandeId]
+              );
+              results.matched++;
+            } else {
+              results.unmatched++;
+            }
+            results.imported++;
+            results.details.push({ id: factureId, number, status: commandeId ? 'matched' : 'unmatched' });
+          } else {
+            // Mettre à jour les champs si la facture existait déjà
+            await client.query(
+              `UPDATE factures_exutoires SET
+                 pennylane_invoice_number = $1, pennylane_external_reference = $2,
+                 pennylane_customer_name = $3, pennylane_data = $4,
+                 date_facture = $5, montant_ht = $6, montant_ttc = $7,
+                 quantite_facturee = $8, imported_at = NOW()
+               WHERE pennylane_invoice_id = $9`,
+              [number, externalRef, customerName, JSON.stringify(inv), date, montantHt, montantTtc, quantite, invId]
+            );
+            if (existing.rows[0].commande_id) {
+              await recomputeFactureEcart(client, existing.rows[0].id);
+            }
+            results.updated++;
+          }
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK');
+          console.error('[PENNYLANE] Erreur import facture', invId, err.message);
           results.errors++;
-          results.details.push({ invoice_number: invoice.invoice_number, status: 'error', error: errMsg });
+          results.details.push({ id: invId, status: 'error', error: err.message });
         }
-      } catch (syncErr) {
-        results.errors++;
-        results.details.push({ invoice_number: invoice.invoice_number, status: 'error', error: syncErr.message });
       }
+    } finally {
+      client.release();
     }
 
-    // Mettre à jour le log
     await pool.query(
-      `UPDATE pennylane_sync_log SET status = $1, completed_at = NOW(), details = $2 WHERE id = $3`,
-      [results.errors > 0 ? 'partial' : 'completed', JSON.stringify(results), syncLog.rows[0].id]
+      `UPDATE pennylane_sync_log
+       SET status = $1, completed_at = NOW(), records_count = $2, details = $3
+       WHERE id = $4`,
+      [results.errors > 0 ? 'partial' : 'completed', results.imported + results.updated, JSON.stringify(results), syncLogId]
     );
-
     await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
 
     res.json({
-      message: `Synchronisation terminée : ${results.synced} facture(s) synchronisée(s), ${results.errors} erreur(s)`,
+      message: `Synchronisation terminée — ${results.imported} importée(s), ${results.updated} mise(s) à jour, ${results.matched} rapprochée(s) auto, ${results.unmatched} à rapprocher manuellement, ${results.errors} erreur(s)`,
       ...results,
     });
   } catch (err) {
-    console.error('[PENNYLANE] Erreur sync factures :', err);
+    if (syncLogId) {
+      try {
+        await pool.query(`UPDATE pennylane_sync_log SET status = 'error', completed_at = NOW(), details = $1 WHERE id = $2`,
+          [JSON.stringify({ error: err.message }), syncLogId]);
+      } catch (_) { /* best-effort */ }
+    }
+    console.error('[PENNYLANE] Erreur sync customer-invoices :', err);
     res.status(err.statusCode || 500).json({ error: err.message || 'Erreur synchronisation' });
   }
 });

@@ -79,6 +79,7 @@ const NAV_TREE = [
             children: [
               { label: 'Clients', path: '/exutoires-clients', icon: Users, roles: ['ADMIN', 'MANAGER'] },
               { label: 'Grille tarifaire', path: '/exutoires-tarifs', icon: CircleDollarSign, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Contrôle facturation', path: '/exutoires-controle-facturation', icon: FileText, roles: ['ADMIN', 'MANAGER'] },
             ],
           },
           {
