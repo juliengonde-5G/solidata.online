@@ -3431,8 +3431,9 @@ async function initDatabase() {
     `);
     await client.query(`
       UPDATE factures_exutoires f SET partner_id = p.id
-      FROM partners p
-      WHERE p.source_table = 'clients_exutoires' AND p.source_id = f.client_id
+      FROM partners p, commandes_exutoires c
+      WHERE p.source_table = 'clients_exutoires' AND p.source_id = c.client_id
+        AND c.id = f.commande_id
         AND f.partner_id IS NULL;
     `);
 
