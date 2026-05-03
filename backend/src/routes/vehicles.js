@@ -154,24 +154,60 @@ router.get('/available', async (req, res) => {
 router.use(authenticate);
 router.use(autoLogActivity('vehicle'));
 
-// GET /api/vehicles
+// GET /api/vehicles — par défaut : seulement les non-archivés
+// ?include_archived=true pour aussi inclure les archivés
 router.get('/', async (req, res) => {
   try {
-    const { status, team_id } = req.query;
+    const { status, team_id, include_archived } = req.query;
     let query = `SELECT v.*, t.name as team_name,
        CONCAT(e.first_name, ' ', e.last_name) as assigned_driver_name
        FROM vehicles v LEFT JOIN teams t ON v.team_id = t.id
        LEFT JOIN employees e ON v.assigned_driver_id = e.id WHERE 1=1`;
     const params = [];
 
+    if (include_archived !== 'true') {
+      query += ' AND COALESCE(v.is_archived, false) = false';
+    }
     if (status) { params.push(status); query += ` AND v.status = $${params.length}`; }
     if (team_id) { params.push(team_id); query += ` AND v.team_id = $${params.length}`; }
 
-    query += ' ORDER BY v.name';
+    query += ' ORDER BY COALESCE(v.is_archived, false), v.name';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error('[VEHICLES] Erreur liste :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PATCH /api/vehicles/:id/archive — Archiver un véhicule retiré du service
+router.patch('/:id/archive', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE vehicles SET is_archived = true, archived_at = NOW(), updated_at = NOW()
+       WHERE id = $1 RETURNING id, registration, is_archived`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur archive :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PATCH /api/vehicles/:id/restore — Restaurer un véhicule archivé
+router.patch('/:id/restore', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE vehicles SET is_archived = false, archived_at = NULL, updated_at = NOW()
+       WHERE id = $1 RETURNING id, registration, is_archived`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur restore :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
