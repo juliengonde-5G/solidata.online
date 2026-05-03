@@ -219,10 +219,9 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Bandeau : KPIs globaux + Fil d'actualité */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <KpiTile
+        {/* KPIs globaux — pleine largeur */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <KpiTile
               label="Collecte ce mois"
               value={loading ? '-' : formatTonnage(kpis?.collecte?.tonnage_mois)}
               unit="kg"
@@ -254,9 +253,10 @@ export default function Dashboard() {
               color={alertes.length > 0 ? 'amber' : 'slate'}
               trend={null}
             />
-          </div>
-          <NewsWidget items={news} onSeeAll={() => navigate('/news')} />
         </div>
+
+        {/* Fil d'actualité — sous les indicateurs */}
+        <NewsWidget items={news} onSeeAll={() => navigate('/news')} />
 
         {/* Objectifs vs Realise (jauges) - ADMIN uniquement */}
         {user?.role === 'ADMIN' && objectifs.length > 0 && (
@@ -497,7 +497,7 @@ function NewsWidget({ items, onSeeAll }) {
   };
 
   return (
-    <div className="card-modern p-4 lg:col-span-1 flex flex-col">
+    <div className="card-modern p-4 flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
           <Newspaper className="w-4 h-4 text-slate-400" />
