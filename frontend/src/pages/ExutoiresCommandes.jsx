@@ -8,9 +8,32 @@ import { LoadingSpinner, Modal, KanbanBoard, StatusBadge } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
+// Map complet (incluant les anciens types) — utilisé UNIQUEMENT pour afficher
+// le libellé d'une commande historique. Pour les nouvelles commandes, voir
+// TYPES_PRODUIT_OPTIONS ci-dessous.
 const TYPES_PRODUIT = {
-  original: 'Original', csr: 'CSR', effilo_blanc: 'Effilo Blanc',
-  effilo_couleur: 'Effilo Couleur', jean: 'Jean', coton_blanc: 'Coton Blanc', coton_couleur: 'Coton Couleur'
+  original: 'Original',
+  csr: 'CSR',
+  essuyage: 'Essuyage',
+  tricot: 'Tricot',
+  merinos: 'Mérinos',
+  jean: 'Jean',
+  coton_blanc: 'Coton Blanc',
+  coton_couleur: 'Coton Couleur',
+  // Anciens types — affichage historique uniquement
+  effilo_blanc: 'Effilo Blanc (obsolète)',
+  effilo_couleur: 'Effilo Couleur (obsolète)',
+};
+// Types proposés à la création/édition — sans les obsolètes
+const TYPES_PRODUIT_OPTIONS = {
+  original: 'Original',
+  csr: 'CSR',
+  essuyage: 'Essuyage',
+  tricot: 'Tricot',
+  merinos: 'Mérinos',
+  jean: 'Jean',
+  coton_blanc: 'Coton Blanc',
+  coton_couleur: 'Coton Couleur',
 };
 const STATUTS = {
   en_attente: { label: 'En attente', color: 'bg-gray-100 text-gray-700' },
@@ -411,7 +434,7 @@ export default function ExutoiresCommandes() {
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
               >
                 <option value="">Tous les types</option>
-                {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
+                {Object.entries(TYPES_PRODUIT_OPTIONS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
                 ))}
               </select>
@@ -453,7 +476,7 @@ export default function ExutoiresCommandes() {
               <div>
                 <label className="text-xs text-gray-500">Types de produit * <span className="text-gray-400">(plusieurs possibles)</span></label>
                 <div className="mt-1 grid grid-cols-2 gap-2">
-                  {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
+                  {Object.entries(TYPES_PRODUIT_OPTIONS).map(([k, v]) => (
                     <label key={k} className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${form.type_produit.includes(k) ? 'bg-primary/10 border-primary' : 'hover:bg-gray-50'}`}>
                       <input
                         type="checkbox"

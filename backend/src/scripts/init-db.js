@@ -3551,6 +3551,78 @@ async function initDatabase() {
     console.log('[INIT-DB] Contrôle facturation Pennylane (factures_exutoires étendue) ✓');
 
     // ══════════════════════════════════════════
+    // V1.8.2 — Refonte référentiels métier
+    // (a) commandes_exutoires.type_produit : effilo_* → essuyage + tricot + merinos
+    // (b) categories_sortantes : soft-delete + renommages + nouveaux choix BTQ/VAK/Export
+    // ══════════════════════════════════════════
+
+    // (a) Types de produit pour commandes — DROP + UPDATE + recréer CHECK
+    try {
+      await client.query(`
+        UPDATE commandes_exutoires
+        SET type_produit = 'essuyage'
+        WHERE type_produit IN ('effilo_blanc', 'effilo_couleur')
+      `);
+      await client.query(`
+        ALTER TABLE commandes_exutoires
+        DROP CONSTRAINT IF EXISTS commandes_exutoires_type_produit_check
+      `);
+      await client.query(`
+        ALTER TABLE commandes_exutoires
+        ADD CONSTRAINT commandes_exutoires_type_produit_check
+        CHECK (type_produit IN ('original', 'csr', 'essuyage', 'tricot', 'merinos', 'jean', 'coton_blanc', 'coton_couleur'))
+      `);
+      console.log('[INIT-DB] commandes_exutoires.type_produit étendu (essuyage/tricot/merinos) ✓');
+    } catch (e) {
+      console.error('[INIT-DB] Erreur migration type_produit :', e.message);
+    }
+
+    // (b) Catégories sortantes — soft-delete via is_active
+    try {
+      await client.query(`
+        ALTER TABLE categories_sortantes
+        ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true
+      `);
+      // Renommages (préservent les FK)
+      await client.query(`UPDATE categories_sortantes SET nom = 'Recyclage Coton',  famille = 'recyclage' WHERE nom = 'Effilochage Coton'`);
+      await client.query(`UPDATE categories_sortantes SET nom = 'Recyclage Tricot', famille = 'recyclage' WHERE nom = 'Effilochage Laine'`);
+      await client.query(`UPDATE categories_sortantes SET nom = 'Extra'                                  WHERE nom = 'Extra 1er Choix'`);
+      // Soft-delete (11 catégories)
+      await client.query(`
+        UPDATE categories_sortantes SET is_active = false
+        WHERE nom IN (
+          'Chiffons Synthétiques',
+          'Déstockage',
+          'Effilochage Synthétique',
+          'Extra 2ème Choix',
+          'Originaux 1er Choix',
+          'Originaux 2ème Choix',
+          'Originaux 3ème Choix',
+          'Pré-classé Été',
+          'Pré-classé Hiver',
+          'VAK Afrique',
+          'VAK Export',
+          'VAK Moyen-Orient'
+        )
+      `);
+      // Nouveaux ajouts (idempotent)
+      await client.query(`
+        INSERT INTO categories_sortantes (nom, famille, is_active) VALUES
+          ('Recyclage Jean',     'recyclage', true),
+          ('Recyclage Mérinos',  'recyclage', true),
+          ('Essuyage',           'essuyage',  true),
+          ('1er Choix (BTQ)',    'choix',     true),
+          ('2ème Choix (VAK)',   'choix',     true),
+          ('3ème Choix (Export)','choix',     true)
+        ON CONFLICT (nom) DO UPDATE SET famille = EXCLUDED.famille, is_active = true
+      `);
+      console.log('[INIT-DB] Catégories sortantes refondues (3 renommées, 11 désactivées, 6 ajoutées) ✓');
+    } catch (e) {
+      console.error('[INIT-DB] Erreur migration categories_sortantes :', e.message);
+    }
+
+
+    // ══════════════════════════════════════════
     // V2 — State machine centralisée (Enterprise Architect Ch2)
     // Audit transverse de toutes les transitions d'état métier.
     // ══════════════════════════════════════════

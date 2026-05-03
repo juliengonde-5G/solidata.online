@@ -157,7 +157,7 @@ router.post('/sorties', authorize('ADMIN', 'MANAGER'), [
 // GET /api/tri/categories (alias)
 router.get('/categories', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM categories_sortantes ORDER BY famille, nom');
+    const result = await pool.query("SELECT * FROM categories_sortantes WHERE is_active IS DISTINCT FROM false ORDER BY famille, nom");
     res.json(result.rows);
   } catch (err) {
     console.error('[TRI] Erreur catégories :', err);
@@ -168,7 +168,7 @@ router.get('/categories', async (req, res) => {
 // GET /api/tri/categories-sortantes
 router.get('/categories-sortantes', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM categories_sortantes ORDER BY famille, nom');
+    const result = await pool.query("SELECT * FROM categories_sortantes WHERE is_active IS DISTINCT FROM false ORDER BY famille, nom");
     res.json(result.rows);
   } catch (err) {
     console.error('[TRI] Erreur catégories :', err);
