@@ -3,19 +3,19 @@ import Layout from '../components/Layout';
 import { LoadingSpinner, KPICard, PageHeader, Section } from '../components';
 import api from '../services/api';
 import {
-  BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar,
+  LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
 } from 'recharts';
-import { Users, UserPlus, Heart, ClipboardList, BarChart3 } from 'lucide-react';
+import { Users, UserPlus, Heart, ClipboardList, AlertTriangle } from 'lucide-react';
 
 // ══════════════════════════════════════════
-// REPORTING RH — enrichi avec graphiques
+// REPORTING RH
 // ══════════════════════════════════════════
 
-const TEAM_COLORS = ['#0D9488', '#6366F1', '#F59E0B', '#EC4899', '#8B5CF6', '#10B981', '#EF4444', '#64748B'];
 const STATUS_COLORS_MAP = {
   received: '#3B82F6', screening: '#FBBF24', interview: '#8B5CF6',
-  trial: '#F97316', recruited: '#10B981', rejected: '#EF4444', withdrawn: '#94A3B8',
+  trial: '#F97316', recruited: '#10B981',
 };
 
 export default function ReportingRH() {
@@ -24,23 +24,26 @@ export default function ReportingRH() {
   const [teams, setTeams] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [insertionStats, setInsertionStats] = useState(null);
+  const [absenteeism, setAbsenteeism] = useState([]);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [empRes, teamRes, candRes, insRes] = await Promise.all([
+      const [empRes, teamRes, candRes, insRes, absRes] = await Promise.all([
         api.get('/employees?is_active=true'),
         api.get('/teams'),
         api.get('/candidates'),
         api.get('/performance/industrial-kpis').catch(() => ({ data: null })),
+        api.get('/employees/absenteeism/monthly?months=12').catch(() => ({ data: [] })),
       ]);
       const empData = Array.isArray(empRes.data) ? empRes.data : (empRes.data?.employees || []);
       setEmployees(empData);
       setTeams(teamRes.data || []);
       setCandidates(candRes.data || []);
       setInsertionStats(insRes.data?.insertion || null);
+      setAbsenteeism(absRes.data || []);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -49,42 +52,56 @@ export default function ReportingRH() {
 
   const totalEmployees = employees.length;
 
-  // Team data for bar chart
-  const teamData = teams.map(t => ({
+  const teamData = teams.map((t) => ({
     name: t.name,
     effectif: parseInt(t.member_count) || 0,
   })).sort((a, b) => b.effectif - a.effectif);
 
-  // Candidate pipeline
+  // Pipeline candidatures
   const candidateStatuses = {};
-  candidates.forEach(c => {
+  candidates.forEach((c) => {
     const s = c.status || 'inconnu';
     candidateStatuses[s] = (candidateStatuses[s] || 0) + 1;
   });
 
   const statusLabels = {
     received: 'Reçus', screening: 'Pré-sélection', interview: 'Entretien',
-    trial: 'Essai', recruited: 'Recrutés', rejected: 'Refusés', withdrawn: 'Désistés',
+    trial: 'Essai', recruited: 'Recrutés',
   };
 
-  // Funnel data
+  // Entonnoir horizontal — chaque étape conserve les candidats des étapes suivantes
+  // (plus on avance, plus on perd → effet entonnoir)
   const funnelSteps = ['received', 'screening', 'interview', 'trial', 'recruited'];
-  const funnelData = funnelSteps.map(s => ({
+  const cumulativeCounts = {};
+  funnelSteps.slice().reverse().forEach((step, idx, arr) => {
+    const successors = arr.slice(0, idx);
+    cumulativeCounts[step] = (candidateStatuses[step] || 0)
+      + successors.reduce((sum, s) => sum + (cumulativeCounts[s] || 0), 0);
+  });
+
+  const funnelData = funnelSteps.map((s) => ({
     step: statusLabels[s] || s,
-    count: candidateStatuses[s] || 0,
+    count: cumulativeCounts[s] || 0,
     fill: STATUS_COLORS_MAP[s] || '#94A3B8',
   }));
 
-  // Pie data for candidate distribution
-  const pieData = Object.entries(candidateStatuses).map(([status, count]) => ({
-    name: statusLabels[status] || status,
-    value: count,
-    fill: STATUS_COLORS_MAP[status] || '#94A3B8',
-  }));
-
-  // Insertion stats
   const sortiesPositives = insertionStats && insertionStats.total > 0
     ? Math.round(insertionStats.parcours_termines / insertionStats.total * 100) : 0;
+
+  // Absentéisme : transformer pour le chart (format mois court FR)
+  const monthLabel = (yyyymm) => {
+    if (!yyyymm) return '';
+    const [y, m] = yyyymm.split('-');
+    const moisCourts = ['Janv', 'Févr', 'Mars', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sept', 'Oct', 'Nov', 'Déc'];
+    return `${moisCourts[parseInt(m, 10) - 1]} ${y.slice(2)}`;
+  };
+  const absenteeismChart = absenteeism.map((row) => ({
+    mois: monthLabel(row.mois),
+    planifies: Number(row.jours_planifies) || 0,
+    realises: (Number(row.jours_travailles) || 0) + (Number(row.jours_absents) || 0),
+    absences: Number(row.jours_absents) || 0,
+    taux: Number(row.taux_absenteisme) || 0,
+  }));
 
   return (
     <Layout>
@@ -104,69 +121,74 @@ export default function ReportingRH() {
           <KPICard title="Parcours insertion" value={insertionStats?.parcours_actifs || '—'} unit="actifs" icon={Heart} accent="red" />
         </div>
 
-        {/* Charts row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Team bar chart */}
-          <Section title="Effectifs par équipe">
-            {teamData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={teamData} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis type="number" tick={{ fontSize: 11 }} />
-                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Bar dataKey="effectif" name="Effectif" fill="#0D9488" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="text-sm text-slate-400 text-center py-12">Aucune équipe</p>
-            )}
-          </Section>
-
-          {/* Candidate pie chart */}
-          <Section title="Répartition candidatures">
-            {pieData.length > 0 ? (
-              <div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2}>
-                      {pieData.map((d, i) => <Cell key={i} fill={d.fill} />)}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="grid grid-cols-2 gap-1.5 mt-2">
-                  {pieData.map((d, i) => (
-                    <div key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
-                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.fill }} />
-                      <span className="truncate">{d.name}</span>
-                      <span className="font-medium ml-auto">{d.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-slate-400 text-center py-12">Aucune candidature</p>
-            )}
-          </Section>
-        </div>
-
-        {/* Funnel */}
-        <Section title="Entonnoir de recrutement">
-          {funnelData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={funnelData}>
+        {/* Effectifs par équipe */}
+        <Section title="Effectifs par équipe">
+          {teamData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={teamData} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="step" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Bar dataKey="count" name="Candidats">
+                <Bar dataKey="effectif" name="Effectif" fill="#0D9488" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-slate-400 text-center py-12">Aucune équipe</p>
+          )}
+        </Section>
+
+        {/* Entonnoir horizontal */}
+        <Section title="Entonnoir de recrutement" subtitle="Cumul des candidats à chaque étape (passé ou en cours)">
+          {funnelData.some((f) => f.count > 0) ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={funnelData} layout="vertical" margin={{ left: 20, right: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="step" width={110} tick={{ fontSize: 12, fontWeight: 600 }} />
+                <Tooltip />
+                <Bar dataKey="count" name="Candidats" radius={[0, 6, 6, 0]} label={{ position: 'right', fill: '#475569', fontSize: 11, fontWeight: 600 }}>
                   {funnelData.map((d, i) => <Cell key={i} fill={d.fill} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
+            <p className="text-sm text-slate-400 text-center py-12">Aucune candidature</p>
+          )}
+        </Section>
+
+        {/* Absentéisme — planning prévu vs réel */}
+        <Section
+          title="Suivi de l'absentéisme"
+          subtitle="Comparaison planning prévisionnel vs réalisé sur 12 mois — taux d'absentéisme calculé sur le réalisé"
+          icon={AlertTriangle}
+        >
+          {absenteeismChart.length === 0 || absenteeismChart.every((d) => d.planifies === 0 && d.realises === 0) ? (
+            <p className="text-sm text-slate-400 text-center py-12">
+              Données insuffisantes pour calculer l'absentéisme
+              <br />
+              <span className="text-xs">(planning prévisionnel ou heures déclarées manquantes)</span>
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={absenteeismChart}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="mois" tick={{ fontSize: 11 }} />
+                <YAxis yAxisId="left" tick={{ fontSize: 11 }} label={{ value: 'Jours', angle: -90, position: 'insideLeft', fontSize: 10, fill: '#64748B' }} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} unit="%" />
+                <Tooltip
+                  formatter={(val, name) => {
+                    if (name === "Taux d'absentéisme") return `${val} %`;
+                    return val;
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line yAxisId="left" type="monotone" dataKey="planifies" stroke="#94A3B8" strokeWidth={2} strokeDasharray="5 5" name="Planning prévu (j)" dot={{ r: 3 }} />
+                <Line yAxisId="left" type="monotone" dataKey="realises" stroke="#0D9488" strokeWidth={2} name="Planning réalisé (j)" dot={{ r: 3 }} />
+                <Line yAxisId="left" type="monotone" dataKey="absences" stroke="#EF4444" strokeWidth={2} name="Absences (j)" dot={{ r: 3 }} />
+                <Line yAxisId="right" type="monotone" dataKey="taux" stroke="#F59E0B" strokeWidth={2.5} name="Taux d'absentéisme" dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
           )}
         </Section>
 

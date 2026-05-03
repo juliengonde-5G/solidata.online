@@ -483,6 +483,59 @@ router.get('/work-hours/summary', authorize('ADMIN', 'RH', 'MANAGER'), async (re
   }
 });
 
+// GET /api/employees/absenteeism?months=12
+// Comparaison planning prévu (schedule) vs réel (work_hours) sur N derniers mois
+// → utilisé par le reporting RH pour le graphique d'absentéisme
+router.get('/absenteeism/monthly', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const months = Math.max(1, Math.min(24, parseInt(req.query.months) || 12));
+    const result = await pool.query(
+      `WITH series AS (
+         SELECT date_trunc('month', NOW()) - (n || ' months')::interval AS mois_start
+         FROM generate_series(0, $1::int - 1) n
+       ),
+       prevu AS (
+         SELECT date_trunc('month', s.date) AS mois,
+                COUNT(*)::int AS jours_planifies,
+                SUM(CASE WHEN s.status IN ('absence', 'maladie', 'sick') THEN 1 ELSE 0 END)::int AS absences_planifiees
+         FROM schedule s
+         WHERE s.date >= (SELECT MIN(mois_start) FROM series)
+         GROUP BY 1
+       ),
+       reel AS (
+         SELECT date_trunc('month', wh.date) AS mois,
+                COUNT(CASE WHEN wh.type = 'normal' THEN 1 END)::int AS jours_travailles,
+                COUNT(CASE WHEN wh.type IN ('absence', 'sick') THEN 1 END)::int AS jours_absents,
+                COALESCE(SUM(wh.hours_worked), 0)::float AS heures_reelles
+         FROM work_hours wh
+         WHERE wh.date >= (SELECT MIN(mois_start) FROM series)
+         GROUP BY 1
+       )
+       SELECT to_char(s.mois_start, 'YYYY-MM') AS mois,
+              COALESCE(p.jours_planifies, 0) AS jours_planifies,
+              COALESCE(p.absences_planifiees, 0) AS absences_planifiees,
+              COALESCE(r.jours_travailles, 0) AS jours_travailles,
+              COALESCE(r.jours_absents, 0) AS jours_absents,
+              COALESCE(r.heures_reelles, 0) AS heures_reelles,
+              CASE WHEN COALESCE(r.jours_travailles, 0) + COALESCE(r.jours_absents, 0) > 0
+                   THEN ROUND((COALESCE(r.jours_absents, 0)::numeric / (COALESCE(r.jours_travailles, 0) + COALESCE(r.jours_absents, 0))) * 100, 1)
+                   ELSE 0 END AS taux_absenteisme,
+              CASE WHEN COALESCE(p.jours_planifies, 0) > 0
+                   THEN COALESCE(r.jours_travailles, 0) + COALESCE(r.jours_absents, 0) - COALESCE(p.jours_planifies, 0)
+                   ELSE NULL END AS ecart_planning
+         FROM series s
+         LEFT JOIN prevu p ON p.mois = s.mois_start
+         LEFT JOIN reel r ON r.mois = s.mois_start
+         ORDER BY s.mois_start ASC`,
+      [months]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur absenteeism :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // DELETE /api/employees/:id (désactivation)
 router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   try {

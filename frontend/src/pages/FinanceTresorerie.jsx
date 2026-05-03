@@ -156,40 +156,120 @@ export default function FinanceTresorerie() {
           </Section>
         </div>
 
-        {/* Tableau flux par categorie */}
-        <Section title="Flux de tresorerie par categorie" icon={List}>
+        {/* Tableau flux par categorie — séparé Revenus / Dépenses */}
+        <Section title="Flux de tresorerie par categorie" icon={List} subtitle="Détail par type de revenu et type de dépense">
           {loading ? (
             <LoadingSpinner />
           ) : cashFlowGroups.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-8">Aucune donnee disponible</p>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Categorie</th>
-                    {MONTHS.map((m) => (
-                      <th key={m} className="text-right px-3 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">{m}</th>
-                    ))}
-                    <th className="text-right px-4 py-3 font-semibold text-slate-800 text-xs uppercase tracking-wider bg-slate-100">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cashFlowGroups.map((group) => (
-                    <CashFlowGroup
-                      key={group.key}
-                      group={group}
-                      expanded={!!expandedGroups[group.key]}
-                      onToggle={() => toggleGroup(group.key)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <CashFlowSplitTable
+              groups={cashFlowGroups}
+              expandedGroups={expandedGroups}
+              toggleGroup={toggleGroup}
+            />
           )}
         </Section>
       </div>
     </Layout>
+  );
+}
+
+// ══════════════════════════════════════════
+// Cash Flow Split — séparation Revenus / Dépenses
+// ══════════════════════════════════════════
+
+function CashFlowSplitTable({ groups, expandedGroups, toggleGroup }) {
+  const revenus = groups.filter((g) => g.type === 'revenue' || g.class === '7');
+  const depenses = groups.filter((g) => g.type === 'expense' || (g.class && g.class !== '7'));
+
+  const totalsByMonth = (list) => {
+    const t = Array.from({ length: 12 }, () => 0);
+    list.forEach((g) => (g.months || []).forEach((v, i) => { t[i] += v || 0; }));
+    return t;
+  };
+  const revenusTotals = totalsByMonth(revenus);
+  const depensesTotals = totalsByMonth(depenses);
+  const soldeTotals = revenusTotals.map((v, i) => v - (depensesTotals[i] || 0));
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-200">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-slate-50 border-b border-slate-200">
+            <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider min-w-[220px]">Categorie</th>
+            {MONTHS.map((m) => (
+              <th key={m} className="text-right px-3 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">{m}</th>
+            ))}
+            <th className="text-right px-4 py-3 font-semibold text-slate-800 text-xs uppercase tracking-wider bg-slate-100">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {/* === REVENUS === */}
+          <tr className="bg-emerald-50 border-y-2 border-emerald-200">
+            <td colSpan={14} className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-emerald-700 flex items-center gap-2">
+              <ArrowUp className="w-3.5 h-3.5" /> Types de revenus ({revenus.length})
+            </td>
+          </tr>
+          {revenus.length === 0 ? (
+            <tr><td colSpan={14} className="px-4 py-3 text-center text-xs text-slate-400 italic">Aucun revenu sur la période</td></tr>
+          ) : revenus.map((group) => (
+            <CashFlowGroup
+              key={group.key}
+              group={group}
+              expanded={!!expandedGroups[group.key]}
+              onToggle={() => toggleGroup(group.key)}
+            />
+          ))}
+          <tr className="bg-emerald-100/60 font-bold border-y border-emerald-300">
+            <td className="px-4 py-2 text-emerald-800 text-xs uppercase">Sous-total Revenus</td>
+            {revenusTotals.map((v, i) => (
+              <td key={i} className="text-right px-3 py-2 text-emerald-700 text-xs">{fmt(v)}</td>
+            ))}
+            <td className="text-right px-4 py-2 bg-emerald-200/60 text-emerald-900 text-xs">
+              {fmt(revenusTotals.reduce((s, v) => s + v, 0))}
+            </td>
+          </tr>
+
+          {/* === DÉPENSES === */}
+          <tr className="bg-red-50 border-y-2 border-red-200">
+            <td colSpan={14} className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-red-700 flex items-center gap-2">
+              <ArrowDown className="w-3.5 h-3.5" /> Types de dépenses ({depenses.length})
+            </td>
+          </tr>
+          {depenses.length === 0 ? (
+            <tr><td colSpan={14} className="px-4 py-3 text-center text-xs text-slate-400 italic">Aucune dépense sur la période</td></tr>
+          ) : depenses.map((group) => (
+            <CashFlowGroup
+              key={group.key}
+              group={group}
+              expanded={!!expandedGroups[group.key]}
+              onToggle={() => toggleGroup(group.key)}
+            />
+          ))}
+          <tr className="bg-red-100/60 font-bold border-y border-red-300">
+            <td className="px-4 py-2 text-red-800 text-xs uppercase">Sous-total Dépenses</td>
+            {depensesTotals.map((v, i) => (
+              <td key={i} className="text-right px-3 py-2 text-red-700 text-xs">{fmt(v)}</td>
+            ))}
+            <td className="text-right px-4 py-2 bg-red-200/60 text-red-900 text-xs">
+              {fmt(depensesTotals.reduce((s, v) => s + v, 0))}
+            </td>
+          </tr>
+
+          {/* === SOLDE === */}
+          <tr className="bg-slate-100 border-t-2 border-slate-400 font-extrabold">
+            <td className="px-4 py-3 text-slate-900 text-xs uppercase tracking-wider">Solde net (Revenus − Dépenses)</td>
+            {soldeTotals.map((v, i) => (
+              <td key={i} className={`text-right px-3 py-3 text-xs ${v < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{fmt(v)}</td>
+            ))}
+            <td className={`text-right px-4 py-3 bg-slate-200 text-sm ${soldeTotals.reduce((s, v) => s + v, 0) < 0 ? 'text-red-900' : 'text-emerald-900'}`}>
+              {fmt(soldeTotals.reduce((s, v) => s + v, 0))}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 

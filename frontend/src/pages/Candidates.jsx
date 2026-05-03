@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Inbox, Briefcase, Award, FileText, Upload, X, Trash2, Pencil } from 'lucide-react';
+import { Briefcase, Award, FileText, Upload, X, Trash2, Pencil } from 'lucide-react';
 import Layout from '../components/Layout';
 import { Modal, KanbanBoard, StatusBadge } from '../components';
 import useConfirm from '../hooks/useConfirm';
@@ -324,29 +324,12 @@ export default function Candidates() {
     { key: 'hired', label: 'Recrutés', value: stats?.byStatus?.hired ?? 0, accent: 'green' },
   ];
 
-  // Sidebar gauche
-  const sidebar = {
-    views: {
-      title: 'Vues',
-      active: activeView,
-      onSelect: (k) => setActiveView(k),
-      items: [
-        { key: 'all', label: 'Tous les candidats', icon: Users, count: stats?.total ?? 0 },
-        { key: 'thisMonth', label: 'Ce mois', icon: Inbox, count: stats?.thisMonth ?? 0 },
-        { key: 'withPCM', label: 'Avec PCM', icon: Award, count: stats?.withPCM ?? 0 },
-        { key: 'withCV', label: 'Avec CV', icon: FileText },
-      ],
-    },
-    categories: positions.length > 0 ? {
-      title: 'Postes',
-      active: activePosition,
-      onSelect: (k) => setActivePosition(k),
-      items: [
-        { key: 'all', label: 'Tous les postes', icon: Briefcase },
-        ...positions.map((p) => ({ key: String(p.id), label: p.title, icon: Briefcase })),
-      ],
-    } : null,
-  };
+  const viewFilters = [
+    { key: 'all', label: 'Tous', count: stats?.total ?? 0 },
+    { key: 'thisMonth', label: 'Ce mois', count: stats?.thisMonth ?? 0 },
+    { key: 'withPCM', label: 'Avec PCM', count: stats?.withPCM ?? 0 },
+    { key: 'withCV', label: 'Avec CV' },
+  ];
 
   // Colonnes du kanban
   const columns = STATUSES.map((status) => ({
@@ -429,7 +412,6 @@ export default function Candidates() {
           </>
         }
         kpis={kpiList}
-        sidebar={sidebar}
         search={{
           value: searchQuery,
           onChange: setSearchQuery,
@@ -449,31 +431,37 @@ export default function Candidates() {
           onDropCol,
         }}
         extraTopBar={
-          <div
-            className={`border-2 border-dashed rounded-2xl p-4 text-center transition-all cursor-pointer ${cvDragActive ? 'border-primary bg-primary-surface' : 'border-slate-200 bg-slate-50 hover:border-primary/40 hover:bg-teal-50/40'}`}
-            onDragOver={(e) => { e.preventDefault(); setCvDragActive(true); }}
-            onDragLeave={() => setCvDragActive(false)}
-            onDrop={(e) => { e.preventDefault(); setCvDragActive(false); handleCVUpload(e.dataTransfer.files[0]); }}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" className="hidden" onChange={(e) => handleCVUpload(e.target.files[0])} />
-            {uploading ? (
-              <div className="flex items-center justify-center gap-2 text-primary">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" />
-                <span className="text-xs font-semibold">Analyse du CV en cours...</span>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center gap-2.5">
-                <Upload className="w-4 h-4 text-primary" />
-                <p className="text-xs text-slate-600">
-                  <span className="font-semibold text-primary">Glissez un CV ici</span>{' '}
-                  <span className="text-slate-500">ou cliquez pour importer (PDF, Word, Image)</span>
-                </p>
-              </div>
-            )}
-            {uploadMsg && (
-              <div className={`mt-2 px-3 py-1.5 rounded-lg text-[11px] font-medium ${uploadMsg.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                {uploadMsg.text}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Vue :</span>
+              {viewFilters.map((v) => (
+                <button
+                  key={v.key}
+                  onClick={() => setActiveView(v.key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    activeView === v.key
+                      ? 'bg-primary text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {v.label}
+                  {v.count != null && <span className="ml-1 opacity-70">({v.count})</span>}
+                </button>
+              ))}
+            </div>
+            {positions.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Poste :</span>
+                <select
+                  value={activePosition}
+                  onChange={(e) => setActivePosition(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                >
+                  <option value="all">Tous les postes</option>
+                  {positions.map((p) => (
+                    <option key={p.id} value={String(p.id)}>{p.title}</option>
+                  ))}
+                </select>
               </div>
             )}
           </div>
@@ -550,7 +538,39 @@ export default function Candidates() {
 
         {/* Add Modal */}
         {showAddModal && (
-          <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Nouveau candidat" size="sm">
+          <Modal isOpen={showAddModal} onClose={() => { setShowAddModal(false); setUploadMsg(null); }} title="Nouveau candidat" size="sm">
+            {/* Zone upload CV (parsing IA) */}
+            <div
+              className={`border-2 border-dashed rounded-xl p-4 text-center transition-all cursor-pointer mb-4 ${cvDragActive ? 'border-primary bg-primary-surface' : 'border-slate-200 bg-slate-50 hover:border-primary/40 hover:bg-teal-50/40'}`}
+              onDragOver={(e) => { e.preventDefault(); setCvDragActive(true); }}
+              onDragLeave={() => setCvDragActive(false)}
+              onDrop={(e) => { e.preventDefault(); setCvDragActive(false); handleCVUpload(e.dataTransfer.files[0]).then(() => setShowAddModal(false)); }}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" className="hidden" onChange={(e) => handleCVUpload(e.target.files[0]).then(() => setShowAddModal(false))} />
+              {uploading ? (
+                <div className="flex items-center justify-center gap-2 text-primary py-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" />
+                  <span className="text-xs font-semibold">Analyse du CV en cours…</span>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-1.5 py-1">
+                  <Upload className="w-5 h-5 text-primary" />
+                  <p className="text-xs text-slate-600">
+                    <span className="font-semibold text-primary">Charger un CV</span>{' '}
+                    <span className="text-slate-500">(PDF, Word, image) — l'IA pré-remplit la fiche</span>
+                  </p>
+                </div>
+              )}
+              {uploadMsg && (
+                <div className={`mt-2 px-3 py-1.5 rounded-lg text-[11px] font-medium ${uploadMsg.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                  {uploadMsg.text}
+                </div>
+              )}
+            </div>
+
+            <div className="text-xs text-slate-400 text-center mb-3">— ou saisie manuelle —</div>
+
             <form onSubmit={createCandidate} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({...form, first_name: e.target.value})} className="input-modern" required />

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ShoppingBag, TrendingUp } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, CartesianGrid } from 'recharts';
+import { ShoppingBag, TrendingUp, X, Filter } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
 import Layout from '../components/Layout';
 import { LoadingSpinner, KpiCard, PageHeader, DateRangePicker } from '../components';
 import api from '../services/api';
@@ -31,6 +31,9 @@ export default function BoutiquesVentes() {
   const [segments, setSegments] = useState([]);
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Filtre actif (cumulable : segment + rayon)
+  const [activeSegment, setActiveSegment] = useState(null);
+  const [activeRayon, setActiveRayon] = useState(null);
 
   useEffect(() => {
     api.get('/boutiques?active=true').then(res => {
@@ -39,12 +42,14 @@ export default function BoutiquesVentes() {
     });
   }, []);
 
-  useEffect(() => { if (boutiqueId) loadAnalytics(); }, [boutiqueId, dateFrom, dateTo]);
+  useEffect(() => { if (boutiqueId) loadAnalytics(); }, [boutiqueId, dateFrom, dateTo, activeSegment, activeRayon]);
 
   async function loadAnalytics() {
     setLoading(true);
     try {
-      const qs = `boutique_id=${boutiqueId}&date_from=${dateFrom}&date_to=${dateTo}`;
+      let qs = `boutique_id=${boutiqueId}&date_from=${dateFrom}&date_to=${dateTo}`;
+      if (activeSegment) qs += `&segment=${encodeURIComponent(activeSegment)}`;
+      if (activeRayon) qs += `&rayon=${encodeURIComponent(activeRayon)}`;
       const [d, r, s, a] = await Promise.all([
         api.get(`/boutique-ventes/analytics/daily?${qs}`),
         api.get(`/boutique-ventes/analytics/rayons?${qs}`),
@@ -58,6 +63,8 @@ export default function BoutiquesVentes() {
     } catch (e) { console.error(e); }
     setLoading(false);
   }
+
+  const clearFilters = () => { setActiveSegment(null); setActiveRayon(null); };
 
   const kpis = useMemo(() => {
     const total = daily.reduce((s, r) => s + (r.ca_ttc || 0), 0);
@@ -102,6 +109,27 @@ export default function BoutiquesVentes() {
               onChange={(r) => { setDateFrom(r.from); setDateTo(r.to); }}
             />
           </div>
+          {(activeSegment || activeRayon) && (
+            <div className="flex items-center gap-2 ml-auto">
+              <Filter className="w-4 h-4 text-pink-600" />
+              <span className="text-xs text-slate-500">Filtres actifs :</span>
+              {activeSegment && (
+                <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-pink-50 text-pink-700 rounded-full text-xs font-medium">
+                  Segment : {SEGMENT_LABELS[activeSegment] || activeSegment}
+                  <button onClick={() => setActiveSegment(null)} className="hover:bg-pink-100 rounded-full p-0.5"><X className="w-3 h-3" /></button>
+                </span>
+              )}
+              {activeRayon && (
+                <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-pink-50 text-pink-700 rounded-full text-xs font-medium">
+                  Rayon : {activeRayon}
+                  <button onClick={() => setActiveRayon(null)} className="hover:bg-pink-100 rounded-full p-0.5"><X className="w-3 h-3" /></button>
+                </span>
+              )}
+              <button onClick={clearFilters} className="text-xs text-slate-500 hover:text-slate-700 underline">
+                Réinitialiser
+              </button>
+            </div>
+          )}
         </div>
 
         {loading ? <LoadingSpinner size="lg" /> : (
@@ -128,10 +156,20 @@ export default function BoutiquesVentes() {
               </div>
 
               <div className="bg-white rounded-card shadow-card p-4">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Répartition par rayon</h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Répartition par rayon <span className="text-xs text-slate-400 font-normal">(cliquez pour filtrer)</span></h3>
                 <ResponsiveContainer width="100%" height={260}>
                   <PieChart>
-                    <Pie data={rayonChart} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(e) => e.name}>
+                    <Pie
+                      data={rayonChart}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={90}
+                      label={(e) => e.name}
+                      onClick={(d) => d?.name && setActiveRayon(d.name)}
+                      cursor="pointer"
+                    >
                       {rayonChart.map((_, i) => <Cell key={i} fill={RAYON_COLORS[i % RAYON_COLORS.length]} />)}
                     </Pie>
                     <Tooltip formatter={(v) => `${v.toLocaleString('fr-FR')} €`} />
@@ -142,22 +180,29 @@ export default function BoutiquesVentes() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
               <div className="bg-white rounded-card shadow-card p-4">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Par segment</h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Par segment <span className="text-xs text-slate-400 font-normal">(cliquez pour filtrer)</span></h3>
                 <table className="w-full text-sm">
                   <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
                     <tr><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA HT</th></tr>
                   </thead>
                   <tbody>
-                    {segments.map(s => (
-                      <tr key={s.segment} className="border-b border-slate-100">
-                        <td className="py-2 flex items-center gap-2">
-                          <span className="w-3 h-3 rounded" style={{ backgroundColor: SEGMENT_COLORS[s.segment] }}></span>
-                          {SEGMENT_LABELS[s.segment] || s.segment}
-                        </td>
-                        <td className="py-2 text-right">{s.nb_articles}</td>
-                        <td className="py-2 text-right font-medium">{Number(s.ca_ttc).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
-                      </tr>
-                    ))}
+                    {segments.map(s => {
+                      const isActive = activeSegment === s.segment;
+                      return (
+                        <tr
+                          key={s.segment}
+                          className={`border-b border-slate-100 cursor-pointer transition ${isActive ? 'bg-pink-50' : 'hover:bg-slate-50'}`}
+                          onClick={() => setActiveSegment(isActive ? null : s.segment)}
+                        >
+                          <td className="py-2 flex items-center gap-2">
+                            <span className="w-3 h-3 rounded" style={{ backgroundColor: SEGMENT_COLORS[s.segment] }}></span>
+                            <span className={isActive ? 'font-semibold text-pink-700' : ''}>{SEGMENT_LABELS[s.segment] || s.segment}</span>
+                          </td>
+                          <td className="py-2 text-right">{s.nb_articles}</td>
+                          <td className="py-2 text-right font-medium">{Number(s.ca_ttc).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

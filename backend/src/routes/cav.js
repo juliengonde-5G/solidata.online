@@ -452,10 +452,13 @@ router.post('/batch-generate-qr', authorize('ADMIN'), async (req, res) => {
   }
 });
 
-// GET /api/cav/:id/activity — Histogramme activite : 10j passe + 10j futur
+// GET /api/cav/:id/activity — Histogramme activite : N jours passes + N jours futurs
+// Query params : days_before (def 10, max 60), days_after (def 10, max 30)
 router.get('/:id/activity', async (req, res) => {
   try {
     const cavId = req.params.id;
+    const daysBefore = Math.max(1, Math.min(60, parseInt(req.query.days_before) || 10));
+    const daysAfter = Math.max(0, Math.min(30, parseInt(req.query.days_after) || 10));
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -468,9 +471,9 @@ router.get('/:id/activity', async (req, res) => {
     const cav = cavResult.rows[0];
     const hasSensor = !!(cav.lora_deveui || cav.sensor_reference);
 
-    // 2. Historique des 10 derniers jours — collectes reelles
+    // 2. Historique des N derniers jours — collectes reelles
     const tenDaysAgo = new Date(today);
-    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+    tenDaysAgo.setDate(tenDaysAgo.getDate() - daysBefore);
 
     const historyResult = await pool.query(
       `SELECT date, SUM(weight_kg) as poids_kg
@@ -531,10 +534,10 @@ router.get('/:id/activity', async (req, res) => {
     // 4. Construire les donnees jour par jour
     const days = [];
 
-    // -- Historique : 10 derniers jours
+    // -- Historique : N derniers jours
     // On simule l'accumulation : chaque jour le conteneur se remplit, une collecte remet a zero
     let accumulatedKg = 0;
-    for (let i = -10; i <= 10; i++) {
+    for (let i = -daysBefore; i <= daysAfter; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() + i);
       const dateStr = d.toISOString().slice(0, 10);
