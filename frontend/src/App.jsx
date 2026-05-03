@@ -53,6 +53,7 @@ const ExutoiresClients = lazy(() => import('./pages/ExutoiresClients'));
 const ExutoiresTarifs = lazy(() => import('./pages/ExutoiresTarifs'));
 const Billing = lazy(() => import('./pages/Billing'));
 const Pennylane = lazy(() => import('./pages/Pennylane'));
+const PennylaneConfig = lazy(() => import('./pages/PennylaneConfig'));
 const ActivityLog = lazy(() => import('./pages/ActivityLog'));
 const InventaireOriginal = lazy(() => import('./pages/InventaireOriginal'));
 const AdminStockOriginal = lazy(() => import('./pages/AdminStockOriginal'));
@@ -71,14 +72,6 @@ const PerformanceDashboard = lazy(() => import('./pages/PerformanceDashboard'));
 const DashboardExecutif = lazy(() => import('./pages/DashboardExecutif'));
 const AdminAlertThresholds = lazy(() => import('./pages/AdminAlertThresholds'));
 
-const HubRecrutement = lazy(() => import('./pages/HubRecrutement'));
-const HubEquipe = lazy(() => import('./pages/HubEquipe'));
-const HubCollecte = lazy(() => import('./pages/HubCollecte'));
-const HubTriProduction = lazy(() => import('./pages/HubTriProduction'));
-const HubExutoires = lazy(() => import('./pages/HubExutoires'));
-const HubReporting = lazy(() => import('./pages/HubReporting'));
-const HubAdmin = lazy(() => import('./pages/HubAdmin'));
-const HubBoutiques = lazy(() => import('./pages/HubBoutiques'));
 const BoutiquesDashboard = lazy(() => import('./pages/BoutiquesDashboard'));
 const BoutiquesVentes = lazy(() => import('./pages/BoutiquesVentes'));
 const BoutiquesCommandes = lazy(() => import('./pages/BoutiquesCommandes'));
@@ -114,15 +107,6 @@ function App() {
               <Route path="/pcm-test/:token" element={<PCMTest />} />
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
 
-              {/* Hub pages — pages d'accueil par section */}
-              <Route path="/hub-recrutement" element={<ProtectedRoute roles={['ADMIN', 'RH']}><HubRecrutement /></ProtectedRoute>} />
-              <Route path="/hub-equipe" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><HubEquipe /></ProtectedRoute>} />
-              <Route path="/hub-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><HubCollecte /></ProtectedRoute>} />
-              <Route path="/hub-tri-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><HubTriProduction /></ProtectedRoute>} />
-              <Route path="/hub-exutoires" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><HubExutoires /></ProtectedRoute>} />
-              <Route path="/hub-boutiques" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><HubBoutiques /></ProtectedRoute>} />
-              <Route path="/hub-reporting" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH']}><HubReporting /></ProtectedRoute>} />
-              <Route path="/hub-admin" element={<ProtectedRoute roles={['ADMIN']}><HubAdmin /></ProtectedRoute>} />
 
               {/* Boutiques */}
               <Route path="/boutiques" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesDashboard /></ProtectedRoute>} />
@@ -185,6 +169,7 @@ function App() {
               {/* Facturation */}
               <Route path="/billing" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Billing /></ProtectedRoute>} />
               <Route path="/pennylane" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Pennylane /></ProtectedRoute>} />
+              <Route path="/admin/pennylane-config" element={<ProtectedRoute roles={['ADMIN']}><PennylaneConfig /></ProtectedRoute>} />
 
               {/* Finance */}
               <Route path="/finance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Finance /></ProtectedRoute>} />
