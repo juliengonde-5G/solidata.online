@@ -12,29 +12,80 @@ export default function AdminCollaboratorsImport() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
+  // Convertit DD/MM/YYYY ou D/M/YY → YYYY-MM-DD ; renvoie null si invalide
+  const parseFRDate = (s) => {
+    if (!s) return null;
+    const t = s.trim();
+    if (!t) return null;
+    const m = t.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+    if (!m) return null;
+    let [, d, mo, y] = m;
+    if (y.length === 2) y = (parseInt(y, 10) > 50 ? '19' : '20') + y;
+    return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  };
+
+  const normalizeHeader = (h) =>
+    (h || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '') // strip accents
+      .replace(/\s+/g, ' ');
+
   const parseCSV = (text) => {
-    const lines = text.trim().split('\n');
+    const trimmed = (text || '').trim();
+    if (!trimmed) return [];
+    // Détection auto du séparateur sur la 1re ligne (priorité : ; > , > tab)
+    const firstLine = trimmed.split(/\r?\n/, 1)[0] || '';
+    const sep = firstLine.includes(';') ? ';'
+      : firstLine.includes('\t') ? '\t'
+      : ',';
+
+    const lines = trimmed.split(/\r?\n/).filter((l) => l.trim());
     if (lines.length < 2) return [];
 
-    const headerLine = lines[0];
-    const headers = headerLine.split(',').map((h) => h.trim().toLowerCase());
+    const headers = lines[0].split(sep).map(normalizeHeader);
 
-    return lines
-      .slice(1)
-      .map((line) => {
-        const values = line.split(',').map((v) => v.trim());
-        const obj = {};
-        headers.forEach((header, i) => {
-          if (header === 'malibou_id' || header === 'id') obj.malibou_id = values[i];
-          else if (header === 'prénom' || header === 'first_name') obj.first_name = values[i];
-          else if (header === 'nom' || header === 'last_name') obj.last_name = values[i];
-          else if (header === 'poste' || header === 'position') obj.position = values[i];
-          else if (header === 'type de contrat' || header === 'contract_type') obj.contract_type = values[i];
-          else if (header === 'sexe' || header === 'gender') obj.gender = values[i];
-        });
-        return obj;
-      })
-      .filter((obj) => obj.first_name && obj.last_name);
+    return lines.slice(1).map((line) => {
+      const values = line.split(sep).map((v) => v.trim());
+      const obj = {};
+      headers.forEach((header, i) => {
+        const v = values[i] || '';
+        // Identifiants
+        if (header === 'identifiant malibou' || header === 'malibou_id' || header === 'id') obj.malibou_id = v;
+        // Identité
+        else if (header === 'prenom' || header === 'first_name') obj.first_name = v;
+        else if (header === 'nom' || header === 'last_name') obj.last_name = v;
+        else if (header === 'nom de naissance' || header === 'birth_name') obj.birth_name = v;
+        else if (header === 'sexe' || header === 'gender') {
+          // Normalisation : F / M / Autre
+          const u = v.toUpperCase();
+          obj.gender = u === 'F' || u === 'FEMME' || u === 'FEMININ' ? 'F'
+            : u === 'M' || u === 'H' || u === 'HOMME' || u === 'MASCULIN' ? 'M'
+            : v;
+        }
+        else if (header === 'date de naissance' || header === 'birth_date') obj.birth_date = parseFRDate(v);
+        else if (header === 'nationalite' || header === 'nationality') obj.nationality = v;
+        // Contrat
+        else if (header === 'poste' || header === 'position') obj.position = v;
+        else if (header === 'type de contrat' || header === 'contract_type') obj.contract_type = v;
+        else if (header === 'qualification') obj.qualification = v;
+        // Suivi
+        else if (
+          header === 'date de derniere visite medicale' ||
+          header === 'derniere visite medicale' ||
+          header === 'last_medical_visit'
+        ) obj.last_medical_visit = parseFRDate(v);
+        else if (
+          header === 'adresse mail personnelle' ||
+          header === 'mail personnel' ||
+          header === 'email personnel' ||
+          header === 'personal_email'
+        ) obj.personal_email = v;
+        // Champ legacy (rétro-compat ancien CSV à 6 colonnes)
+        else if (header === 'sexe') obj.gender = v;
+      });
+      return obj;
+    }).filter((obj) => obj.first_name && obj.last_name);
   };
 
   const onFileChange = (e) => {
@@ -91,17 +142,29 @@ export default function AdminCollaboratorsImport() {
           icon={Upload}
         />
 
-        <Section title="Format attendu" icon={FileText}>
+        <Section title="Format attendu (export Malibou)" icon={FileText}>
           <p className="text-sm text-slate-600 mb-3">
-            Le CSV doit avoir les colonnes suivantes (avec ces en-têtes ou leurs variantes anglaises) :
+            Séparateur <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">;</code> (point-virgule).
+            Les en-têtes <strong>FR</strong> (export Malibou) et <strong>EN</strong> sont reconnus, accents tolérés.
           </p>
-          <ul className="list-disc list-inside text-sm text-slate-600 space-y-1.5">
-            <li><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">malibou_id</code> ou <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">ID</code></li>
-            <li><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">prénom</code> ou <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">first_name</code></li>
-            <li><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">nom</code> ou <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">last_name</code></li>
-            <li><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">poste</code> ou <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">position</code></li>
-            <li><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">type de contrat</code> ou <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">contract_type</code> (CDI, CDD, Apprentissage)</li>
+          <div className="bg-slate-50 rounded-lg p-3 mb-3 overflow-x-auto">
+            <code className="text-[11px] text-slate-700 whitespace-pre">Identifiant malibou;Prénom;Nom;Nom de naissance;Sexe;Date de naissance;Nationalité;Poste;Type de contrat;Qualification;Date de dernière Visite médicale;Adresse mail personnelle</code>
+          </div>
+          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-y-1 text-xs text-slate-600">
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Identifiant malibou</code> — id Malibou</li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Prénom / Nom / Nom de naissance</code></li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Sexe</code> — F / M</li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Date de naissance</code> — JJ/MM/AAAA</li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Nationalité</code></li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Poste</code> — libellé fonction</li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Type de contrat</code> — CDI / CDD / Apprentissage</li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Qualification</code> — texte libre (ex: <em>Niveau: C, Coefficient: 345</em>)</li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Date de dernière Visite médicale</code> — JJ/MM/AAAA, optionnel</li>
+            <li><code className="bg-slate-100 px-1.5 py-0.5 rounded">Adresse mail personnelle</code> — optionnel</li>
           </ul>
+          <p className="text-xs text-slate-400 mt-3 italic">
+            Les colonnes manquantes ou vides sont ignorées. L'ancien format CSV (6 colonnes, séparateur <code>,</code>) reste compatible.
+          </p>
         </Section>
 
         <Section title="Importer un fichier" icon={Upload}>

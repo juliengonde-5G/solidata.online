@@ -2,91 +2,106 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { body } = require('express-validator');
-const { validate } = require('../middleware/validate');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const pdfParse = require('pdf-parse');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
-// Multer setup for PDF upload
-const uploadDir = path.join(__dirname, '../../uploads/factures-exutoires');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
-    cb(null, `facture-${Date.now()}-${safeName}`);
+// ══════════════════════════════════════════
+// CONTRÔLE FACTURATION (V1.8+)
+// Outil de rapprochement entre factures clients émises sur Pennylane
+// (importées via /api/pennylane/sync/customer-invoices) et les
+// commandes_exutoires. NE GÉNÈRE PAS de factures.
+// ══════════════════════════════════════════
+
+// Recalcule + persiste les écarts pour une facture liée
+async function recomputeFactureEcart(client, factureId) {
+  const r = await client.query(
+    `SELECT f.id, f.commande_id, f.quantite_facturee, f.montant_ht,
+            cp.pesee_client AS pesee_client_t,
+            c.prix_tonne
+     FROM factures_exutoires f
+     LEFT JOIN commandes_exutoires c ON c.id = f.commande_id
+     LEFT JOIN LATERAL (
+       SELECT pesee_client FROM controles_pesee WHERE commande_id = f.commande_id
+       ORDER BY id DESC LIMIT 1
+     ) cp ON true
+     WHERE f.id = $1`,
+    [factureId]
+  );
+  if (r.rows.length === 0) return null;
+  const f = r.rows[0];
+  const peseeClientT = parseFloat(f.pesee_client_t) || null;
+  const qtyFacturee = parseFloat(f.quantite_facturee) || null;
+  let ecart = null;
+  let ecartPct = null;
+  if (peseeClientT != null && qtyFacturee != null) {
+    ecart = Math.round((qtyFacturee - peseeClientT) * 1000) / 1000;
+    ecartPct = peseeClientT > 0 ? Math.round((ecart / peseeClientT) * 10000) / 100 : null;
   }
-});
-const upload = multer({ storage, fileFilter: (req, file, cb) => {
-  cb(null, file.mimetype === 'application/pdf');
-}, limits: { fileSize: 10 * 1024 * 1024 } });
+  const prix = parseFloat(f.prix_tonne) || 0;
+  const montantAttendu = peseeClientT != null ? Math.round(peseeClientT * prix * 100) / 100 : null;
+  const ecartMontant = (montantAttendu != null && f.montant_ht != null)
+    ? Math.round((parseFloat(f.montant_ht) - montantAttendu) * 100) / 100
+    : null;
 
-// OCR helper function
-async function extractInvoiceData(pdfPath) {
-  try {
-    const dataBuffer = await fs.promises.readFile(pdfPath);
-    const data = await pdfParse(dataBuffer);
-    const text = data.text;
-
-    // Extract date - formats: DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
-    let ocr_date = null;
-    const dateMatch = text.match(/(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})/);
-    if (dateMatch) {
-      ocr_date = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-    } else {
-      // Try YYYY-MM-DD
-      const isoMatch = text.match(/(\d{4})-(\d{2})-(\d{2})/);
-      if (isoMatch) ocr_date = isoMatch[0];
-    }
-
-    // Extract tonnage - number followed by t, T, tonne(s), or kg (convert)
-    let ocr_tonnage = null;
-    const tonMatch = text.match(/([\d\s,.]+)\s*(?:tonne|tonnes|t(?:\.|\s|$))/i);
-    if (tonMatch) {
-      ocr_tonnage = parseFloat(tonMatch[1].replace(/\s/g, '').replace(',', '.'));
-    } else {
-      const kgMatch = text.match(/([\d\s,.]+)\s*kg/i);
-      if (kgMatch) {
-        ocr_tonnage = parseFloat(kgMatch[1].replace(/\s/g, '').replace(',', '.')) / 1000;
-      }
-    }
-
-    // Extract amount - number near euro, EUR, Total, Montant, Net a payer
-    let ocr_montant = null;
-    const montantPatterns = [
-      /(?:total|montant|net\s*[àa]\s*payer|ttc)\s*[:\s]*([\d\s,.]+)\s*(?:€|eur)/i,
-      /([\d\s,.]+)\s*(?:€|eur)/i,
-    ];
-    for (const pattern of montantPatterns) {
-      const match = text.match(pattern);
-      if (match) {
-        ocr_montant = parseFloat(match[1].replace(/\s/g, '').replace(',', '.'));
-        break;
-      }
-    }
-
-    return { ocr_date, ocr_tonnage, ocr_montant, raw_text: text.substring(0, 2000) };
-  } catch (err) {
-    console.error('[OCR] Erreur extraction :', err);
-    return { ocr_date: null, ocr_tonnage: null, ocr_montant: null, raw_text: null };
-  }
+  await client.query(
+    `UPDATE factures_exutoires
+     SET pesee_client_kg = $1,
+         ecart_quantite = $2,
+         ecart_quantite_pct = $3,
+         montant_attendu = $4,
+         ecart_montant = $5
+     WHERE id = $6`,
+    [peseeClientT, ecart, ecartPct, montantAttendu, ecartMontant, factureId]
+  );
+  return { peseeClientT, ecart, ecartPct, montantAttendu, ecartMontant };
 }
 
-// GET /api/factures-exutoires
+async function getTolerance() {
+  try {
+    const r = await pool.query("SELECT value FROM settings WHERE key = 'facturation_tolerance_pct' LIMIT 1");
+    const v = parseFloat(r.rows[0]?.value);
+    return Number.isFinite(v) ? v : 5;
+  } catch { return 5; }
+}
+
+// GET /api/factures-exutoires — Liste enrichie (avec commande + client + écarts)
 router.get('/', async (req, res) => {
   try {
+    const { statut, matched, search } = req.query;
+    const conditions = ["f.source = 'pennylane'"];
+    const params = [];
+    if (statut) {
+      params.push(statut);
+      conditions.push(`f.statut_facture = $${params.length}`);
+    }
+    if (matched === 'true') conditions.push('f.commande_id IS NOT NULL');
+    if (matched === 'false') conditions.push('f.commande_id IS NULL');
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`(
+        f.pennylane_invoice_number ILIKE $${params.length}
+        OR f.pennylane_customer_name ILIKE $${params.length}
+        OR c.reference ILIKE $${params.length}
+      )`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await pool.query(`
-      SELECT f.*, f.statut_facture as statut, c.reference as commande_reference, c.type_produit, c.prix_tonne,
-             cl.raison_sociale as client_nom
+      SELECT f.id, f.statut_facture, f.commande_id, f.imported_at,
+             f.pennylane_invoice_id, f.pennylane_invoice_number, f.pennylane_customer_name,
+             f.pennylane_external_reference, f.pennylane_data,
+             f.date_facture, f.montant_ht, f.montant_ttc,
+             f.quantite_facturee, f.unite_quantite,
+             f.pesee_client_kg, f.ecart_quantite, f.ecart_quantite_pct,
+             f.montant_attendu, f.ecart_montant,
+             f.rapprochement_mode, f.validee_par, f.date_validation,
+             c.reference AS commande_reference, c.type_produit, c.prix_tonne, c.statut AS commande_statut,
+             cl.raison_sociale AS client_nom
       FROM factures_exutoires f
-      JOIN commandes_exutoires c ON f.commande_id = c.id
-      JOIN clients_exutoires cl ON c.client_id = cl.id
-      ORDER BY f.created_at DESC
-    `);
+      LEFT JOIN commandes_exutoires c ON f.commande_id = c.id
+      LEFT JOIN clients_exutoires cl ON c.client_id = cl.id
+      ${where}
+      ORDER BY f.date_facture DESC NULLS LAST, f.imported_at DESC
+    `, params);
     res.json(result.rows);
   } catch (err) {
     console.error('[FACTURES-EXUTOIRES] Erreur liste :', err);
@@ -94,188 +109,91 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/factures-exutoires
-router.post('/', upload.single('facture'), [
-  body('commande_id').isInt().withMessage('ID commande requis'),
-], validate, async (req, res) => {
+// GET /api/factures-exutoires/stats — KPIs pour le dashboard
+router.get('/stats', async (req, res) => {
   try {
-    const { commande_id } = req.body;
-
-    if (!commande_id) {
-      return res.status(400).json({ error: 'Champ obligatoire : commande_id' });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ error: 'Fichier PDF obligatoire' });
-    }
-
-    // Run OCR on uploaded PDF
-    const ocrData = await extractInvoiceData(req.file.path);
-
-    // Fetch commande + client details for concordance
-    const commandeResult = await pool.query(
-      `SELECT c.*, cl.raison_sociale, cl.siret as client_siret
-       FROM commandes_exutoires c
-       JOIN clients_exutoires cl ON c.client_id = cl.id
-       WHERE c.id = $1`,
-      [commande_id]
-    );
-    if (commandeResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Commande non trouvee' });
-    }
-    const commande = commandeResult.rows[0];
-    const prix_tonne = parseFloat(commande.prix_tonne);
-
-    // Calculate montant_attendu: pesee_client * prix_tonne, fallback to pesee_interne
-    let montant_attendu = null;
-    let pesee_reference = null;
-    let pesee_source = null;
-
-    const peseeResult = await pool.query(
-      'SELECT pesee_client FROM controles_pesee WHERE commande_id = $1',
-      [commande_id]
-    );
-    if (peseeResult.rows.length > 0 && peseeResult.rows[0].pesee_client != null) {
-      pesee_reference = parseFloat(peseeResult.rows[0].pesee_client);
-      pesee_source = 'client';
-      montant_attendu = pesee_reference * prix_tonne;
-    } else {
-      const prepResult = await pool.query(
-        'SELECT pesee_interne FROM preparations_expedition WHERE commande_id = $1',
-        [commande_id]
-      );
-      if (prepResult.rows.length > 0 && prepResult.rows[0].pesee_interne != null) {
-        pesee_reference = parseFloat(prepResult.rows[0].pesee_interne);
-        pesee_source = 'interne';
-        montant_attendu = pesee_reference * prix_tonne;
-      }
-    }
-
-    // Calculate ecart_montant
-    let ecart_montant = null;
-    if (ocrData.ocr_montant != null && montant_attendu != null) {
-      ecart_montant = ocrData.ocr_montant - montant_attendu;
-    }
-
-    // Determine statut_facture
-    let statut_facture;
-    if (ecart_montant === null) {
-      statut_facture = 'recue';
-    } else if (Math.abs(ecart_montant) < 1) {
-      statut_facture = 'conforme';
-    } else {
-      statut_facture = 'ecart';
-    }
-
-    // Concordance checks
-    const concordance = {
-      client_attendu: commande.raison_sociale,
-      client_siret: commande.client_siret || null,
-      prix_tonne_commande: prix_tonne,
-      pesee_reference,
-      pesee_source,
-      montant_attendu,
-      types_produit: commande.type_produit,
-      // Check if OCR text contains client name
-      client_trouve_dans_facture: ocrData.raw_text
-        ? ocrData.raw_text.toLowerCase().includes((commande.raison_sociale || '').toLowerCase())
-        : null,
-      // Check if OCR tonnage matches pesee
-      ecart_tonnage: (ocrData.ocr_tonnage != null && pesee_reference != null)
-        ? ocrData.ocr_tonnage - pesee_reference : null,
-      ecart_tonnage_pct: (ocrData.ocr_tonnage != null && pesee_reference != null && pesee_reference > 0)
-        ? ((ocrData.ocr_tonnage - pesee_reference) / pesee_reference * 100) : null,
-    };
-
-    const facturePath = req.file.filename;
-
-    const result = await pool.query(
-      `INSERT INTO factures_exutoires (commande_id, facture_pdf, ocr_date, ocr_tonnage, ocr_montant, montant_attendu, ecart_montant, statut_facture)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [commande_id, facturePath, ocrData.ocr_date, ocrData.ocr_tonnage, ocrData.ocr_montant, montant_attendu, ecart_montant, statut_facture]
-    );
-
-    res.status(201).json({ ...result.rows[0], ocr: ocrData, concordance });
+    const tolerance = await getTolerance();
+    const stats = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE source = 'pennylane') AS total,
+        COUNT(*) FILTER (WHERE source = 'pennylane' AND commande_id IS NULL) AS unmatched,
+        COUNT(*) FILTER (WHERE source = 'pennylane' AND commande_id IS NOT NULL AND ABS(COALESCE(ecart_quantite_pct, 0)) > $1) AS with_ecart,
+        COUNT(*) FILTER (WHERE source = 'pennylane' AND statut_facture = 'validee') AS validated
+      FROM factures_exutoires
+    `, [tolerance]);
+    const orphans = await pool.query(`
+      SELECT COUNT(*) AS count FROM commandes_exutoires c
+      WHERE c.statut IN ('expediee', 'pesee_recue', 'facturee')
+        AND NOT EXISTS (SELECT 1 FROM factures_exutoires f WHERE f.commande_id = c.id AND f.source = 'pennylane')
+    `);
+    res.json({
+      tolerance_pct: tolerance,
+      total: parseInt(stats.rows[0].total) || 0,
+      unmatched: parseInt(stats.rows[0].unmatched) || 0,
+      with_ecart: parseInt(stats.rows[0].with_ecart) || 0,
+      validated: parseInt(stats.rows[0].validated) || 0,
+      orphan_commandes: parseInt(orphans.rows[0].count) || 0,
+    });
   } catch (err) {
-    console.error('[FACTURES-EXUTOIRES] Erreur creation :', err);
+    console.error('[FACTURES-EXUTOIRES] Erreur stats :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// PUT /api/factures-exutoires/:id
-router.put('/:id', async (req, res) => {
+// GET /api/factures-exutoires/orphan-commandes — Commandes sans facture rapprochée
+router.get('/orphan-commandes', async (req, res) => {
   try {
-    const { ocr_date, ocr_tonnage, ocr_montant } = req.body;
-
-    const existing = await pool.query('SELECT * FROM factures_exutoires WHERE id = $1', [req.params.id]);
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Facture non trouvee' });
-    }
-
-    const facture = existing.rows[0];
-    const newMontant = ocr_montant != null ? parseFloat(ocr_montant) : parseFloat(facture.ocr_montant);
-    const montant_attendu = facture.montant_attendu != null ? parseFloat(facture.montant_attendu) : null;
-
-    // Recalculate ecart_montant
-    let ecart_montant = null;
-    if (!isNaN(newMontant) && montant_attendu != null) {
-      ecart_montant = newMontant - montant_attendu;
-    }
-
-    // Recalculate statut_facture
-    let statut_facture;
-    if (ecart_montant === null) {
-      statut_facture = 'recue';
-    } else if (Math.abs(ecart_montant) < 1) {
-      statut_facture = 'conforme';
-    } else {
-      statut_facture = 'ecart';
-    }
-
-    const result = await pool.query(
-      `UPDATE factures_exutoires SET
-       ocr_date = COALESCE($1, ocr_date),
-       ocr_tonnage = COALESCE($2, ocr_tonnage),
-       ocr_montant = COALESCE($3, ocr_montant),
-       ecart_montant = $4,
-       statut_facture = $5
-       WHERE id = $6 RETURNING *`,
-      [ocr_date || null, ocr_tonnage || null, ocr_montant || null, ecart_montant, statut_facture, req.params.id]
-    );
-
-    res.json(result.rows[0]);
+    const result = await pool.query(`
+      SELECT c.id, c.reference, c.statut, c.type_produit, c.tonnage_prevu, c.prix_tonne, c.date_commande,
+             cl.raison_sociale AS client_nom,
+             cp.pesee_client AS pesee_client_t
+      FROM commandes_exutoires c
+      JOIN clients_exutoires cl ON c.client_id = cl.id
+      LEFT JOIN LATERAL (
+        SELECT pesee_client FROM controles_pesee WHERE commande_id = c.id ORDER BY id DESC LIMIT 1
+      ) cp ON true
+      WHERE c.statut IN ('expediee', 'pesee_recue', 'facturee')
+        AND NOT EXISTS (SELECT 1 FROM factures_exutoires f WHERE f.commande_id = c.id AND f.source = 'pennylane')
+      ORDER BY c.date_commande DESC
+    `);
+    res.json(result.rows);
   } catch (err) {
-    console.error('[FACTURES-EXUTOIRES] Erreur mise a jour :', err);
+    console.error('[FACTURES-EXUTOIRES] Erreur orphan-commandes :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// PATCH /api/factures-exutoires/:id/valider
-router.patch('/:id/valider', async (req, res) => {
+// GET /api/factures-exutoires/candidates-for/:factureId
+// Liste des commandes potentiellement rapprochables pour une facture donnée
+router.get('/candidates-for/:factureId', async (req, res) => {
   try {
-    const existing = await pool.query('SELECT * FROM factures_exutoires WHERE id = $1', [req.params.id]);
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Facture non trouvee' });
-    }
-
-    const result = await pool.query(
-      `UPDATE factures_exutoires SET
-       statut_facture = 'validee',
-       validee_par = $1,
-       date_validation = NOW()
-       WHERE id = $2 RETURNING *`,
-      [req.user.id, req.params.id]
-    );
-
-    // Update commande statut to 'cloturee'
-    await pool.query(
-      `UPDATE commandes_exutoires SET statut = 'cloturee', updated_at = NOW() WHERE id = $1`,
-      [existing.rows[0].commande_id]
-    );
-
-    res.json(result.rows[0]);
+    const factureId = parseInt(req.params.factureId, 10);
+    if (!Number.isInteger(factureId)) return res.status(400).json({ error: 'ID invalide' });
+    const factureRes = await pool.query(
+      `SELECT pennylane_customer_name, date_facture, montant_ht, quantite_facturee
+       FROM factures_exutoires WHERE id = $1`, [factureId]);
+    if (factureRes.rows.length === 0) return res.status(404).json({ error: 'Facture introuvable' });
+    const f = factureRes.rows[0];
+    const result = await pool.query(`
+      SELECT c.id, c.reference, c.statut, c.type_produit, c.tonnage_prevu, c.prix_tonne,
+             c.date_commande, cl.raison_sociale AS client_nom,
+             cp.pesee_client AS pesee_client_t,
+             CASE WHEN LOWER(cl.raison_sociale) LIKE LOWER($1) THEN 10 ELSE 0 END
+             + CASE WHEN c.date_commande BETWEEN ($2::date - INTERVAL '30 days') AND ($2::date + INTERVAL '30 days') THEN 5 ELSE 0 END
+             AS match_score
+      FROM commandes_exutoires c
+      JOIN clients_exutoires cl ON c.client_id = cl.id
+      LEFT JOIN LATERAL (
+        SELECT pesee_client FROM controles_pesee WHERE commande_id = c.id ORDER BY id DESC LIMIT 1
+      ) cp ON true
+      WHERE c.statut NOT IN ('annulee')
+        AND NOT EXISTS (SELECT 1 FROM factures_exutoires fx WHERE fx.commande_id = c.id AND fx.source = 'pennylane')
+      ORDER BY match_score DESC, c.date_commande DESC
+      LIMIT 50
+    `, [`%${f.pennylane_customer_name || ''}%`, f.date_facture]);
+    res.json(result.rows);
   } catch (err) {
-    console.error('[FACTURES-EXUTOIRES] Erreur validation :', err);
+    console.error('[FACTURES-EXUTOIRES] Erreur candidates :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -284,21 +202,163 @@ router.patch('/:id/valider', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT f.*, c.reference, c.type_produit, c.prix_tonne, c.tonnage_prevu, c.statut as commande_statut,
-             cl.raison_sociale, cl.contact_nom, cl.contact_email
+      SELECT f.*, f.statut_facture as statut,
+             c.reference, c.type_produit, c.prix_tonne, c.tonnage_prevu, c.statut as commande_statut,
+             cl.raison_sociale, cl.contact_nom, cl.contact_email,
+             cp.pesee_client AS pesee_client_t, cp.pesee_interne, cp.ecart_pesee, cp.ecart_pourcentage
       FROM factures_exutoires f
-      JOIN commandes_exutoires c ON f.commande_id = c.id
-      JOIN clients_exutoires cl ON c.client_id = cl.id
+      LEFT JOIN commandes_exutoires c ON f.commande_id = c.id
+      LEFT JOIN clients_exutoires cl ON c.client_id = cl.id
+      LEFT JOIN LATERAL (
+        SELECT pesee_client, pesee_interne, ecart_pesee, ecart_pourcentage
+        FROM controles_pesee WHERE commande_id = f.commande_id ORDER BY id DESC LIMIT 1
+      ) cp ON true
       WHERE f.id = $1
     `, [req.params.id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Facture non trouvee' });
-    }
-
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Facture introuvable' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[FACTURES-EXUTOIRES] Erreur detail :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/factures-exutoires/:id/link-commande
+// Rapproche manuellement une facture à une commande, recalcule les écarts,
+// bascule la commande en statut 'cloturee' (Q5 : peu importe l'écart).
+router.post('/:id/link-commande', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const factureId = parseInt(req.params.id, 10);
+    const commandeId = parseInt(req.body.commande_id, 10);
+    if (!Number.isInteger(factureId) || !Number.isInteger(commandeId)) {
+      return res.status(400).json({ error: 'IDs invalides' });
+    }
+    await client.query('BEGIN');
+    // Vérifie que la commande n'est pas déjà liée à une autre facture
+    const existing = await client.query(
+      `SELECT id FROM factures_exutoires WHERE commande_id = $1 AND id != $2 AND source = 'pennylane'`,
+      [commandeId, factureId]
+    );
+    if (existing.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Cette commande est déjà rapprochée d\'une autre facture' });
+    }
+    const upd = await client.query(
+      `UPDATE factures_exutoires
+       SET commande_id = $1, rapprochement_mode = 'manuel', statut_facture = 'rapprochement_manuel'
+       WHERE id = $2 AND source = 'pennylane'
+       RETURNING id`,
+      [commandeId, factureId]
+    );
+    if (upd.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Facture introuvable' });
+    }
+    const ecart = await recomputeFactureEcart(client, factureId);
+    // Bascule statut commande → cloturee
+    await client.query(
+      `UPDATE commandes_exutoires SET statut = 'cloturee', updated_at = NOW() WHERE id = $1`,
+      [commandeId]
+    );
+    await client.query(
+      `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, motif, modifie_par)
+       VALUES ($1, NULL, 'cloturee', $2, $3)`,
+      [commandeId, `Rapprochement manuel facture #${factureId}`, req.user.id]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, facture_id: factureId, commande_id: commandeId, ...ecart });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[FACTURES-EXUTOIRES] Erreur link-commande :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/factures-exutoires/:id/unlink — Délier (ADMIN seulement)
+router.post('/:id/unlink', authorize('ADMIN'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const factureRes = await client.query(
+      `SELECT id, commande_id FROM factures_exutoires WHERE id = $1`,
+      [req.params.id]
+    );
+    if (factureRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Facture introuvable' });
+    }
+    const oldCommandeId = factureRes.rows[0].commande_id;
+    await client.query(
+      `UPDATE factures_exutoires
+       SET commande_id = NULL, rapprochement_mode = NULL, statut_facture = 'recue',
+           pesee_client_kg = NULL, ecart_quantite = NULL, ecart_quantite_pct = NULL,
+           montant_attendu = NULL, ecart_montant = NULL
+       WHERE id = $1`,
+      [req.params.id]
+    );
+    if (oldCommandeId) {
+      // Restaurer la commande au statut 'expediee' (la plus probable)
+      await client.query(
+        `UPDATE commandes_exutoires SET statut = 'expediee', updated_at = NOW() WHERE id = $1 AND statut = 'cloturee'`,
+        [oldCommandeId]
+      );
+      await client.query(
+        `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, motif, modifie_par)
+         VALUES ($1, 'cloturee', 'expediee', 'Désouplage manuel facture', $2)`,
+        [oldCommandeId, req.user.id]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[FACTURES-EXUTOIRES] Erreur unlink :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/factures-exutoires/:id/validate-ecart — Valider une facture malgré l'écart
+router.post('/:id/validate-ecart', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE factures_exutoires
+       SET statut_facture = 'ecart_valide', validee_par = $1, date_validation = NOW()
+       WHERE id = $2 AND commande_id IS NOT NULL
+       RETURNING *`,
+      [req.user.id, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Facture introuvable ou non rapprochée' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[FACTURES-EXUTOIRES] Erreur validate-ecart :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PATCH /api/factures-exutoires/:id/valider — alias de validate-ecart (rétrocompat)
+router.patch('/:id/valider', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE factures_exutoires
+       SET statut_facture = 'validee', validee_par = $1, date_validation = NOW()
+       WHERE id = $2 RETURNING *`,
+      [req.user.id, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Facture introuvable' });
+    if (result.rows[0].commande_id) {
+      await pool.query(
+        `UPDATE commandes_exutoires SET statut = 'cloturee', updated_at = NOW() WHERE id = $1`,
+        [result.rows[0].commande_id]
+      );
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[FACTURES-EXUTOIRES] Erreur validation :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

@@ -1916,6 +1916,18 @@ async function initDatabase() {
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
     `);
 
+    // V1.8+ : Champs étendus pour import Malibou (CSV 12 colonnes)
+    await client.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS malibou_id VARCHAR(50);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_name VARCHAR(100);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS gender VARCHAR(10);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_date DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS nationality VARCHAR(100);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS qualification TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS personal_email VARCHAR(255);
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_employees_malibou_id ON employees(malibou_id) WHERE malibou_id IS NOT NULL`);
+
     // ── Conformité IAE — Prescripteurs (P1#14)
     await client.query(`
       CREATE TABLE IF NOT EXISTS prescripteur_orgas (
@@ -3481,6 +3493,62 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_factures_exutoires_partner ON factures_exutoires(partner_id);');
 
     console.log('[INIT-DB] Référentiel unifié `partners` + migration ✓');
+
+    // ══════════════════════════════════════════
+    // V1.8+ — Contrôle facturation Pennylane
+    // Outil de réconciliation (PAS de génération) : on PULL les factures
+    // émises sur Pennylane → on les rapproche d'une commande_exutoires
+    // → on compare quantité facturée vs pesée_client → alerte non-bloquante.
+    // ══════════════════════════════════════════
+    const facturesExutoiresMigrations = [
+      // Colonnes pour relier à une facture Pennylane importée
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS pennylane_invoice_id VARCHAR(80)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS pennylane_invoice_number VARCHAR(80)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS pennylane_external_reference VARCHAR(120)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS pennylane_customer_id VARCHAR(80)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS pennylane_customer_name VARCHAR(255)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS pennylane_data JSONB",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS imported_at TIMESTAMP DEFAULT NOW()",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'pennylane'",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS date_facture DATE",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS quantite_facturee DECIMAL(10,3)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS unite_quantite VARCHAR(10) DEFAULT 't'",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS montant_ht DECIMAL(12,2)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS montant_ttc DECIMAL(12,2)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS ecart_quantite DECIMAL(10,3)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS ecart_quantite_pct DECIMAL(6,2)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS pesee_client_kg DECIMAL(10,3)",
+      "ALTER TABLE factures_exutoires ADD COLUMN IF NOT EXISTS rapprochement_mode VARCHAR(20)",
+      // commande_id devient nullable (factures non rapprochées)
+      "ALTER TABLE factures_exutoires ALTER COLUMN commande_id DROP NOT NULL",
+    ];
+    for (const sql of facturesExutoiresMigrations) {
+      try { await client.query(sql); } catch (e) { /* ignore — colonne déjà présente */ }
+    }
+    // Index pour anti-doublon Pennylane et lookup rapide
+    await client.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_factures_exutoires_pennylane_id ON factures_exutoires(pennylane_invoice_id) WHERE pennylane_invoice_id IS NOT NULL");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_factures_exutoires_commande ON factures_exutoires(commande_id) WHERE commande_id IS NOT NULL");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_factures_exutoires_source ON factures_exutoires(source)");
+
+    // Élargir le CHECK de statut_facture pour accepter "rapprochement_manuel" et "ecart_valide"
+    try {
+      await client.query("ALTER TABLE factures_exutoires DROP CONSTRAINT IF EXISTS factures_exutoires_statut_facture_check");
+      await client.query(`
+        ALTER TABLE factures_exutoires ADD CONSTRAINT factures_exutoires_statut_facture_check
+        CHECK (statut_facture IN ('recue', 'conforme', 'ecart', 'validee', 'rapprochement_manuel', 'ecart_valide'))
+      `);
+    } catch (e) { /* ignore — contrainte déjà à jour */ }
+
+    // Setting global : tolérance d'écart facturation (% — défaut 5)
+    try {
+      await client.query(`
+        INSERT INTO settings (key, value, category)
+        VALUES ('facturation_tolerance_pct', '5', 'facturation')
+        ON CONFLICT (key) DO NOTHING
+      `);
+    } catch (e) { /* settings table peut ne pas exister sur ancienne installation */ }
+
+    console.log('[INIT-DB] Contrôle facturation Pennylane (factures_exutoires étendue) ✓');
 
     // ══════════════════════════════════════════
     // V2 — State machine centralisée (Enterprise Architect Ch2)
