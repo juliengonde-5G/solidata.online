@@ -121,10 +121,10 @@ router.get('/kpis', cacheMiddleware(dashboardKey('kpis'), 120), async (req, res)
       ),
 
       // === STOCK ===
-      // Stock total (entrées - sorties) en kg
+      // Stock total (entrées - sorties) en kg — colonne réelle = poids_kg
       pool.query(
         `SELECT COALESCE(SUM(
-           CASE WHEN type = 'entree' THEN quantity ELSE -quantity END
+           CASE WHEN type = 'entree' THEN poids_kg ELSE -poids_kg END
          ), 0) as total FROM stock_movements`
       ),
       // Mouvements de stock aujourd'hui
