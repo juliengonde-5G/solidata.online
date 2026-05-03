@@ -1,6 +1,5 @@
 /**
- * Shared components for Hub pages — KPI cards and navigation cards.
- * Used by Dashboard, HubCollecte, HubEquipe, HubAdmin, etc.
+ * Shared dashboard components — KPI cards and navigation cards.
  */
 
 export function KpiCard({ title, value, unit, icon: Icon, accent = 'slate', footer }) {

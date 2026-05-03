@@ -1,0 +1,205 @@
+const express = require('express');
+const router = express.Router();
+const pool = require('../../config/database');
+
+// GET /api/tours/active-summary?date=YYYY-MM-DD
+// Synthèse de TOUTES les tournées actives du jour pour la vue "Collecte en direct"
+// Renvoie : KPIs agrégés + une entrée par tournée (résumé compact + points + dernière position)
+router.get('/active-summary', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+
+    // 1. Tournées du jour avec véhicule + chauffeur
+    const toursRes = await pool.query(
+      `SELECT t.id, t.date, t.status, t.collection_type,
+              t.started_at, t.completed_at,
+              t.estimated_duration_min, t.distance_km,
+              t.osrm_geometry,
+              v.id AS vehicle_id, v.registration, v.name AS vehicle_name,
+              v.max_capacity_kg,
+              CONCAT(e.first_name, ' ', e.last_name) AS driver_name,
+              e.id AS driver_id
+       FROM tours t
+       LEFT JOIN vehicles v ON v.id = t.vehicle_id
+       LEFT JOIN employees e ON e.id = t.driver_employee_id
+       WHERE t.date = $1
+         AND t.status IN ('planned', 'in_progress', 'returning')
+       ORDER BY t.started_at ASC NULLS LAST, t.id ASC`,
+      [date]
+    );
+
+    const tours = toursRes.rows;
+    if (tours.length === 0) {
+      return res.json({
+        date,
+        kpis: {
+          vehicules_actifs: 0,
+          cav_a_vider: 0,
+          avancement_pct: 0,
+          distance_restante_km: 0,
+        },
+        tours: [],
+      });
+    }
+
+    const tourIds = tours.map((t) => t.id);
+
+    // 2. Points (CAV ou association points selon collection_type)
+    const cavPointsRes = await pool.query(
+      `SELECT tc.tour_id, tc.id AS point_id, tc.cav_id, tc.position, tc.status,
+              tc.fill_level, tc.collected_at, tc.weight_kg,
+              tc.planned_passage_time,
+              c.name AS point_name, c.address, c.commune, c.latitude, c.longitude
+       FROM tour_cav tc
+       JOIN cav c ON c.id = tc.cav_id
+       WHERE tc.tour_id = ANY($1::int[])
+       ORDER BY tc.tour_id, tc.position`,
+      [tourIds]
+    );
+    const assoPointsRes = await pool.query(
+      `SELECT tap.tour_id, tap.id AS point_id, tap.association_point_id AS cav_id,
+              tap.position, tap.status, tap.fill_level, tap.collected_at,
+              tap.planned_passage_time,
+              ap.name AS point_name, ap.address, ap.ville AS commune,
+              ap.latitude, ap.longitude
+       FROM tour_association_point tap
+       JOIN association_points ap ON ap.id = tap.association_point_id
+       WHERE tap.tour_id = ANY($1::int[])
+       ORDER BY tap.tour_id, tap.position`,
+      [tourIds]
+    );
+    const allPoints = [...cavPointsRes.rows, ...assoPointsRes.rows];
+
+    // 3. Dernière position GPS connue par véhicule
+    const lastPositionsRes = await pool.query(
+      `SELECT DISTINCT ON (vehicle_id) vehicle_id, latitude, longitude, speed, recorded_at
+       FROM gps_positions
+       WHERE vehicle_id = ANY($1::int[])
+         AND recorded_at >= NOW() - INTERVAL '4 hours'
+       ORDER BY vehicle_id, recorded_at DESC`,
+      [tours.filter((t) => t.vehicle_id).map((t) => t.vehicle_id)]
+    );
+    const lastPosByVehicle = {};
+    lastPositionsRes.rows.forEach((r) => {
+      lastPosByVehicle[r.vehicle_id] = r;
+    });
+
+    // 4. Pesées du jour par tournée
+    const weightsRes = await pool.query(
+      `SELECT tour_id, COALESCE(SUM(net_weight_kg), 0) AS total_weight_kg
+       FROM tour_weights
+       WHERE tour_id = ANY($1::int[])
+       GROUP BY tour_id`,
+      [tourIds]
+    );
+    const weightsByTour = {};
+    weightsRes.rows.forEach((r) => { weightsByTour[r.tour_id] = parseFloat(r.total_weight_kg) || 0; });
+
+    // 5. Incidents du jour par tournée
+    const incidentsRes = await pool.query(
+      `SELECT tour_id, COUNT(*)::int AS nb_incidents
+       FROM incidents
+       WHERE tour_id = ANY($1::int[])
+       GROUP BY tour_id`,
+      [tourIds]
+    );
+    const incidentsByTour = {};
+    incidentsRes.rows.forEach((r) => { incidentsByTour[r.tour_id] = r.nb_incidents; });
+
+    // 6. Construire la réponse par tournée
+    const enrichedTours = tours.map((t) => {
+      const points = allPoints.filter((p) => p.tour_id === t.id);
+      const collectedCount = points.filter((p) => p.status === 'collected').length;
+      const remainingCount = points.filter((p) => p.status === 'pending' || p.status === 'in_progress').length;
+      const lastPos = lastPosByVehicle[t.vehicle_id] || null;
+      const weight = weightsByTour[t.id] || 0;
+      const incidentsCount = incidentsByTour[t.id] || 0;
+
+      // ETA simple : si tournée commencée et durée estimée connue
+      let eta = null;
+      if (t.started_at && t.estimated_duration_min) {
+        eta = new Date(new Date(t.started_at).getTime() + t.estimated_duration_min * 60 * 1000).toISOString();
+      }
+
+      // Distance restante : ratio CAV restants × distance totale (estimation linéaire)
+      const totalCount = points.length || 1;
+      const distanceRemaining = t.distance_km
+        ? Math.round(parseFloat(t.distance_km) * (remainingCount / totalCount) * 10) / 10
+        : null;
+
+      // Alerte dépassement : si on a passé 80% de la durée mais < 80% de progression
+      const now = Date.now();
+      const elapsedMin = t.started_at ? (now - new Date(t.started_at).getTime()) / 60000 : 0;
+      const progressPct = totalCount > 0 ? (collectedCount / totalCount) * 100 : 0;
+      const elapsedPct = t.estimated_duration_min ? (elapsedMin / t.estimated_duration_min) * 100 : 0;
+      const alertOverrun = elapsedPct > 80 && progressPct < elapsedPct - 15;
+
+      return {
+        id: t.id,
+        date: t.date,
+        status: t.status,
+        collection_type: t.collection_type || 'cav',
+        vehicle_id: t.vehicle_id,
+        vehicle_registration: t.registration,
+        vehicle_name: t.vehicle_name,
+        max_capacity_kg: t.max_capacity_kg,
+        driver_name: t.driver_name,
+        started_at: t.started_at,
+        estimated_duration_min: t.estimated_duration_min,
+        distance_km: t.distance_km ? parseFloat(t.distance_km) : null,
+        distance_remaining_km: distanceRemaining,
+        elapsed_min: Math.round(elapsedMin),
+        progress_pct: Math.round(progressPct),
+        nb_points: totalCount,
+        nb_collected: collectedCount,
+        nb_remaining: remainingCount,
+        weight_collected_kg: weight,
+        nb_incidents: incidentsCount,
+        eta,
+        alert_overrun: alertOverrun,
+        last_position: lastPos
+          ? { latitude: parseFloat(lastPos.latitude), longitude: parseFloat(lastPos.longitude), speed: lastPos.speed, recorded_at: lastPos.recorded_at }
+          : null,
+        points: points.map((p) => ({
+          id: p.point_id,
+          cav_id: p.cav_id,
+          position: p.position,
+          name: p.point_name,
+          address: p.address,
+          commune: p.commune,
+          latitude: p.latitude ? parseFloat(p.latitude) : null,
+          longitude: p.longitude ? parseFloat(p.longitude) : null,
+          status: p.status,
+          fill_level: p.fill_level,
+          collected_at: p.collected_at,
+          weight_kg: p.weight_kg ? parseFloat(p.weight_kg) : null,
+          planned_passage_time: p.planned_passage_time,
+        })),
+      };
+    });
+
+    // 7. KPIs agrégés
+    const totalRemaining = enrichedTours.reduce((s, t) => s + t.nb_remaining, 0);
+    const totalCollected = enrichedTours.reduce((s, t) => s + t.nb_collected, 0);
+    const totalPoints = enrichedTours.reduce((s, t) => s + t.nb_points, 0);
+    const totalDistanceRemaining = enrichedTours.reduce((s, t) => s + (t.distance_remaining_km || 0), 0);
+    const vehiculesActifs = new Set(enrichedTours.filter((t) => t.status === 'in_progress' || t.status === 'returning').map((t) => t.vehicle_id)).size;
+    const avancementPct = totalPoints > 0 ? Math.round((totalCollected / totalPoints) * 100) : 0;
+
+    res.json({
+      date,
+      kpis: {
+        vehicules_actifs: vehiculesActifs,
+        cav_a_vider: totalRemaining,
+        avancement_pct: avancementPct,
+        distance_restante_km: Math.round(totalDistanceRemaining * 10) / 10,
+      },
+      tours: enrichedTours,
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur active-summary :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+module.exports = router;

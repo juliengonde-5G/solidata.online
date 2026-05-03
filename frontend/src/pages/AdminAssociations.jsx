@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Users } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal, PageHeader } from '../components';
+import { LoadingSpinner, Modal, PageHeader, MapSizeFix } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
@@ -284,6 +284,7 @@ export default function AdminAssociations() {
               {detailItem.latitude && detailItem.longitude && (
                 <div className="h-48 rounded-lg overflow-hidden border">
                   <MapContainer center={[detailItem.latitude, detailItem.longitude]} zoom={15} style={{ height: '100%' }} zoomControl={false}>
+                    <MapSizeFix />
                     <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
                     <Marker position={[detailItem.latitude, detailItem.longitude]} />
                   </MapContainer>
@@ -364,6 +365,7 @@ export default function AdminAssociations() {
                 style={{ height: '100%' }}
                 zoomControl={false}
               >
+                <MapSizeFix />
                 <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
                 <LocationPicker
                   position={mapPos}

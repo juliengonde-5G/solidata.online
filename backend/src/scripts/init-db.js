@@ -2747,10 +2747,48 @@ async function initDatabase() {
       "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS resultat_general_ok BOOLEAN",
       "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS signature_encadrant TEXT",
       "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS signature_direction TEXT",
+      // V1.7+ : clôture de journée (manager valide en fin de journée)
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS validated_at TIMESTAMP",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS validated_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+      "ALTER TABLE production_daily ADD COLUMN IF NOT EXISTS validation_comment TEXT",
     ];
     for (const sql of prodDailyMigrations) {
       try { await client.query(sql); } catch(e) { /* colonne existe déjà */ }
     }
+
+    // Objectifs de production (trimestriel = entrée matière, mensuel = répartition tri)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS production_objectives (
+        id SERIAL PRIMARY KEY,
+        period_type VARCHAR(20) NOT NULL CHECK (period_type IN ('trimestriel', 'mensuel')),
+        period_start DATE NOT NULL,
+        period_end DATE NOT NULL,
+        type VARCHAR(40) NOT NULL,
+        value_kg DOUBLE PRECISION,
+        value_pct DOUBLE PRECISION,
+        alert_threshold_pct DOUBLE PRECISION,
+        commentaire TEXT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (period_type, period_start, type)
+      )
+    `);
+    await client.query("CREATE INDEX IF NOT EXISTS idx_prod_obj_period ON production_objectives(period_start, period_end)");
+
+    // Consignes du directeur (durée variable : un jour ou une plage)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS production_consignes (
+        id SERIAL PRIMARY KEY,
+        date_start DATE NOT NULL,
+        date_end DATE NOT NULL,
+        message TEXT NOT NULL,
+        priority VARCHAR(20) DEFAULT 'normal' CHECK (priority IN ('normal', 'important', 'urgent')),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query("CREATE INDEX IF NOT EXISTS idx_prod_consignes_dates ON production_consignes(date_start, date_end)");
 
     // Postes opérateurs par jour (affectation matin/après-midi)
     await client.query(`

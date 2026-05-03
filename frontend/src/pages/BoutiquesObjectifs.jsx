@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Target, Save } from 'lucide-react';
+import { Target, Save, ChevronDown, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 import Layout from '../components/Layout';
 import { LoadingSpinner, useToast, PageHeader } from '../components';
@@ -16,6 +16,7 @@ export default function BoutiquesObjectifs() {
   const [ventes, setVentes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [tableOpen, setTableOpen] = useState(false);
 
   useEffect(() => {
     api.get('/boutiques?active=true').then(res => {
@@ -55,8 +56,8 @@ export default function BoutiquesObjectifs() {
         .map(o => ({
           mois: o.mois,
           ca_objectif_ht: parseFloat(o.ca_objectif_ht) || 0,
-          nb_tickets_objectif: o.nb_tickets_objectif ? parseInt(o.nb_tickets_objectif) : null,
-          panier_moyen_objectif: o.panier_moyen_objectif ? parseFloat(o.panier_moyen_objectif) : null,
+          nb_tickets_objectif: null,
+          panier_moyen_objectif: null,
         }));
       await api.post('/boutique-objectifs/bulk', { boutique_id: parseInt(boutiqueId), annee, segment: 'global', objectifs: payload });
       toast.success('Objectifs enregistrés');
@@ -103,66 +104,7 @@ export default function BoutiquesObjectifs() {
 
         {loading ? <LoadingSpinner /> : (
           <>
-            <div className="bg-white rounded-card shadow-card p-4 mb-4 overflow-x-auto">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Saisie des objectifs mensuels</h3>
-              <table className="w-full text-sm">
-                <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
-                  <tr>
-                    <th className="text-left py-2 px-2">Mois</th>
-                    <th className="text-right py-2 px-2">CA objectif HT (€)</th>
-                    <th className="text-right py-2 px-2">Nb tickets</th>
-                    <th className="text-right py-2 px-2">Panier moy. (€)</th>
-                    <th className="text-right py-2 px-2">CA réalisé</th>
-                    <th className="text-right py-2 px-2">% atteinte</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {objectifs.map((o, i) => {
-                    const v = ventes.find(x => x.mois === o.mois);
-                    const realise = v?.ca_ttc || 0;
-                    const objNum = parseFloat(o.ca_objectif_ht) || 0;
-                    const pct = objNum > 0 ? (realise / objNum) * 100 : null;
-                    return (
-                      <tr key={i} className="border-b border-slate-100">
-                        <td className="py-2 px-2 font-medium">{MOIS[i]}</td>
-                        <td className="py-2 px-2">
-                          <input type="number" step="100" value={o.ca_objectif_ht} onChange={(e) => {
-                            const n = [...objectifs]; n[i].ca_objectif_ht = e.target.value; setObjectifs(n);
-                          }} className="w-28 border border-slate-300 rounded px-2 py-1 text-right" />
-                        </td>
-                        <td className="py-2 px-2">
-                          <input type="number" value={o.nb_tickets_objectif} onChange={(e) => {
-                            const n = [...objectifs]; n[i].nb_tickets_objectif = e.target.value; setObjectifs(n);
-                          }} className="w-20 border border-slate-300 rounded px-2 py-1 text-right" />
-                        </td>
-                        <td className="py-2 px-2">
-                          <input type="number" step="0.1" value={o.panier_moyen_objectif} onChange={(e) => {
-                            const n = [...objectifs]; n[i].panier_moyen_objectif = e.target.value; setObjectifs(n);
-                          }} className="w-20 border border-slate-300 rounded px-2 py-1 text-right" />
-                        </td>
-                        <td className="py-2 px-2 text-right text-slate-600">{realise.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €</td>
-                        <td className="py-2 px-2 text-right font-medium">
-                          {pct !== null ? (
-                            <span className={pct >= 100 ? 'text-green-600' : pct >= 80 ? 'text-amber-600' : 'text-red-600'}>
-                              {pct.toFixed(0)}%
-                            </span>
-                          ) : '—'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              <div className="flex justify-end mt-4">
-                <button onClick={save} disabled={saving} className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50">
-                  <Save className="w-4 h-4" />
-                  {saving ? 'Enregistrement...' : 'Enregistrer'}
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-card shadow-card p-4">
+            <div className="bg-white rounded-card shadow-card p-4 mb-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Objectif vs Réalisé ({annee})</h3>
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={chartData}>
@@ -175,6 +117,66 @@ export default function BoutiquesObjectifs() {
                   <Bar dataKey="realise" fill="#EC4899" name="Réalisé" />
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+
+            <div className="bg-white rounded-card shadow-card">
+              <button
+                onClick={() => setTableOpen(o => !o)}
+                className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition rounded-card"
+              >
+                <span className="flex items-center gap-2">
+                  {tableOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  Saisie des objectifs mensuels
+                </span>
+                <span className="text-xs text-slate-400 font-normal">{tableOpen ? 'Masquer' : 'Afficher'}</span>
+              </button>
+              {tableOpen && (
+                <div className="px-4 pb-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left py-2 px-2">Mois</th>
+                        <th className="text-right py-2 px-2">CA objectif HT (€)</th>
+                        <th className="text-right py-2 px-2">CA réalisé</th>
+                        <th className="text-right py-2 px-2">% atteinte</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {objectifs.map((o, i) => {
+                        const v = ventes.find(x => x.mois === o.mois);
+                        const realise = v?.ca_ttc || 0;
+                        const objNum = parseFloat(o.ca_objectif_ht) || 0;
+                        const pct = objNum > 0 ? (realise / objNum) * 100 : null;
+                        return (
+                          <tr key={i} className="border-b border-slate-100">
+                            <td className="py-2 px-2 font-medium">{MOIS[i]}</td>
+                            <td className="py-2 px-2">
+                              <input type="number" step="100" value={o.ca_objectif_ht} onChange={(e) => {
+                                const n = [...objectifs]; n[i].ca_objectif_ht = e.target.value; setObjectifs(n);
+                              }} className="w-32 border border-slate-300 rounded px-2 py-1 text-right" />
+                            </td>
+                            <td className="py-2 px-2 text-right text-slate-600">{realise.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €</td>
+                            <td className="py-2 px-2 text-right font-medium">
+                              {pct !== null ? (
+                                <span className={pct >= 100 ? 'text-green-600' : pct >= 80 ? 'text-amber-600' : 'text-red-600'}>
+                                  {pct.toFixed(0)}%
+                                </span>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  <div className="flex justify-end mt-4">
+                    <button onClick={save} disabled={saving} className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50">
+                      <Save className="w-4 h-4" />
+                      {saving ? 'Enregistrement...' : 'Enregistrer'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}

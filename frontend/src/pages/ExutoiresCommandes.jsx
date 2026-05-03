@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-  ShoppingCart, Inbox, Package, Truck, CheckCircle2,
-  ArrowUpRight, Calendar, Tag as TagIcon, Building2,
+  Inbox, Package, Truck, CheckCircle2,
+  ArrowUpRight, Calendar, Building2,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, KanbanBoard, StatusBadge } from '../components';
@@ -308,31 +308,14 @@ export default function ExutoiresCommandes() {
     },
   ];
 
-  // Sidebar : vue par statut réel + filtres type de produit
-  const sidebar = {
-    views: {
-      title: 'Vues',
-      active: filterStatut || 'all',
-      onSelect: (k) => setFilterStatut(k === 'all' ? '' : k),
-      items: [
-        { key: 'all', label: 'Toutes', icon: ShoppingCart, count: totalActive },
-        ...Object.entries(STATUTS).map(([k, v]) => ({
-          key: k,
-          label: v.label,
-          count: commandes.filter((c) => c.statut === k).length,
-        })),
-      ],
-    },
-    categories: {
-      title: 'Type de produit',
-      active: filterType || 'all',
-      onSelect: (k) => setFilterType(k === 'all' ? '' : k),
-      items: [
-        { key: 'all', label: 'Tous les types', icon: TagIcon },
-        ...Object.entries(TYPES_PRODUIT).map(([k, v]) => ({ key: k, label: v, icon: TagIcon })),
-      ],
-    },
-  };
+  const statutFilters = [
+    { key: '', label: 'Toutes', count: totalActive },
+    ...Object.entries(STATUTS).map(([k, v]) => ({
+      key: k,
+      label: v.label,
+      count: commandes.filter((c) => c.statut === k).length,
+    })),
+  ];
 
   // Colonnes passées à KanbanBoard
   const boardColumns = KANBAN_COLUMNS.map((c) => ({
@@ -396,12 +379,45 @@ export default function ExutoiresCommandes() {
           </button>
         }
         kpis={kpiList}
-        sidebar={sidebar}
         search={{
           value: filterSearch,
           onChange: setFilterSearch,
           placeholder: 'Rechercher par client, référence…',
         }}
+        extraTopBar={
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Statut :</span>
+              {statutFilters.map((s) => (
+                <button
+                  key={s.key || 'all'}
+                  onClick={() => setFilterStatut(s.key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    (filterStatut || '') === s.key
+                      ? 'bg-primary text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {s.label}
+                  {s.count != null && <span className="ml-1 opacity-70">({s.count})</span>}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Type :</span>
+              <select
+                value={filterType || ''}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                <option value="">Tous les types</option>
+                {Object.entries(TYPES_PRODUIT).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        }
         columns={boardColumns}
         itemsByColumn={itemsByColumn}
         renderCard={renderCommandeCard}
@@ -409,7 +425,7 @@ export default function ExutoiresCommandes() {
         emptyState={
           (itemsByColumn._annulees?.length || 0) > 0 ? (
             <div className="text-xs text-slate-500 text-center">
-              {itemsByColumn._annulees.length} commande(s) annulée(s) — filtrable via la sidebar.
+              {itemsByColumn._annulees.length} commande(s) annulée(s).
             </div>
           ) : null
         }

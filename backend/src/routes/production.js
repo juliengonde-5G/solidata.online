@@ -340,4 +340,213 @@ router.delete('/commentaires/:id', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// OBJECTIFS DE PRODUCTION (trimestriel + mensuel)
+// ══════════════════════════════════════════
+
+// GET /api/production/objectives?date=YYYY-MM-DD — objectifs en vigueur à la date
+router.get('/objectives', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const result = await pool.query(
+      `SELECT * FROM production_objectives
+       WHERE $1::date BETWEEN period_start AND period_end
+       ORDER BY period_type DESC, type ASC`,
+      [date]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[PRODUCTION] Erreur objectives GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/production/objectives — Créer/maj un objectif (upsert sur period_type+period_start+type)
+router.post('/objectives', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { period_type, period_start, period_end, type, value_kg, value_pct, alert_threshold_pct, commentaire } = req.body;
+    if (!period_type || !period_start || !period_end || !type) {
+      return res.status(400).json({ error: 'period_type, period_start, period_end, type requis' });
+    }
+    if (!['trimestriel', 'mensuel'].includes(period_type)) {
+      return res.status(400).json({ error: 'period_type invalide' });
+    }
+    const result = await pool.query(
+      `INSERT INTO production_objectives (period_type, period_start, period_end, type, value_kg, value_pct, alert_threshold_pct, commentaire, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (period_type, period_start, type) DO UPDATE SET
+         period_end = EXCLUDED.period_end,
+         value_kg = EXCLUDED.value_kg,
+         value_pct = EXCLUDED.value_pct,
+         alert_threshold_pct = EXCLUDED.alert_threshold_pct,
+         commentaire = EXCLUDED.commentaire,
+         updated_at = NOW()
+       RETURNING *`,
+      [period_type, period_start, period_end, type, value_kg || null, value_pct || null, alert_threshold_pct || null, commentaire || null, req.user.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[PRODUCTION] Erreur objectives POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/production/objectives/:id
+router.delete('/objectives/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM production_objectives WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// CONSIGNES (notes du directeur datées)
+// ══════════════════════════════════════════
+
+// GET /api/production/consignes?date=YYYY-MM-DD — consignes actives à la date
+router.get('/consignes', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const result = await pool.query(
+      `SELECT pc.*, u.first_name AS author_first, u.last_name AS author_last
+       FROM production_consignes pc
+       LEFT JOIN users u ON u.id = pc.created_by
+       WHERE $1::date BETWEEN pc.date_start AND pc.date_end
+       ORDER BY
+         CASE pc.priority WHEN 'urgent' THEN 1 WHEN 'important' THEN 2 ELSE 3 END,
+         pc.created_at DESC`,
+      [date]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[PRODUCTION] Erreur consignes GET :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/production/consignes
+router.post('/consignes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { date_start, date_end, message, priority } = req.body;
+    if (!date_start || !date_end || !message) {
+      return res.status(400).json({ error: 'date_start, date_end, message requis' });
+    }
+    const result = await pool.query(
+      `INSERT INTO production_consignes (date_start, date_end, message, priority, created_by)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [date_start, date_end, message, priority || 'normal', req.user.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[PRODUCTION] Erreur consignes POST :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/production/consignes/:id
+router.delete('/consignes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM production_consignes WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// CLÔTURE DE JOURNÉE
+// ══════════════════════════════════════════
+
+// POST /api/production/feuille/:date/validate — Clôturer la journée (manager)
+router.post('/feuille/:date/validate', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const { validation_comment } = req.body;
+    const result = await pool.query(
+      `UPDATE production_daily
+       SET validated_at = NOW(),
+           validated_by = $1,
+           validation_comment = $2,
+           updated_at = NOW()
+       WHERE date = $3
+       RETURNING *`,
+      [req.user.id, validation_comment || null, date]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Aucune feuille trouvée pour cette date — saisir d\'abord les KPI' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[PRODUCTION] Erreur clôture :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/production/feuille/:date/reopen — Réouvrir une journée clôturée (ADMIN seulement)
+router.post('/feuille/:date/reopen', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE production_daily SET validated_at = NULL, validated_by = NULL, validation_comment = NULL, updated_at = NOW()
+       WHERE date = $1 RETURNING *`,
+      [req.params.date]
+    );
+    res.json(result.rows[0] || null);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// MANAGERS CHAÎNE DE TRI (pour listes déroulantes)
+// ══════════════════════════════════════════
+
+// GET /api/production/managers-tri — Employés affectés à la chaîne de tri (encadrant atelier / contrôle tri)
+// Heuristique : employés en CDI/CDII actifs dont le poste contient "encadrant", "manager", "chef" ou "contrôle"
+// + tous les utilisateurs MANAGER/ADMIN du système (utiles si pas dans employees)
+router.get('/managers-tri', async (req, res) => {
+  try {
+    const [empRes, userRes] = await Promise.all([
+      pool.query(`
+        SELECT id, first_name, last_name, position
+        FROM employees
+        WHERE is_active = true
+          AND (
+            LOWER(COALESCE(position, '')) LIKE '%encadrant%'
+            OR LOWER(COALESCE(position, '')) LIKE '%manager%'
+            OR LOWER(COALESCE(position, '')) LIKE '%chef%'
+            OR LOWER(COALESCE(position, '')) LIKE '%contrôle%'
+            OR LOWER(COALESCE(position, '')) LIKE '%controle%'
+            OR LOWER(COALESCE(position, '')) LIKE '%responsable%'
+          )
+        ORDER BY last_name, first_name
+      `),
+      pool.query(`
+        SELECT id, first_name, last_name, role, username
+        FROM users
+        WHERE role IN ('ADMIN', 'MANAGER') AND is_active = true
+        ORDER BY last_name, first_name
+      `),
+    ]);
+    res.json({
+      employees: empRes.rows.map((e) => ({
+        id: e.id,
+        type: 'employee',
+        nom: `${e.first_name || ''} ${e.last_name || ''}`.trim(),
+        poste: e.position,
+      })),
+      users: userRes.rows.map((u) => ({
+        id: u.id,
+        type: 'user',
+        nom: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username,
+        role: u.role,
+      })),
+    });
+  } catch (err) {
+    console.error('[PRODUCTION] Erreur managers-tri :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;

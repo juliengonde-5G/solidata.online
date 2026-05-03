@@ -1,20 +1,24 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Building2, Map as MapIcon, BarChart3 } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Building2, Map as MapIcon, BarChart3, Bot, Radio, Filter } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
-import { PageHeader, Section } from '../components';
+import { PageHeader, Section, MapSizeFix } from '../components';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import 'leaflet/dist/leaflet.css';
 
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
 export default function ReportingMetropole() {
-  const [year, setYear] = useState(new Date().getFullYear());
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
   const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [communeFilter, setCommuneFilter] = useState('');
   const [dashboard, setDashboard] = useState(null);
   const [cavList, setCavList] = useState([]);
   const [selectedCav, setSelectedCav] = useState(null);
   const [cavDetail, setCavDetail] = useState(null);
+  const [cavActivity, setCavActivity] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const loadDashboard = useCallback(async () => {
@@ -34,13 +38,36 @@ export default function ReportingMetropole() {
 
   const openCavDetail = async (cav) => {
     setSelectedCav(cav);
+    setCavDetail(null);
+    setCavActivity(null);
     try {
-      const r = await api.get(`/metropole/cav/${cav.id}/details`);
-      setCavDetail(r.data);
+      const [detailRes, actRes] = await Promise.all([
+        api.get(`/metropole/cav/${cav.id}/details`),
+        api.get(`/cav/${cav.id}/activity?days_before=15&days_after=15`).catch(() => ({ data: null })),
+      ]);
+      setCavDetail(detailRes.data);
+      setCavActivity(actRes.data);
     } catch (err) { console.error(err); setCavDetail(null); }
   };
 
   const d = dashboard;
+
+  // Filtre commune client-side
+  const communes = useMemo(() => {
+    const set = new Set(cavList.map((c) => c.commune).filter(Boolean));
+    return Array.from(set).sort();
+  }, [cavList]);
+
+  const filteredCavList = useMemo(() => {
+    if (!communeFilter) return cavList;
+    return cavList.filter((c) => c.commune === communeFilter);
+  }, [cavList, communeFilter]);
+
+  // Plage d'années étendue (10 ans en arrière, 1 an en avant)
+  const years = useMemo(
+    () => Array.from({ length: 12 }, (_, i) => currentYear - 10 + i),
+    [currentYear]
+  );
 
   return (
     <Layout>
@@ -50,12 +77,19 @@ export default function ReportingMetropole() {
           subtitle="Suivi des indicateurs environnementaux et sociaux"
           icon={Building2}
           actions={
-            <div className="flex gap-2 items-center">
-              <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="input-modern w-auto">
+            <div className="flex flex-wrap gap-2 items-center">
+              <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="input-modern w-auto" title="Mois">
                 {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
               </select>
-              <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="input-modern w-auto">
-                {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+              <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="input-modern w-auto" title="Année">
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <span className="inline-flex items-center gap-1 text-xs text-slate-500 ml-2">
+                <Filter className="w-3.5 h-3.5" /> Commune :
+              </span>
+              <select value={communeFilter} onChange={(e) => setCommuneFilter(e.target.value)} className="input-modern w-auto" title="Filtrer par commune">
+                <option value="">Toutes ({communes.length})</option>
+                {communes.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           }
@@ -107,11 +141,12 @@ export default function ReportingMetropole() {
               {/* Carte Leaflet */}
               <div className="rounded-lg overflow-hidden border mb-4" style={{ height: '400px' }}>
                 <MapContainer center={[49.4231, 1.0993]} zoom={11} style={{ height: '100%', width: '100%' }}>
+                  <MapSizeFix />
                   <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                     url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                   />
-                  {cavList.filter(c => c.latitude && c.longitude).map(c => (
+                  {filteredCavList.filter(c => c.latitude && c.longitude).map(c => (
                     <CircleMarker
                       key={c.id}
                       center={[c.latitude, c.longitude]}
@@ -139,7 +174,7 @@ export default function ReportingMetropole() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {/* Liste des CAV */}
                 <div className="lg:col-span-1 max-h-96 overflow-y-auto space-y-1">
-                  {cavList.map(c => (
+                  {filteredCavList.map(c => (
                     <button key={c.id} onClick={() => openCavDetail(c)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition ${
                         selectedCav?.id === c.id ? 'bg-primary/10 border border-primary' : 'hover:bg-gray-50 border border-transparent'
@@ -180,43 +215,92 @@ export default function ReportingMetropole() {
                         <MiniCard label="Moyenne" value={`${Math.round(cavDetail.stats.avg_kg)} kg`} />
                       </div>
 
-                      {/* Graphique historique */}
-                      {cavDetail.collection_history?.length > 0 && (
+                      {/* Évolution remplissage : 15j historique + 15j prévision */}
+                      {cavActivity?.jours?.length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Historique des collectes</p>
-                          <div className="flex items-end gap-0.5 h-32 bg-gray-50 rounded-lg p-2">
-                            {cavDetail.collection_history.slice(0, 30).reverse().map((h, i) => {
-                              const maxW = Math.max(...cavDetail.collection_history.slice(0, 30).map(x => parseFloat(x.weight_kg)));
-                              const pct = maxW > 0 ? (parseFloat(h.weight_kg) / maxW) * 100 : 0;
-                              return (
-                                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full" title={`${new Date(h.date).toLocaleDateString('fr-FR')}: ${h.weight_kg}kg`}>
-                                  <div className="w-full bg-blue-400 rounded-t min-h-[2px]" style={{ height: `${Math.max(pct, 2)}%` }} />
-                                </div>
-                              );
-                            })}
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-gray-500 uppercase">Évolution du remplissage (J-15 → J+15)</p>
+                            <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                              <span className="inline-flex items-center gap-1"><Radio className="w-3 h-3 text-teal-600" /> Sonde</span>
+                              <span className="inline-flex items-center gap-1"><Bot className="w-3 h-3 text-blue-500" /> Prédiction</span>
+                              <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-red-500" /> Seuil 80%</span>
+                            </div>
                           </div>
-                          <div className="flex justify-between text-[10px] text-gray-400 mt-1 px-2">
-                            <span>Plus ancien</span>
-                            <span>Récent</span>
-                          </div>
+                          <ResponsiveContainer width="100%" height={180}>
+                            <BarChart
+                              data={cavActivity.jours.map((j) => ({
+                                ...j,
+                                label: new Date(j.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+                                shortLabel: new Date(j.date).getDate().toString(),
+                              }))}
+                              margin={{ top: 5, right: 8, left: -20, bottom: 0 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                              <XAxis dataKey="shortLabel" tick={{ fontSize: 10 }} interval={1} />
+                              <YAxis tick={{ fontSize: 10 }} unit="%" domain={[0, 120]} />
+                              <Tooltip
+                                contentStyle={{ fontSize: 11, borderRadius: 8 }}
+                                formatter={(val) => [`${val}%`, 'Remplissage']}
+                                labelFormatter={(_, payload) => {
+                                  const p = payload?.[0]?.payload;
+                                  if (!p) return '';
+                                  const tag = p.type === 'prevision' ? ' 🤖 (prévision)'
+                                    : p.source === 'sensor' ? ' 📡 (sonde)'
+                                    : ' (estimé)';
+                                  return (p.label || '') + tag;
+                                }}
+                              />
+                              <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="3 3" />
+                              <Bar dataKey="fill_pct" radius={[3, 3, 0, 0]} maxBarSize={14}>
+                                {cavActivity.jours.map((j, i) => (
+                                  <Cell
+                                    key={i}
+                                    fill={
+                                      j.type === 'prevision' ? '#93C5FD'
+                                        : j.source === 'sensor' ? '#0D9488'
+                                        : '#94A3B8'
+                                    }
+                                  />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
                         </div>
                       )}
 
-                      {/* Niveaux de remplissage constatés lors des collectes */}
+                      {/* Tableau des 3 derniers passages */}
                       {cavDetail.fill_history?.length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Niveau de remplissage constaté par le chauffeur à chaque collecte</p>
-                          <div className="flex items-end gap-0.5 h-24 bg-gray-50 rounded-lg p-2">
-                            {cavDetail.fill_history.slice(0, 20).reverse().map((f, i) => {
-                              const pct = f.fill_level ? (f.fill_level / 5) * 100 : 0;
-                              const color = pct > 80 ? 'bg-red-400' : pct > 50 ? 'bg-yellow-400' : 'bg-green-400';
-                              return (
-                                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full" title={`${new Date(f.date).toLocaleDateString('fr-FR')}: niveau ${f.fill_level}/5`}>
-                                  <div className={`w-full ${color} rounded-t min-h-[2px]`} style={{ height: `${Math.max(pct, 4)}%` }} />
-                                </div>
-                              );
-                            })}
-                          </div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">3 derniers passages chauffeur</p>
+                          <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                            <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b border-slate-200">
+                              <tr>
+                                <th className="text-left py-2 px-3">Date</th>
+                                <th className="text-left py-2 px-3">Heure</th>
+                                <th className="text-right py-2 px-3">Remplissage déclaré</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {cavDetail.fill_history.slice(0, 3).map((f, i) => {
+                                const date = new Date(f.date);
+                                const fillPct = f.fill_level ? Math.round((f.fill_level / 5) * 100) : null;
+                                const colorClass = fillPct == null ? 'text-slate-400'
+                                  : fillPct >= 80 ? 'text-red-600 font-semibold'
+                                  : fillPct >= 60 ? 'text-orange-600 font-semibold'
+                                  : fillPct >= 40 ? 'text-amber-600'
+                                  : 'text-green-600';
+                                return (
+                                  <tr key={i} className="border-b border-slate-100 last:border-0">
+                                    <td className="py-2 px-3">{date.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                                    <td className="py-2 px-3 text-slate-500">{date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</td>
+                                    <td className={`py-2 px-3 text-right ${colorClass}`}>
+                                      {fillPct != null ? `${fillPct}% (niv. ${f.fill_level}/5)` : '—'}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
                       )}
 

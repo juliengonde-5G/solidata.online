@@ -7,7 +7,8 @@ import api from '../services/api';
 import {
   Truck, ArrowDownWideNarrow, Users, Factory, Ship, BarChart3,
   Settings, UserPlus, Package, Heart, Lock, Clock, Sparkles,
-  AlertTriangle, Info, Target, ChevronRight, LayoutGrid
+  AlertTriangle, Info, Target, ChevronRight, LayoutGrid,
+  Newspaper, Pin
 } from 'lucide-react';
 
 // ══════════════════════════════════════════
@@ -20,7 +21,7 @@ const MODULE_CARDS = [
     key: 'recrutement',
     title: 'Recrutement',
     description: 'Candidats, entretiens, PCM',
-    path: '/hub-recrutement',
+    path: '/candidates',
     icon: UserPlus,
     color: 'blue',
     roles: ['ADMIN', 'RH'],
@@ -31,7 +32,7 @@ const MODULE_CARDS = [
     key: 'equipe',
     title: 'Gestion Equipe',
     description: 'Collaborateurs, heures, insertion',
-    path: '/hub-equipe',
+    path: '/employees',
     icon: Users,
     color: 'emerald',
     roles: ['ADMIN', 'RH', 'MANAGER'],
@@ -42,7 +43,7 @@ const MODULE_CARDS = [
     key: 'collecte',
     title: 'Collecte',
     description: 'Tournees, CAV, GPS temps reel',
-    path: '/hub-collecte',
+    path: '/dashboard-collecte',
     icon: Truck,
     color: 'teal',
     roles: ['ADMIN', 'MANAGER'],
@@ -53,7 +54,7 @@ const MODULE_CARDS = [
     key: 'tri',
     title: 'Tri & Production',
     description: 'Chaines de tri, stock, expeditions',
-    path: '/hub-tri-production',
+    path: '/production',
     icon: Factory,
     color: 'amber',
     roles: ['ADMIN', 'MANAGER'],
@@ -64,7 +65,7 @@ const MODULE_CARDS = [
     key: 'exutoires',
     title: 'Logistique',
     description: 'Commandes, preparation, facturation',
-    path: '/hub-exutoires',
+    path: '/exutoires-commandes',
     icon: Ship,
     color: 'purple',
     roles: ['ADMIN', 'MANAGER'],
@@ -75,7 +76,7 @@ const MODULE_CARDS = [
     key: 'reporting',
     title: 'Reporting',
     description: 'KPI collecte, production, RH',
-    path: '/hub-reporting',
+    path: '/performance',
     icon: BarChart3,
     color: 'rose',
     roles: ['ADMIN', 'MANAGER', 'RH'],
@@ -88,7 +89,7 @@ const ADMIN_CARD = {
   key: 'admin',
   title: 'Administration',
   description: 'Utilisateurs, config, BDD, RGPD',
-  path: '/hub-admin',
+  path: '/users',
   icon: Settings,
   color: 'slate',
   roles: ['ADMIN'],
@@ -111,12 +112,23 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [kpis, setKpis] = useState(null);
   const [objectifs, setObjectifs] = useState([]);
+  const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadDashboard();
+    loadNews();
     if (user?.role === 'ADMIN') loadObjectifs();
   }, []);
+
+  const loadNews = async () => {
+    try {
+      const res = await api.get('/news?limit=5');
+      setNews(res.data || []);
+    } catch (err) {
+      console.error('Erreur chargement actualités:', err);
+    }
+  };
 
   const loadDashboard = async () => {
     try {
@@ -207,40 +219,43 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* KPIs globaux */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <KpiTile
-            label="Collecte ce mois"
-            value={loading ? '-' : formatTonnage(kpis?.collecte?.tonnage_mois)}
-            unit="kg"
-            icon={Truck}
-            color="teal"
-            trend={kpis?.collecte?.trend_7j}
-          />
-          <KpiTile
-            label="Trie ce mois"
-            value={loading ? '-' : formatTonnage(kpis?.production?.kg_trie_mois)}
-            unit="kg"
-            icon={ArrowDownWideNarrow}
-            color="emerald"
-            trend={kpis?.production?.trend_7j}
-          />
-          <KpiTile
-            label="Collaborateurs"
-            value={loading ? '-' : (kpis?.rh?.employes_actifs || 0)}
-            unit="actifs"
-            icon={Users}
-            color="blue"
-            trend={null}
-          />
-          <KpiTile
-            label="Alertes"
-            value={loading ? '-' : alertes.length}
-            unit=""
-            icon={AlertTriangle}
-            color={alertes.length > 0 ? 'amber' : 'slate'}
-            trend={null}
-          />
+        {/* Bandeau : KPIs globaux + Fil d'actualité */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <KpiTile
+              label="Collecte ce mois"
+              value={loading ? '-' : formatTonnage(kpis?.collecte?.tonnage_mois)}
+              unit="kg"
+              icon={Truck}
+              color="teal"
+              trend={kpis?.collecte?.trend_7j}
+            />
+            <KpiTile
+              label="Trie ce mois"
+              value={loading ? '-' : formatTonnage(kpis?.production?.kg_trie_mois)}
+              unit="kg"
+              icon={ArrowDownWideNarrow}
+              color="emerald"
+              trend={kpis?.production?.trend_7j}
+            />
+            <KpiTile
+              label="Collaborateurs"
+              value={loading ? '-' : (kpis?.rh?.employes_actifs || 0)}
+              unit="actifs"
+              icon={Users}
+              color="blue"
+              trend={null}
+            />
+            <KpiTile
+              label="Alertes"
+              value={loading ? '-' : alertes.length}
+              unit=""
+              icon={AlertTriangle}
+              color={alertes.length > 0 ? 'amber' : 'slate'}
+              trend={null}
+            />
+          </div>
+          <NewsWidget items={news} onSeeAll={() => navigate('/news')} />
         </div>
 
         {/* Objectifs vs Realise (jauges) - ADMIN uniquement */}
@@ -461,6 +476,57 @@ function KpiTile({ label, value, unit, icon: Icon, color, trend }) {
         {unit && <span className="text-xs font-medium text-slate-400">{unit}</span>}
       </div>
       {trend && trend.length > 1 && <Sparkline data={trend} color={color} />}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
+// News Widget — fil d'actualité compact
+// ══════════════════════════════════════════
+
+function NewsWidget({ items, onSeeAll }) {
+  const fmt = (d) => {
+    if (!d) return '';
+    const date = new Date(d);
+    const now = new Date();
+    if (date.toDateString() === now.toDateString()) return "Aujourd'hui";
+    const days = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+    if (days === 1) return 'Hier';
+    if (days < 7) return `Il y a ${days}j`;
+    return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  };
+
+  return (
+    <div className="card-modern p-4 lg:col-span-1 flex flex-col">
+      <div className="flex items-center justify-between mb-3">
+        <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <Newspaper className="w-4 h-4 text-slate-400" />
+          Fil d'actualité
+        </span>
+        <button onClick={onSeeAll} className="text-xs text-primary hover:underline">
+          Voir tout
+        </button>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-xs text-slate-400 py-6 text-center">Aucune actualité</p>
+      ) : (
+        <ul className="space-y-2 overflow-y-auto max-h-64">
+          {items.map((item) => (
+            <li key={item.id} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+              <div className="flex items-start gap-2">
+                {item.is_pinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0 mt-0.5" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-slate-700 truncate">{item.title}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {fmt(item.created_at)}
+                    {item.category && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 uppercase">{item.category}</span>}
+                  </p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

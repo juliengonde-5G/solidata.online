@@ -545,7 +545,7 @@ export default function ExutoiresGantt() {
       <div className="p-6 max-w-full">
         {/* Header */}
         <PageHeader
-          title="Planning Gantt — Lieux de chargement"
+          title="Occupation zone de chargement"
           icon={CalendarRange}
         />
 

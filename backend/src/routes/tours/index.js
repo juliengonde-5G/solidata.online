@@ -27,6 +27,7 @@ const eventsRouter = require('./events');
 const eventsAutoRouter = require('./events-auto');
 const statsRouter = require('./stats');
 const liveSummaryRouter = require('./live-summary');
+const activeSummaryRouter = require('./active-summary');
 const reoptimizeRouter = require('./reoptimize');
 const planningRouter = require('./planning');
 const dashboardRouter = require('./dashboard');
@@ -570,6 +571,7 @@ router.use(authenticate);
 
 // Mount live-summary route (supervision d'une tournée en cours)
 router.use('/', liveSummaryRouter);
+router.use('/', activeSummaryRouter);
 
 // Mount reoptimize routes (manager trigger / accept / reject)
 router.use('/', reoptimizeRouter);

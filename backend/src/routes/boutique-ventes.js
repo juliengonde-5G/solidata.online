@@ -407,7 +407,7 @@ router.get('/', async (req, res) => {
 // GET /api/boutique-ventes/analytics/daily — CA quotidien
 router.get('/analytics/daily', async (req, res) => {
   try {
-    const { boutique_id, date_from, date_to } = req.query;
+    const { boutique_id, date_from, date_to, segment, rayon } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
     const result = await pool.query(`
       SELECT DATE(date_vente) AS jour,
@@ -420,9 +420,11 @@ router.get('/analytics/daily', async (req, res) => {
       WHERE boutique_id = $1
         AND ($2::DATE IS NULL OR DATE(date_vente) >= $2::DATE)
         AND ($3::DATE IS NULL OR DATE(date_vente) <= $3::DATE)
+        AND ($4::TEXT IS NULL OR segment = $4)
+        AND ($5::TEXT IS NULL OR rayon = $5)
       GROUP BY DATE(date_vente)
       ORDER BY jour
-    `, [boutique_id, date_from || null, date_to || null]);
+    `, [boutique_id, date_from || null, date_to || null, segment || null, rayon || null]);
     res.json(result.rows);
   } catch (err) {
     console.error('[boutique-ventes] analytics/daily:', err);
@@ -460,7 +462,7 @@ router.get('/analytics/monthly', async (req, res) => {
 // GET /api/boutique-ventes/analytics/rayons
 router.get('/analytics/rayons', async (req, res) => {
   try {
-    const { boutique_id, date_from, date_to } = req.query;
+    const { boutique_id, date_from, date_to, segment, rayon } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
     const result = await pool.query(`
       SELECT rayon, segment,
@@ -471,9 +473,11 @@ router.get('/analytics/rayons', async (req, res) => {
       WHERE boutique_id = $1
         AND ($2::DATE IS NULL OR DATE(date_vente) >= $2::DATE)
         AND ($3::DATE IS NULL OR DATE(date_vente) <= $3::DATE)
+        AND ($4::TEXT IS NULL OR segment = $4)
+        AND ($5::TEXT IS NULL OR rayon = $5)
       GROUP BY rayon, segment
       ORDER BY ca_ttc DESC
-    `, [boutique_id, date_from || null, date_to || null]);
+    `, [boutique_id, date_from || null, date_to || null, segment || null, rayon || null]);
     res.json(result.rows);
   } catch (err) {
     console.error('[boutique-ventes] analytics/rayons:', err);
@@ -484,7 +488,7 @@ router.get('/analytics/rayons', async (req, res) => {
 // GET /api/boutique-ventes/analytics/segments
 router.get('/analytics/segments', async (req, res) => {
   try {
-    const { boutique_id, date_from, date_to } = req.query;
+    const { boutique_id, date_from, date_to, segment, rayon } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
     const result = await pool.query(`
       SELECT segment,
@@ -496,9 +500,11 @@ router.get('/analytics/segments', async (req, res) => {
       WHERE boutique_id = $1
         AND ($2::DATE IS NULL OR DATE(date_vente) >= $2::DATE)
         AND ($3::DATE IS NULL OR DATE(date_vente) <= $3::DATE)
+        AND ($4::TEXT IS NULL OR segment = $4)
+        AND ($5::TEXT IS NULL OR rayon = $5)
       GROUP BY segment
       ORDER BY ca_ttc DESC
-    `, [boutique_id, date_from || null, date_to || null]);
+    `, [boutique_id, date_from || null, date_to || null, segment || null, rayon || null]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Erreur analytics' });
@@ -508,7 +514,7 @@ router.get('/analytics/segments', async (req, res) => {
 // GET /api/boutique-ventes/analytics/articles — top articles
 router.get('/analytics/articles', async (req, res) => {
   try {
-    const { boutique_id, date_from, date_to, limit = 20 } = req.query;
+    const { boutique_id, date_from, date_to, segment, rayon, limit = 20 } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
     const result = await pool.query(`
       SELECT article, rayon,
@@ -522,10 +528,12 @@ router.get('/analytics/articles', async (req, res) => {
       WHERE boutique_id = $1
         AND ($2::DATE IS NULL OR DATE(date_vente) >= $2::DATE)
         AND ($3::DATE IS NULL OR DATE(date_vente) <= $3::DATE)
+        AND ($4::TEXT IS NULL OR segment = $4)
+        AND ($5::TEXT IS NULL OR rayon = $5)
       GROUP BY article, rayon
       ORDER BY ca_ttc DESC
-      LIMIT $4
-    `, [boutique_id, date_from || null, date_to || null, parseInt(limit)]);
+      LIMIT $6
+    `, [boutique_id, date_from || null, date_to || null, segment || null, rayon || null, parseInt(limit)]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Erreur analytics' });

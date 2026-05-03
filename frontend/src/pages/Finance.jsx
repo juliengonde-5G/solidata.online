@@ -172,31 +172,52 @@ export default function Finance() {
 
         {/* Graphiques */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Section title="CA et Résultat mensuel" icon={BarChart3}>
+          <Section title="CA réalisé vs CA budgété" icon={BarChart3} subtitle="Comparaison mensuelle (histogrammes)">
             {loading ? (
               <div className="flex items-center justify-center h-64"><LoadingSpinner /></div>
             ) : (
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={260}>
                 <ComposedChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="mois" tick={{ fontSize: 12, fill: '#64748b' }} />
                   <YAxis tick={{ fontSize: 12, fill: '#64748b' }} tickFormatter={(v) => fmtK(v)} />
                   <Tooltip
                     formatter={(value, name) => {
-                      const labels = { ca: 'CA', resultat: 'Resultat', budget_ca: 'Budget CA', budget_resultat: 'Budget Resultat' };
+                      const labels = { ca: 'CA réalisé', budget_ca: 'CA budgété' };
                       return [fmt(value) + ' EUR', labels[name] || name];
                     }}
                     labelStyle={{ color: '#334155', fontWeight: 600 }}
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
                   />
-                  <Legend
-                    formatter={(v) => ({ ca: 'CA', resultat: 'Resultat', budget_ca: 'Budget CA', budget_resultat: 'Budget Resultat' }[v] || v)}
-                  />
+                  <Legend formatter={(v) => ({ ca: 'CA réalisé', budget_ca: 'CA budgété' }[v] || v)} />
                   <Bar dataKey="ca" fill="#0d9488" radius={[4, 4, 0, 0]} name="ca" />
-                  <Line type="monotone" dataKey="resultat" stroke="#f59e0b" strokeWidth={2} dot={false} name="resultat" />
-                  <Line type="monotone" dataKey="budget_ca" stroke="#3b82f6" strokeWidth={2} strokeDasharray="4 4" dot={false} name="budget_ca" />
-                  <Line type="monotone" dataKey="budget_resultat" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" dot={false} name="budget_resultat" />
+                  <Bar dataKey="budget_ca" fill="#94A3B8" radius={[4, 4, 0, 0]} name="budget_ca" />
                 </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </Section>
+
+          <Section title="Résultat réalisé vs Résultat budgété" icon={BarChart3} subtitle="Évolution mensuelle (courbes)">
+            {loading ? (
+              <div className="flex items-center justify-center h-64"><LoadingSpinner /></div>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="mois" tick={{ fontSize: 12, fill: '#64748b' }} />
+                  <YAxis tick={{ fontSize: 12, fill: '#64748b' }} tickFormatter={(v) => fmtK(v)} />
+                  <Tooltip
+                    formatter={(value, name) => {
+                      const labels = { resultat: 'Résultat réalisé', budget_resultat: 'Résultat budgété' };
+                      return [fmt(value) + ' EUR', labels[name] || name];
+                    }}
+                    labelStyle={{ color: '#334155', fontWeight: 600 }}
+                    contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
+                  />
+                  <Legend formatter={(v) => ({ resultat: 'Résultat réalisé', budget_resultat: 'Résultat budgété' }[v] || v)} />
+                  <Line type="monotone" dataKey="resultat" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} name="resultat" />
+                  <Line type="monotone" dataKey="budget_resultat" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" dot={false} name="budget_resultat" />
+                </LineChart>
               </ResponsiveContainer>
             )}
           </Section>

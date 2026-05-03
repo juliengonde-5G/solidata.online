@@ -15,3 +15,4 @@ export { default as Section } from './Section';
 export { default as DateRangePicker } from './DateRangePicker';
 export { default as FormField } from './FormField';
 export { default as ErrorState } from './ErrorState';
+export { default as MapSizeFix } from './MapSizeFix';

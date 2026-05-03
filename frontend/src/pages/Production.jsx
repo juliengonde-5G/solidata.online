@@ -35,9 +35,26 @@ export default function Production() {
   const [data, setData] = useState([]);
   const [dashboard, setDashboard] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
   const [showCommentModal, setShowCommentModal] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [commentType, setCommentType] = useState('general');
+  // Refonte V1.7+ : objectifs périodiques, consignes & managers tri
+  const [managers, setManagers] = useState({ employees: [], users: [] });
+  const [objectives, setObjectives] = useState([]);
+  const [consignes, setConsignes] = useState([]);
+  const [showObjectiveModal, setShowObjectiveModal] = useState(false);
+  const [showConsigneModal, setShowConsigneModal] = useState(false);
+  const [objForm, setObjForm] = useState({
+    period_type: 'trimestriel', period_start: '', period_end: '',
+    type: 'entree_ligne', value_kg: '', value_pct: '', alert_threshold_pct: '', commentaire: '',
+  });
+  const [consigneForm, setConsigneForm] = useState({
+    date_start: new Date().toISOString().slice(0, 10),
+    date_end: new Date().toISOString().slice(0, 10),
+    message: '',
+    priority: 'normal',
+  });
 
   // État de la feuille de production (hors postes — viennent du planning)
   const [form, setForm] = useState({
@@ -48,6 +65,22 @@ export default function Production() {
     objectif_recyclage_pct: 70, objectif_reutilisation_pct: 30, objectif_csr_pct: '<10%',
     encadrant: '',
   });
+
+  // Charger managers tri (une seule fois)
+  useEffect(() => {
+    api.get('/production/managers-tri').then((r) => setManagers(r.data || { employees: [], users: [] })).catch(() => {});
+  }, []);
+
+  // Charger objectifs en vigueur + consignes pour la date sélectionnée
+  useEffect(() => {
+    Promise.all([
+      api.get(`/production/objectives?date=${selectedDate}`).catch(() => ({ data: [] })),
+      api.get(`/production/consignes?date=${selectedDate}`).catch(() => ({ data: [] })),
+    ]).then(([objRes, consRes]) => {
+      setObjectives(objRes.data || []);
+      setConsignes(consRes.data || []);
+    });
+  }, [selectedDate]);
 
   // Charger feuille de production
   const loadFeuille = useCallback(async () => {
@@ -167,6 +200,67 @@ export default function Production() {
     }
   };
 
+  const validateFeuille = async () => {
+    if (!feuille?.daily) return;
+    if (!window.confirm('Clôturer la journée ? Plus aucune modification ne sera possible (sauf réouverture par un administrateur).')) return;
+    setValidating(true);
+    try {
+      await api.post(`/production/feuille/${selectedDate}/validate`, {});
+      await loadFeuille();
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || 'Erreur lors de la clôture');
+    }
+    setValidating(false);
+  };
+
+  const reopenFeuille = async () => {
+    if (!window.confirm('Réouvrir la journée pour modifications ?')) return;
+    try {
+      await api.post(`/production/feuille/${selectedDate}/reopen`, {});
+      await loadFeuille();
+    } catch (err) { console.error(err); }
+  };
+
+  const saveObjective = async () => {
+    if (!objForm.period_start || !objForm.period_end || !objForm.type) {
+      alert('Période et type requis');
+      return;
+    }
+    try {
+      await api.post('/production/objectives', {
+        ...objForm,
+        value_kg: objForm.value_kg ? parseFloat(objForm.value_kg) : null,
+        value_pct: objForm.value_pct ? parseFloat(objForm.value_pct) : null,
+        alert_threshold_pct: objForm.alert_threshold_pct ? parseFloat(objForm.alert_threshold_pct) : null,
+      });
+      setShowObjectiveModal(false);
+      setObjForm({ period_type: 'trimestriel', period_start: '', period_end: '', type: 'entree_ligne', value_kg: '', value_pct: '', alert_threshold_pct: '', commentaire: '' });
+      const r = await api.get(`/production/objectives?date=${selectedDate}`);
+      setObjectives(r.data || []);
+    } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
+  };
+
+  const saveConsigne = async () => {
+    if (!consigneForm.message.trim()) { alert('Message requis'); return; }
+    try {
+      await api.post('/production/consignes', consigneForm);
+      setShowConsigneModal(false);
+      setConsigneForm({ date_start: selectedDate, date_end: selectedDate, message: '', priority: 'normal' });
+      const r = await api.get(`/production/consignes?date=${selectedDate}`);
+      setConsignes(r.data || []);
+    } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
+  };
+
+  const deleteConsigne = async (id) => {
+    if (!window.confirm('Supprimer cette consigne ?')) return;
+    try {
+      await api.delete(`/production/consignes/${id}`);
+      const r = await api.get(`/production/consignes?date=${selectedDate}`);
+      setConsignes(r.data || []);
+    } catch (err) { console.error(err); }
+  };
+
   const addComment = async () => {
     if (!newComment.trim()) return;
     try {
@@ -279,12 +373,31 @@ export default function Production() {
                 <ChevronRight className="w-5 h-5" />
               </button>
               <span className="text-slate-500 capitalize">{formatDate(selectedDate)}</span>
-              <div className="ml-auto">
-                <button onClick={saveFeuille} disabled={saving}
-                  className="btn-primary text-sm">
+              <div className="ml-auto flex gap-2 items-center">
+                {feuille?.daily?.validated_at && (
+                  <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-green-100 text-green-700 font-medium">
+                    ✓ Clôturée le {new Date(feuille.daily.validated_at).toLocaleString('fr-FR')}
+                  </span>
+                )}
+                <button onClick={saveFeuille} disabled={saving || !!feuille?.daily?.validated_at}
+                  className="btn-primary text-sm disabled:opacity-50">
                   <Save className="w-4 h-4 mr-2" strokeWidth={1.8} />
-                  {saving ? 'Enregistrement...' : 'Enregistrer la feuille'}
+                  {saving ? 'Enregistrement...' : 'Enregistrer'}
                 </button>
+                {!feuille?.daily?.validated_at ? (
+                  <button
+                    onClick={validateFeuille}
+                    disabled={validating || !feuille?.daily}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={!feuille?.daily ? 'Saisir et enregistrer la feuille avant de la clôturer' : ''}
+                  >
+                    {validating ? 'Clôture…' : 'Valider et clôturer la journée'}
+                  </button>
+                ) : user?.role === 'ADMIN' && (
+                  <button onClick={reopenFeuille} className="text-xs text-slate-500 hover:text-slate-700 underline">
+                    Rouvrir
+                  </button>
+                )}
               </div>
             </div>
 
@@ -348,26 +461,39 @@ export default function Production() {
                   <div className="space-y-2">
                     <div>
                       <label className="text-[10px] text-slate-500">Encadrant atelier</label>
-                      <input value={form.encadrant_atelier}
-                        onChange={e => setForm({ ...form, encadrant_atelier: e.target.value, encadrant: e.target.value })}
-                        className="input-modern text-sm" placeholder="Nom encadrant" />
+                      <ManagerSelect
+                        value={form.encadrant_atelier}
+                        onChange={(v) => setForm({ ...form, encadrant_atelier: v, encadrant: v })}
+                        managers={managers}
+                      />
                     </div>
                     <div>
                       <label className="text-[10px] text-slate-500">Contrôle tri</label>
-                      <input value={form.controleur_tri}
-                        onChange={e => setForm({ ...form, controleur_tri: e.target.value })}
-                        className="input-modern text-sm" placeholder="Nom contrôleur" />
+                      <ManagerSelect
+                        value={form.controleur_tri}
+                        onChange={(v) => setForm({ ...form, controleur_tri: v })}
+                        managers={managers}
+                      />
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Effectif détaillé */}
+              {/* Effectif détaillé — LECTURE SEULE depuis le planning */}
               <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 mb-3">
-                <p className="text-xs font-semibold text-slate-700 mb-2">
-                  <Users className="w-4 h-4 inline mr-1" />
-                  Effectif du jour — Total : <span className="text-primary text-sm">{effectifTotal || '—'}</span>
-                  {nbAffectes > 0 && <span className="text-slate-400 ml-2">({nbAffectes} affectés dans le planning)</span>}
+                <p className="text-xs font-semibold text-slate-700 mb-2 flex items-center justify-between">
+                  <span>
+                    <Users className="w-4 h-4 inline mr-1" />
+                    Effectif du jour — Total : <span className="text-primary text-sm">{nbAffectes || effectifTotal || '—'}</span>
+                    <span className="text-slate-400 ml-2">(lecture depuis le planning hebdo)</span>
+                  </span>
+                  <button
+                    onClick={() => navigate(`/planning-hebdo?week_start=${getWeekStart(selectedDate)}`)}
+                    className="text-xs text-primary hover:underline flex items-center gap-1"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Modifier le planning
+                  </button>
                 </p>
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                   {[
@@ -380,21 +506,60 @@ export default function Production() {
                   ].map(({ key, label }) => (
                     <div key={key}>
                       <label className="text-[10px] text-slate-500">{label}</label>
-                      <input type="number" value={form[key]}
-                        onChange={e => setForm({ ...form, [key]: e.target.value })}
-                        className="input-modern text-sm" placeholder="0" />
+                      <input type="number" value={form[key] || ''}
+                        readOnly disabled
+                        className="input-modern text-sm bg-slate-100 cursor-not-allowed" placeholder="0" />
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Consigne du jour */}
-              <div>
-                <label className="text-xs font-semibold text-slate-600">Consigne du jour</label>
-                <textarea value={form.consigne} onChange={e => setForm({ ...form, consigne: e.target.value })}
-                  className="input-modern text-sm" rows={2} placeholder="Consignes particulières pour la journée..." />
+              {/* Consignes datées — bandeau lecture + bouton ajout */}
+              <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-amber-800">
+                    📋 Consignes du directeur ({consignes.length})
+                  </p>
+                  {(user?.role === 'ADMIN' || user?.role === 'MANAGER') && (
+                    <button
+                      onClick={() => setShowConsigneModal(true)}
+                      className="text-xs text-amber-700 hover:text-amber-900 underline"
+                    >
+                      + Ajouter une consigne
+                    </button>
+                  )}
+                </div>
+                {consignes.length === 0 ? (
+                  <p className="text-xs text-amber-600 italic">Aucune consigne pour cette journée</p>
+                ) : (
+                  <div className="space-y-2">
+                    {consignes.map((c) => (
+                      <div key={c.id} className="bg-white rounded p-2 border border-amber-100">
+                        <div className="flex items-start gap-2">
+                          <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                            c.priority === 'urgent' ? 'bg-red-100 text-red-700'
+                              : c.priority === 'important' ? 'bg-amber-100 text-amber-700'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}>{c.priority}</span>
+                          <p className="text-sm text-slate-700 flex-1">{c.message}</p>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Du {new Date(c.date_start).toLocaleDateString('fr-FR')} au {new Date(c.date_end).toLocaleDateString('fr-FR')}
+                          {(c.author_first || c.author_last) && ` — ${c.author_first || ''} ${c.author_last || ''}`.trim()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* ══ OBJECTIFS PÉRIODIQUES (trim entrée + mois tri) ══ */}
+            <ObjectivesPanel
+              objectives={objectives}
+              onAdd={() => setShowObjectiveModal(true)}
+              canEdit={user?.role === 'ADMIN' || user?.role === 'MANAGER'}
+            />
 
             {/* ══ SECTION CENTRALE : Affectations planning + Chariots ══ */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
@@ -653,6 +818,104 @@ export default function Production() {
             </div>
           </div>
         </Modal>
+
+        {/* Modal nouvel objectif (trim/mois) */}
+        <Modal isOpen={showObjectiveModal} onClose={() => setShowObjectiveModal(false)} title="Nouvel objectif de production" size="md"
+          footer={<>
+            <button type="button" onClick={() => setShowObjectiveModal(false)} className="flex-1 btn-ghost">Annuler</button>
+            <button type="button" onClick={saveObjective} className="flex-1 btn-primary text-sm">Enregistrer</button>
+          </>}
+        >
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Période</label>
+                <select value={objForm.period_type} onChange={(e) => setObjForm({ ...objForm, period_type: e.target.value })} className="input-modern text-sm">
+                  <option value="trimestriel">Trimestriel (entrée matière)</option>
+                  <option value="mensuel">Mensuel (% tri)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Type</label>
+                <select value={objForm.type} onChange={(e) => setObjForm({ ...objForm, type: e.target.value })} className="input-modern text-sm">
+                  {objForm.period_type === 'trimestriel' ? (
+                    <option value="entree_ligne">Entrée chaîne tri (kg)</option>
+                  ) : (
+                    <>
+                      <option value="recyclage">% Recyclage</option>
+                      <option value="reemploi">% Réemploi</option>
+                      <option value="csr">% CSR (avec seuil alerte)</option>
+                    </>
+                  )}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Début</label>
+                <input type="date" value={objForm.period_start} onChange={(e) => setObjForm({ ...objForm, period_start: e.target.value })} className="input-modern text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Fin</label>
+                <input type="date" value={objForm.period_end} onChange={(e) => setObjForm({ ...objForm, period_end: e.target.value })} className="input-modern text-sm" />
+              </div>
+              {objForm.period_type === 'trimestriel' ? (
+                <div className="col-span-2">
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Tonnage cible (kg)</label>
+                  <input type="number" value={objForm.value_kg} onChange={(e) => setObjForm({ ...objForm, value_kg: e.target.value })} className="input-modern text-sm" />
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 mb-1 block">Pourcentage cible</label>
+                    <input type="number" value={objForm.value_pct} onChange={(e) => setObjForm({ ...objForm, value_pct: e.target.value })} className="input-modern text-sm" placeholder="ex: 70" />
+                  </div>
+                  {objForm.type === 'csr' && (
+                    <div>
+                      <label className="text-xs font-medium text-red-600 mb-1 block">Seuil d'alerte (%)</label>
+                      <input type="number" value={objForm.alert_threshold_pct} onChange={(e) => setObjForm({ ...objForm, alert_threshold_pct: e.target.value })} className="input-modern text-sm" placeholder="ex: 10" />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">Commentaire</label>
+              <textarea value={objForm.commentaire} onChange={(e) => setObjForm({ ...objForm, commentaire: e.target.value })} className="input-modern text-sm" rows={2} />
+            </div>
+          </div>
+        </Modal>
+
+        {/* Modal nouvelle consigne */}
+        <Modal isOpen={showConsigneModal} onClose={() => setShowConsigneModal(false)} title="Nouvelle consigne du directeur" size="md"
+          footer={<>
+            <button type="button" onClick={() => setShowConsigneModal(false)} className="flex-1 btn-ghost">Annuler</button>
+            <button type="button" onClick={saveConsigne} className="flex-1 btn-primary text-sm">Enregistrer</button>
+          </>}
+        >
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Du</label>
+                <input type="date" value={consigneForm.date_start} onChange={(e) => setConsigneForm({ ...consigneForm, date_start: e.target.value })} className="input-modern text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Au</label>
+                <input type="date" value={consigneForm.date_end} onChange={(e) => setConsigneForm({ ...consigneForm, date_end: e.target.value })} className="input-modern text-sm" />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">Priorité</label>
+              <select value={consigneForm.priority} onChange={(e) => setConsigneForm({ ...consigneForm, priority: e.target.value })} className="input-modern text-sm">
+                <option value="normal">Normal</option>
+                <option value="important">Important</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">Message</label>
+              <textarea value={consigneForm.message} onChange={(e) => setConsigneForm({ ...consigneForm, message: e.target.value })} className="input-modern text-sm" rows={4} autoFocus placeholder="Ex: Privilégier l'enlèvement des stocks de KINTSU pour libérer le quai 2…" />
+            </div>
+          </div>
+        </Modal>
       </div>
     </Layout>
   );
@@ -664,6 +927,107 @@ function KPICard({ label, value, target, color }) {
       <p className="text-xs text-slate-500">{label}</p>
       <p className={`text-2xl font-bold ${color}`}>{value}</p>
       {target && <p className="text-xs text-slate-400">Objectif : {target}t</p>}
+    </div>
+  );
+}
+
+// Sélecteur de manager (Encadrant atelier / Contrôle tri)
+function ManagerSelect({ value, onChange, managers }) {
+  // Compose la liste : tous les managers tri + tous les users ADMIN/MANAGER
+  const all = [
+    ...(managers.employees || []).map((m) => ({ key: `e-${m.id}`, label: m.nom + (m.poste ? ` (${m.poste})` : '') })),
+    ...(managers.users || []).map((u) => ({ key: `u-${u.id}`, label: u.nom + ` [${u.role}]` })),
+  ];
+  // Si la valeur ne correspond à aucun, on l'ajoute en tête (cas legacy texte libre)
+  const valueExists = all.some((o) => o.label === value);
+  const options = !value || valueExists ? all : [{ key: 'custom', label: value + ' (saisi)' }, ...all];
+
+  return (
+    <select
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      className="input-modern text-sm"
+    >
+      <option value="">— Sélectionner —</option>
+      {options.map((o) => (
+        <option key={o.key} value={o.label}>{o.label}</option>
+      ))}
+    </select>
+  );
+}
+
+// Panneau récapitulatif des objectifs en vigueur (trim entrée + mois tri) avec alerte CSR
+function ObjectivesPanel({ objectives, onAdd, canEdit }) {
+  const trim = objectives.filter((o) => o.period_type === 'trimestriel');
+  const mois = objectives.filter((o) => o.period_type === 'mensuel');
+  const csrObj = mois.find((o) => o.type === 'csr');
+
+  const labelType = (t) => ({
+    entree_ligne: 'Entrée chaîne (kg)',
+    recyclage: '% Recyclage',
+    reemploi: '% Réemploi',
+    csr: '% CSR',
+  })[t] || t;
+
+  return (
+    <div className="card-modern p-4 mb-4">
+      <div className="flex items-center justify-between mb-3 border-b pb-2">
+        <h2 className="text-sm font-bold text-slate-700">
+          🎯 Objectifs en vigueur
+        </h2>
+        {canEdit && (
+          <button onClick={onAdd} className="text-xs text-primary hover:underline">
+            + Nouvel objectif
+          </button>
+        )}
+      </div>
+
+      {objectives.length === 0 ? (
+        <p className="text-xs text-slate-400 italic text-center py-4">Aucun objectif défini pour cette période</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Trimestre */}
+          <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+            <p className="text-xs font-bold text-blue-800 uppercase mb-2">Objectif trimestriel — Matière entrante</p>
+            {trim.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">Aucun</p>
+            ) : trim.map((o) => (
+              <div key={o.id} className="flex items-baseline justify-between text-sm">
+                <span className="text-slate-600">{labelType(o.type)}</span>
+                <span className="font-bold text-blue-700">{o.value_kg ? Number(o.value_kg).toLocaleString('fr-FR') + ' kg' : '—'}</span>
+              </div>
+            ))}
+            {trim[0]?.period_start && (
+              <p className="text-[10px] text-slate-400 mt-1">
+                {new Date(trim[0].period_start).toLocaleDateString('fr-FR')} → {new Date(trim[0].period_end).toLocaleDateString('fr-FR')}
+              </p>
+            )}
+          </div>
+
+          {/* Mois */}
+          <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+            <p className="text-xs font-bold text-emerald-800 uppercase mb-2">Objectif mensuel — Répartition tri</p>
+            {mois.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">Aucun</p>
+            ) : mois.map((o) => (
+              <div key={o.id} className="flex items-baseline justify-between text-sm">
+                <span className="text-slate-600 flex items-center gap-1">
+                  {labelType(o.type)}
+                  {o.type === 'csr' && o.alert_threshold_pct && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">⚠ alerte ≥ {o.alert_threshold_pct}%</span>
+                  )}
+                </span>
+                <span className="font-bold text-emerald-700">{o.value_pct != null ? `${o.value_pct}%` : '—'}</span>
+              </div>
+            ))}
+            {csrObj?.alert_threshold_pct && (
+              <p className="text-[10px] text-red-600 mt-1 italic">
+                Alerte CSR : ne doit pas dépasser {csrObj.alert_threshold_pct}% sur le trimestre
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
