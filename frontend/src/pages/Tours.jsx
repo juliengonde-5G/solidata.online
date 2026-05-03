@@ -90,8 +90,12 @@ export default function Tours() {
 
   const loadTourDetail = async (id) => {
     try {
-      const res = await api.get(`/tours/${id}`);
-      setSelectedTour(res.data);
+      // Détail de base + résumé enrichi (points, incidents, GPS, poids…)
+      const [base, summary] = await Promise.all([
+        api.get(`/tours/${id}`),
+        api.get(`/tours/${id}/live-summary`).catch(() => ({ data: null })),
+      ]);
+      setSelectedTour({ ...base.data, summary: summary.data });
     } catch (err) { console.error(err); }
   };
 
@@ -447,40 +451,11 @@ export default function Tours() {
               )}
         </Modal>
 
-        {/* Tour Detail Modal */}
+        {/* Tour Detail Panel (slide-in droite, large, enrichi) */}
         {selectedTour && (
           <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex justify-end z-50" onClick={() => setSelectedTour(null)}>
-            <div className="bg-white w-full sm:w-[480px] h-full overflow-y-auto shadow-elevated p-4 sm:p-6 animate-slide-in-right" onClick={e => e.stopPropagation()}>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-slate-800">Détail tournée #{selectedTour.id}</h2>
-                <button onClick={() => setSelectedTour(null)} className="text-slate-400 hover:text-slate-600 text-xl p-1 rounded-lg hover:bg-slate-100">&times;</button>
-              </div>
-              <div className="space-y-3 text-sm">
-                <Field label="Date" value={selectedTour.date ? new Date(selectedTour.date).toLocaleDateString('fr-FR') : '—'} />
-                <Field label="Véhicule" value={selectedTour.registration} />
-                <Field label="Chauffeur" value={selectedTour.driver_name} />
-                <Field label="Mode" value={MODE_LABELS[selectedTour.mode] || selectedTour.mode} />
-                <Field label="Statut" value={STATUS_LABELS[selectedTour.status] || selectedTour.status} />
-                <Field label="Poids total" value={selectedTour.total_weight_kg ? `${selectedTour.total_weight_kg} kg` : '—'} />
-                <Field label="Distance" value={selectedTour.estimated_distance_km ? `${selectedTour.estimated_distance_km} km` : '—'} />
-                <Field label="Durée" value={selectedTour.estimated_duration_min ? `${selectedTour.estimated_duration_min} min` : '—'} />
-              </div>
-              {selectedTour.cavs && selectedTour.cavs.length > 0 && (
-                <div className="mt-4">
-                  <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2"><MapPin className="w-4 h-4 text-teal-600" />Points de collecte ({selectedTour.cavs.length})</h3>
-                  <div className="space-y-2">
-                    {selectedTour.cavs.map((c, i) => (
-                      <div key={i} className="bg-slate-50 rounded-xl p-3 text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center text-[10px] font-bold">{c.ordre || i + 1}</span>
-                          <span className="font-semibold text-slate-800">{c.nom || c.cav_name}</span>
-                        </div>
-                        {c.collected_weight_kg && <p className="mt-1 text-slate-500 flex items-center gap-1"><Clock className="w-3 h-3" />Collecté : {c.collected_weight_kg} kg</p>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+            <div className="bg-white w-full sm:w-[680px] h-full overflow-y-auto shadow-elevated p-4 sm:p-6 animate-slide-in-right" onClick={e => e.stopPropagation()}>
+              <TourDetailPanel tour={selectedTour} onClose={() => setSelectedTour(null)} />
             </div>
           </div>
         )}
@@ -494,6 +469,181 @@ function Field({ label, value }) {
     <div>
       <span className="text-slate-500 text-xs font-medium">{label}</span>
       <p className="font-semibold text-slate-800">{value || '—'}</p>
+    </div>
+  );
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDur(min) {
+  if (min == null) return '—';
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h}h${String(m).padStart(2, '0')}`;
+}
+
+function TourDetailPanel({ tour, onClose }) {
+  const summary = tour.summary || {};
+  const points = summary.points || tour.cavs || [];
+  const incidents = summary.incidents || [];
+  const weights = summary.weights || [];
+  const distance = summary.distance_actual_km ?? summary.distance_km ?? tour.estimated_distance_km;
+  const duration = summary.elapsed_minutes ?? summary.duration_min ?? tour.estimated_duration_min;
+  const totalWeight = summary.total_weight_kg ?? tour.total_weight_kg ?? 0;
+  const avgFill = summary.avg_fill_percent ?? null;
+
+  return (
+    <>
+      <div className="flex justify-between items-start mb-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800">Tournée #{tour.id}</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            {tour.date ? new Date(tour.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '—'}
+            {tour.collection_type === 'association' && <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700">ASSOCIATIONS</span>}
+          </p>
+        </div>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none p-1 rounded-lg hover:bg-slate-100">&times;</button>
+      </div>
+
+      {/* Résumé en 3 colonnes */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <SummaryTile label="Statut" value={tour.status} />
+        <SummaryTile label="Mode" value={tour.mode} />
+        <SummaryTile label="Type" value={tour.collection_type === 'association' ? 'Asso' : 'CAV'} />
+      </div>
+
+      {/* Qui + véhicule */}
+      <div className="card-modern p-3 mb-4 bg-slate-50">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Qui & véhicule</h3>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <Field label="Chauffeur" value={tour.driver_name || [tour.driver_first_name, tour.driver_last_name].filter(Boolean).join(' ')} />
+          <Field label="Véhicule" value={tour.registration || tour.vehicle_registration || tour.vehicle_name} />
+          <Field label="Démarrage" value={tour.started_at ? new Date(tour.started_at).toLocaleString('fr-FR') : '—'} />
+          <Field label="Fin" value={tour.completed_at ? new Date(tour.completed_at).toLocaleString('fr-FR') : '—'} />
+        </div>
+      </div>
+
+      {/* KPI globaux */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+        <MiniStat label="Durée" value={fmtDur(duration)} />
+        <MiniStat label="Distance" value={distance ? `${Math.round(distance * 10) / 10} km` : '—'} />
+        <MiniStat label="Points" value={`${(summary.nb_collected ?? points.filter(p => p.status === 'collected').length)}/${points.length}`} />
+        <MiniStat label="Poids total" value={totalWeight ? `${Math.round(totalWeight)} kg` : '—'} />
+        {avgFill != null && <MiniStat label="Remplissage moy." value={`${avgFill}%`} />}
+        {incidents.length > 0 && <MiniStat label="Incidents" value={incidents.length} highlight />}
+      </div>
+
+      {/* Liste détaillée des points */}
+      <div className="mb-4">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-2">
+          <MapPin className="w-3.5 h-3.5" />
+          Points de collecte ({points.length})
+        </h3>
+        {points.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">Aucun point</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full text-xs">
+              <thead className="text-[10px] uppercase text-slate-500 bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left py-1.5 px-2 w-8">#</th>
+                  <th className="text-left py-1.5 px-2">Point</th>
+                  <th className="text-right py-1.5 px-2">Prévu</th>
+                  <th className="text-right py-1.5 px-2">Réel</th>
+                  <th className="text-right py-1.5 px-2">Remplissage</th>
+                  <th className="text-right py-1.5 px-2">Poids</th>
+                  <th className="text-center py-1.5 px-2">⚠</th>
+                </tr>
+              </thead>
+              <tbody>
+                {points.map((p, i) => (
+                  <tr key={p.id || i} className="border-b border-slate-100">
+                    <td className="py-1.5 px-2 font-mono text-slate-400">{p.position || i + 1}</td>
+                    <td className="py-1.5 px-2">
+                      <p className="font-medium text-slate-700">{p.cav_name || p.name || p.nom}</p>
+                      {p.commune && <p className="text-[10px] text-slate-400">{p.commune}</p>}
+                    </td>
+                    <td className="py-1.5 px-2 text-right text-slate-500">{fmtTime(p.planned_passage_at || p.planned_passage_time)}</td>
+                    <td className="py-1.5 px-2 text-right text-slate-700">{fmtTime(p.collected_at)}</td>
+                    <td className="py-1.5 px-2 text-right">
+                      {p.fill_level != null ? <span className="font-semibold">{p.fill_level}/5</span> : <span className="text-slate-400">—</span>}
+                    </td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">
+                      {p.weight_kg != null ? <span className="font-semibold">{Math.round(p.weight_kg)} kg</span> : (p.collected_weight_kg ? <span className="font-semibold">{Math.round(p.collected_weight_kg)} kg</span> : <span className="text-slate-400">—</span>)}
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      {p.has_incident && <span className="text-red-500" title="Incident">!</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Pesées centre de tri */}
+      {weights.length > 0 && (
+        <div className="mb-4">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-2">
+            <Truck className="w-3.5 h-3.5" />
+            Pesées au centre de tri ({weights.length})
+          </h3>
+          <div className="space-y-1">
+            {weights.map((w) => (
+              <div key={w.id} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-3 py-2">
+                <span className="text-slate-500">{fmtTime(w.recorded_at)}</span>
+                <span className="font-semibold">{Math.round(parseFloat(w.weight_kg) || 0)} kg</span>
+                {w.is_intermediate && <span className="text-[10px] text-amber-600">(intermédiaire)</span>}
+                {w.notes && <span className="text-[10px] text-slate-400 truncate">{w.notes}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Incidents */}
+      {incidents.length > 0 && (
+        <div className="mb-4">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2 flex items-center gap-2">
+            ⚠ Incidents déclarés ({incidents.length})
+          </h3>
+          <div className="space-y-2">
+            {incidents.map((inc) => (
+              <div key={inc.id} className="bg-red-50 border border-red-100 rounded-lg p-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-red-800">{inc.type}</span>
+                  <span className="text-[10px] text-red-500">{fmtTime(inc.created_at)}</span>
+                </div>
+                {inc.description && <p className="text-slate-600 mt-1">{inc.description}</p>}
+                <p className="text-[10px] text-slate-400 mt-1">Statut : {inc.status}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function SummaryTile({ label, value }) {
+  return (
+    <div className="bg-slate-50 rounded-lg p-2 text-center">
+      <p className="text-[10px] text-slate-500 uppercase">{label}</p>
+      <p className="text-sm font-semibold text-slate-700 mt-0.5">{value || '—'}</p>
+    </div>
+  );
+}
+
+function MiniStat({ label, value, highlight }) {
+  return (
+    <div className={`rounded-lg p-2 ${highlight ? 'bg-red-50 border border-red-100' : 'bg-slate-50'}`}>
+      <p className="text-[10px] text-slate-500 uppercase">{label}</p>
+      <p className={`text-sm font-bold ${highlight ? 'text-red-700' : 'text-slate-800'}`}>{value}</p>
     </div>
   );
 }

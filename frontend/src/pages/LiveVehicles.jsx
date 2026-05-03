@@ -7,8 +7,9 @@ import L from 'leaflet';
 import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
 import {
-  MapPin, Truck, Gauge, Clock, Target, TrendingUp, AlertTriangle,
-  CheckCircle2, CircleDashed, XCircle, Wrench, Info, Shuffle, Filter,
+  MapPin, Truck, Gauge, Clock, AlertTriangle,
+  CheckCircle2, CircleDashed, XCircle, Activity,
+  Route as RouteIcon, Users, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -18,673 +19,446 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
-const truckIcon = new L.DivIcon({
-  html: '<div style="background:#0D9488;color:white;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4)">🚛</div>',
-  className: '',
-  iconSize: [36, 36],
-  iconAnchor: [18, 18],
-});
+// Palette de couleurs distinctes par tournée (max 12)
+const TOUR_COLORS = ['#0D9488', '#6366F1', '#F59E0B', '#EC4899', '#8B5CF6', '#10B981', '#EF4444', '#F97316', '#06B6D4', '#84CC16', '#A855F7', '#14B8A6'];
 
-const POINT_COLORS = {
-  collected: '#16a34a',
-  pending: '#cbd5e1',
-  skipped: '#f59e0b',
-  incident: '#dc2626',
-};
-
-function formatDuration(minutes) {
-  if (minutes === null || minutes === undefined) return '—';
-  if (minutes < 60) return `${minutes} min`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `${h}h${m.toString().padStart(2, '0')}`;
+function truckIcon(color) {
+  return new L.DivIcon({
+    html: `<div style="background:${color};color:white;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:16px;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4)">🚛</div>`,
+    className: '',
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
 }
 
-function formatTime(iso) {
+function fmtDuration(min) {
+  if (min == null) return '—';
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h}h${String(m).padStart(2, '0')}`;
+}
+
+function fmtTime(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
-function DelayBadge({ minutes }) {
-  if (minutes === null || minutes === undefined) return null;
-  const late = minutes > 2;
-  const early = minutes < -2;
-  const cls = late ? 'bg-red-100 text-red-700' : early ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700';
-  const sign = minutes > 0 ? '+' : '';
-  return (
-    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${cls}`}>
-      {sign}{minutes} min
-    </span>
-  );
-}
-
-function FillBar({ level }) {
-  if (level === null || level === undefined) return <span className="text-xs text-slate-400">—</span>;
-  const percent = Math.min(100, Math.max(0, level * 20));
-  const color = percent >= 80 ? 'bg-red-500' : percent >= 50 ? 'bg-amber-500' : 'bg-emerald-500';
-  return (
-    <div className="flex items-center gap-1.5 min-w-[60px]">
-      <div className="h-1.5 bg-slate-200 rounded-full flex-1 overflow-hidden">
-        <div className={`h-full ${color}`} style={{ width: `${percent}%` }} />
-      </div>
-      <span className="text-[10px] text-slate-500 tabular-nums">{percent}%</span>
-    </div>
-  );
-}
-
-function StatusIcon({ status }) {
-  switch (status) {
-    case 'collected': return <CheckCircle2 className="w-4 h-4 text-emerald-600" />;
-    case 'skipped': return <XCircle className="w-4 h-4 text-amber-600" />;
-    case 'incident': return <AlertTriangle className="w-4 h-4 text-red-600" />;
-    default: return <CircleDashed className="w-4 h-4 text-slate-400" />;
-  }
-}
-
-function AlertBanner({ alerts }) {
-  if (!alerts || alerts.length === 0) {
-    return (
-      <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-50 border border-emerald-100">
-        <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-        <span className="text-sm text-emerald-800">Tournée nominale — aucune alerte</span>
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-1.5">
-      {alerts.map((a, i) => {
-        const color = a.level === 'error'
-          ? 'bg-red-50 border-red-100 text-red-800'
-          : a.level === 'warn'
-          ? 'bg-amber-50 border-amber-100 text-amber-800'
-          : 'bg-blue-50 border-blue-100 text-blue-800';
-        const Icon = a.category === 'maintenance' ? Wrench : a.category === 'delay' ? Clock : a.category === 'incident' ? AlertTriangle : Info;
-        return (
-          <div key={i} className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${color}`}>
-            <Icon className="w-4 h-4 flex-shrink-0" />
-            <span className="text-sm">{a.message}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function KPICard({ label, value, unit, icon: Icon, accent = 'slate' }) {
-  const styles = {
-    green: 'bg-emerald-50 text-emerald-700',
-    amber: 'bg-amber-50 text-amber-700',
-    red: 'bg-red-50 text-red-700',
-    blue: 'bg-blue-50 text-blue-700',
-    slate: 'bg-slate-100 text-slate-700',
-  };
-  return (
-    <div className="card-modern p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium truncate">{label}</p>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-xl font-bold text-slate-800 tabular-nums">{value}</span>
-            {unit && <span className="text-xs text-slate-400">{unit}</span>}
-          </div>
-        </div>
-        {Icon && (
-          <div className={`p-1.5 rounded-lg ${styles[accent] || styles.slate}`}>
-            <Icon className="w-4 h-4" />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export default function LiveVehicles() {
-  const [activeTours, setActiveTours] = useState([]);
-  const [selectedTourId, setSelectedTourId] = useState(null);
-  const [summary, setSummary] = useState(null);
-  const [livePosition, setLivePosition] = useState(null);
-  const [trail, setTrail] = useState([]);
+export default function CollectionsLive() {
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('all'); // all | pending | collected | skipped | incident
-  const [communeFilter, setCommuneFilter] = useState('all');
-  const [botInsights, setBotInsights] = useState([]);
+  const [expandedTour, setExpandedTour] = useState(null);
+  const [livePositions, setLivePositions] = useState({}); // vehicle_id → {lat, lng, speed, ts}
   const socketRef = useRef(null);
 
-  // Initialisation : liste des tournées actives + connexion socket
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get('/tours?status=in_progress');
-        setActiveTours(res.data || []);
-        if (res.data && res.data.length > 0) {
-          setSelectedTourId(res.data[0].id);
+  const loadActive = useCallback(async () => {
+    try {
+      const res = await api.get('/tours/active-summary');
+      setData(res.data);
+      // Pré-remplir livePositions avec last_position
+      const initialPositions = {};
+      (res.data.tours || []).forEach((t) => {
+        if (t.last_position && t.vehicle_id) {
+          initialPositions[t.vehicle_id] = {
+            lat: t.last_position.latitude,
+            lng: t.last_position.longitude,
+            speed: t.last_position.speed,
+            ts: t.last_position.recorded_at,
+          };
         }
-      } catch (err) {
-        console.error('[CollectionsLive] Chargement tournées actives:', err);
-      }
-      setLoading(false);
-    })();
+      });
+      setLivePositions(initialPositions);
+    } catch (err) {
+      console.error('[CollectionsLive] active-summary:', err);
+    }
+    setLoading(false);
+  }, []);
+
+  // Initial load + polling 30s + Socket.IO pour positions GPS temps réel
+  useEffect(() => {
+    loadActive();
+    const interval = setInterval(loadActive, 30000);
 
     const token = localStorage.getItem('token');
     const socket = io(window.location.origin, { auth: { token } });
     socketRef.current = socket;
 
-    socket.on('connect_error', (err) => {
-      console.warn('[CollectionsLive] Socket error:', err?.message);
+    socket.on('vehicle-position', (d) => {
+      const lat = parseFloat(d.latitude);
+      const lng = parseFloat(d.longitude);
+      const vId = d.vehicle_id || d.vehicleId;
+      if (!vId || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      setLivePositions((prev) => ({
+        ...prev,
+        [vId]: { lat, lng, speed: d.speed, ts: d.timestamp || new Date().toISOString() },
+      }));
     });
-
-    return () => { socket.disconnect(); };
-  }, []);
-
-  // Charger la synthèse de la tournée sélectionnée
-  const loadSummary = useCallback(async (tourId) => {
-    if (!tourId) return;
-    setSummaryLoading(true);
-    try {
-      const res = await api.get(`/tours/${tourId}/live-summary`);
-      setSummary(res.data);
-      // Observations SolidataBot (Niveau 3.4) — best-effort, non bloquant
-      api.get(`/chat/insights/tour/${tourId}`)
-        .then(r => setBotInsights(r.data?.insights || []))
-        .catch(() => setBotInsights([]));
-      // Initialiser le trail avec la dernière position si dispo
-      if (res.data.last_position) {
-        setLivePosition({
-          lat: res.data.last_position.latitude,
-          lng: res.data.last_position.longitude,
-          speed: res.data.last_position.speed,
-          timestamp: res.data.last_position.recorded_at,
-        });
-      } else {
-        setLivePosition(null);
-      }
-      setTrail([]);
-    } catch (err) {
-      console.error('[CollectionsLive] Chargement synthèse:', err);
-    }
-    setSummaryLoading(false);
-  }, []);
-
-  // Rejoindre la room Socket.IO + charger la synthèse quand la tournée change
-  useEffect(() => {
-    if (!selectedTourId || !socketRef.current) return;
-    const socket = socketRef.current;
-
-    const join = () => socket.emit('join-tour', parseInt(selectedTourId, 10));
-    if (socket.connected) join();
-    else socket.once('connect', join);
-
-    loadSummary(selectedTourId);
-
-    const onPosition = (data) => {
-      const tourKey = data.tourId || data.tour_id;
-      if (parseInt(tourKey, 10) !== parseInt(selectedTourId, 10)) return;
-      const lat = parseFloat(data.latitude);
-      const lng = parseFloat(data.longitude);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      setLivePosition({ lat, lng, speed: data.speed, timestamp: data.timestamp });
-      setTrail(prev => [...prev, [lat, lng]].slice(-200));
-    };
-
-    const onCavUpdate = () => {
-      // Rafraîchit la synthèse complète pour mettre à jour KPI + liste CAV.
-      loadSummary(selectedTourId);
-    };
-    const onTourUpdate = () => loadSummary(selectedTourId);
-    const onReoptUpdate = () => loadSummary(selectedTourId);
-
-    socket.on('vehicle-position', onPosition);
-    socket.on('cav-status-update', onCavUpdate);
-    socket.on('tour-status-update', onTourUpdate);
-    socket.on('reoptimization-proposal', onReoptUpdate);
-    socket.on('reoptimization-accepted', onReoptUpdate);
-    socket.on('reoptimization-rejected', onReoptUpdate);
+    socket.on('cav-status-update', loadActive);
+    socket.on('tour-status-update', loadActive);
 
     return () => {
-      socket.off('vehicle-position', onPosition);
-      socket.off('cav-status-update', onCavUpdate);
-      socket.off('tour-status-update', onTourUpdate);
-      socket.off('reoptimization-proposal', onReoptUpdate);
-      socket.off('reoptimization-accepted', onReoptUpdate);
-      socket.off('reoptimization-rejected', onReoptUpdate);
+      clearInterval(interval);
+      socket.disconnect();
     };
-  }, [selectedTourId, loadSummary]);
+  }, [loadActive]);
 
-  const requestReoptimization = useCallback(async () => {
-    if (!selectedTourId) return;
-    try {
-      await api.post(`/tours/${selectedTourId}/reoptimize`, {
-        current_lat: livePosition?.lat ?? null,
-        current_lng: livePosition?.lng ?? null,
-        reason: 'manual',
-      });
-      loadSummary(selectedTourId);
-    } catch (err) {
-      console.error('[CollectionsLive] reoptimize :', err);
-    }
-  }, [selectedTourId, livePosition, loadSummary]);
+  const tours = data?.tours || [];
+  const kpis = data?.kpis || { vehicules_actifs: 0, cav_a_vider: 0, avancement_pct: 0, distance_restante_km: 0 };
 
-  const decideReoptimization = useCallback(async (reoptId, action) => {
-    if (!selectedTourId || !reoptId) return;
-    try {
-      await api.post(`/tours/${selectedTourId}/reoptimize/${reoptId}/${action}`);
-      loadSummary(selectedTourId);
-    } catch (err) {
-      console.error('[CollectionsLive] reopt decision :', err);
-    }
-  }, [selectedTourId, loadSummary]);
-
-  // Polling filet de sécurité (20 s) pour remonter incidents/pesées si socket muet
-  useEffect(() => {
-    if (!selectedTourId) return;
-    const interval = setInterval(() => loadSummary(selectedTourId), 20000);
-    return () => clearInterval(interval);
-  }, [selectedTourId, loadSummary]);
-
+  // Centre de la carte : moyenne des positions actuelles (ou Rouen)
   const mapCenter = useMemo(() => {
-    if (livePosition) return [livePosition.lat, livePosition.lng];
-    if (summary?.points?.length) {
-      const p = summary.points.find(pt => pt.latitude && pt.longitude) || summary.points[0];
-      if (p?.latitude) return [parseFloat(p.latitude), parseFloat(p.longitude)];
+    const positions = Object.values(livePositions);
+    if (positions.length === 0) {
+      // Fallback : moyenne des points CAV à vider
+      const allPoints = tours.flatMap((t) => t.points.filter((p) => p.latitude && p.longitude));
+      if (allPoints.length === 0) return [49.4231, 1.0993];
+      const avgLat = allPoints.reduce((s, p) => s + p.latitude, 0) / allPoints.length;
+      const avgLng = allPoints.reduce((s, p) => s + p.longitude, 0) / allPoints.length;
+      return [avgLat, avgLng];
     }
-    return [49.4231, 1.0993];
-  }, [livePosition, summary]);
+    return [
+      positions.reduce((s, p) => s + p.lat, 0) / positions.length,
+      positions.reduce((s, p) => s + p.lng, 0) / positions.length,
+    ];
+  }, [livePositions, tours]);
 
-  // ⚠ Tous les hooks doivent être appelés de façon inconditionnelle
-  // avant les early returns pour respecter la règle des Hooks de React.
-  const allPoints = summary?.points || [];
-  const communes = useMemo(() => {
-    const set = new Set();
-    for (const p of allPoints) { if (p.commune) set.add(p.commune); }
-    return Array.from(set).sort();
-  }, [allPoints]);
-  const filteredPoints = useMemo(() => {
-    return allPoints.filter(p => {
-      if (statusFilter !== 'all') {
-        if (statusFilter === 'incident' ? !p.has_incident : p.status !== statusFilter) return false;
-      }
-      if (communeFilter !== 'all' && p.commune !== communeFilter) return false;
-      return true;
-    });
-  }, [allPoints, statusFilter, communeFilter]);
-
-  if (loading) {
-    return <Layout><LoadingSpinner size="lg" message="Chargement des tournées en cours…" /></Layout>;
-  }
-
-  if (activeTours.length === 0) {
-    return (
-      <Layout>
-        <div className="p-6">
-          <PageHeader
-            title="Suivi des collectes en cours"
-            subtitle="Tournées actives en temps réel"
-            icon={Truck}
-          />
-          <div className="card-modern p-12 text-center">
-            <CircleDashed className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500">Aucune tournée en cours pour le moment.</p>
-            <p className="text-sm text-slate-400 mt-1">Les tournées démarrées par les chauffeurs apparaîtront ici automatiquement.</p>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  const kpis = summary?.kpis || {};
-  const alerts = summary?.alerts || [];
-  const tour = summary?.tour;
-  const pendingReopt = summary?.pending_reoptimization || null;
-  const batches = summary?.batches || [];
-  const points = filteredPoints;
-  const filtersActive = statusFilter !== 'all' || communeFilter !== 'all';
+  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement…" /></Layout>;
 
   return (
     <Layout>
-      <div className="p-4 md:p-6 space-y-4">
-        {/* Top bar : sélection véhicule/tournée */}
+      <div className="space-y-4">
         <PageHeader
-          title="Suivi des collectes en cours"
-          subtitle={`${activeTours.length} tournée${activeTours.length > 1 ? 's' : ''} active${activeTours.length > 1 ? 's' : ''} · temps réel via GPS`}
-          icon={MapPin}
+          title="Collecte en direct"
+          subtitle={`Suivi temps réel des tournées — ${data?.date ? new Date(data.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : ''}`}
+          icon={Activity}
           actions={
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={requestReoptimization}
-                disabled={!!pendingReopt}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                title={pendingReopt ? 'Une proposition est déjà en attente' : 'Proposer une ré-optimisation'}
-              >
-                <Shuffle className="w-4 h-4" />
-                Ré-optimiser
-              </button>
-              <label className="text-xs font-medium text-slate-500">Tournée</label>
-              <select
-                value={selectedTourId || ''}
-                onChange={(e) => setSelectedTourId(parseInt(e.target.value, 10))}
-                className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                {activeTours.map(t => (
-                  <option key={t.id} value={t.id}>
-                    {t.registration || `Tournée #${t.id}`} — {t.driver_name || 'sans chauffeur'}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <button onClick={loadActive} className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600">
+              Actualiser
+            </button>
           }
         />
 
-        {/* Proposition de ré-optimisation en attente */}
-        {pendingReopt && (
-          <div className="card-modern border-2 border-amber-300 bg-amber-50 p-4">
-            <div className="flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-amber-100 flex-shrink-0">
-                <Shuffle className="w-5 h-5 text-amber-700" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-amber-900">
-                  Proposition de ré-optimisation de l'ordre des CAV
-                </p>
-                <p className="text-xs text-amber-800 mt-0.5">
-                  Déclencheur : <strong>{pendingReopt.trigger_reason}</strong>
-                  {' · '}Source : {pendingReopt.triggered_by}
-                  {' · '}Gain estimé :{' '}
-                  <strong>
-                    −{Math.round(((pendingReopt.old_distance_km - pendingReopt.new_distance_km) / Math.max(0.1, pendingReopt.old_distance_km)) * 100)}%
-                    {' '}
-                    ({(pendingReopt.old_distance_km ?? 0).toFixed(1)} km → {(pendingReopt.new_distance_km ?? 0).toFixed(1)} km)
-                  </strong>
-                </p>
-                <p className="text-[11px] text-amber-700 mt-0.5">
-                  Durée : {Math.round(pendingReopt.old_duration_min ?? 0)} min → {Math.round(pendingReopt.new_duration_min ?? 0)} min
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => decideReoptimization(pendingReopt.id, 'reject')}
-                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50"
-                >
-                  Refuser
-                </button>
-                <button
-                  type="button"
-                  onClick={() => decideReoptimization(pendingReopt.id, 'accept')}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
-                >
-                  Accepter
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Bandeau alertes "Op Solidata" (alertes live + insights SolidataBot) */}
-        <AlertBanner alerts={[
-          ...alerts,
-          ...botInsights.map(i => ({ level: i.level, category: i.category, message: `💡 ${i.message}` })),
-        ]} />
-
-        {/* Filtres carte & liste (Niveau 2.5) */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <div className="flex items-center gap-1.5 text-slate-500">
-            <Filter className="w-3.5 h-3.5" />
-            <span className="font-medium">Filtres</span>
-          </div>
-          <div className="flex items-center gap-1">
-            {[
-              { key: 'all', label: 'Tous' },
-              { key: 'pending', label: 'À venir' },
-              { key: 'collected', label: 'Collectés' },
-              { key: 'skipped', label: 'Ignorés' },
-              { key: 'incident', label: 'Incidents' },
-            ].map(s => (
-              <button
-                key={s.key}
-                onClick={() => setStatusFilter(s.key)}
-                className={`px-2 py-1 rounded-md border transition ${
-                  statusFilter === s.key
-                    ? 'bg-emerald-600 text-white border-emerald-600'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          {communes.length > 1 && (
-            <select
-              value={communeFilter}
-              onChange={(e) => setCommuneFilter(e.target.value)}
-              className="px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-700"
-            >
-              <option value="all">Toutes communes</option>
-              {communes.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          )}
-          {filtersActive && (
-            <button
-              onClick={() => { setStatusFilter('all'); setCommuneFilter('all'); }}
-              className="text-slate-400 hover:text-slate-600 underline"
-            >
-              Réinitialiser
-            </button>
-          )}
-          <span className="text-slate-400 ml-auto">
-            {points.length} / {allPoints.length} points
-          </span>
-        </div>
-
-        {/* KPI row */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <KPICard
-            label="Avancement"
-            value={`${kpis.nb_cav_collected ?? 0}/${kpis.nb_cav_total ?? 0}`}
-            unit={`${kpis.progress_percent ?? 0}%`}
-            icon={Target}
-            accent="green"
+        {/* KPIs en haut */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiTile
+            label="Véhicules en collecte"
+            value={kpis.vehicules_actifs}
+            icon={Truck}
+            color="teal"
           />
-          <KPICard
-            label="Remplissage camion"
-            value={`${kpis.fill_cumulated_percent ?? 0}`}
-            unit="%"
-            icon={TrendingUp}
-            accent={kpis.fill_cumulated_percent >= 80 ? 'red' : kpis.fill_cumulated_percent >= 50 ? 'amber' : 'green'}
+          <KpiTile
+            label="CAV à vider"
+            value={kpis.cav_a_vider}
+            icon={MapPin}
+            color={kpis.cav_a_vider > 0 ? 'amber' : 'emerald'}
           />
-          <KPICard
-            label="Distance parcourue"
-            value={kpis.distance_km ?? 0}
-            unit="km"
+          <KpiTile
+            label="Avancement de la journée"
+            value={`${kpis.avancement_pct}%`}
             icon={Gauge}
-            accent="slate"
+            color={kpis.avancement_pct >= 80 ? 'emerald' : kpis.avancement_pct >= 50 ? 'amber' : 'slate'}
+            footer={<ProgressBar pct={kpis.avancement_pct} />}
           />
-          <KPICard
-            label="Durée écoulée"
-            value={formatDuration(kpis.elapsed_min)}
-            icon={Clock}
-            accent="slate"
-          />
-          <KPICard
-            label="Décalage moyen"
-            value={kpis.avg_delay_min === null || kpis.avg_delay_min === undefined ? '—' : `${kpis.avg_delay_min > 0 ? '+' : ''}${kpis.avg_delay_min}`}
-            unit={kpis.avg_delay_min !== null && kpis.avg_delay_min !== undefined ? 'min' : ''}
-            icon={Clock}
-            accent={kpis.avg_delay_min > 15 ? 'red' : kpis.avg_delay_min > 5 ? 'amber' : 'green'}
-          />
-          <KPICard
-            label="ETA fin"
-            value={formatTime(kpis.eta_end)}
-            icon={Clock}
-            accent="blue"
+          <KpiTile
+            label="Distance restante"
+            value={`${kpis.distance_restante_km} km`}
+            icon={RouteIcon}
+            color="slate"
           />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Carte */}
-          <div className="lg:col-span-2 card-modern overflow-hidden" style={{ height: '70vh' }}>
-            <MapContainer center={mapCenter} zoom={12} style={{ height: '100%', width: '100%' }}>
-              <MapSizeFix />
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-              />
+        {tours.length === 0 ? (
+          <div className="card-modern p-12 text-center">
+            <Truck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <p className="text-slate-500">Aucune tournée active aujourd'hui</p>
+            <p className="text-xs text-slate-400 mt-1">Les tournées planifiées apparaîtront ici dès leur démarrage</p>
+          </div>
+        ) : (
+          <>
+            {/* Carte multi-tournées */}
+            <div className="card-modern overflow-hidden" style={{ height: '60vh' }}>
+              <MapContainer center={mapCenter} zoom={11} style={{ height: '100%', width: '100%' }}>
+                <MapSizeFix />
+                <TileLayer
+                  attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
+                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                />
 
-              {/* Markers CAV */}
-              {points.map((p) => {
-                if (!p.latitude || !p.longitude) return null;
-                const color = POINT_COLORS[p.status] || POINT_COLORS.pending;
+                {tours.map((tour, idx) => {
+                  const color = TOUR_COLORS[idx % TOUR_COLORS.length];
+                  const validPoints = tour.points.filter((p) => p.latitude && p.longitude);
+                  const linePoints = validPoints
+                    .filter((p) => p.status === 'pending' || p.status === 'in_progress')
+                    .map((p) => [p.latitude, p.longitude]);
+
+                  return (
+                    <FragmentBlock key={tour.id}>
+                      {/* Itinéraire restant */}
+                      {linePoints.length >= 2 && (
+                        <Polyline
+                          positions={linePoints}
+                          pathOptions={{ color, weight: 3, opacity: 0.6, dashArray: '6 4' }}
+                        />
+                      )}
+
+                      {/* Points CAV */}
+                      {validPoints.map((p) => {
+                        const isCollected = p.status === 'collected';
+                        const isIncident = p.status === 'incident' || p.status === 'skipped';
+                        return (
+                          <CircleMarker
+                            key={`${tour.id}-${p.id}`}
+                            center={[p.latitude, p.longitude]}
+                            radius={isCollected ? 6 : 9}
+                            pathOptions={{
+                              color: 'white',
+                              weight: 2,
+                              fillColor: isIncident ? '#dc2626' : isCollected ? '#94A3B8' : color,
+                              fillOpacity: isCollected ? 0.5 : 0.95,
+                            }}
+                          >
+                            <Popup>
+                              <div className="text-xs space-y-0.5">
+                                <p className="font-bold">{p.position}. {p.name}</p>
+                                {p.address && <p className="text-slate-500">{p.address}</p>}
+                                <p>Statut : <strong>{p.status}</strong></p>
+                                {p.collected_at && <p>Collecté à : {fmtTime(p.collected_at)}</p>}
+                                {p.weight_kg != null && <p>Poids déclaré : <strong>{p.weight_kg} kg</strong></p>}
+                                {p.fill_level != null && <p>Remplissage : <strong>{p.fill_level}/5</strong></p>}
+                                {p.planned_passage_time && !isCollected && (
+                                  <p className="text-slate-400">Passage prévu : {fmtTime(p.planned_passage_time)}</p>
+                                )}
+                                <p className="mt-1 text-[10px] uppercase tracking-wider" style={{ color }}>
+                                  Tournée #{tour.id} — {tour.driver_name || '—'}
+                                </p>
+                              </div>
+                            </Popup>
+                          </CircleMarker>
+                        );
+                      })}
+
+                      {/* Position véhicule en temps réel */}
+                      {livePositions[tour.vehicle_id] && (
+                        <Marker
+                          position={[livePositions[tour.vehicle_id].lat, livePositions[tour.vehicle_id].lng]}
+                          icon={truckIcon(color)}
+                        >
+                          <Popup>
+                            <div className="text-xs space-y-1">
+                              <p className="font-bold" style={{ color }}>🚛 {tour.vehicle_registration || tour.vehicle_name || '—'}</p>
+                              <p>Chauffeur : {tour.driver_name || '—'}</p>
+                              <p>Vitesse : {livePositions[tour.vehicle_id].speed != null ? `${Math.round(livePositions[tour.vehicle_id].speed)} km/h` : '—'}</p>
+                              <p>Maj : {fmtTime(livePositions[tour.vehicle_id].ts)}</p>
+                              <p className="text-slate-500">{tour.nb_collected}/{tour.nb_points} collectés</p>
+                            </div>
+                          </Popup>
+                        </Marker>
+                      )}
+                    </FragmentBlock>
+                  );
+                })}
+              </MapContainer>
+            </div>
+
+            {/* Légende des tournées */}
+            <div className="flex flex-wrap gap-3 px-2 text-xs">
+              {tours.map((tour, idx) => {
+                const color = TOUR_COLORS[idx % TOUR_COLORS.length];
                 return (
-                  <CircleMarker
-                    key={p.id}
-                    center={[parseFloat(p.latitude), parseFloat(p.longitude)]}
-                    radius={8}
-                    pathOptions={{ color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.9 }}
-                  >
-                    <Popup>
-                      <div className="text-xs space-y-0.5">
-                        <p className="font-bold">{p.position}. {p.cav_name}</p>
-                        {p.address && <p className="text-slate-500">{p.address}</p>}
-                        <p>Statut : <strong>{p.status}</strong></p>
-                        {p.fill_level !== null && p.fill_level !== undefined && (
-                          <p>Remplissage : <strong>{p.fill_level * 20}%</strong></p>
-                        )}
-                        {p.has_incident && (
-                          <p className="text-red-600">⚠ Incident signalé</p>
-                        )}
-                        {p.collected_at && (
-                          <p className="text-slate-500">Collecté à {formatTime(p.collected_at)}</p>
-                        )}
-                      </div>
-                    </Popup>
-                  </CircleMarker>
+                  <div key={tour.id} className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                    <span className="font-medium text-slate-700">#{tour.id}</span>
+                    <span className="text-slate-500">— {tour.driver_name || 'sans chauffeur'}</span>
+                    <span className="text-[10px] text-slate-400">({tour.collection_type === 'association' ? 'asso' : 'CAV'})</span>
+                  </div>
                 );
               })}
-
-              {/* Trail GPS */}
-              {trail.length > 1 && (
-                <Polyline positions={trail} pathOptions={{ color: '#0D9488', weight: 3, opacity: 0.7 }} />
-              )}
-
-              {/* Position véhicule live */}
-              {livePosition && (
-                <Marker position={[livePosition.lat, livePosition.lng]} icon={truckIcon}>
-                  <Popup>
-                    <div className="text-xs">
-                      <p className="font-bold">{tour?.vehicle?.registration || 'Véhicule'}</p>
-                      <p>{tour?.driver?.name || '—'}</p>
-                      <p>Vitesse : {livePosition.speed ? `${Math.round(livePosition.speed)} km/h` : '—'}</p>
-                      <p className="text-slate-400">{livePosition.timestamp ? formatTime(livePosition.timestamp) : ''}</p>
-                    </div>
-                  </Popup>
-                </Marker>
-              )}
-            </MapContainer>
-          </div>
-
-          {/* Liste CAV */}
-          <div className="card-modern overflow-hidden flex flex-col" style={{ height: '70vh' }}>
-            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-slate-800 text-sm">Points de la tournée</h3>
-                <p className="text-[11px] text-slate-500">
-                  {tour?.collection_type === 'association' ? 'Points associations' : 'Conteneurs CAV'}
-                  {' · '}
-                  {kpis.nb_cav_collected ?? 0}/{kpis.nb_cav_total ?? 0} collectés
-                </p>
-              </div>
-              {summaryLoading && <LoadingSpinner size="sm" />}
             </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-              {points.length === 0 && (
-                <div className="p-6 text-center text-sm text-slate-400">
-                  Aucun point dans la tournée
-                </div>
-              )}
-              {points.map((p) => (
-                <div key={p.id} className="px-4 py-3 hover:bg-slate-50">
-                  <div className="flex items-start gap-2">
-                    <div className="pt-0.5"><StatusIcon status={p.status} /></div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-semibold text-slate-400 tabular-nums">#{p.position}</span>
-                        <span className="text-sm font-medium text-slate-800 truncate">{p.cav_name}</span>
-                      </div>
-                      {p.commune && (
-                        <p className="text-[11px] text-slate-500 truncate">{p.commune}</p>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                        {p.status === 'collected' && (
-                          <>
-                            <FillBar level={p.fill_level} />
-                            <span className="text-[11px] text-slate-500">
-                              {formatTime(p.collected_at)}
-                            </span>
-                            <DelayBadge minutes={p.delay_minutes} />
-                          </>
-                        )}
-                        {p.status === 'pending' && p.planned_passage_at && (
-                          <span className="text-[11px] text-slate-500">
-                            Prévu : {formatTime(p.planned_passage_at)}
-                          </span>
-                        )}
-                        {p.status === 'skipped' && (
-                          <span className="text-[11px] text-amber-700 font-medium">Non collecté</span>
-                        )}
-                        {p.has_incident && (
-                          <span title={p.incidents[0]?.description || 'Incident'}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 px-1.5 py-0.5 rounded">
-                            <AlertTriangle className="w-3 h-3" /> Incident
-                          </span>
-                        )}
-                      </div>
-
-                      {p.notes && (
-                        <p className="text-[11px] text-slate-500 italic mt-1 truncate">« {p.notes} »</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Pied : pesée retour tri + batches liés (Niveau 2.4) */}
-            {(summary?.weights?.length > 0 || batches.length > 0) && (
-              <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 text-xs space-y-1">
-                {summary?.weights?.length > 0 && (
-                  <div>
-                    <span className="text-slate-500">Pesée retour : </span>
-                    <span className="font-semibold text-slate-700">
-                      {Math.round((kpis.total_weight_kg || 0) * 10) / 10} kg
-                    </span>
-                    <span className="text-slate-400 ml-2">
-                      ({summary.weights.length} pesée{summary.weights.length > 1 ? 's' : ''})
-                    </span>
-                  </div>
-                )}
-                {batches.length > 0 && batches.map(b => (
-                  <div key={b.id} className="flex items-center justify-between">
-                    <span className="text-slate-500">
-                      Batch tri : <span className="font-mono font-semibold text-slate-700">{b.code}</span>
-                      {b.chaine_nom ? <span className="text-slate-400 ml-1">· {b.chaine_nom}</span> : null}
-                    </span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                      b.status === 'termine' ? 'bg-emerald-100 text-emerald-700'
-                      : b.status === 'en_cours' ? 'bg-amber-100 text-amber-700'
-                      : b.status === 'annule' ? 'bg-red-100 text-red-700'
-                      : 'bg-slate-200 text-slate-600'}`}>
-                      {b.status}
-                    </span>
-                  </div>
-                ))}
+            {/* Tableau synthèse par tournée */}
+            <div className="card-modern overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <h2 className="font-semibold text-slate-700">Synthèse par tournée</h2>
+                <span className="text-xs text-slate-400">{tours.length} tournée{tours.length > 1 ? 's' : ''}</span>
               </div>
-            )}
-          </div>
-        </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs uppercase text-slate-500 bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="text-left py-2 px-3 w-12"></th>
+                      <th className="text-left py-2 px-3">Tournée</th>
+                      <th className="text-left py-2 px-3">Chauffeur / Véhicule</th>
+                      <th className="text-center py-2 px-3">Avancement</th>
+                      <th className="text-right py-2 px-3">CAV</th>
+                      <th className="text-right py-2 px-3">Distance</th>
+                      <th className="text-right py-2 px-3">Temps</th>
+                      <th className="text-center py-2 px-3">Alerte</th>
+                      <th className="text-right py-2 px-3">Poids</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tours.map((tour, idx) => {
+                      const color = TOUR_COLORS[idx % TOUR_COLORS.length];
+                      const isExpanded = expandedTour === tour.id;
+                      return (
+                        <FragmentBlock key={tour.id}>
+                          <tr
+                            onClick={() => setExpandedTour(isExpanded ? null : tour.id)}
+                            className={`border-b border-slate-100 cursor-pointer transition ${isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50'}`}
+                          >
+                            <td className="py-2 px-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
+                              </div>
+                            </td>
+                            <td className="py-2 px-3">
+                              <p className="font-semibold text-slate-800">#{tour.id}</p>
+                              <p className="text-[10px] text-slate-500">{tour.collection_type === 'association' ? 'Associations' : 'CAV'} · {tour.status}</p>
+                            </td>
+                            <td className="py-2 px-3">
+                              <p className="font-medium text-slate-700">{tour.driver_name || '—'}</p>
+                              <p className="text-[10px] text-slate-500">{tour.vehicle_registration || tour.vehicle_name || '—'}</p>
+                            </td>
+                            <td className="py-2 px-3 min-w-[140px]">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                  <ProgressBar pct={tour.progress_pct} color={color} />
+                                </div>
+                                <span className="text-xs font-semibold tabular-nums">{tour.progress_pct}%</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-3 text-right tabular-nums">
+                              <span className="font-medium">{tour.nb_collected}</span>
+                              <span className="text-slate-400">/{tour.nb_points}</span>
+                            </td>
+                            <td className="py-2 px-3 text-right text-xs tabular-nums">
+                              {tour.distance_remaining_km != null ? `${tour.distance_remaining_km}/${tour.distance_km || '—'} km` : '—'}
+                            </td>
+                            <td className="py-2 px-3 text-right text-xs tabular-nums">
+                              {fmtDuration(tour.elapsed_min)} / {fmtDuration(tour.estimated_duration_min)}
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              {tour.alert_overrun && (
+                                <span title="Risque de dépassement de durée" className="inline-flex"><AlertTriangle className="w-4 h-4 text-red-500" /></span>
+                              )}
+                              {tour.nb_incidents > 0 && (
+                                <span title={`${tour.nb_incidents} incident(s)`} className="ml-1 inline-flex"><XCircle className="w-4 h-4 text-amber-500" /></span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-right text-xs font-semibold tabular-nums">
+                              {tour.weight_collected_kg > 0 ? `${tour.weight_collected_kg} kg` : '—'}
+                            </td>
+                          </tr>
+
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={9} className="bg-slate-50 px-4 py-3 border-b border-slate-200">
+                                <ExpandedDetail tour={tour} color={color} />
+                              </td>
+                            </tr>
+                          )}
+                        </FragmentBlock>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </Layout>
+  );
+}
+
+// React.Fragment helper avec clé propagée pour éviter les warnings JSX
+function FragmentBlock({ children }) {
+  return <>{children}</>;
+}
+
+function KpiTile({ label, value, icon: Icon, color, footer }) {
+  const styles = {
+    teal: { bg: 'bg-teal-50', text: 'text-teal-700', icon: 'text-teal-600' },
+    emerald: { bg: 'bg-emerald-50', text: 'text-emerald-700', icon: 'text-emerald-600' },
+    amber: { bg: 'bg-amber-50', text: 'text-amber-700', icon: 'text-amber-600' },
+    slate: { bg: 'bg-slate-50', text: 'text-slate-700', icon: 'text-slate-500' },
+  }[color] || { bg: 'bg-slate-50', text: 'text-slate-700', icon: 'text-slate-500' };
+
+  return (
+    <div className={`card-modern p-4 ${styles.bg}`}>
+      <div className="flex items-start justify-between mb-2">
+        <span className="text-xs font-medium text-slate-600">{label}</span>
+        <Icon className={`w-5 h-5 ${styles.icon}`} />
+      </div>
+      <p className={`text-3xl font-extrabold tracking-tight ${styles.text}`}>{value}</p>
+      {footer && <div className="mt-2">{footer}</div>}
+    </div>
+  );
+}
+
+function ProgressBar({ pct, color = '#0D9488' }) {
+  const safe = Math.min(100, Math.max(0, pct || 0));
+  return (
+    <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+      <div className="h-full transition-all" style={{ width: `${safe}%`, backgroundColor: color }} />
+    </div>
+  );
+}
+
+function ExpandedDetail({ tour, color }) {
+  return (
+    <div>
+      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center gap-2">
+        <Users className="w-3.5 h-3.5" />
+        Liste des CAV — {tour.driver_name || '—'}
+      </h3>
+      <div className="overflow-x-auto rounded-lg bg-white border border-slate-200">
+        <table className="w-full text-xs">
+          <thead className="text-[10px] uppercase text-slate-500 bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="text-left py-1.5 px-2 w-8">#</th>
+              <th className="text-left py-1.5 px-2">Point</th>
+              <th className="text-left py-1.5 px-2">Statut</th>
+              <th className="text-right py-1.5 px-2">Heure prévue</th>
+              <th className="text-right py-1.5 px-2">Heure réelle</th>
+              <th className="text-right py-1.5 px-2">Remplissage</th>
+              <th className="text-right py-1.5 px-2">Poids</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tour.points.map((p) => {
+              const isCollected = p.status === 'collected';
+              const isIncident = p.status === 'incident' || p.status === 'skipped';
+              const StatusIco = isCollected ? CheckCircle2 : isIncident ? XCircle : CircleDashed;
+              const statusColor = isCollected ? 'text-emerald-600' : isIncident ? 'text-red-500' : 'text-slate-400';
+              return (
+                <tr key={p.id} className="border-b border-slate-100">
+                  <td className="py-1.5 px-2 font-mono text-slate-400">{p.position}</td>
+                  <td className="py-1.5 px-2">
+                    <p className="font-medium text-slate-700">{p.name}</p>
+                    {p.commune && <p className="text-[10px] text-slate-400">{p.commune}</p>}
+                  </td>
+                  <td className="py-1.5 px-2">
+                    <span className={`inline-flex items-center gap-1 ${statusColor}`}>
+                      <StatusIco className="w-3.5 h-3.5" />
+                      {p.status}
+                    </span>
+                  </td>
+                  <td className="py-1.5 px-2 text-right text-slate-500">{fmtTime(p.planned_passage_time)}</td>
+                  <td className="py-1.5 px-2 text-right text-slate-700">{fmtTime(p.collected_at)}</td>
+                  <td className="py-1.5 px-2 text-right">
+                    {p.fill_level != null ? <span className="font-semibold">{p.fill_level}/5</span> : <span className="text-slate-400">—</span>}
+                  </td>
+                  <td className="py-1.5 px-2 text-right tabular-nums">
+                    {p.weight_kg != null ? <span className="font-semibold">{p.weight_kg} kg</span> : <span className="text-slate-400">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
