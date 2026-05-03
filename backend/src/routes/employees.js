@@ -536,6 +536,22 @@ router.get('/absenteeism/monthly', authorize('ADMIN', 'RH', 'MANAGER'), async (r
   }
 });
 
+// DELETE /api/employees/clear — Supprimer tous les employés (ADMIN only)
+// IMPORTANT : déclarée AVANT /:id pour qu'Express ne matche pas :id="clear"
+router.delete('/clear', authorize('ADMIN'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM work_hours');
+    await pool.query('DELETE FROM schedule');
+    await pool.query('DELETE FROM employee_availability');
+    await pool.query('DELETE FROM employee_contracts');
+    await pool.query('DELETE FROM employees');
+    res.json({ message: 'Tous les employés ont été supprimés' });
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur suppression /clear :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // DELETE /api/employees/:id (désactivation)
 router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   try {
@@ -785,22 +801,7 @@ router.post('/import/csv', authorize('ADMIN'), async (req, res) => {
   }
 });
 
-// DELETE /api/employees/clear — Supprimer tous les employés (ADMIN only)
-router.delete('/clear', authorize('ADMIN'), async (req, res) => {
-  try {
-    // Supprimer en cascade (contraintes FK)
-    await pool.query('DELETE FROM work_hours');
-    await pool.query('DELETE FROM schedule');
-    await pool.query('DELETE FROM employee_availability');
-    await pool.query('DELETE FROM employee_contracts');
-    await pool.query('DELETE FROM employees');
-
-    res.json({ message: 'Tous les employés ont été supprimés' });
-  } catch (err) {
-    console.error('[EMPLOYEES] Erreur suppression :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
+// (route DELETE /clear déplacée AVANT DELETE /:id — voir ligne ~539)
 
 // ══════════════════════════════════════════
 // VISITE MÉDICALE POST-EMBAUCHE (P1#13 — conformité droit du travail IAE)
