@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Factory } from 'lucide-react';
+import { Factory, FileDown } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, DataTable, StatusBadge, PageHeader } from '../components';
 import api from '../services/api';
 import DiagrammeFluxTri from '../components/DiagrammeFluxTri';
+import { exportChaineTriPDF } from '../components/exportChaineTriPDF';
 
 const POSTES_LABELS = {
   'Crack 1': { color: 'bg-blue-500', short: 'CR1' },
@@ -55,6 +56,23 @@ export default function ChaineTri() {
     } catch (err) { console.error(err); }
   };
 
+  const handleExportPDF = async () => {
+    const month = new Date().toISOString().slice(0, 7);
+    try {
+      const [dashRes, exoRes] = await Promise.all([
+        api.get(`/production/dashboard?month=${month}`).catch(() => ({ data: null })),
+        api.get('/referentiels/exutoires').catch(() => ({ data: [] })),
+      ]);
+      exportChaineTriPDF({
+        fluxMois: dashRes.data?.summary || null,
+        exutoires: exoRes.data || [],
+      });
+    } catch (err) {
+      console.error(err);
+      exportChaineTriPDF();
+    }
+  };
+
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement de la chaîne de tri..." /></Layout>;
 
   return (
@@ -83,6 +101,14 @@ export default function ChaineTri() {
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'production' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
               >
                 Production & Effectifs
+              </button>
+              <button
+                onClick={handleExportPDF}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-solidata-green text-white hover:bg-solidata-green/90 flex items-center gap-1.5"
+                title="Exporter le diagramme de la chaîne de tri en PDF (A4 paysage)"
+              >
+                <FileDown size={14} />
+                Exporter PDF
               </button>
             </div>
           }
