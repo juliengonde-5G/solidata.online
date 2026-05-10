@@ -1357,7 +1357,49 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_produits_finis_batch ON produits_finis(batch_id);');
 
-    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF) ✓');
+    // V1.9 — postes d'étiquetage (génération séquentielle d'IDs cartons en base24)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS postes_etiquetage (
+        id SERIAL PRIMARY KEY,
+        numero_poste SMALLINT NOT NULL UNIQUE CHECK (numero_poste BETWEEN 1 AND 9),
+        nom VARCHAR(80) NOT NULL,
+        compteur_actuel INTEGER NOT NULL DEFAULT 0 CHECK (compteur_actuel >= 0 AND compteur_actuel < 331776),
+        is_active BOOLEAN DEFAULT true,
+        derniere_etiquette_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    const postesExist = await client.query("SELECT id FROM postes_etiquetage LIMIT 1");
+    if (postesExist.rows.length === 0) {
+      await client.query(`INSERT INTO postes_etiquetage (numero_poste, nom) VALUES (1, 'Poste 1')`);
+    }
+
+    // ALTERS produits_finis pour piste de sortie scan
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN poste_etiquetage_id INTEGER REFERENCES postes_etiquetage(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN sortie_commande_type VARCHAR(10) CHECK (sortie_commande_type IN ('btq', 'vak'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN sortie_commande_id INTEGER;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE produits_finis ADD COLUMN scanned_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_pf_status_sortie ON produits_finis(status, date_sortie) WHERE date_sortie IS NULL;
+    `);
+
+    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage) ✓');
 
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)

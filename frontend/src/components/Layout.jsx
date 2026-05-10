@@ -10,7 +10,7 @@ import {
   RefreshCw, Lock, Settings, Car,
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
-  Database, Building2, ListChecks, FileText, Beaker,
+  Database, Building2, ListChecks, FileText, Beaker, ScanLine,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -89,6 +89,7 @@ const NAV_TREE = [
               { label: 'Inventaire Original', path: '/inventaire-original', icon: Warehouse, roles: ['ADMIN', 'MANAGER'] },
               { label: 'Stock MP', path: '/stock', icon: Package, roles: ['ADMIN', 'MANAGER'] },
               { label: 'Produits Finis', path: '/produits-finis', icon: Tag, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Sortie cartons', path: '/inventaire/sortie-cartons', icon: ScanLine, roles: ['ADMIN', 'MANAGER', 'COLLABORATEUR'] },
             ],
           },
         ],
@@ -102,6 +103,7 @@ const NAV_TREE = [
     children: [
       { label: 'Feuille de production', path: '/production', icon: Factory, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Chaîne de tri', path: '/chaine-tri', icon: ArrowUpDown, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Étiquettes', path: '/tri/etiquettes', icon: Tag, roles: ['ADMIN', 'MANAGER', 'COLLABORATEUR'] },
     ],
   },
   {

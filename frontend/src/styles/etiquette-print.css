@@ -1,0 +1,33 @@
+@page {
+  size: A4 portrait;
+  margin: 12mm;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #etiquette-print-root,
+  #etiquette-print-root * {
+    visibility: visible;
+  }
+  #etiquette-print-root {
+    position: absolute;
+    inset: 0;
+    width: 186mm;
+    margin: 0 auto;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+#etiquette-print-root {
+  display: none;
+}
+
+@media print {
+  #etiquette-print-root {
+    display: block;
+  }
+}
