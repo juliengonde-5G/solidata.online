@@ -191,7 +191,7 @@ router.get('/feuille/:date', async (req, res) => {
       `, [date]),
       pool.query('SELECT * FROM production_chariots WHERE production_date = $1 ORDER BY ligne, numero', [date]),
       pool.query(`
-        SELECT pc.*, u.nom as auteur_nom, u.prenom as auteur_prenom
+        SELECT pc.*, u.last_name as auteur_nom, u.first_name as auteur_prenom
         FROM production_commentaires pc
         LEFT JOIN users u ON u.id = pc.created_by
         WHERE pc.production_date = $1
@@ -288,7 +288,7 @@ router.post('/chariots', async (req, res) => {
 router.get('/commentaires/:date', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT pc.*, u.nom as auteur_nom, u.prenom as auteur_prenom
+      SELECT pc.*, u.last_name as auteur_nom, u.first_name as auteur_prenom
       FROM production_commentaires pc
       LEFT JOIN users u ON u.id = pc.created_by
       WHERE pc.production_date = $1
@@ -316,7 +316,7 @@ router.post('/commentaires', [
 
     // Récupérer avec infos auteur
     const full = await pool.query(`
-      SELECT pc.*, u.nom as auteur_nom, u.prenom as auteur_prenom
+      SELECT pc.*, u.last_name as auteur_nom, u.first_name as auteur_prenom
       FROM production_commentaires pc
       LEFT JOIN users u ON u.id = pc.created_by
       WHERE pc.id = $1

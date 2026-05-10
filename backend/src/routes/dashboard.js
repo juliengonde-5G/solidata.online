@@ -152,13 +152,17 @@ router.get('/kpis', cacheMiddleware(dashboardKey('kpis'), 120), async (req, res)
       ),
 
       // === ALERTES (données brutes) ===
-      // Alertes maintenance non résolues
+      // Alertes maintenance non résolues.
+      // Schéma réel (cf. init-db.js / vehicles.js auto-create) :
+      //   - vehicles.registration (PAS registration_number)
+      //   - vehicle_maintenance_alerts.is_resolved (PAS resolved)
+      //   - vehicle_maintenance_alerts.alerts JSONB (PAS alert_type / message)
       pool.query(
-        `SELECT v.registration_number, vma.alert_type, vma.message
+        `SELECT v.registration, vma.alerts, vma.alert_date
          FROM vehicle_maintenance_alerts vma
          JOIN vehicles v ON v.id = vma.vehicle_id
-         WHERE vma.resolved = false OR vma.resolved IS NULL
-         ORDER BY vma.created_at DESC LIMIT 5`
+         WHERE COALESCE(vma.is_resolved, false) = false
+         ORDER BY vma.alert_date DESC LIMIT 5`
       ),
 
       // === ACTIVITE RECENTE ===

@@ -87,9 +87,13 @@ router.get('/conteneurs', async (req, res) => {
 
 router.get('/positions', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM positions WHERE is_active = true ORDER BY name');
+    // Schéma réel (cf. init-db.js) : la colonne s'appelle `title`, pas `name`.
+    const result = await pool.query('SELECT * FROM positions WHERE is_active = true ORDER BY title');
     res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+  } catch (err) {
+    console.error('[REFERENTIELS] Erreur positions :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 module.exports = router;
