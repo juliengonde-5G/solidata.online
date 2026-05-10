@@ -239,6 +239,8 @@ const NAV_TREE = [
       { label: 'Configuration', path: '/settings', icon: Settings, roles: ['ADMIN'] },
       { label: 'Référentiels', path: '/referentiels', icon: ClipboardList, roles: ['ADMIN'] },
       { label: 'Catalogue produits', path: '/admin/catalogue', icon: Tag, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Configuration Refashion', path: '/admin/refashion-config', icon: ShieldCheck, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN', 'MANAGER'] },
       { label: 'RGPD', path: '/rgpd', icon: Lock, roles: ['ADMIN'] },
       { label: 'Dashboard exécutif (test)', path: '/dashboard-executif', icon: Beaker, roles: ['ADMIN'] },
       {

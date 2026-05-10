@@ -9,6 +9,16 @@ router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
 // ══════ DPAV Trimestriel ══════
 
+async function getTauxAt(date) {
+  const r = await pool.query(
+    `SELECT taux_euro_par_tonne FROM refashion_taux_subvention
+     WHERE valid_from <= $1 AND (valid_to IS NULL OR valid_to >= $1)
+     ORDER BY valid_from DESC LIMIT 1`,
+    [date]
+  );
+  return r.rowCount > 0 ? Number(r.rows[0].taux_euro_par_tonne) : null;
+}
+
 // GET /api/refashion/dpav — Synthèse DPAV pour un trimestre
 router.get('/dpav', async (req, res) => {
   try {
@@ -16,7 +26,11 @@ router.get('/dpav', async (req, res) => {
     const quarter = req.query.quarter || req.query.trimestre || Math.ceil((new Date().getMonth() + 1) / 3);
 
     const dpavRes = await pool.query(
-      'SELECT * FROM refashion_dpav WHERE annee = $1 AND trimestre = $2',
+      `SELECT d.*, u1.username AS created_by_username, u2.username AS updated_by_username
+       FROM refashion_dpav d
+       LEFT JOIN users u1 ON d.created_by = u1.id
+       LEFT JOIN users u2 ON d.updated_by = u2.id
+       WHERE d.annee = $1 AND d.trimestre = $2`,
       [year, quarter]
     );
 
@@ -31,19 +45,21 @@ router.get('/dpav', async (req, res) => {
     const csr = dpav.csr_t || 0;
     const energie = dpav.energie_t || 0;
     const entree = dpav.achats_t || 0;
+    const tri = dpav.tri_t || 0;
 
-    const taux = { reemploi: 80, recyclage: 295, csr: 210, energie: 20, entree: 193 };
+    // Tarif unique €/t entrant à la chaîne de tri, paramétré dans refashion_taux_subvention
+    const refDate = `${year}-${String(quarter * 3).padStart(2, '0')}-15`;
+    const tauxEntree = await getTauxAt(refDate);
+    const total_subvention = tauxEntree != null ? tri * tauxEntree : null;
 
-    const details = [
-      { categorie: 'Réemploi', tonnage: reemploi, taux: taux.reemploi, subvention: reemploi * taux.reemploi },
-      { categorie: 'Recyclage', tonnage: recyclage, taux: taux.recyclage, subvention: recyclage * taux.recyclage },
-      { categorie: 'CSR', tonnage: csr, taux: taux.csr, subvention: csr * taux.csr },
-      { categorie: 'Énergie', tonnage: energie, taux: taux.energie, subvention: energie * taux.energie },
-      { categorie: 'Entrée', tonnage: entree, taux: taux.entree, subvention: entree * taux.entree },
-    ];
-
-    const total_t = reemploi + recyclage + csr + energie + entree;
-    const total_subvention = details.reduce((s, d) => s + d.subvention, 0);
+    const historyRes = await pool.query(
+      `SELECT h.action, h.changed_at, u.username AS changed_by_username
+       FROM refashion_dpav_history h
+       LEFT JOIN users u ON h.changed_by = u.id
+       WHERE h.annee = $1 AND h.trimestre = $2
+       ORDER BY h.changed_at DESC LIMIT 20`,
+      [year, quarter]
+    );
 
     res.json({
       reemploi_t: reemploi,
@@ -51,11 +67,12 @@ router.get('/dpav', async (req, res) => {
       csr_t: csr,
       energie_t: energie,
       entree_t: entree,
-      total_t,
+      tri_t: tri,
+      taux_entree_euro_par_tonne: tauxEntree,
       total_subvention,
       nb_communes: communesRes.rows[0]?.nb || 0,
-      details,
       raw: dpav,
+      history: historyRes.rows,
     });
   } catch (err) {
     console.error('[REFASHION] Erreur DPAV :', err);
@@ -63,32 +80,166 @@ router.get('/dpav', async (req, res) => {
   }
 });
 
-// POST /api/refashion/dpav
+// POST /api/refashion/dpav — avec audit-trail
 router.post('/dpav', [
   body('annee').isInt().withMessage('Année requise (valeur numérique)'),
   body('trimestre').isInt({ min: 1, max: 4 }).withMessage('Trimestre requis (1-4)'),
 ], validate, async (req, res) => {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const { annee, trimestre, stock_debut_t, stock_fin_t, achats_t,
       ventes_reemploi_t, ventes_recyclage_t, csr_t, energie_t, tri_t, conformite_cdc, notes } = req.body;
 
-    const result = await pool.query(
+    const existing = await client.query(
+      'SELECT id FROM refashion_dpav WHERE annee=$1 AND trimestre=$2',
+      [annee, trimestre]
+    );
+    const action = existing.rowCount > 0 ? 'UPDATE' : 'INSERT';
+
+    const result = await client.query(
       `INSERT INTO refashion_dpav (annee, trimestre, stock_debut_t, stock_fin_t, achats_t,
-       ventes_reemploi_t, ventes_recyclage_t, csr_t, energie_t, tri_t, conformite_cdc, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ventes_reemploi_t, ventes_recyclage_t, csr_t, energie_t, tri_t, conformite_cdc, notes,
+        created_by, updated_by, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,NOW())
        ON CONFLICT (annee, trimestre) DO UPDATE SET
-       stock_debut_t = $3, stock_fin_t = $4, achats_t = $5, ventes_reemploi_t = $6,
-       ventes_recyclage_t = $7, csr_t = $8, energie_t = $9, tri_t = $10,
-       conformite_cdc = $11, notes = $12 RETURNING *`,
+         stock_debut_t=$3, stock_fin_t=$4, achats_t=$5, ventes_reemploi_t=$6,
+         ventes_recyclage_t=$7, csr_t=$8, energie_t=$9, tri_t=$10,
+         conformite_cdc=$11, notes=$12, updated_by=$13, updated_at=NOW()
+       RETURNING *`,
       [annee, trimestre, stock_debut_t, stock_fin_t, achats_t,
-       ventes_reemploi_t, ventes_recyclage_t, csr_t, energie_t, tri_t, conformite_cdc, notes]
+       ventes_reemploi_t, ventes_recyclage_t, csr_t, energie_t, tri_t, conformite_cdc, notes, req.user.id]
     );
 
+    await client.query(
+      `INSERT INTO refashion_dpav_history (dpav_id, annee, trimestre, action, snapshot, changed_by)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [result.rows[0].id, annee, trimestre, action, JSON.stringify(result.rows[0]), req.user.id]
+    );
+
+    await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[REFASHION] Erreur saisie DPAV :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
+});
+
+// ══════ Paramétrage taux subvention Refashion (P0-C) ══════
+
+// GET /api/refashion/taux — historique des taux conventionnés
+router.get('/taux', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT t.*, u.username AS created_by_username
+       FROM refashion_taux_subvention t
+       LEFT JOIN users u ON t.created_by = u.id
+       ORDER BY t.valid_from DESC`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/refashion/taux/current
+router.get('/taux/current', async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const t = await getTauxAt(today);
+    res.json({ taux_euro_par_tonne: t, valid_at: today });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/refashion/taux — ajout d'une convention/avenant
+router.post('/taux', authorize('ADMIN'), [
+  body('taux_euro_par_tonne').isFloat({ min: 0 }).withMessage('Taux requis (>= 0)'),
+  body('valid_from').isISO8601().withMessage('valid_from requis (YYYY-MM-DD)'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { taux_euro_par_tonne, valid_from, valid_to, source_document, notes } = req.body;
+    // Clôture automatique du précédent taux : si pas de valid_to, on l'aligne sur valid_from - 1
+    await client.query(
+      `UPDATE refashion_taux_subvention
+       SET valid_to = ($1::date - INTERVAL '1 day')::date
+       WHERE valid_to IS NULL AND valid_from < $1::date`,
+      [valid_from]
+    );
+    const r = await client.query(
+      `INSERT INTO refashion_taux_subvention
+         (taux_euro_par_tonne, valid_from, valid_to, source_document, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [taux_euro_par_tonne, valid_from, valid_to || null, source_document || null, notes || null, req.user.id]
+    );
+    await client.query('COMMIT');
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.patch('/taux/:id', authorize('ADMIN'), async (req, res) => {
+  const { taux_euro_par_tonne, valid_from, valid_to, source_document, notes } = req.body || {};
+  const sets = []; const vals = [];
+  for (const [k, v] of [['taux_euro_par_tonne', taux_euro_par_tonne], ['valid_from', valid_from],
+    ['valid_to', valid_to], ['source_document', source_document], ['notes', notes]]) {
+    if (v !== undefined) { sets.push(`${k} = $${sets.length + 1}`); vals.push(v); }
+  }
+  if (sets.length === 0) return res.status(400).json({ error: 'Rien à modifier' });
+  vals.push(req.params.id);
+  try {
+    const r = await pool.query(
+      `UPDATE refashion_taux_subvention SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Introuvable' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════ Agrément Refashion sur exutoires (P0-A) ══════
+
+router.patch('/exutoires/:id/agrement', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const { agrement_refashion, agrement_numero, agrement_date_debut, agrement_date_fin, agrement_notes } = req.body || {};
+  try {
+    const r = await pool.query(
+      `UPDATE exutoires SET
+         agrement_refashion = COALESCE($1, agrement_refashion),
+         agrement_numero = COALESCE($2, agrement_numero),
+         agrement_date_debut = COALESCE($3, agrement_date_debut),
+         agrement_date_fin = COALESCE($4, agrement_date_fin),
+         agrement_notes = COALESCE($5, agrement_notes)
+       WHERE id = $6 RETURNING *`,
+      [
+        typeof agrement_refashion === 'boolean' ? agrement_refashion : null,
+        agrement_numero || null,
+        agrement_date_debut || null,
+        agrement_date_fin || null,
+        agrement_notes || null,
+        req.params.id,
+      ]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Exutoire introuvable' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/exutoires-agrement', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nom, type, agrement_refashion, agrement_numero,
+              agrement_date_debut, agrement_date_fin, agrement_notes, is_active
+       FROM exutoires
+       ORDER BY agrement_refashion DESC, nom`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ══════ Communes ══════

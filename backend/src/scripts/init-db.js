@@ -1471,7 +1471,94 @@ async function initDatabase() {
       }
     }
 
-    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage, ref_dimensions) ✓');
+    // V2.0 — Audit Refashion & Métropole (P0)
+    // -- Agrément Refashion sur exutoires
+    for (const sql of [
+      `ALTER TABLE exutoires ADD COLUMN agrement_refashion BOOLEAN DEFAULT false`,
+      `ALTER TABLE exutoires ADD COLUMN agrement_numero VARCHAR(50)`,
+      `ALTER TABLE exutoires ADD COLUMN agrement_date_debut DATE`,
+      `ALTER TABLE exutoires ADD COLUMN agrement_date_fin DATE`,
+      `ALTER TABLE exutoires ADD COLUMN agrement_notes TEXT`,
+    ]) {
+      await client.query(`DO $$ BEGIN ${sql}; EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
+    }
+
+    // -- Audit-trail DPAV
+    for (const sql of [
+      `ALTER TABLE refashion_dpav ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+      `ALTER TABLE refashion_dpav ADD COLUMN updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+      `ALTER TABLE refashion_dpav ADD COLUMN updated_at TIMESTAMP`,
+    ]) {
+      await client.query(`DO $$ BEGIN ${sql}; EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
+    }
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS refashion_dpav_history (
+        id SERIAL PRIMARY KEY,
+        dpav_id INTEGER NOT NULL,
+        annee INTEGER NOT NULL,
+        trimestre INTEGER NOT NULL,
+        action VARCHAR(20) NOT NULL CHECK (action IN ('INSERT','UPDATE','DELETE')),
+        snapshot JSONB NOT NULL,
+        changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        changed_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_refashion_dpav_history_period ON refashion_dpav_history(annee, trimestre, changed_at DESC);
+    `);
+
+    // -- Paramétrage taux subvention Refashion (versionné par convention/avenant)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS refashion_taux_subvention (
+        id SERIAL PRIMARY KEY,
+        taux_euro_par_tonne NUMERIC(10,2) NOT NULL CHECK (taux_euro_par_tonne >= 0),
+        valid_from DATE NOT NULL,
+        valid_to DATE,
+        source_document VARCHAR(255),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CHECK (valid_to IS NULL OR valid_to >= valid_from)
+      );
+      CREATE INDEX IF NOT EXISTS idx_refashion_taux_valid_from ON refashion_taux_subvention(valid_from DESC);
+    `);
+
+    // -- Référentiel communes INSEE (Métropole Rouen)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS referentiel_communes (
+        code_insee VARCHAR(5) PRIMARY KEY,
+        nom VARCHAR(150) NOT NULL,
+        code_postal VARCHAR(5),
+        epci_code VARCHAR(10),
+        epci_nom VARCHAR(150),
+        population_insee INTEGER,
+        is_metropole_rouen BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ref_communes_epci ON referentiel_communes(epci_code) WHERE is_metropole_rouen = true;
+      CREATE INDEX IF NOT EXISTS idx_ref_communes_cp ON referentiel_communes(code_postal);
+    `);
+    await client.query(`DO $$ BEGIN ALTER TABLE cav ADD COLUMN code_insee_commune VARCHAR(5) REFERENCES referentiel_communes(code_insee) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_cav_code_insee ON cav(code_insee_commune);`);
+
+    // Seed referentiel_communes depuis JSON s'il est vide
+    const refCommunesCount = await client.query(`SELECT COUNT(*)::int AS n FROM referentiel_communes`);
+    if (refCommunesCount.rows[0].n === 0) {
+      try {
+        const seedPath = require('path').join(__dirname, '..', 'data', 'communes-metropole-rouen.json');
+        const seed = JSON.parse(require('fs').readFileSync(seedPath, 'utf-8'));
+        for (const c of seed) {
+          await client.query(
+            `INSERT INTO referentiel_communes (code_insee, nom, code_postal, epci_code, epci_nom, population_insee, is_metropole_rouen)
+             VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+            [c.code_insee, c.nom, c.code_postal, c.epci_code, c.epci_nom, c.population_insee, c.is_metropole_rouen ?? true]
+          );
+        }
+        console.log(`[INIT-DB] referentiel_communes seedé : ${seed.length} communes`);
+      } catch (e) {
+        console.warn(`[INIT-DB] Seed communes non-appliqué (${e.message}) — fichier manquant`);
+      }
+    }
+
+    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage, ref_dimensions, audit P0) ✓');
 
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)
