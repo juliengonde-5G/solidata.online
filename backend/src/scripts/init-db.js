@@ -728,19 +728,9 @@ async function initDatabase() {
     // ══════════════════════════════════════════
     // MODULE V2 : Référentiels & Tri
     // ══════════════════════════════════════════
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS associations (
-        id SERIAL PRIMARY KEY,
-        nom VARCHAR(255) NOT NULL,
-        type VARCHAR(100),
-        adresse TEXT,
-        commune VARCHAR(100),
-        contact_nom VARCHAR(100),
-        contact_tel VARCHAR(20),
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
+    // Note : la table `associations` historique a été supprimée (doublon avec
+    // association_points). La suppression est appliquée plus bas dans la
+    // section migrations V2.2.
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS exutoires (
@@ -1559,8 +1549,9 @@ async function initDatabase() {
     }
 
     // V2.1 — gammes réduites à EXTRA / STANDARD / VAK / EXPORT (refonte UI)
+    // V2.2 — suppression effective des anciennes gammes (BTQ EXTRA, BTQ STAND, CHIF, Pvak)
     await client.query(`
-      UPDATE ref_dimensions SET is_active = false
+      DELETE FROM ref_dimensions
       WHERE type = 'gamme' AND valeur NOT IN ('EXTRA','STANDARD','VAK','EXPORT')
     `);
     for (const [valeur, ordre] of [['EXTRA', 0], ['STANDARD', 1], ['VAK', 2], ['EXPORT', 3]]) {
@@ -1570,6 +1561,10 @@ async function initDatabase() {
         [valeur, ordre]
       );
     }
+
+    // V2.2 — la table `associations` du référentiel fait doublon avec
+    // `association_points` (module collecte). Suppression de la table inutilisée.
+    await client.query(`DROP TABLE IF EXISTS associations CASCADE`);
 
     console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage, ref_dimensions, audit P0, gammes V2.1) ✓');
 

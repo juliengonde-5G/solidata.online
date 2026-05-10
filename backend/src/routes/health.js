@@ -16,12 +16,27 @@ function withTimeout(promise, ms, label) {
 
 router.get('/', async (req, res) => {
   const checks = { uptime_sec: Math.floor(process.uptime()) };
+  const database = { connected: false };
   let overallOk = true;
 
   const dbStart = Date.now();
   try {
     await withTimeout(pool.query('SELECT 1'), DB_TIMEOUT_MS, 'DB');
     checks.database = { status: 'ok', latency_ms: Date.now() - dbStart };
+    database.connected = true;
+    try {
+      const meta = await withTimeout(
+        pool.query("SELECT version() AS pg, extversion AS postgis FROM pg_extension WHERE extname = 'postgis'"),
+        DB_TIMEOUT_MS, 'DB-meta'
+      );
+      if (meta.rows[0]) {
+        database.version = meta.rows[0].pg;
+        database.postgis = meta.rows[0].postgis;
+      } else {
+        const v = await pool.query('SELECT version() AS pg');
+        database.version = v.rows[0]?.pg;
+      }
+    } catch (_) { /* meta best-effort */ }
   } catch (err) {
     overallOk = false;
     checks.database = { status: 'error', error: err.message, latency_ms: Date.now() - dbStart };
@@ -47,10 +62,17 @@ router.get('/', async (req, res) => {
     heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
   };
 
+  const modules = {
+    auth: !!process.env.JWT_SECRET,
+    redis: checks.redis?.status === 'ok',
+  };
+
   res.status(overallOk ? 200 : 503).json({
     status: overallOk ? 'ok' : 'error',
     timestamp: new Date().toISOString(),
     version: APP_VERSION,
+    database,
+    modules,
     checks,
   });
 });
