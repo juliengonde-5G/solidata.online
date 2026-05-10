@@ -23,9 +23,30 @@ import jwt as pyjwt
 # Configuration
 # ---------------------------------------------------------------------------
 
+
+def _require_secret(name: str, hint: str = "") -> str:
+    """Return env var `name` or fail-fast at startup if missing/empty.
+
+    Pas de fallback "dev par défaut" sur les secrets : tout secret hardcodé
+    finit fatalement par fuiter (déjà vu : la valeur de JWT_SECRET du
+    .env.example pré-rotation a été commitée publiquement). Mieux vaut un
+    crash explicite au démarrage qui force le déploiement à fournir la valeur.
+    """
+    val = os.environ.get(name, "").strip()
+    if not val:
+        msg = f"[FATAL] Variable d'environnement requise non définie : {name}."
+        if hint:
+            msg += f"\n  → {hint}"
+        raise RuntimeError(msg)
+    return val
+
+
 app = Flask(__name__)
 app.config.update(
-    SECRET_KEY=os.environ.get("SECRET_KEY", "solidata-agent-dev-key"),
+    SECRET_KEY=_require_secret(
+        "SECRET_KEY",
+        "Générer : python -c \"import secrets; print(secrets.token_hex(32))\"",
+    ),
     DB_URL=os.environ.get(
         "DATABASE_URL",
         "postgresql://{user}:{pw}@{host}:{port}/{db}".format(
@@ -39,7 +60,10 @@ app.config.update(
     REDIS_URL=os.environ.get("REDIS_URL", "redis://solidata-redis:6379/1"),
     ANTHROPIC_API_KEY=os.environ.get("ANTHROPIC_API_KEY", ""),
     CLAUDE_MODEL=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
-    JWT_SECRET=os.environ.get("JWT_SECRET", "solidata-jwt-secret"),
+    JWT_SECRET=_require_secret(
+        "JWT_SECRET",
+        "Doit être identique à celui du backend Node.js (vérifie/aligne sur la valeur dans /opt/solidata.online/.env serveur).",
+    ),
     RATE_LIMIT_PER_MIN=int(os.environ.get("RATE_LIMIT_PER_MIN", "20")),
     MAX_HISTORY=10,
 )
@@ -644,21 +668,35 @@ def chat():
     })
 
 
-# Dev-only: token generation for testing (disabled in production)
-@app.route("/dev/token", methods=["POST"])
-def dev_token():
-    """Generate a test JWT token (dev only)."""
-    if os.environ.get("FLASK_ENV") == "production":
-        return jsonify({"error": "Non disponible en production"}), 403
-    data = request.get_json(silent=True) or {}
-    payload = {
-        "userId": data.get("user_id", 1),
-        "role": data.get("role", "ADMIN"),
-        "username": data.get("username", "dev"),
-        "exp": datetime.utcnow() + timedelta(hours=8),
-    }
-    token = pyjwt.encode(payload, app.config["JWT_SECRET"], algorithm="HS256")
-    return jsonify({"token": token})
+# Dev-only: token generation for testing.
+#
+# Guard EXPLICITE opt-in : l'endpoint n'existe que si ENABLE_DEV_TOKEN=true
+# est explicitement défini. L'ancien guard sur FLASK_ENV était fragile car
+# bypassable (valeurs "prod", "staging", var absente → tous interprétés
+# comme "pas prod" et activaient l'endpoint).
+#
+# Valeurs acceptées pour activer : "true", "1", "yes" (case insensitive).
+# Toute autre valeur, y compris "false", "" ou variable absente → désactivé.
+_DEV_TOKEN_ENABLED = os.environ.get("ENABLE_DEV_TOKEN", "").strip().lower() in ("true", "1", "yes")
+
+if _DEV_TOKEN_ENABLED:
+    logger.warning(
+        "⚠️  /dev/token est ACTIF (ENABLE_DEV_TOKEN=true). "
+        "Ne JAMAIS activer ce flag en production."
+    )
+
+    @app.route("/dev/token", methods=["POST"])
+    def dev_token():
+        """Generate a test JWT token (dev only — requires ENABLE_DEV_TOKEN=true)."""
+        data = request.get_json(silent=True) or {}
+        payload = {
+            "userId": data.get("user_id", 1),
+            "role": data.get("role", "ADMIN"),
+            "username": data.get("username", "dev"),
+            "exp": datetime.utcnow() + timedelta(hours=8),
+        }
+        token = pyjwt.encode(payload, app.config["JWT_SECRET"], algorithm="HS256")
+        return jsonify({"token": token})
 
 
 # ---------------------------------------------------------------------------

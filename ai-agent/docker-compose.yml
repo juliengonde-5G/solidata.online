@@ -18,8 +18,11 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-solidata_pass}
       - REDIS_URL=redis://solidata-redis:6379/1
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - JWT_SECRET=${JWT_SECRET:-solidata-jwt-secret}
-      - SECRET_KEY=${SECRET_KEY:-solidata-agent-secret}
+      # Pas de défaut sur les secrets : si ${JWT_SECRET} / ${SECRET_KEY} ne sont
+      # pas définis côté hôte, app.py fail-fast au démarrage avec un message clair.
+      # Voir _require_secret() dans ai-agent/app.py.
+      - JWT_SECRET=${JWT_SECRET}
+      - SECRET_KEY=${SECRET_KEY}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-20250514}
       - RATE_LIMIT_PER_MIN=20
     depends_on:

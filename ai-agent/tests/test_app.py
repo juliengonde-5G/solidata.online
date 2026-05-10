@@ -12,9 +12,14 @@ from unittest.mock import MagicMock, patch
 import jwt as pyjwt
 import pytest
 
-# Patch env before importing app
+# Patch env before importing app.
+# JWT_SECRET et SECRET_KEY sont requis (app.py fail-fast via _require_secret).
+# ENABLE_DEV_TOKEN doit être "true" pour que test_dev_token trouve la route
+# (le guard explicite remplace l'ancien check fragile sur FLASK_ENV).
 os.environ["ANTHROPIC_API_KEY"] = "sk-test-key"
 os.environ["JWT_SECRET"] = "test-secret"
+os.environ["SECRET_KEY"] = "test-flask-secret"
+os.environ["ENABLE_DEV_TOKEN"] = "true"
 os.environ["REDIS_URL"] = "redis://localhost:6379/1"
 os.environ["DATABASE_URL"] = "postgresql://test:test@localhost:5432/test"
 
