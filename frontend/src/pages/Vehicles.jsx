@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Truck, Plus, Pencil, FileText, Download, Trash2, Lightbulb, AlertTriangle, Archive, ArchiveRestore } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
+import VehicleAccessPanel from '../components/VehicleAccessPanel';
 import api from '../services/api';
 
 const EVENT_TYPES = [
@@ -420,6 +421,13 @@ export default function Vehicles() {
                 <div><span className="text-slate-400 text-xs">Plan constructeur</span><p className="font-medium">{selectedVehicle.vehicle_type && selectedVehicle.vehicle_type !== 'generic' ? selectedVehicle.vehicle_type : <span className="text-orange-500">Non configuré</span>}</p></div>
               </div>
             </div>
+
+            {/* Accès chauffeur — URL unique « 1 URL = 1 véhicule » (ADMIN seul) */}
+            <VehicleAccessPanel
+              vehicleId={selectedVehicle.id}
+              registration={selectedVehicle.registration}
+              name={selectedVehicle.name}
+            />
 
             {/* Grille d'entretien constructeur */}
             <div className="card-modern p-5">

@@ -173,7 +173,9 @@ router.get('/', async (req, res) => {
 
     query += ' ORDER BY COALESCE(v.is_archived, false), v.name';
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    // qr_token est une clé d'auth physique — jamais dans les listings.
+    // Récupération dédiée via GET /:id/access-info (ADMIN).
+    res.json(result.rows.map((r) => { delete r.qr_token; return r; }));
   } catch (err) {
     console.error('[VEHICLES] Erreur liste :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -212,6 +214,71 @@ router.patch('/:id/restore', authorize('ADMIN', 'MANAGER'), async (req, res) => 
   }
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+// URL d'accès chauffeur (« 1 URL = 1 véhicule »)
+//
+// `qr_token` est traité comme une clé physique du véhicule : exposé UNIQUEMENT
+// via ces deux endpoints (ADMIN). Les routes GET / et GET /:id strippent ce
+// champ avant réponse (defense in depth).
+//
+// Base URL mobile via env var MOBILE_BASE_URL (défaut prod). Permet de
+// pointer vers un sous-domaine de staging sans rebuilder.
+// ──────────────────────────────────────────────────────────────────────────
+const MOBILE_BASE_URL = process.env.MOBILE_BASE_URL || 'https://m.solidata.online';
+const buildVehicleUrl = (token) => `${MOBILE_BASE_URL}/v/${token}`;
+
+// GET /api/vehicles/:id/access-info — Récupérer l'URL d'accès courante (ADMIN)
+router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, registration, name, qr_token FROM vehicles WHERE id = $1',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+    const v = result.rows[0];
+    res.json({
+      vehicle_id: v.id,
+      registration: v.registration,
+      name: v.name,
+      qr_token: v.qr_token,
+      mobile_url: buildVehicleUrl(v.qr_token),
+    });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur access-info :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/vehicles/:id/regenerate-token — Régénérer l'URL (révoque l'ancienne)
+//
+// À utiliser par le manager quand : changement de chauffeur titulaire,
+// téléphone perdu/volé, ou suspicion de compromission. L'ancien raccourci
+// devient immédiatement invalide → tap-renvoi 401 côté chauffeur.
+router.post('/:id/regenerate-token', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE vehicles
+         SET qr_token = encode(gen_random_bytes(16), 'hex'),
+             updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, registration, name, qr_token`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+    const v = result.rows[0];
+    res.json({
+      vehicle_id: v.id,
+      registration: v.registration,
+      name: v.name,
+      qr_token: v.qr_token,
+      mobile_url: buildVehicleUrl(v.qr_token),
+    });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur regenerate-token :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/vehicles/:id — déplacé après les routes statiques pour éviter que /:id intercepte /maintenance/*, /document-types/*
 // Voir plus bas dans le fichier
 
@@ -240,7 +307,11 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
         vehicle_type || 'generic',
       ]
     );
-    res.status(201).json(result.rows[0]);
+    const created = result.rows[0];
+    // qr_token est auto-généré (DEFAULT) — on ne le révèle pas ici.
+    // Le manager va le lire via GET /:id/access-info pour paramétrer le téléphone.
+    delete created.qr_token;
+    res.status(201).json(created);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Immatriculation déjà existante' });
     console.error('[VEHICLES] Erreur création :', err);
@@ -264,7 +335,9 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       [name || null, brand || null, model || null, type || null, max_capacity_kg || null, tare_weight_kg ? parseFloat(tare_weight_kg) : null, team_id ? parseInt(team_id) : null, status || null, current_km || null, next_maintenance || null, insurance_expiry || null, vehicle_type || null, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
-    res.json(result.rows[0]);
+    const updated = result.rows[0];
+    delete updated.qr_token;
+    res.json(updated);
   } catch (err) {
     console.error('[VEHICLES] Erreur modification :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -294,7 +367,9 @@ router.put('/:id/assign-driver', authorize('ADMIN', 'MANAGER'), async (req, res)
       [employee_id || null, req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
-    res.json(result.rows[0]);
+    const updated = result.rows[0];
+    delete updated.qr_token;
+    res.json(updated);
   } catch (err) {
     console.error('[VEHICLES] Erreur assign-driver :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -1044,7 +1119,11 @@ router.get('/:id', async (req, res) => {
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    // qr_token est une clé d'auth physique — jamais dans le détail générique.
+    // Récupération dédiée via GET /:id/access-info (ADMIN).
+    delete row.qr_token;
+    res.json(row);
   } catch (err) {
     console.error('[VEHICLES] Erreur détail :', err);
     res.status(500).json({ error: 'Erreur serveur' });

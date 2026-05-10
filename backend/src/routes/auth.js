@@ -29,21 +29,44 @@ function parseExpiry(str) {
   return val * 1000;
 }
 
-// POST /api/auth/driver-start — Mode chauffeur : démarrage par véhicule (sans identifiant)
+// POST /api/auth/driver-start — Mode chauffeur : démarrage par token véhicule
+//
+// Pattern « 1 URL = 1 véhicule » :
+//   - Le chauffeur ouvre https://m.solidata.online/v/<qr_token> sur son téléphone
+//     (raccourci écran d'accueil paramétré une fois par le manager au dépôt).
+//   - Le front mobile POSTe ici { vehicle_token } et reçoit un JWT.
+//   - Le `qr_token` est une chaîne hex 32 char (16 octets aléatoires) — espace
+//     2^128, énumération infaisable. Régénération côté admin = révocation
+//     immédiate de l'ancien raccourci.
+//
+// L'ancien comportement `{ vehicle_id }` (entier énumérable) a été supprimé.
 router.post('/driver-start', async (req, res) => {
   try {
-    const { vehicle_id, driver_name } = req.body;
-    if (!vehicle_id) return res.status(400).json({ error: 'Véhicule requis' });
+    const { vehicle_token, driver_name } = req.body;
+    if (!vehicle_token || typeof vehicle_token !== 'string') {
+      return res.status(400).json({ error: 'Token véhicule requis' });
+    }
+    // Format hex 32 caractères imposé pour rejeter rapidement les tokens malformés.
+    if (!/^[a-f0-9]{32}$/.test(vehicle_token)) {
+      return res.status(401).json({ error: 'Token véhicule invalide' });
+    }
 
-    // Chercher le véhicule et son chauffeur assigné
+    // Chercher le véhicule et son chauffeur assigné via le qr_token (pas l'id).
+    // Filtre `is_archived = false` pour qu'un véhicule retiré du service ne
+    // délivre plus de JWT même si son ancien token traîne sur un téléphone.
     const vRes = await pool.query(
       `SELECT v.id, v.registration, v.name, v.assigned_driver_id,
               e.id as emp_id, e.first_name, e.last_name, e.user_id
        FROM vehicles v
        LEFT JOIN employees e ON e.id = v.assigned_driver_id
-       WHERE v.id = $1`, [vehicle_id]
+       WHERE v.qr_token = $1
+         AND COALESCE(v.is_archived, false) = false`, [vehicle_token]
     );
-    if (vRes.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+    if (vRes.rows.length === 0) {
+      // Message neutre : on ne dit pas si le token n'existe pas, est révoqué,
+      // ou pointe sur un véhicule archivé → réduit la surface d'énumération.
+      return res.status(401).json({ error: 'Accès véhicule invalide. Contacte ton responsable.' });
+    }
 
     const vehicle = vRes.rows[0];
     let userId, employeeId, firstName, lastName;
@@ -75,7 +98,7 @@ router.post('/driver-start', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: userId, userId, role: 'COLLABORATEUR', username: `driver_${vehicle_id}` },
+      { id: userId, userId, role: 'COLLABORATEUR', username: `driver_${vehicle.id}` },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );

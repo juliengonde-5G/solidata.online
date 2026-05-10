@@ -34,8 +34,10 @@ export function AuthProvider({ children }) {
     return res.data;
   };
 
-  const driverStart = async (vehicleId) => {
-    const res = await api.post('/auth/driver-start', { vehicle_id: vehicleId });
+  // driverStart : démarrage chauffeur via le qr_token véhicule (« 1 URL = 1 véhicule »).
+  // Pour le détail du flux, voir mobile/src/pages/VehicleLogin.jsx.
+  const driverStart = async (vehicleToken) => {
+    const res = await api.post('/auth/driver-start', { vehicle_token: vehicleToken });
     localStorage.setItem('mobile_token', res.data.token);
     if (res.data.refreshToken) localStorage.setItem('mobile_refresh_token', res.data.refreshToken);
     setUser(res.data.user);

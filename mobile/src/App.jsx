@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { UsageModeProvider } from './contexts/UsageModeContext';
 import { startAutoSync, cacheReferenceData } from './services/sync';
 import Login from './pages/Login';
+import VehicleLogin from './pages/VehicleLogin';
 import BatteryAlert from './components/BatteryAlert';
 import SolidataBot from './components/SolidataBot';
 import SyncStatusBanner from './components/SyncStatusBanner';
@@ -29,6 +30,10 @@ function App() {
         <UsageModeProvider>
           <SyncStatusBanner />
           <Routes>
+            {/* Auth chauffeur — point d'entrée principal (raccourci écran d'accueil).
+                « 1 URL = 1 véhicule » : voir mobile/src/pages/VehicleLogin.jsx. */}
+            <Route path="/v/:token" element={<VehicleLogin />} />
+            {/* Landing « pas d'accès » pour tout arrivée hors flux URL véhicule. */}
             <Route path="/login" element={<Navigate to="/start" />} />
             <Route path="/start" element={<Login />} />
             <Route path="/vehicle-select" element={<VehicleSelect />} />

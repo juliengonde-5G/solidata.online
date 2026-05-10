@@ -4016,6 +4016,30 @@ async function initDatabase() {
       console.error('[INIT-DB] Erreur ALTER vehicles is_archived :', e.message);
     }
 
+    // V2.0.1 — URL d'accès unique par véhicule (« 1 URL = 1 véhicule »)
+    //
+    // Pattern : le chauffeur ouvre https://m.solidata.online/v/<qr_token>
+    // sur son téléphone (paramétré une fois par le manager au dépôt),
+    // installe le raccourci sur l'écran d'accueil, et toute ré-ouverture
+    // re-authentifie automatiquement contre le véhicule lié à ce token.
+    //
+    // Le token remplace l'ancien `vehicle_id` (entier énumérable) comme
+    // credential du flux /api/auth/driver-start. Régénération côté admin
+    // = révocation immédiate de l'ancien raccourci.
+    try {
+      await client.query("ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS qr_token VARCHAR(32) UNIQUE");
+      // Backfill : tout véhicule existant reçoit un token unique aléatoire (16 octets hex = 32 caractères).
+      // Idempotent : la clause WHERE évite d'écraser un token déjà attribué.
+      await client.query("UPDATE vehicles SET qr_token = encode(gen_random_bytes(16), 'hex') WHERE qr_token IS NULL");
+      // Défaut pour les futurs INSERT + NOT NULL après backfill.
+      await client.query("ALTER TABLE vehicles ALTER COLUMN qr_token SET DEFAULT encode(gen_random_bytes(16), 'hex')");
+      await client.query("ALTER TABLE vehicles ALTER COLUMN qr_token SET NOT NULL");
+      await client.query("CREATE INDEX IF NOT EXISTS idx_vehicles_qr_token ON vehicles(qr_token)");
+      console.log('[INIT-DB] Vehicles : qr_token (URL d\'accès chauffeur) ✓');
+    } catch (e) {
+      console.error('[INIT-DB] Erreur ALTER vehicles qr_token :', e.message);
+    }
+
     // V1.8.4 — Auto-discovery événements + jours fériés/vacances scolaires
     try {
       // Étendre evenements_locaux pour traçabilité source + lien CAV/association
