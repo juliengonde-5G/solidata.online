@@ -217,7 +217,6 @@ const NAV_TREE = [
     label: 'Administration',
     icon: ShieldCheck,
     children: [
-      { label: 'Utilisateurs', path: '/users', icon: Lock, roles: ['ADMIN'] },
       {
         label: 'Collecte',
         icon: Truck,

@@ -31,7 +31,6 @@ const ReportingProduction = lazy(() => import('./pages/ReportingProduction'));
 const Refashion = lazy(() => import('./pages/Refashion'));
 const Users = lazy(() => import('./pages/Users'));
 const Settings = lazy(() => import('./pages/Settings'));
-const Referentiels = lazy(() => import('./pages/Referentiels'));
 const AdminPredictive = lazy(() => import('./pages/AdminPredictive'));
 const CollectionProposals = lazy(() => import('./pages/CollectionProposals'));
 const InsertionParcours = lazy(() => import('./pages/InsertionParcours'));
@@ -194,7 +193,7 @@ function App() {
               {/* Administration */}
               <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute roles={['ADMIN']}><Settings /></ProtectedRoute>} />
-              <Route path="/referentiels" element={<ProtectedRoute roles={['ADMIN']}><Referentiels /></ProtectedRoute>} />
+              <Route path="/referentiels" element={<Navigate to="/admin/catalogue" replace />} />
               <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />
               <Route path="/admin-alert-thresholds" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAlertThresholds /></ProtectedRoute>} />
               <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN']}><RGPD /></ProtectedRoute>} />

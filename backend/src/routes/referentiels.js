@@ -11,40 +11,9 @@ router.use(autoLogActivity('referentiel'));
 
 // ══════ ASSOCIATIONS ══════
 
-router.get('/associations', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM associations ORDER BY nom');
-    res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-router.post('/associations', authorize('ADMIN'), [
-  body('nom').notEmpty().withMessage('Nom requis'),
-], validate, async (req, res) => {
-  try {
-    const { nom, type, adresse, commune, contact_nom, contact_tel } = req.body;
-    const result = await pool.query(
-      'INSERT INTO associations (nom, type, adresse, commune, contact_nom, contact_tel) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [nom, type, adresse, commune, contact_nom, contact_tel]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
-
-router.put('/associations/:id', authorize('ADMIN'), async (req, res) => {
-  try {
-    const { nom, type, adresse, commune, contact_nom, contact_tel, is_active } = req.body;
-    const result = await pool.query(
-      `UPDATE associations SET nom=COALESCE($1,nom), type=COALESCE($2,type),
-       adresse=COALESCE($3,adresse), commune=COALESCE($4,commune),
-       contact_nom=COALESCE($5,contact_nom), contact_tel=COALESCE($6,contact_tel),
-       is_active=COALESCE($7,is_active) WHERE id=$8 RETURNING *`,
-      [nom, type, adresse, commune, contact_nom, contact_tel, is_active, req.params.id]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Non trouvé' });
-    res.json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
+// Note : les routes /associations historiques ont été supprimées (la gestion
+// s'effectue désormais via /api/association-points + l'écran AdminAssociations
+// du module collecte). La table `associations` est droppée par init-db.
 
 // ══════ EXUTOIRES ══════
 
