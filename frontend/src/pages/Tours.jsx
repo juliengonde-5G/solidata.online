@@ -570,7 +570,14 @@ function TourDetailPanel({ tour, onClose }) {
                     <td className="py-1.5 px-2 text-right text-slate-500">{fmtTime(p.planned_passage_at || p.planned_passage_time)}</td>
                     <td className="py-1.5 px-2 text-right text-slate-700">{fmtTime(p.collected_at)}</td>
                     <td className="py-1.5 px-2 text-right">
-                      {p.fill_level != null ? <span className="font-semibold">{p.fill_level}/5</span> : <span className="text-slate-400">—</span>}
+                      {p.status === 'skipped' ? (
+                        <span className="inline-block px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase"
+                          title={p.skip_reason ? `Motif : ${p.skip_reason.replace(/_/g, ' ')}` : 'Aucun motif renseigné'}>
+                          {p.skip_reason ? p.skip_reason.replace(/_/g, ' ') : 'skipped'}
+                        </span>
+                      ) : p.fill_level != null ? (
+                        <span className="font-semibold">{p.fill_level}/5</span>
+                      ) : <span className="text-slate-400">—</span>}
                     </td>
                     <td className="py-1.5 px-2 text-right tabular-nums">
                       {p.weight_kg != null ? <span className="font-semibold">{Math.round(p.weight_kg)} kg</span> : (p.collected_weight_kg ? <span className="font-semibold">{Math.round(p.collected_weight_kg)} kg</span> : <span className="text-slate-400">—</span>)}

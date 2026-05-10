@@ -1728,6 +1728,20 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Migrations P1 (categories_sortantes refonte + audit-trail + 5 vues SQL) ✓');
 
+    // V2.4 — P2-A : suppression de flux_sortants (orphelin, jamais écrite, remplacée par vw_dpav_sortants)
+    await client.query(`DROP TABLE IF EXISTS flux_sortants CASCADE`);
+
+    // V2.4 — P2-C : précision sortie d'insertion (employeur + SIRET + durée contrat)
+    await client.query(`DO $$ BEGIN
+      ALTER TABLE insertion_milestones ADD COLUMN sortie_employeur_siret VARCHAR(14);
+    EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
+    await client.query(`DO $$ BEGIN
+      ALTER TABLE insertion_milestones ADD COLUMN sortie_duree_contrat_mois SMALLINT
+        CHECK (sortie_duree_contrat_mois IS NULL OR sortie_duree_contrat_mois >= 0);
+    EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
+
+    console.log('[INIT-DB] Migrations P2 (DROP flux_sortants + employeur sortie) ✓');
+
     console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage, ref_dimensions, audit P0, gammes V2.1) ✓');
 
     // ══════════════════════════════════════════

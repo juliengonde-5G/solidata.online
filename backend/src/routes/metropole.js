@@ -29,15 +29,46 @@ router.get('/dashboard', async (req, res) => {
       WHERE date >= $1 AND date < $2
     `, [dateFrom, dateTo]);
 
-    // Emissions CO2 evitees — facteurs Refashion/ADEME par type d'exutoire
-    // original=3.169, csr=0.121, effilo=0.500, jean=0.500, coton=0.750 (t CO2/t textile)
-    // Mix moyen : 40% reemploi + 35% recyclage fibre + 15% chiffons + 10% CSR
+    // Émissions CO2 évitées — facteurs ADEME par filière de valorisation
+    // (réutilisation=3.169, recyclage=0.500, chiffons=0.750, csr=0.121 t CO2/t textile)
+    // Le mix utilisé est :
+    //   1) calculé sur les colisages scellés de la période (mix observé)
+    //   2) à défaut, mix moyen fallback 40/35/15/10
     const totalKg = parseFloat(collecte.rows[0].total_kg) || 0;
     const totalTonnes = totalKg / 1000;
-    const co2Reemploi = totalTonnes * 0.40 * 3.169;     // Original / reemploi direct
-    const co2Recyclage = totalTonnes * 0.35 * 0.500;    // Effilochage / jean
-    const co2Chiffons = totalTonnes * 0.15 * 0.750;     // Coton blanc/couleur
-    const co2CSR = totalTonnes * 0.10 * 0.121;          // Combustible solide
+
+    const FACTEURS_CO2 = { reutilisation: 3.169, recyclage: 0.500, chiffons: 0.750, csr: 0.121 };
+    let mix = { reutilisation: 0.40, recyclage: 0.35, chiffons: 0.15, csr: 0.10, source: 'fallback' };
+
+    try {
+      const mixObs = await pool.query(`
+        SELECT
+          SUM(CASE WHEN cs.famille_refashion = 'reutilisation' THEN c.poids_kg ELSE 0 END) AS reutilisation_kg,
+          SUM(CASE WHEN cs.famille_refashion = 'recyclage' AND cs.nom NOT ILIKE 'Chiffons%' THEN c.poids_kg ELSE 0 END) AS recyclage_kg,
+          SUM(CASE WHEN cs.famille_refashion = 'recyclage' AND cs.nom ILIKE 'Chiffons%' THEN c.poids_kg ELSE 0 END) AS chiffons_kg,
+          SUM(CASE WHEN cs.famille_refashion = 'csr' THEN c.poids_kg ELSE 0 END) AS csr_kg,
+          SUM(c.poids_kg) AS total_kg
+        FROM colisages c
+        JOIN categories_sortantes cs ON c.categorie_sortante_id = cs.id
+        WHERE c.status IN ('scelle','expedie','livre') AND c.scelle_at IS NOT NULL
+          AND c.scelle_at >= $1::date AND c.scelle_at < $2::date
+      `, [dateFrom, dateTo]);
+      const t = parseFloat(mixObs.rows[0]?.total_kg) || 0;
+      if (t > 100) {
+        mix = {
+          reutilisation: parseFloat(mixObs.rows[0].reutilisation_kg) / t,
+          recyclage: parseFloat(mixObs.rows[0].recyclage_kg) / t,
+          chiffons: parseFloat(mixObs.rows[0].chiffons_kg) / t,
+          csr: parseFloat(mixObs.rows[0].csr_kg) / t,
+          source: 'observe',
+        };
+      }
+    } catch (_) { /* fallback */ }
+
+    const co2Reemploi = totalTonnes * mix.reutilisation * FACTEURS_CO2.reutilisation;
+    const co2Recyclage = totalTonnes * mix.recyclage * FACTEURS_CO2.recyclage;
+    const co2Chiffons = totalTonnes * mix.chiffons * FACTEURS_CO2.chiffons;
+    const co2CSR = totalTonnes * mix.csr * FACTEURS_CO2.csr;
     const co2Total = Math.round((co2Reemploi + co2Recyclage + co2Chiffons + co2CSR) * 100) / 100;
 
     // Effectifs
@@ -124,9 +155,18 @@ router.get('/dashboard', async (req, res) => {
       },
       emissions_evitees: {
         co2_total_tonnes: co2Total,
+        mix_source: mix.source,
+        mix: {
+          reutilisation_pct: Math.round(mix.reutilisation * 1000) / 10,
+          recyclage_pct: Math.round(mix.recyclage * 1000) / 10,
+          chiffons_pct: Math.round(mix.chiffons * 1000) / 10,
+          csr_pct: Math.round(mix.csr * 1000) / 10,
+        },
         detail: {
           reemploi_tonnes: Math.round(co2Reemploi * 100) / 100,
           recyclage_tonnes: Math.round(co2Recyclage * 100) / 100,
+          chiffons_tonnes: Math.round(co2Chiffons * 100) / 100,
+          csr_tonnes: Math.round(co2CSR * 100) / 100,
         },
       },
       taux_captation: tauxCaptation,

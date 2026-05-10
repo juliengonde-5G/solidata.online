@@ -520,7 +520,7 @@ router.get('/:id/summary-public', async (req, res) => {
     } else {
       const r = await pool.query(
         `SELECT tc.id, tc.cav_id, tc.position, tc.status, tc.fill_level,
-                tc.collected_at, tc.planned_passage_time, tc.notes,
+                tc.collected_at, tc.planned_passage_time, tc.notes, tc.skip_reason,
                 c.name AS cav_name, c.commune
            FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id
           WHERE tc.tour_id = $1 ORDER BY tc.position`,
