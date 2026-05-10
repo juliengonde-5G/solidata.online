@@ -20,6 +20,8 @@ const Production = lazy(() => import('./pages/Production'));
 const ChaineTri = lazy(() => import('./pages/ChaineTri'));
 const Stock = lazy(() => import('./pages/Stock'));
 const ProduitsFinis = lazy(() => import('./pages/ProduitsFinis'));
+const EtiquetteGenerer = lazy(() => import('./pages/EtiquetteGenerer'));
+const SortieCartons = lazy(() => import('./pages/SortieCartons'));
 const ReportingCollecte = lazy(() => import('./pages/ReportingCollecte'));
 const ReportingRH = lazy(() => import('./pages/ReportingRH'));
 const ReportingProduction = lazy(() => import('./pages/ReportingProduction'));
@@ -145,6 +147,8 @@ function App() {
               <Route path="/chaine-tri" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ChaineTri /></ProtectedRoute>} />
               <Route path="/stock" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Stock /></ProtectedRoute>} />
               <Route path="/produits-finis" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ProduitsFinis /></ProtectedRoute>} />
+              <Route path="/tri/etiquettes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'COLLABORATEUR']}><EtiquetteGenerer /></ProtectedRoute>} />
+              <Route path="/inventaire/sortie-cartons" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'COLLABORATEUR']}><SortieCartons /></ProtectedRoute>} />
 
               {/* Logistique */}
               <Route path="/exutoires-commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCommandes /></ProtectedRoute>} />
