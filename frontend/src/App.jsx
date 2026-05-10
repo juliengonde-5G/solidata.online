@@ -24,6 +24,7 @@ const EtiquetteGenerer = lazy(() => import('./pages/EtiquetteGenerer'));
 const SortieCartons = lazy(() => import('./pages/SortieCartons'));
 const AdminCatalogue = lazy(() => import('./pages/AdminCatalogue'));
 const AdminRefashionConfig = lazy(() => import('./pages/AdminRefashionConfig'));
+const AdminRefashionExports = lazy(() => import('./pages/AdminRefashionExports'));
 const AdminCommunes = lazy(() => import('./pages/AdminCommunes'));
 const ReportingCollecte = lazy(() => import('./pages/ReportingCollecte'));
 const ReportingRH = lazy(() => import('./pages/ReportingRH'));
@@ -153,6 +154,7 @@ function App() {
               <Route path="/inventaire/sortie-cartons" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'COLLABORATEUR']}><SortieCartons /></ProtectedRoute>} />
               <Route path="/admin/catalogue" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminCatalogue /></ProtectedRoute>} />
               <Route path="/admin/refashion-config" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminRefashionConfig /></ProtectedRoute>} />
+              <Route path="/admin/refashion-exports" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminRefashionExports /></ProtectedRoute>} />
               <Route path="/admin/communes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminCommunes /></ProtectedRoute>} />
 
               {/* Logistique */}

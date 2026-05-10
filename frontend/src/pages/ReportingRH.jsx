@@ -25,18 +25,25 @@ export default function ReportingRH() {
   const [candidates, setCandidates] = useState([]);
   const [insertionStats, setInsertionStats] = useState(null);
   const [absenteeism, setAbsenteeism] = useState([]);
+  const [formation, setFormation] = useState(null);
+  const [etp, setEtp] = useState(null);
+  const [absent, setAbsent] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     setLoading(true);
+    const annee = new Date().getFullYear();
     try {
-      const [empRes, teamRes, candRes, insRes, absRes] = await Promise.all([
+      const [empRes, teamRes, candRes, insRes, absRes, formRes, etpRes, absKpiRes] = await Promise.all([
         api.get('/employees?is_active=true'),
         api.get('/teams'),
         api.get('/candidates'),
         api.get('/performance/industrial-kpis').catch(() => ({ data: null })),
         api.get('/employees/absenteeism/monthly?months=12').catch(() => ({ data: [] })),
+        api.get(`/employees/kpi/formation?annee=${annee}`).catch(() => ({ data: null })),
+        api.get(`/employees/kpi/etp?annee=${annee}`).catch(() => ({ data: null })),
+        api.get(`/employees/kpi/absenteisme?annee=${annee}`).catch(() => ({ data: null })),
       ]);
       const empData = Array.isArray(empRes.data) ? empRes.data : (empRes.data?.employees || []);
       setEmployees(empData);
@@ -44,6 +51,9 @@ export default function ReportingRH() {
       setCandidates(candRes.data || []);
       setInsertionStats(insRes.data?.insertion || null);
       setAbsenteeism(absRes.data || []);
+      setFormation(formRes.data);
+      setEtp(etpRes.data);
+      setAbsent(absKpiRes.data);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -119,6 +129,37 @@ export default function ReportingRH() {
           <KPICard title="Candidatures" value={candidates.length} icon={UserPlus} accent="amber" />
           <KPICard title="Recrutés" value={candidateStatuses.recruited || 0} icon={UserPlus} accent="emerald" />
           <KPICard title="Parcours insertion" value={insertionStats?.parcours_actifs || '—'} unit="actifs" icon={Heart} accent="red" />
+        </div>
+
+        {/* KPI audit Métropole (P1-D) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="bg-white rounded-2xl shadow p-5 border border-blue-100">
+            <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Heures de formation {formation?.annee ?? new Date().getFullYear()}</div>
+            <div className="text-3xl font-extrabold text-blue-700">
+              {formation?.total_heures != null ? `${Math.round(formation.total_heures)} h` : '—'}
+            </div>
+            <div className="text-sm text-slate-500 mt-1">
+              {formation?.par_personne?.length || 0} salarié(s) avec formation
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl shadow p-5 border border-emerald-100">
+            <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">ETP total {etp?.annee ?? new Date().getFullYear()}</div>
+            <div className="text-3xl font-extrabold text-emerald-700">
+              {etp?.total_etp != null ? etp.total_etp : '—'}
+            </div>
+            <div className="text-sm text-slate-500 mt-1">
+              Base {etp?.etp_reference_heures || 1607}h/an · {etp?.par_equipe?.length || 0} équipes
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl shadow p-5 border border-amber-100">
+            <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Absentéisme moyen (équipe la plus haute)</div>
+            <div className="text-3xl font-extrabold text-amber-700">
+              {absent?.par_equipe?.[0]?.taux_pct != null ? `${absent.par_equipe[0].taux_pct} %` : '—'}
+            </div>
+            <div className="text-sm text-slate-500 mt-1">
+              {absent?.par_equipe?.[0]?.equipe || '—'}
+            </div>
+          </div>
         </div>
 
         {/* Effectifs par équipe */}

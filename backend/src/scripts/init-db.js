@@ -1566,6 +1566,168 @@ async function initDatabase() {
     // `association_points` (module collecte). Suppression de la table inutilisée.
     await client.query(`DROP TABLE IF EXISTS associations CASCADE`);
 
+    // V2.3 — Refonte categories_sortantes alignée Dashboard 2026 (P1-A)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE categories_sortantes ADD COLUMN famille_refashion VARCHAR(30)
+          CHECK (famille_refashion IN ('reutilisation','recyclage','csr','elimination','retour'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN ALTER TABLE categories_sortantes ADD COLUMN ordre SMALLINT DEFAULT 100;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Seed des 18 catégories sortantes (17 Dashboard + Refus de tri obligatoire)
+    const categoriesSortantes = [
+      { nom: 'Original',                     famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 10 },
+      { nom: 'Pré-classé Textiles',          famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 20 },
+      { nom: 'Pré-classé Chaussures par paire', famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 21 },
+      { nom: 'Pré-classé Sacs Ceintures',    famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 22 },
+      { nom: 'Pré-classé Linge de maison',   famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 23 },
+      { nom: '2nd choix (VAK) Textiles',     famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 30 },
+      { nom: '2nd choix (VAK) Chaussures',   famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 31 },
+      { nom: '2nd choix (VAK) Maroquinerie', famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 32 },
+      { nom: 'Destockage Textiles',          famille: 'Réutilisation', famille_refashion: 'reutilisation', ordre: 40 },
+      { nom: 'Effilochage Coton',            famille: 'Recyclage',     famille_refashion: 'recyclage',     ordre: 50 },
+      { nom: 'Effilochage Jean',             famille: 'Recyclage',     famille_refashion: 'recyclage',     ordre: 51 },
+      { nom: 'Effilochage Mérinos',          famille: 'Recyclage',     famille_refashion: 'recyclage',     ordre: 52 },
+      { nom: 'Effilochage Tricot',           famille: 'Recyclage',     famille_refashion: 'recyclage',     ordre: 53 },
+      { nom: 'Chiffons blanc',               famille: 'Chiffons',      famille_refashion: 'recyclage',     ordre: 60 },
+      { nom: 'Chiffons couleur',             famille: 'Chiffons',      famille_refashion: 'recyclage',     ordre: 61 },
+      { nom: 'CSR Textiles',                 famille: 'CSR',           famille_refashion: 'csr',           ordre: 70 },
+      { nom: 'CSR Chaussures',               famille: 'CSR',           famille_refashion: 'csr',           ordre: 71 },
+      { nom: 'Refus de tri',                 famille: 'Élimination',   famille_refashion: 'elimination',   ordre: 90 },
+    ];
+    for (const c of categoriesSortantes) {
+      await client.query(
+        `INSERT INTO categories_sortantes (nom, famille, famille_refashion, ordre, is_active)
+         VALUES ($1, $2, $3, $4, true)
+         ON CONFLICT (nom) DO UPDATE SET
+           famille = EXCLUDED.famille,
+           famille_refashion = EXCLUDED.famille_refashion,
+           ordre = EXCLUDED.ordre,
+           is_active = true`,
+        [c.nom, c.famille, c.famille_refashion, c.ordre]
+      );
+    }
+
+    // V2.3 — audit-trail operation_outputs + motif non-collecte tour_cav (P1-B)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE operation_outputs ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tour_cav ADD COLUMN skip_reason VARCHAR(30)
+          CHECK (skip_reason IS NULL OR skip_reason IN
+            ('cav_fermee','bouchee','acces_impossible','proprietaire_absent','vide','autre'));
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // V2.3 — 5 vues SQL Dashboard 2026 (P1-C : QHSE permanent)
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_tonnage_annuel_tournee AS
+      SELECT EXTRACT(YEAR FROM t.date)::int AS annee,
+             EXTRACT(MONTH FROM t.date)::int AS mois,
+             COALESCE(sr.name, 'Tournée ad hoc') AS tournee,
+             COALESCE(SUM(tw.weight_kg), 0)::int AS poids_kg,
+             COUNT(DISTINCT t.id)::int AS nb_tournees
+      FROM tours t
+      LEFT JOIN tour_weights tw ON tw.tour_id = t.id
+      LEFT JOIN standard_routes sr ON t.standard_route_id = sr.id
+      WHERE t.status = 'completed'
+      GROUP BY annee, mois, sr.name
+      ORDER BY annee, mois, sr.name;
+    `);
+
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_dpav_sortants AS
+      SELECT EXTRACT(YEAR FROM c.scelle_at)::int AS annee,
+             EXTRACT(QUARTER FROM c.scelle_at)::int AS trimestre,
+             cs.famille AS section_dpav,
+             cs.famille_refashion,
+             cs.nom AS categorie,
+             e.nom AS exutoire,
+             (SUM(c.poids_kg) / 1000.0)::numeric(10,3) AS tonnage_t,
+             COUNT(*)::int AS nb_colisages
+      FROM colisages c
+      JOIN categories_sortantes cs ON c.categorie_sortante_id = cs.id
+      LEFT JOIN exutoires e ON c.exutoire_id = e.id
+      WHERE c.status IN ('scelle','expedie','livre') AND c.scelle_at IS NOT NULL
+      GROUP BY annee, trimestre, cs.famille, cs.famille_refashion, cs.nom, e.nom
+      ORDER BY annee, trimestre, cs.famille, exutoire;
+    `);
+
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_dpav_communes AS
+      SELECT EXTRACT(YEAR FROM t.date)::int AS annee,
+             EXTRACT(QUARTER FROM t.date)::int AS trimestre,
+             COALESCE(rc.code_insee, '')::text AS code_insee,
+             COALESCE(rc.nom, c.commune, '(non rattaché)') AS commune,
+             COALESCE(rc.code_postal, '') AS code_postal,
+             COALESCE(SUM(tw.weight_kg), 0)::int AS poids_kg
+      FROM tours t
+      JOIN tour_weights tw ON tw.tour_id = t.id
+      JOIN tour_cav tc ON tc.tour_id = t.id AND tc.status = 'collected'
+      JOIN cav c ON tc.cav_id = c.id
+      LEFT JOIN referentiel_communes rc ON c.code_insee_commune = rc.code_insee
+      WHERE t.status = 'completed'
+      GROUP BY annee, trimestre, rc.code_insee, COALESCE(rc.nom, c.commune, '(non rattaché)'), rc.code_postal
+      ORDER BY annee, trimestre, commune;
+    `);
+
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_subvention_refashion_mensuelle AS
+      WITH entree AS (
+        SELECT EXTRACT(YEAR FROM date)::int AS annee,
+               EXTRACT(MONTH FROM date)::int AS mois,
+               SUM(entree_ligne_kg)::int AS tonnage_trie_kg
+        FROM production_daily
+        GROUP BY annee, mois
+      ), taux AS (
+        SELECT taux_euro_par_tonne, valid_from, COALESCE(valid_to, '9999-12-31'::date) AS valid_to
+        FROM refashion_taux_subvention
+      )
+      SELECT e.annee, e.mois,
+             e.tonnage_trie_kg,
+             t.taux_euro_par_tonne,
+             ROUND((e.tonnage_trie_kg / 1000.0 * t.taux_euro_par_tonne)::numeric, 2) AS subvention_eur
+      FROM entree e
+      LEFT JOIN taux t ON make_date(e.annee, e.mois, 15) BETWEEN t.valid_from AND t.valid_to
+      ORDER BY e.annee, e.mois;
+    `);
+
+    await client.query(`
+      CREATE OR REPLACE VIEW vw_coherence_tri_filiere AS
+      WITH entrant AS (
+        SELECT EXTRACT(YEAR FROM date)::int AS annee,
+               EXTRACT(MONTH FROM date)::int AS mois,
+               SUM(entree_ligne_kg)::int AS entree_kg
+        FROM production_daily
+        GROUP BY annee, mois
+      ), sortant AS (
+        SELECT EXTRACT(YEAR FROM c.scelle_at)::int AS annee,
+               EXTRACT(MONTH FROM c.scelle_at)::int AS mois,
+               SUM(c.poids_kg)::int AS sortie_kg
+        FROM colisages c
+        WHERE c.status IN ('scelle','expedie','livre') AND c.scelle_at IS NOT NULL
+        GROUP BY annee, mois
+      )
+      SELECT e.annee, e.mois,
+             e.entree_kg,
+             COALESCE(s.sortie_kg, 0) AS sortie_kg,
+             (e.entree_kg - COALESCE(s.sortie_kg, 0)) AS ecart_kg,
+             ROUND(100.0 * (e.entree_kg - COALESCE(s.sortie_kg, 0))::numeric
+                   / NULLIF(e.entree_kg, 0), 2) AS ecart_pct
+      FROM entrant e
+      LEFT JOIN sortant s USING (annee, mois)
+      ORDER BY e.annee, e.mois;
+    `);
+
+    console.log('[INIT-DB] Migrations P1 (categories_sortantes refonte + audit-trail + 5 vues SQL) ✓');
+
     console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage, ref_dimensions, audit P0, gammes V2.1) ✓');
 
     // ══════════════════════════════════════════

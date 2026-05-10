@@ -208,6 +208,59 @@ router.patch('/taux/:id', authorize('ADMIN'), async (req, res) => {
 // exutoires sont conservées en DB pour ne pas perdre d'éventuelles
 // données saisies mais ne sont plus exposées.
 
+// ══════ Exports Dashboard 2026 (P1-C : QHSE permanent) ══════
+
+function toCsv(rows) {
+  if (!rows || rows.length === 0) return '';
+  const cols = Object.keys(rows[0]);
+  const escape = (v) => {
+    if (v == null) return '';
+    const s = String(v);
+    return /[",;\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [cols.join(';'), ...rows.map(r => cols.map(c => escape(r[c])).join(';'))].join('\n');
+}
+
+const EXPORT_VIEWS = {
+  'tonnage-annuel-tournee': 'vw_tonnage_annuel_tournee',
+  'dpav-sortants': 'vw_dpav_sortants',
+  'dpav-communes': 'vw_dpav_communes',
+  'subvention-mensuelle': 'vw_subvention_refashion_mensuelle',
+  'coherence-tri-filiere': 'vw_coherence_tri_filiere',
+};
+
+router.get('/exports/:slug', async (req, res) => {
+  const view = EXPORT_VIEWS[req.params.slug];
+  if (!view) return res.status(404).json({ error: 'Export inconnu' });
+  try {
+    const { annee, trimestre, format } = req.query;
+    let sql = `SELECT * FROM ${view}`;
+    const params = []; const filters = [];
+    if (annee) { params.push(parseInt(annee)); filters.push(`annee = $${params.length}`); }
+    if (trimestre && /^[1-4]$/.test(trimestre)) {
+      params.push(parseInt(trimestre)); filters.push(`trimestre = $${params.length}`);
+    }
+    if (filters.length) sql += ' WHERE ' + filters.join(' AND ');
+    const { rows } = await pool.query(sql, params);
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${req.params.slug}.csv"`);
+      return res.send(toCsv(rows));
+    }
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/exports', async (req, res) => {
+  res.json(Object.keys(EXPORT_VIEWS).map(slug => ({
+    slug,
+    view: EXPORT_VIEWS[slug],
+    csv_url: `/api/refashion/exports/${slug}?format=csv`,
+    json_url: `/api/refashion/exports/${slug}`,
+  })));
+});
+
 // ══════ Communes ══════
 
 // GET /api/refashion/communes
