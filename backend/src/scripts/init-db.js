@@ -1416,7 +1416,62 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_pf_status_sortie ON produits_finis(status, date_sortie) WHERE date_sortie IS NULL;
     `);
 
-    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage) ✓');
+    // V1.9.2 — référentiel des dimensions (genres, saisons, gammes, catégories eco-org)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ref_dimensions (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(30) NOT NULL CHECK (type IN ('categorie_eco_org','genre','saison','gamme')),
+        valeur VARCHAR(100) NOT NULL,
+        ordre SMALLINT DEFAULT 100,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(type, valeur)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ref_dimensions_type_active ON ref_dimensions(type, is_active);
+    `);
+
+    // Seed dimensions + produits_catalogue depuis le JSON Excel-extrait, uniquement si tables vides
+    const dimsCount = await client.query(`SELECT COUNT(*)::int AS n FROM ref_dimensions`);
+    const catCount = await client.query(`SELECT COUNT(*)::int AS n FROM produits_catalogue`);
+    if (dimsCount.rows[0].n === 0 || catCount.rows[0].n === 0) {
+      try {
+        const seedPath = require('path').join(__dirname, '..', 'data', 'catalogue-base.json');
+        const seed = JSON.parse(require('fs').readFileSync(seedPath, 'utf-8'));
+
+        if (dimsCount.rows[0].n === 0) {
+          const cats = Array.from(new Set(seed.produits.map(p => p.categorie_eco_org)));
+          const all = [
+            ...cats.map((v, i) => ['categorie_eco_org', v, i]),
+            ...(seed.genres || []).map((v, i) => ['genre', v, i]),
+            ...(seed.saisons || []).map((v, i) => ['saison', v, i]),
+            ...(seed.gammes || []).map((v, i) => ['gamme', v, i]),
+          ];
+          for (const [type, valeur, ordre] of all) {
+            await client.query(
+              `INSERT INTO ref_dimensions (type, valeur, ordre) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+              [type, valeur, ordre]
+            );
+          }
+          console.log(`[INIT-DB] ref_dimensions seedé : ${all.length} valeurs`);
+        }
+
+        if (catCount.rows[0].n === 0) {
+          for (const p of seed.produits) {
+            await client.query(
+              `INSERT INTO produits_catalogue (nom, categorie_eco_org, genre, saison, gamme, is_active)
+               VALUES ($1, $2, $3, $4, $5, true)
+               ON CONFLICT DO NOTHING`,
+              [p.nom, p.categorie_eco_org, 'Sans Genre', 'Sans Saison', 'VAK']
+            );
+          }
+          console.log(`[INIT-DB] produits_catalogue seedé : ${seed.produits.length} produits (défauts Sans Genre / Sans Saison / VAK)`);
+        }
+      } catch (e) {
+        console.warn(`[INIT-DB] Seed catalogue non-appliqué (${e.message}) — utiliser scripts/seed-catalogue.js manuellement`);
+      }
+    }
+
+    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage, ref_dimensions) ✓');
 
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)
