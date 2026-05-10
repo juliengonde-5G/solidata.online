@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { Map, Plus, Upload, Search } from 'lucide-react';
+import { Map, RefreshCw, Search } from 'lucide-react';
 import api from '../services/api';
 
 export default function AdminCommunes() {
@@ -8,11 +8,8 @@ export default function AdminCommunes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [q, setQ] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [form, setForm] = useState({ code_insee: '', nom: '', code_postal: '', epci_code: '', epci_nom: 'Métropole Rouen Normandie', population_insee: '', is_metropole_rouen: true });
-  const [csvText, setCsvText] = useState('');
-  const [importResult, setImportResult] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshResult, setRefreshResult] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -25,46 +22,26 @@ export default function AdminCommunes() {
 
   useEffect(() => { load(); }, []);
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const refreshFromInsee = async () => {
+    setRefreshing(true);
+    setError(null);
+    setRefreshResult(null);
     try {
-      await api.post('/communes', {
-        ...form,
-        population_insee: form.population_insee ? parseInt(form.population_insee) : null,
-      });
-      setShowForm(false);
-      setForm({ code_insee: '', nom: '', code_postal: '', epci_code: '', epci_nom: 'Métropole Rouen Normandie', population_insee: '', is_metropole_rouen: true });
-      load();
-    } catch (e) { setError(e.response?.data?.error || e.message); }
+      const r = await api.post('/communes/refresh-metropole');
+      setRefreshResult(r.data);
+      await load();
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || 'Erreur API geo.api.gouv.fr');
+    } finally { setRefreshing(false); }
   };
 
-  const submitImport = async () => {
-    try {
-      const lines = csvText.trim().split('\n');
-      if (lines.length < 2) { setError('CSV doit contenir au moins 2 lignes (header + data)'); return; }
-      const header = lines[0].split(/[,;\t]/).map(h => h.trim().toLowerCase());
-      const idx = (name) => header.indexOf(name);
-      const rows = lines.slice(1).map(line => {
-        const cols = line.split(/[,;\t]/).map(c => c.trim());
-        return {
-          code_insee: cols[idx('code_insee')] || cols[idx('insee')],
-          nom: cols[idx('nom')] || cols[idx('commune')],
-          code_postal: cols[idx('code_postal')] || cols[idx('cp')],
-          epci_code: cols[idx('epci_code')],
-          epci_nom: cols[idx('epci_nom')],
-          population_insee: cols[idx('population_insee')] || cols[idx('population')]
-            ? parseInt(cols[idx('population_insee')] || cols[idx('population')])
-            : null,
-          is_metropole_rouen: true,
-        };
-      }).filter(r => r.code_insee && r.nom);
-
-      const res = await api.post('/communes/import', { rows });
-      setImportResult(res.data);
-      setCsvText('');
-      load();
-    } catch (e) { setError(e.response?.data?.error || e.message); }
-  };
+  // auto-refresh si la liste est vide au premier chargement
+  useEffect(() => {
+    if (!loading && communes.length === 0 && !refreshResult && !error) {
+      refreshFromInsee();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   return (
     <Layout>
@@ -85,62 +62,17 @@ export default function AdminCommunes() {
           </div>
           <button onClick={load} className="px-4 py-2 rounded-lg bg-slate-200 hover:bg-slate-300 font-semibold text-sm">Filtrer</button>
           <div className="flex-1" />
-          <button onClick={() => setShowImport(!showImport)} className="px-4 py-2 rounded-lg bg-white border font-semibold text-sm flex items-center gap-2 hover:bg-slate-100">
-            <Upload className="w-4 h-4" /> Import CSV
-          </button>
-          <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm flex items-center gap-2 hover:bg-blue-700">
-            <Plus className="w-4 h-4" /> Nouvelle commune
+          <button onClick={refreshFromInsee} disabled={refreshing}
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm flex items-center gap-2 hover:bg-blue-700 disabled:bg-slate-300">
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Actualisation…' : 'Actualiser depuis API INSEE'}
           </button>
         </div>
 
-        {showImport && (
-          <div className="bg-white rounded-2xl shadow p-5 mb-6">
-            <h3 className="font-bold text-slate-700 mb-2">Import CSV</h3>
-            <p className="text-sm text-slate-500 mb-3">Format attendu (séparateur , ; ou tab) : <code className="bg-slate-100 px-1 rounded">code_insee,nom,code_postal,epci_code,epci_nom,population_insee</code></p>
-            <textarea value={csvText} onChange={e => setCsvText(e.target.value)}
-              rows="6" placeholder="code_insee,nom,code_postal,epci_code,epci_nom,population_insee&#10;76540,Rouen,76000,200023414,Métropole Rouen Normandie,110988"
-              className="w-full px-3 py-2 border rounded-lg font-mono text-sm" />
-            <div className="flex gap-2 mt-3">
-              <button onClick={submitImport} className="px-5 py-2 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700">Importer</button>
-              {importResult && <span className="text-sm text-emerald-700 font-semibold self-center">
-                ✓ {importResult.inserted} créées, {importResult.updated} mises à jour
-              </span>}
-            </div>
+        {refreshResult && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4 text-sm text-emerald-800">
+            ✓ Synchronisation API INSEE — {refreshResult.inserted} créées, {refreshResult.updated} mises à jour ({refreshResult.total} communes Métropole)
           </div>
-        )}
-
-        {showForm && (
-          <form onSubmit={submit} className="bg-white rounded-2xl shadow p-5 mb-6 grid gap-4 md:grid-cols-3">
-            <div>
-              <label className="text-xs font-semibold text-slate-600 block mb-1">Code INSEE (5)</label>
-              <input required value={form.code_insee} onChange={e => setForm({ ...form, code_insee: e.target.value })}
-                pattern="\d{5}" className="w-full px-3 py-2 border rounded-lg" placeholder="76540" />
-            </div>
-            <div className="md:col-span-2">
-              <label className="text-xs font-semibold text-slate-600 block mb-1">Nom</label>
-              <input required value={form.nom} onChange={e => setForm({ ...form, nom: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" placeholder="Rouen" />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-600 block mb-1">Code postal</label>
-              <input value={form.code_postal} onChange={e => setForm({ ...form, code_postal: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" placeholder="76000" />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-600 block mb-1">Population</label>
-              <input type="number" value={form.population_insee} onChange={e => setForm({ ...form, population_insee: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-600 block mb-1">EPCI</label>
-              <input value={form.epci_nom} onChange={e => setForm({ ...form, epci_nom: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg" />
-            </div>
-            <div className="md:col-span-3 flex gap-3 justify-end">
-              <button type="button" onClick={() => setShowForm(false)} className="px-5 py-2 rounded-lg bg-slate-200 hover:bg-slate-300 font-semibold">Annuler</button>
-              <button type="submit" className="px-5 py-2 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700">Enregistrer</button>
-            </div>
-          </form>
         )}
 
         <div className="bg-white rounded-2xl shadow overflow-hidden">

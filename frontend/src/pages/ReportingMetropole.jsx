@@ -30,15 +30,15 @@ export default function ReportingMetropole() {
       const [dashRes, cavRes, sdRes, scRes, captRes] = await Promise.all([
         api.get(`/metropole/dashboard?year=${year}&month=${month}`),
         api.get('/metropole/cav'),
-        api.get(`/metropole/sortie-dynamique?annee=${year}`),
-        api.get('/metropole/service-cav?months=6'),
-        api.get(`/metropole/captation-par-commune?annee=${year}`),
+        api.get(`/metropole/sortie-dynamique?annee=${year}`).catch(() => ({ data: null })),
+        api.get('/metropole/service-cav?months=6').catch(() => ({ data: [] })),
+        api.get(`/metropole/captation-par-commune?annee=${year}`).catch(() => ({ data: [] })),
       ]);
       setDashboard(dashRes.data);
       setCavList(cavRes.data);
       setSortieDyn(sdRes.data);
-      setServiceCav(scRes.data);
-      setCaptation(captRes.data);
+      setServiceCav(scRes.data || []);
+      setCaptation(captRes.data || []);
     } catch (err) { console.error(err); }
     setLoading(false);
   }, [year, month]);
