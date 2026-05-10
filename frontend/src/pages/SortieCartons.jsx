@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { ScanLine, Check, X, Package, AlertTriangle, Truck, Store } from 'lucide-react';
+import { ScanLine, Check, X, Package, AlertTriangle, Store, Layers } from 'lucide-react';
 import Layout from '../components/Layout';
 import useScannerInput from '../hooks/useScannerInput';
 import { beepSuccess, beepError, beepAlreadyOut, unlockAudio } from '../utils/beep';
@@ -14,7 +14,7 @@ const GAMME_COLORS = {
 };
 
 export default function SortieCartons() {
-  const [type, setType] = useState('btq');
+  const [mode, setMode] = useState(null);
   const [orders, setOrders] = useState([]);
   const [order, setOrder] = useState(null);
   const [scanned, setScanned] = useState([]);
@@ -23,18 +23,20 @@ export default function SortieCartons() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (order) return;
+    if (mode !== 'btq' || order) return;
     let cancelled = false;
     setLoadingOrders(true);
-    api.get(`/etiquettes/commandes-actives/${type}`)
+    api.get('/etiquettes/commandes-actives/btq')
       .then(({ data }) => { if (!cancelled) setOrders(data); })
       .catch(e => { if (!cancelled) setError(e.response?.data?.error || e.message); })
       .finally(() => { if (!cancelled) setLoadingOrders(false); });
     return () => { cancelled = true; };
-  }, [type, order]);
+  }, [mode, order]);
+
+  const scanning = mode === 'libre' || !!order;
 
   const handleScan = async (code) => {
-    if (!order) return;
+    if (!scanning) return;
     if (scanned.find(s => s.code_barre === code)) {
       beepAlreadyOut();
       setFlash({ kind: 'already', code, at: Date.now() });
@@ -42,11 +44,10 @@ export default function SortieCartons() {
       return;
     }
     try {
-      const { data } = await api.post('/etiquettes/sortie-scan', {
-        code_barre: code,
-        commande_type: order.type,
-        commande_id: order.id,
-      });
+      const payload = mode === 'libre'
+        ? { code_barre: code, commande_type: 'libre' }
+        : { code_barre: code, commande_type: 'btq', commande_id: order.id };
+      const { data } = await api.post('/etiquettes/sortie-scan', payload);
       beepSuccess();
       setScanned(prev => [{ ...data.carton, scanned_at: new Date() }, ...prev]);
       setFlash({ kind: 'ok', code, carton: data.carton, at: Date.now() });
@@ -65,22 +66,35 @@ export default function SortieCartons() {
     }
   };
 
-  useScannerInput({ onScan: handleScan, enabled: !!order });
+  useScannerInput({ onScan: handleScan, enabled: scanning });
 
   const totalKg = useMemo(() => scanned.reduce((s, c) => s + Number(c.poids_kg || 0), 0), [scanned]);
 
   const pickOrder = async (o) => {
     unlockAudio();
-    setOrder({ ...o, type });
+    setOrder({ ...o, type: 'btq' });
     try {
-      const { data } = await api.get(`/etiquettes/sortie-session/${type}/${o.id}`);
+      const { data } = await api.get(`/etiquettes/sortie-session/btq/${o.id}`);
       setScanned(data.items || []);
     } catch (e) {
       setError(e.response?.data?.error || e.message);
     }
   };
 
-  if (!order) {
+  const enterLibre = () => {
+    unlockAudio();
+    setMode('libre');
+    setScanned([]);
+  };
+
+  const leaveScan = () => {
+    setMode(null);
+    setOrder(null);
+    setScanned([]);
+    setFlash(null);
+  };
+
+  if (!mode) {
     return (
       <Layout>
         <div className="min-h-[calc(100vh-60px)] bg-slate-50 p-8">
@@ -89,27 +103,44 @@ export default function SortieCartons() {
             <h1 className="text-2xl font-bold text-slate-800">Sortie cartons par scan</h1>
           </header>
 
-          <div className="bg-white rounded-2xl shadow p-2 inline-flex gap-2 mb-6">
+          <div className="grid gap-6 md:grid-cols-2 max-w-4xl">
             <button
-              onClick={() => setType('btq')}
-              className={`px-6 py-3 rounded-xl font-bold flex items-center gap-2 ${type === 'btq' ? 'bg-emerald-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
+              onClick={() => setMode('btq')}
+              className="bg-white rounded-3xl shadow-md hover:shadow-xl p-10 text-left transition transform hover:-translate-y-1 border-2 border-emerald-200 hover:border-emerald-500"
             >
-              <Store className="w-5 h-5" /> Boutique (BTQ)
+              <Store className="w-16 h-16 text-emerald-600 mb-4" strokeWidth={1.5} />
+              <div className="text-2xl font-bold text-slate-800 mb-2">Sur commande boutique</div>
+              <div className="text-sm text-slate-500">Scan rattaché à une commande BTQ active. Les cartons sont liés à la commande pour la traçabilité.</div>
             </button>
             <button
-              onClick={() => setType('vak')}
-              className={`px-6 py-3 rounded-xl font-bold flex items-center gap-2 ${type === 'vak' ? 'bg-blue-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
+              onClick={enterLibre}
+              className="bg-white rounded-3xl shadow-md hover:shadow-xl p-10 text-left transition transform hover:-translate-y-1 border-2 border-blue-200 hover:border-blue-500"
             >
-              <Truck className="w-5 h-5" /> Vrac / Exutoires (VAK)
+              <Layers className="w-16 h-16 text-blue-600 mb-4" strokeWidth={1.5} />
+              <div className="text-2xl font-bold text-slate-800 mb-2">Scan libre</div>
+              <div className="text-sm text-slate-500">Sortie de stock sans rattachement à une commande. Le carton est marqué expédié sans destination.</div>
             </button>
           </div>
+        </div>
+      </Layout>
+    );
+  }
 
-          <h2 className="text-lg font-semibold text-slate-700 mb-4">Choisir la commande active</h2>
+  if (mode === 'btq' && !order) {
+    return (
+      <Layout>
+        <div className="min-h-[calc(100vh-60px)] bg-slate-50 p-8">
+          <header className="flex items-center gap-4 mb-8">
+            <button onClick={leaveScan} className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-sm font-semibold">← Retour</button>
+            <Store className="w-8 h-8 text-emerald-600" />
+            <h1 className="text-2xl font-bold text-slate-800">Choisir la commande boutique</h1>
+          </header>
+
           {error && <div className="bg-rose-50 text-rose-700 p-3 rounded mb-4 text-sm">{error}</div>}
           {loadingOrders && <div className="text-slate-400">Chargement…</div>}
           {!loadingOrders && orders.length === 0 && (
             <div className="bg-white rounded-2xl shadow p-8 text-center text-slate-500">
-              Aucune commande active dans ce module pour le moment.
+              Aucune commande BTQ active. Une commande doit être au statut envoyée, ajustée ou en préparation.
             </div>
           )}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -132,15 +163,19 @@ export default function SortieCartons() {
     );
   }
 
+  const headerLabel = mode === 'libre' ? 'Mode scan libre' : order.label;
+  const headerSub = mode === 'libre' ? 'Sans rattachement commande' : `${order.reference} • Boutique`;
+  const accent = mode === 'libre' ? 'text-blue-600' : 'text-emerald-600';
+
   return (
     <Layout>
       <div className="min-h-[calc(100vh-60px)] bg-slate-50 flex flex-col">
         <header className="bg-white border-b px-6 py-4 flex items-center gap-4 shadow-sm">
-          <button onClick={() => setOrder(null)} className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-sm font-semibold">← Changer</button>
-          <ScanLine className="w-7 h-7 text-blue-600" />
+          <button onClick={leaveScan} className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-sm font-semibold">← Changer</button>
+          {mode === 'libre' ? <Layers className={`w-7 h-7 ${accent}`} /> : <Store className={`w-7 h-7 ${accent}`} />}
           <div className="flex-1">
-            <div className="text-xs text-slate-500">{order.reference} • {order.type === 'btq' ? 'Boutique' : 'Vrac'}</div>
-            <div className="text-xl font-bold text-slate-800">{order.label}</div>
+            <div className="text-xs text-slate-500">{headerSub}</div>
+            <div className="text-xl font-bold text-slate-800">{headerLabel}</div>
           </div>
           <div className="text-right">
             <div className="text-xs text-slate-500">Cartons / Poids</div>
@@ -204,7 +239,7 @@ export default function SortieCartons() {
 
         <footer className="bg-white border-t px-6 py-3 flex items-center justify-between text-sm text-slate-500">
           <span>Astuce : cette page écoute la douchette en permanence. Cliquez n'importe où dans la fenêtre si rien ne se passe.</span>
-          <span>{order.reference}</span>
+          <span>{mode === 'libre' ? 'Sortie libre' : order.reference}</span>
         </footer>
       </div>
     </Layout>

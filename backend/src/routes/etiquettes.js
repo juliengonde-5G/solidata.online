@@ -106,11 +106,14 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
 
 router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
   const { code_barre, commande_type, commande_id } = req.body || {};
-  if (!code_barre || !commande_type || !commande_id) {
-    return res.status(400).json({ error: 'code_barre, commande_type, commande_id requis' });
+  if (!code_barre || !commande_type) {
+    return res.status(400).json({ error: 'code_barre et commande_type requis' });
   }
-  if (!['btq', 'vak'].includes(commande_type)) {
-    return res.status(400).json({ error: 'commande_type doit être btq ou vak' });
+  if (!['btq', 'vak', 'libre'].includes(commande_type)) {
+    return res.status(400).json({ error: 'commande_type doit être btq, vak ou libre' });
+  }
+  if (commande_type !== 'libre' && !commande_id) {
+    return res.status(400).json({ error: 'commande_id requis pour ce type' });
   }
 
   const client = await pool.connect();
@@ -132,7 +135,7 @@ router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), asyn
       return res.status(409).json({ error: 'Carton déjà sorti', code: 'ALREADY_OUT', carton: c });
     }
 
-    let cmdRow;
+    let cmdRow = null;
     if (commande_type === 'btq') {
       cmdRow = await client.query(
         `SELECT id, reference, statut FROM boutique_commandes WHERE id = $1`,
@@ -142,7 +145,7 @@ router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), asyn
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'Commande BTQ inactive ou introuvable', code: 'COMMANDE_FERMEE' });
       }
-    } else {
+    } else if (commande_type === 'vak') {
       cmdRow = await client.query(
         `SELECT id, reference, statut FROM commandes_exutoires WHERE id = $1`,
         [commande_id]
@@ -159,13 +162,13 @@ router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), asyn
          sortie_commande_type = $1, sortie_commande_id = $2, scanned_by = $3
        WHERE id = $4
        RETURNING id, code_barre, produit, categorie_eco_org, genre, gamme, poids_kg, date_sortie`,
-      [commande_type, commande_id, req.user.id, c.id]
+      [commande_type, commande_type === 'libre' ? null : commande_id, req.user.id, c.id]
     );
 
     await client.query('COMMIT');
     res.json({
       carton: updated.rows[0],
-      commande: cmdRow.rows[0],
+      commande: cmdRow ? cmdRow.rows[0] : null,
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -180,6 +183,7 @@ router.get('/sortie-session/:type/:commande_id', async (req, res) => {
   if (!['btq', 'vak'].includes(type)) {
     return res.status(400).json({ error: 'type doit être btq ou vak' });
   }
+  // mode 'libre' n'a pas de session persistante côté backend (pas de commande)
   try {
     const { rows } = await pool.query(
       `SELECT id, code_barre, produit, categorie_eco_org, genre, gamme, poids_kg, date_sortie, scanned_by

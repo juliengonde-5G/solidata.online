@@ -1382,8 +1382,25 @@ async function initDatabase() {
     `);
     await client.query(`
       DO $$ BEGIN
-        ALTER TABLE produits_finis ADD COLUMN sortie_commande_type VARCHAR(10) CHECK (sortie_commande_type IN ('btq', 'vak'));
+        ALTER TABLE produits_finis ADD COLUMN sortie_commande_type VARCHAR(10) CHECK (sortie_commande_type IN ('btq', 'vak', 'libre'));
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    // V1.9.1 : étend la CHECK existante pour accepter 'libre' si la colonne préexistait
+    await client.query(`
+      DO $$
+      DECLARE c text;
+      BEGIN
+        SELECT con.conname INTO c FROM pg_constraint con
+        JOIN pg_attribute att ON att.attnum = ANY(con.conkey) AND att.attrelid = con.conrelid
+        WHERE con.conrelid = 'produits_finis'::regclass AND con.contype = 'c'
+          AND att.attname = 'sortie_commande_type' LIMIT 1;
+        IF c IS NOT NULL THEN
+          EXECUTE 'ALTER TABLE produits_finis DROP CONSTRAINT ' || quote_ident(c);
+        END IF;
+        ALTER TABLE produits_finis ADD CONSTRAINT produits_finis_sortie_commande_type_check
+          CHECK (sortie_commande_type IS NULL OR sortie_commande_type IN ('btq','vak','libre'));
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
     `);
     await client.query(`
       DO $$ BEGIN

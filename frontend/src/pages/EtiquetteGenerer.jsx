@@ -22,9 +22,11 @@ export default function EtiquetteGenerer() {
   const [error, setError] = useState(null);
   const [poste, setPoste] = useState(null);
   const [options, setOptions] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
         const [p, o] = await Promise.all([
@@ -35,7 +37,9 @@ export default function EtiquetteGenerer() {
         setPoste(p.data[0] || null);
         setOptions(o.data || []);
       } catch (e) {
-        if (!cancelled) setError(e.response?.data?.error || e.message);
+        if (!cancelled) setError(e.response?.data?.error || e.message || 'Erreur réseau');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -158,26 +162,41 @@ export default function EtiquetteGenerer() {
           {step === 0 && (
             <div>
               <h2 className="text-xl font-bold text-slate-700 mb-6">Choisir la catégorie</h2>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                {categories.map((c) => {
-                  const Icon = c.icon;
-                  const active = sel.categorie === c.key;
-                  return (
-                    <button
-                      key={c.key}
-                      onClick={() => { setSel({ ...sel, categorie: c.key, genre: '', saison: '', gamme: '', produit: '' }); setStep(1); }}
-                      className={`relative aspect-square rounded-2xl shadow-md flex flex-col items-center justify-center gap-4 transition transform hover:scale-105 ${
-                        active ? 'ring-4 ring-emerald-500' : ''
-                      }`}
-                      style={{ background: c.bg, color: c.color }}
-                    >
-                      <Icon className="w-24 h-24" strokeWidth={1.5} />
-                      <span className="text-2xl font-bold">{c.label}</span>
-                    </button>
-                  );
-                })}
-                {categories.length === 0 && <div className="col-span-full text-slate-400">Chargement du catalogue…</div>}
-              </div>
+              {loading && (
+                <div className="bg-white rounded-2xl shadow p-8 text-center text-slate-500">
+                  Chargement du catalogue…
+                </div>
+              )}
+              {!loading && categories.length === 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-amber-900">
+                  <div className="text-xl font-bold mb-3">Catalogue vide</div>
+                  <p className="mb-2">Aucun produit dans <code className="px-1 bg-amber-100 rounded">produits_catalogue</code>. Pour peupler le référentiel depuis le fichier Excel historique :</p>
+                  <pre className="bg-white border rounded p-3 text-xs overflow-x-auto">node backend/src/scripts/seed-catalogue.js --commit</pre>
+                  <p className="mt-3 text-sm">Pour aussi importer les 10 398 cartons historiques :</p>
+                  <pre className="bg-white border rounded p-3 text-xs overflow-x-auto">node backend/src/scripts/import-saisie-produit.js --commit</pre>
+                </div>
+              )}
+              {!loading && categories.length > 0 && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                  {categories.map((c) => {
+                    const Icon = c.icon;
+                    const active = sel.categorie === c.key;
+                    return (
+                      <button
+                        key={c.key}
+                        onClick={() => { setSel({ ...sel, categorie: c.key, genre: '', saison: '', gamme: '', produit: '' }); setStep(1); }}
+                        className={`relative aspect-square rounded-2xl shadow-md flex flex-col items-center justify-center gap-4 transition transform hover:scale-105 ${
+                          active ? 'ring-4 ring-emerald-500' : ''
+                        }`}
+                        style={{ background: c.bg, color: c.color }}
+                      >
+                        <Icon className="w-24 h-24" strokeWidth={1.5} />
+                        <span className="text-2xl font-bold">{c.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
