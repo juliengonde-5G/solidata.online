@@ -10,7 +10,7 @@ import {
   RefreshCw, Lock, Settings, Car,
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
-  Database, Building2, ListChecks, FileText, Beaker, ScanLine,
+  Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -54,7 +54,6 @@ const NAV_TREE = [
             children: [
               { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['ADMIN', 'MANAGER'] },
               { label: 'Associations', path: '/admin-associations', icon: Handshake, roles: ['ADMIN', 'MANAGER'] },
-              { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN', 'MANAGER'] },
             ],
           },
           { label: 'Historique des tournées', path: '/tours', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
@@ -226,6 +225,7 @@ const NAV_TREE = [
           { label: 'Moteur prédictif', path: '/admin-predictive', icon: Brain, roles: ['ADMIN'] },
           { label: 'Gestion des CAV', path: '/admin-cav', icon: Map, roles: ['ADMIN'] },
           { label: 'Capteurs CAV', path: '/admin-sensors', icon: Radio, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN', 'MANAGER'] },
         ],
       },
       {
@@ -238,6 +238,7 @@ const NAV_TREE = [
       { label: 'Configuration', path: '/settings', icon: Settings, roles: ['ADMIN'] },
       { label: 'Catalogue & référentiels', path: '/admin/catalogue', icon: Tag, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Configuration Refashion', path: '/admin/refashion-config', icon: ShieldCheck, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Exports DPAV Refashion', path: '/admin/refashion-exports', icon: Download, roles: ['ADMIN', 'MANAGER'] },
       {
         label: 'Utilisateurs & RGPD',
         icon: Users,

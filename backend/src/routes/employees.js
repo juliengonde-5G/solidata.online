@@ -911,4 +911,76 @@ router.put('/:id/visite-medicale/programmer', authorize('ADMIN', 'RH'), async (r
   }
 });
 
+// ══════ KPI RH P1-D — formation, ETP, absentéisme ══════
+
+router.get('/kpi/formation', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    const { rows } = await pool.query(`
+      SELECT e.id, e.first_name, e.last_name, t.name AS equipe,
+             COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type='training'), 0)::numeric(8,2) AS heures_formation
+      FROM employees e
+      LEFT JOIN teams t ON e.team_id = t.id
+      LEFT JOIN work_hours wh ON wh.employee_id = e.id AND EXTRACT(YEAR FROM wh.date) = $1
+      WHERE e.is_active = true
+      GROUP BY e.id, e.first_name, e.last_name, t.name
+      HAVING COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type='training'), 0) > 0
+      ORDER BY heures_formation DESC
+    `, [annee]);
+    const total = rows.reduce((s, r) => s + Number(r.heures_formation), 0);
+    res.json({ annee, total_heures: total, par_personne: rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/kpi/etp', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    const heuresPleinTemps = 1607;
+    const { rows } = await pool.query(`
+      SELECT t.name AS equipe,
+             COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training')), 0)::numeric(10,2) AS heures_travaillees,
+             COUNT(DISTINCT e.id)::int AS nb_salaries
+      FROM employees e
+      LEFT JOIN teams t ON e.team_id = t.id
+      LEFT JOIN work_hours wh ON wh.employee_id = e.id AND EXTRACT(YEAR FROM wh.date) = $1
+      WHERE e.is_active = true
+      GROUP BY t.name
+      ORDER BY heures_travaillees DESC
+    `, [annee]);
+    const enriched = rows.map(r => ({
+      ...r,
+      etp: Math.round((Number(r.heures_travaillees) / heuresPleinTemps) * 100) / 100,
+    }));
+    const totalEtp = enriched.reduce((s, r) => s + r.etp, 0);
+    res.json({ annee, etp_reference_heures: heuresPleinTemps, total_etp: Math.round(totalEtp * 100) / 100, par_equipe: enriched });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/kpi/absenteisme', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    const mois = req.query.mois ? parseInt(req.query.mois) : null;
+    const params = [annee];
+    let monthFilter = '';
+    if (mois) { params.push(mois); monthFilter = `AND EXTRACT(MONTH FROM wh.date) = $${params.length}`; }
+    const { rows } = await pool.query(`
+      SELECT t.name AS equipe,
+             COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('absence','sick')), 0)::numeric(10,2) AS heures_absence,
+             COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training','absence','sick')), 0)::numeric(10,2) AS heures_totales,
+             ROUND(
+               100.0 * SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('absence','sick'))::numeric
+               / NULLIF(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training','absence','sick')), 0),
+               2
+             ) AS taux_pct
+      FROM employees e
+      LEFT JOIN teams t ON e.team_id = t.id
+      LEFT JOIN work_hours wh ON wh.employee_id = e.id AND EXTRACT(YEAR FROM wh.date) = $1 ${monthFilter}
+      WHERE e.is_active = true
+      GROUP BY t.name
+      ORDER BY taux_pct DESC NULLS LAST
+    `, params);
+    res.json({ annee, mois, par_equipe: rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;
