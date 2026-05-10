@@ -83,6 +83,16 @@ services:
       LIVEOBJECTS_WEBHOOK_SECRET: ${LIVEOBJECTS_WEBHOOK_SECRET:-}
       LORA_APPKEY_ENCRYPTION_KEY: ${LORA_APPKEY_ENCRYPTION_KEY:-}
       SENSOR_FRESHNESS_HOURS: ${SENSOR_FRESHNESS_HOURS:-8}
+      # Web Push (Niveau 2.2) — VAPID. Si non défini, le service se
+      # désactive silencieusement et NotificationBell affiche
+      # « Push non configuré côté serveur ». Génération :
+      #   docker compose exec backend npx web-push generate-vapid-keys
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@solidata.online}
+      # Clé de chiffrement des rapports PCM (insertion). Si non définie,
+      # fallback sur JWT_SECRET (audit V1.4.2 demandait la séparation).
+      PCM_ENCRYPTION_KEY: ${PCM_ENCRYPTION_KEY:-}
     volumes:
       - uploads:/app/uploads
       - ./boutiques-csv:/data/boutiques-csv
