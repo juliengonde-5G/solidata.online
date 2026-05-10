@@ -257,4 +257,97 @@ router.get('/evolution', async (req, res) => {
   }
 });
 
+// ══════ KPIs P0-E ══════
+
+// Taux de sortie dynamique (CDI/CDD/formation/création) — année
+router.get('/sortie-dynamique', async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    const { rows } = await pool.query(`
+      WITH sorties AS (
+        SELECT im.sortie_type, im.sortie_classification
+        FROM insertion_milestones im
+        WHERE im.type = 'sortie'
+          AND im.statut = 'realise'
+          AND EXTRACT(YEAR FROM im.date_realisation) = $1
+      )
+      SELECT
+        COUNT(*)::int AS total_sorties,
+        COUNT(*) FILTER (WHERE sortie_type IN ('CDI','CDD','formation','creation'))::int AS dynamiques,
+        COUNT(*) FILTER (WHERE sortie_type = 'CDI')::int AS cdi,
+        COUNT(*) FILTER (WHERE sortie_type = 'CDD')::int AS cdd,
+        COUNT(*) FILTER (WHERE sortie_type = 'formation')::int AS formation,
+        COUNT(*) FILTER (WHERE sortie_type = 'creation')::int AS creation,
+        COUNT(*) FILTER (WHERE sortie_type IN ('abandon','fin'))::int AS non_dynamiques,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE sortie_type IN ('CDI','CDD','formation','creation'))::numeric
+              / NULLIF(COUNT(*), 0), 1) AS taux_dynamique_pct
+      FROM sorties
+    `, [annee]);
+    res.json({ annee, ...(rows[0] || {}) });
+  } catch (err) {
+    console.error('[METROPOLE] Erreur sortie-dynamique :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Taux de service CAV (% CAV collectés vs planifiés) — mois
+router.get('/service-cav', async (req, res) => {
+  try {
+    const months = parseInt(req.query.months) || 12;
+    const { rows } = await pool.query(`
+      SELECT
+        DATE_TRUNC('month', t.date) AS mois,
+        COUNT(*) FILTER (WHERE tc.status = 'collected')::int AS collectes,
+        COUNT(*) FILTER (WHERE tc.status = 'skipped')::int AS sautes,
+        COUNT(*) FILTER (WHERE tc.status IN ('collected','skipped'))::int AS planifies,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE tc.status = 'collected')::numeric
+              / NULLIF(COUNT(*) FILTER (WHERE tc.status IN ('collected','skipped')), 0), 1) AS taux_service_pct
+      FROM tours t
+      JOIN tour_cav tc ON tc.tour_id = t.id
+      WHERE t.status = 'completed'
+        AND t.date >= DATE_TRUNC('month', NOW()) - make_interval(months => $1)
+      GROUP BY DATE_TRUNC('month', t.date)
+      ORDER BY mois
+    `, [months]);
+    res.json(rows);
+  } catch (err) {
+    console.error('[METROPOLE] Erreur service-cav :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Tonnage captation par commune kg/hab — année
+router.get('/captation-par-commune', async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(rc.nom, c.commune, '(non rattaché)') AS commune,
+        rc.code_insee,
+        rc.epci_nom,
+        COALESCE(rc.population_insee, c.population_commune) AS population,
+        COALESCE(SUM(tw.weight_kg), 0)::int AS poids_kg,
+        COUNT(DISTINCT t.id)::int AS nb_tournees,
+        CASE
+          WHEN COALESCE(rc.population_insee, c.population_commune) > 0
+          THEN ROUND(SUM(tw.weight_kg)::numeric / NULLIF(COALESCE(rc.population_insee, c.population_commune), 0), 3)
+          ELSE NULL
+        END AS kg_par_hab
+      FROM tours t
+      JOIN tour_weights tw ON tw.tour_id = t.id
+      JOIN tour_cav tc ON tc.tour_id = t.id AND tc.status = 'collected'
+      JOIN cav c ON tc.cav_id = c.id
+      LEFT JOIN referentiel_communes rc ON c.code_insee_commune = rc.code_insee
+      WHERE EXTRACT(YEAR FROM t.date) = $1
+      GROUP BY COALESCE(rc.nom, c.commune, '(non rattaché)'), rc.code_insee, rc.epci_nom,
+               COALESCE(rc.population_insee, c.population_commune)
+      ORDER BY poids_kg DESC
+    `, [annee]);
+    res.json(rows);
+  } catch (err) {
+    console.error('[METROPOLE] Erreur captation-par-commune :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

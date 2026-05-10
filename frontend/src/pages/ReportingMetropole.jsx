@@ -20,16 +20,25 @@ export default function ReportingMetropole() {
   const [cavDetail, setCavDetail] = useState(null);
   const [cavActivity, setCavActivity] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sortieDyn, setSortieDyn] = useState(null);
+  const [serviceCav, setServiceCav] = useState([]);
+  const [captation, setCaptation] = useState([]);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const [dashRes, cavRes] = await Promise.all([
+      const [dashRes, cavRes, sdRes, scRes, captRes] = await Promise.all([
         api.get(`/metropole/dashboard?year=${year}&month=${month}`),
         api.get('/metropole/cav'),
+        api.get(`/metropole/sortie-dynamique?annee=${year}`),
+        api.get('/metropole/service-cav?months=6'),
+        api.get(`/metropole/captation-par-commune?annee=${year}`),
       ]);
       setDashboard(dashRes.data);
       setCavList(cavRes.data);
+      setSortieDyn(sdRes.data);
+      setServiceCav(scRes.data);
+      setCaptation(captRes.data);
     } catch (err) { console.error(err); }
     setLoading(false);
   }, [year, month]);
@@ -113,6 +122,49 @@ export default function ReportingMetropole() {
                   sub={`Objectif Refashion: ${d.taux_captation.objectif_refashion_kg} kg | Pop: ${(d.taux_captation.population_totale / 1000).toFixed(0)}k hab`}
                   color={d.taux_captation.kg_par_hab_an >= d.taux_captation.objectif_refashion_kg ? 'green' : 'amber'}
                 />
+              )}
+            </div>
+
+            {/* KPIs P0-E audit Métropole */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {sortieDyn && (
+                <div className="bg-white rounded-2xl shadow p-5 border border-emerald-100">
+                  <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Taux de sortie dynamique {sortieDyn.annee}</div>
+                  <div className="text-4xl font-extrabold text-emerald-600">
+                    {sortieDyn.taux_dynamique_pct != null ? `${sortieDyn.taux_dynamique_pct}%` : '—'}
+                  </div>
+                  <div className="text-sm text-slate-500 mt-2">
+                    {sortieDyn.dynamiques}/{sortieDyn.total_sorties} sorties — CDI {sortieDyn.cdi} · CDD {sortieDyn.cdd} · Formation {sortieDyn.formation} · Création {sortieDyn.creation}
+                  </div>
+                </div>
+              )}
+              {serviceCav.length > 0 && (() => {
+                const last = serviceCav[serviceCav.length - 1];
+                return (
+                  <div className="bg-white rounded-2xl shadow p-5 border border-blue-100">
+                    <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Taux de service CAV (dernier mois)</div>
+                    <div className="text-4xl font-extrabold text-blue-600">
+                      {last.taux_service_pct != null ? `${last.taux_service_pct}%` : '—'}
+                    </div>
+                    <div className="text-sm text-slate-500 mt-2">
+                      {last.collectes} collectes / {last.sautes} sautées sur {last.planifies} planifiées
+                    </div>
+                  </div>
+                );
+              })()}
+              {captation.length > 0 && (
+                <div className="bg-white rounded-2xl shadow p-5 border border-amber-100">
+                  <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Captation par commune (top 3)</div>
+                  <div className="space-y-1 text-sm mt-2">
+                    {captation.slice(0, 3).map((c) => (
+                      <div key={c.commune} className="flex justify-between text-slate-700">
+                        <span className="truncate font-medium">{c.commune}</span>
+                        <span className="tabular-nums text-amber-700 font-bold">{c.kg_par_hab != null ? `${c.kg_par_hab} kg/hab` : `${(c.poids_kg / 1000).toFixed(1)}t`}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-2">{captation.length} communes total</div>
+                </div>
               )}
             </div>
 
