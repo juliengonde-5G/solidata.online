@@ -232,7 +232,6 @@ const NAV_TREE = [
         label: 'Reporting',
         icon: PieChart,
         children: [
-          { label: 'Configuration Pennylane', path: '/admin/pennylane-config', icon: Settings, roles: ['ADMIN'] },
           { label: 'Stock Original', path: '/admin-stock-original', icon: Scale, roles: ['ADMIN'] },
         ],
       },

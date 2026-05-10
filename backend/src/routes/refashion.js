@@ -203,44 +203,10 @@ router.patch('/taux/:id', authorize('ADMIN'), async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ══════ Agrément Refashion sur exutoires (P0-A) ══════
-
-router.patch('/exutoires/:id/agrement', authorize('ADMIN', 'MANAGER'), async (req, res) => {
-  const { agrement_refashion, agrement_numero, agrement_date_debut, agrement_date_fin, agrement_notes } = req.body || {};
-  try {
-    const r = await pool.query(
-      `UPDATE exutoires SET
-         agrement_refashion = COALESCE($1, agrement_refashion),
-         agrement_numero = COALESCE($2, agrement_numero),
-         agrement_date_debut = COALESCE($3, agrement_date_debut),
-         agrement_date_fin = COALESCE($4, agrement_date_fin),
-         agrement_notes = COALESCE($5, agrement_notes)
-       WHERE id = $6 RETURNING *`,
-      [
-        typeof agrement_refashion === 'boolean' ? agrement_refashion : null,
-        agrement_numero || null,
-        agrement_date_debut || null,
-        agrement_date_fin || null,
-        agrement_notes || null,
-        req.params.id,
-      ]
-    );
-    if (r.rowCount === 0) return res.status(404).json({ error: 'Exutoire introuvable' });
-    res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-router.get('/exutoires-agrement', async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT id, nom, type, agrement_refashion, agrement_numero,
-              agrement_date_debut, agrement_date_fin, agrement_notes, is_active
-       FROM exutoires
-       ORDER BY agrement_refashion DESC, nom`
-    );
-    res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// Note : les endpoints d'agrément Refashion sur exutoires ont été retirés
+// (P0-A abandonné, pas d'utilité métier). Les colonnes agrement_* sur
+// exutoires sont conservées en DB pour ne pas perdre d'éventuelles
+// données saisies mais ne sont plus exposées.
 
 // ══════ Communes ══════
 

@@ -9,7 +9,6 @@ const TYPES = [
   { key: 'genre', label: 'Genres' },
   { key: 'saison', label: 'Saisons' },
   { key: 'gamme', label: 'Gammes' },
-  { key: 'exutoires', label: 'Exutoires' },
   { key: 'conteneurs', label: 'Conteneurs' },
 ];
 
@@ -17,7 +16,6 @@ export default function AdminCatalogue() {
   const [tab, setTab] = useState('produits');
   const [produits, setProduits] = useState([]);
   const [dimensions, setDimensions] = useState([]);
-  const [exutoires, setExutoires] = useState([]);
   const [conteneurs, setConteneurs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -28,15 +26,13 @@ export default function AdminCatalogue() {
     setLoading(true);
     setError(null);
     try {
-      const [p, d, e, c] = await Promise.all([
+      const [p, d, c] = await Promise.all([
         api.get('/etiquettes/admin/produits'),
         api.get('/etiquettes/admin/dimensions'),
-        api.get('/referentiels/exutoires').catch(() => ({ data: [] })),
         api.get('/referentiels/conteneurs').catch(() => ({ data: [] })),
       ]);
       setProduits(p.data || []);
       setDimensions(d.data || []);
-      setExutoires(e.data || []);
       setConteneurs(c.data || []);
     } catch (e) {
       setError(e.response?.data?.error || e.message);
@@ -170,7 +166,7 @@ export default function AdminCatalogue() {
           </>
         )}
 
-        {['exutoires', 'conteneurs'].includes(tab) && (
+        {tab === 'conteneurs' && (
           <>
             <form onSubmit={(e) => { e.preventDefault(); addReferentiel(tab); }}
               className="bg-white rounded-2xl shadow p-4 mb-6 flex flex-wrap gap-3 items-end">
@@ -179,13 +175,6 @@ export default function AdminCatalogue() {
                 <input value={refForm.nom || ''} onChange={e => setRefForm({ ...refForm, nom: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg" placeholder={tab === 'conteneurs' ? 'ex: Carton 60L' : 'Nom'} />
               </div>
-              {tab === 'exutoires' && (
-                <div className="flex-1 min-w-[150px]">
-                  <label className="text-xs text-slate-600 font-semibold block mb-1">Type</label>
-                  <input value={refForm.type || ''} onChange={e => setRefForm({ ...refForm, type: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg" placeholder="ex: Recyclage" />
-                </div>
-              )}
               <button type="submit" className="px-5 py-2 rounded-lg bg-emerald-600 text-white font-bold flex items-center gap-2 hover:bg-emerald-700">
                 <Plus className="w-4 h-4" /> Ajouter
               </button>
@@ -196,22 +185,20 @@ export default function AdminCatalogue() {
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
                     <th className="px-4 py-3">Nom</th>
-                    {tab === 'exutoires' && <th className="px-4 py-3">Type</th>}
-                    {tab === 'conteneurs' && <><th className="px-4 py-3 text-right">Capacité (L)</th><th className="px-4 py-3 text-right">Poids max (kg)</th></>}
-                    {tab !== 'conteneurs' && <th className="px-4 py-3">Contact</th>}
+                    <th className="px-4 py-3 text-right">Capacité (L)</th>
+                    <th className="px-4 py-3 text-right">Poids max (kg)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(tab === 'exutoires' ? exutoires : conteneurs).map(item => (
+                  {conteneurs.map(item => (
                     <tr key={item.id} className="border-t hover:bg-slate-50">
                       <td className="px-4 py-3 font-medium text-slate-800">{item.nom}</td>
-                      {tab === 'exutoires' && <td className="px-4 py-3 text-slate-600">{item.type || '—'}</td>}
-                      {tab === 'conteneurs' && <><td className="px-4 py-3 text-right tabular-nums">{item.capacite_litres ?? '—'}</td><td className="px-4 py-3 text-right tabular-nums">{item.poids_max_kg ?? '—'}</td></>}
-                      {tab !== 'conteneurs' && <td className="px-4 py-3 text-slate-500 text-sm">{item.contact_nom || '—'}</td>}
+                      <td className="px-4 py-3 text-right tabular-nums">{item.capacite_litres ?? '—'}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{item.poids_max_kg ?? '—'}</td>
                     </tr>
                   ))}
-                  {(tab === 'exutoires' ? exutoires : conteneurs).length === 0 && (
-                    <tr><td colSpan="3" className="px-4 py-8 text-center text-slate-400">Aucune entrée</td></tr>
+                  {conteneurs.length === 0 && (
+                    <tr><td colSpan="3" className="px-4 py-8 text-center text-slate-400">Aucun conteneur</td></tr>
                   )}
                 </tbody>
               </table>

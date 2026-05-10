@@ -35,13 +35,6 @@ export default function AdminCommunes() {
     } finally { setRefreshing(false); }
   };
 
-  // auto-refresh si la liste est vide au premier chargement
-  useEffect(() => {
-    if (!loading && communes.length === 0 && !refreshResult && !error) {
-      refreshFromInsee();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
 
   return (
     <Layout>
@@ -78,8 +71,17 @@ export default function AdminCommunes() {
         <div className="bg-white rounded-2xl shadow overflow-hidden">
           {loading && <div className="p-8 text-center text-slate-400">Chargement…</div>}
           {!loading && communes.length === 0 && (
-            <div className="p-8 text-center text-slate-400">
-              Aucune commune. Importe le référentiel INSEE COG via le bouton « Import CSV » ci-dessus.
+            <div className="p-12 text-center">
+              <Map className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+              <div className="text-xl font-bold text-slate-700 mb-2">Aucune commune chargée</div>
+              <p className="text-sm text-slate-500 mb-6 max-w-md mx-auto">
+                Clique sur <strong>« Actualiser depuis API INSEE »</strong> pour charger automatiquement les 71 communes de la Métropole Rouen Normandie depuis <code className="px-1 bg-slate-100 rounded">geo.api.gouv.fr</code>.
+              </p>
+              <button onClick={refreshFromInsee} disabled={refreshing}
+                className="px-6 py-4 rounded-2xl bg-blue-600 text-white font-bold text-lg flex items-center gap-3 mx-auto hover:bg-blue-700 shadow-lg disabled:bg-slate-300">
+                <RefreshCw className={`w-6 h-6 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Chargement depuis API INSEE…' : 'Charger maintenant'}
+              </button>
             </div>
           )}
           {!loading && communes.length > 0 && (
