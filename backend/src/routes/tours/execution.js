@@ -277,7 +277,11 @@ module.exports = function createExecutionRouter(upload) {
   // PUT /api/tours/:tourId/cav/:cavId — Mettre à jour un CAV de tournée
   router.put('/:tourId/cav/:cavId', async (req, res) => {
     try {
-      const { status, fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes } = req.body;
+      const { status, fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes, skip_reason } = req.body;
+      const VALID_SKIP = ['cav_fermee', 'bouchee', 'acces_impossible', 'proprietaire_absent', 'vide', 'autre'];
+      if (skip_reason && !VALID_SKIP.includes(skip_reason)) {
+        return res.status(400).json({ error: 'skip_reason invalide', allowed: VALID_SKIP });
+      }
 
       const result = await pool.query(
         `UPDATE tour_cav SET status = COALESCE($1, status),
@@ -286,9 +290,12 @@ module.exports = function createExecutionRouter(upload) {
          qr_unavailable = COALESCE($4, qr_unavailable),
          qr_unavailable_reason = COALESCE($5, qr_unavailable_reason),
          notes = COALESCE($6, notes),
+         skip_reason = CASE WHEN $1 = 'skipped' THEN COALESCE($7, skip_reason)
+                            WHEN $1 IS NOT NULL AND $1 <> 'skipped' THEN NULL
+                            ELSE skip_reason END,
          collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
-         WHERE tour_id = $7 AND cav_id = $8 RETURNING *`,
-        [status, fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes, req.params.tourId, req.params.cavId]
+         WHERE tour_id = $8 AND cav_id = $9 RETURNING *`,
+        [status, fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes, skip_reason, req.params.tourId, req.params.cavId]
       );
 
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });

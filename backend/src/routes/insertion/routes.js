@@ -271,9 +271,11 @@ router.put('/milestones/:id', async (req, res) => {
         sortie_commentaires = COALESCE($25, sortie_commentaires),
         sortie_employeur = COALESCE($26, sortie_employeur),
         sortie_formation = COALESCE($27, sortie_formation),
-        ai_recommendations = COALESCE($28, ai_recommendations),
+        sortie_employeur_siret = COALESCE($28, sortie_employeur_siret),
+        sortie_duree_contrat_mois = COALESCE($29, sortie_duree_contrat_mois),
+        ai_recommendations = COALESCE($30, ai_recommendations),
         updated_at = NOW()
-      WHERE id = $29 RETURNING *`,
+      WHERE id = $31 RETURNING *`,
       [
         d.status, d.interview_date, d.interviewer_id, d.completed_date,
         d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
@@ -284,6 +286,7 @@ router.put('/milestones/:id', async (req, res) => {
         d.observations, d.actions_a_mener, d.avis_global,
         d.sortie_classification, d.sortie_type, d.sortie_commentaires,
         d.sortie_employeur, d.sortie_formation,
+        d.sortie_employeur_siret, d.sortie_duree_contrat_mois,
         d.ai_recommendations ? JSON.stringify(d.ai_recommendations) : null,
         req.params.id,
       ]

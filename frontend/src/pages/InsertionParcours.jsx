@@ -374,6 +374,22 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
               onChange={e => setForm({ ...form, sortie_employeur: e.target.value })}
               className="input-modern py-1" />
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">SIRET employeur (optionnel)</label>
+              <input type="text" pattern="\d{14}" maxLength="14"
+                value={form.sortie_employeur_siret || ''}
+                onChange={e => setForm({ ...form, sortie_employeur_siret: e.target.value })}
+                className="input-modern py-1" placeholder="14 chiffres" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Durée contrat (mois)</label>
+              <input type="number" min="0" max="60"
+                value={form.sortie_duree_contrat_mois || ''}
+                onChange={e => setForm({ ...form, sortie_duree_contrat_mois: e.target.value ? parseInt(e.target.value) : null })}
+                className="input-modern py-1" placeholder="ex: 12" />
+            </div>
+          </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Commentaires CIP sortie</label>
             <textarea value={form.sortie_commentaires || ''}
