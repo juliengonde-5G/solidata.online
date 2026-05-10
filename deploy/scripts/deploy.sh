@@ -345,18 +345,37 @@ case "${ACTION}" in
         exit 1
     fi
 
-    # Cleanup + Health check
-    log "Étape 6/6 — Nettoyage et vérification..."
-    docker image prune -f
-
-    # Health check
+    # Health check (basique)
+    log "Étape 6/7 — Health check basique..."
     sleep 3
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://localhost/api/health 2>/dev/null || echo "000")
     if [ "$HTTP_CODE" = "200" ]; then
         log "Health check API : OK (HTTP 200)"
     else
-        warn "Health check API : HTTP ${HTTP_CODE} — vérifiez les logs backend"
+        error "Health check API : HTTP ${HTTP_CODE} — déploiement interrompu. Vérifiez : docker compose -f ${COMPOSE_FILE} logs backend --tail 50"
     fi
+
+    # Smoke test endpoints critiques (couvre les bugs SQL post-déploiement)
+    #
+    # Source .env pour récupérer API_USER / API_PASSWORD — sans, le smoke
+    # ne couvre que les endpoints publics et passe à côté des 500 derrière
+    # auth (ce qui défait l'objectif).
+    log "Étape 7/7 — Smoke test endpoints critiques..."
+    # shellcheck disable=SC1091
+    set -a; source .env; set +a
+    if [ -z "${API_USER:-}" ] || [ -z "${API_PASSWORD:-}" ]; then
+        warn "API_USER ou API_PASSWORD absent du .env — smoke test exécuté en mode dégradé (endpoints publics seulement)."
+        warn "Pour couvrir les endpoints protégés, ajoute dans .env : API_USER=<admin> et API_PASSWORD=<mot de passe>"
+    fi
+    if BASE_URL=http://localhost API_USER="${API_USER:-}" API_PASSWORD="${API_PASSWORD:-}" \
+       node scripts/tests/api-smoke.js; then
+        log "Smoke test : tous les endpoints critiques répondent ✓"
+    else
+        error "Smoke test ÉCHOUÉ — un endpoint critique retourne 5xx. Inspecter la sortie ci-dessus + logs backend. Rollback à envisager : git reset --hard HEAD~1 && bash deploy/scripts/deploy.sh update"
+    fi
+
+    # Cleanup
+    docker image prune -f
 
     log "=== MISE À JOUR TERMINÉE ==="
     docker compose -f ${COMPOSE_FILE} ps
