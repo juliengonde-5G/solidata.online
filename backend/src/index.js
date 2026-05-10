@@ -89,7 +89,62 @@ const uploadsDir = path.join(__dirname, '..', 'uploads');
     logger.warn('Impossible de créer le dossier', { dir, error: err.message });
   }
 });
-app.use('/uploads', express.static(uploadsDir));
+// T1.1 — Hardening /uploads (defense in depth, après fileFilter sur les multer)
+//
+// Avant : express.static qui détecte le Content-Type par sniffing du fichier
+// → un .svg avec <script> ou un .html uploadé étaient rendus tels quels
+// dans l'origine de l'app (stored XSS).
+//
+// Après : on sert toujours en inline (les <img src="/uploads/..."> de l'UI
+// doivent marcher), mais :
+//   - Content-Type forcé depuis l'extension (whitelist), jamais sniffé
+//   - X-Content-Type-Options: nosniff (couche supplémentaire)
+//   - Content-Security-Policy sandbox sur la réponse → même si un fichier
+//     HTML/SVG arrivait à se loger ici, il ne pourrait ni exécuter de
+//     script ni charger de ressource externe.
+const UPLOAD_MIME_BY_EXT = {
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png':  'image/png',
+  '.webp': 'image/webp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+  '.gif':  'image/gif',
+  '.pdf':  'application/pdf',
+  '.csv':  'text/csv; charset=utf-8',
+  '.txt':  'text/plain; charset=utf-8',
+  '.doc':  'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls':  'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+
+app.get('/uploads/*', (req, res) => {
+  // Le wildcard d'Express ne traite pas `..` ; on resolve et on vérifie que
+  // le chemin final est bien sous uploadsDir (anti path-traversal).
+  const requested = path.normalize(req.params[0]);
+  const absolute = path.resolve(uploadsDir, requested);
+  if (!absolute.startsWith(path.resolve(uploadsDir) + path.sep) && absolute !== path.resolve(uploadsDir)) {
+    return res.status(403).end();
+  }
+  if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+    return res.status(404).end();
+  }
+
+  const ext = path.extname(absolute).toLowerCase();
+  const contentType = UPLOAD_MIME_BY_EXT[ext];
+  if (!contentType) {
+    // Extension inconnue : on refuse plutôt que de servir avec un MIME
+    // générique qui laisserait potentiellement le navigateur deviner.
+    return res.status(415).json({ error: 'Type de fichier non supporté' });
+  }
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox; frame-ancestors 'none'");
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.sendFile(absolute);
+});
 app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 
 // Rendre io accessible aux routes

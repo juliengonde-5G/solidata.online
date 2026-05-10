@@ -7,6 +7,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { csvFilter } = require('../utils/upload-filters');
 
 const uploadDir = path.join(__dirname, '../../uploads/boutique-csv');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -18,7 +19,9 @@ const storage = multer.diskStorage({
     cb(null, `btq-${Date.now()}-${safeName}`);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } });
+// T1.1 : whitelist CSV uniquement — bloque l'upload de fichiers exécutables,
+// SVG, HTML qui pourraient être réfléchis via /uploads.
+const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 }, fileFilter: csvFilter });
 
 router.use(authenticate);
 router.use(autoLogActivity('boutique_vente'));

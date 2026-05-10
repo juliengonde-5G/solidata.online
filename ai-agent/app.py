@@ -622,14 +622,21 @@ def index():
 
 @app.route("/health")
 def health():
-    """Health check endpoint."""
+    """Health check endpoint.
+
+    Public (pas d'auth) — donc on ne renvoie JAMAIS le détail de l'exception
+    au client (l'ancien `str(e)` pouvait leaker DSN, host, credentials,
+    stack trace). Le détail va dans les logs serveur, le client reçoit
+    juste un statut binaire.
+    """
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         redis_client.ping()
         return jsonify({"status": "ok", "timestamp": datetime.now().isoformat()})
     except Exception as e:
-        return jsonify({"status": "error", "detail": str(e)}), 500
+        logger.error("Health check failed: %s", e, exc_info=True)
+        return jsonify({"status": "error"}), 500
 
 
 @app.route("/chat", methods=["POST"])

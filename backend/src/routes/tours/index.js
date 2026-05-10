@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { authenticate } = require('../../middleware/auth');
+const { imageFilter } = require('../../utils/upload-filters');
 
 // Upload photos incidents
 const photoStorage = multer.diskStorage({
@@ -17,7 +18,9 @@ const photoStorage = multer.diskStorage({
     cb(null, `incident_${Date.now()}${ext}`);
   },
 });
-const upload = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 } });
+// T1.1 : whitelist image — bloque l'upload de fichiers exécutables / SVG+JS
+// qui pourraient être réfléchis via /uploads/incidents.
+const upload = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFilter });
 
 // Sub-routers
 const crudRouter = require('./crud');

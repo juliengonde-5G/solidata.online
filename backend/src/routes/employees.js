@@ -8,6 +8,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const { imageFilter } = require('../utils/upload-filters');
 
 // Upload photo
 const photoStorage = multer.diskStorage({
@@ -17,10 +18,16 @@ const photoStorage = multer.diskStorage({
     cb(null, dir);
   },
   filename: (req, file, cb) => {
-    cb(null, `photo_${Date.now()}${path.extname(file.originalname)}`);
+    // T1.1 : sanitize l'extension — ne garder que [a-z0-9.] pour éviter
+    // qu'un originalname pathologique (..//, espaces, etc.) ne passe.
+    const rawExt = path.extname(file.originalname || '').toLowerCase();
+    const ext = rawExt.replace(/[^a-z0-9.]/g, '') || '.jpg';
+    cb(null, `photo_${Date.now()}${ext}`);
   },
 });
-const upload = multer({ storage: photoStorage, limits: { fileSize: 5 * 1024 * 1024 } });
+// T1.1 : whitelist image uniquement (jpg/png/webp/heic) — bloque le
+// upload de .svg+JS, .html, .exe, etc.
+const upload = multer({ storage: photoStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
 router.use(authenticate);
 router.use(autoLogActivity('employee'));
