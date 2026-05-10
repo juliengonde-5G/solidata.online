@@ -24,8 +24,9 @@ router.get('/postes', async (req, res) => {
 router.get('/options', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nom, categorie_eco_org, genre, saison, gamme
+      `SELECT MIN(id) AS id, nom, categorie_eco_org
        FROM produits_catalogue WHERE is_active = true
+       GROUP BY nom, categorie_eco_org
        ORDER BY categorie_eco_org, nom`
     );
     res.json(rows);
@@ -34,10 +35,24 @@ router.get('/options', async (req, res) => {
   }
 });
 
+router.get('/dimensions', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, type, valeur, ordre FROM ref_dimensions
+       WHERE is_active = true ORDER BY type, ordre, valeur`
+    );
+    const out = { categorie_eco_org: [], genre: [], saison: [], gamme: [] };
+    for (const r of rows) if (out[r.type]) out[r.type].push(r.valeur);
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
-  const { poste_id, catalogue_id, poids_kg } = req.body || {};
-  if (!poste_id || !catalogue_id || !poids_kg || Number(poids_kg) <= 0) {
-    return res.status(400).json({ error: 'poste_id, catalogue_id et poids_kg (>0) requis' });
+  const { poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg } = req.body || {};
+  if (!poste_id || !produit || !categorie_eco_org || !genre || !saison || !gamme || !poids_kg || Number(poids_kg) <= 0) {
+    return res.status(400).json({ error: 'poste_id, produit, categorie_eco_org, genre, saison, gamme et poids_kg (>0) requis' });
   }
 
   const client = await pool.connect();
@@ -51,14 +66,23 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Poste introuvable ou inactif' });
     }
-    const cat = await client.query(
-      `SELECT nom, categorie_eco_org, genre, saison, gamme
-       FROM produits_catalogue WHERE id = $1 AND is_active = true`,
-      [catalogue_id]
+
+    let catRow = await client.query(
+      `SELECT id FROM produits_catalogue
+       WHERE nom = $1 AND categorie_eco_org = $2 AND genre = $3 AND saison = $4 AND gamme = $5
+       LIMIT 1`,
+      [produit, categorie_eco_org, genre, saison, gamme]
     );
-    if (cat.rowCount === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Produit catalogue introuvable' });
+    let catalogue_id;
+    if (catRow.rowCount > 0) {
+      catalogue_id = catRow.rows[0].id;
+    } else {
+      const ins = await client.query(
+        `INSERT INTO produits_catalogue (nom, categorie_eco_org, genre, saison, gamme, is_active)
+         VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
+        [produit, categorie_eco_org, genre, saison, gamme]
+      );
+      catalogue_id = ins.rows[0].id;
     }
 
     const newCounter = poste.rows[0].compteur_actuel + 1;
@@ -70,7 +94,6 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
       return res.status(409).json({ error: `Compteur poste saturé : ${e.message}` });
     }
 
-    const c = cat.rows[0];
     const dateFab = new Date();
     const insert = await client.query(
       `INSERT INTO produits_finis
@@ -78,7 +101,7 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
           poids_kg, date_fabrication, poste_etiquetage_id, status, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'en_stock', $11)
        RETURNING id, code_barre, poids_kg, date_fabrication, produit, categorie_eco_org, genre, saison, gamme`,
-      [code_barre, catalogue_id, c.nom, c.categorie_eco_org, c.genre, c.saison, c.gamme,
+      [code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
         Number(poids_kg), dateFab, poste_id, req.user.id]
     );
 
@@ -104,13 +127,104 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
   }
 });
 
+// === Admin catalogue ===
+router.get('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT MIN(id) AS id, nom, categorie_eco_org, bool_or(is_active) AS is_active
+       FROM produits_catalogue
+       GROUP BY nom, categorie_eco_org
+       ORDER BY categorie_eco_org, nom`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const { nom, categorie_eco_org } = req.body || {};
+  if (!nom || !categorie_eco_org) return res.status(400).json({ error: 'nom et categorie_eco_org requis' });
+  try {
+    const r = await pool.query(
+      `INSERT INTO produits_catalogue (nom, categorie_eco_org, genre, saison, gamme, is_active)
+       VALUES ($1, $2, 'Sans Genre', 'Sans Saison', 'VAK', true)
+       ON CONFLICT DO NOTHING
+       RETURNING id, nom, categorie_eco_org`,
+      [nom.trim(), categorie_eco_org.trim()]
+    );
+    res.status(201).json(r.rows[0] || { ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const { nom, categorie_eco_org, is_active } = req.body || {};
+  if (!nom || !categorie_eco_org || typeof is_active !== 'boolean') {
+    return res.status(400).json({ error: 'nom, categorie_eco_org, is_active (boolean) requis' });
+  }
+  try {
+    const r = await pool.query(
+      `UPDATE produits_catalogue SET is_active = $1
+       WHERE nom = $2 AND categorie_eco_org = $3 RETURNING count(*) OVER ()`,
+      [is_active, nom, categorie_eco_org]
+    );
+    res.json({ updated: r.rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/admin/dimensions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, type, valeur, ordre, is_active FROM ref_dimensions ORDER BY type, ordre, valeur`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/admin/dimensions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const { type, valeur, ordre } = req.body || {};
+  if (!type || !valeur) return res.status(400).json({ error: 'type et valeur requis' });
+  if (!['categorie_eco_org', 'genre', 'saison', 'gamme'].includes(type)) {
+    return res.status(400).json({ error: 'type invalide' });
+  }
+  try {
+    const r = await pool.query(
+      `INSERT INTO ref_dimensions (type, valeur, ordre) VALUES ($1, $2, $3)
+       ON CONFLICT (type, valeur) DO UPDATE SET is_active = true
+       RETURNING id, type, valeur, ordre, is_active`,
+      [type, valeur.trim(), ordre || 100]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch('/admin/dimensions/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const { id } = req.params;
+  const { is_active, ordre, valeur } = req.body || {};
+  const sets = []; const vals = [];
+  if (typeof is_active === 'boolean') { sets.push(`is_active = $${sets.length + 1}`); vals.push(is_active); }
+  if (Number.isFinite(ordre)) { sets.push(`ordre = $${sets.length + 1}`); vals.push(ordre); }
+  if (valeur && typeof valeur === 'string') { sets.push(`valeur = $${sets.length + 1}`); vals.push(valeur.trim()); }
+  if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+  vals.push(id);
+  try {
+    const r = await pool.query(
+      `UPDATE ref_dimensions SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Dimension introuvable' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
   const { code_barre, commande_type, commande_id } = req.body || {};
-  if (!code_barre || !commande_type || !commande_id) {
-    return res.status(400).json({ error: 'code_barre, commande_type, commande_id requis' });
+  if (!code_barre || !commande_type) {
+    return res.status(400).json({ error: 'code_barre et commande_type requis' });
   }
-  if (!['btq', 'vak'].includes(commande_type)) {
-    return res.status(400).json({ error: 'commande_type doit être btq ou vak' });
+  if (!['btq', 'vak', 'libre'].includes(commande_type)) {
+    return res.status(400).json({ error: 'commande_type doit être btq, vak ou libre' });
+  }
+  if (commande_type !== 'libre' && !commande_id) {
+    return res.status(400).json({ error: 'commande_id requis pour ce type' });
   }
 
   const client = await pool.connect();
@@ -132,7 +246,7 @@ router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), asyn
       return res.status(409).json({ error: 'Carton déjà sorti', code: 'ALREADY_OUT', carton: c });
     }
 
-    let cmdRow;
+    let cmdRow = null;
     if (commande_type === 'btq') {
       cmdRow = await client.query(
         `SELECT id, reference, statut FROM boutique_commandes WHERE id = $1`,
@@ -142,7 +256,7 @@ router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), asyn
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'Commande BTQ inactive ou introuvable', code: 'COMMANDE_FERMEE' });
       }
-    } else {
+    } else if (commande_type === 'vak') {
       cmdRow = await client.query(
         `SELECT id, reference, statut FROM commandes_exutoires WHERE id = $1`,
         [commande_id]
@@ -159,13 +273,13 @@ router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), asyn
          sortie_commande_type = $1, sortie_commande_id = $2, scanned_by = $3
        WHERE id = $4
        RETURNING id, code_barre, produit, categorie_eco_org, genre, gamme, poids_kg, date_sortie`,
-      [commande_type, commande_id, req.user.id, c.id]
+      [commande_type, commande_type === 'libre' ? null : commande_id, req.user.id, c.id]
     );
 
     await client.query('COMMIT');
     res.json({
       carton: updated.rows[0],
-      commande: cmdRow.rows[0],
+      commande: cmdRow ? cmdRow.rows[0] : null,
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -180,6 +294,7 @@ router.get('/sortie-session/:type/:commande_id', async (req, res) => {
   if (!['btq', 'vak'].includes(type)) {
     return res.status(400).json({ error: 'type doit être btq ou vak' });
   }
+  // mode 'libre' n'a pas de session persistante côté backend (pas de commande)
   try {
     const { rows } = await pool.query(
       `SELECT id, code_barre, produit, categorie_eco_org, genre, gamme, poids_kg, date_sortie, scanned_by

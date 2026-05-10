@@ -21,54 +21,45 @@ export default function EtiquetteGenerer() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [poste, setPoste] = useState(null);
-  const [options, setOptions] = useState([]);
+  const [dimensions, setDimensions] = useState({ categorie_eco_org: [], genre: [], saison: [], gamme: [] });
+  const [produits, setProduits] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
-        const [p, o] = await Promise.all([
+        const [p, d, o] = await Promise.all([
           api.get('/etiquettes/postes'),
+          api.get('/etiquettes/dimensions'),
           api.get('/etiquettes/options'),
         ]);
         if (cancelled) return;
         setPoste(p.data[0] || null);
-        setOptions(o.data || []);
+        setDimensions(d.data || { categorie_eco_org: [], genre: [], saison: [], gamme: [] });
+        setProduits(o.data || []);
       } catch (e) {
-        if (!cancelled) setError(e.response?.data?.error || e.message);
+        if (!cancelled) setError(e.response?.data?.error || e.message || 'Erreur réseau');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
   }, []);
 
   const categories = useMemo(() => {
-    const set = new Set(options.map(o => o.categorie_eco_org).filter(Boolean));
-    return Array.from(set).map((key) => ({
+    return (dimensions.categorie_eco_org || []).map((key) => ({
       key, label: key,
       ...(CATEGORY_VISUALS[key] || { icon: Tag, color: '#475569', bg: '#E2E8F0' }),
     }));
-  }, [options]);
+  }, [dimensions.categorie_eco_org]);
 
-  const filteredBy = (field, base) => {
-    const set = new Set(base.map(o => o[field]).filter(Boolean));
-    return Array.from(set).sort();
-  };
-  const filtered = useMemo(() => options.filter(o =>
-    (!sel.categorie || o.categorie_eco_org === sel.categorie)
-  ), [options, sel.categorie]);
-  const genres = useMemo(() => filteredBy('genre', filtered), [filtered]);
-  const saisons = useMemo(() => filteredBy('saison', filtered.filter(o => !sel.genre || o.genre === sel.genre)), [filtered, sel.genre]);
-  const gammes = useMemo(() => filteredBy('gamme', filtered.filter(o =>
-    (!sel.genre || o.genre === sel.genre) && (!sel.saison || o.saison === sel.saison)
-  )), [filtered, sel.genre, sel.saison]);
-  const produits = useMemo(() => {
-    const list = filtered.filter(o =>
-      (!sel.genre || o.genre === sel.genre) &&
-      (!sel.saison || o.saison === sel.saison) &&
-      (!sel.gamme || o.gamme === sel.gamme)
-    );
-    return list.map(o => ({ id: o.id, label: o.nom }));
-  }, [filtered, sel.genre, sel.saison, sel.gamme]);
+  const produitsFiltres = useMemo(() => (
+    sel.categorie
+      ? produits.filter(p => p.categorie_eco_org === sel.categorie).map(p => p.nom)
+      : []
+  ), [produits, sel.categorie]);
 
   const reset = () => {
     setSel({ categorie: '', genre: '', saison: '', gamme: '', produit: '', poids: '' });
@@ -79,17 +70,16 @@ export default function EtiquetteGenerer() {
 
   const onPrint = async () => {
     if (!poste) { setError('Aucun poste actif'); return; }
-    const cat = options.find(o =>
-      o.categorie_eco_org === sel.categorie && o.genre === sel.genre &&
-      o.saison === sel.saison && o.gamme === sel.gamme && o.nom === sel.produit
-    );
-    if (!cat) { setError('Combinaison produit introuvable au catalogue'); return; }
     setSubmitting(true);
     setError(null);
     try {
       const { data } = await api.post('/etiquettes/generer', {
         poste_id: poste.id,
-        catalogue_id: cat.id,
+        produit: sel.produit,
+        categorie_eco_org: sel.categorie,
+        genre: sel.genre,
+        saison: sel.saison,
+        gamme: sel.gamme,
         poids_kg: parseFloat(sel.poids.replace(',', '.')),
       });
       setSuccess(data);
@@ -115,13 +105,6 @@ export default function EtiquetteGenerer() {
   };
 
   const canPrint = sel.categorie && sel.genre && sel.saison && sel.gamme && sel.produit && sel.poids && parseFloat(sel.poids.replace(',', '.')) > 0 && !submitting;
-  const stepValid =
-    (step === 0 && sel.categorie) ||
-    (step === 1 && sel.genre) ||
-    (step === 2 && sel.saison) ||
-    (step === 3 && sel.gamme) ||
-    (step === 4 && sel.produit) ||
-    (step === 5 && canPrint);
 
   return (
     <Layout>
@@ -158,45 +141,70 @@ export default function EtiquetteGenerer() {
           {step === 0 && (
             <div>
               <h2 className="text-xl font-bold text-slate-700 mb-6">Choisir la catégorie</h2>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                {categories.map((c) => {
-                  const Icon = c.icon;
-                  const active = sel.categorie === c.key;
-                  return (
-                    <button
-                      key={c.key}
-                      onClick={() => { setSel({ ...sel, categorie: c.key, genre: '', saison: '', gamme: '', produit: '' }); setStep(1); }}
-                      className={`relative aspect-square rounded-2xl shadow-md flex flex-col items-center justify-center gap-4 transition transform hover:scale-105 ${
-                        active ? 'ring-4 ring-emerald-500' : ''
-                      }`}
-                      style={{ background: c.bg, color: c.color }}
-                    >
-                      <Icon className="w-24 h-24" strokeWidth={1.5} />
-                      <span className="text-2xl font-bold">{c.label}</span>
-                    </button>
-                  );
-                })}
-                {categories.length === 0 && <div className="col-span-full text-slate-400">Chargement du catalogue…</div>}
-              </div>
+              {loading && (
+                <div className="bg-white rounded-2xl shadow p-8 text-center text-slate-500">Chargement du catalogue…</div>
+              )}
+              {!loading && categories.length === 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-amber-900">
+                  <div className="text-xl font-bold mb-3">Catalogue vide</div>
+                  <p className="mb-2">Aucune catégorie dans <code className="px-1 bg-amber-100 rounded">ref_dimensions</code>. L'auto-seed est censé peupler depuis <code className="px-1 bg-amber-100 rounded">backend/src/data/catalogue-base.json</code> au démarrage. Si tu vois ce message en prod, relance le backend ou utilise la page admin Catalogue pour créer les catégories.</p>
+                </div>
+              )}
+              {!loading && categories.length > 0 && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                  {categories.map((c) => {
+                    const Icon = c.icon;
+                    const active = sel.categorie === c.key;
+                    return (
+                      <button
+                        key={c.key}
+                        onClick={() => { setSel({ ...sel, categorie: c.key, produit: '' }); setStep(1); }}
+                        className={`relative aspect-square rounded-2xl shadow-md flex flex-col items-center justify-center gap-4 transition transform hover:scale-105 ${
+                          active ? 'ring-4 ring-emerald-500' : ''
+                        }`}
+                        style={{ background: c.bg, color: c.color }}
+                      >
+                        <Icon className="w-24 h-24" strokeWidth={1.5} />
+                        <span className="text-2xl font-bold">{c.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
           {step === 1 && (
-            <PickGrid title="Genre" items={genres} value={sel.genre} onPick={(v) => { setSel({ ...sel, genre: v, saison: '', gamme: '', produit: '' }); setStep(2); }} />
+            <PickGrid title="Genre" items={dimensions.genre} value={sel.genre}
+              onPick={(v) => { setSel({ ...sel, genre: v }); setStep(2); }} />
           )}
           {step === 2 && (
-            <PickGrid title="Saison" items={saisons} value={sel.saison} onPick={(v) => { setSel({ ...sel, saison: v, gamme: '', produit: '' }); setStep(3); }} cols={3} />
+            <PickGrid title="Saison" items={dimensions.saison} value={sel.saison}
+              onPick={(v) => { setSel({ ...sel, saison: v }); setStep(3); }} cols={3} />
           )}
           {step === 3 && (
-            <PickGrid title="Gamme" items={gammes} value={sel.gamme} onPick={(v) => { setSel({ ...sel, gamme: v, produit: '' }); setStep(4); }} cols={3} />
+            <PickGrid title="Gamme" items={dimensions.gamme} value={sel.gamme}
+              onPick={(v) => { setSel({ ...sel, gamme: v }); setStep(4); }} cols={3} />
           )}
           {step === 4 && (
-            <PickGrid
-              title="Produit"
-              items={produits.map(p => p.label)}
-              value={sel.produit}
-              onPick={(v) => { setSel({ ...sel, produit: v }); setStep(5); }}
-            />
+            <div>
+              <h2 className="text-xl font-bold text-slate-700 mb-6">Produit</h2>
+              {produitsFiltres.length === 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-amber-900">
+                  Aucun produit pour la catégorie <strong>{sel.categorie}</strong>. Ajoute un produit depuis Admin → Catalogue.
+                </div>
+              )}
+              <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {produitsFiltres.map((it) => (
+                  <button key={it}
+                    onClick={() => { setSel({ ...sel, produit: it }); setStep(5); }}
+                    className={`px-6 py-8 rounded-2xl text-xl font-bold shadow-md transition transform hover:scale-105 ${
+                      sel.produit === it ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
+                    }`}
+                  >{it}</button>
+                ))}
+              </div>
+            </div>
           )}
 
           {step === 5 && (
@@ -209,9 +217,7 @@ export default function EtiquetteGenerer() {
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   {['7', '8', '9', '4', '5', '6', '1', '2', '3', ',', '0', 'del'].map((k) => (
-                    <button
-                      key={k}
-                      onClick={() => onPoidsKey(k)}
+                    <button key={k} onClick={() => onPoidsKey(k)}
                       className="aspect-square rounded-2xl text-3xl font-bold bg-slate-100 hover:bg-slate-200 active:bg-slate-300 transition flex items-center justify-center"
                     >
                       {k === 'del' ? <Delete className="w-8 h-8" /> : k}
@@ -220,9 +226,7 @@ export default function EtiquetteGenerer() {
                 </div>
               </div>
               <div className="max-w-md mx-auto mt-8">
-                <button
-                  onClick={onPrint}
-                  disabled={!canPrint}
+                <button onClick={onPrint} disabled={!canPrint}
                   className="w-full h-32 rounded-3xl text-3xl font-extrabold bg-emerald-600 text-white shadow-xl hover:bg-emerald-700 active:scale-95 transition disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center justify-center gap-4"
                 >
                   <Printer className="w-12 h-12" />
@@ -234,11 +238,8 @@ export default function EtiquetteGenerer() {
         </div>
 
         <footer className="bg-white border-t px-6 py-4 flex items-center justify-between">
-          <button
-            onClick={() => setStep(Math.max(0, step - 1))}
-            disabled={step === 0}
-            className="px-5 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 disabled:opacity-40 flex items-center gap-2 font-semibold"
-          >
+          <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}
+            className="px-5 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 disabled:opacity-40 flex items-center gap-2 font-semibold">
             <ChevronLeft className="w-5 h-5" /> Retour
           </button>
           <div className="text-sm text-slate-600 flex flex-wrap gap-x-4">
@@ -249,12 +250,7 @@ export default function EtiquetteGenerer() {
             {sel.produit && <span>🎯 {sel.produit}</span>}
             {sel.poids && <span>⚖️ {sel.poids} kg</span>}
           </div>
-          <button
-            onClick={reset}
-            className="px-5 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 font-semibold text-slate-600"
-          >
-            Annuler
-          </button>
+          <button onClick={reset} className="px-5 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 font-semibold text-slate-600">Annuler</button>
         </footer>
 
         {success && (
@@ -262,10 +258,8 @@ export default function EtiquetteGenerer() {
             <Check className="w-40 h-40 mb-6" strokeWidth={3} />
             <div className="text-3xl font-bold mb-2">Étiquette imprimée</div>
             <div className="text-6xl font-extrabold tracking-wider mb-8">{success.code_barre}</div>
-            <button
-              onClick={reset}
-              className="px-8 py-4 rounded-2xl bg-white text-emerald-700 text-xl font-bold shadow-xl hover:bg-emerald-50"
-            >
+            <button onClick={reset}
+              className="px-8 py-4 rounded-2xl bg-white text-emerald-700 text-xl font-bold shadow-xl hover:bg-emerald-50">
               Nouvelle étiquette
             </button>
           </div>
@@ -283,17 +277,16 @@ function PickGrid({ title, items, value, onPick, cols }) {
     <div>
       <h2 className="text-xl font-bold text-slate-700 mb-6">{title}</h2>
       <div className={`grid gap-4 ${colsClass}`}>
-        {items.map((it) => (
-          <button
-            key={it}
-            onClick={() => onPick(it)}
+        {(items || []).map((it) => (
+          <button key={it} onClick={() => onPick(it)}
             className={`px-6 py-8 rounded-2xl text-xl font-bold shadow-md transition transform hover:scale-105 ${
               value === it ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
             }`}
-          >
-            {it}
-          </button>
+          >{it}</button>
         ))}
+        {(!items || items.length === 0) && (
+          <div className="col-span-full text-slate-400 italic">Aucune valeur — ajoute-en depuis Admin → Catalogue.</div>
+        )}
       </div>
     </div>
   );

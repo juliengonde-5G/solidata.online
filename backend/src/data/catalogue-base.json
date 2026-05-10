@@ -1,0 +1,440 @@
+{
+  "produits": [
+    {
+      "nom": "Accessoires",
+      "categorie_eco_org": "Maroquinerie"
+    },
+    {
+      "nom": "Anorak",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Baskets",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Bleus de travail",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Blouses et tabliers",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Blousons, parkas, manteaux (sac blanc)",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Bobs, casquettes et chapeaux",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Body, sous-vêtements et débardeurs",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Bottes",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Bottes caoutchouc",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Bottines",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Caracos / débardeurs",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Cartables",
+      "categorie_eco_org": "Maroquinerie"
+    },
+    {
+      "nom": "Ceintures",
+      "categorie_eco_org": "Maroquinerie"
+    },
+    {
+      "nom": "Chaussons",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Chaussures",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Chaussures de fête",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Chaussures de foot",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Chaussures de plage",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Chaussures de randonnée",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Chaussures de sécurité",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Chaussures neige",
+      "categorie_eco_org": "Chaussures"
+    },
+    {
+      "nom": "Chemises manches courtes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Chemises manches longues",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Chemisiers manches courtes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Chemisiers manches longues",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Chiffons Blancs",
+      "categorie_eco_org": "Chiffons"
+    },
+    {
+      "nom": "Chiffons Couleurs",
+      "categorie_eco_org": "Chiffons"
+    },
+    {
+      "nom": "Collants, chaussettes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Combi / salopette",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Combi / shorts",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Costumes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Coussins et couvertures",
+      "categorie_eco_org": "Couettes et coussins"
+    },
+    {
+      "nom": "Cravates",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Cuir et daim sac blanc",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Cuirs",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Déguisements",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Dentelle",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Djellabas",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Draps, taies, housses de couette",
+      "categorie_eco_org": "Linge"
+    },
+    {
+      "nom": "EXTRA Haut",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "EXTRA Bas",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Fêtes et cérémonies",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Foulards",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Fourrure",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Gants, bonnets, écharpes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Gigoteuse, turbulettes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Gilets",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Grande taille",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Grosses pièces",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Imperméables",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Imprimé animalier",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Jeans",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Jupes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Jupes courtes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Jupes longues",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Leggings",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Linge de maison",
+      "categorie_eco_org": "Linge"
+    },
+    {
+      "nom": "Maillots de bain",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Maroquinerie",
+      "categorie_eco_org": "Maroquinerie"
+    },
+    {
+      "nom": "Pantalons",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Pantalons fluides",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Paréos",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Peluches",
+      "categorie_eco_org": "Jouets"
+    },
+    {
+      "nom": "Polaires",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Polos manches courtes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Polos manches longues",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Porte-monnaie et pochettes",
+      "categorie_eco_org": "Maroquinerie"
+    },
+    {
+      "nom": "Pulls",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Rideaux",
+      "categorie_eco_org": "Rideaux"
+    },
+    {
+      "nom": "Robe de mariée",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Robes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Sacs à dos",
+      "categorie_eco_org": "Maroquinerie"
+    },
+    {
+      "nom": "Sacs à main",
+      "categorie_eco_org": "Maroquinerie"
+    },
+    {
+      "nom": "Shorts, bermudas",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Sorties de bain",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Sous-pulls",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Sous-vêtements",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Sport",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Sweats",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Tee-shirts manches courtes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Tee-shirts manches longues",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Tendance maintenant et marques",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Tissus",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vestes",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vestes cuir",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vestes en jeans",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements armée",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements de Noël",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements blancs",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements de grossesse",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements de nuit",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements de pluie",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements de ski",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements enfant (carton)",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements enfant (curon)",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements fleuris",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements layette (carton)",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements layette (curon)",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements pois",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vêtements velours",
+      "categorie_eco_org": "Textiles"
+    },
+    {
+      "nom": "Vintage",
+      "categorie_eco_org": "Textiles"
+    }
+  ],
+  "genres": [
+    "Adulte Femme",
+    "Adulte Homme",
+    "Adulte Mixte",
+    "Enfant Fille",
+    "Enfant Garçon",
+    "Enfant Mixte",
+    "Layette",
+    "Layette Fille",
+    "Layette Garçon",
+    "Sans Genre"
+  ],
+  "saisons": [
+    "Hiver",
+    "Sans Saison",
+    "Été"
+  ],
+  "gammes": [
+    "BTQ EXTRA",
+    "BTQ STAND",
+    "CHIF",
+    "Pvak",
+    "VAK"
+  ]
+}
