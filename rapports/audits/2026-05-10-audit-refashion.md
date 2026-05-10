@@ -1,5 +1,7 @@
 # Audit Refashion — traçabilité chaîne de tri et flux non-original
 
+> 📌 **Mise à jour 2026-05-10 (post-sprints P0/P1/P2)** : couverture passée de 55 % à **92 %**. Tous les blocages critiques de la section 1 (synthèse) sont résolus. Voir le rapport de suivi consolidé `2026-05-10-audit-suivi-sprints.md` pour le détail chantier par chantier.
+
 **Date** : 2026-05-10
 **Auditeur** : éco-organisme Refashion
 **Périmètre** : Solidarité Textiles — centre de tri Rouen

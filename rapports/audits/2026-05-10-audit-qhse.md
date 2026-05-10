@@ -1,5 +1,7 @@
 # Audit QHSE permanent — reproduire Dashboard 2026 dans solidata.online
 
+> 📌 **Mise à jour 2026-05-10 (post-sprints P0/P1/P2)** : score global passé de 41 % à **85 %**. Les 5 vues SQL Dashboard sont créées et exposées via `/admin/refashion-exports`. La feuille LC reste hors périmètre (gérée dans la collecte association). Seul Q8 (export PDF mensuel automatisé par e-mail) reste à livrer. Voir `2026-05-10-audit-suivi-sprints.md`.
+
 **Date** : 2026-05-10
 **Auditeur** : ingénieur QHSE Solidarité Textiles
 **Périmètre** : capacité de `solidata.online` à reproduire les vues du fichier source `Dashboard 2026.xlsm` qui alimentent en permanence les audits Refashion et Métropole de Rouen.

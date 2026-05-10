@@ -1,5 +1,7 @@
 # Audit Métropole Rouen Normandie — collecte et emploi
 
+> 📌 **Mise à jour 2026-05-10 (post-sprints P0/P1/P2)** : couverture passée de 60 % à **88 %**. Référentiel INSEE des 71 communes Métropole disponible via API, KPI taux de sortie dynamique exposés, motif de non-collecte tracé, mix valorisation CO2 observé. Voir `2026-05-10-audit-suivi-sprints.md`.
+
 **Date** : 2026-05-10
 **Auditeur** : Métropole Rouen Normandie — service Économie circulaire et Insertion
 **Périmètre** : Solidarité Textiles — collecte territoire métropole + structure d'insertion par l'activité économique (SIAE)
