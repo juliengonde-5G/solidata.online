@@ -54,6 +54,7 @@ const NAV_TREE = [
             children: [
               { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['ADMIN', 'MANAGER'] },
               { label: 'Associations', path: '/admin-associations', icon: Handshake, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN', 'MANAGER'] },
             ],
           },
           { label: 'Historique des tournées', path: '/tours', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
@@ -237,12 +238,16 @@ const NAV_TREE = [
         ],
       },
       { label: 'Configuration', path: '/settings', icon: Settings, roles: ['ADMIN'] },
-      { label: 'Référentiels', path: '/referentiels', icon: ClipboardList, roles: ['ADMIN'] },
-      { label: 'Catalogue produits', path: '/admin/catalogue', icon: Tag, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Catalogue & référentiels', path: '/admin/catalogue', icon: Tag, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Configuration Refashion', path: '/admin/refashion-config', icon: ShieldCheck, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'RGPD', path: '/rgpd', icon: Lock, roles: ['ADMIN'] },
-      { label: 'Dashboard exécutif (test)', path: '/dashboard-executif', icon: Beaker, roles: ['ADMIN'] },
+      {
+        label: 'Utilisateurs & RGPD',
+        icon: Users,
+        children: [
+          { label: 'Utilisateurs', path: '/users', icon: Users, roles: ['ADMIN'] },
+          { label: 'Registre RGPD', path: '/rgpd', icon: Lock, roles: ['ADMIN'] },
+        ],
+      },
       {
         label: 'Utilitaires',
         icon: Wrench,

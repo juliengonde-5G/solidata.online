@@ -1558,7 +1558,20 @@ async function initDatabase() {
       }
     }
 
-    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage, ref_dimensions, audit P0) ✓');
+    // V2.1 — gammes réduites à EXTRA / STANDARD / VAK / EXPORT (refonte UI)
+    await client.query(`
+      UPDATE ref_dimensions SET is_active = false
+      WHERE type = 'gamme' AND valeur NOT IN ('EXTRA','STANDARD','VAK','EXPORT')
+    `);
+    for (const [valeur, ordre] of [['EXTRA', 0], ['STANDARD', 1], ['VAK', 2], ['EXPORT', 3]]) {
+      await client.query(
+        `INSERT INTO ref_dimensions (type, valeur, ordre) VALUES ('gamme', $1, $2)
+         ON CONFLICT (type, valeur) DO UPDATE SET is_active = true, ordre = EXCLUDED.ordre`,
+        [valeur, ordre]
+      );
+    }
+
+    console.log('[INIT-DB] Migrations (candidate_id, exécution tri, colisages, batch_id PF, étiquetage, ref_dimensions, audit P0, gammes V2.1) ✓');
 
     // ══════════════════════════════════════════
     // DONNÉES INITIALES (Seeds)

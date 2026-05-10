@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { Tag, Plus, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react';
+import { Tag, Plus, ToggleLeft, ToggleRight, Handshake, Truck, Package } from 'lucide-react';
 import api from '../services/api';
 
 const TYPES = [
@@ -9,29 +9,51 @@ const TYPES = [
   { key: 'genre', label: 'Genres' },
   { key: 'saison', label: 'Saisons' },
   { key: 'gamme', label: 'Gammes' },
+  { key: 'associations', label: 'Associations' },
+  { key: 'exutoires', label: 'Exutoires' },
+  { key: 'conteneurs', label: 'Conteneurs' },
 ];
 
 export default function AdminCatalogue() {
   const [tab, setTab] = useState('produits');
   const [produits, setProduits] = useState([]);
   const [dimensions, setDimensions] = useState([]);
+  const [associations, setAssociations] = useState([]);
+  const [exutoires, setExutoires] = useState([]);
+  const [conteneurs, setConteneurs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({ nom: '', categorie_eco_org: '', valeur: '', ordre: 100 });
+  const [refForm, setRefForm] = useState({});
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [p, d] = await Promise.all([
+      const [p, d, a, e, c] = await Promise.all([
         api.get('/etiquettes/admin/produits'),
         api.get('/etiquettes/admin/dimensions'),
+        api.get('/referentiels/associations').catch(() => ({ data: [] })),
+        api.get('/referentiels/exutoires').catch(() => ({ data: [] })),
+        api.get('/referentiels/conteneurs').catch(() => ({ data: [] })),
       ]);
       setProduits(p.data || []);
       setDimensions(d.data || []);
+      setAssociations(a.data || []);
+      setExutoires(e.data || []);
+      setConteneurs(c.data || []);
     } catch (e) {
       setError(e.response?.data?.error || e.message);
     } finally { setLoading(false); }
+  };
+
+  const addReferentiel = async (kind) => {
+    if (!refForm.nom) return;
+    try {
+      await api.post(`/referentiels/${kind}`, refForm);
+      setRefForm({});
+      load();
+    } catch (e) { setError(e.response?.data?.error || e.message); }
   };
 
   useEffect(() => { load(); }, []);
@@ -82,7 +104,7 @@ export default function AdminCatalogue() {
       <div className="min-h-[calc(100vh-60px)] bg-slate-50 p-8">
         <header className="flex items-center gap-4 mb-6">
           <Tag className="w-7 h-7 text-emerald-600" />
-          <h1 className="text-2xl font-bold text-slate-800">Catalogue produits</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Catalogue & référentiels</h1>
         </header>
 
         <nav className="bg-white rounded-2xl shadow p-2 inline-flex gap-1 mb-6 flex-wrap">
@@ -152,7 +174,67 @@ export default function AdminCatalogue() {
           </>
         )}
 
-        {tab !== 'produits' && (
+        {['associations', 'exutoires', 'conteneurs'].includes(tab) && (
+          <>
+            <form onSubmit={(e) => { e.preventDefault(); addReferentiel(tab); }}
+              className="bg-white rounded-2xl shadow p-4 mb-6 flex flex-wrap gap-3 items-end">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-xs text-slate-600 font-semibold block mb-1">Nom</label>
+                <input value={refForm.nom || ''} onChange={e => setRefForm({ ...refForm, nom: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg" placeholder={tab === 'conteneurs' ? 'ex: Carton 60L' : 'Nom'} />
+              </div>
+              {tab === 'associations' && (
+                <>
+                  <div className="flex-1 min-w-[150px]">
+                    <label className="text-xs text-slate-600 font-semibold block mb-1">Commune</label>
+                    <input value={refForm.commune || ''} onChange={e => setRefForm({ ...refForm, commune: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                </>
+              )}
+              {tab === 'exutoires' && (
+                <div className="flex-1 min-w-[150px]">
+                  <label className="text-xs text-slate-600 font-semibold block mb-1">Type</label>
+                  <input value={refForm.type || ''} onChange={e => setRefForm({ ...refForm, type: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg" placeholder="ex: Recyclage" />
+                </div>
+              )}
+              <button type="submit" className="px-5 py-2 rounded-lg bg-emerald-600 text-white font-bold flex items-center gap-2 hover:bg-emerald-700">
+                <Plus className="w-4 h-4" /> Ajouter
+              </button>
+            </form>
+
+            <div className="bg-white rounded-2xl shadow overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Nom</th>
+                    {tab === 'associations' && <th className="px-4 py-3">Commune</th>}
+                    {tab === 'exutoires' && <th className="px-4 py-3">Type</th>}
+                    {tab === 'conteneurs' && <><th className="px-4 py-3 text-right">Capacité (L)</th><th className="px-4 py-3 text-right">Poids max (kg)</th></>}
+                    {tab !== 'conteneurs' && <th className="px-4 py-3">Contact</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(tab === 'associations' ? associations : tab === 'exutoires' ? exutoires : conteneurs).map(item => (
+                    <tr key={item.id} className="border-t hover:bg-slate-50">
+                      <td className="px-4 py-3 font-medium text-slate-800">{item.nom}</td>
+                      {tab === 'associations' && <td className="px-4 py-3 text-slate-600">{item.commune || '—'}</td>}
+                      {tab === 'exutoires' && <td className="px-4 py-3 text-slate-600">{item.type || '—'}</td>}
+                      {tab === 'conteneurs' && <><td className="px-4 py-3 text-right tabular-nums">{item.capacite_litres ?? '—'}</td><td className="px-4 py-3 text-right tabular-nums">{item.poids_max_kg ?? '—'}</td></>}
+                      {tab !== 'conteneurs' && <td className="px-4 py-3 text-slate-500 text-sm">{item.contact_nom || '—'}</td>}
+                    </tr>
+                  ))}
+                  {(tab === 'associations' ? associations : tab === 'exutoires' ? exutoires : conteneurs).length === 0 && (
+                    <tr><td colSpan="3" className="px-4 py-8 text-center text-slate-400">Aucune entrée</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {['categorie_eco_org', 'genre', 'saison', 'gamme'].includes(tab) && (
           <>
             <form onSubmit={addDimension} className="bg-white rounded-2xl shadow p-4 mb-6 flex flex-wrap gap-3 items-end">
               <div className="flex-1 min-w-[200px]">
