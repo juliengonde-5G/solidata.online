@@ -1,0 +1,272 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-05-14",
+  "legend": {
+    "node_types": {
+      "container": "Service Docker (frontend, backend, db…) — niveau macro",
+      "module": "Module métier (route Express, page React) — niveau micro, imbriqué dans son conteneur",
+      "external": "Service externe (API tierce, fournisseur SaaS)",
+      "actor": "Acteur humain ou matériel (utilisateur, capteur, douchette)"
+    },
+    "edge_kinds": {
+      "http": "Requête HTTP REST",
+      "ws": "Événement Socket.IO temps réel",
+      "sql": "Requête SQL (lecture ou écriture en base)",
+      "cache": "Lecture/écriture cache Redis",
+      "job": "Job asynchrone (BullMQ, scheduler)",
+      "ext": "Appel API externe",
+      "ui": "Interaction UI utilisateur"
+    }
+  },
+  "packages": [
+    { "id": "user", "label": "Utilisateur web", "type": "actor", "icon": "user", "description": "Manager / Admin / RH / Responsable boutique connecté au web." },
+    { "id": "driver", "label": "Chauffeur", "type": "actor", "icon": "truck", "description": "Chauffeur-collecteur sur PWA mobile, raccourci home screen." },
+    { "id": "operator", "label": "Opérateur tri", "type": "actor", "icon": "factory", "description": "Opérateur en chaîne de tri (douchette HID, étiquetage)." },
+    { "id": "scanner-hid", "label": "Douchette HID", "type": "actor", "icon": "scan", "description": "Lecteur code-barres USB type clavier (CODE128)." },
+    { "id": "lora-sensor", "label": "Capteur LoRaWAN", "type": "actor", "icon": "radio", "description": "Capteur Milesight EM400-MUD installé dans un CAV." },
+
+    { "id": "nginx", "label": "Nginx", "type": "container", "tech": "Reverse proxy SSL Let's Encrypt", "description": "Termine TLS, route vers frontend / mobile / backend / socket.io / uploads. Redact /v/<hex32> dans les access logs." },
+    { "id": "frontend", "label": "Frontend Web", "type": "container", "tech": "React 18 + Vite 6 + Tailwind", "description": "SPA React, 75 pages lazy-loadées, sert depuis solidata.online." },
+    { "id": "mobile", "label": "Mobile PWA", "type": "container", "tech": "React + vite-plugin-pwa", "description": "App chauffeur sur m.solidata.online, raccourci écran d'accueil." },
+    { "id": "backend", "label": "Backend API", "type": "container", "tech": "Node.js 20 + Express 4 + Socket.IO 4", "description": "API REST + WebSocket, 69 fichiers de routes." },
+    { "id": "ai-agent", "label": "Agent IA", "type": "container", "tech": "Python Flask + Anthropic SDK", "description": "SolidataBot conversationnel, contexte ERP injecté." },
+    { "id": "postgres", "label": "PostgreSQL + PostGIS", "type": "container", "tech": "PG 15 / PostGIS 3.4", "description": "Base de données principale, 80+ tables." },
+    { "id": "redis", "label": "Redis", "type": "container", "tech": "Redis 7", "description": "Cache (volatile-lru, TTL natif) + BullMQ queues." },
+    { "id": "scheduler", "label": "Scheduler", "type": "container", "tech": "node-cron + BullMQ workers", "description": "Jobs périodiques : scan CSV LogicS, collecte météo, sync Pennylane, ML feedback." },
+
+    { "id": "mod-auth", "label": "auth", "type": "module", "parent": "backend", "file": "backend/src/routes/auth.js", "description": "JWT access 8h + refresh 7j, bcrypt, driver-start par vehicle_token." },
+    { "id": "mod-candidates", "label": "candidates", "type": "module", "parent": "backend", "file": "backend/src/routes/candidates.js", "description": "Kanban recrutement, CV parsing, entretiens." },
+    { "id": "mod-pcm", "label": "pcm", "type": "module", "parent": "backend", "file": "backend/src/routes/pcm.js", "description": "Test PCM 20 questions, chiffrement AES-256 des réponses." },
+    { "id": "mod-tours", "label": "tours", "type": "module", "parent": "backend", "file": "backend/src/routes/tours/", "description": "Tournées, GPS, proximité CAV, OSRM, TSP." },
+    { "id": "mod-vehicles", "label": "vehicles", "type": "module", "parent": "backend", "file": "backend/src/routes/vehicles.js", "description": "Véhicules + qr_token unique pour l'auth mobile." },
+    { "id": "mod-cav", "label": "cav", "type": "module", "parent": "backend", "file": "backend/src/routes/cav.js", "description": "Conteneurs d'Apport Volontaire, géolocalisés." },
+    { "id": "mod-sensors", "label": "cav-sensors", "type": "module", "parent": "backend", "file": "backend/src/services/sensors/", "description": "Webhook Orange Live Objects, décodeur EM400-MUD." },
+    { "id": "mod-tri", "label": "tri / etiquettes", "type": "module", "parent": "backend", "file": "backend/src/routes/tri/etiquettes.js", "description": "Génération étiquettes A4 + base24 compatible Excel." },
+    { "id": "mod-stock", "label": "stock", "type": "module", "parent": "backend", "file": "backend/src/routes/stock.js", "description": "stock_movements + colisages + grand livre." },
+    { "id": "mod-boutiques", "label": "boutique-ventes", "type": "module", "parent": "backend", "file": "backend/src/routes/boutique-ventes.js", "description": "Import CSV LogicS, KPIs retail, panier moyen, IPT." },
+    { "id": "mod-exutoires", "label": "commandes-exutoires", "type": "module", "parent": "backend", "file": "backend/src/routes/commandes-exutoires.js", "description": "State machine 9 statuts, audit double, FOR UPDATE." },
+    { "id": "mod-pennylane", "label": "pennylane", "type": "module", "parent": "backend", "file": "backend/src/routes/pennylane.js", "description": "Sync PULL Grand Livre + factures clients (PUSH retiré)." },
+    { "id": "mod-refashion", "label": "refashion", "type": "module", "parent": "backend", "file": "backend/src/routes/refashion.js", "description": "DPAV trimestriel, vues SQL d'audit, exports CSV." },
+    { "id": "mod-notifications", "label": "notifications", "type": "module", "parent": "backend", "file": "backend/src/services/notifications.js", "description": "Triggers SMS/email via Brevo." },
+    { "id": "mod-socket", "label": "Socket.IO", "type": "module", "parent": "backend", "file": "backend/src/index.js", "description": "Salles room:tour:<id>, gps:position, cav:proximity." },
+
+    { "id": "page-login", "label": "Login.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/Login.jsx" },
+    { "id": "page-candidates", "label": "Candidates.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/Candidates.jsx" },
+    { "id": "page-live", "label": "LiveVehicles.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/LiveVehicles.jsx" },
+    { "id": "page-etiquettes", "label": "EtiquetteGenerer.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/EtiquetteGenerer.jsx" },
+    { "id": "page-cartons", "label": "SortieCartons.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/SortieCartons.jsx" },
+    { "id": "page-boutiques", "label": "BoutiquesImport.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/BoutiquesImport.jsx" },
+    { "id": "page-exutoires", "label": "ExutoiresCommandes.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/ExutoiresCommandes.jsx" },
+    { "id": "page-pennylane", "label": "Pennylane.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/Pennylane.jsx" },
+    { "id": "page-refashion", "label": "Refashion.jsx", "type": "module", "parent": "frontend", "file": "frontend/src/pages/Refashion.jsx" },
+    { "id": "widget-bot", "label": "SolidataBot widget", "type": "module", "parent": "frontend", "file": "frontend/src/components/SolidataBot.jsx" },
+
+    { "id": "mob-vlogin", "label": "VehicleLogin.jsx", "type": "module", "parent": "mobile", "file": "mobile/src/pages/VehicleLogin.jsx" },
+    { "id": "mob-tour", "label": "TourView.jsx", "type": "module", "parent": "mobile", "file": "mobile/src/pages/TourView.jsx" },
+    { "id": "mob-checklist", "label": "Checklist.jsx", "type": "module", "parent": "mobile", "file": "mobile/src/pages/Checklist.jsx" },
+
+    { "id": "brevo", "label": "Brevo", "type": "external", "tech": "API SMS + Email transactionnel", "description": "Envoi des SMS de convocation et emails." },
+    { "id": "open-meteo", "label": "Open-Meteo", "type": "external", "tech": "API météo gratuite", "description": "Prévision + historique météo (codes WMO)." },
+    { "id": "osrm", "label": "OSRM", "type": "external", "tech": "Routing engine open source", "description": "Calcul d'itinéraire véhicule pour TSP tournée." },
+    { "id": "claude-api", "label": "Claude API", "type": "external", "tech": "Anthropic Messages API", "description": "Modèle Opus 4.7 pour SolidataBot." },
+    { "id": "pennylane-api", "label": "Pennylane API", "type": "external", "tech": "REST API comptable", "description": "Lecture Grand Livre + factures clients (PULL only)." },
+    { "id": "live-objects", "label": "Orange Live Objects", "type": "external", "tech": "Plateforme LoRaWAN", "description": "Webhook + MQTT pour décodage capteurs CAV." },
+    { "id": "refashion-api", "label": "Refashion", "type": "external", "tech": "Éco-organisme REP textile", "description": "Réception déclaratives DPAV (actuellement export CSV)." }
+  ],
+  "flows": [
+    {
+      "id": "login-web",
+      "label": "Connexion utilisateur web",
+      "domain": "Auth",
+      "summary": "Un manager se connecte à solidata.online. JWT émis, refresh stocké, redirection dashboard.",
+      "steps": [
+        { "from": "user", "to": "frontend", "kind": "ui", "label": "Saisit email/mot de passe", "details": "Login.jsx : useState pour email/password, submit avec disable + spinner." },
+        { "from": "frontend", "to": "nginx", "kind": "http", "label": "POST /api/auth/login", "details": "Headers: Content-Type: application/json. Body: { email, password }. Pas de cookie : JWT côté JS." },
+        { "from": "nginx", "to": "backend", "kind": "http", "label": "Forward /api → :3001", "details": "Reverse proxy, HSTS, rate limiter (20 req/min sur /auth/*)." },
+        { "from": "backend", "to": "mod-auth", "kind": "http", "label": "router.post('/login')", "details": "Validation Joi, lookup user actif." },
+        { "from": "mod-auth", "to": "postgres", "kind": "sql", "label": "SELECT FROM users WHERE email=$1 AND active=true", "details": "Requête paramétrée. bcrypt.compare(password, password_hash) en mémoire." },
+        { "from": "mod-auth", "to": "postgres", "kind": "sql", "label": "INSERT INTO refresh_tokens", "details": "Refresh JWT 7j, stocké hashé + IP + user_agent + expires_at." },
+        { "from": "mod-auth", "to": "frontend", "kind": "http", "label": "200 { token, refreshToken, user }", "details": "Access JWT 8h signé HS256 avec JWT_SECRET. User contient role pour ProtectedRoute." },
+        { "from": "frontend", "to": "user", "kind": "ui", "label": "AuthContext → redirect /", "details": "Token stocké en localStorage ('solidata_token'). axios interceptor ajoute Authorization: Bearer." }
+      ]
+    },
+    {
+      "id": "driver-start",
+      "label": "Chauffeur ouvre son raccourci véhicule",
+      "domain": "Auth chauffeur",
+      "summary": "Le chauffeur tape sur le raccourci home screen de son téléphone (https://m.solidata.online/v/<qr_token>). Auth automatique, JWT mobile, redirect vers checklist du jour.",
+      "steps": [
+        { "from": "driver", "to": "mobile", "kind": "ui", "label": "Tape raccourci /v/<token>", "details": "Token hex 32 char (espace 2¹²⁸). 1 URL = 1 véhicule, distribution D3 (pairing au dépôt en personne)." },
+        { "from": "mobile", "to": "mob-vlogin", "kind": "ui", "label": "VehicleLogin.jsx mount", "details": "useParams() → token. history.replaceState immédiatement après auth pour retirer le token de la barre d'adresse." },
+        { "from": "mob-vlogin", "to": "nginx", "kind": "http", "label": "POST /api/auth/driver-start", "details": "Body: { vehicle_token }. Pas de vehicle_id énumérable." },
+        { "from": "nginx", "to": "mod-auth", "kind": "http", "label": "Forward + redact log", "details": "Nginx log_format remplace /v/<hex32> → /v/REDACTED via map." },
+        { "from": "mod-auth", "to": "postgres", "kind": "sql", "label": "SELECT v.* FROM vehicles WHERE qr_token=$1", "details": "qr_token UNIQUE NOT NULL. Si pas trouvé → 401." },
+        { "from": "mod-auth", "to": "postgres", "kind": "sql", "label": "SELECT tour du jour", "details": "JOIN tours ON driver_employee_id pour pré-remplir la redirection." },
+        { "from": "mod-auth", "to": "mob-vlogin", "kind": "http", "label": "200 { token, vehicle, tour_today }", "details": "JWT mobile, payload contient vehicle_id." },
+        { "from": "mob-vlogin", "to": "mob-checklist", "kind": "ui", "label": "navigate('/checklist')", "details": "ou /vehicle-select si pas de tournée du jour. JWT stocké en mobile_token." }
+      ]
+    },
+    {
+      "id": "invite-candidate",
+      "label": "Inviter un candidat au test PCM",
+      "domain": "Recrutement",
+      "summary": "RH déclenche l'envoi d'un SMS de convocation avec lien magique vers le test PCM 20 questions.",
+      "steps": [
+        { "from": "user", "to": "page-candidates", "kind": "ui", "label": "Clique 'Inviter au PCM'", "details": "Candidates.jsx : bouton dans la fiche candidat statut 'Entretien'." },
+        { "from": "page-candidates", "to": "mod-candidates", "kind": "http", "label": "POST /api/candidates/:id/invite-pcm", "details": "Auth + role ADMIN/RH. Body vide." },
+        { "from": "mod-candidates", "to": "postgres", "kind": "sql", "label": "INSERT INTO pcm_sessions", "details": "Crée session avec token UUID v4 unique, expires_at = NOW() + 7 jours. status='invited'." },
+        { "from": "mod-candidates", "to": "mod-notifications", "kind": "http", "label": "sendSMS(candidate.tel, template)", "details": "Template 'pcm_invitation' depuis message_templates : 'Bonjour {prenom}, votre test : https://solidata.online/pcm-test/{token}'." },
+        { "from": "mod-notifications", "to": "brevo", "kind": "ext", "label": "POST api.brevo.com/v3/transactionalSMS/sms", "details": "Sender = 'Solidata'. Retour : messageId logué dans notification_triggers." },
+        { "from": "brevo", "to": "mod-notifications", "kind": "ext", "label": "200 messageId", "details": "Erreur capturée → INSERT notification_triggers status='failed' (best effort, ne bloque pas)." },
+        { "from": "mod-candidates", "to": "page-candidates", "kind": "http", "label": "200 { sent: true }", "details": "Toast vert 'Invitation envoyée'." }
+      ]
+    },
+    {
+      "id": "start-tour",
+      "label": "Démarrer une tournée chauffeur (GPS temps réel)",
+      "domain": "Collecte",
+      "summary": "Chauffeur démarre sa tournée. Position GPS émise toutes les 10s, proximité CAV calculée, web LiveVehicles mis à jour en direct.",
+      "steps": [
+        { "from": "driver", "to": "mob-tour", "kind": "ui", "label": "Clique 'Démarrer'", "details": "TourView.jsx : navigator.geolocation.watchPosition avec enableHighAccuracy." },
+        { "from": "mob-tour", "to": "mod-tours", "kind": "http", "label": "POST /api/tours/:id/start", "details": "Met status='in_progress' + start_at = NOW()." },
+        { "from": "mod-tours", "to": "postgres", "kind": "sql", "label": "UPDATE tours SET status, start_at", "details": "Retourne la tournée + tour_cav." },
+        { "from": "mod-tours", "to": "redis", "kind": "cache", "label": "SET cache:tour_cav:<id> TTL 60s", "details": "Cache la liste de tour_cav pour économiser les SELECT en boucle (V5/V6 fix N+1)." },
+        { "from": "mob-tour", "to": "mod-socket", "kind": "ws", "label": "join room:tour:<id>", "details": "Authentification Socket.IO par middleware (JWT mobile)." },
+        { "from": "mob-tour", "to": "mod-socket", "kind": "ws", "label": "emit gps:position { lat, lng, speed }", "details": "Throttle 10s côté mobile. Backend déduplique <5s côté serveur." },
+        { "from": "mod-socket", "to": "mod-tours", "kind": "ws", "label": "TourService.findCAVsInProximity (100m)", "details": "haversineDistance + filter sur cache Redis. Garde-fou isFinite()." },
+        { "from": "mod-socket", "to": "postgres", "kind": "sql", "label": "INSERT INTO gps_positions", "details": "Index (vehicle_id, recorded_at). PostGIS point pour requêtes spatiales ultérieures." },
+        { "from": "mod-socket", "to": "page-live", "kind": "ws", "label": "broadcast vehicle:position", "details": "Vers tous les clients web abonnés à la salle 'admin'." },
+        { "from": "page-live", "to": "user", "kind": "ui", "label": "Met à jour marker Leaflet", "details": "12 couleurs par tournée. Toast si proximité CAV détectée." }
+      ]
+    },
+    {
+      "id": "lora-fill",
+      "label": "Capteur LoRaWAN remonte un taux de remplissage CAV",
+      "domain": "IoT",
+      "summary": "Un capteur Milesight EM400-MUD installé dans un CAV émet sa mesure de distance par radio LoRaWAN. Décodage, persistance, alerte si seuil dépassé.",
+      "steps": [
+        { "from": "lora-sensor", "to": "live-objects", "kind": "ext", "label": "Émet trame LoRaWAN (uplink)", "details": "Payload binaire chiffré, décodé par la gateway Orange." },
+        { "from": "live-objects", "to": "nginx", "kind": "ext", "label": "POST /api/sensors/webhook", "details": "Webhook HTTP avec signature HMAC. Body = JSON avec deveui + payload hex." },
+        { "from": "nginx", "to": "mod-sensors", "kind": "http", "label": "Forward", "details": "Pas de JWT — auth par signature webhook." },
+        { "from": "mod-sensors", "to": "mod-sensors", "kind": "http", "label": "decoder EM400-MUD", "details": "decoder.js : parse les bytes (distance cm, battery %, temperature °C)." },
+        { "from": "mod-sensors", "to": "postgres", "kind": "sql", "label": "INSERT INTO cav_sensor_readings", "details": "Snapshot brut + valeurs décodées. Trigger BEFORE INSERT calcule fill_rate_pct depuis distance + CAV height." },
+        { "from": "mod-sensors", "to": "postgres", "kind": "sql", "label": "UPDATE cav SET fill_rate, last_sensor_at", "details": "Vue matérialisée mv_cav_stats refresh asynchrone." },
+        { "from": "mod-sensors", "to": "mod-socket", "kind": "ws", "label": "emit cav:fill-update", "details": "Si fill_rate > 80 % → broadcast alerte." },
+        { "from": "mod-socket", "to": "frontend", "kind": "ws", "label": "Push alerte temps réel", "details": "FillRateMap.jsx : marker passe en rouge sans reload." }
+      ]
+    },
+    {
+      "id": "carton-etiquette",
+      "label": "Générer une étiquette carton (chaîne de tri)",
+      "domain": "Tri",
+      "summary": "Opérateur en chaîne génère une étiquette A4 pour un carton plein. Numérotation séquentielle par poste + base24 compatible Excel legacy.",
+      "steps": [
+        { "from": "operator", "to": "page-etiquettes", "kind": "ui", "label": "Choisit poste + produit + dimensions", "details": "EtiquetteGenerer.jsx : workflow tactile 6 étapes, gros boutons." },
+        { "from": "page-etiquettes", "to": "mod-tri", "kind": "http", "label": "POST /api/tri/etiquettes/generate", "details": "Body: { poste_id, produit_catalogue_id, dimension, poids_kg }." },
+        { "from": "mod-tri", "to": "postgres", "kind": "sql", "label": "SELECT MAX(numero) FROM colisages WHERE poste_id", "details": "Pour incrémenter le compteur du poste (séquence par poste, pas globale)." },
+        { "from": "mod-tri", "to": "mod-tri", "kind": "http", "label": "base24(numero) → P0123 type", "details": "Helper base24 reproduit la formule Excel legacy : ='P'&poste&REPT('0',4-LEN(BASE(D7,24)))&BASE(D7,24)." },
+        { "from": "mod-tri", "to": "postgres", "kind": "sql", "label": "INSERT INTO colisages", "details": "code_barre unique, poste_id, produit_catalogue_id, poids_kg, scellé=false." },
+        { "from": "mod-tri", "to": "page-etiquettes", "kind": "http", "label": "200 { code_barre, libelle, dimensions }", "details": "Front rend l'étiquette A4 : jsbarcode CODE128 + logo + numéro lisible humain." },
+        { "from": "page-etiquettes", "to": "operator", "kind": "ui", "label": "Impression directe (window.print)", "details": "Format A4 portrait, marges 5mm, prêt pour imprimante thermique étiquette pré-format." }
+      ]
+    },
+    {
+      "id": "carton-out",
+      "label": "Scanner sortie carton (douchette HID)",
+      "domain": "Stock",
+      "summary": "Opérateur ou responsable boutique scanne un carton avec la douchette pour le sortir du stock. Feedback sonore immédiat, mouvement de stock enregistré.",
+      "steps": [
+        { "from": "scanner-hid", "to": "page-cartons", "kind": "ui", "label": "Émule frappe clavier CODE128", "details": "SortieCartons.jsx : input invisible focus permanent, listener keydown, parse jusqu'à Enter." },
+        { "from": "page-cartons", "to": "mod-stock", "kind": "http", "label": "POST /api/stock/sortie-cartons/scan", "details": "Body: { code_barre, destination: 'BTQ_STSEVER' | 'BTQ_LHOPITAL' | 'EXUTOIRE' | 'LIBRE' }." },
+        { "from": "mod-stock", "to": "postgres", "kind": "sql", "label": "BEGIN; SELECT FROM colisages FOR UPDATE", "details": "Verrou pessimiste anti double-scan concurrent." },
+        { "from": "mod-stock", "to": "postgres", "kind": "sql", "label": "INSERT INTO stock_movements (type='sortie')", "details": "Mouvement avec colisage_id + matiere_id + poids + destination + scanned_by." },
+        { "from": "mod-stock", "to": "postgres", "kind": "sql", "label": "UPDATE colisages SET sorti=true; COMMIT", "details": "Atomicité de la transaction." },
+        { "from": "mod-stock", "to": "page-cartons", "kind": "http", "label": "200 { ok, libelle, poids }", "details": "Front joue AudioContext beep success (440Hz 80ms) — sinon beep error (220Hz 200ms ×2)." },
+        { "from": "page-cartons", "to": "operator", "kind": "ui", "label": "Affiche ligne + bip", "details": "Liste défilante des derniers scans, total poids cumulé en bas." }
+      ]
+    },
+    {
+      "id": "boutique-csv",
+      "label": "Import CSV LogicS d'une boutique",
+      "domain": "Boutiques",
+      "summary": "Le scheduler scanne /opt/solidata.online/csv-boutiques/ toutes les heures. Détecte un nouveau fichier LogicS, déduplique SHA-256, importe ventes + tickets, récupère la météo du jour.",
+      "steps": [
+        { "from": "scheduler", "to": "scheduler", "kind": "job", "label": "Cron horaire scanCsvBoutiques", "details": "node-cron '0 * * * *'. Lit volume Docker monté en RO." },
+        { "from": "scheduler", "to": "mod-boutiques", "kind": "http", "label": "boutiqueVentes.importFile(path)", "details": "Détecte format (10 vs 11 col). Sépar. ';'. Encoding latin1." },
+        { "from": "mod-boutiques", "to": "postgres", "kind": "sql", "label": "SELECT FROM boutique_import_batches WHERE sha256", "details": "Anti-doublon : hash du fichier complet. Si déjà importé → skip + log." },
+        { "from": "mod-boutiques", "to": "postgres", "kind": "sql", "label": "INSERT batch + ventes + tickets", "details": "Si format 11 col : utilise Num_Ticket réel LogicS. Sinon : reconstruit par minute_key (YYYY-MM-DD HH:MM)." },
+        { "from": "mod-boutiques", "to": "open-meteo", "kind": "ext", "label": "GET api.open-meteo.com/v1/forecast?past_days", "details": "Lat/lng de la boutique. Récupère temp, précip, code WMO du jour." },
+        { "from": "open-meteo", "to": "mod-boutiques", "kind": "ext", "label": "200 daily array", "details": "Pas d'authentification, free tier." },
+        { "from": "mod-boutiques", "to": "postgres", "kind": "sql", "label": "UPSERT boutique_meteo_quotidien", "details": "ON CONFLICT (boutique_id, date) DO UPDATE. Sert ensuite la corrélation météo/CA." },
+        { "from": "mod-boutiques", "to": "scheduler", "kind": "job", "label": "Log batch summary", "details": "Lignes importées, KPIs recalculés, météo enrichie." }
+      ]
+    },
+    {
+      "id": "exutoire-pesee",
+      "label": "Bascule statut commande exutoire (state machine)",
+      "domain": "Logistique",
+      "summary": "Manager valide la pesée d'un client. Transition de statut via la state machine centralisée, audit double (métier + transverse), bascule auto en 'cloturee' si rapprochée.",
+      "steps": [
+        { "from": "user", "to": "page-exutoires", "kind": "ui", "label": "Saisit poids client + clique 'Valider'", "details": "ExutoiresCommandes.jsx : modal de transition avec next-state-only buttons." },
+        { "from": "page-exutoires", "to": "mod-exutoires", "kind": "http", "label": "PATCH /api/commandes-exutoires/:id/statut", "details": "Body: { next: 'pesee_validee', pesee_client_kg }." },
+        { "from": "mod-exutoires", "to": "postgres", "kind": "sql", "label": "BEGIN; SELECT FOR UPDATE", "details": "Verrou pessimiste anti-race. Charge la commande + tarif + role utilisateur." },
+        { "from": "mod-exutoires", "to": "mod-exutoires", "kind": "http", "label": "stateMachine.transition()", "details": "services/state-machine : 9 statuts × 8 transitions valides. Refuse si role insuffisant ou transition non autorisée." },
+        { "from": "mod-exutoires", "to": "postgres", "kind": "sql", "label": "UPDATE commandes_exutoires SET statut", "details": "Plus INSERT controles_pesee (pesee_client_kg, pesee_centre_kg, ecart_pct)." },
+        { "from": "mod-exutoires", "to": "postgres", "kind": "sql", "label": "INSERT commandes_exutoires_historique", "details": "Audit métier riche, dans la transaction : ancien_statut, nouveau_statut, payload JSONB." },
+        { "from": "mod-exutoires", "to": "postgres", "kind": "sql", "label": "COMMIT", "details": "Tout ou rien." },
+        { "from": "mod-exutoires", "to": "postgres", "kind": "sql", "label": "INSERT state_transitions_audit (best effort)", "details": "Audit transverse post-commit. Si KO, ne ré-ouvre pas la TX." },
+        { "from": "mod-exutoires", "to": "page-exutoires", "kind": "http", "label": "200 { commande, transitions: [...] }", "details": "Renvoie aussi les next states possibles pour rafraîchir l'UI." }
+      ]
+    },
+    {
+      "id": "pennylane-sync",
+      "label": "Sync PULL factures clients Pennylane",
+      "domain": "Finance",
+      "summary": "Admin déclenche manuellement la sync (ou cron quotidien). Import incrémental depuis Pennylane, matching auto sur référence commande exutoire, alerte écart > 5%.",
+      "steps": [
+        { "from": "user", "to": "page-pennylane", "kind": "ui", "label": "Clique 'Synchroniser factures clients'", "details": "Pennylane.jsx : bouton avec spinner + dernière sync affichée." },
+        { "from": "page-pennylane", "to": "mod-pennylane", "kind": "http", "label": "POST /api/pennylane/sync/customer-invoices", "details": "Auth ADMIN." },
+        { "from": "mod-pennylane", "to": "postgres", "kind": "sql", "label": "SELECT last_sync_at FROM pennylane_config", "details": "Récupère le curseur pour la sync incrémentale." },
+        { "from": "mod-pennylane", "to": "pennylane-api", "kind": "ext", "label": "GET /customer_invoices?since=…", "details": "Bearer token API. Pagination par cursor. Retour : array de factures clients émises." },
+        { "from": "pennylane-api", "to": "mod-pennylane", "kind": "ext", "label": "200 invoices[]", "details": "12 colonnes utiles : id, external_reference, label, amount_ttc, quantity, customer, ..." },
+        { "from": "mod-pennylane", "to": "postgres", "kind": "sql", "label": "UPSERT factures_exutoires", "details": "INSERT ... ON CONFLICT (pennylane_id) DO UPDATE. Index unique anti-doublon." },
+        { "from": "mod-pennylane", "to": "postgres", "kind": "sql", "label": "Matching auto sur reference + libellé", "details": "JOIN commandes_exutoires ON external_reference. Si match → link + calcule ecart_quantite_pct vs controles_pesee.pesee_client." },
+        { "from": "mod-pennylane", "to": "postgres", "kind": "sql", "label": "UPDATE statut → 'cloturee'", "details": "Si écart ≤ tolerance (settings.facturation_tolerance_pct, défaut 5%) ET match auto réussi." },
+        { "from": "mod-pennylane", "to": "postgres", "kind": "sql", "label": "UPDATE pennylane_config SET last_sync_at", "details": "Nouveau curseur pour la prochaine sync." },
+        { "from": "mod-pennylane", "to": "page-pennylane", "kind": "http", "label": "200 { imported, matched, manual, ecarts }", "details": "UI affiche un résumé + tableau des écarts > tolérance pour validation manuelle." }
+      ]
+    },
+    {
+      "id": "ask-bot",
+      "label": "Question à SolidataBot",
+      "domain": "IA conversationnelle",
+      "summary": "Utilisateur pose une question dans le widget chat. L'agent IA (Flask) injecte le contexte ERP en interrogeant l'API Solidata avec le JWT user, puis appelle Claude.",
+      "steps": [
+        { "from": "user", "to": "widget-bot", "kind": "ui", "label": "Tape une question", "details": "SolidataBot.jsx : widget flottant bas-droite, conversation locale en useState." },
+        { "from": "widget-bot", "to": "ai-agent", "kind": "http", "label": "POST /chat", "details": "Body: { message, history[] }. Headers: Authorization: Bearer <jwt_user> propagé." },
+        { "from": "ai-agent", "to": "backend", "kind": "http", "label": "GET /api/dashboard/kpis (contexte)", "details": "L'agent appelle l'API Solidata avec le même JWT que l'utilisateur (impersonation contrôlée)." },
+        { "from": "backend", "to": "redis", "kind": "cache", "label": "GET cache:dashboard:kpis", "details": "X-Cache: HIT 90% du temps (TTL 120s)." },
+        { "from": "backend", "to": "ai-agent", "kind": "http", "label": "200 { kpis, alertes }", "details": "Données métier injectées comme outil." },
+        { "from": "ai-agent", "to": "claude-api", "kind": "ext", "label": "POST /v1/messages", "details": "Model: claude-opus-4-7. Prompt système : 'Tu es SolidataBot, contexte ERP SOLIDATA : …'. Tool use possible." },
+        { "from": "claude-api", "to": "ai-agent", "kind": "ext", "label": "Streaming réponse", "details": "SSE chunks → forwardés au front." },
+        { "from": "ai-agent", "to": "widget-bot", "kind": "http", "label": "Stream tokens", "details": "Server-Sent Events. Front affiche progressivement." },
+        { "from": "widget-bot", "to": "user", "kind": "ui", "label": "Réponse rendue + sources", "details": "Markdown rendu, blocs code colorés, liens vers les pages mentionnées (deep linking)." }
+      ]
+    },
+    {
+      "id": "refashion-dpav",
+      "label": "Export DPAV trimestriel Refashion",
+      "domain": "Conformité",
+      "summary": "Admin clôture un trimestre et génère le CSV DPAV à transmettre à Refashion. Audit trail conservé (qui, quand, snapshot JSONB).",
+      "steps": [
+        { "from": "user", "to": "page-refashion", "kind": "ui", "label": "Sélectionne trimestre + clique 'Exporter DPAV'", "details": "Refashion.jsx : trimestre verrouillé en lecture après clôture, banner orange si non-clôturé." },
+        { "from": "page-refashion", "to": "mod-refashion", "kind": "http", "label": "GET /api/refashion/exports/dpav-sortants?format=csv", "details": "Query: trimestre=2026T1, format=csv." },
+        { "from": "mod-refashion", "to": "postgres", "kind": "sql", "label": "SELECT FROM vw_dpav_sortants", "details": "Vue SQL d'audit : agrégat colisages scellés du trimestre × catégories_sortantes avec famille_refashion." },
+        { "from": "mod-refashion", "to": "postgres", "kind": "sql", "label": "INSERT INTO refashion_dpav_history", "details": "Snapshot JSONB du résultat + created_by + trimestre. Audit trail immuable." },
+        { "from": "mod-refashion", "to": "page-refashion", "kind": "http", "label": "200 text/csv Content-Disposition", "details": "Génère le CSV en flux, Content-Disposition: attachment; filename=dpav-2026T1.csv. Encoding utf-8 BOM pour Excel FR." },
+        { "from": "page-refashion", "to": "user", "kind": "ui", "label": "Téléchargement déclenché", "details": "Le manager dépose ensuite manuellement le CSV sur le portail Refashion (pas d'API officielle disponible côté Refashion à ce jour)." },
+        { "from": "user", "to": "refashion-api", "kind": "ext", "label": "Upload manuel portail", "details": "Hors application : upload sur le portail web Refashion par l'utilisateur." }
+      ]
+    }
+  ]
+}

@@ -76,6 +76,7 @@ const FinanceControles = lazy(() => import('./pages/FinanceControles'));
 const PerformanceDashboard = lazy(() => import('./pages/PerformanceDashboard'));
 const DashboardExecutif = lazy(() => import('./pages/DashboardExecutif'));
 const AdminAlertThresholds = lazy(() => import('./pages/AdminAlertThresholds'));
+const AdminWorkflows = lazy(() => import('./pages/AdminWorkflows'));
 
 const BoutiquesDashboard = lazy(() => import('./pages/BoutiquesDashboard'));
 const BoutiquesVentes = lazy(() => import('./pages/BoutiquesVentes'));
@@ -206,6 +207,7 @@ function App() {
               <Route path="/admin-stock-original" element={<ProtectedRoute roles={['ADMIN']}><AdminStockOriginal /></ProtectedRoute>} />
               <Route path="/admin-associations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAssociations /></ProtectedRoute>} />
               <Route path="/admin-collaborators-import" element={<ProtectedRoute roles={['ADMIN']}><AdminCollaboratorsImport /></ProtectedRoute>} />
+              <Route path="/admin/workflows" element={<ProtectedRoute roles={['ADMIN']}><AdminWorkflows /></ProtectedRoute>} />
               <Route path="/news" element={<ProtectedRoute><NewsFeed /></ProtectedRoute>} />
 
               <Route path="*" element={<Navigate to="/" />} />
