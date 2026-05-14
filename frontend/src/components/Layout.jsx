@@ -10,7 +10,7 @@ import {
   RefreshCw, Lock, Settings, Car,
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
-  Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
+  Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download, Network,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -254,6 +254,7 @@ const NAV_TREE = [
           { label: 'Importer collaborateurs', path: '/admin-collaborators-import', icon: UserPlus, roles: ['ADMIN'] },
           { label: "Journal d'activité", path: '/activity-log', icon: FileText, roles: ['ADMIN'] },
           { label: 'Base de données', path: '/admin-db', icon: Database, roles: ['ADMIN'] },
+          { label: 'Workflows applicatifs', path: '/admin/workflows', icon: Network, roles: ['ADMIN'] },
         ],
       },
     ],
