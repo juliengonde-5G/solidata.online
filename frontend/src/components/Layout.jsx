@@ -11,6 +11,7 @@ import {
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
+  TrendingUp,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -120,6 +121,24 @@ const NAV_TREE = [
         children: [
           { label: 'Objectifs', path: '/boutiques/objectifs', icon: Target, roles: ['ADMIN', 'MANAGER'] },
           { label: 'Import CSV', path: '/boutiques/import', icon: Upload, roles: ['ADMIN', 'MANAGER'] },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'vak',
+    label: 'Vente au Kilo',
+    icon: Scale,
+    children: [
+      { label: 'Performance VAK', path: '/vak', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Performance annuelle', path: '/vak/annuel', icon: TrendingUp, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Sessions & Import', path: '/vak/sessions', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Écran Live', path: '/vak/live', icon: Activity, roles: ['ADMIN', 'MANAGER'] },
+      {
+        label: 'Réglages',
+        icon: Settings,
+        children: [
+          { label: 'Config SumUp', path: '/admin/vak/sumup-config', icon: Sparkles, roles: ['ADMIN'] },
         ],
       },
     ],

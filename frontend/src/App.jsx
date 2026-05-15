@@ -83,6 +83,12 @@ const BoutiquesCommandes = lazy(() => import('./pages/BoutiquesCommandes'));
 const BoutiquesObjectifs = lazy(() => import('./pages/BoutiquesObjectifs'));
 const BoutiquesImport = lazy(() => import('./pages/BoutiquesImport'));
 
+const VakPerformance = lazy(() => import('./pages/VakPerformance'));
+const VakAnnuel = lazy(() => import('./pages/VakAnnuel'));
+const VakSessions = lazy(() => import('./pages/VakSessions'));
+const VakLive = lazy(() => import('./pages/VakLive'));
+const VakSumupConfig = lazy(() => import('./pages/VakSumupConfig'));
+
 function PageFallback() {
   return (
     <div role="status" aria-live="polite" className="flex items-center justify-center h-screen bg-[var(--color-bg)]">
@@ -119,6 +125,13 @@ function App() {
               <Route path="/boutiques/commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesCommandes /></ProtectedRoute>} />
               <Route path="/boutiques/objectifs" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><BoutiquesObjectifs /></ProtectedRoute>} />
               <Route path="/boutiques/import" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><BoutiquesImport /></ProtectedRoute>} />
+
+              {/* Vente au Kilo (VAK) — caisse SumUp, dashboards perf, live TV */}
+              <Route path="/vak" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakPerformance /></ProtectedRoute>} />
+              <Route path="/vak/annuel" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakAnnuel /></ProtectedRoute>} />
+              <Route path="/vak/sessions" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakSessions /></ProtectedRoute>} />
+              <Route path="/vak/live" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakLive /></ProtectedRoute>} />
+              <Route path="/admin/vak/sumup-config" element={<ProtectedRoute roles={['ADMIN']}><VakSumupConfig /></ProtectedRoute>} />
 
               {/* Recrutement */}
               <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Candidates /></ProtectedRoute>} />
