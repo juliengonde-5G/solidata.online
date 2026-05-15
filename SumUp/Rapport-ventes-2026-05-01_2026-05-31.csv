@@ -1,0 +1,673 @@
+Date,Type,Réf. transaction,Moyen de paiement,Quantité,Unité,Description,Catégorie,SKU,Devise,Prix avant réduction,Réduction,Prix (TTC),Prix (HT),TVA,Taux de TVA,Compte
+15 mai 2026 10:15,Vente,TAAA23ZXECY,Mastercard - Débit,"1,33",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,31","0,00","9,31","7,76","1,55",20 %,Caissier Frip & Co
+15 mai 2026 10:16,Vente,TAAA23ZXTBY,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 10:16,Vente,TAAA23ZXTBY,Visa - Débit,"2,565",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"17,96","0,00","17,96","14,97","2,99",20 %,Caissier Frip & Co
+15 mai 2026 10:20,Vente,TAAA23ZYVNG,Espèces,"0,28",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"1,96","0,00","1,96","1,63","0,33",20 %,Caissier Frip & Co
+15 mai 2026 10:20,Vente,TAAA23ZY3ZL,Espèces,"2,06",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"14,42","0,00","14,42","12,02","2,40",20 %,Caissier Frip & Co
+15 mai 2026 10:21,Vente,TAAA23ZZC7Z,Espèces,"5,15",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"28,84","0,00","28,84","24,03","4,81",20 %,Caissier Frip & Co
+15 mai 2026 10:23,Vente,TAAA23ZZSZ4,Espèces,"6,575",kg,Chaussures,Ventes Au Kilo,,EUR,"19,72","0,00","19,72","16,43","3,29",20 %,Caissier Frip & Co
+15 mai 2026 10:25,Vente,TAAA23Z2EM9,Mastercard - Débit,"2,815",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"19,70","0,00","19,70","16,42","3,28",20 %,Caissier Frip & Co
+15 mai 2026 10:25,Vente,TAAA23Z2LKG,Visa - Débit,"1,8",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,60","0,00","12,60","10,50","2,10",20 %,Caissier Frip & Co
+15 mai 2026 10:26,Vente,TAAA23Z2S4X,Visa - Débit,"0,535",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,74","0,00","3,74","3,12","0,62",20 %,Caissier Frip & Co
+15 mai 2026 10:26,Vente,TAAA23Z2ZRP,Espèces,"3,992",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,95","0,00","27,95","23,29","4,66",20 %,Caissier Frip & Co
+15 mai 2026 10:27,Vente,TAAA23Z292U,Espèces,"0,18",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"1,26","0,00","1,26","1,05","0,21",20 %,Caissier Frip & Co
+15 mai 2026 10:28,Vente,TAAA23Z3L3E,Espèces,"3,24",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"22,68","0,00","22,68","18,90","3,78",20 %,Caissier Frip & Co
+15 mai 2026 10:29,Vente,TAAA23Z32NQ,Espèces,"4,02",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,14","0,00","28,14","23,45","4,69",20 %,Caissier Frip & Co
+15 mai 2026 10:30,Vente,TAAA23Z33GU,Visa - Débit,4,pce,Sacs,Ventes Au Kilo,,EUR,"0,80","0,00","0,80","0,67","0,13",20 %,Caissier Frip & Co
+15 mai 2026 10:30,Vente,TAAA23Z33GU,Visa - Débit,"5,895",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"33,01","0,00","33,01","27,51","5,50",20 %,Caissier Frip & Co
+15 mai 2026 10:30,Vente,TAAA23Z33GU,Visa - Débit,"8,635",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"48,36","0,00","48,36","40,30","8,06",20 %,Caissier Frip & Co
+15 mai 2026 10:31,Vente,TAAA23Z4K3R,Espèces,2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 10:31,Vente,TAAA23Z4K3R,Espèces,"6,795",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,05","0,00","38,05","31,71","6,34",20 %,Caissier Frip & Co
+15 mai 2026 10:31,Vente,TAAA23Z4PHY,Mastercard - Débit,"3,85",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"26,95","0,00","26,95","22,46","4,49",20 %,Caissier Frip & Co
+15 mai 2026 10:32,Vente,TAAA23Z4VX4,Visa - Crédit,"1,905",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,34","0,00","13,34","11,12","2,22",20 %,Caissier Frip & Co
+15 mai 2026 10:33,Vente,TAAA23Z43LY,Visa - Crédit,"0,535",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,74","0,00","3,74","3,12","0,62",20 %,Caissier Frip & Co
+15 mai 2026 10:33,Vente,TAAA23Z6AVD,Mastercard - Débit,"2,115",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"14,80","0,00","14,80","12,33","2,47",20 %,Caissier Frip & Co
+15 mai 2026 10:33,Vente,TAAA23Z6BL7,Espèces,"0,815",kg,Chaussures,Ventes Au Kilo,,EUR,"2,44","0,00","2,44","2,03","0,41",20 %,Caissier Frip & Co
+15 mai 2026 10:33,Vente,TAAA23Z6BL7,Espèces,"8,92",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"49,95","0,00","49,95","41,62","8,33",20 %,Caissier Frip & Co
+15 mai 2026 10:34,Vente,TAAA23Z6KRU,Espèces,"0,77",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,39","0,00","5,39","4,49","0,90",20 %,Caissier Frip & Co
+15 mai 2026 10:35,Vente,TAAA23Z6XDN,Mastercard - Crédit,"11,105",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"62,19","0,00","62,19","51,82","10,37",20 %,Caissier Frip & Co
+15 mai 2026 10:37,Vente,TAAA23Z7NA6,Visa - Débit,6,kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"33,60","0,00","33,60","28,00","5,60",20 %,Caissier Frip & Co
+15 mai 2026 10:38,Vente,TAAA23Z7VT4,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 10:38,Vente,TAAA23Z7VT4,Visa - Débit,"1,56",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,92","0,00","10,92","9,10","1,82",20 %,Caissier Frip & Co
+15 mai 2026 10:40,Vente,TAAA23Z9NUG,Visa - Débit,"7,52",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"42,11","0,00","42,11","35,09","7,02",20 %,Caissier Frip & Co
+15 mai 2026 10:42,Vente,TAAA23Z99BC,Espèces,2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 10:42,Vente,TAAA23Z99BC,Espèces,"10,125",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"56,70","0,00","56,70","47,25","9,45",20 %,Caissier Frip & Co
+15 mai 2026 10:44,Vente,TAAA232AXQQ,Espèces,"4,48",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"31,36","0,00","31,36","26,13","5,23",20 %,Caissier Frip & Co
+15 mai 2026 10:44,Vente,TAAA232A7GN,Visa - Débit,"3,2",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"22,40","0,00","22,40","18,67","3,73",20 %,Caissier Frip & Co
+15 mai 2026 10:45,Vente,TAAA232BEM6,Mastercard - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 10:45,Vente,TAAA232BEM6,Mastercard - Débit,"0,86",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,02","0,00","6,02","5,02","1,00",20 %,Caissier Frip & Co
+15 mai 2026 10:46,Vente,TAAA232BK6E,Visa - Débit,"1,1",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,70","0,00","7,70","6,42","1,28",20 %,Caissier Frip & Co
+15 mai 2026 10:46,Vente,TAAA232BRCP,Visa - Débit,"2,54",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"17,78","0,00","17,78","14,82","2,96",20 %,Caissier Frip & Co
+15 mai 2026 10:46,Vente,TAAA232BRRM,Visa - Débit,"0,8",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,60","0,00","5,60","4,67","0,93",20 %,Caissier Frip & Co
+15 mai 2026 10:46,Vente,TAAA232BYND,Espèces,"0,64",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,48","0,00","4,48","3,73","0,75",20 %,Caissier Frip & Co
+15 mai 2026 10:47,Vente,TAAA232B7HC,Espèces,"2,905",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"20,34","0,00","20,34","16,95","3,39",20 %,Caissier Frip & Co
+15 mai 2026 10:47,Vente,TAAA232B9H3,Visa - Débit,"2,73",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"19,11","0,00","19,11","15,92","3,19",20 %,Caissier Frip & Co
+15 mai 2026 10:51,Vente,TAAA232DKXX,Visa - Débit,"13,945",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"78,09","0,00","78,09","65,08","13,01",20 %,Caissier Frip & Co
+15 mai 2026 10:53,Vente,TAAA232EET2,Visa - Débit,"1,42",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,94","0,00","9,94","8,28","1,66",20 %,Caissier Frip & Co
+15 mai 2026 10:54,Vente,TAAA232ERT3,Visa - Débit,"0,405",kg,Chaussures,Ventes Au Kilo,,EUR,"1,22","0,00","1,22","1,02","0,20",20 %,Caissier Frip & Co
+15 mai 2026 10:54,Vente,TAAA232ERT3,Visa - Débit,"1,81",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,67","0,00","12,67","10,56","2,11",20 %,Caissier Frip & Co
+15 mai 2026 10:54,Vente,TAAA232EUQA,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 10:54,Vente,TAAA232EUQA,Espèces,"3,67",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"25,69","0,00","25,69","21,41","4,28",20 %,Caissier Frip & Co
+15 mai 2026 10:55,Vente,TAAA232E4XC,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 10:55,Vente,TAAA232E4XC,Espèces,"8,65",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"48,44","0,00","48,44","40,37","8,07",20 %,Caissier Frip & Co
+15 mai 2026 10:55,Vente,TAAA232E9GQ,Mastercard - Débit,"0,51",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,57","0,00","3,57","2,98","0,59",20 %,Caissier Frip & Co
+15 mai 2026 10:56,Vente,TAAA232FESK,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 10:56,Vente,TAAA232FESK,Espèces,"2,645",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,52","0,00","18,52","15,43","3,09",20 %,Caissier Frip & Co
+15 mai 2026 10:56,Vente,TAAA232FMFF,Visa - Débit,"3,9",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,30","0,00","27,30","22,75","4,55",20 %,Caissier Frip & Co
+15 mai 2026 10:59,Vente,TAAA232GNGR,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 10:59,Vente,TAAA232GNGR,Visa - Débit,"5,265",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,48","0,00","29,48","24,57","4,91",20 %,Caissier Frip & Co
+15 mai 2026 11:01,Vente,TAAA232HA43,Visa - Débit,"0,66",kg,Chaussures,Ventes Au Kilo,,EUR,"1,98","0,00","1,98","1,65","0,33",20 %,Caissier Frip & Co
+15 mai 2026 11:01,Vente,TAAA232HA43,Visa - Débit,"1,62",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,34","0,00","11,34","9,45","1,89",20 %,Caissier Frip & Co
+15 mai 2026 11:02,Vente,TAAA232HSUA,Mastercard - Crédit,"0,67",kg,Chaussures,Ventes Au Kilo,,EUR,"2,01","0,00","2,01","1,68","0,33",20 %,Caissier Frip & Co
+15 mai 2026 11:02,Vente,TAAA232HSUA,Mastercard - Crédit,"1,915",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,40","0,00","13,40","11,17","2,23",20 %,Caissier Frip & Co
+15 mai 2026 11:03,Vente,TAAA232KCS3,Espèces,"8,27",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"46,31","0,00","46,31","38,59","7,72",20 %,Caissier Frip & Co
+15 mai 2026 11:04,Vente,TAAA232KQ4A,Espèces,"1,085",kg,Chaussures,Ventes Au Kilo,,EUR,"3,26","0,00","3,26","2,72","0,54",20 %,Caissier Frip & Co
+15 mai 2026 11:04,Vente,TAAA232KQ4A,Espèces,"0,905",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,34","0,00","6,34","5,28","1,06",20 %,Caissier Frip & Co
+15 mai 2026 11:06,Vente,TAAA232LDVM,Visa - Crédit,"6,63",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"37,13","0,00","37,13","30,94","6,19",20 %,Caissier Frip & Co
+15 mai 2026 11:06,Vente,TAAA232LDVM,Visa - Crédit,"9,815",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"54,96","0,00","54,96","45,80","9,16",20 %,Caissier Frip & Co
+15 mai 2026 11:06,Vente,TAAA232LDVM,Visa - Crédit,"7,715",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"43,20","0,00","43,20","36,00","7,20",20 %,Caissier Frip & Co
+15 mai 2026 11:06,Vente,TAAA232LKHM,Espèces,"2,96",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"20,72","0,00","20,72","17,27","3,45",20 %,Caissier Frip & Co
+15 mai 2026 11:07,Vente,TAAA232L24U,Visa - Crédit,"5,92",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"33,15","0,00","33,15","27,62","5,53",20 %,Caissier Frip & Co
+15 mai 2026 11:08,Vente,TAAA232L7XQ,Visa - Débit,"11,055",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"61,91","0,00","61,91","51,59","10,32",20 %,Caissier Frip & Co
+15 mai 2026 11:08,Vente,TAAA232MCGL,Visa - Débit,"1,15",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"8,05","0,00","8,05","6,71","1,34",20 %,Caissier Frip & Co
+15 mai 2026 11:08,Vente,TAAA232MPXF,Visa - Crédit,"3,115",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,80","0,00","21,80","18,17","3,63",20 %,Caissier Frip & Co
+15 mai 2026 11:09,Vente,TAAA232MUR3,Visa - Débit,"0,575",kg,Chaussures,Ventes Au Kilo,,EUR,"1,72","0,00","1,72","1,43","0,29",20 %,Caissier Frip & Co
+15 mai 2026 11:09,Vente,TAAA232MUR3,Visa - Débit,"3,675",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"25,72","0,00","25,72","21,43","4,29",20 %,Caissier Frip & Co
+15 mai 2026 11:10,Vente,TAAA232ND3A,Espèces,"2,695",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,86","0,00","18,86","15,72","3,14",20 %,Caissier Frip & Co
+15 mai 2026 11:12,Vente,TAAA232N3YU,Espèces,"1,72",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,04","0,00","12,04","10,03","2,01",20 %,Caissier Frip & Co
+15 mai 2026 11:13,Vente,TAAA232PFQV,Visa - Débit,"3,215",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"22,50","0,00","22,50","18,75","3,75",20 %,Caissier Frip & Co
+15 mai 2026 11:14,Vente,TAAA232P24C,Espèces,"8,41",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"47,10","0,00","47,10","39,25","7,85",20 %,Caissier Frip & Co
+15 mai 2026 11:16,Vente,"TAAA232QQTX, TAAA232QS7L","Espèces, Visa - Débit","1,71",kg,Chaussures,Ventes Au Kilo,,EUR,"5,13","0,00","5,13","4,28","0,85",20 %,Caissier Frip & Co
+15 mai 2026 11:16,Vente,"TAAA232QQTX, TAAA232QS7L","Espèces, Visa - Débit","4,615",kg,Chaussures,Ventes Au Kilo,,EUR,"13,84","0,00","13,84","11,53","2,31",20 %,Caissier Frip & Co
+15 mai 2026 11:16,Vente,"TAAA232QQTX, TAAA232QS7L","Espèces, Visa - Débit","5,245",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,37","0,00","29,37","24,48","4,89",20 %,Caissier Frip & Co
+15 mai 2026 11:16,Vente,"TAAA232QQTX, TAAA232QS7L","Espèces, Visa - Débit","9,725",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"54,46","0,00","54,46","45,38","9,08",20 %,Caissier Frip & Co
+15 mai 2026 11:16,Vente,TAAA232QXYQ,Espèces,"4,19",kg,Chaussures,Ventes Au Kilo,,EUR,"12,57","0,00","12,57","10,48","2,09",20 %,Caissier Frip & Co
+15 mai 2026 11:16,Vente,TAAA232QXYQ,Espèces,"6,93",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,81","0,00","38,81","32,34","6,47",20 %,Caissier Frip & Co
+15 mai 2026 11:18,Vente,TAAA232RRQ2,Visa - Débit,1,pce,Montant personnalisé,,,EUR,"10,00","0,00","10,00","8,33","1,67",20 %,Caissier Frip & Co
+15 mai 2026 11:19,Vente,TAAA232RY4V,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 11:19,Vente,TAAA232RY4V,Espèces,"3,99",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,93","0,00","27,93","23,28","4,65",20 %,Caissier Frip & Co
+15 mai 2026 11:19,Vente,TAAA232R3MB,Espèces,"1,52",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,64","0,00","10,64","8,87","1,77",20 %,Caissier Frip & Co
+15 mai 2026 11:20,Vente,TAAA232SFKV,Visa - Débit,"1,52",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,64","0,00","10,64","8,87","1,77",20 %,Caissier Frip & Co
+15 mai 2026 11:21,Vente,TAAA232SVDV,Espèces,"2,92",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"20,44","0,00","20,44","17,03","3,41",20 %,Caissier Frip & Co
+15 mai 2026 11:22,Vente,TAAA232TA29,Espèces,"1,785",kg,Chaussures,Ventes Au Kilo,,EUR,"5,36","0,00","5,36","4,47","0,89",20 %,Caissier Frip & Co
+15 mai 2026 11:22,Vente,TAAA232TA29,Espèces,"7,095",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"39,73","0,00","39,73","33,11","6,62",20 %,Caissier Frip & Co
+15 mai 2026 11:22,Vente,TAAA232TA29,Espèces,"7,525",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"42,14","0,00","42,14","35,12","7,02",20 %,Caissier Frip & Co
+15 mai 2026 11:22,Vente,TAAA232TBNG,Visa - Crédit,"0,73",kg,Chaussures,Ventes Au Kilo,,EUR,"2,19","0,00","2,19","1,82","0,37",20 %,Caissier Frip & Co
+15 mai 2026 11:22,Vente,TAAA232TBNG,Visa - Crédit,"2,76",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"19,32","0,00","19,32","16,10","3,22",20 %,Caissier Frip & Co
+15 mai 2026 11:23,Vente,TAAA232TQRQ,Visa - Débit,"1,61",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,27","0,00","11,27","9,39","1,88",20 %,Caissier Frip & Co
+15 mai 2026 11:24,Vente,TAAA232T7P4,Visa - Débit,"11,015",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"61,68","0,00","61,68","51,40","10,28",20 %,Caissier Frip & Co
+15 mai 2026 11:25,Vente,TAAA232UKU3,Visa - Crédit,"0,355",kg,Chaussures,Ventes Au Kilo,,EUR,"1,06","0,00","1,06","0,88","0,18",20 %,Caissier Frip & Co
+15 mai 2026 11:25,Vente,TAAA232UKU3,Visa - Crédit,"10,225",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"57,26","0,00","57,26","47,72","9,54",20 %,Caissier Frip & Co
+15 mai 2026 11:25,Vente,TAAA232UNL2,Mastercard - Débit,"0,555",kg,Chaussures,Ventes Au Kilo,,EUR,"1,66","0,00","1,66","1,38","0,28",20 %,Caissier Frip & Co
+15 mai 2026 11:25,Vente,TAAA232UNL2,Mastercard - Débit,"11,14",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"62,38","0,00","62,38","51,98","10,40",20 %,Caissier Frip & Co
+15 mai 2026 11:26,Vente,TAAA232UZBT,Mastercard - Débit,"3,115",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,80","0,00","21,80","18,17","3,63",20 %,Caissier Frip & Co
+15 mai 2026 11:26,Vente,TAAA232UYM7,Visa - Débit,"3,845",kg,Chaussures,Ventes Au Kilo,,EUR,"11,54","0,00","11,54","9,62","1,92",20 %,Caissier Frip & Co
+15 mai 2026 11:27,Vente,"TAAA232VG42, TAAA232VLEE","Mastercard - Crédit, Visa - Débit","5,255",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,43","0,00","29,43","24,52","4,91",20 %,Caissier Frip & Co
+15 mai 2026 11:27,Vente,TAAA232VHCU,Mastercard - Débit,4,pce,Sacs,Ventes Au Kilo,,EUR,"0,80","0,00","0,80","0,67","0,13",20 %,Caissier Frip & Co
+15 mai 2026 11:27,Vente,TAAA232VHCU,Mastercard - Débit,"7,02",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"39,31","0,00","39,31","32,76","6,55",20 %,Caissier Frip & Co
+15 mai 2026 11:27,Vente,TAAA232VHCU,Mastercard - Débit,"10,08",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"56,45","0,00","56,45","47,04","9,41",20 %,Caissier Frip & Co
+15 mai 2026 11:28,Vente,TAAA232VYNC,Mastercard - Débit,"2,66",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,62","0,00","18,62","15,52","3,10",20 %,Caissier Frip & Co
+15 mai 2026 11:28,Vente,TAAA232V3XY,Mastercard - Débit,"11,35",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"63,56","0,00","63,56","52,97","10,59",20 %,Caissier Frip & Co
+15 mai 2026 11:29,Vente,TAAA232V74Z,Visa - Débit,"1,34",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,38","0,00","9,38","7,82","1,56",20 %,Caissier Frip & Co
+15 mai 2026 11:29,Vente,TAAA232XEG2,Mastercard - Débit,"0,695",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,86","0,00","4,86","4,05","0,81",20 %,Caissier Frip & Co
+15 mai 2026 11:29,Vente,TAAA232XGRS,Mastercard - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 11:29,Vente,TAAA232XGRS,Mastercard - Débit,"1,12",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,84","0,00","7,84","6,53","1,31",20 %,Caissier Frip & Co
+15 mai 2026 11:31,Vente,TAAA232XZYZ,Visa - Débit,"0,955",kg,Chaussures,Ventes Au Kilo,,EUR,"2,86","0,00","2,86","2,38","0,48",20 %,Caissier Frip & Co
+15 mai 2026 11:31,Vente,TAAA232XZYZ,Visa - Débit,"4,06",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,42","0,00","28,42","23,68","4,74",20 %,Caissier Frip & Co
+15 mai 2026 11:31,Vente,TAAA232X4KH,Mastercard - Débit,"5,91",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"33,10","0,00","33,10","27,58","5,52",20 %,Caissier Frip & Co
+15 mai 2026 11:31,Vente,TAAA232X4KH,Mastercard - Débit,"10,94",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"61,26","0,00","61,26","51,05","10,21",20 %,Caissier Frip & Co
+15 mai 2026 11:32,Vente,TAAA232YQUN,Espèces,"0,815",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,70","0,00","5,70","4,75","0,95",20 %,Caissier Frip & Co
+15 mai 2026 11:32,Vente,TAAA232YR6K,Espèces,"3,535",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"24,74","0,00","24,74","20,62","4,12",20 %,Caissier Frip & Co
+15 mai 2026 11:33,Vente,TAAA232ZCMN,Mastercard - Débit,"0,3",kg,Chaussures,Ventes Au Kilo,,EUR,"0,90","0,00","0,90","0,75","0,15",20 %,Caissier Frip & Co
+15 mai 2026 11:33,Vente,TAAA232ZCMN,Mastercard - Débit,"2,945",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"20,62","0,00","20,62","17,18","3,44",20 %,Caissier Frip & Co
+15 mai 2026 11:34,Vente,TAAA232ZGUQ,Espèces,"5,66",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,70","0,00","31,70","26,42","5,28",20 %,Caissier Frip & Co
+15 mai 2026 11:34,Vente,TAAA232ZQGZ,Visa - Débit,"0,82",kg,Chaussures,Ventes Au Kilo,,EUR,"2,46","0,00","2,46","2,05","0,41",20 %,Caissier Frip & Co
+15 mai 2026 11:34,Vente,TAAA232ZQGZ,Visa - Débit,"3,355",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"23,48","0,00","23,48","19,57","3,91",20 %,Caissier Frip & Co
+15 mai 2026 11:36,Vente,TAAA2322AT6,Espèces,"5,68",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,81","0,00","31,81","26,51","5,30",20 %,Caissier Frip & Co
+15 mai 2026 11:36,Vente,TAAA232Z44X,Visa - Débit,"11,33",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"63,45","0,00","63,45","52,88","10,57",20 %,Caissier Frip & Co
+15 mai 2026 11:36,Vente,TAAA2322M7E,Visa - Débit,"4,615",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"32,30","0,00","32,30","26,92","5,38",20 %,Caissier Frip & Co
+15 mai 2026 11:36,Vente,TAAA2322MHQ,Mastercard - Débit,"2,75",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"19,25","0,00","19,25","16,04","3,21",20 %,Caissier Frip & Co
+15 mai 2026 11:37,Vente,TAAA2322XPG,Mastercard - Débit,"0,585",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,10","0,00","4,10","3,42","0,68",20 %,Caissier Frip & Co
+15 mai 2026 11:38,Vente,TAAA23226Y6,Espèces,"2,15",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,05","0,00","15,05","12,54","2,51",20 %,Caissier Frip & Co
+15 mai 2026 11:38,Vente,TAAA23229PM,Espèces,"0,225",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"1,58","0,00","1,58","1,32","0,26",20 %,Caissier Frip & Co
+15 mai 2026 11:38,Vente,TAAA2323KD2,Visa - Débit,"1,805",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,64","0,00","12,64","10,53","2,11",20 %,Caissier Frip & Co
+15 mai 2026 11:39,Vente,TAAA2323PPY,Mastercard - Débit,"1,02",kg,Chaussures,Ventes Au Kilo,,EUR,"3,06","0,00","3,06","2,55","0,51",20 %,Caissier Frip & Co
+15 mai 2026 11:39,Vente,TAAA2323PPY,Mastercard - Débit,"1,4",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,80","0,00","9,80","8,17","1,63",20 %,Caissier Frip & Co
+15 mai 2026 11:39,Vente,TAAA2323S4L,Visa - Débit,"2,57",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"17,99","0,00","17,99","14,99","3,00",20 %,Caissier Frip & Co
+15 mai 2026 11:40,Vente,TAAA2324AFY,Mastercard - Débit,"0,91",kg,Chaussures,Ventes Au Kilo,,EUR,"2,73","0,00","2,73","2,28","0,45",20 %,Caissier Frip & Co
+15 mai 2026 11:40,Vente,TAAA2324AFY,Mastercard - Débit,"6,38",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"35,73","0,00","35,73","29,78","5,95",20 %,Caissier Frip & Co
+15 mai 2026 11:41,Vente,TAAA2324GQB,Mastercard - Débit,"0,815",kg,Chaussures,Ventes Au Kilo,,EUR,"2,44","0,00","2,44","2,03","0,41",20 %,Caissier Frip & Co
+15 mai 2026 11:41,Vente,TAAA2324GQB,Mastercard - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 11:41,Vente,TAAA2324GQB,Mastercard - Débit,"2,905",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"20,34","0,00","20,34","16,95","3,39",20 %,Caissier Frip & Co
+15 mai 2026 11:42,Vente,TAAA2324Y7Q,Mastercard - Débit,"0,635",kg,Chaussures,Ventes Au Kilo,,EUR,"1,90","0,00","1,90","1,58","0,32",20 %,Caissier Frip & Co
+15 mai 2026 11:42,Vente,TAAA2324Y7Q,Mastercard - Débit,2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 11:42,Vente,TAAA2324Y7Q,Mastercard - Débit,"6,89",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,58","0,00","38,58","32,15","6,43",20 %,Caissier Frip & Co
+15 mai 2026 11:42,Vente,TAAA2324Y9N,Visa - Débit,"0,84",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,88","0,00","5,88","4,90","0,98",20 %,Caissier Frip & Co
+15 mai 2026 11:42,Vente,TAAA2324924,Visa - Débit,"1,355",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,48","0,00","9,48","7,90","1,58",20 %,Caissier Frip & Co
+15 mai 2026 11:42,Vente,TAAA2326FGT,Espèces,"2,63",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,41","0,00","18,41","15,34","3,07",20 %,Caissier Frip & Co
+15 mai 2026 11:43,Vente,TAAA2326RRU,Espèces,"1,48",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,36","0,00","10,36","8,63","1,73",20 %,Caissier Frip & Co
+15 mai 2026 11:43,Vente,TAAA2326RD2,Visa - Débit,"8,99",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"50,34","0,00","50,34","41,95","8,39",20 %,Caissier Frip & Co
+15 mai 2026 11:45,Vente,TAAA2327DFM,Visa - Débit,"8,245",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"46,17","0,00","46,17","38,48","7,69",20 %,Caissier Frip & Co
+15 mai 2026 11:45,Vente,TAAA2327CVZ,Mastercard - Débit,"2,41",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"16,87","0,00","16,87","14,06","2,81",20 %,Caissier Frip & Co
+15 mai 2026 11:45,Vente,TAAA2327QDB,Espèces,"1,37",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,59","0,00","9,59","7,99","1,60",20 %,Caissier Frip & Co
+15 mai 2026 11:46,Vente,TAAA232726N,Visa - Débit,"2,72",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"19,04","0,00","19,04","15,87","3,17",20 %,Caissier Frip & Co
+15 mai 2026 11:47,Vente,TAAA2329BQD,Visa - Débit,"0,445",kg,Chaussures,Ventes Au Kilo,,EUR,"1,34","0,00","1,34","1,12","0,22",20 %,Caissier Frip & Co
+15 mai 2026 11:47,Vente,TAAA2329BQD,Visa - Débit,"3,805",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"26,64","0,00","26,64","22,20","4,44",20 %,Caissier Frip & Co
+15 mai 2026 11:47,Vente,TAAA2329C44,Visa - Débit,"2,69",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,83","0,00","18,83","15,69","3,14",20 %,Caissier Frip & Co
+15 mai 2026 11:47,Vente,TAAA2329HRE,Mastercard - Débit,"2,62",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,34","0,00","18,34","15,28","3,06",20 %,Caissier Frip & Co
+15 mai 2026 11:48,Vente,TAAA2329VTP,Mastercard - Débit,"5,21",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,18","0,00","29,18","24,32","4,86",20 %,Caissier Frip & Co
+15 mai 2026 11:48,Vente,TAAA2329Z94,Visa - Débit,"5,93",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"33,21","0,00","33,21","27,68","5,53",20 %,Caissier Frip & Co
+15 mai 2026 11:49,Vente,TAAA233AABP,Visa - Débit,"1,6",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,20","0,00","11,20","9,33","1,87",20 %,Caissier Frip & Co
+15 mai 2026 11:50,Vente,TAAA233AQRC,Espèces,"4,355",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"30,48","0,00","30,48","25,40","5,08",20 %,Caissier Frip & Co
+15 mai 2026 11:50,Vente,TAAA233AQCG,Visa - Débit,"7,505",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"42,03","0,00","42,03","35,02","7,01",20 %,Caissier Frip & Co
+15 mai 2026 11:51,Vente,TAAA233A47K,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 11:51,Vente,TAAA233A47K,Espèces,5,kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"28,00","0,00","28,00","23,33","4,67",20 %,Caissier Frip & Co
+15 mai 2026 11:51,Vente,TAAA233A7HF,Visa - Crédit,"0,3",kg,Chaussures,Ventes Au Kilo,,EUR,"0,90","0,00","0,90","0,75","0,15",20 %,Caissier Frip & Co
+15 mai 2026 11:51,Vente,TAAA233A7HF,Visa - Crédit,"0,69",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,83","0,00","4,83","4,02","0,81",20 %,Caissier Frip & Co
+15 mai 2026 11:51,Vente,TAAA233BGN4,Visa - Débit,"2,665",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,66","0,00","18,66","15,55","3,11",20 %,Caissier Frip & Co
+15 mai 2026 11:52,Vente,TAAA233BUCF,Mastercard - Débit,"6,59",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"36,90","0,00","36,90","30,75","6,15",20 %,Caissier Frip & Co
+15 mai 2026 11:53,Vente,TAAA233B4LF,Espèces,"6,86",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,42","0,00","38,42","32,02","6,40",20 %,Caissier Frip & Co
+15 mai 2026 11:53,Vente,TAAA233B9A9,Mastercard - Crédit,"11,03",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"61,77","0,00","61,77","51,48","10,29",20 %,Caissier Frip & Co
+15 mai 2026 11:53,Vente,TAAA233B9A9,Mastercard - Crédit,"7,515",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"42,08","0,00","42,08","35,07","7,01",20 %,Caissier Frip & Co
+15 mai 2026 11:55,Vente,TAAA233CYHM,Visa - Débit,"8,22",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"46,03","0,00","46,03","38,36","7,67",20 %,Caissier Frip & Co
+15 mai 2026 11:56,Vente,TAAA233DP6M,Espèces,"4,685",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"32,80","0,00","32,80","27,33","5,47",20 %,Caissier Frip & Co
+15 mai 2026 11:57,Vente,TAAA233DY32,Visa - Débit,"1,305",kg,Chaussures,Ventes Au Kilo,,EUR,"3,92","0,00","3,92","3,27","0,65",20 %,Caissier Frip & Co
+15 mai 2026 11:57,Vente,TAAA233DY32,Visa - Débit,"13,49",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"75,54","0,00","75,54","62,95","12,59",20 %,Caissier Frip & Co
+15 mai 2026 11:57,Vente,TAAA233EBF2,Visa - Débit,"4,01",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,07","0,00","28,07","23,39","4,68",20 %,Caissier Frip & Co
+15 mai 2026 11:58,Vente,TAAA233ECBM,Mastercard - Débit,"1,66",kg,Chaussures,Ventes Au Kilo,,EUR,"4,98","0,00","4,98","4,15","0,83",20 %,Caissier Frip & Co
+15 mai 2026 11:58,Vente,TAAA233ECBM,Mastercard - Débit,"6,265",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"35,08","0,00","35,08","29,23","5,85",20 %,Caissier Frip & Co
+15 mai 2026 11:58,Vente,TAAA233EMNN,Espèces,"7,17",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"40,15","0,00","40,15","33,46","6,69",20 %,Caissier Frip & Co
+15 mai 2026 11:58,Vente,TAAA233EN3A,Visa - Débit,"10,625",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"59,50","0,00","59,50","49,58","9,92",20 %,Caissier Frip & Co
+15 mai 2026 11:59,Vente,TAAA233FAUS,Visa - Crédit,"6,095",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,13","0,00","34,13","28,44","5,69",20 %,Caissier Frip & Co
+15 mai 2026 11:59,Vente,TAAA233FCXP,Mastercard - Débit,"5,67",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,75","0,00","31,75","26,46","5,29",20 %,Caissier Frip & Co
+15 mai 2026 12:00,Vente,TAAA233FSLK,Espèces,"7,64",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"42,78","0,00","42,78","35,65","7,13",20 %,Caissier Frip & Co
+15 mai 2026 12:01,Vente,TAAA233F6PG,Mastercard - Crédit,"9,265",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"51,88","0,00","51,88","43,23","8,65",20 %,Caissier Frip & Co
+15 mai 2026 12:01,Vente,TAAA233F6PG,Mastercard - Crédit,"9,22",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"51,63","0,00","51,63","43,02","8,61",20 %,Caissier Frip & Co
+15 mai 2026 12:01,Vente,TAAA233F6PG,Mastercard - Crédit,"10,415",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"58,32","0,00","58,32","48,60","9,72",20 %,Caissier Frip & Co
+15 mai 2026 12:01,Vente,TAAA233F94G,Visa - Débit,"5,935",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"33,24","0,00","33,24","27,70","5,54",20 %,Caissier Frip & Co
+15 mai 2026 12:02,Vente,TAAA233GMET,Espèces,"0,52",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,64","0,00","3,64","3,03","0,61",20 %,Caissier Frip & Co
+15 mai 2026 12:05,Vente,TAAA233KDBZ,Espèces,"0,445",kg,Chaussures,Ventes Au Kilo,,EUR,"1,34","0,00","1,34","1,12","0,22",20 %,Caissier Frip & Co
+15 mai 2026 12:05,Vente,TAAA233KDBZ,Espèces,"3,29",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"23,03","0,00","23,03","19,19","3,84",20 %,Caissier Frip & Co
+15 mai 2026 12:07,Vente,TAAA233KYSQ,Mastercard - Crédit,"0,24",kg,Chaussures,Ventes Au Kilo,,EUR,"0,72","0,00","0,72","0,60","0,12",20 %,Caissier Frip & Co
+15 mai 2026 12:07,Vente,TAAA233KYSQ,Mastercard - Crédit,"0,865",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,06","0,00","6,06","5,05","1,01",20 %,Caissier Frip & Co
+15 mai 2026 12:08,Vente,TAAA233LEDH,Visa - Débit,"0,915",kg,Chaussures,Ventes Au Kilo,,EUR,"2,74","0,00","2,74","2,28","0,46",20 %,Caissier Frip & Co
+15 mai 2026 12:08,Vente,TAAA233LEDH,Visa - Débit,"1,585",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,10","0,00","11,10","9,25","1,85",20 %,Caissier Frip & Co
+15 mai 2026 12:09,Vente,TAAA233L3L9,Visa - Débit,"1,565",kg,Chaussures,Ventes Au Kilo,,EUR,"4,70","0,00","4,70","3,92","0,78",20 %,Caissier Frip & Co
+15 mai 2026 12:09,Vente,TAAA233L3L9,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:09,Vente,TAAA233L3L9,Visa - Débit,"5,55",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,08","0,00","31,08","25,90","5,18",20 %,Caissier Frip & Co
+15 mai 2026 12:09,Vente,TAAA233L9QL,Espèces,"0,52",kg,Chaussures,Ventes Au Kilo,,EUR,"1,56","0,00","1,56","1,30","0,26",20 %,Caissier Frip & Co
+15 mai 2026 12:09,Vente,TAAA233L9QL,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:09,Vente,TAAA233L9QL,Espèces,"6,125",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,30","0,00","34,30","28,58","5,72",20 %,Caissier Frip & Co
+15 mai 2026 12:10,Vente,TAAA233MKKR,Visa - Débit,"3,155",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"22,08","0,00","22,08","18,40","3,68",20 %,Caissier Frip & Co
+15 mai 2026 12:10,Vente,TAAA233MPPK,Mastercard - Débit,"5,328",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,84","0,00","29,84","24,87","4,97",20 %,Caissier Frip & Co
+15 mai 2026 12:10,Vente,TAAA233MTYQ,Visa - Crédit,"6,61",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"37,02","0,00","37,02","30,85","6,17",20 %,Caissier Frip & Co
+15 mai 2026 12:11,Vente,TAAA233MYFT,Mastercard - Débit,"6,14",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,38","0,00","34,38","28,65","5,73",20 %,Caissier Frip & Co
+15 mai 2026 12:11,Vente,TAAA233M94D,Visa - Débit,"2,215",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,50","0,00","15,50","12,92","2,58",20 %,Caissier Frip & Co
+15 mai 2026 12:11,Vente,TAAA233NB47,Espèces,"2,64",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,48","0,00","18,48","15,40","3,08",20 %,Caissier Frip & Co
+15 mai 2026 12:12,Vente,TAAA233NP7E,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:12,Vente,TAAA233NP7E,Visa - Débit,"1,61",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,27","0,00","11,27","9,39","1,88",20 %,Caissier Frip & Co
+15 mai 2026 12:12,Vente,TAAA233NT24,Mastercard - Débit,"6,095",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,13","0,00","34,13","28,44","5,69",20 %,Caissier Frip & Co
+15 mai 2026 12:14,Vente,TAAA233PEH4,Espèces,"4,605",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"32,24","0,00","32,24","26,87","5,37",20 %,Caissier Frip & Co
+15 mai 2026 12:14,Vente,TAAA233PF4H,Visa - Crédit,"1,425",kg,Chaussures,Ventes Au Kilo,,EUR,"4,28","0,00","4,28","3,57","0,71",20 %,Caissier Frip & Co
+15 mai 2026 12:14,Vente,TAAA233PF4H,Visa - Crédit,"7,66",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"42,90","0,00","42,90","35,75","7,15",20 %,Caissier Frip & Co
+15 mai 2026 12:14,Vente,TAAA233PR3S,Visa - Débit,"8,72",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"48,83","0,00","48,83","40,69","8,14",20 %,Caissier Frip & Co
+15 mai 2026 12:15,Vente,TAAA233PXKF,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:15,Vente,TAAA233PXKF,Visa - Débit,"5,265",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,48","0,00","29,48","24,57","4,91",20 %,Caissier Frip & Co
+15 mai 2026 12:15,Vente,TAAA233P4U4,Mastercard - Débit,2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 12:15,Vente,TAAA233P4U4,Mastercard - Débit,"9,58",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"53,65","0,00","53,65","44,71","8,94",20 %,Caissier Frip & Co
+15 mai 2026 12:16,Vente,TAAA233QHHB,Espèces,"0,86",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,02","0,00","6,02","5,02","1,00",20 %,Caissier Frip & Co
+15 mai 2026 12:16,Vente,TAAA233QKH3,Espèces,"8,91",kg,Chaussures,Ventes Au Kilo,,EUR,"26,73","0,00","26,73","22,28","4,45",20 %,Caissier Frip & Co
+15 mai 2026 12:17,Vente,TAAA233QXX9,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:17,Vente,TAAA233QXX9,Visa - Débit,"1,88",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,16","0,00","13,16","10,97","2,19",20 %,Caissier Frip & Co
+15 mai 2026 12:18,Vente,TAAA233RC2F,Mastercard - Débit,"6,66",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"37,30","0,00","37,30","31,08","6,22",20 %,Caissier Frip & Co
+15 mai 2026 12:18,Vente,TAAA233RNDL,Espèces,"0,805",kg,Chaussures,Ventes Au Kilo,,EUR,"2,42","0,00","2,42","2,02","0,40",20 %,Caissier Frip & Co
+15 mai 2026 12:18,Vente,TAAA233RNDL,Espèces,"7,14",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"39,98","0,00","39,98","33,32","6,66",20 %,Caissier Frip & Co
+15 mai 2026 12:20,Vente,TAAA233SASU,Visa - Débit,"5,695",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,89","0,00","31,89","26,58","5,31",20 %,Caissier Frip & Co
+15 mai 2026 12:21,Vente,TAAA233SPDY,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:21,Vente,TAAA233SPDY,Visa - Débit,"6,41",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"35,90","0,00","35,90","29,92","5,98",20 %,Caissier Frip & Co
+15 mai 2026 12:22,Vente,TAAA233TKF6,Espèces,"0,515",kg,Chaussures,Ventes Au Kilo,,EUR,"1,54","0,00","1,54","1,28","0,26",20 %,Caissier Frip & Co
+15 mai 2026 12:22,Vente,TAAA233TKF6,Espèces,"0,63",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,41","0,00","4,41","3,68","0,73",20 %,Caissier Frip & Co
+15 mai 2026 12:22,Vente,TAAA233TC6P,Mastercard - Débit,"0,365",kg,Chaussures,Ventes Au Kilo,,EUR,"1,10","0,00","1,10","0,92","0,18",20 %,Caissier Frip & Co
+15 mai 2026 12:22,Vente,TAAA233TC6P,Mastercard - Débit,"9,885",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"55,36","0,00","55,36","46,13","9,23",20 %,Caissier Frip & Co
+15 mai 2026 12:24,Vente,TAAA233T92D,Mastercard - Débit,"4,07",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"22,79","0,00","22,79","18,99","3,80",20 %,Caissier Frip & Co
+15 mai 2026 12:24,Vente,TAAA233UBXD,Espèces,"1,175",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"8,22","0,00","8,22","6,85","1,37",20 %,Caissier Frip & Co
+15 mai 2026 12:24,Vente,TAAA233UH9P,Visa - Débit,"5,54",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,02","0,00","31,02","25,85","5,17",20 %,Caissier Frip & Co
+15 mai 2026 12:25,Vente,TAAA233UMQ6,Mastercard - Débit,"9,155",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"51,27","0,00","51,27","42,72","8,55",20 %,Caissier Frip & Co
+15 mai 2026 12:25,Vente,TAAA233UU7L,Espèces,"1,43",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,01","0,00","10,01","8,34","1,67",20 %,Caissier Frip & Co
+15 mai 2026 12:26,Vente,TAAA233VB3S,Espèces,"0,445",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,12","0,00","3,12","2,60","0,52",20 %,Caissier Frip & Co
+15 mai 2026 12:26,Vente,TAAA233VF6B,Mastercard - Crédit,"10,64",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"59,58","0,00","59,58","49,65","9,93",20 %,Caissier Frip & Co
+15 mai 2026 12:27,Vente,TAAA233VP4Y,Mastercard - Débit,"0,805",kg,Chaussures,Ventes Au Kilo,,EUR,"2,42","0,00","2,42","2,02","0,40",20 %,Caissier Frip & Co
+15 mai 2026 12:27,Vente,TAAA233VP4Y,Mastercard - Débit,"1,74",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,18","0,00","12,18","10,15","2,03",20 %,Caissier Frip & Co
+15 mai 2026 12:27,Vente,TAAA233V36U,Espèces,"0,535",kg,Chaussures,Ventes Au Kilo,,EUR,"1,60","0,00","1,60","1,33","0,27",20 %,Caissier Frip & Co
+15 mai 2026 12:27,Vente,TAAA233V36U,Espèces,"0,565",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,96","0,00","3,96","3,30","0,66",20 %,Caissier Frip & Co
+15 mai 2026 12:28,Vente,TAAA233V76N,Visa - Débit,"3,12",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,84","0,00","21,84","18,20","3,64",20 %,Caissier Frip & Co
+15 mai 2026 12:29,Vente,TAAA233XLS9,Visa - Débit,"4,095",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,66","0,00","28,66","23,88","4,78",20 %,Caissier Frip & Co
+15 mai 2026 12:30,Vente,TAAA233X27U,Mastercard - Débit,"2,255",kg,Chaussures,Ventes Au Kilo,,EUR,"6,76","0,00","6,76","5,63","1,13",20 %,Caissier Frip & Co
+15 mai 2026 12:30,Vente,TAAA233YC9N,Visa - Débit,"2,745",kg,Chaussures,Ventes Au Kilo,,EUR,"8,24","0,00","8,24","6,87","1,37",20 %,Caissier Frip & Co
+15 mai 2026 12:31,Vente,TAAA233YN3U,Mastercard - Débit,"5,39",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"30,18","0,00","30,18","25,15","5,03",20 %,Caissier Frip & Co
+15 mai 2026 12:31,Vente,TAAA233YY9K,Mastercard - Débit,"10,55",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"59,08","0,00","59,08","49,23","9,85",20 %,Caissier Frip & Co
+15 mai 2026 12:32,Vente,TAAA233ZELG,Espèces,"0,82",kg,Chaussures,Ventes Au Kilo,,EUR,"2,46","0,00","2,46","2,05","0,41",20 %,Caissier Frip & Co
+15 mai 2026 12:32,Vente,TAAA233ZELG,Espèces,"1,37",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,59","0,00","9,59","7,99","1,60",20 %,Caissier Frip & Co
+15 mai 2026 12:33,Vente,TAAA233ZPGH,Espèces,"4,745",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"33,22","0,00","33,22","27,68","5,54",20 %,Caissier Frip & Co
+15 mai 2026 12:34,Vente,TAAA2332FVL,Mastercard - Crédit,"2,27",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,89","0,00","15,89","13,24","2,65",20 %,Caissier Frip & Co
+15 mai 2026 12:35,Vente,TAAA2332V9F,Visa - Débit,"6,595",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"36,93","0,00","36,93","30,78","6,15",20 %,Caissier Frip & Co
+15 mai 2026 12:36,Vente,TAAA23326MZ,Espèces,"2,475",kg,Chaussures,Ventes Au Kilo,,EUR,"7,42","0,00","7,42","6,18","1,24",20 %,Caissier Frip & Co
+15 mai 2026 12:36,Vente,TAAA23326MZ,Espèces,"8,545",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"47,85","0,00","47,85","39,88","7,97",20 %,Caissier Frip & Co
+15 mai 2026 12:36,Vente,TAAA2333GLE,Espèces,"2,57",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"17,99","0,00","17,99","14,99","3,00",20 %,Caissier Frip & Co
+15 mai 2026 12:37,Vente,TAAA2333K99,Espèces,"5,64",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,58","0,00","31,58","26,32","5,26",20 %,Caissier Frip & Co
+15 mai 2026 12:37,Vente,TAAA2333T79,Visa - Crédit,"6,635",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"37,16","0,00","37,16","30,97","6,19",20 %,Caissier Frip & Co
+15 mai 2026 12:38,Vente,TAAA23337QN,Espèces,"3,33",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"23,31","0,00","23,31","19,42","3,89",20 %,Caissier Frip & Co
+15 mai 2026 12:38,Vente,TAAA2334DLQ,Mastercard - Crédit,"1,04",kg,Chaussures,Ventes Au Kilo,,EUR,"3,12","0,00","3,12","2,60","0,52",20 %,Caissier Frip & Co
+15 mai 2026 12:38,Vente,TAAA2334DLQ,Mastercard - Crédit,"2,285",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"16,00","0,00","16,00","13,33","2,67",20 %,Caissier Frip & Co
+15 mai 2026 12:39,Vente,TAAA2334SX4,Espèces,"5,3",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,68","0,00","29,68","24,73","4,95",20 %,Caissier Frip & Co
+15 mai 2026 12:40,Vente,TAAA23346C9,Visa - Débit,"1,285",kg,Chaussures,Ventes Au Kilo,,EUR,"3,86","0,00","3,86","3,22","0,64",20 %,Caissier Frip & Co
+15 mai 2026 12:40,Vente,TAAA23346C9,Visa - Débit,"5,195",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,09","0,00","29,09","24,24","4,85",20 %,Caissier Frip & Co
+15 mai 2026 12:41,Vente,TAAA2336GLB,Mastercard - Débit,2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 12:41,Vente,TAAA2336GLB,Mastercard - Débit,"9,57",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"53,59","0,00","53,59","44,66","8,93",20 %,Caissier Frip & Co
+15 mai 2026 12:41,Vente,TAAA2336EL3,Mastercard - Débit,2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 12:41,Vente,TAAA2336EL3,Mastercard - Débit,"6,835",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,28","0,00","38,28","31,90","6,38",20 %,Caissier Frip & Co
+15 mai 2026 12:42,Vente,TAAA2336ZLA,Visa - Débit,"11,19",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"62,66","0,00","62,66","52,22","10,44",20 %,Caissier Frip & Co
+15 mai 2026 12:42,Vente,TAAA2337EES,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:42,Vente,TAAA2337EES,Espèces,"1,83",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,81","0,00","12,81","10,68","2,13",20 %,Caissier Frip & Co
+15 mai 2026 12:44,Vente,TAAA2337XVA,Espèces,"0,955",kg,Chaussures,Ventes Au Kilo,,EUR,"2,86","0,00","2,86","2,38","0,48",20 %,Caissier Frip & Co
+15 mai 2026 12:44,Vente,TAAA2337XVA,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:44,Vente,TAAA2337XVA,Espèces,"1,41",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,87","0,00","9,87","8,22","1,65",20 %,Caissier Frip & Co
+15 mai 2026 12:44,Vente,TAAA2339DDM,Espèces,"0,945",kg,Chaussures,Ventes Au Kilo,,EUR,"2,84","0,00","2,84","2,37","0,47",20 %,Caissier Frip & Co
+15 mai 2026 12:44,Vente,TAAA2339DDM,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:44,Vente,TAAA2339DDM,Espèces,"6,115",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,24","0,00","34,24","28,53","5,71",20 %,Caissier Frip & Co
+15 mai 2026 12:45,Vente,TAAA2339F9S,Visa - Débit,"2,57",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"17,99","0,00","17,99","14,99","3,00",20 %,Caissier Frip & Co
+15 mai 2026 12:46,Vente,TAAA2339TRR,Visa - Débit,"0,59",kg,Chaussures,Ventes Au Kilo,,EUR,"1,77","0,00","1,77","1,48","0,29",20 %,Caissier Frip & Co
+15 mai 2026 12:46,Vente,TAAA2339TRR,Visa - Débit,"5,705",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,95","0,00","31,95","26,62","5,33",20 %,Caissier Frip & Co
+15 mai 2026 12:46,Vente,TAAA2339UBS,Visa - Débit,"0,805",kg,Chaussures,Ventes Au Kilo,,EUR,"2,42","0,00","2,42","2,02","0,40",20 %,Caissier Frip & Co
+15 mai 2026 12:47,Vente,TAAA234ACG6,Visa - Débit,"5,585",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,28","0,00","31,28","26,07","5,21",20 %,Caissier Frip & Co
+15 mai 2026 12:47,Vente,TAAA234APS9,Visa - Débit,"2,73",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"19,11","0,00","19,11","15,92","3,19",20 %,Caissier Frip & Co
+15 mai 2026 12:48,Vente,TAAA234AZ4Q,Espèces,"8,51",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"47,66","0,00","47,66","39,72","7,94",20 %,Caissier Frip & Co
+15 mai 2026 12:49,Vente,TAAA234BHGN,Mastercard - Débit,"12,45",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"69,72","0,00","69,72","58,10","11,62",20 %,Caissier Frip & Co
+15 mai 2026 12:50,Vente,TAAA234BQGX,Visa - Débit,"12,57",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"70,39","0,00","70,39","58,66","11,73",20 %,Caissier Frip & Co
+15 mai 2026 12:50,Vente,TAAA234B494,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:50,Vente,TAAA234B494,Visa - Débit,"8,39",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"46,98","0,00","46,98","39,15","7,83",20 %,Caissier Frip & Co
+15 mai 2026 12:51,Vente,TAAA234CD32,Visa - Débit,"7,735",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"43,32","0,00","43,32","36,10","7,22",20 %,Caissier Frip & Co
+15 mai 2026 12:51,Vente,TAAA234CFBM,Visa - Débit,"1,74",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,18","0,00","12,18","10,15","2,03",20 %,Caissier Frip & Co
+15 mai 2026 12:51,Vente,TAAA234CP4Z,Visa - Débit,"1,78",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,46","0,00","12,46","10,38","2,08",20 %,Caissier Frip & Co
+15 mai 2026 12:53,Vente,TAAA234DB74,Visa - Débit,"12,705",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"71,15","0,00","71,15","59,29","11,86",20 %,Caissier Frip & Co
+15 mai 2026 12:53,Vente,TAAA234DB74,Visa - Débit,"9,09",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"50,90","0,00","50,90","42,42","8,48",20 %,Caissier Frip & Co
+15 mai 2026 12:53,Vente,TAAA234DFPE,Visa - Débit,"0,8",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"4,48","0,00","4,48","3,73","0,75",20 %,Caissier Frip & Co
+15 mai 2026 12:53,Vente,TAAA234DFPE,Visa - Débit,"8,99",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"50,34","0,00","50,34","41,95","8,39",20 %,Caissier Frip & Co
+15 mai 2026 12:53,Vente,TAAA234DP3M,Mastercard - Débit,"4,11",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,77","0,00","28,77","23,98","4,79",20 %,Caissier Frip & Co
+15 mai 2026 12:54,Vente,TAAA234DY7N,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:55,Vente,TAAA234ELCK,Espèces,"1,29",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,03","0,00","9,03","7,52","1,51",20 %,Caissier Frip & Co
+15 mai 2026 12:56,Vente,TAAA234E77H,Espèces,"3,02",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,14","0,00","21,14","17,62","3,52",20 %,Caissier Frip & Co
+15 mai 2026 12:57,Vente,TAAA234FA9Y,Espèces,"0,51",kg,Chaussures,Ventes Au Kilo,,EUR,"1,53","0,00","1,53","1,28","0,25",20 %,Caissier Frip & Co
+15 mai 2026 12:57,Vente,TAAA234FA9Y,Espèces,"6,445",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"36,09","0,00","36,09","30,08","6,01",20 %,Caissier Frip & Co
+15 mai 2026 12:57,Vente,TAAA234FM39,Visa - Débit,"3,765",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"26,36","0,00","26,36","21,97","4,39",20 %,Caissier Frip & Co
+15 mai 2026 12:58,Vente,TAAA234FT4C,Visa - Crédit,"3,215",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"22,50","0,00","22,50","18,75","3,75",20 %,Caissier Frip & Co
+15 mai 2026 12:58,Vente,TAAA234FXYU,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 12:58,Vente,TAAA234FXYU,Visa - Débit,"7,54",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"42,22","0,00","42,22","35,18","7,04",20 %,Caissier Frip & Co
+15 mai 2026 12:59,Vente,TAAA234GCFB,Mastercard - Débit,"3,535",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"24,74","0,00","24,74","20,62","4,12",20 %,Caissier Frip & Co
+15 mai 2026 13:01,Vente,TAAA234HEUU,Espèces,"6,9",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,64","0,00","38,64","32,20","6,44",20 %,Caissier Frip & Co
+15 mai 2026 13:02,Vente,TAAA234HPLF,Visa - Débit,"0,965",kg,Chaussures,Ventes Au Kilo,,EUR,"2,90","0,00","2,90","2,42","0,48",20 %,Caissier Frip & Co
+15 mai 2026 13:02,Vente,TAAA234HPLF,Visa - Débit,"2,54",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"14,22","0,00","14,22","11,85","2,37",20 %,Caissier Frip & Co
+15 mai 2026 13:02,Vente,TAAA234HPLF,Visa - Débit,"2,94",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"16,46","0,00","16,46","13,72","2,74",20 %,Caissier Frip & Co
+15 mai 2026 13:02,Vente,TAAA234HX7N,Visa - Débit,"8,14",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"45,58","0,00","45,58","37,98","7,60",20 %,Caissier Frip & Co
+15 mai 2026 13:03,Vente,TAAA234H9N9,Espèces,"2,195",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,36","0,00","15,36","12,80","2,56",20 %,Caissier Frip & Co
+15 mai 2026 13:04,Vente,TAAA234KR4Y,Espèces,"3,65",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"25,55","0,00","25,55","21,29","4,26",20 %,Caissier Frip & Co
+15 mai 2026 13:04,Vente,TAAA234K6BR,Espèces,"3,715",kg,Chaussures,Ventes Au Kilo,,EUR,"11,14","0,00","11,14","9,28","1,86",20 %,Caissier Frip & Co
+15 mai 2026 13:04,Vente,TAAA234K6BR,Espèces,"1,49",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,43","0,00","10,43","8,69","1,74",20 %,Caissier Frip & Co
+15 mai 2026 13:05,Vente,TAAA234LACD,Espèces,"7,425",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"41,58","0,00","41,58","34,65","6,93",20 %,Caissier Frip & Co
+15 mai 2026 13:05,Vente,TAAA234LHHX,Visa - Débit,"1,37",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,59","0,00","9,59","7,99","1,60",20 %,Caissier Frip & Co
+15 mai 2026 13:06,Vente,TAAA234LUVQ,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 13:06,Vente,TAAA234LUVQ,Visa - Débit,"6,505",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"36,43","0,00","36,43","30,36","6,07",20 %,Caissier Frip & Co
+15 mai 2026 13:06,Vente,TAAA234L2HA,Espèces,"0,52",kg,Chaussures,Ventes Au Kilo,,EUR,"1,56","0,00","1,56","1,30","0,26",20 %,Caissier Frip & Co
+15 mai 2026 13:06,Vente,TAAA234L2HA,Espèces,"1,305",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,14","0,00","9,14","7,62","1,52",20 %,Caissier Frip & Co
+15 mai 2026 13:07,Vente,TAAA234MBVA,Espèces,"5,825",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"32,62","0,00","32,62","27,18","5,44",20 %,Caissier Frip & Co
+15 mai 2026 13:07,Vente,TAAA234MBTZ,Visa - Débit,"2,36",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"16,52","0,00","16,52","13,77","2,75",20 %,Caissier Frip & Co
+15 mai 2026 13:07,Vente,TAAA234MNMH,Mastercard - Débit,"2,015",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"14,10","0,00","14,10","11,75","2,35",20 %,Caissier Frip & Co
+15 mai 2026 13:07,Vente,TAAA234MQFV,Mastercard - Débit,"8,05",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"45,08","0,00","45,08","37,57","7,51",20 %,Caissier Frip & Co
+15 mai 2026 13:09,Vente,TAAA234M7VG,Visa - Débit,"9,3",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"52,08","0,00","52,08","43,40","8,68",20 %,Caissier Frip & Co
+15 mai 2026 13:09,Vente,TAAA234NMNX,Visa - Débit,"5,375",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"30,10","0,00","30,10","25,08","5,02",20 %,Caissier Frip & Co
+15 mai 2026 13:10,Vente,TAAA234NSSP,Visa - Débit,"7,475",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"41,86","0,00","41,86","34,88","6,98",20 %,Caissier Frip & Co
+15 mai 2026 13:10,Vente,TAAA234N469,Espèces,"5,33",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,85","0,00","29,85","24,88","4,97",20 %,Caissier Frip & Co
+15 mai 2026 13:11,Vente,TAAA234PERK,Espèces,"1,025",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,18","0,00","7,18","5,98","1,20",20 %,Caissier Frip & Co
+15 mai 2026 13:11,Vente,TAAA234PPKH,Visa - Crédit,"5,745",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"32,17","0,00","32,17","26,81","5,36",20 %,Caissier Frip & Co
+15 mai 2026 13:12,Vente,TAAA234QCM9,Visa - Crédit,"1,34",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,38","0,00","9,38","7,82","1,56",20 %,Caissier Frip & Co
+15 mai 2026 13:13,Vente,TAAA234QGLF,Visa - Débit,"2,625",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,38","0,00","18,38","15,32","3,06",20 %,Caissier Frip & Co
+15 mai 2026 13:13,Vente,TAAA234QPCF,Espèces,"0,565",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,96","0,00","3,96","3,30","0,66",20 %,Caissier Frip & Co
+15 mai 2026 13:13,Vente,TAAA234QPS9,Visa - Débit,"1,505",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"8,43","0,00","8,43","7,02","1,41",20 %,Caissier Frip & Co
+15 mai 2026 13:14,Vente,TAAA234Q349,Visa - Débit,"3,42",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"23,94","0,00","23,94","19,95","3,99",20 %,Caissier Frip & Co
+15 mai 2026 13:14,Vente,TAAA234Q6MS,Mastercard - Débit,"3,405",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"23,84","0,00","23,84","19,87","3,97",20 %,Caissier Frip & Co
+15 mai 2026 13:15,Vente,TAAA234RNDQ,Visa - Débit,"7,985",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"44,72","0,00","44,72","37,27","7,45",20 %,Caissier Frip & Co
+15 mai 2026 13:15,Vente,TAAA234RUUV,Espèces,36,kg,Chaussures,Ventes Au Kilo,,EUR,"108,00","0,00","108,00","90,00","18,00",20 %,Caissier Frip & Co
+15 mai 2026 13:19,Vente,TAAA234TS6Y,Espèces,"2,43",kg,Chaussures,Ventes Au Kilo,,EUR,"7,29","0,00","7,29","6,08","1,21",20 %,Caissier Frip & Co
+15 mai 2026 13:19,Vente,TAAA234TS6Y,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 13:19,Vente,TAAA234TS6Y,Espèces,"6,19",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,66","0,00","34,66","28,88","5,78",20 %,Caissier Frip & Co
+15 mai 2026 13:19,Vente,TAAA234TS6Y,Espèces,"9,51",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"53,26","0,00","53,26","44,38","8,88",20 %,Caissier Frip & Co
+15 mai 2026 13:19,Vente,TAAA234TS6Y,Espèces,"8,76",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"49,06","0,00","49,06","40,88","8,18",20 %,Caissier Frip & Co
+15 mai 2026 13:20,Vente,"TAAA234SMEG, TAAA234T2K3","Espèces, Espèces","2,75",kg,Chaussures,Ventes Au Kilo,,EUR,"8,25","0,00","8,25","6,88","1,37",20 %,Caissier Frip & Co
+15 mai 2026 13:20,Vente,"TAAA234SMEG, TAAA234T2K3","Espèces, Espèces","14,105",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"78,99","0,00","78,99","65,82","13,17",20 %,Caissier Frip & Co
+15 mai 2026 13:20,Vente,TAAA234UAQK,Visa - Débit,"8,445",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"47,29","0,00","47,29","39,41","7,88",20 %,Caissier Frip & Co
+15 mai 2026 13:21,Vente,TAAA234UGDG,Mastercard - Débit,"12,525",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"70,14","0,00","70,14","58,45","11,69",20 %,Caissier Frip & Co
+15 mai 2026 13:21,Vente,TAAA234UQ2L,Visa - Débit,"0,32",kg,Chaussures,Ventes Au Kilo,,EUR,"0,96","0,00","0,96","0,80","0,16",20 %,Caissier Frip & Co
+15 mai 2026 13:21,Vente,TAAA234UQ2L,Visa - Débit,"5,225",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,26","0,00","29,26","24,38","4,88",20 %,Caissier Frip & Co
+15 mai 2026 13:22,Vente,TAAA234UZ9X,Espèces,"2,575",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,02","0,00","18,02","15,02","3,00",20 %,Caissier Frip & Co
+15 mai 2026 13:22,Vente,TAAA234U9CH,Visa - Débit,"1,825",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,78","0,00","12,78","10,65","2,13",20 %,Caissier Frip & Co
+15 mai 2026 13:23,Vente,TAAA234VLUX,Visa - Débit,"9,725",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"54,46","0,00","54,46","45,38","9,08",20 %,Caissier Frip & Co
+15 mai 2026 13:23,Vente,"TAAA234VKGN, TAAA234VNUZ","Mastercard - Débit, Mastercard - Débit","7,72",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"43,23","0,00","43,23","36,02","7,21",20 %,Caissier Frip & Co
+15 mai 2026 13:23,Vente,TAAA234VVUH,Visa - Débit,"1,09",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,63","0,00","7,63","6,36","1,27",20 %,Caissier Frip & Co
+15 mai 2026 13:24,Vente,TAAA234V7DA,Visa - Débit,"2,3",kg,Chaussures,Ventes Au Kilo,,EUR,"6,90","0,00","6,90","5,75","1,15",20 %,Caissier Frip & Co
+15 mai 2026 13:25,Vente,TAAA234XEZU,Mastercard - Débit,"1,235",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"8,64","0,00","8,64","7,20","1,44",20 %,Caissier Frip & Co
+15 mai 2026 13:25,Vente,TAAA234XNYX,Visa - Débit,"6,655",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"37,27","0,00","37,27","31,06","6,21",20 %,Caissier Frip & Co
+15 mai 2026 13:26,Vente,TAAA234XXA2,Mastercard - Crédit,"0,96",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,72","0,00","6,72","5,60","1,12",20 %,Caissier Frip & Co
+15 mai 2026 13:26,Vente,TAAA234YBK6,Espèces,"3,025",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"16,94","0,00","16,94","14,12","2,82",20 %,Caissier Frip & Co
+15 mai 2026 13:27,Vente,TAAA234YE6C,Visa - Débit,"8,78",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"49,17","0,00","49,17","40,98","8,19",20 %,Caissier Frip & Co
+15 mai 2026 13:27,Vente,TAAA234YE6C,Visa - Débit,"9,715",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"54,40","0,00","54,40","45,33","9,07",20 %,Caissier Frip & Co
+15 mai 2026 13:29,Vente,TAAA234ZK9V,Mastercard - Débit,"2,885",kg,Chaussures,Ventes Au Kilo,,EUR,"8,66","0,00","8,66","7,22","1,44",20 %,Caissier Frip & Co
+15 mai 2026 13:29,Vente,TAAA234ZK9V,Mastercard - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 13:29,Vente,TAAA234ZK9V,Mastercard - Débit,"5,95",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"33,32","0,00","33,32","27,77","5,55",20 %,Caissier Frip & Co
+15 mai 2026 13:30,Vente,TAAA234ZZGX,Visa - Débit,"4,095",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,66","0,00","28,66","23,88","4,78",20 %,Caissier Frip & Co
+15 mai 2026 13:31,Vente,"TAAA2342QHZ, TAAA2342SYN","Espèces, Visa - Débit","2,07",kg,Chaussures,Ventes Au Kilo,,EUR,"6,21","0,00","6,21","5,18","1,03",20 %,Caissier Frip & Co
+15 mai 2026 13:31,Vente,"TAAA2342QHZ, TAAA2342SYN","Espèces, Visa - Débit",2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 13:31,Vente,"TAAA2342QHZ, TAAA2342SYN","Espèces, Visa - Débit","8,74",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"48,94","0,00","48,94","40,78","8,16",20 %,Caissier Frip & Co
+15 mai 2026 13:32,Vente,TAAA2342VZP,Visa - Débit,"0,295",kg,Chaussures,Ventes Au Kilo,,EUR,"0,88","0,00","0,88","0,73","0,15",20 %,Caissier Frip & Co
+15 mai 2026 13:32,Vente,TAAA2342VZP,Visa - Débit,"2,375",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"16,62","0,00","16,62","13,85","2,77",20 %,Caissier Frip & Co
+15 mai 2026 13:33,Vente,TAAA2343HFF,Visa - Débit,"1,52",kg,Chaussures,Ventes Au Kilo,,EUR,"4,56","0,00","4,56","3,80","0,76",20 %,Caissier Frip & Co
+15 mai 2026 13:33,Vente,TAAA2343HFF,Visa - Débit,"8,125",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"45,50","0,00","45,50","37,92","7,58",20 %,Caissier Frip & Co
+15 mai 2026 13:33,Vente,TAAA2343HFF,Visa - Débit,"10,985",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"61,52","0,00","61,52","51,27","10,25",20 %,Caissier Frip & Co
+15 mai 2026 13:33,Vente,TAAA2343KZL,Visa - Débit,"1,53",kg,Chaussures,Ventes Au Kilo,,EUR,"4,59","0,00","4,59","3,82","0,77",20 %,Caissier Frip & Co
+15 mai 2026 13:33,Vente,TAAA2343KZL,Visa - Débit,"5,89",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"32,98","0,00","32,98","27,48","5,50",20 %,Caissier Frip & Co
+15 mai 2026 13:33,Vente,TAAA2343S4T,Visa - Débit,"8,2",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"45,92","0,00","45,92","38,27","7,65",20 %,Caissier Frip & Co
+15 mai 2026 13:34,Vente,TAAA23434CN,Espèces,"1,45",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,15","0,00","10,15","8,46","1,69",20 %,Caissier Frip & Co
+15 mai 2026 13:34,Vente,TAAA23437KA,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 13:34,Vente,TAAA23437KA,Espèces,"1,485",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,40","0,00","10,40","8,67","1,73",20 %,Caissier Frip & Co
+15 mai 2026 13:35,Vente,TAAA2344MAZ,Visa - Débit,2,kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"14,00","0,00","14,00","11,67","2,33",20 %,Caissier Frip & Co
+15 mai 2026 13:35,Vente,TAAA2344K7R,Mastercard - Débit,"2,225",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,58","0,00","15,58","12,98","2,60",20 %,Caissier Frip & Co
+15 mai 2026 13:35,Vente,TAAA2344XYX,Visa - Débit,"0,765",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,36","0,00","5,36","4,47","0,89",20 %,Caissier Frip & Co
+15 mai 2026 13:36,Vente,TAAA23443V4,Mastercard - Débit,"1,465",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,26","0,00","10,26","8,55","1,71",20 %,Caissier Frip & Co
+15 mai 2026 13:36,Vente,TAAA23449EB,Visa - Débit,"2,47",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"17,29","0,00","17,29","14,41","2,88",20 %,Caissier Frip & Co
+15 mai 2026 13:38,Vente,TAAA23469LA,Mastercard - Débit,"0,31",kg,Chaussures,Ventes Au Kilo,,EUR,"0,93","0,00","0,93","0,78","0,15",20 %,Caissier Frip & Co
+15 mai 2026 13:38,Vente,TAAA23469LA,Mastercard - Débit,"7,2",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"40,32","0,00","40,32","33,60","6,72",20 %,Caissier Frip & Co
+15 mai 2026 13:38,Vente,TAAA2347GNT,Mastercard - Débit,"3,655",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"25,58","0,00","25,58","21,32","4,26",20 %,Caissier Frip & Co
+15 mai 2026 13:39,Vente,TAAA2347R2K,Mastercard - Crédit,"7,46",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"41,78","0,00","41,78","34,82","6,96",20 %,Caissier Frip & Co
+15 mai 2026 13:40,Vente,TAAA23473BH,Visa - Débit,"1,17",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"8,19","0,00","8,19","6,82","1,37",20 %,Caissier Frip & Co
+15 mai 2026 13:40,Vente,"TAAA2347YXY, TAAA23474KZ","Espèces, Visa - Débit","1,905",kg,Chaussures,Ventes Au Kilo,,EUR,"5,72","0,00","5,72","4,77","0,95",20 %,Caissier Frip & Co
+15 mai 2026 13:40,Vente,"TAAA2347YXY, TAAA23474KZ","Espèces, Visa - Débit",2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 13:40,Vente,"TAAA2347YXY, TAAA23474KZ","Espèces, Visa - Débit","13,875",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"77,70","0,00","77,70","64,75","12,95",20 %,Caissier Frip & Co
+15 mai 2026 13:40,Vente,TAAA2349CTM,Mastercard - Débit,"0,49",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,43","0,00","3,43","2,86","0,57",20 %,Caissier Frip & Co
+15 mai 2026 13:41,Vente,TAAA2349LG2,Visa - Crédit,"0,445",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,12","0,00","3,12","2,60","0,52",20 %,Caissier Frip & Co
+15 mai 2026 13:41,Vente,TAAA2349R9N,Mastercard - Débit,"2,26",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,82","0,00","15,82","13,18","2,64",20 %,Caissier Frip & Co
+15 mai 2026 13:41,Vente,TAAA2349VA9,Mastercard - Débit,"1,1",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,70","0,00","7,70","6,42","1,28",20 %,Caissier Frip & Co
+15 mai 2026 13:42,Vente,TAAA23499NX,Visa - Débit,"5,35",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,96","0,00","29,96","24,97","4,99",20 %,Caissier Frip & Co
+15 mai 2026 13:42,Vente,TAAA23497L4,Visa - Débit,"0,385",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"2,70","0,00","2,70","2,25","0,45",20 %,Caissier Frip & Co
+15 mai 2026 13:42,Vente,TAAA236AHM9,Espèces,"0,495",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"3,46","0,00","3,46","2,88","0,58",20 %,Caissier Frip & Co
+15 mai 2026 13:42,Vente,TAAA236AHXU,Mastercard - Débit,"2,65",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,55","0,00","18,55","15,46","3,09",20 %,Caissier Frip & Co
+15 mai 2026 13:43,Vente,TAAA236ARCC,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 13:43,Vente,TAAA236ARCC,Visa - Débit,"2,22",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,54","0,00","15,54","12,95","2,59",20 %,Caissier Frip & Co
+15 mai 2026 13:43,Vente,TAAA236A2H2,Mastercard - Débit,"1,695",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,86","0,00","11,86","9,88","1,98",20 %,Caissier Frip & Co
+15 mai 2026 13:44,Vente,TAAA236BEXV,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 13:44,Vente,TAAA236BEXV,Visa - Débit,"1,24",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"8,68","0,00","8,68","7,23","1,45",20 %,Caissier Frip & Co
+15 mai 2026 13:44,Vente,TAAA236BC9S,Visa - Débit,"8,165",kg,Chaussures,Ventes Au Kilo,,EUR,"24,50","0,00","24,50","20,42","4,08",20 %,Caissier Frip & Co
+15 mai 2026 13:45,Vente,TAAA236BMYX,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 13:45,Vente,TAAA236BMYX,Visa - Débit,2,kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"14,00","0,00","14,00","11,67","2,33",20 %,Caissier Frip & Co
+15 mai 2026 13:45,Vente,TAAA236BUKN,Visa - Débit,"2,335",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"16,34","0,00","16,34","13,62","2,72",20 %,Caissier Frip & Co
+15 mai 2026 13:46,Vente,TAAA236B3X2,Visa - Crédit,"6,96",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,98","0,00","38,98","32,48","6,50",20 %,Caissier Frip & Co
+15 mai 2026 13:46,Vente,TAAA236BYQC,Visa - Crédit,"1,07",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,49","0,00","7,49","6,24","1,25",20 %,Caissier Frip & Co
+15 mai 2026 13:46,Vente,TAAA236CK9C,Espèces,"4,63",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"32,41","0,00","32,41","27,01","5,40",20 %,Caissier Frip & Co
+15 mai 2026 13:46,Vente,TAAA236CLCR,Visa - Crédit,"1,57",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,99","0,00","10,99","9,16","1,83",20 %,Caissier Frip & Co
+15 mai 2026 13:47,Vente,TAAA236CZNU,Espèces,"0,25",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"1,75","0,00","1,75","1,46","0,29",20 %,Caissier Frip & Co
+15 mai 2026 13:48,Vente,TAAA236C9SZ,Mastercard - Débit,"0,58",kg,Chaussures,Ventes Au Kilo,,EUR,"1,74","0,00","1,74","1,45","0,29",20 %,Caissier Frip & Co
+15 mai 2026 13:48,Vente,TAAA236C9SZ,Mastercard - Débit,"2,37",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"16,59","0,00","16,59","13,82","2,77",20 %,Caissier Frip & Co
+15 mai 2026 13:48,Vente,TAAA236DE79,Visa - Débit,"1,495",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,46","0,00","10,46","8,72","1,74",20 %,Caissier Frip & Co
+15 mai 2026 13:49,Vente,TAAA236DPRA,Mastercard - Débit,"3,445",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"24,12","0,00","24,12","20,10","4,02",20 %,Caissier Frip & Co
+15 mai 2026 13:49,Vente,TAAA236DSMA,Visa - Débit,"0,465",kg,Chaussures,Ventes Au Kilo,,EUR,"1,40","0,00","1,40","1,17","0,23",20 %,Caissier Frip & Co
+15 mai 2026 13:49,Vente,TAAA236DSMA,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 13:49,Vente,TAAA236DSMA,Visa - Débit,3,kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,00","0,00","21,00","17,50","3,50",20 %,Caissier Frip & Co
+15 mai 2026 13:49,Vente,TAAA236DZF9,Mastercard - Débit,"1,45",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,15","0,00","10,15","8,46","1,69",20 %,Caissier Frip & Co
+15 mai 2026 13:49,Vente,TAAA236DYK2,Visa - Débit,"2,265",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,86","0,00","15,86","13,22","2,64",20 %,Caissier Frip & Co
+15 mai 2026 13:50,Vente,TAAA236ELMG,Visa - Crédit,"3,945",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,62","0,00","27,62","23,02","4,60",20 %,Caissier Frip & Co
+15 mai 2026 13:51,Vente,TAAA236ERAD,Mastercard - Débit,"4,045",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"22,65","0,00","22,65","18,88","3,77",20 %,Caissier Frip & Co
+15 mai 2026 13:53,Vente,TAAA236FTBL,Visa - Crédit,"1,64",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"9,18","0,00","9,18","7,65","1,53",20 %,Caissier Frip & Co
+15 mai 2026 13:53,Vente,TAAA236FTBL,Visa - Crédit,"1,885",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"10,56","0,00","10,56","8,80","1,76",20 %,Caissier Frip & Co
+15 mai 2026 13:53,Vente,TAAA236FTBL,Visa - Crédit,"5,28",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,57","0,00","29,57","24,64","4,93",20 %,Caissier Frip & Co
+15 mai 2026 13:57,Vente,TAAA236H7AR,Mastercard - Débit,"3,71",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"20,78","0,00","20,78","17,32","3,46",20 %,Caissier Frip & Co
+15 mai 2026 14:00,Vente,TAAA236LDHG,Espèces,"6,945",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,89","0,00","38,89","32,41","6,48",20 %,Caissier Frip & Co
+15 mai 2026 14:00,Vente,TAAA236LF4N,Espèces,"1,477",kg,Chaussures,Ventes Au Kilo,,EUR,"4,43","0,00","4,43","3,69","0,74",20 %,Caissier Frip & Co
+15 mai 2026 14:00,Vente,TAAA236LF4N,Espèces,4,pce,Sacs,Ventes Au Kilo,,EUR,"0,80","0,00","0,80","0,67","0,13",20 %,Caissier Frip & Co
+15 mai 2026 14:00,Vente,TAAA236LF4N,Espèces,"3,925",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,48","0,00","27,48","22,90","4,58",20 %,Caissier Frip & Co
+15 mai 2026 14:00,Vente,TAAA236LF4N,Espèces,"5,9",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"33,04","0,00","33,04","27,53","5,51",20 %,Caissier Frip & Co
+15 mai 2026 14:04,Vente,TAAA236NLYY,Visa - Débit,"0,305",kg,Chaussures,Ventes Au Kilo,,EUR,"0,92","0,00","0,92","0,77","0,15",20 %,Caissier Frip & Co
+15 mai 2026 14:04,Vente,TAAA236NLYY,Visa - Débit,"2,64",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,48","0,00","18,48","15,40","3,08",20 %,Caissier Frip & Co
+15 mai 2026 14:04,Vente,TAAA236NLYY,Visa - Débit,"7,815",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"43,76","0,00","43,76","36,47","7,29",20 %,Caissier Frip & Co
+15 mai 2026 14:04,Vente,TAAA236NLYY,Visa - Débit,"6,085",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,08","0,00","34,08","28,40","5,68",20 %,Caissier Frip & Co
+15 mai 2026 14:05,Vente,TAAA236N69U,Mastercard - Débit,"2,275",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,92","0,00","15,92","13,27","2,65",20 %,Caissier Frip & Co
+15 mai 2026 14:06,Vente,TAAA236PQPK,Espèces,"0,25",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"1,75","0,00","1,75","1,46","0,29",20 %,Caissier Frip & Co
+15 mai 2026 14:07,Vente,TAAA236QAS3,Visa - Débit,"1,125",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,88","0,00","7,88","6,57","1,31",20 %,Caissier Frip & Co
+15 mai 2026 14:09,Vente,TAAA236Q6MB,Espèces,"1,605",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,24","0,00","11,24","9,37","1,87",20 %,Caissier Frip & Co
+15 mai 2026 14:10,Vente,TAAA236RP4K,Visa - Crédit,"5,27",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,51","0,00","29,51","24,59","4,92",20 %,Caissier Frip & Co
+15 mai 2026 14:11,Vente,TAAA236SAVG,Espèces,4,pce,Sacs,Ventes Au Kilo,,EUR,"0,80","0,00","0,80","0,67","0,13",20 %,Caissier Frip & Co
+15 mai 2026 14:11,Vente,TAAA236SAVG,Espèces,"10,55",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"59,08","0,00","59,08","49,23","9,85",20 %,Caissier Frip & Co
+15 mai 2026 14:11,Vente,TAAA236SAVG,Espèces,"5,595",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,33","0,00","31,33","26,11","5,22",20 %,Caissier Frip & Co
+15 mai 2026 14:11,Vente,TAAA236SBFX,Visa - Crédit,"1,445",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,12","0,00","10,12","8,43","1,69",20 %,Caissier Frip & Co
+15 mai 2026 14:17,Vente,TAAA236VBPP,Mastercard - Débit,"1,5",kg,Chaussures,Ventes Au Kilo,,EUR,"4,50","0,00","4,50","3,75","0,75",20 %,Caissier Frip & Co
+15 mai 2026 14:17,Vente,TAAA236VBPP,Mastercard - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 14:17,Vente,TAAA236VBPP,Mastercard - Débit,"8,575",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"48,02","0,00","48,02","40,02","8,00",20 %,Caissier Frip & Co
+15 mai 2026 14:18,Vente,TAAA236V2GU,Mastercard - Débit,"5,7",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,92","0,00","31,92","26,60","5,32",20 %,Caissier Frip & Co
+15 mai 2026 14:23,Vente,TAAA236ZBC6,Espèces,"0,42",kg,Chaussures,Ventes Au Kilo,,EUR,"1,26","0,00","1,26","1,05","0,21",20 %,Caissier Frip & Co
+15 mai 2026 14:23,Vente,TAAA236ZBC6,Espèces,"7,42",kg,Chaussures,Ventes Au Kilo,,EUR,"22,26","0,00","22,26","18,55","3,71",20 %,Caissier Frip & Co
+15 mai 2026 14:23,Vente,TAAA236ZBC6,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 14:23,Vente,TAAA236ZBC6,Espèces,"7,145",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"40,01","0,00","40,01","33,34","6,67",20 %,Caissier Frip & Co
+15 mai 2026 14:23,Vente,TAAA236ZC3B,Visa - Débit,"0,305",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"1,71","0,00","1,71","1,42","0,29",20 %,Caissier Frip & Co
+15 mai 2026 14:23,Vente,TAAA236ZC3B,Visa - Débit,"4,845",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"27,13","0,00","27,13","22,61","4,52",20 %,Caissier Frip & Co
+15 mai 2026 14:23,Vente,TAAA236ZC3B,Visa - Débit,2,kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"11,20","0,00","11,20","9,33","1,87",20 %,Caissier Frip & Co
+15 mai 2026 14:25,Vente,TAAA2362BUF,Espèces,"5,235",kg,Chaussures,Ventes Au Kilo,,EUR,"15,70","0,00","15,70","13,08","2,62",20 %,Caissier Frip & Co
+15 mai 2026 14:25,Vente,TAAA2362BUF,Espèces,"1,53",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,71","0,00","10,71","8,92","1,79",20 %,Caissier Frip & Co
+15 mai 2026 14:25,Vente,TAAA2362FUU,Espèces,"0,81",kg,Chaussures,Ventes Au Kilo,,EUR,"2,43","0,00","2,43","2,02","0,41",20 %,Caissier Frip & Co
+15 mai 2026 14:25,Vente,TAAA2362FUU,Espèces,"1,345",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,42","0,00","9,42","7,85","1,57",20 %,Caissier Frip & Co
+15 mai 2026 14:26,Vente,TAAA2362U7T,Espèces,"0,74",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,18","0,00","5,18","4,32","0,86",20 %,Caissier Frip & Co
+15 mai 2026 14:28,Vente,TAAA23633EM,Visa - Débit,"4,305",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"30,14","0,00","30,14","25,12","5,02",20 %,Caissier Frip & Co
+15 mai 2026 14:29,Vente,TAAA2364TUV,Mastercard - Débit,"4,03",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,21","0,00","28,21","23,51","4,70",20 %,Caissier Frip & Co
+15 mai 2026 14:30,Vente,TAAA2364VTR,Mastercard - Débit,"2,205",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,44","0,00","15,44","12,87","2,57",20 %,Caissier Frip & Co
+15 mai 2026 14:30,Vente,TAAA23646PM,Visa - Débit,"2,215",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,50","0,00","15,50","12,92","2,58",20 %,Caissier Frip & Co
+15 mai 2026 14:30,Vente,TAAA2366E4L,Espèces,"0,805",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,64","0,00","5,64","4,70","0,94",20 %,Caissier Frip & Co
+15 mai 2026 14:32,Vente,TAAA236643C,Espèces,"0,87",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,09","0,00","6,09","5,08","1,01",20 %,Caissier Frip & Co
+15 mai 2026 14:33,Vente,TAAA2367P4D,Visa - Débit,"1,025",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,18","0,00","7,18","5,98","1,20",20 %,Caissier Frip & Co
+15 mai 2026 14:34,Vente,TAAA23673TT,Mastercard - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 14:34,Vente,TAAA23673TT,Mastercard - Débit,"4,33",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"30,31","0,00","30,31","25,26","5,05",20 %,Caissier Frip & Co
+15 mai 2026 14:34,Vente,"TAAA23674SQ, TAAA236777C","Espèces, Visa - Débit","3,76",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"26,32","0,00","26,32","21,93","4,39",20 %,Caissier Frip & Co
+15 mai 2026 14:35,Vente,TAAA2369L9E,Espèces,"0,4",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"2,80","0,00","2,80","2,33","0,47",20 %,Caissier Frip & Co
+15 mai 2026 14:38,Vente,TAAA237A22S,Espèces,"5,83",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"32,65","0,00","32,65","27,21","5,44",20 %,Caissier Frip & Co
+15 mai 2026 14:38,Vente,TAAA237A22S,Espèces,"4,095",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"22,93","0,00","22,93","19,11","3,82",20 %,Caissier Frip & Co
+15 mai 2026 14:38,Vente,TAAA237A22S,Espèces,"1,31",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"7,34","0,00","7,34","6,12","1,22",20 %,Caissier Frip & Co
+15 mai 2026 14:38,Vente,TAAA237A22S,Espèces,"12,5",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"70,00","0,00","70,00","58,33","11,67",20 %,Caissier Frip & Co
+15 mai 2026 14:40,Vente,TAAA237BUVF,Mastercard - Débit,"0,965",kg,Chaussures,Ventes Au Kilo,,EUR,"2,90","0,00","2,90","2,42","0,48",20 %,Caissier Frip & Co
+15 mai 2026 14:40,Vente,TAAA237BUVF,Mastercard - Débit,"4,175",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"29,22","0,00","29,22","24,35","4,87",20 %,Caissier Frip & Co
+15 mai 2026 14:40,Vente,TAAA237CB3B,Espèces,"2,23",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,61","0,00","15,61","13,01","2,60",20 %,Caissier Frip & Co
+15 mai 2026 14:41,Vente,TAAA237CRFX,Mastercard - Débit,"0,805",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,64","0,00","5,64","4,70","0,94",20 %,Caissier Frip & Co
+15 mai 2026 14:41,Vente,TAAA237CVCE,Visa - Débit,"1,57",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,99","0,00","10,99","9,16","1,83",20 %,Caissier Frip & Co
+15 mai 2026 14:43,Vente,TAAA237DK4P,Visa - Débit,"0,415",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"2,90","0,00","2,90","2,42","0,48",20 %,Caissier Frip & Co
+15 mai 2026 14:43,Vente,TAAA237D2K3,Espèces,"2,59",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"14,50","0,00","14,50","12,08","2,42",20 %,Caissier Frip & Co
+15 mai 2026 14:43,Vente,TAAA237D2K3,Espèces,"2,625",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"14,70","0,00","14,70","12,25","2,45",20 %,Caissier Frip & Co
+15 mai 2026 14:43,Vente,TAAA237D4YE,Espèces,"0,635",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,44","0,00","4,44","3,70","0,74",20 %,Caissier Frip & Co
+15 mai 2026 14:44,Vente,TAAA237ECQL,Visa - Débit,"1,615",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,30","0,00","11,30","9,42","1,88",20 %,Caissier Frip & Co
+15 mai 2026 14:45,Vente,TAAA237ENBL,Mastercard - Débit,"7,925",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"44,38","0,00","44,38","36,98","7,40",20 %,Caissier Frip & Co
+15 mai 2026 14:45,Vente,TAAA237EQ3D,Espèces,"1,895",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,26","0,00","13,26","11,05","2,21",20 %,Caissier Frip & Co
+15 mai 2026 14:45,Vente,TAAA237EVRF,Espèces,"0,785",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,50","0,00","5,50","4,58","0,92",20 %,Caissier Frip & Co
+15 mai 2026 14:46,Vente,TAAA237E7BG,Mastercard - Crédit,"5,225",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,26","0,00","29,26","24,38","4,88",20 %,Caissier Frip & Co
+15 mai 2026 14:47,Vente,TAAA237FU7A,Espèces,"0,59",kg,Chaussures,Ventes Au Kilo,,EUR,"1,77","0,00","1,77","1,48","0,29",20 %,Caissier Frip & Co
+15 mai 2026 14:47,Vente,TAAA237FU7A,Espèces,"7,595",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"42,53","0,00","42,53","35,44","7,09",20 %,Caissier Frip & Co
+15 mai 2026 14:47,Vente,TAAA237FU7A,Espèces,"6,26",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"35,06","0,00","35,06","29,22","5,84",20 %,Caissier Frip & Co
+15 mai 2026 14:48,Vente,TAAA237GDXT,Espèces,"2,115",kg,Chaussures,Ventes Au Kilo,,EUR,"6,34","0,00","6,34","5,28","1,06",20 %,Caissier Frip & Co
+15 mai 2026 14:48,Vente,TAAA237GDXT,Espèces,"7,24",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"40,54","0,00","40,54","33,78","6,76",20 %,Caissier Frip & Co
+15 mai 2026 14:49,Vente,TAAA237GLA4,Visa - Débit,"6,31",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"35,34","0,00","35,34","29,45","5,89",20 %,Caissier Frip & Co
+15 mai 2026 14:49,Vente,TAAA237G4FF,Visa - Débit,"1,625",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,38","0,00","11,38","9,48","1,90",20 %,Caissier Frip & Co
+15 mai 2026 14:49,Vente,TAAA237G4CD,Visa - Débit,"8,26",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"46,26","0,00","46,26","38,55","7,71",20 %,Caissier Frip & Co
+15 mai 2026 14:51,Vente,TAAA237H6DZ,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 14:51,Vente,TAAA237H6DZ,Visa - Débit,"3,215",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"18,00","0,00","18,00","15,00","3,00",20 %,Caissier Frip & Co
+15 mai 2026 14:51,Vente,TAAA237H6DZ,Visa - Débit,"4,4",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"24,64","0,00","24,64","20,53","4,11",20 %,Caissier Frip & Co
+15 mai 2026 14:51,Vente,TAAA237HY9V,Visa - Débit,"4,29",kg,Chaussures,Ventes Au Kilo,,EUR,"12,87","0,00","12,87","10,72","2,15",20 %,Caissier Frip & Co
+15 mai 2026 14:51,Vente,TAAA237HY9V,Visa - Débit,"7,93",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"44,41","0,00","44,41","37,01","7,40",20 %,Caissier Frip & Co
+15 mai 2026 14:52,Vente,TAAA237KKRS,Mastercard - Débit,"4,105",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,74","0,00","28,74","23,95","4,79",20 %,Caissier Frip & Co
+15 mai 2026 14:52,Vente,TAAA237KPA6,Visa - Débit,"8,245",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"46,17","0,00","46,17","38,48","7,69",20 %,Caissier Frip & Co
+15 mai 2026 14:52,Vente,TAAA237KUX2,Espèces,"3,85",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"26,95","0,00","26,95","22,46","4,49",20 %,Caissier Frip & Co
+15 mai 2026 14:53,Vente,TAAA237LCAL,Visa - Débit,"10,795",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"60,45","0,00","60,45","50,38","10,07",20 %,Caissier Frip & Co
+15 mai 2026 14:54,Vente,TAAA237LYMR,Espèces,"0,13",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"0,91","0,00","0,91","0,76","0,15",20 %,Caissier Frip & Co
+15 mai 2026 14:55,Vente,TAAA237L3HT,Visa - Débit,"0,35",kg,Chaussures,Ventes Au Kilo,,EUR,"1,05","0,00","1,05","0,88","0,17",20 %,Caissier Frip & Co
+15 mai 2026 14:55,Vente,TAAA237L3HT,Visa - Débit,"6,905",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,67","0,00","38,67","32,22","6,45",20 %,Caissier Frip & Co
+15 mai 2026 14:55,Vente,TAAA237L99Y,Visa - Crédit,"1,62",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,34","0,00","11,34","9,45","1,89",20 %,Caissier Frip & Co
+15 mai 2026 14:56,Vente,TAAA237MN4M,Visa - Débit,"2,13",kg,Chaussures,Ventes Au Kilo,,EUR,"6,39","0,00","6,39","5,32","1,07",20 %,Caissier Frip & Co
+15 mai 2026 14:56,Vente,TAAA237MN4M,Visa - Débit,"0,935",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,54","0,00","6,54","5,45","1,09",20 %,Caissier Frip & Co
+15 mai 2026 14:56,Vente,TAAA237MQHZ,Espèces,"1,39",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,73","0,00","9,73","8,11","1,62",20 %,Caissier Frip & Co
+15 mai 2026 14:57,Vente,TAAA237M9G4,Espèces,"2,09",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"14,63","0,00","14,63","12,19","2,44",20 %,Caissier Frip & Co
+15 mai 2026 14:59,Vente,TAAA237N6UB,Espèces,"5,785",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"32,40","0,00","32,40","27,00","5,40",20 %,Caissier Frip & Co
+15 mai 2026 15:00,Vente,TAAA237PZ6V,Espèces,"1,815",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,70","0,00","12,70","10,58","2,12",20 %,Caissier Frip & Co
+15 mai 2026 15:01,Vente,TAAA237QEHH,Visa - Crédit,"0,8",kg,Chaussures,Ventes Au Kilo,,EUR,"2,40","0,00","2,40","2,00","0,40",20 %,Caissier Frip & Co
+15 mai 2026 15:01,Vente,TAAA237QEHH,Visa - Crédit,"3,98",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,86","0,00","27,86","23,22","4,64",20 %,Caissier Frip & Co
+15 mai 2026 15:02,Vente,TAAA237QT43,Visa - Débit,"3,67",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"25,69","0,00","25,69","21,41","4,28",20 %,Caissier Frip & Co
+15 mai 2026 15:02,Vente,TAAA237Q2TU,Espèces,"1,38",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,66","0,00","9,66","8,05","1,61",20 %,Caissier Frip & Co
+15 mai 2026 15:03,Vente,TAAA237RBYM,Visa - Crédit,"0,39",kg,Chaussures,Ventes Au Kilo,,EUR,"1,17","0,00","1,17","0,98","0,19",20 %,Caissier Frip & Co
+15 mai 2026 15:03,Vente,TAAA237RBYM,Visa - Crédit,"6,095",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,13","0,00","34,13","28,44","5,69",20 %,Caissier Frip & Co
+15 mai 2026 15:03,Vente,TAAA237RLFE,Visa - Débit,"7,46",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"41,78","0,00","41,78","34,82","6,96",20 %,Caissier Frip & Co
+15 mai 2026 15:04,Vente,TAAA237RSZA,Espèces,"1,95",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,65","0,00","13,65","11,38","2,27",20 %,Caissier Frip & Co
+15 mai 2026 15:05,Vente,TAAA237SDBC,Mastercard - Débit,"1,11",kg,Chaussures,Ventes Au Kilo,,EUR,"3,33","0,00","3,33","2,78","0,55",20 %,Caissier Frip & Co
+15 mai 2026 15:05,Vente,TAAA237SDBC,Mastercard - Débit,"1,1",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,70","0,00","7,70","6,42","1,28",20 %,Caissier Frip & Co
+15 mai 2026 15:05,Vente,TAAA237SMVG,Espèces,"0,995",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,96","0,00","6,96","5,80","1,16",20 %,Caissier Frip & Co
+15 mai 2026 15:06,Vente,TAAA237SKTD,Visa - Débit,"0,57",kg,Chaussures,Ventes Au Kilo,,EUR,"1,71","0,00","1,71","1,42","0,29",20 %,Caissier Frip & Co
+15 mai 2026 15:06,Vente,TAAA237SKTD,Visa - Débit,"1,72",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,04","0,00","12,04","10,03","2,01",20 %,Caissier Frip & Co
+15 mai 2026 15:09,Vente,TAAA237T442,Mastercard - Débit,"5,67",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"31,75","0,00","31,75","26,46","5,29",20 %,Caissier Frip & Co
+15 mai 2026 15:11,Vente,TAAA237VFMM,Mastercard - Débit,"6,055",kg,Chaussures,Ventes Au Kilo,,EUR,"18,16","0,00","18,16","15,13","3,03",20 %,Caissier Frip & Co
+15 mai 2026 15:11,Vente,TAAA237VFMM,Mastercard - Débit,"8,485",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"47,52","0,00","47,52","39,60","7,92",20 %,Caissier Frip & Co
+15 mai 2026 15:13,Vente,TAAA237XATY,Espèces,"0,98",kg,Chaussures,Ventes Au Kilo,,EUR,"2,94","0,00","2,94","2,45","0,49",20 %,Caissier Frip & Co
+15 mai 2026 15:13,Vente,"TAAA237V6PG, TAAA237XD9C","Mastercard - Débit, Espèces","1,885",kg,Chaussures,Ventes Au Kilo,,EUR,"5,66","0,00","5,66","4,72","0,94",20 %,Caissier Frip & Co
+15 mai 2026 15:13,Vente,"TAAA237V6PG, TAAA237XD9C","Mastercard - Débit, Espèces",1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:13,Vente,"TAAA237V6PG, TAAA237XD9C","Mastercard - Débit, Espèces","7,07",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"39,59","0,00","39,59","32,99","6,60",20 %,Caissier Frip & Co
+15 mai 2026 15:14,Vente,TAAA237XXRX,Espèces,"0,565",kg,Chaussures,Ventes Au Kilo,,EUR,"1,70","0,00","1,70","1,42","0,28",20 %,Caissier Frip & Co
+15 mai 2026 15:14,Vente,TAAA237X3AK,Mastercard - Débit,"1,015",kg,Chaussures,Ventes Au Kilo,,EUR,"3,04","0,00","3,04","2,53","0,51",20 %,Caissier Frip & Co
+15 mai 2026 15:14,Vente,TAAA237X3AK,Mastercard - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:14,Vente,TAAA237X3AK,Mastercard - Débit,"1,67",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,69","0,00","11,69","9,74","1,95",20 %,Caissier Frip & Co
+15 mai 2026 15:15,Vente,TAAA237X6YN,Visa - Débit,"1,65",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,55","0,00","11,55","9,62","1,93",20 %,Caissier Frip & Co
+15 mai 2026 15:15,Vente,TAAA237YFSN,Espèces,"0,325",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"2,28","0,00","2,28","1,90","0,38",20 %,Caissier Frip & Co
+15 mai 2026 15:16,Vente,TAAA237YTN7,Visa - Débit,"5,355",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"29,99","0,00","29,99","24,99","5,00",20 %,Caissier Frip & Co
+15 mai 2026 15:16,Vente,TAAA237YUCQ,Mastercard - Débit,"10,615",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"59,44","0,00","59,44","49,53","9,91",20 %,Caissier Frip & Co
+15 mai 2026 15:17,Vente,TAAA237Y6EZ,Mastercard - Crédit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:17,Vente,TAAA237Y6EZ,Mastercard - Crédit,"2,415",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"16,90","0,00","16,90","14,08","2,82",20 %,Caissier Frip & Co
+15 mai 2026 15:17,Vente,TAAA237ZCLY,Visa - Débit,"5,465",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"30,60","0,00","30,60","25,50","5,10",20 %,Caissier Frip & Co
+15 mai 2026 15:17,Vente,TAAA237ZGVK,Mastercard - Débit,"0,99",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,93","0,00","6,93","5,78","1,15",20 %,Caissier Frip & Co
+15 mai 2026 15:18,Vente,TAAA237ZNMP,Mastercard - Débit,"1,305",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,14","0,00","9,14","7,62","1,52",20 %,Caissier Frip & Co
+15 mai 2026 15:18,Vente,TAAA237ZZE9,Mastercard - Débit,"1,295",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,06","0,00","9,06","7,55","1,51",20 %,Caissier Frip & Co
+15 mai 2026 15:19,Vente,TAAA2372FFP,Visa - Débit,"6,55",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"36,68","0,00","36,68","30,57","6,11",20 %,Caissier Frip & Co
+15 mai 2026 15:22,Vente,TAAA2373VQY,Visa - Débit,"1,585",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,10","0,00","11,10","9,25","1,85",20 %,Caissier Frip & Co
+15 mai 2026 15:25,Vente,TAAA2376AK3,Espèces,"3,09",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,63","0,00","21,63","18,02","3,61",20 %,Caissier Frip & Co
+15 mai 2026 15:28,Vente,TAAA2377SD3,Visa - Débit,"2,4",kg,Chaussures,Ventes Au Kilo,,EUR,"7,20","0,00","7,20","6,00","1,20",20 %,Caissier Frip & Co
+15 mai 2026 15:28,Vente,TAAA2377SD3,Visa - Débit,"5,755",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"32,23","0,00","32,23","26,86","5,37",20 %,Caissier Frip & Co
+15 mai 2026 15:30,Vente,"TAAA2379FT3, TAAA2379HZS","Espèces, Visa - Débit","3,575",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"25,02","0,00","25,02","20,85","4,17",20 %,Caissier Frip & Co
+15 mai 2026 15:31,Vente,TAAA23793XR,Visa - Débit,"5,065",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"28,36","0,00","28,36","23,63","4,73",20 %,Caissier Frip & Co
+15 mai 2026 15:32,Vente,TAAA239AEDF,Visa - Débit,"4,82",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"33,74","0,00","33,74","28,12","5,62",20 %,Caissier Frip & Co
+15 mai 2026 15:32,Vente,TAAA239AGKU,Visa - Débit,"4,295",kg,Chaussures,Ventes Au Kilo,,EUR,"12,88","0,00","12,88","10,73","2,15",20 %,Caissier Frip & Co
+15 mai 2026 15:32,Vente,TAAA239AGKU,Visa - Débit,"11,125",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"62,30","0,00","62,30","51,92","10,38",20 %,Caissier Frip & Co
+15 mai 2026 15:34,Vente,TAAA239BDFX,Mastercard - Débit,"7,845",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"43,93","0,00","43,93","36,61","7,32",20 %,Caissier Frip & Co
+15 mai 2026 15:34,Vente,TAAA239BFED,Mastercard - Crédit,"2,615",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"18,30","0,00","18,30","15,25","3,05",20 %,Caissier Frip & Co
+15 mai 2026 15:35,Vente,TAAA239BY7N,Visa - Débit,"3,95",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,65","0,00","27,65","23,04","4,61",20 %,Caissier Frip & Co
+15 mai 2026 15:36,Vente,TAAA239CFHH,Visa - Débit,"0,89",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,23","0,00","6,23","5,19","1,04",20 %,Caissier Frip & Co
+15 mai 2026 15:36,Vente,TAAA239CHPN,Espèces,"14,825",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"83,02","0,00","83,02","69,18","13,84",20 %,Caissier Frip & Co
+15 mai 2026 15:36,Vente,TAAA239CHPN,Espèces,"6,205",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"34,75","0,00","34,75","28,96","5,79",20 %,Caissier Frip & Co
+15 mai 2026 15:36,Vente,TAAA239CHPN,Espèces,"13,95",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"78,12","0,00","78,12","65,10","13,02",20 %,Caissier Frip & Co
+15 mai 2026 15:37,Vente,TAAA239CQX3,Mastercard - Débit,"0,79",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,53","0,00","5,53","4,61","0,92",20 %,Caissier Frip & Co
+15 mai 2026 15:37,Vente,TAAA239C4DP,Mastercard - Débit,"8,4",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"47,04","0,00","47,04","39,20","7,84",20 %,Caissier Frip & Co
+15 mai 2026 15:38,Vente,TAAA239DLZ4,Visa - Débit,"3,48",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"24,36","0,00","24,36","20,30","4,06",20 %,Caissier Frip & Co
+15 mai 2026 15:39,Vente,TAAA239DT9G,Visa - Débit,"1,875",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,12","0,00","13,12","10,93","2,19",20 %,Caissier Frip & Co
+15 mai 2026 15:40,Vente,TAAA239D7F7,Visa - Crédit,"1,665",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,66","0,00","11,66","9,72","1,94",20 %,Caissier Frip & Co
+15 mai 2026 15:41,Vente,TAAA239E4BP,Espèces,"1,51",kg,Chaussures,Ventes Au Kilo,,EUR,"4,53","0,00","4,53","3,78","0,75",20 %,Caissier Frip & Co
+15 mai 2026 15:41,Vente,TAAA239E4BP,Espèces,"3,015",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,10","0,00","21,10","17,58","3,52",20 %,Caissier Frip & Co
+15 mai 2026 15:42,Vente,TAAA239FHXD,Mastercard - Débit,2,kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"14,00","0,00","14,00","11,67","2,33",20 %,Caissier Frip & Co
+15 mai 2026 15:44,Vente,"TAAA239FEEX, TAAA239F96P","Espèces, Espèces","0,735",kg,Chaussures,Ventes Au Kilo,,EUR,"2,20","0,00","2,20","1,83","0,37",20 %,Caissier Frip & Co
+15 mai 2026 15:44,Vente,"TAAA239FEEX, TAAA239F96P","Espèces, Espèces",2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 15:44,Vente,"TAAA239FEEX, TAAA239F96P","Espèces, Espèces","11,92",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"66,75","0,00","66,75","55,62","11,13",20 %,Caissier Frip & Co
+15 mai 2026 15:44,Vente,TAAA239GDLV,Visa - Débit,"1,54",kg,Chaussures,Ventes Au Kilo,,EUR,"4,62","0,00","4,62","3,85","0,77",20 %,Caissier Frip & Co
+15 mai 2026 15:44,Vente,TAAA239GDLV,Visa - Débit,"1,77",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,39","0,00","12,39","10,32","2,07",20 %,Caissier Frip & Co
+15 mai 2026 15:45,Vente,TAAA239GXKV,Mastercard - Débit,"6,63",kg,Chaussures,Ventes Au Kilo,,EUR,"19,89","0,00","19,89","16,58","3,31",20 %,Caissier Frip & Co
+15 mai 2026 15:45,Vente,TAAA239GXKV,Mastercard - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:45,Vente,TAAA239GXKV,Mastercard - Débit,"9,828",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"55,04","0,00","55,04","45,87","9,17",20 %,Caissier Frip & Co
+15 mai 2026 15:47,Vente,TAAA239HMCP,Visa - Débit,"3,955",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,68","0,00","27,68","23,07","4,61",20 %,Caissier Frip & Co
+15 mai 2026 15:48,Vente,TAAA239KFZZ,Espèces,"0,67",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,69","0,00","4,69","3,91","0,78",20 %,Caissier Frip & Co
+15 mai 2026 15:50,Vente,TAAA239LCHX,Espèces,"1,39",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,73","0,00","9,73","8,11","1,62",20 %,Caissier Frip & Co
+15 mai 2026 15:52,Vente,TAAA239L26Y,Espèces,"1,955",kg,Chaussures,Ventes Au Kilo,,EUR,"5,86","0,00","5,86","4,88","0,98",20 %,Caissier Frip & Co
+15 mai 2026 15:53,Vente,TAAA239MQTS,Visa - Débit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:53,Vente,TAAA239MQTS,Visa - Débit,"3,08",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,56","0,00","21,56","17,97","3,59",20 %,Caissier Frip & Co
+15 mai 2026 15:54,Vente,TAAA239M76F,Espèces,"0,9",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,30","0,00","6,30","5,25","1,05",20 %,Caissier Frip & Co
+15 mai 2026 15:56,Vente,TAAA239NVDH,Visa - Crédit,"0,77",kg,Chaussures,Ventes Au Kilo,,EUR,"2,31","0,00","2,31","1,92","0,39",20 %,Caissier Frip & Co
+15 mai 2026 15:56,Vente,TAAA239NVDH,Visa - Crédit,"0,635",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,44","0,00","4,44","3,70","0,74",20 %,Caissier Frip & Co
+15 mai 2026 15:57,Vente,TAAA239PGZQ,Espèces,"0,4",kg,Chaussures,Ventes Au Kilo,,EUR,"1,20","0,00","1,20","1,00","0,20",20 %,Caissier Frip & Co
+15 mai 2026 15:57,Vente,TAAA239PGZQ,Espèces,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:57,Vente,TAAA239PGZQ,Espèces,"0,895",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,26","0,00","6,26","5,22","1,04",20 %,Caissier Frip & Co
+15 mai 2026 15:57,Vente,TAAA239PN74,Espèces,"0,13",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"0,91","0,00","0,91","0,76","0,15",20 %,Caissier Frip & Co
+15 mai 2026 15:58,Vente,"TAAA239PUSZ, TAAA239PYFY","Espèces, Mastercard - Débit",1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:58,Vente,"TAAA239PUSZ, TAAA239PYFY","Espèces, Mastercard - Débit","5,02",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"28,11","0,00","28,11","23,42","4,69",20 %,Caissier Frip & Co
+15 mai 2026 15:58,Vente,TAAA239PZHE,Mastercard - Débit,"4,035",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,24","0,00","28,24","23,53","4,71",20 %,Caissier Frip & Co
+15 mai 2026 15:59,Vente,TAAA239QCV9,Visa - Crédit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:59,Vente,TAAA239QCV9,Visa - Crédit,"2,85",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"19,95","0,00","19,95","16,62","3,33",20 %,Caissier Frip & Co
+15 mai 2026 15:59,Vente,TAAA239QF4F,Mastercard - Crédit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 15:59,Vente,TAAA239QF4F,Mastercard - Crédit,"3,875",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,12","0,00","27,12","22,60","4,52",20 %,Caissier Frip & Co
+15 mai 2026 16:00,Vente,TAAA239Q9LR,Visa - Crédit,"1,495",kg,Chaussures,Ventes Au Kilo,,EUR,"4,48","0,00","4,48","3,73","0,75",20 %,Caissier Frip & Co
+15 mai 2026 16:00,Vente,TAAA239Q9LR,Visa - Crédit,1,pce,Sacs,Ventes Au Kilo,,EUR,"0,20","0,00","0,20","0,17","0,03",20 %,Caissier Frip & Co
+15 mai 2026 16:00,Vente,TAAA239Q9LR,Visa - Crédit,"2,17",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"15,19","0,00","15,19","12,66","2,53",20 %,Caissier Frip & Co
+15 mai 2026 16:01,Vente,TAAA239Q7AD,Visa - Débit,"0,825",kg,Chaussures,Ventes Au Kilo,,EUR,"2,48","0,00","2,48","2,07","0,41",20 %,Caissier Frip & Co
+15 mai 2026 16:01,Vente,TAAA239Q7AD,Visa - Débit,"7,285",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"40,80","0,00","40,80","34,00","6,80",20 %,Caissier Frip & Co
+15 mai 2026 16:02,Vente,"TAAA239RSDR, TAAA239RUH3","Espèces, Visa - Débit","3,99",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"27,93","0,00","27,93","23,28","4,65",20 %,Caissier Frip & Co
+15 mai 2026 16:02,Vente,TAAA239RVAA,Visa - Crédit,"0,455",kg,Chaussures,Ventes Au Kilo,,EUR,"1,36","0,00","1,36","1,13","0,23",20 %,Caissier Frip & Co
+15 mai 2026 16:02,Vente,TAAA239RVAA,Visa - Crédit,"2,285",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"16,00","0,00","16,00","13,33","2,67",20 %,Caissier Frip & Co
+15 mai 2026 16:03,Vente,TAAA239SFSY,Mastercard - Débit,"4,705",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"32,94","0,00","32,94","27,45","5,49",20 %,Caissier Frip & Co
+15 mai 2026 16:04,Vente,TAAA239SRYY,Visa - Crédit,"0,33",kg,Chaussures,Ventes Au Kilo,,EUR,"0,99","0,00","0,99","0,82","0,17",20 %,Caissier Frip & Co
+15 mai 2026 16:04,Vente,TAAA239SRYY,Visa - Crédit,"1,25",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"8,75","0,00","8,75","7,29","1,46",20 %,Caissier Frip & Co
+15 mai 2026 16:05,Vente,TAAA239SY69,Visa - Débit,"1,935",kg,Chaussures,Ventes Au Kilo,,EUR,"5,80","0,00","5,80","4,83","0,97",20 %,Caissier Frip & Co
+15 mai 2026 16:05,Vente,TAAA239SY69,Visa - Débit,"7,135",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"39,96","0,00","39,96","33,30","6,66",20 %,Caissier Frip & Co
+15 mai 2026 16:05,Vente,TAAA239S7HB,Visa - Débit,"6,505",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"36,43","0,00","36,43","30,36","6,07",20 %,Caissier Frip & Co
+15 mai 2026 16:06,Vente,TAAA239TQ4N,Mastercard - Débit,"1,39",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,73","0,00","9,73","8,11","1,62",20 %,Caissier Frip & Co
+15 mai 2026 16:07,Vente,TAAA239UATK,Mastercard - Crédit,"5,39",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"30,18","0,00","30,18","25,15","5,03",20 %,Caissier Frip & Co
+15 mai 2026 16:07,Vente,TAAA239UBBN,Espèces,"0,81",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"5,67","0,00","5,67","4,72","0,95",20 %,Caissier Frip & Co
+15 mai 2026 16:09,Vente,TAAA239VDVB,Espèces,2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 16:09,Vente,TAAA239VDVB,Espèces,"6,435",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"36,04","0,00","36,04","30,03","6,01",20 %,Caissier Frip & Co
+15 mai 2026 16:09,Vente,TAAA239VLBV,Espèces,"1,91",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,37","0,00","13,37","11,14","2,23",20 %,Caissier Frip & Co
+15 mai 2026 16:11,Vente,TAAA239V63D,Espèces,"0,48",kg,Chaussures,Ventes Au Kilo,,EUR,"1,44","0,00","1,44","1,20","0,24",20 %,Caissier Frip & Co
+15 mai 2026 16:11,Vente,TAAA239V63D,Espèces,"4,45",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"31,15","0,00","31,15","25,96","5,19",20 %,Caissier Frip & Co
+15 mai 2026 16:12,Vente,TAAA239XUZK,Visa - Débit,"4,885",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"34,20","0,00","34,20","28,50","5,70",20 %,Caissier Frip & Co
+15 mai 2026 16:15,Vente,TAAA239ZD2Z,Visa - Débit,"6,645",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"37,21","0,00","37,21","31,01","6,20",20 %,Caissier Frip & Co
+15 mai 2026 16:18,Vente,TAAA2392PKX,Espèces,"1,04",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,28","0,00","7,28","6,07","1,21",20 %,Caissier Frip & Co
+15 mai 2026 16:18,Vente,TAAA2392LXL,Mastercard - Débit,"0,385",kg,Chaussures,Ventes Au Kilo,,EUR,"1,16","0,00","1,16","0,97","0,19",20 %,Caissier Frip & Co
+15 mai 2026 16:18,Vente,TAAA2392LXL,Mastercard - Débit,"4,285",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"30,00","0,00","30,00","25,00","5,00",20 %,Caissier Frip & Co
+15 mai 2026 16:18,Vente,TAAA23924PS,Visa - Débit,"1,66",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,62","0,00","11,62","9,68","1,94",20 %,Caissier Frip & Co
+15 mai 2026 16:20,Vente,TAAA23936TP,Visa - Débit,"6,85",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"38,36","0,00","38,36","31,97","6,39",20 %,Caissier Frip & Co
+15 mai 2026 16:22,Vente,TAAA2394UTV,Visa - Débit,"7,37",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"41,27","0,00","41,27","34,39","6,88",20 %,Caissier Frip & Co
+15 mai 2026 16:23,Vente,TAAA2396KKM,Mastercard - Débit,"4,015",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,10","0,00","28,10","23,42","4,68",20 %,Caissier Frip & Co
+15 mai 2026 16:25,Vente,TAAA2397BPK,Espèces,"1,985",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,90","0,00","13,90","11,58","2,32",20 %,Caissier Frip & Co
+15 mai 2026 16:25,Vente,TAAA2397FQN,Visa - Débit,"3,575",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"25,02","0,00","25,02","20,85","4,17",20 %,Caissier Frip & Co
+15 mai 2026 16:26,Vente,TAAA2397ZNV,Espèces,"5,825",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"32,62","0,00","32,62","27,18","5,44",20 %,Caissier Frip & Co
+15 mai 2026 16:26,Vente,TAAA23977RM,Espèces,"8,605",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"48,19","0,00","48,19","40,16","8,03",20 %,Caissier Frip & Co
+15 mai 2026 16:27,Vente,TAAA2399PFB,Espèces,"1,88",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"13,16","0,00","13,16","10,97","2,19",20 %,Caissier Frip & Co
+15 mai 2026 16:29,Vente,TAAA24AAKVE,Espèces,"1,05",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,35","0,00","7,35","6,12","1,23",20 %,Caissier Frip & Co
+15 mai 2026 16:30,Vente,TAAA24AA26H,Espèces,"1,8",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,60","0,00","12,60","10,50","2,10",20 %,Caissier Frip & Co
+15 mai 2026 16:30,Vente,TAAA24AA3FR,Espèces,"1,525",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,68","0,00","10,68","8,90","1,78",20 %,Caissier Frip & Co
+15 mai 2026 16:32,Vente,TAAA24AB6QK,Mastercard - Débit,"3,35",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"23,45","0,00","23,45","19,54","3,91",20 %,Caissier Frip & Co
+15 mai 2026 16:33,Vente,"TAAA24ACK46, TAAA24ACMUR","Espèces, Visa - Débit","3,04",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"21,28","0,00","21,28","17,73","3,55",20 %,Caissier Frip & Co
+15 mai 2026 16:34,Vente,TAAA24ACZTB,Visa - Débit,"11,735",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"65,72","0,00","65,72","54,77","10,95",20 %,Caissier Frip & Co
+15 mai 2026 16:34,Vente,TAAA24AC6VG,Visa - Débit,"0,56",kg,Chaussures,Ventes Au Kilo,,EUR,"1,68","0,00","1,68","1,40","0,28",20 %,Caissier Frip & Co
+15 mai 2026 16:34,Vente,TAAA24AC6VG,Visa - Débit,2,pce,Sacs,Ventes Au Kilo,,EUR,"0,40","0,00","0,40","0,33","0,07",20 %,Caissier Frip & Co
+15 mai 2026 16:34,Vente,TAAA24AC6VG,Visa - Débit,"5,02",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"28,11","0,00","28,11","23,42","4,69",20 %,Caissier Frip & Co
+15 mai 2026 16:35,Vente,TAAA24ADXAZ,Espèces,"0,89",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"6,23","0,00","6,23","5,19","1,04",20 %,Caissier Frip & Co
+15 mai 2026 16:36,Vente,TAAA24ADZAP,Visa - Débit,"0,645",kg,Chaussures,Ventes Au Kilo,,EUR,"1,94","0,00","1,94","1,62","0,32",20 %,Caissier Frip & Co
+15 mai 2026 16:36,Vente,TAAA24ADZAP,Visa - Débit,"3,54",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"24,78","0,00","24,78","20,65","4,13",20 %,Caissier Frip & Co
+15 mai 2026 16:36,Vente,TAAA24ADZAP,Visa - Débit,"4,155",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"29,08","0,00","29,08","24,23","4,85",20 %,Caissier Frip & Co
+15 mai 2026 16:36,Vente,TAAA24AEBM9,Visa - Débit,"7,485",kg,Vente Plus de 5 kilos,Ventes Au Kilo,,EUR,"41,92","0,00","41,92","34,93","6,99",20 %,Caissier Frip & Co
+15 mai 2026 16:36,Vente,TAAA24AEDYQ,Visa - Débit,"4,22",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"29,54","0,00","29,54","24,62","4,92",20 %,Caissier Frip & Co
+15 mai 2026 16:37,Vente,TAAA24AEQZC,Visa - Débit,"1,695",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"11,86","0,00","11,86","9,88","1,98",20 %,Caissier Frip & Co
+15 mai 2026 16:38,Vente,TAAA24AE3ZN,Mastercard - Débit,"5,18",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"36,26","0,00","36,26","30,22","6,04",20 %,Caissier Frip & Co
+15 mai 2026 16:40,Vente,TAAA24AGAGP,Espèces,"0,98",kg,Chaussures,Ventes Au Kilo,,EUR,"2,94","0,00","2,94","2,45","0,49",20 %,Caissier Frip & Co
+15 mai 2026 16:40,Vente,TAAA24AGAGP,Espèces,"0,64",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"4,48","0,00","4,48","3,73","0,75",20 %,Caissier Frip & Co
+15 mai 2026 16:40,Vente,TAAA24AGDSS,Mastercard - Débit,"0,645",kg,Chaussures,Ventes Au Kilo,,EUR,"1,94","0,00","1,94","1,62","0,32",20 %,Caissier Frip & Co
+15 mai 2026 16:40,Vente,TAAA24AGDSS,Mastercard - Débit,"4,045",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"28,32","0,00","28,32","23,60","4,72",20 %,Caissier Frip & Co
+15 mai 2026 16:42,Vente,TAAA24AHC3Z,Mastercard - Crédit,"1,205",kg,Chaussures,Ventes Au Kilo,,EUR,"3,62","0,00","3,62","3,02","0,60",20 %,Caissier Frip & Co
+15 mai 2026 16:42,Vente,TAAA24AHC3Z,Mastercard - Crédit,"3,39",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"23,73","0,00","23,73","19,78","3,95",20 %,Caissier Frip & Co
+15 mai 2026 16:44,Vente,TAAA24AKEZF,Mastercard - Crédit,"4,165",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"29,16","0,00","29,16","24,30","4,86",20 %,Caissier Frip & Co
+15 mai 2026 16:44,Vente,TAAA24AKF3X,Visa - Débit,"2,82",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"19,74","0,00","19,74","16,45","3,29",20 %,Caissier Frip & Co
+15 mai 2026 16:46,Vente,TAAA24AK63X,Visa - Crédit,"1,835",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"12,84","0,00","12,84","10,70","2,14",20 %,Caissier Frip & Co
+15 mai 2026 16:47,Vente,TAAA24AK3R3,Visa - Débit,"0,98",kg,Chaussures,Ventes Au Kilo,,EUR,"2,94","0,00","2,94","2,45","0,49",20 %,Caissier Frip & Co
+15 mai 2026 16:47,Vente,TAAA24AK3R3,Visa - Débit,"1,385",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"9,70","0,00","9,70","8,08","1,62",20 %,Caissier Frip & Co
+15 mai 2026 16:49,Vente,TAAA24AMX4X,Mastercard - Débit,"1,045",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"7,32","0,00","7,32","6,10","1,22",20 %,Caissier Frip & Co
+15 mai 2026 16:51,Vente,TAAA24ANQFL,Visa - Débit,"1,56",kg,Vente Moins de 5 Kg,Ventes Au Kilo,,EUR,"10,92","0,00","10,92","9,10","1,82",20 %,Caissier Frip & Co
