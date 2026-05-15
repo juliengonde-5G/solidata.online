@@ -10,3 +10,4 @@ backend/uploads/*
 !backend/uploads/.gitkeep
 deploy/backups/
 /opt/solidata-backups/
+.claude/skills/deploy-prod/SKILL.md
