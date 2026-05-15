@@ -2709,7 +2709,10 @@ async function initDatabase() {
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_appkey_encrypted TEXT;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_height_cm INTEGER;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_install_date DATE;
-      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reporting_interval_min INTEGER DEFAULT 360;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reporting_interval_min INTEGER DEFAULT 180;
+      -- Migration 15/05/2026 : alignement défaut 360 → 180 min (cf. paramétrage Milesight EM400-MUD)
+      -- Ne touche que les CAV laissés à l'ancien défaut, préserve les valeurs personnalisées.
+      UPDATE cav SET sensor_reporting_interval_min = 180 WHERE sensor_reporting_interval_min = 360;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_status VARCHAR(20) DEFAULT 'inactive';
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_battery_level DOUBLE PRECISION;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_last_rssi INTEGER;

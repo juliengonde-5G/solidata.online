@@ -632,7 +632,7 @@ router.get('/sensors', authorize('ADMIN', 'MANAGER'), async (req, res) => {
         c.sensor_battery_level, c.sensor_last_rssi,
         CASE
           WHEN c.sensor_last_reading_at IS NULL THEN 'never'
-          WHEN c.sensor_last_reading_at < NOW() - (COALESCE(c.sensor_reporting_interval_min, 360) * INTERVAL '2 minute') THEN 'offline'
+          WHEN c.sensor_last_reading_at < NOW() - (COALESCE(c.sensor_reporting_interval_min, 180) * INTERVAL '2 minute') THEN 'offline'
           WHEN c.sensor_battery_level IS NOT NULL AND c.sensor_battery_level <= 20 THEN 'low_battery'
           ELSE 'active'
         END AS computed_status,
@@ -736,7 +736,7 @@ router.post('/:id/sensor/provision', authorize('ADMIN', 'MANAGER'), [
          sensor_type = COALESCE($5, 'ultrasonic'),
          sensor_height_cm = $6,
          sensor_install_date = COALESCE($7, CURRENT_DATE),
-         sensor_reporting_interval_min = COALESCE($8, 360),
+         sensor_reporting_interval_min = COALESCE($8, 180),
          sensor_status = 'active'
        WHERE id = $9
        RETURNING id, name, lora_deveui, lora_appeui, sensor_reference, sensor_type,
@@ -744,7 +744,7 @@ router.post('/:id/sensor/provision', authorize('ADMIN', 'MANAGER'), [
       [
         dev_eui.toUpperCase(), app_eui || null, encrypted,
         ref, sensor_type, sensor_height_cm,
-        sensor_install_date || null, sensor_reporting_interval_min || 360,
+        sensor_install_date || null, sensor_reporting_interval_min || 180,
         req.params.id,
       ]
     );
@@ -1064,7 +1064,7 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
       return res.status(400).json({ error: 'Aucun capteur provisionné sur ce CAV' });
     }
 
-    const reportingMin = cav.sensor_reporting_interval_min || 360; // défaut 6h
+    const reportingMin = cav.sensor_reporting_interval_min || 180; // défaut 3h
     const expectedGapMin = reportingMin * 2; // tolérance ×2
 
     // ───── Couche 1 : Sonde (config locale) ─────
