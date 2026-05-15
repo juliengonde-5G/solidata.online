@@ -345,23 +345,22 @@ router.get('/:id/analytics/segments', authorize('ADMIN', 'MANAGER'), async (req,
 
 router.get('/:id/analytics/payments', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
+    // MAX(entry_mode) plutôt que sous-requête corrélée : Postgres refuse
+    // (avec raison) une sous-requête qui référence une colonne non agrégée
+    // sous GROUP BY. MAX d'un VARCHAR donne un échantillon stable.
     const r = await pool.query(`
       SELECT moyen_paiement,
              COUNT(*)::INT AS nb_tickets,
              COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
              COALESCE(SUM(poids_kg),0)::FLOAT AS poids_kg,
              COALESCE(AVG(total_ttc),0)::FLOAT AS panier_moyen,
-             COALESCE(
-               (SELECT entry_mode FROM vak_tickets t2
-                WHERE t2.vak_id = vak_tickets.vak_id
-                  AND t2.moyen_paiement = vak_tickets.moyen_paiement
-                  AND t2.entry_mode IS NOT NULL LIMIT 1),
-             NULL) AS entry_mode_sample
+             MAX(entry_mode) AS entry_mode_sample
       FROM vak_tickets WHERE vak_id = $1
       GROUP BY moyen_paiement ORDER BY ca_ttc DESC
     `, [req.params.id]);
     res.json(r.rows);
   } catch (err) {
+    logger.error('VAK payments', { error: err.message });
     res.status(500).json({ error: 'Erreur' });
   }
 });
