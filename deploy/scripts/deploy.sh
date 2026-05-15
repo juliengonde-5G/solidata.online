@@ -350,7 +350,9 @@ case "${ACTION}" in
     sleep 3
     # Nginx redirige tout HTTP→HTTPS (301). On tape directement HTTPS avec -k
     # (cert localhost ≠ cert solidata.online → -k requis en interne).
-    HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 5 https://localhost/api/health 2>/dev/null || echo "000")
+    # Le Host header force le bon vhost : sans ça nginx tombe sur le default_server
+    # qui peut être un autre projet (ex: solireport) → 502.
+    HTTP_CODE=$(curl -sk -H "Host: solidata.online" -o /dev/null -w "%{http_code}" --connect-timeout 5 https://localhost/api/health 2>/dev/null || echo "000")
     if [ "$HTTP_CODE" = "200" ]; then
         log "Health check API : OK (HTTP 200)"
     else
@@ -369,7 +371,10 @@ case "${ACTION}" in
         warn "API_USER ou API_PASSWORD absent du .env — smoke test exécuté en mode dégradé (endpoints publics seulement)."
         warn "Pour couvrir les endpoints protégés, ajoute dans .env : API_USER=<admin> et API_PASSWORD=<mot de passe>"
     fi
-    if NODE_TLS_REJECT_UNAUTHORIZED=0 BASE_URL=https://localhost API_USER="${API_USER:-}" API_PASSWORD="${API_PASSWORD:-}" \
+    # On tape solidata.online (et pas localhost) pour matcher le bon vhost nginx :
+    # https://localhost atterrit sur le default_server (potentiellement un autre projet) → 502.
+    # Le cert est valide pour solidata.online, donc pas besoin de TLS-insecure.
+    if BASE_URL=https://solidata.online API_USER="${API_USER:-}" API_PASSWORD="${API_PASSWORD:-}" \
        node scripts/tests/api-smoke.js; then
         log "Smoke test : tous les endpoints critiques répondent ✓"
     else
