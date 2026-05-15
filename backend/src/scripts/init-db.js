@@ -3687,6 +3687,147 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Module Boutiques ✓');
 
+    // ══════════════════════════════════════════════════════════════════
+    // MODULE VAK — Vente au Kilo (caisse SumUp, événement mensuel)
+    // ══════════════════════════════════════════════════════════════════
+    // Une VAK = un événement de 2-3 jours au siège (Rouen, 49.4231 / 1.0993)
+    // Source principale : API SumUp (OAuth + webhooks live)
+    // Fallback : import CSV manuel (Rapport-ventes-YYYY-MM-DD_YYYY-MM-DD.csv)
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vaks (
+        id SERIAL PRIMARY KEY,
+        libelle TEXT NOT NULL,
+        date_debut DATE NOT NULL,
+        date_fin DATE NOT NULL,
+        lieu TEXT DEFAULT 'Siège - Rouen',
+        latitude DOUBLE PRECISION DEFAULT 49.4231,
+        longitude DOUBLE PRECISION DEFAULT 1.0993,
+        ca_objectif_ttc NUMERIC(10,2),
+        poids_objectif_kg NUMERIC(10,2),
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        CHECK (date_fin >= date_debut)
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vaks_dates ON vaks(date_debut, date_fin)');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vak_import_batches (
+        id SERIAL PRIMARY KEY,
+        vak_id INTEGER REFERENCES vaks(id) ON DELETE CASCADE,
+        filename TEXT NOT NULL,
+        file_hash VARCHAR(64) UNIQUE NOT NULL,
+        date_debut DATE,
+        date_fin DATE,
+        nb_lignes_total INTEGER DEFAULT 0,
+        nb_lignes_importees INTEGER DEFAULT 0,
+        nb_lignes_erreur INTEGER DEFAULT 0,
+        nb_tickets_reconstitues INTEGER DEFAULT 0,
+        ca_total_ttc NUMERIC(10,2) DEFAULT 0,
+        poids_total_kg NUMERIC(10,3) DEFAULT 0,
+        statut VARCHAR(20) DEFAULT 'en_cours',
+        erreurs JSONB,
+        source VARCHAR(16) DEFAULT 'csv_manuel',
+        imported_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_batches_vak ON vak_import_batches(vak_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_batches_hash ON vak_import_batches(file_hash)');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vak_tickets (
+        id SERIAL PRIMARY KEY,
+        vak_id INTEGER REFERENCES vaks(id) ON DELETE CASCADE,
+        sumup_transaction_id VARCHAR(64) UNIQUE,
+        ref_transaction VARCHAR(64) NOT NULL,
+        date_ticket TIMESTAMP NOT NULL,
+        moyen_paiement VARCHAR(64),
+        entry_mode VARCHAR(32),
+        nb_articles INTEGER DEFAULT 0,
+        poids_kg NUMERIC(8,3) DEFAULT 0,
+        total_ttc NUMERIC(10,2) DEFAULT 0,
+        total_ht NUMERIC(10,2) DEFAULT 0,
+        total_tva NUMERIC(10,2) DEFAULT 0,
+        batch_id INTEGER REFERENCES vak_import_batches(id) ON DELETE SET NULL,
+        source VARCHAR(16) NOT NULL DEFAULT 'csv_manuel',
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vak_id, ref_transaction)
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_tickets_vak_date ON vak_tickets(vak_id, date_ticket)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_tickets_sumup_id ON vak_tickets(sumup_transaction_id) WHERE sumup_transaction_id IS NOT NULL');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vak_ventes (
+        id SERIAL PRIMARY KEY,
+        vak_id INTEGER REFERENCES vaks(id) ON DELETE CASCADE,
+        ticket_id INTEGER REFERENCES vak_tickets(id) ON DELETE CASCADE,
+        batch_id INTEGER REFERENCES vak_import_batches(id) ON DELETE CASCADE,
+        date_vente TIMESTAMP NOT NULL,
+        ref_transaction VARCHAR(64),
+        moyen_paiement VARCHAR(64),
+        description TEXT,
+        segment VARCHAR(32),
+        unite VARCHAR(8),
+        quantite NUMERIC(10,3) DEFAULT 0,
+        prix_unitaire_ttc NUMERIC(10,2) DEFAULT 0,
+        remise NUMERIC(10,2) DEFAULT 0,
+        total_ht NUMERIC(10,2) DEFAULT 0,
+        total_ttc NUMERIC(10,2) DEFAULT 0,
+        total_tva NUMERIC(10,2) DEFAULT 0,
+        taux_tva NUMERIC(5,2) DEFAULT 20,
+        compte VARCHAR(64),
+        source VARCHAR(16) NOT NULL DEFAULT 'csv_manuel',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_ventes_vak_date ON vak_ventes(vak_id, date_vente)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_ventes_segment ON vak_ventes(segment)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_ventes_paiement ON vak_ventes(moyen_paiement)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_ventes_ticket ON vak_ventes(ticket_id)');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vak_meteo_quotidien (
+        id SERIAL PRIMARY KEY,
+        vak_id INTEGER REFERENCES vaks(id) ON DELETE CASCADE,
+        date DATE NOT NULL,
+        weather_code INTEGER,
+        weather_label VARCHAR(50),
+        temp_min DECIMAL(4,1),
+        temp_max DECIMAL(4,1),
+        precipitation_mm DECIMAL(6,1),
+        wind_speed_max DECIMAL(5,1),
+        sunshine_hours DECIMAL(4,1),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(vak_id, date)
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vak_sumup_sync_log (
+        id SERIAL PRIMARY KEY,
+        sync_type VARCHAR(20) NOT NULL,
+        started_at TIMESTAMP DEFAULT NOW(),
+        ended_at TIMESTAMP,
+        status VARCHAR(16),
+        nb_transactions_received INTEGER DEFAULT 0,
+        nb_transactions_inserted INTEGER DEFAULT 0,
+        nb_transactions_skipped INTEGER DEFAULT 0,
+        oldest_time TIMESTAMP,
+        newest_time TIMESTAMP,
+        error_message TEXT,
+        triggered_by INTEGER REFERENCES users(id),
+        details JSONB
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_vak_sumup_sync_started ON vak_sumup_sync_log(started_at DESC)');
+
+    console.log('[INIT-DB] Module VAK (Vente au Kilo) ✓');
+
     // ══════════════════════════════════════════
     // V3 — Seuils d'alerte configurables (Direction D6 / action 11)
     // Dashboard exécutif : la Direction définit ses propres seuils min/max.
@@ -4154,6 +4295,8 @@ async function initDatabase() {
       'boutiques', 'boutique_ventes', 'boutique_tickets',
       'boutique_commandes', 'boutique_commande_lignes',
       'boutique_objectifs', 'boutique_meteo_quotidien',
+      'vaks', 'vak_import_batches', 'vak_tickets', 'vak_ventes',
+      'vak_meteo_quotidien', 'vak_sumup_sync_log',
       'association_points', 'cav_sensor_readings', 'refashion_dpav',
       'refashion_communes', 'refashion_subventions', 'historique_mensuel',
     ];

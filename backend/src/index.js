@@ -67,7 +67,12 @@ app.use(helmet({
 }));
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(cookieParser());
-app.use(express.json({ limit: '10mb' }));
+// `verify` capture le buffer brut sur req.rawBody, utile aux webhooks signés
+// (SumUp VAK / autres futurs). Aucun coût mesurable, le buffer existe déjà.
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Logging HTTP corrélé (request-id, durée, statut, user)
@@ -246,6 +251,9 @@ app.use('/api/boutique-commandes', require('./routes/boutique-commandes'));
 app.use('/api/boutique-objectifs', require('./routes/boutique-objectifs'));
 app.use('/api/boutique-meteo', require('./routes/boutique-meteo'));
 
+// Module VAK : Vente au Kilo mensuelle (caisse SumUp, dashboards perf, live TV)
+app.use('/api/vak', require('./routes/vak'));
+
 // 404 handler pour les routes API non trouvées
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 
@@ -280,6 +288,9 @@ io.use((socket, next) => {
   }
 });
 
+// Exposer io pour les jobs scheduler (sync SumUp VAK qui doit emit en live)
+global.__io = io;
+
 io.on('connection', (socket) => {
   logger.debug(`Socket client connecté: ${socket.id}`, { userId: socket.user?.id });
 
@@ -287,6 +298,17 @@ io.on('connection', (socket) => {
   socket.on('join-tour', (tourId) => {
     socket.join(`tour-${tourId}`);
     logger.debug(`Socket ${socket.id} rejoint tour-${tourId}`);
+  });
+
+  // Dashboard live VAK : un client (écran TV / page Live) rejoint la salle d'une VAK
+  socket.on('vak:join', (vakId) => {
+    if (vakId == null) return;
+    socket.join(`vak:live:${vakId}`);
+    logger.debug(`Socket ${socket.id} rejoint vak:live:${vakId}`);
+  });
+  socket.on('vak:leave', (vakId) => {
+    if (vakId == null) return;
+    socket.leave(`vak:live:${vakId}`);
   });
 
   // Position GPS du chauffeur — avec détection proximité CAV pour historiser le temps de collecte

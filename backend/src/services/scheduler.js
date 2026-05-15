@@ -622,6 +622,22 @@ function startScheduler() {
       await scanBoutiqueCSVFolders();
     }
 
+    // VAK SumUp — catch-up horaire pendant une VAK active (les webhooks
+    // alimentent normalement le live, ce job rattrape les éventuels manqués).
+    // Hors VAK, sync 1×/jour à 3h.
+    try {
+      const inVak = await pool.query(
+        `SELECT 1 FROM vaks WHERE CURRENT_DATE BETWEEN date_debut AND date_fin LIMIT 1`,
+      );
+      if (inVak.rows.length > 0) {
+        await syncVakSumUp();
+      } else if (now.getHours() === 3 && now.getMinutes() < 30) {
+        await syncVakSumUp();
+      }
+    } catch (err) {
+      console.error('[SCHEDULER] VAK SumUp scheduling:', err.message);
+    }
+
     // ══ V1.8.4 — Auto-discovery événements + jours fériés ══
 
     // Mensuel : le 1er à 04h00 → découverte events + recalcul facteurs saisonniers
@@ -740,6 +756,41 @@ async function collectBoutiqueWeather() {
   }
 }
 
+// ══════════════════════════════════════════
+// VAK — Sync SumUp incrémentale + météo + refresh token
+// ══════════════════════════════════════════
+async function syncVakSumUp() {
+  try {
+    const sumup = require('./sumup');
+    const status = await sumup.getConnectionStatus();
+    if (!status.connected) return; // pas de credentials => skip silencieux
+    // Pendant une VAK active, le webhook fait le live ; la sync sert de catch-up
+    // au cas où un webhook a été manqué (sync horaire pendant VAK, journalière sinon).
+    const result = await sumup.syncTransactionsFromApi({ io: global.__io || null });
+    if (result.inserted > 0) {
+      console.log(`[SCHEDULER] VAK SumUp sync: +${result.inserted}/${result.received} transactions`);
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] syncVakSumUp:', err.message);
+  }
+}
+
+async function captureVakWeather() {
+  try {
+    const sumup = require('./sumup');
+    const r = await pool.query(`
+      SELECT id FROM vaks
+      WHERE date_debut <= CURRENT_DATE + INTERVAL '1 day'
+        AND date_fin >= CURRENT_DATE - INTERVAL '7 days'
+    `);
+    for (const row of r.rows) {
+      await sumup.captureWeatherForVak(row.id).catch(() => { /* best effort */ });
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] captureVakWeather:', err.message);
+  }
+}
+
 async function runAllJobs() {
   // Distributed locking: seule une instance exécute les jobs
   const locked = await acquireLock();
@@ -760,6 +811,8 @@ async function runAllJobs() {
     await refreshMaterializedViews();
     await scanBoutiqueCSVFolders();
     await collectBoutiqueWeather();
+    await syncVakSumUp();
+    await captureVakWeather();
     console.log('[SCHEDULER] Tous les jobs executes');
   } catch (err) {
     console.error('[SCHEDULER] Erreur globale:', err.message);
