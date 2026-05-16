@@ -25,7 +25,13 @@ const logger = require('../config/logger');
 const SUMUP_API_BASE = process.env.SUMUP_API_BASE_URL || 'https://api.sumup.com';
 const SUMUP_REDIRECT_URI = process.env.SUMUP_REDIRECT_URI
   || 'https://solidata.online/api/vak/sumup/callback';
-const SUMUP_SCOPES = ['transactions.history', 'user.profile', 'user.app-settings'];
+// Scopes OAuth. SumUp refuse l'autorisation (invalid_scope) si on demande un
+// scope non activé pour le client. `transactions.history` suffit pour la sync
+// des ventes VAK ; les autres scopes (user.profile_readonly, payments, etc.)
+// peuvent être ajoutés via SUMUP_OAUTH_SCOPES si l'app les expose côté
+// developer.sumup.com.
+const SUMUP_SCOPES = (process.env.SUMUP_OAUTH_SCOPES || 'transactions.history')
+  .split(/[\s,]+/).filter(Boolean);
 
 // ── Chiffrement secrets (réutilise PCM_ENCRYPTION_KEY, fallback JWT_SECRET) ──
 function getEncryptionKey() {
