@@ -18,6 +18,8 @@ export default function VakSumupConfig() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [resyncSince, setResyncSince] = useState('');
+  const [resyncing, setResyncing] = useState(false);
 
   useEffect(() => {
     if (searchParams.get('connected')) toast.success('Connexion SumUp établie');
@@ -75,6 +77,19 @@ export default function VakSumupConfig() {
       toast.error(err.response?.data?.error || 'Erreur sync');
     }
     setSyncing(false);
+  }
+
+  async function resyncFrom() {
+    if (!resyncSince) { toast.error('Choisis une date de début'); return; }
+    setResyncing(true);
+    try {
+      const r = await api.post('/vak/sumup/sync', { since: resyncSince });
+      toast.success(`Resync OK depuis ${resyncSince} : ${r.data.inserted}/${r.data.received} transactions importées`);
+      await load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur resync');
+    }
+    setResyncing(false);
   }
 
   async function disconnect() {
@@ -181,6 +196,57 @@ export default function VakSumupConfig() {
             </div>
           </div>
         </div>
+
+        {/* Rattrapage historique (resync depuis une date) */}
+        {status?.connected && (
+          <div className="bg-white rounded-card shadow-card p-5 mb-6 border-l-4 border-amber-500">
+            <div className="flex items-start gap-3 mb-3">
+              <Info className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h3 className="font-semibold text-slate-800">Rattrapage de l'historique</h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  Par défaut la sync ne remonte que 90 jours en arrière et ne redescend plus une fois passée.
+                  Pour importer les ventes des <strong>VAK passées</strong> (depuis novembre 2026, première VAK SumUp),
+                  saisis une date de début ci-dessous. Les transactions trouvées seront automatiquement rattachées
+                  aux VAK qui couvrent leur date (créées sur la page <a href="/vak/sessions" className="underline text-orange-600">Sessions & Import</a>).
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 items-end">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Resynchroniser depuis</label>
+                <input type="date" value={resyncSince} onChange={(e) => setResyncSince(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <button onClick={resyncFrom} disabled={resyncing || !resyncSince}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 text-sm font-medium disabled:opacity-50">
+                {resyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                Lancer le rattrapage
+              </button>
+              <div className="flex gap-2 text-xs">
+                <button type="button"
+                  onClick={() => setResyncSince('2026-11-01')}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">
+                  1er nov. 2026
+                </button>
+                <button type="button"
+                  onClick={() => setResyncSince(new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10))}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">
+                  -1 an
+                </button>
+                <button type="button"
+                  onClick={() => setResyncSince(new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10))}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">
+                  -6 mois
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-3">
+              Astuce : si le rattrapage tire beaucoup de transactions, la requête peut prendre plusieurs dizaines de
+              secondes. Surveille l'historique des synchronisations plus bas pour confirmer le bon déroulement.
+            </p>
+          </div>
+        )}
 
         {/* Runbook OAuth */}
         {!status?.has_credentials && (
