@@ -4086,22 +4086,44 @@ async function initDatabase() {
     // ══════════════════════════════════════════
 
     // (a) Types de produit pour commandes — DROP + UPDATE + recréer CHECK
+    // Note : migrate-exutoires.js convertit type_produit en TEXT[] pour le
+    // support multi-types. On adapte la syntaxe au type courant de la colonne.
     try {
-      await client.query(`
-        UPDATE commandes_exutoires
-        SET type_produit = 'essuyage'
-        WHERE type_produit IN ('effilo_blanc', 'effilo_couleur')
+      const colType = await client.query(`
+        SELECT data_type FROM information_schema.columns
+        WHERE table_name = 'commandes_exutoires' AND column_name = 'type_produit'
       `);
+      const isArray = colType.rows[0]?.data_type === 'ARRAY';
       await client.query(`
         ALTER TABLE commandes_exutoires
         DROP CONSTRAINT IF EXISTS commandes_exutoires_type_produit_check
       `);
-      await client.query(`
-        ALTER TABLE commandes_exutoires
-        ADD CONSTRAINT commandes_exutoires_type_produit_check
-        CHECK (type_produit IN ('original', 'csr', 'essuyage', 'tricot', 'merinos', 'jean', 'coton_blanc', 'coton_couleur'))
-      `);
-      console.log('[INIT-DB] commandes_exutoires.type_produit étendu (essuyage/tricot/merinos) ✓');
+      if (isArray) {
+        await client.query(`
+          UPDATE commandes_exutoires
+          SET type_produit = ARRAY['essuyage']::TEXT[]
+          WHERE 'effilo_blanc' = ANY(type_produit) OR 'effilo_couleur' = ANY(type_produit)
+        `);
+        // CHECK constraint sur ARRAY : tous les éléments du tableau doivent
+        // être dans la whitelist (utilise <@ pour subset).
+        await client.query(`
+          ALTER TABLE commandes_exutoires
+          ADD CONSTRAINT commandes_exutoires_type_produit_check
+          CHECK (type_produit <@ ARRAY['original', 'csr', 'essuyage', 'tricot', 'merinos', 'jean', 'coton_blanc', 'coton_couleur']::TEXT[])
+        `);
+      } else {
+        await client.query(`
+          UPDATE commandes_exutoires
+          SET type_produit = 'essuyage'
+          WHERE type_produit IN ('effilo_blanc', 'effilo_couleur')
+        `);
+        await client.query(`
+          ALTER TABLE commandes_exutoires
+          ADD CONSTRAINT commandes_exutoires_type_produit_check
+          CHECK (type_produit IN ('original', 'csr', 'essuyage', 'tricot', 'merinos', 'jean', 'coton_blanc', 'coton_couleur'))
+        `);
+      }
+      console.log(`[INIT-DB] commandes_exutoires.type_produit étendu (mode ${isArray ? 'ARRAY' : 'scalaire'}) ✓`);
     } catch (e) {
       console.error('[INIT-DB] Erreur migration type_produit :', e.message);
     }
@@ -4112,10 +4134,24 @@ async function initDatabase() {
         ALTER TABLE categories_sortantes
         ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true
       `);
-      // Renommages (préservent les FK)
-      await client.query(`UPDATE categories_sortantes SET nom = 'Recyclage Coton',  famille = 'recyclage' WHERE nom = 'Effilochage Coton'`);
-      await client.query(`UPDATE categories_sortantes SET nom = 'Recyclage Tricot', famille = 'recyclage' WHERE nom = 'Effilochage Laine'`);
-      await client.query(`UPDATE categories_sortantes SET nom = 'Extra'                                  WHERE nom = 'Extra 1er Choix'`);
+      // Renommages (préservent les FK). On garde le rename uniquement si la
+      // cible n'existe pas déjà — sinon le seed L1602 a déjà créé la nouvelle
+      // catégorie et le rename violerait l'UNIQUE constraint sur nom.
+      await client.query(`
+        UPDATE categories_sortantes SET nom = 'Recyclage Coton', famille = 'recyclage'
+        WHERE nom = 'Effilochage Coton'
+          AND NOT EXISTS (SELECT 1 FROM categories_sortantes WHERE nom = 'Recyclage Coton')
+      `);
+      await client.query(`
+        UPDATE categories_sortantes SET nom = 'Recyclage Tricot', famille = 'recyclage'
+        WHERE nom = 'Effilochage Laine'
+          AND NOT EXISTS (SELECT 1 FROM categories_sortantes WHERE nom = 'Recyclage Tricot')
+      `);
+      await client.query(`
+        UPDATE categories_sortantes SET nom = 'Extra'
+        WHERE nom = 'Extra 1er Choix'
+          AND NOT EXISTS (SELECT 1 FROM categories_sortantes WHERE nom = 'Extra')
+      `);
       // Soft-delete (11 catégories)
       await client.query(`
         UPDATE categories_sortantes SET is_active = false
@@ -4172,6 +4208,8 @@ async function initDatabase() {
     // = révocation immédiate de l'ancien raccourci.
     try {
       await client.query("ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS qr_token VARCHAR(32) UNIQUE");
+      // pgcrypto pour gen_random_bytes (postgis seul ne suffit pas) — idempotent
+      await client.query("CREATE EXTENSION IF NOT EXISTS pgcrypto");
       // Backfill : tout véhicule existant reçoit un token unique aléatoire (16 octets hex = 32 caractères).
       // Idempotent : la clause WHERE évite d'écraser un token déjà attribué.
       await client.query("UPDATE vehicles SET qr_token = encode(gen_random_bytes(16), 'hex') WHERE qr_token IS NULL");
