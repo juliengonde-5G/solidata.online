@@ -131,6 +131,7 @@ const NAV_TREE = [
     icon: Scale,
     children: [
       { label: 'Performance VAK', path: '/vak', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Vue par jour', path: '/vak/jours', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Performance annuelle', path: '/vak/annuel', icon: TrendingUp, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Sessions & Import', path: '/vak/sessions', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Écran Live', path: '/vak/live', icon: Activity, roles: ['ADMIN', 'MANAGER'] },

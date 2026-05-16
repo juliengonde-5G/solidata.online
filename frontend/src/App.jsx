@@ -84,6 +84,7 @@ const BoutiquesObjectifs = lazy(() => import('./pages/BoutiquesObjectifs'));
 const BoutiquesImport = lazy(() => import('./pages/BoutiquesImport'));
 
 const VakPerformance = lazy(() => import('./pages/VakPerformance'));
+const VakJournee = lazy(() => import('./pages/VakJournee'));
 const VakAnnuel = lazy(() => import('./pages/VakAnnuel'));
 const VakSessions = lazy(() => import('./pages/VakSessions'));
 const VakLive = lazy(() => import('./pages/VakLive'));
@@ -128,6 +129,7 @@ function App() {
 
               {/* Vente au Kilo (VAK) — caisse SumUp, dashboards perf, live TV */}
               <Route path="/vak" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakPerformance /></ProtectedRoute>} />
+              <Route path="/vak/jours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakJournee /></ProtectedRoute>} />
               <Route path="/vak/annuel" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakAnnuel /></ProtectedRoute>} />
               <Route path="/vak/sessions" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakSessions /></ProtectedRoute>} />
               <Route path="/vak/live" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakLive /></ProtectedRoute>} />

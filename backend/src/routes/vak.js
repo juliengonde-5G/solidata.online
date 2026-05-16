@@ -446,6 +446,68 @@ router.get('/:id/analytics/comparison', authorize('ADMIN', 'MANAGER'), async (re
   }
 });
 
+// Vue ventilée par jour de la VAK (cartes comparatives jour par jour)
+router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const vakId = req.params.id;
+    const [days, hourly, segments, payments, meteo] = await Promise.all([
+      pool.query(`
+        SELECT DATE(t.date_ticket) AS jour,
+               COUNT(*)::INT                                              AS nb_tickets,
+               COALESCE(SUM(t.total_ttc),0)::FLOAT                        AS ca_ttc,
+               COALESCE(SUM(t.total_ht),0)::FLOAT                         AS ca_ht,
+               COALESCE(SUM(t.total_tva),0)::FLOAT                        AS tva_collectee,
+               COALESCE(SUM(t.poids_kg),0)::FLOAT                         AS poids_kg,
+               COALESCE(SUM(t.nb_articles),0)::INT                        AS nb_articles,
+               COALESCE(AVG(t.total_ttc),0)::FLOAT                        AS panier_moyen,
+               COALESCE(SUM(CASE WHEN t.moyen_paiement ILIKE '%espèce%' OR t.moyen_paiement ILIKE '%cash%' THEN t.total_ttc END),0)::FLOAT AS ca_especes,
+               COALESCE(SUM(CASE WHEN t.moyen_paiement ILIKE '%visa%' OR t.moyen_paiement ILIKE '%mastercard%' OR t.moyen_paiement ILIKE '%carte%' THEN t.total_ttc END),0)::FLOAT AS ca_cb,
+               COUNT(CASE WHEN t.moyen_paiement ILIKE '%espèce%' OR t.moyen_paiement ILIKE '%cash%' THEN 1 END)::INT AS nb_especes,
+               COUNT(CASE WHEN t.moyen_paiement ILIKE '%visa%' OR t.moyen_paiement ILIKE '%mastercard%' OR t.moyen_paiement ILIKE '%carte%' THEN 1 END)::INT AS nb_cb,
+               MIN(t.date_ticket) AS premiere_vente,
+               MAX(t.date_ticket) AS derniere_vente
+        FROM vak_tickets t WHERE t.vak_id = $1
+        GROUP BY DATE(t.date_ticket) ORDER BY DATE(t.date_ticket)
+      `, [vakId]),
+      pool.query(`
+        SELECT DATE(date_ticket) AS jour,
+               EXTRACT(HOUR FROM date_ticket)::INT AS heure,
+               COUNT(*)::INT AS nb_tickets,
+               COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
+               COALESCE(SUM(poids_kg),0)::FLOAT AS poids_kg
+        FROM vak_tickets WHERE vak_id = $1
+        GROUP BY jour, heure ORDER BY jour, heure
+      `, [vakId]),
+      pool.query(`
+        SELECT DATE(date_vente) AS jour, segment,
+               COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
+               COALESCE(SUM(quantite),0)::FLOAT AS quantite
+        FROM vak_ventes WHERE vak_id = $1
+        GROUP BY jour, segment ORDER BY jour, segment
+      `, [vakId]),
+      pool.query(`
+        SELECT DATE(date_ticket) AS jour, moyen_paiement,
+               COUNT(*)::INT AS nb_tickets,
+               COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc
+        FROM vak_tickets WHERE vak_id = $1
+        GROUP BY jour, moyen_paiement ORDER BY jour, ca_ttc DESC
+      `, [vakId]),
+      pool.query(`SELECT * FROM vak_meteo_quotidien WHERE vak_id = $1 ORDER BY date`, [vakId]),
+    ]);
+
+    res.json({
+      days: days.rows,
+      hourly: hourly.rows,
+      segments: segments.rows,
+      payments: payments.rows,
+      meteo: meteo.rows,
+    });
+  } catch (err) {
+    logger.error('VAK by-day', { error: err.message });
+    res.status(500).json({ error: 'Erreur analyse par jour' });
+  }
+});
+
 router.get('/:id/meteo', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const r = await pool.query(`
