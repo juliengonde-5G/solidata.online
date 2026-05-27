@@ -30,7 +30,17 @@ function decryptApiKey(encrypted) {
   const [ivHex, encryptedHex] = encrypted.split(':');
   if (!ivHex || !encryptedHex) throw new Error('Format de clé chiffrée invalide');
   const decipher = crypto.createDecipheriv('aes-256-cbc', derivedKey, Buffer.from(ivHex, 'hex'));
-  return decipher.update(encryptedHex, 'hex', 'utf8') + decipher.final('utf8');
+  try {
+    return decipher.update(encryptedHex, 'hex', 'utf8') + decipher.final('utf8');
+  } catch (err) {
+    if (err.message && err.message.includes('bad decrypt')) {
+      throw Object.assign(
+        new Error('Clé API Pennylane illisible — la clé de chiffrement du serveur a changé (rotation JWT_SECRET). Veuillez ressaisir la clé API dans la configuration Pennylane.'),
+        { statusCode: 400 }
+      );
+    }
+    throw err;
+  }
 }
 
 /**
