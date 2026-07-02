@@ -335,6 +335,41 @@ re-copie le certificat et recharge nginx automatiquement toutes les 6 h, et le c
 renouvellement (`deploy/crontab.txt`) enchaîne sur `reload-nginx-certs.sh`. Penser à
 réinstaller le crontab après mise à jour : `crontab /opt/solidata.online/deploy/crontab.txt`.
 
+**Cas 5 — `certbot renew` : « renewal config file ... is broken » / parse failure :**
+
+Symptôme : `certbot renew` affiche `Renewal configuration file /etc/letsencrypt/renewal/solidata.online.conf
+is broken. The error was: renewal config file {} is missing a required file reference. Skipping.`
+puis `0 renew failure(s), 1 parse failure(s)`.
+
+Cause : un fichier de renouvellement orphelin (souvent vide, 0 octet) traîne dans
+`renewal/`. Il date généralement du premier déploiement, où l'entrypoint nginx avait
+déjà créé un `live/solidata.online/` (certificat auto-signé) — certbot a donc créé le
+vrai lignage sous le nom suffixé `solidata.online-0001` et laissé un `solidata.online.conf`
+incomplet. Le vrai lignage `solidata.online-0001` continue de se renouveler normalement ;
+seul le `.conf` orphelin fait échouer le parsing.
+
+```bash
+cd /opt/solidata.online
+
+# 1. Identifier le .conf cassé (souvent 0 octet) et confirmer le vrai lignage
+docker compose -f docker-compose.prod.yml run --rm --entrypoint sh certbot -c '
+  ls -la /etc/letsencrypt/renewal/
+  ls -la /etc/letsencrypt/live/solidata.online-0001/
+'
+
+# 2. Supprimer le .conf orphelin (inexploitable, certbot le skip déjà — aucune perte)
+docker compose -f docker-compose.prod.yml run --rm --entrypoint sh certbot -c '
+  rm -f /etc/letsencrypt/renewal/solidata.online.conf
+'
+
+# 3. Vérifier : plus de parse failure
+docker compose -f docker-compose.prod.yml run --rm certbot renew
+docker compose -f docker-compose.prod.yml run --rm certbot certificates
+```
+
+Ne jamais supprimer `solidata.online-0001.conf` ni le dossier `live/solidata.online-0001/` :
+c'est le lignage réel servi par nginx.
+
 **Note :** L'entrypoint nginx génère des certificats auto-signés temporaires si les vrais sont illisibles, permettant à nginx de démarrer (HTTPS avec avertissement navigateur).
 
 ---
