@@ -39,11 +39,14 @@ else
 fi
 
 # Boucle de rafraîchissement (toutes les 6 h = 21600 s)
+# Rechargement via SIGHUP à PID 1 (le maître nginx après le `exec` ci-dessous).
+# On évite `nginx -s reload` qui échoue en mode `daemon off;` quand
+# /var/run/nginx.pid est vide (« invalid PID number »).
 (
   while :; do
     sleep 21600
     refresh_certs
-    nginx -s reload 2>/dev/null || true
+    kill -HUP 1 2>/dev/null || true
     echo "nginx rechargé (rafraîchissement certificat SSL)"
   done
 ) &
