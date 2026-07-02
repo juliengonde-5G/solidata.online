@@ -302,6 +302,39 @@ ss -tlnp | grep :80
 # Arrêter le service qui occupe le port, puis relancer certbot
 ```
 
+**Cas 4 — Certificat expiré dans le navigateur (`NET::ERR_CERT_DATE_INVALID`) :**
+
+Symptôme : le navigateur affiche « Votre connexion n'est pas privée » alors que certbot tourne.
+Cause classique : certbot a bien renouvelé le certificat sur le disque, mais nginx sert toujours
+la copie faite au démarrage du conteneur (l'entrypoint copie `live/solidata.online-0001/` vers
+`live/solidata.online/`, et nginx garde le certificat en mémoire tant qu'il n'est pas rechargé).
+
+```bash
+cd /opt/solidata.online
+
+# 1. Vérifier ce que nginx sert réellement vs ce qui est sur le disque
+echo | openssl s_client -connect solidata.online:443 -servername solidata.online 2>/dev/null \
+  | openssl x509 -noout -dates
+docker compose -f docker-compose.prod.yml exec nginx \
+  openssl x509 -noout -dates -in /etc/letsencrypt/live/solidata.online-0001/fullchain.pem
+
+# 2. Forcer le renouvellement si le certificat sur disque est aussi expiré
+docker compose -f docker-compose.prod.yml run --rm certbot renew
+# (ajouter --force-renewal seulement si certbot répond « not yet due » alors que le cert est expiré)
+
+# 3. Re-copier + recharger nginx (sans coupure)
+bash deploy/scripts/reload-nginx-certs.sh
+
+# 4. Vérifier
+echo | openssl s_client -connect solidata.online:443 -servername solidata.online 2>/dev/null \
+  | openssl x509 -noout -dates
+```
+
+Depuis le correctif de juillet 2026, l'entrypoint nginx (`deploy/nginx/nginx-entrypoint.sh`)
+re-copie le certificat et recharge nginx automatiquement toutes les 6 h, et le cron de
+renouvellement (`deploy/crontab.txt`) enchaîne sur `reload-nginx-certs.sh`. Penser à
+réinstaller le crontab après mise à jour : `crontab /opt/solidata.online/deploy/crontab.txt`.
+
 **Note :** L'entrypoint nginx génère des certificats auto-signés temporaires si les vrais sont illisibles, permettant à nginx de démarrer (HTTPS avec avertissement navigateur).
 
 ---
