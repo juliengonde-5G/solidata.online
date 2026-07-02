@@ -319,7 +319,9 @@ docker compose -f docker-compose.prod.yml exec nginx \
   openssl x509 -noout -dates -in /etc/letsencrypt/live/solidata.online-0001/fullchain.pem
 
 # 2. Forcer le renouvellement si le certificat sur disque est aussi expiré
-docker compose -f docker-compose.prod.yml run --rm certbot renew
+#    --entrypoint certbot est OBLIGATOIRE (sinon la boucle infinie du daemon
+#    ignore la commande et bloque sur sleep 12h)
+docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot certbot renew
 # (ajouter --force-renewal seulement si certbot répond « not yet due » alors que le cert est expiré)
 
 # 3. Re-copier + recharger nginx (sans coupure)
@@ -363,12 +365,18 @@ docker compose -f docker-compose.prod.yml run --rm --entrypoint sh certbot -c '
 '
 
 # 3. Vérifier : plus de parse failure
-docker compose -f docker-compose.prod.yml run --rm certbot renew
-docker compose -f docker-compose.prod.yml run --rm certbot certificates
+#    --entrypoint certbot évite le blocage sur la boucle infinie du daemon
+docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot certbot renew
+docker compose -f docker-compose.prod.yml run --rm --entrypoint certbot certbot certificates
 ```
 
 Ne jamais supprimer `solidata.online-0001.conf` ni le dossier `live/solidata.online-0001/` :
 c'est le lignage réel servi par nginx.
+
+> **Piège `docker compose run certbot` :** le service `certbot` a un entrypoint en
+> boucle infinie (daemon de renouvellement). Toute commande one-shot doit donc forcer
+> `--entrypoint certbot` (ou `--entrypoint sh` pour inspecter les fichiers), sinon la
+> commande passée est ignorée et le conteneur reste bloqué sur `sleep 12h`.
 
 **Note :** L'entrypoint nginx génère des certificats auto-signés temporaires si les vrais sont illisibles, permettant à nginx de démarrer (HTTPS avec avertissement navigateur).
 

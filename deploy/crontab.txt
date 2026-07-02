@@ -11,7 +11,10 @@
 
 # Renouvellement certificat SSL (2x par jour) + rechargement nginx
 # (sans le reload, nginx sert l'ancien certificat jusqu'à expiration)
-0 3,15 * * * docker compose -f /opt/solidata.online/docker-compose.prod.yml run --rm certbot renew --quiet >> /opt/solidata.online/logs/certbot.log 2>&1; bash /opt/solidata.online/deploy/scripts/reload-nginx-certs.sh >> /opt/solidata.online/logs/certbot.log 2>&1
+# --entrypoint certbot est OBLIGATOIRE : l'entrypoint par défaut du service
+# est une boucle infinie (daemon), sinon le `renew` est ignoré et le cron
+# reste bloqué sur un `sleep 12h`.
+0 3,15 * * * docker compose -f /opt/solidata.online/docker-compose.prod.yml run --rm --entrypoint certbot certbot renew --quiet >> /opt/solidata.online/logs/certbot.log 2>&1; bash /opt/solidata.online/deploy/scripts/reload-nginx-certs.sh >> /opt/solidata.online/logs/certbot.log 2>&1
 
 # Nettoyage Docker (images orphelines) chaque dimanche à 4h
 0 4 * * 0 docker image prune -f >> /opt/solidata.online/logs/docker-cleanup.log 2>&1
