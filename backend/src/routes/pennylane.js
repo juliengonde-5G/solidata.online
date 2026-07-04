@@ -606,7 +606,7 @@ router.post('/sync/customer-invoices', authorize('ADMIN', 'MANAGER'), async (req
                 [commandeId]
               );
               await client.query(
-                `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, motif)
+                `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, commentaire)
                  VALUES ($1, NULL, 'cloturee', 'Facture Pennylane rapprochée automatiquement')`,
                 [commandeId]
               );

@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const { monthBounds } = require('../utils/month-range');
 
 // ══════════════════════════════════════════
 // CONSTANTES
@@ -249,8 +250,7 @@ router.get('/daily-summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, re
 router.get('/monthly-summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
     const { month = new Date().toISOString().slice(0, 7) } = req.query;
-    const startDate = `${month}-01`;
-    const endDate = `${month}-31`;
+    const [startDate, endDate] = monthBounds(month);
 
     const result = await pool.query(`
       SELECT

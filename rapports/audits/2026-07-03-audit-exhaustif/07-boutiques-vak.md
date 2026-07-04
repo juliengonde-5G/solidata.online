@@ -53,13 +53,13 @@ Deux modules de maturité inégale. **Boutiques** : chaîne d'ingestion CSV Logi
 
 ### A1 — HIGH — Le webhook d'import e-mail des boutiques est inatteignable (401)
 - **Preuve** : `boutique-ventes.js:26` `router.use(authenticate)` s'applique à **toutes** les routes suivantes, dont `POST /webhook-email` (l.823) qui prétend pourtant « Authentifié par clé secrète (header X-Webhook-Secret), **sans JWT** » (l.807). `middleware/auth.js:14-31` exige un `Bearer` **sans aucune exception de chemin**. Le webhook n'est monté nulle part avant `authenticate` (index.js:249 monte le routeur entier ; `routes/webhooks.js` ne contient aucun handler boutique — vérifié). Contraste probant : le webhook VAK est, lui, monté **avant** `router.use(authenticate)` (`vak.js:74` vs `153`).
-- **Impact** : Power Automate (qui n'a pas de JWT) reçoit **401 avant même** la vérification `X-Webhook-Secret`. Le canal d'import « temps réel » documenté ne fonctionne pas. Aggravant : le commentaire scheduler (`scheduler.js:617`) pointe Power Automate vers `POST /api/boutique-ventes/webhook` — **chemin qui n'existe pas** (le vrai est `/webhook-email`). Seul le scan de dossier (`scanBoutiqueCSVFolders`) importe réellement, et uniquement si les fichiers atterrissent sur le **système de fichiers serveur** (`csv_folder_path`), pas par e-mail.
-- **Correctif** : monter `POST /webhook-email` **avant** `router.use(authenticate)` (comme VAK), ou l'extraire dans `routes/webhooks.js`. Corriger le chemin/commentaire scheduler.
+- **Impact** : Power Automate (qui n'a pas de JWT) reçoit **401 avant même** la vérification `X-Webhook-Secret`. Le canal d'import « temps réel » documenté ne fonctionne pas. **Aggravant UI** : la page d'import annonce en tête, en dur, que « Les CSV Logic'S sont reçus en temps réel via le webhook `POST /api/boutique-ventes/webhook-email` … Aucune intervention manuelle requise » (`BoutiquesImport.jsx:138-141`) et propose un bloc de dépannage entier (`:146-188`) qui coache le responsable à POSTer sur cette URL avec `X-Webhook-Secret` — **sans jamais évoquer le mur d'authentification** (l'auteur du guide n'a pas vu que la route est derrière `authenticate`). Le responsable croit donc l'import automatique en place alors qu'il échoue silencieusement en 401. Aggravant #2 : le commentaire scheduler (`scheduler.js:617`) pointe vers `POST /api/boutique-ventes/webhook` — **chemin qui n'existe même pas** (le vrai est `/webhook-email`). Seul le scan de dossier (`scanBoutiqueCSVFolders`) importe réellement, et uniquement si les fichiers atterrissent sur le **système de fichiers serveur** (`csv_folder_path`), pas par e-mail.
+- **Correctif** : monter `POST /webhook-email` **avant** `router.use(authenticate)` (comme VAK, `vak.js:74`), ou l'extraire dans `routes/webhooks.js`. Corriger le chemin/commentaire scheduler et le texte UI.
 
 ### A2 — HIGH — Aucun cloisonnement par boutique (fuite horizontale inter-boutiques)
 - **Preuve** : tous les routeurs boutique n'ont que `router.use(authenticate)` sans filtrage par propriétaire. `boutiques.js:13` (GET liste toutes) et `:38` (GET n'importe laquelle) ; `boutique-ventes.js:389,411,466,492,575,663,706,777` (analytics de **n'importe quel** `boutique_id` en query) ; `boutique-commandes.js:139` (liste), `:228` (POST crée pour n'importe quel `boutique_id` en body), `:378` (annuler) autorisent `RESP_BTQ` ; `boutique-objectifs.js:11,29`. La colonne `boutiques.responsable_id` (`init-db.js:3441`) existe mais **n'est jamais utilisée** pour restreindre les requêtes à `req.user`.
-- **Impact** : un `RESP_BTQ` de St-Sever peut lire tout le CA/tickets/objectifs de L'Hôpital via `?boutique_id=<autre>`, et **créer/annuler des commandes** sur une autre boutique. Confidentialité + intégrité opérationnelle. Pour un ERP multi-boutiques destiné à s'étendre, c'est une absence de cloisonnement locataire.
-- **Correctif** : middleware qui, si `req.user.role === 'RESP_BTQ'`, force `boutique_id ∈ {boutiques WHERE responsable_id = req.user.id}` (ou claim `boutique_id` sur le JWT) ; rejeter 403 sinon.
+- **Impact** : un `RESP_BTQ` de St-Sever peut lire tout le CA/tickets/objectifs de L'Hôpital via `?boutique_id=<autre>`, et **créer/annuler des commandes** sur une autre boutique. Confirmé côté UI : le formulaire de commande présente un `<select>` de **toutes** les boutiques (`BoutiquesCommandes.jsx:183`) et `canSend` inclut `RESP_BTQ` (`:119`) — rien n'empêche un responsable de commander au nom d'une autre boutique. Confidentialité + intégrité opérationnelle. Pour un ERP multi-boutiques destiné à s'étendre, c'est une absence de cloisonnement locataire.
+- **Correctif** : middleware qui, si `req.user.role === 'RESP_BTQ'`, force `boutique_id ∈ {boutiques WHERE responsable_id = req.user.id}` (ou claim `boutique_id` sur le JWT) ; rejeter 403 sinon. Côté UI, verrouiller le sélecteur de boutique sur celle du responsable.
 
 ### A3 — HIGH (conditionnel) — Fusion de tickets inter-jours au format 11 colonnes
 - **Preuve** : au format neuf, la clé de regroupement est `mk = T<num_ticket>` (`boutique-ventes.js:201`) **sans composante de date**, stockée dans la colonne `minute_key` (l.237). La table impose `UNIQUE(boutique_id, minute_key)` (`init-db.js:3496`) et l'UPSERT est **additif** (`ON CONFLICT ... nb_articles = ... + EXCLUDED.nb_articles`, l.239-243). Un fichier par boutique **par jour** est importé quotidiennement (batch distinct).
@@ -68,12 +68,12 @@ Deux modules de maturité inégale. **Boutiques** : chaîne d'ingestion CSV Logi
 
 ### A4 — MEDIUM — Objectif/budget HT comparé au réalisé TTC
 - **Preuve** : objectifs stockés en **HT** (`ca_objectif_ht`, renommé depuis `ca_objectif_ttc` par migration `init-db.js:3676-3689`). Mais `boutiques.js:182-183` : `ca_total_realise = Σ ca_ttc` vs `ca_total_objectif = Σ ca_objectif_ht`. `boutique-objectifs.js:36` (objectif HT) comparé l.46 à `SUM(total_ttc)` (réalisé TTC). Idem `panier_moyen_objectif` vs panier TTC (l.49).
-- **Impact** : le « % d'atteinte » mélange HT et TTC → biais systématique de l'ordre du taux de TVA. Un responsable croit atteindre l'objectif alors qu'il manque la marge de TVA (ou l'inverse selon la saisie).
-- **Correctif** : comparer à grandeurs homogènes (HT vs HT ou TTC vs TTC) ; expliciter l'unité dans l'UI.
+- **Impact** : le « % d'atteinte » mélange HT et TTC → biais systématique de l'ordre du taux de TVA. Confirmé UI : `BoutiquesObjectifs.jsx:139` intitule la colonne « CA objectif HT » et l.147-149 calcule `pct = ca_ttc_réalisé / objectif_HT × 100` — l'atteinte est littéralement du TTC-sur-HT (surévaluée). **Aggravant de libellé** : le dashboard affiche une carte titrée « **CA HT du jour** » dont la valeur est en réalité `kpis.ca_ttc` (`BoutiquesDashboard.jsx:258`), idem « CA HT réalisé » = TTC (`:377`). Le responsable lit un montant TTC étiqueté « HT » et le compare à un objectif réellement HT.
+- **Correctif** : comparer à grandeurs homogènes (HT vs HT ou TTC vs TTC) ; corriger les titres de cartes (« CA HT » qui affiche du TTC) ; expliciter l'unité dans l'UI.
 
 ### A5 — MEDIUM — « Panier moyen » calculé de trois façons différentes
 - **Preuve** : `boutique-ventes.js:554` `/analytics/panier-moyen` = `AVG(total_ttc)` (TTC) ; `:623` `/analytics/kpis` = `AVG(total_ht)` (HT) ; `:451` `/analytics/monthly` = `SUM(total_ht)/COUNT(tickets)` (HT). Le glossaire CLAUDE.md définit panier moyen = **CA TTC / tickets**.
-- **Impact** : selon la carte/vue, le panier moyen affiché diffère (écart = taux de TVA) → incohérence visible pour l'utilisateur.
+- **Impact** : selon la carte/vue, le panier moyen affiché diffère (écart = taux de TVA) → incohérence visible pour l'utilisateur. Le dashboard affiche `kpis.panier_moyen` (HT, via `/kpis`) sur une carte simplement titrée « Panier moyen » (`BoutiquesDashboard.jsx:260,385`), alors que le glossaire le définit en TTC.
 - **Correctif** : une seule définition (TTC conforme au glossaire), factorisée.
 
 ### A6 — MEDIUM — Analyse horaire/heatmap en UTC, désalignée de la météo (Europe/Paris)
@@ -130,10 +130,14 @@ Deux modules de maturité inégale. **Boutiques** : chaîne d'ingestion CSV Logi
 - **Preuve** : `boutique-commandes.js:335-353` committe les poids ajustés dans une transaction, **puis** `checkAndTransition` (l.354) ouvre une **autre** connexion/transaction. Si la transition échoue (état invalide), les poids sont déjà persistés mais le statut reste.
 - **Correctif** : réaliser l'ajustement et la transition dans la même transaction.
 
-### A18 — LOW — « Évolution N-1 » boutiques = période adjacente, pas année précédente
-- **Preuve** : `boutique-ventes.js:713-723` calcule la période précédente **immédiatement adjacente** de même durée (`prevTo = date_from - 1j`). CLAUDE.md 1.4.1 parle de « période équivalente N-1 ». VAK, lui, fait bien même-mois-an-1 (`vak.js:383-397`).
-- **Impact** : si l'UI intitule ce delta « vs N-1 (année précédente) », il est faux (c'est « vs période précédente »). À vérifier côté front (§4).
-- **Correctif** : aligner le libellé UI sur la sémantique réelle, ou implémenter le vrai N-1.
+### A18 — NOTE DOC (pas un bug) — « N-1 » de CLAUDE.md = en fait « période précédente »
+- **Preuve** : `boutique-ventes.js:713-723` compare à la période **immédiatement adjacente** de même durée (`prevTo = date_from - 1j`). CLAUDE.md 1.4.1 parle de « période équivalente N-1 », formulation trompeuse. **Le front, lui, est correct** : il présente ces deltas comme « vs J-1 » (`BoutiquesDashboard.jsx:256`) et « vs M-1 » (MonthView) — cohérent avec ce que calcule l'endpoint. VAK, de son côté, fait un vrai même-mois-an-1 (`vak.js:383-397`).
+- **Conclusion** : aucun bug fonctionnel ; corriger uniquement le mot « N-1 » dans CLAUDE.md (→ « période précédente ») pour les boutiques.
+
+### A19 — MEDIUM — Robustesse de l'écran TV VakLive (token / Socket.IO / veille)
+- **Preuve** : `VakLive.jsx` interroge `/vak/live/current` (auth ADMIN/MANAGER, `vak.js:629`) toutes les 60 s (`:67`) et ouvre un socket avec `localStorage.getItem('accessToken')` (`:95-97`). L'access token expire à 8 h (CLAUDE.md §2). `connectSocket` a un garde `if (socketRef.current) return` (`:94`) : le socket n'est **jamais recréé avec un token rafraîchi**. Le `catch` de `loadCurrent` se contente d'un `console.error` (`:82`), laissant les compteurs figés à l'écran.
+- **Impact** : sur un écran mural pendant une VAK de 2-3 jours, à l'expiration du token (8 h), `/vak/live/current` renvoie 401 → l'écran **se fige silencieusement** sur les dernières valeurs (pas d'erreur visible), et le live socket peut rester authentifié avec un token périmé. Va à l'encontre de la promesse « écran TV kiosk robuste ». Corollaire timezone (A6) : `ca_jour` repart de 0 quand l'UTC bascule de jour (~22 h Paris l'été) alors que la VAK peut encore tourner.
+- **Correctif** : rafraîchissement silencieux du token (interceptor déjà présent) + recréation du socket sur expiration ; bandeau « données périmées » si le dernier fetch échoue ; borne `ca_jour` sur le fuseau Europe/Paris.
 
 ---
 
@@ -147,15 +151,13 @@ Deux modules de maturité inégale. **Boutiques** : chaîne d'ingestion CSV Logi
 
 ---
 
-## 4. SIMPLICITÉ D'USAGE (responsable boutique peu à l'aise) — [à enrichir après lecture frontend]
+## 4. SIMPLICITÉ D'USAGE (responsable boutique peu à l'aise)
 
-- **Importer le CSV du jour** : le webhook e-mail « zéro clic » promis est mort (A1) ; reste soit le scan de dossier serveur (invisible pour le responsable), soit l'upload manuel (`BoutiquesImport.jsx`). Les messages d'erreur d'import (doublon date/hash) sont renvoyés en clair mais leur lisibilité UI reste à vérifier. Un batch coincé en `en_cours` (A11) bloque silencieusement les ré-imports.
-- **Lire le dashboard** : 8 KPI, mais panier moyen incohérent (A5) et % objectif biaisé (A4) → risque de perte de confiance. Heatmap décalée (A6).
-- **Passer une commande** : state machine claire (brouillon→envoyée→ajustée→préparation→expédiée), rôles corrects — a priori le point le plus abouti côté responsable.
-- **Suivre l'objectif** : dépend de A4.
-- **Écran TV VakLive** : `/live/current` exige un JWT ADMIN/MANAGER (`vak.js:629`) → sur un mur, l'expiration du token (8 h) fige l'écran ; robustesse Socket.IO (reconnexion, veille) à vérifier dans `VakLive.jsx`.
-
-*(Frictions UI détaillées + vérification libellés/erreurs : section complétée après lecture des pages.)*
+- **Importer le CSV du jour** : bon point — `BoutiquesImport.jsx` gère les cas doublon proprement : hash identique → toast d'avertissement (`:62-63`), chevauchement de dates → boîte de dialogue de confirmation lisible avec le fichier/plage en conflit et bouton « Forcer l'import » (`:64-79`), succès → toast « X lignes, Y tickets, Z € » (`:84-85`). L'historique des imports est clair (statut coloré, période, CA). **Mauvais points** : (1) la page **ment** au responsable en affirmant que l'import e-mail automatique fonctionne (A1) ; (2) le texte du format attendu documente l'**ancien** format 10 colonnes (`:218`, sans `Num_Ticket`) alors que le format courant est à 11 colonnes ; (3) un batch bloqué en `en_cours` (A11) empêche silencieusement le ré-import sans message explicatif ; (4) forcer l'import **ajoute** les ventes en doublon (le message le dit, mais l'utilisateur ne mesure pas l'impact analytique).
+- **Lire le dashboard** : 3 onglets jour/mois/année, cartes KPI avec deltas et badges — ergonomie soignée. Mais la confiance est minée par les libellés faux : carte « CA HT du jour » qui affiche du TTC (A4), panier moyen HT non signalé (A5), objectif % surévalué (A4), heatmap d'affluence décalée d'1-2 h (A6). Pour un public peu à l'aise, ces incohérences chiffrées sont difficiles à diagnostiquer et érodent la crédibilité de l'outil.
+- **Passer une commande** : point le plus abouti — state machine claire (brouillon→envoyée→ajustée→préparation→expédiée→annulée), boutons conditionnés au rôle (`BoutiquesCommandes.jsx:118-119`), historique avec auteur. Réserve : le sélecteur de boutique n'est pas cloisonné (A2).
+- **Suivre l'objectif** : saisie 12 mois repliable, graphe objectif/réalisé — simple ; faussé par A4.
+- **Écran TV VakLive** : kiosk plein écran soigné (compteurs animés easeOutCubic, jauges, ticker, écran « Prochaine VAK » en repli) mais robustesse insuffisante pour un mur non surveillé (A19 : figement silencieux à l'expiration du token, pas de bandeau d'erreur).
 
 ---
 
@@ -189,4 +191,4 @@ Deux modules de maturité inégale. **Boutiques** : chaîne d'ingestion CSV Logi
 
 ---
 
-*Rapport 07 — première version (backend complet). Enrichissement frontend en cours.*
+*Rapport 07 — version consolidée (backend + services + scheduler + DDL + frontend Boutiques/VAK). Toutes les affirmations sont référencées `fichier:ligne`. Aucun fichier de code modifié.*

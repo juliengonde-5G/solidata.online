@@ -9,7 +9,7 @@ describe('state-machine — canTransition', () => {
   test('refuse une transition vers un état inconnu', () => {
     const r = canTransition({
       machine: 'commande_exutoire',
-      fromState: 'brouillon',
+      fromState: 'en_attente',
       toState: 'etat_imaginaire',
       userRole: 'ADMIN',
     });
@@ -20,7 +20,7 @@ describe('state-machine — canTransition', () => {
   test('refuse une transition non autorisée par les règles', () => {
     const r = canTransition({
       machine: 'commande_exutoire',
-      fromState: 'brouillon',
+      fromState: 'en_attente',
       toState: 'expediee',  // saute des étapes
       userRole: 'ADMIN',
     });
@@ -31,7 +31,7 @@ describe('state-machine — canTransition', () => {
   test('accepte une transition valide pour un rôle autorisé', () => {
     const r = canTransition({
       machine: 'commande_exutoire',
-      fromState: 'brouillon',
+      fromState: 'en_attente',
       toState: 'confirmee',
       userRole: 'ADMIN',
     });
@@ -41,7 +41,7 @@ describe('state-machine — canTransition', () => {
   test('refuse une transition pour un rôle non autorisé', () => {
     const r = canTransition({
       machine: 'commande_exutoire',
-      fromState: 'brouillon',
+      fromState: 'en_attente',
       toState: 'confirmee',
       userRole: 'COLLABORATEUR',
     });
@@ -64,7 +64,7 @@ describe('state-machine — canTransition', () => {
     const r = canTransition({
       machine: 'commande_exutoire',
       fromState: null,
-      toState: 'brouillon',
+      toState: 'en_attente',
       userRole: 'ADMIN',
     });
     expect(r.ok).toBe(true);
@@ -121,7 +121,7 @@ describe('state-machine — normalizeState (alias rétrocompat)', () => {
 
 describe('state-machine — getAvailableTransitions', () => {
   test('retourne les transitions sortantes pour un état donné', () => {
-    const list = getAvailableTransitions('commande_exutoire', 'brouillon', 'ADMIN');
+    const list = getAvailableTransitions('commande_exutoire', 'en_attente', 'ADMIN');
     expect(list).toContain('confirmee');
     expect(list).toContain('annulee');
     expect(list).not.toContain('expediee');
@@ -141,7 +141,7 @@ describe('state-machine — getAvailableTransitions', () => {
   });
 
   test('retourne toutes les transitions si pas de userRole fourni', () => {
-    const list = getAvailableTransitions('commande_exutoire', 'brouillon');
+    const list = getAvailableTransitions('commande_exutoire', 'en_attente');
     expect(list).toContain('confirmee');
     expect(list).toContain('annulee');
   });
