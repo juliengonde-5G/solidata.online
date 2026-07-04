@@ -256,7 +256,17 @@ router.get('/batches/:id', async (req, res) => {
       exec.outputs = outputs.rows;
     }
 
-    res.json({ ...batch.rows[0], executions: executions.rows });
+    // Traçabilité aval (R6) : cartons étiquetés rattachés à ce lot, avec leur
+    // sortie de stock (statut + type de commande + date). Rend visible la
+    // chaîne lot → carton → sortie.
+    const cartons = await pool.query(
+      `SELECT id, code_barre, produit, categorie_eco_org, gamme, poids_kg,
+              status, sortie_commande_type, date_sortie, date_fabrication
+       FROM produits_finis WHERE batch_id = $1 ORDER BY date_fabrication DESC`,
+      [req.params.id]
+    );
+
+    res.json({ ...batch.rows[0], executions: executions.rows, cartons: cartons.rows });
   } catch (err) {
     console.error('[TRI] Erreur détail lot :', err);
     res.status(500).json({ error: 'Erreur serveur' });

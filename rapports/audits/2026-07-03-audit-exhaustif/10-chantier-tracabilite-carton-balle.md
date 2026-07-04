@@ -27,8 +27,13 @@
   déjà disponible pour le sélecteur. Tests Jest.
 - **I2 — UI Lots de tri** *(frontend)* : sur `ChaineTri`, un onglet « Lots » (créer un lot depuis une
   sortie balance atelier, démarrer, voir l'avancement). Sélecteur de lot dans `EtiquetteGenerer`.
-- **I3 — Lien colisage → expédition (R7)** *(backend + UI)* : endpoint d'association colisages↔expédition
-  qui écrit `colisages.expedition_id` + bascule `produits_finis.status`. Vue colisage.
+- **I3 — Visibilité de la chaîne lot → carton → sortie** *(backend + UI)* — **réorienté** : la couche
+  `colisages` (tri.js) est un modèle de conditionnement **inutilisé** ; la vraie sortie carton se fait par
+  scan douchette (`/etiquettes/sortie-scan` → `produits_finis.status`/`sortie_commande_type`/`date_sortie`).
+  Plutôt que de câbler `colisages.expedition_id` (couche morte), on rend la chaîne réelle **interrogeable** :
+  `GET /tri/batches/:id` renvoie les cartons rattachés avec leur sortie, et la vue « Lots de tri » affiche
+  une **fiche traçabilité** (lot → cartons → destination/date). Le lien colisage↔expédition reste un
+  non-objectif tant que le workflow de colisage n'est pas adopté.
 - **I4 — Alimentation stock trié (R2/R5)** *(backend)* : à la complétion d'une exécution, reverser les
   `operation_outputs` en `stock_movements` (entrée par catégorie). Nécessite de résoudre au passage
   le seed `matieres` (bug A1) — à cadrer.
@@ -39,6 +44,6 @@
 
 - [x] I1 — Lien carton → lot (backend + tests)
 - [x] I2 — UI Lots de tri (ChaineTri onglet « Lots de tri ») + sélecteur de lot dans EtiquetteGenerer + endpoint `GET /etiquettes/lots-actifs` (COLLABORATEUR)
-- [ ] I3 — Lien colisage → expédition
+- [x] I3 — Fiche traçabilité lot → cartons → sortie (`GET /tri/batches/:id` enrichi + panneau ChaineTri) ; couche colisage laissée en non-objectif
 - [ ] I4 — Alimentation stock trié
 - [ ] I5 — Réparation vues Refashion

@@ -31,6 +31,7 @@ export default function ChaineTri() {
   const [lotForm, setLotForm] = useState({ chaine_id: '', poids_initial_kg: '' });
   const [lotMsg, setLotMsg] = useState(null);
   const [lotBusy, setLotBusy] = useState(false);
+  const [lotDetail, setLotDetail] = useState(null); // lot + cartons rattachés
 
   useEffect(() => { loadData(); }, []);
   useEffect(() => { if (vue === 'production') loadProdData(); }, [vue, prodMonth]);
@@ -91,6 +92,16 @@ export default function ChaineTri() {
       loadLots();
     } catch (err) {
       setLotMsg({ type: 'error', text: err.response?.data?.error || 'Démarrage impossible' });
+    }
+  };
+
+  const openLotDetail = async (id) => {
+    setLotDetail(null);
+    try {
+      const res = await api.get(`/tri/batches/${id}`);
+      setLotDetail(res.data);
+    } catch (err) {
+      setLotMsg({ type: 'error', text: err.response?.data?.error || 'Détail du lot indisponible' });
     }
   };
 
@@ -428,9 +439,12 @@ export default function ChaineTri() {
                 { key: 'nb_operations', label: 'Opérations', align: 'center', render: (l) => l.nb_operations || 0 },
                 { key: 'status', label: 'Statut', align: 'center', render: (l) => <StatusBadge status={l.status === 'en_cours' ? 'in_progress' : l.status === 'termine' ? 'completed' : l.status === 'annule' ? 'cancelled' : 'pending'} size="sm" /> },
                 { key: 'actions', label: '', align: 'right', render: (l) => (
-                  l.status === 'en_attente'
-                    ? <button onClick={() => startLot(l.id)} className="text-primary text-sm font-medium hover:underline">Démarrer</button>
-                    : <span className="text-xs text-gray-300">—</span>
+                  <div className="flex items-center justify-end gap-3">
+                    {l.status === 'en_attente' && (
+                      <button onClick={() => startLot(l.id)} className="text-primary text-sm font-medium hover:underline">Démarrer</button>
+                    )}
+                    <button onClick={() => openLotDetail(l.id)} className="text-slate-500 text-sm font-medium hover:underline">Traçabilité</button>
+                  </div>
                 )},
               ];
               return (
@@ -444,6 +458,57 @@ export default function ChaineTri() {
                 />
               );
             })()}
+
+            {/* Détail lot : cartons rattachés + leur sortie (chaîne lot → carton → sortie) */}
+            {lotDetail && (
+              <div className="card-modern p-6 mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-slate-800">
+                    Traçabilité du lot <span className="font-mono">{lotDetail.code}</span>
+                  </h3>
+                  <button onClick={() => setLotDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm">Fermer</button>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5 text-sm">
+                  <div><span className="text-gray-500">Chaîne</span><p className="font-medium">{lotDetail.chaine_nom || '—'}</p></div>
+                  <div><span className="text-gray-500">Poids initial</span><p className="font-medium">{(lotDetail.poids_initial_kg || 0).toLocaleString('fr-FR')} kg</p></div>
+                  <div><span className="text-gray-500">Cartons étiquetés</span><p className="font-medium">{(lotDetail.cartons || []).length}</p></div>
+                  <div><span className="text-gray-500">Cartons sortis</span><p className="font-medium">{(lotDetail.cartons || []).filter(c => c.status !== 'en_stock').length}</p></div>
+                </div>
+                <h4 className="text-sm font-semibold text-slate-600 mb-2">Cartons rattachés</h4>
+                {(lotDetail.cartons || []).length === 0 ? (
+                  <p className="text-sm text-gray-400 py-4">Aucun carton étiqueté sur ce lot pour l'instant. Sélectionne ce lot sur le poste d'étiquetage pour les rattacher.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b">
+                          <th className="py-2 pr-3">Code-barre</th>
+                          <th className="py-2 pr-3">Produit</th>
+                          <th className="py-2 pr-3 text-right">Poids</th>
+                          <th className="py-2 pr-3 text-center">Statut</th>
+                          <th className="py-2 pr-3">Sortie</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lotDetail.cartons.map((c) => (
+                          <tr key={c.id} className="border-b border-slate-100">
+                            <td className="py-2 pr-3 font-mono">{c.code_barre}</td>
+                            <td className="py-2 pr-3">{c.produit}{c.gamme ? ` · ${c.gamme}` : ''}</td>
+                            <td className="py-2 pr-3 text-right">{(c.poids_kg || 0).toLocaleString('fr-FR')} kg</td>
+                            <td className="py-2 pr-3 text-center">
+                              <StatusBadge status={c.status === 'en_stock' ? 'active' : c.status === 'vendu' ? 'completed' : 'shipped'} size="sm" label={c.status} />
+                            </td>
+                            <td className="py-2 pr-3 text-gray-500">
+                              {c.date_sortie ? `${c.sortie_commande_type || ''} · ${new Date(c.date_sortie).toLocaleDateString('fr-FR')}` : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
