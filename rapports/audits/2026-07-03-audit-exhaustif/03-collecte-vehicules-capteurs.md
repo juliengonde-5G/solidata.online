@@ -75,7 +75,7 @@ Le module collecte est **le plus riche de l'ERP** (18 sous-routeurs tours/, IA p
 **A7 — Mobile offline : scans QR et GPS jamais synchronisés, deux endpoints de sync inexistants**
 - `mobile/src/services/sync.js:89` poste `/tours/${tourId}/scan` — **n'existe pas** (seul `/:id/scan-public`, tours/index.js:227) → 404 → politique « 4xx = suppression » (:97-100) purge la file.
 - `sync.js:187` poste `/tours/gps-batch` — **n'existe nulle part** dans le backend (grep global) → 404 → batch supprimé (:200-202).
-- Aggravant : **aucun producteur** — `addPendingScan` (db.js:151) n'est appelé par personne ; IdentifyCav.jsx:85-91 stocke le scan en localStorage sans jamais POSTer `/scan-public` (ni online ni offline) ; rien n'écrit dans `gpsBuffer`.
+- Aggravant : **aucun producteur** — `addPendingScan` (db.js:151) n'est appelé par personne ; IdentifyCav.jsx:85-91 stocke le scan en localStorage sans jamais POSTer (ni online ni offline) ; rien n'écrit dans `gpsBuffer`. Ironie : le « bon » endpoint existe même en double — `POST /api/cav/scan-qr` (authentifié, cav.js:275-321) fait tout correctement (résolution par `qr_code_data`, insert `cav_qr_scans` avec GPS, marquage `tour_cav.qr_scanned`) et le mobile possède le JWT pour l'appeler.
 - **Impact** : la table `cav_qr_scans` n'est jamais alimentée par le flux chauffeur (traçabilité scan morte, l'historique de scans d'AdminCAV reste vide) ; le GPS n'existe qu'en temps réel socket — toute zone blanche = trou définitif dans `gps_positions` (temps de collecte appris `cav_collection_times` amputés).
 - **Correctif** : créer `POST /api/tours/:id/scan-public` batch + `POST /api/tours/gps-batch-public` ; appeler `addPendingScan`/buffer GPS dans IdentifyCav/TourMap ; en attendant, corriger les URLs de sync.js.
 
@@ -86,6 +86,7 @@ Le module collecte est **le plus riche de l'ERP** (18 sous-routeurs tours/, IA p
 
 **A9 — Colonnes fantômes silencieusement absorbées par des catch**
 - `routes/tours/stats.js:84` : `c.nom as cav_nom` — la table `cav` a `name` (init-db.js:357) → **`GET /reporting/anomalies` = 500** (le propre outil de détection d'anomalies est cassé).
+- `routes/tours/stats.js:144,154-155` : `c.nom`, `c.type`, `c.is_active` — aucune de ces 3 colonnes n'existe sur `cav` (c'est `name` et `status`) → **`GET /reporting/cav-analytics` = 500** également.
 - `services/predictive-ai.js:59-61` : `t.type`, `t.start_time`, `t.end_time` — inexistants sur `tours` (c'est `mode`, `started_at`, `completed_at`) → `GET /predictive/ia/synthese` et `/predictive/ia/ajustements` (stats.js:461-489, page AdminPredictive) = 500.
 - `routes/tours/live-summary.js:257-263` : `SELECT type, description, due_at, due_km FROM vehicle_maintenance_alerts WHERE status='pending'` — la table réelle a `alert_date, alerts JSONB, is_resolved` (init-db.js:2657-2667) → erreur avalée par `catch(_){}` (:272) → **les alertes maintenance ne remontent jamais** dans la supervision live.
 - **Correctif** : corriger les 3 requêtes ; règle de revue : interdire `catch(_) {}` sur les requêtes SQL (logger au minimum).
@@ -97,7 +98,7 @@ Le module collecte est **le plus riche de l'ERP** (18 sous-routeurs tours/, IA p
 
 **A11 — Config du moteur prédictif volatile et éclatée**
 - Les facteurs saisonniers/jours/fériés/vacances/scoring sont des `let` module (predictions.js:11-95) mutés par `PUT /predictive-config` (crud.js:70-102) — **perdus à chaque redéploiement/restart** (aucune persistance settings/DB).
-- Jours fériés et vacances scolaires **hardcodés jusqu'à l'été 2027** (predictions.js:20-64) : bombe à retardement silencieuse (le job annuel `syncAllHolidays`, scheduler.js:663-672, existe mais n'écrit pas dans ces variables — à confirmer, service holidays.js).
+- Jours fériés et vacances scolaires **hardcodés jusqu'à l'été 2027** (predictions.js:20-64) : bombe à retardement silencieuse. Le job annuel `syncAllHolidays` (scheduler.js:663-672) alimente bien les tables `jours_feries`/`vacances_scolaires` depuis api.gouv.fr (holidays.js:27-45) — **mais le moteur ne les lit jamais** : leur seul consommateur est un compteur d'affichage (events-auto.js:783-789). `isHoliday()` et `getSchoolVacationStatus()` continuent de lire les tableaux en dur.
 - Le recalcul mensuel `recalcSeasonalFactors` (predictive-ai.js:408-472, cron 1ᵉʳ du mois) écrit `predictive_seasonal_factors`… **que le moteur ne lit jamais** (seul un `MAX(computed_at)` d'affichage, events-auto.js:785).
 - `/cav/map` et `/cav/fill-rate` utilisent un **troisième** jeu de facteurs saisonniers hardcodé différent (cav.js:78,141 : `[0.8…1.2]` vs predictions.js:11 `[0.88…0.75]`) — le réglage AdminPredictive n'a aucun effet sur les cartes. S'ajoute au bug front « Appliquer sans effet » (annexe 03b §1) : la boucle de calibration est cassée à 3 étages.
 - **Correctif** : persister la config dans `settings` (pattern déjà utilisé pour SumUp), charger au boot, faire lire `predictive_seasonal_factors` par predictions.js, factoriser les facteurs dans un module unique.
@@ -115,6 +116,7 @@ Le module collecte est **le plus riche de l'ERP** (18 sous-routeurs tours/, IA p
 - **A20** Créations multi-INSERT sans transaction : tournées (crud.js:182-196, :222-239, :260-272, :294-308), `applyReoptimization` (reoptimize-service.js:208-213) → tournées orphelines/positions incohérentes possibles en cas d'échec partiel.
 - **A21** `GET /:id/live-summary` charge **toutes** les positions GPS de la tournée sans LIMIT (live-summary.js:109-114 — le commentaire dit « 200 dernières ») : ~2 900 lignes/8 h re-parcourues à chaque poll du détail tournée.
 - **A22** `getContextForDate` (context.js:43) appelle Open-Meteo `forecast` pour toute date absente du cache : pour une date passée >7 j l'API renvoie vide → facteurs neutres silencieux (les analyses rétrospectives croient à une météo neutre).
+- **A23** Échéancier maintenance : le rapprochement opération↔événement se fait par `description.toLowerCase().includes(premier_mot_du_label)` (vehicles.js:1018-1019, :1046-1047) — « Filtre à air » et « Filtre habitacle » se confondent sur « filtre » → statuts `ok/dépassé` potentiellement faux. Prévoir un `item_code` sur `vehicle_events`. (Les profils constructeur hardcodés subsistent en fallback :399, `profile_source` le signale honnêtement :974.)
 
 ---
 

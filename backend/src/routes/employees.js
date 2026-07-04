@@ -7,6 +7,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { monthBounds } = require('../utils/month-range');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const { imageFilter } = require('../utils/upload-filters');
 
@@ -178,8 +179,9 @@ router.get('/schedule/planning', authorize('ADMIN', 'RH', 'MANAGER'), async (req
     const params = [];
 
     if (month) {
-      params.push(month + '-01');
-      params.push(month + '-31');
+      const [mStart, mEnd] = monthBounds(month);
+      params.push(mStart);
+      params.push(mEnd);
       query += ` AND s.date BETWEEN $${params.length - 1} AND $${params.length}`;
     }
     if (team_id) { params.push(team_id); query += ` AND e.team_id = $${params.length}`; }
@@ -300,8 +302,9 @@ router.get('/:id/hours', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORATEUR'), a
       WHERE wh.employee_id = $1`;
     const params = [req.params.id];
     if (month && /^\d{4}-\d{2}$/.test(month)) {
-      params.push(month + '-01');
-      params.push(month + '-31');
+      const [mStart, mEnd] = monthBounds(month);
+      params.push(mStart);
+      params.push(mEnd);
       query += ` AND wh.date BETWEEN $${params.length - 1} AND $${params.length}`;
     }
     query += ' ORDER BY wh.date DESC';
@@ -330,7 +333,7 @@ router.get('/:id/hours/summary', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORAT
          COUNT(CASE WHEN type = 'holiday' THEN 1 END)::int AS holiday_days
        FROM work_hours
        WHERE employee_id = $1 AND date BETWEEN $2 AND $3`,
-      [req.params.id, month + '-01', month + '-31']
+      [req.params.id, ...monthBounds(month)]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -400,8 +403,9 @@ router.get('/work-hours/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
     const params = [];
 
     if (month) {
-      params.push(month + '-01');
-      params.push(month + '-31');
+      const [mStart, mEnd] = monthBounds(month);
+      params.push(mStart);
+      params.push(mEnd);
       query += ` AND wh.date BETWEEN $${params.length - 1} AND $${params.length}`;
     }
     if (employee_id) { params.push(employee_id); query += ` AND wh.employee_id = $${params.length}`; }
@@ -480,7 +484,7 @@ router.get('/work-hours/summary', authorize('ADMIN', 'RH', 'MANAGER'), async (re
        WHERE e.is_active = true
        GROUP BY e.id, e.first_name, e.last_name, e.weekly_hours, e.team_id, t.name
        ORDER BY e.last_name`,
-      [month + '-01', month + '-31']
+      monthBounds(month)
     );
 
     res.json(result.rows);

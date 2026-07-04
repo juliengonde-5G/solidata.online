@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const { monthBounds } = require('../utils/month-range');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 router.use(autoLogActivity('expedition'));
@@ -95,7 +96,7 @@ router.get('/summary', async (req, res) => {
       WHERE exp.date BETWEEN $1 AND $2
       GROUP BY ex.nom, cs.nom, cs.famille
       ORDER BY total_kg DESC
-    `, [month + '-01', month + '-31']);
+    `, monthBounds(month));
 
     res.json(result.rows);
   } catch (err) {

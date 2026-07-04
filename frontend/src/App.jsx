@@ -136,7 +136,7 @@ function App() {
               <Route path="/admin/vak/sumup-config" element={<ProtectedRoute roles={['ADMIN']}><VakSumupConfig /></ProtectedRoute>} />
 
               {/* Recrutement */}
-              <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Candidates /></ProtectedRoute>} />
+              <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Candidates /></ProtectedRoute>} />
               <Route path="/recruitment-plan" element={<ProtectedRoute roles={['ADMIN', 'RH']}><RecruitmentPlan /></ProtectedRoute>} />
               <Route path="/pcm" element={<ProtectedRoute roles={['ADMIN', 'RH']}><PersonalityMatrix /></ProtectedRoute>} />
 

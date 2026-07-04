@@ -337,7 +337,7 @@ L'ESPR imposera à l'horizon 2027-2030 un DPP textile (composition, recyclabilit
 
 **ChaineTri — vitrine.** Lecture seule pour l'encadrement ; convient. Mais c'est le SEUL écran « tri » : l'opérateur de chaîne n'a AUCUN écran d'exécution (pas de saisie de sortie par poste, pas de lot) — cohérent avec R4.
 
-**Stock / Inventaire (Stock.jsx) — 3/10.** Formulaire cassé (A1) avec échec silencieux ; inventaire : table dense, saisie au clavier, pas de mode tactile, théorique faux (A6). Réservé de fait à l'admin.
+**Stock / Inventaire (Stock.jsx) — 3/10.** Formulaire cassé (A1) avec échec silencieux (`console.error`, `Stock.jsx:61`) ; inventaire : table dense, saisie au clavier, pas de mode tactile, théorique faux (A6). Réservé de fait à l'admin. À noter le contraste : `InventaireOriginal.jsx:98-105` et `AdminStockOriginal.jsx:104-108` affichent, eux, de vrais messages succès/erreur (`setMessage type success/error`) — le pattern existe dans le code, Stock.jsx ne l'applique simplement pas.
 
 **Production (feuille) — 5/10 pour un manager, inadapté à un opérateur** (nombreux champs, vocabulaire gestionnaire). La bascule automatique du total balance est une bonne idée mais son caractère « snapshot au clic » n'est pas signalé à l'utilisateur (R3).
 

@@ -13,8 +13,7 @@ router.get('/active-summary', async (req, res) => {
     const toursRes = await pool.query(
       `SELECT t.id, t.date, t.status, t.collection_type,
               t.started_at, t.completed_at,
-              t.estimated_duration_min, t.distance_km,
-              t.osrm_geometry,
+              t.estimated_duration_min, t.estimated_distance_km AS distance_km,
               v.id AS vehicle_id, v.registration, v.name AS vehicle_name,
               v.max_capacity_kg,
               CONCAT(e.first_name, ' ', e.last_name) AS driver_name,
@@ -47,7 +46,7 @@ router.get('/active-summary', async (req, res) => {
     // 2. Points (CAV ou association points selon collection_type)
     const cavPointsRes = await pool.query(
       `SELECT tc.tour_id, tc.id AS point_id, tc.cav_id, tc.position, tc.status,
-              tc.fill_level, tc.collected_at, tc.weight_kg,
+              tc.fill_level, tc.collected_at, NULL::double precision AS weight_kg,
               tc.planned_passage_time,
               c.name AS point_name, c.address, c.commune, c.latitude, c.longitude
        FROM tour_cav tc
@@ -86,7 +85,7 @@ router.get('/active-summary', async (req, res) => {
 
     // 4. Pesées du jour par tournée
     const weightsRes = await pool.query(
-      `SELECT tour_id, COALESCE(SUM(net_weight_kg), 0) AS total_weight_kg
+      `SELECT tour_id, COALESCE(SUM(weight_kg), 0) AS total_weight_kg
        FROM tour_weights
        WHERE tour_id = ANY($1::int[])
        GROUP BY tour_id`,

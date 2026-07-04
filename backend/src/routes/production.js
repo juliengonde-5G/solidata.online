@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const { monthBounds } = require('../utils/month-range');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 router.use(autoLogActivity('production'));
@@ -21,8 +22,9 @@ router.get('/', async (req, res) => {
     const params = [];
 
     if (month) {
-      params.push(month + '-01');
-      params.push(month + '-31');
+      const [mStart, mEnd] = monthBounds(month);
+      params.push(mStart);
+      params.push(mEnd);
       query += ` AND date BETWEEN $${params.length - 1} AND $${params.length}`;
     }
     if (date_from) { params.push(date_from); query += ` AND date >= $${params.length}`; }
@@ -54,11 +56,11 @@ router.get('/dashboard', async (req, res) => {
         ROUND(AVG(entree_recyclage_r3_kg)::numeric, 0) as moyenne_entree_r3
       FROM production_daily
       WHERE date BETWEEN $1 AND $2
-    `, [month + '-01', month + '-31']);
+    `, monthBounds(month));
 
     const daily = await pool.query(
       'SELECT date, entree_ligne_kg, objectif_entree_ligne_kg, entree_recyclage_r3_kg, objectif_entree_r3_kg, total_jour_t, productivite_kg_per, effectif_reel FROM production_daily WHERE date BETWEEN $1 AND $2 ORDER BY date',
-      [month + '-01', month + '-31']
+      monthBounds(month)
     );
 
     // Objectif mensuel : 46.8t (22 jours) ou 41.6t (mois court)

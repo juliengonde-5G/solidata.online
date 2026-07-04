@@ -95,11 +95,11 @@ export default function ProduitsFinis() {
                 <div className="mt-2 space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-500">Articles</span>
-                    <span className="font-medium">{s.count || 0}</span>
+                    <span className="font-medium">{s.nb_produits ?? s.count ?? 0}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Poids total</span>
-                    <span className="font-medium">{parseFloat(s.total_kg || 0).toFixed(0)} kg</span>
+                    <span className="font-medium">{parseFloat(s.poids_total_kg ?? s.total_kg ?? 0).toFixed(0)} kg</span>
                   </div>
                 </div>
               </div>
