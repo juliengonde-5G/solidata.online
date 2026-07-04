@@ -38,7 +38,7 @@
 ## Suivi
 
 - [x] I1 — Lien carton → lot (backend + tests)
-- [ ] I2 — UI Lots de tri + sélecteur étiquettes
+- [x] I2 — UI Lots de tri (ChaineTri onglet « Lots de tri ») + sélecteur de lot dans EtiquetteGenerer + endpoint `GET /etiquettes/lots-actifs` (COLLABORATEUR)
 - [ ] I3 — Lien colisage → expédition
 - [ ] I4 — Alimentation stock trié
 - [ ] I5 — Réparation vues Refashion

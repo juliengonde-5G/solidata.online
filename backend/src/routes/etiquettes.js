@@ -35,6 +35,24 @@ router.get('/options', async (req, res) => {
   }
 });
 
+// Lots ouverts (en_attente/en_cours) pour le sélecteur d'étiquetage — exposé ici
+// (routeur étiquettes, accessible COLLABORATEUR) plutôt que via /tri/batches
+// (réservé ADMIN/MANAGER) pour que l'opérateur du poste puisse rattacher le lot.
+router.get('/lots-actifs', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT bt.id, bt.code, bt.status, ct.nom AS chaine_nom
+       FROM batch_tracking bt
+       LEFT JOIN chaines_tri ct ON bt.chaine_id = ct.id
+       WHERE bt.status IN ('en_attente', 'en_cours')
+       ORDER BY bt.created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/dimensions', async (req, res) => {
   try {
     const { rows } = await pool.query(
