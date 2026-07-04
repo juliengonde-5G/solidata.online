@@ -3,7 +3,15 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate);
+// /industrial-kpis alimente aussi la page Reporting RH (rôle RH) — KPIs
+// agrégés sans PII. Le reste du routeur reste ADMIN/MANAGER.
+router.use((req, res, next) => {
+  const roles = req.path === '/industrial-kpis'
+    ? ['ADMIN', 'MANAGER', 'RH']
+    : ['ADMIN', 'MANAGER'];
+  return authorize(...roles)(req, res, next);
+});
 
 // ══════════════════════════════════════════
 // GET /api/performance/dashboard — KPIs consolides

@@ -79,7 +79,11 @@ async function getEmployeeInsertionData(employeeId) {
     try {
       const CryptoJS = require('crypto-js');
       const key = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
-      const decrypted = CryptoJS.AES.decrypt(pcmReport.rows[0].encrypted_report, key).toString(CryptoJS.enc.Utf8);
+      let decrypted = CryptoJS.AES.decrypt(pcmReport.rows[0].encrypted_report, key).toString(CryptoJS.enc.Utf8);
+      if (!decrypted && process.env.JWT_SECRET && key !== process.env.JWT_SECRET) {
+        // Rapports historiques chiffrés avec JWT_SECRET (avant alignement clé PCM)
+        decrypted = CryptoJS.AES.decrypt(pcmReport.rows[0].encrypted_report, process.env.JWT_SECRET).toString(CryptoJS.enc.Utf8);
+      }
       pcmData = JSON.parse(decrypted);
     } catch {
       pcmData = { base_type: pcmReport.rows[0].base_type, phase_type: pcmReport.rows[0].phase_type };

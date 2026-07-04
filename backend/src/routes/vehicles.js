@@ -130,7 +130,10 @@ const uploadVehicleDoc = multer({
 // ══════════════════════════════════════════
 
 // GET /api/vehicles/available — Liste des véhicules pour le mobile (tous sauf hors service)
-router.get('/available', async (req, res) => {
+// Audit 07/2026 : plus aucun appelant public (l'énumération publique des
+// véhicules a été supprimée en v2.0.1) et la réponse contient des PII
+// chauffeurs → authentification requise.
+router.get('/available', authenticate, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT DISTINCT ON (v.id) v.id, v.registration, v.name, v.status,
