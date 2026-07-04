@@ -2524,19 +2524,14 @@ async function initDatabase() {
     // ══════════════════════════════════════════
     // MODULE : Objectifs periodiques
     // ══════════════════════════════════════════
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS periodic_objectives (
-        id SERIAL PRIMARY KEY,
-        section VARCHAR(50) NOT NULL,
-        label VARCHAR(255) NOT NULL,
-        target_value DOUBLE PRECISION NOT NULL,
-        period VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (period IN ('daily', 'weekly', 'monthly', 'quarterly', 'yearly')),
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log('[INIT-DB] Module Periodic Objectives ✓');
+    // NOTE (audit 07/2026) : la table periodic_objectives est créée et possédée
+    // par routes/settings.js (schéma domaine/indicateur/valeur_cible/periode/
+    // annee/mois — utilisé par le CRUD Settings, le dashboard /objectifs et le
+    // scorecard). Un second CREATE incompatible (section/label/target_value/
+    // is_active) existait ici et entrait en course avec le premier selon
+    // l'ordre de chargement → schéma imprévisible. Supprimé : une seule
+    // définition canonique, côté settings.js.
+    console.log('[INIT-DB] Module Periodic Objectives → défini dans settings.js');
 
     // ══════════════════════════════════════════
     // MODULE : Parcours insertion — Jalons obligatoires (Diagnostic, M+3, M+6, M+10, Sortie)
