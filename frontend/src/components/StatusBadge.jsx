@@ -48,6 +48,7 @@ const statusMappings = {
   RH: { label: 'RH', color: 'bg-teal-100 text-teal-700', dot: 'bg-teal-500' },
   COLLABORATEUR: { label: 'Collaborateur', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
   AUTORITE: { label: 'Autorite', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  RESP_BTQ: { label: 'Resp. Boutique', color: 'bg-pink-100 text-pink-700', dot: 'bg-pink-500' },
 
   // Qualite produits finis
   A: { label: 'A', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },

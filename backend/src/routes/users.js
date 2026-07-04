@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
 router.post('/', [
   body('username').notEmpty().withMessage('Nom d\'utilisateur requis'),
   body('password').isLength({ min: 6 }).withMessage('Mot de passe de 6 caractères minimum requis'),
-  body('role').isIn(['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE']).withMessage('Rôle invalide'),
+  body('role').isIn(['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ']).withMessage('Rôle invalide'),
 ], validate, async (req, res) => {
   try {
     const { username, password, email, role, first_name, last_name, phone, team_id } = req.body;
@@ -38,7 +38,7 @@ router.post('/', [
       return res.status(400).json({ error: 'Nom d\'utilisateur, mot de passe et rôle requis' });
     }
 
-    const validRoles = ['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE'];
+    const validRoles = ['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ'];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ error: 'Rôle invalide' });
     }

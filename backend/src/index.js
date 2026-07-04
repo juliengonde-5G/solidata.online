@@ -374,6 +374,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     tourCavsCache.clear();
     lastProximityCheck.clear();
+    logger.debug(`Socket client déconnecté: ${socket.id}`);
   });
 
   // V6.2 — haversineDistanceSimple retiré, déplacé vers
@@ -401,10 +402,6 @@ io.on('connection', (socket) => {
   // Mise à jour statut tournée
   socket.on('tour-status', (data) => {
     io.to(`tour-${data.tourId}`).emit('tour-status-update', data);
-  });
-
-  socket.on('disconnect', () => {
-    logger.debug(`Socket client déconnecté: ${socket.id}`);
   });
 });
 

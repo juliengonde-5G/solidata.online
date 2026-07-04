@@ -74,12 +74,14 @@ describe('GET /api/reporting/dashboard', () => {
 
 describe('GET /api/reporting/collecte', () => {
   it('should return collecte data grouped by date', async () => {
-    mockQuery.mockResolvedValueOnce({
-      rows: [
-        { periode: '2026-03-20', nb_tours: '3', total_kg: 1500, avg_kg: 500 },
-        { periode: '2026-03-19', nb_tours: '2', total_kg: 1000, avg_kg: 500 },
-      ],
-    });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ exists: false }] }) // mvExists (fast path check)
+      .mockResolvedValueOnce({
+        rows: [
+          { periode: '2026-03-20', nb_tours: '3', total_kg: 1500, avg_kg: 500 },
+          { periode: '2026-03-19', nb_tours: '2', total_kg: 1000, avg_kg: 500 },
+        ],
+      });
     const res = await request(app)
       .get('/api/reporting/collecte')
       .set('Authorization', `Bearer ${adminToken}`);

@@ -88,7 +88,7 @@ export default function ReportingCollecte() {
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <KPICard title="Tonnage collecté" value={`${(totalKg / 1000).toFixed(1)}`} unit="t" icon={Truck} accent="primary" />
-          <KPICard title="CO2 évité" value={co2Evite} unit="kg" icon={Leaf} accent="emerald" />
+          <KPICard title="CO2 évité" value={co2Evite} unit="t" icon={Leaf} accent="emerald" />
           <KPICard title="Tours réalisées" value={dashboard?.tours?.completed || 0} icon={Target} accent="amber" />
           <KPICard title="Kg moyen/tour" value={avgKgTour.toLocaleString('fr-FR')} unit="kg" icon={BarChart3} accent="primary" />
           <KPICard title="CAV actifs" value={dashboard?.cav?.actifs || 0} icon={MapPin} accent="slate" />
