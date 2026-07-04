@@ -1643,6 +1643,13 @@ async function initDatabase() {
     `);
 
     await client.query(`
+      -- NOTE audit 07/2026 : cette vue (et vw_coherence_tri_filiere plus bas)
+      -- s'appuient sur la table colisages, une couche de conditionnement aujourd'hui
+      -- NON adoptée (la sortie carton réelle passe par produits_finis / scan
+      -- douchette). Elles restent donc vides. Les rendre fiables = soit adopter
+      -- le workflow de colisage, soit les repointer sur produits_finis avec un
+      -- mapping vers famille_refashion — décision métier (voir chantier
+      -- traçabilité, rapport 04 §1.5 et 10-chantier-tracabilite-carton-balle.md).
       CREATE OR REPLACE VIEW vw_dpav_sortants AS
       SELECT EXTRACT(YEAR FROM c.scelle_at)::int AS annee,
              EXTRACT(QUARTER FROM c.scelle_at)::int AS trimestre,
@@ -1661,17 +1668,32 @@ async function initDatabase() {
     `);
 
     await client.query(`
+      -- Correctif audit 07/2026 : l'ancienne définition joignait tours × tour_weights
+      -- × tour_cav dans le même GROUP BY → produit cartésien. Chaque pesée était
+      -- comptée une fois PAR CAV collecté et attribuée en TOTAL à chaque commune,
+      -- gonflant le tonnage territorial (~×nb_cav). On calcule maintenant le poids
+      -- total par tournée et le nombre de CAV collectés dans des CTE SÉPARÉES, puis
+      -- on répartit uniformément (total / nb_cav) sur chaque CAV collecté et on
+      -- agrège par commune — total conservé, plus de double-comptage.
       CREATE OR REPLACE VIEW vw_dpav_communes AS
+      WITH poids_tour AS (
+        SELECT tour_id, SUM(weight_kg) AS poids_total_kg
+        FROM tour_weights GROUP BY tour_id
+      ), cav_par_tour AS (
+        SELECT tour_id, COUNT(*) AS nb_cav_collectes
+        FROM tour_cav WHERE status = 'collected' GROUP BY tour_id
+      )
       SELECT EXTRACT(YEAR FROM t.date)::int AS annee,
              EXTRACT(QUARTER FROM t.date)::int AS trimestre,
              COALESCE(rc.code_insee, '')::text AS code_insee,
              COALESCE(rc.nom, c.commune, '(non rattaché)') AS commune,
              COALESCE(rc.code_postal, '') AS code_postal,
-             COALESCE(SUM(tw.weight_kg), 0)::int AS poids_kg
+             COALESCE(ROUND(SUM(pt.poids_total_kg::numeric / NULLIF(cpt.nb_cav_collectes, 0))), 0)::int AS poids_kg
       FROM tours t
-      JOIN tour_weights tw ON tw.tour_id = t.id
       JOIN tour_cav tc ON tc.tour_id = t.id AND tc.status = 'collected'
       JOIN cav c ON tc.cav_id = c.id
+      JOIN poids_tour pt ON pt.tour_id = t.id
+      JOIN cav_par_tour cpt ON cpt.tour_id = t.id
       LEFT JOIN referentiel_communes rc ON c.code_insee_commune = rc.code_insee
       WHERE t.status = 'completed'
       GROUP BY annee, trimestre, rc.code_insee, COALESCE(rc.nom, c.commune, '(non rattaché)'), rc.code_postal
