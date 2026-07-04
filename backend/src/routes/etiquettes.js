@@ -50,7 +50,7 @@ router.get('/dimensions', async (req, res) => {
 });
 
 router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
-  const { poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg } = req.body || {};
+  const { poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg, batch_id } = req.body || {};
   if (!poste_id || !produit || !categorie_eco_org || !genre || !saison || !gamme || !poids_kg || Number(poids_kg) <= 0) {
     return res.status(400).json({ error: 'poste_id, produit, categorie_eco_org, genre, saison, gamme et poids_kg (>0) requis' });
   }
@@ -65,6 +65,22 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
     if (poste.rowCount === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Poste introuvable ou inactif' });
+    }
+
+    // Traçabilité carton → lot (R6) : si un lot est fourni, on le rattache au
+    // carton étiqueté. Validé pour éviter d'écrire une FK morte ; on n'accepte
+    // qu'un lot ouvert (en_attente/en_cours), pas un lot terminé ou annulé.
+    let linkedBatchId = null;
+    if (batch_id !== undefined && batch_id !== null && batch_id !== '') {
+      const batch = await client.query(
+        `SELECT id FROM batch_tracking WHERE id = $1 AND status IN ('en_attente', 'en_cours')`,
+        [batch_id]
+      );
+      if (batch.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Lot introuvable ou déjà clôturé (batch_id)' });
+      }
+      linkedBatchId = batch.rows[0].id;
     }
 
     let catRow = await client.query(
@@ -98,11 +114,11 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
     const insert = await client.query(
       `INSERT INTO produits_finis
          (code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
-          poids_kg, date_fabrication, poste_etiquetage_id, status, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'en_stock', $11)
-       RETURNING id, code_barre, poids_kg, date_fabrication, produit, categorie_eco_org, genre, saison, gamme`,
+          poids_kg, date_fabrication, poste_etiquetage_id, status, batch_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'en_stock', $11, $12)
+       RETURNING id, code_barre, poids_kg, date_fabrication, produit, categorie_eco_org, genre, saison, gamme, batch_id`,
       [code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
-        Number(poids_kg), dateFab, poste_id, req.user.id]
+        Number(poids_kg), dateFab, poste_id, linkedBatchId, req.user.id]
     );
 
     await client.query(
