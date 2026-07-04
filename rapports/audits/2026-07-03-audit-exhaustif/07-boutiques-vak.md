@@ -17,8 +17,8 @@ Deux modules de maturité inégale. **Boutiques** : chaîne d'ingestion CSV Logi
 |----------|--------|---------|
 | CRITIQUE | 0 | — |
 | HIGH | 3 | A1, A2, A3 |
-| MEDIUM | 8 | A4–A11 |
-| LOW | 6 | A12–A17 |
+| MEDIUM | 9 | A4–A11, A19 |
+| LOW | 6 | A12–A17 (+ A18 note doc) |
 
 ---
 
