@@ -8,6 +8,7 @@ import { useUsageMode } from '../contexts/UsageModeContext';
 import { USAGE_MODES } from '../services/usageMode';
 import UsageModeBanner from '../components/UsageModeBanner';
 import PrimaryActionBar from '../components/PrimaryActionBar';
+import { authedFetch } from '../services/authedFetch';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -72,7 +73,7 @@ export default function TourMap() {
     const pollReopt = async () => {
       if (!tourId) return;
       try {
-        const res = await fetch(`/api/tours/${tourId}/reoptimize/pending-public`);
+        const res = await authedFetch(`/api/tours/${tourId}/reoptimize/pending-public`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.id) setReoptProposal(data);
@@ -92,7 +93,7 @@ export default function TourMap() {
 
   const loadTour = async () => {
     try {
-      const res = await fetch(`/api/tours/${tourId}/public`);
+      const res = await authedFetch(`/api/tours/${tourId}/public`);
       const data = await res.json();
       setTour(data);
       setCavs(data.cavs || []);
@@ -212,7 +213,7 @@ export default function TourMap() {
     if (!reoptProposal || reoptProcessing) return;
     setReoptProcessing(true);
     try {
-      await fetch(`/api/tours/${tourId}/reoptimize/${reoptProposal.id}/${action}-public`, {
+      await authedFetch(`/api/tours/${tourId}/reoptimize/${reoptProposal.id}/${action}-public`, {
         method: 'POST',
       });
       setReoptProposal(null);

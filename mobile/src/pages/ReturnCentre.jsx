@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
+import { authedFetch } from '../services/authedFetch';
 
 export default function ReturnCentre() {
   const [kmEnd, setKmEnd] = useState('');
@@ -12,7 +13,7 @@ export default function ReturnCentre() {
   const submit = async () => {
     setLoading(true);
     try {
-      await fetch(`/api/tours/${tourId}/status-public`, {
+      await authedFetch(`/api/tours/${tourId}/status-public`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

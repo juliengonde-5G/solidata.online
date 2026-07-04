@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
+import { setVehicleToken } from '../services/driverAuth';
 
 const AuthContext = createContext();
 
@@ -40,6 +41,9 @@ export function AuthProvider({ children }) {
     const res = await api.post('/auth/driver-start', { vehicle_token: vehicleToken });
     localStorage.setItem('mobile_token', res.data.token);
     if (res.data.refreshToken) localStorage.setItem('mobile_refresh_token', res.data.refreshToken);
+    // Persiste le vehicle_token pour permettre la ré-auth chauffeur transparente
+    // (le JWT chauffeur n'a pas de refresh token — voir services/driverAuth.js).
+    setVehicleToken(vehicleToken);
     setUser(res.data.user);
     return res.data;
   };
@@ -47,6 +51,7 @@ export function AuthProvider({ children }) {
   const logout = () => {
     localStorage.removeItem('mobile_token');
     localStorage.removeItem('mobile_refresh_token');
+    localStorage.removeItem('mobile_vehicle_token');
     setUser(null);
   };
 

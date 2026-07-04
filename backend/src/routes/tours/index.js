@@ -46,7 +46,23 @@ const { sendPushToRoles } = require('../../services/push-notifications');
 
 const pool = require('../../config/database');
 
-// GET /api/tours/vehicle/:vehicleId/today — Tournée du jour pour un véhicule (public)
+// ── Auth chauffeur sur les routes mobile historiquement « publiques » ──────
+// Audit 07/2026 : le détail de tournée et les actions de collecte (démarrer,
+// collecter, peser, incident, statut, scan, ré-optim) étaient exposés SANS
+// authentification, avec un :id de tournée/véhicule énumérable — n'importe qui
+// sur Internet pouvait lire les tournées (adresses CAV, GPS) ou falsifier
+// anonymement tonnage/pesées/incidents. Elles exigent désormais le JWT
+// chauffeur émis par POST /auth/driver-start ; le mobile le joint et se
+// ré-authentifie de façon transparente (mobile/src/services/authedFetch.js).
+// Les URLs « -public »/« /public »/« /today » sont conservées à l'identique
+// pour éviter une migration d'URL coordonnée — seule l'exigence d'auth change.
+const MOBILE_DRIVER_PATH = /(-public(\/|$))|(^\/[^/]+\/public$)|(^\/vehicle\/[^/]+\/today$)/;
+router.use((req, res, next) => {
+  if (MOBILE_DRIVER_PATH.test(req.path)) return authenticate(req, res, next);
+  return next();
+});
+
+// GET /api/tours/vehicle/:vehicleId/today — Tournée du jour (JWT chauffeur requis)
 router.get('/vehicle/:vehicleId/today', async (req, res) => {
   try {
     const { vehicleId } = req.params;

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Html5Qrcode } from 'html5-qrcode';
 import { vibrateSuccess } from '../services/haptic';
 import PrimaryActionBar from '../components/PrimaryActionBar';
+import { authedFetch } from '../services/authedFetch';
 
 /**
  * Flux unifié d'identification d'un CAV :
@@ -37,7 +38,7 @@ export default function IdentifyCav() {
 
   const loadTourCavs = async () => {
     try {
-      const res = await fetch(`/api/tours/${tourId}/public`);
+      const res = await authedFetch(`/api/tours/${tourId}/public`);
       const data = await res.json();
       const pending = (data.cavs || []).filter(c => c.status !== 'collected');
       setTourCavs(pending);

@@ -17,6 +17,7 @@ import {
   getAllItems, getItem, deleteItem, clearStore, putItem, countItems, STORES,
 } from './db';
 import api from './api';
+import { authedFetch } from './authedFetch';
 
 let syncInProgress = false;
 
@@ -75,7 +76,13 @@ export async function getPendingCount() {
 }
 
 function isClientError(err) {
+  // Une erreur marquée `retryable` (ré-auth chauffeur impossible : réseau coupé
+  // ou token révoqué) ne DOIT jamais purger la file — ce n'est pas une donnée
+  // invalide, juste un problème d'authentification temporaire.
+  if (err?.retryable) return false;
   const status = err?.response?.status;
+  // 401 = auth (jamais une donnée invalide) → conservé pour rejeu après ré-auth.
+  if (status === 401) return false;
   return status >= 400 && status < 500;
 }
 
@@ -114,7 +121,7 @@ export async function syncPendingScans() {
  * Exporté pour usage direct depuis WeighIn.jsx.
  */
 export async function sendWeight(w) {
-  const weighRes = await fetch(`/api/tours/${w.tourId}/weigh-public`, {
+  const weighRes = await authedFetch(`/api/tours/${w.tourId}/weigh-public`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -131,7 +138,7 @@ export async function sendWeight(w) {
     throw err;
   }
   if (w.finalize && !w.isIntermediate) {
-    const statusRes = await fetch(`/api/tours/${w.tourId}/status-public`, {
+    const statusRes = await authedFetch(`/api/tours/${w.tourId}/status-public`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'completed' }),
@@ -212,9 +219,10 @@ export async function syncGpsBuffer() {
  * depuis le flux rapide Incident.jsx).
  */
 export async function sendIncident(incident) {
-  // Utilise fetch (endpoint public, pas d'auth JWT) pour rester aligné avec
-  // le flux chauffeur actuel. client_id envoyé au cas où le backend évolue.
-  const res = await fetch(`/api/tours/${incident.tourId}/incident-public`, {
+  // authedFetch : joint le JWT chauffeur + ré-auth transparente (l'endpoint
+  // n'est plus public depuis l'audit 07/2026). client_id envoyé au cas où le
+  // backend évolue.
+  const res = await authedFetch(`/api/tours/${incident.tourId}/incident-public`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -263,7 +271,7 @@ export async function syncPendingIncidents() {
  * depuis FillLevel avant d'ouvrir StepConfirmScreen).
  */
 export async function sendCollect(collect) {
-  const res = await fetch(`/api/tours/${collect.tourId}/cav/${collect.cavId}/collect-public`, {
+  const res = await authedFetch(`/api/tours/${collect.tourId}/cav/${collect.cavId}/collect-public`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

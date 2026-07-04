@@ -34,6 +34,17 @@ api.interceptors.response.use(
           localStorage.removeItem('mobile_refresh_token');
         }
       }
+      // Repli chauffeur : le JWT driver-start n'a pas de refresh token — on
+      // ré-authentifie via le vehicle_token persisté puis on rejoue une fois.
+      try {
+        const { reauthDriver } = await import('./driverAuth');
+        const fresh = await reauthDriver();
+        if (fresh) {
+          error.config.headers = error.config.headers || {};
+          error.config.headers.Authorization = `Bearer ${fresh}`;
+          return api(error.config);
+        }
+      } catch { /* pas de vehicle_token ou ré-auth refusée → rejet normal */ }
     }
     return Promise.reject(error);
   }

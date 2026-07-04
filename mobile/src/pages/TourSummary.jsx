@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import OfflineActionBadge from '../components/OfflineActionBadge';
 import { getPendingCount, syncEvents, syncAll } from '../services/sync';
+import { authedFetch } from '../services/authedFetch';
 
 export default function TourSummary() {
   const [tour, setTour] = useState(null);
@@ -13,7 +14,7 @@ export default function TourSummary() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`/api/tours/${tourId}/summary-public`);
+        const res = await authedFetch(`/api/tours/${tourId}/summary-public`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         // Le backend renvoie { tour, stats }. On aplatit pour compatibilité
