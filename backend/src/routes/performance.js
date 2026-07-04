@@ -278,12 +278,15 @@ router.get('/industrial-kpis', async (req, res) => {
         SELECT COUNT(*)::int as actifs FROM employees WHERE is_active = true
       `),
 
-      // Insertion KPIs
+      // Insertion KPIs — la source du statut de parcours est
+      // employees.insertion_status (insertion_diagnostics n'a pas de colonne
+      // status ; même correctif que le hotfix V1.5.1 sur le dashboard).
       pool.query(`
         SELECT COUNT(*)::int as total,
-          COUNT(CASE WHEN status = 'completed' THEN 1 END)::int as termines,
-          COUNT(CASE WHEN status = 'active' OR status IS NULL THEN 1 END)::int as actifs
-        FROM insertion_diagnostics
+          COUNT(CASE WHEN insertion_status = 'termine' THEN 1 END)::int as termines,
+          COUNT(CASE WHEN insertion_status = 'en_parcours' THEN 1 END)::int as actifs
+        FROM employees
+        WHERE insertion_status IS NOT NULL AND insertion_status <> 'none'
       `),
     ]);
 
