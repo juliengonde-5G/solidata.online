@@ -170,7 +170,7 @@ router.get('/schedule/planning', authorize('ADMIN', 'RH', 'MANAGER'), async (req
   try {
     const { month, team_id, employee_id } = req.query;
     let query = `
-      SELECT s.*, e.first_name, e.last_name, e.team_id, p.name as position_name
+      SELECT s.*, e.first_name, e.last_name, e.team_id, p.title as position_name
       FROM schedule s
       JOIN employees e ON s.employee_id = e.id
       LEFT JOIN positions p ON s.position_id = p.id
@@ -203,18 +203,21 @@ router.post('/schedule', authorize('ADMIN', 'RH', 'MANAGER'), [
   body('status').notEmpty().withMessage('Statut requis'),
 ], validate, async (req, res) => {
   try {
-    const { employee_id, date, status, position_id, is_provisional } = req.body;
+    const { employee_id, date, status, position_id, is_provisional, periode } = req.body;
     if (!employee_id || !date || !status) {
       return res.status(400).json({ error: 'employee_id, date et status requis' });
     }
 
+    // La contrainte UNIQUE de schedule est (employee_id, date, periode) depuis
+    // la migration matin/après-midi (init-db) — l'ancienne (employee_id, date)
+    // n'existe plus et faisait échouer l'upsert (42P10).
     const result = await pool.query(
-      `INSERT INTO schedule (employee_id, date, status, position_id, is_provisional)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (employee_id, date) DO UPDATE SET
+      `INSERT INTO schedule (employee_id, date, status, position_id, is_provisional, periode)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'journee'))
+       ON CONFLICT (employee_id, date, periode) DO UPDATE SET
        status = $3, position_id = $4, is_provisional = $5
        RETURNING *`,
-      [employee_id, date, status, position_id, is_provisional !== false]
+      [employee_id, date, status, position_id, is_provisional !== false, periode]
     );
 
     res.json(result.rows[0]);
@@ -250,11 +253,11 @@ router.post('/schedule/bulk', authorize('ADMIN', 'RH', 'MANAGER'), [
     const results = [];
     for (const entry of entries) {
       const r = await pool.query(
-        `INSERT INTO schedule (employee_id, date, status, position_id, is_provisional)
-         VALUES ($1, $2, $3, $4, true)
-         ON CONFLICT (employee_id, date) DO UPDATE SET status = $3, position_id = $4
+        `INSERT INTO schedule (employee_id, date, status, position_id, is_provisional, periode)
+         VALUES ($1, $2, $3, $4, true, COALESCE($5, 'journee'))
+         ON CONFLICT (employee_id, date, periode) DO UPDATE SET status = $3, position_id = $4
          RETURNING *`,
-        [entry.employee_id, entry.date, entry.status, entry.position_id]
+        [entry.employee_id, entry.date, entry.status, entry.position_id, entry.periode]
       );
       results.push(r.rows[0]);
     }

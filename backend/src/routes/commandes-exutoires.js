@@ -17,11 +17,16 @@ router.use(autoLogActivity('commande_exutoire'));
 const FACTEURS_CO2 = {
   original:       3.169,  // Reemploi direct — evite production textile neuf
   csr:            0.121,  // Combustible Solide de Recuperation — substitution energetique fossile
-  effilo_blanc:   0.500,  // Effilochage blanc — recyclage fibre (isolant, rembourrage)
-  effilo_couleur: 0.500,  // Effilochage couleur — recyclage fibre
+  // Types courants (refonte gammes P1 : essuyage/tricot/merinos)
+  essuyage:       0.750,  // Chiffons essuyage industriel — substitution produit neuf
+  tricot:         0.500,  // Recyclage fibre tricot — effilochage
+  merinos:        0.500,  // Recyclage fibre laine merinos — effilochage
   jean:           0.500,  // Recyclage denim — effilochage fibre
   coton_blanc:    0.750,  // Chiffons essuyage industriel — substitution produit neuf
   coton_couleur:  0.750,  // Chiffons essuyage industriel — substitution produit neuf
+  // Types historiques (commandes anterieures a la refonte P1)
+  effilo_blanc:   0.500,  // Effilochage blanc — recyclage fibre (isolant, rembourrage)
+  effilo_couleur: 0.500,  // Effilochage couleur — recyclage fibre
 };
 
 // Helper: generate order reference
