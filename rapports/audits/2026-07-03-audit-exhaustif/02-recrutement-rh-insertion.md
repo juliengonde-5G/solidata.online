@@ -14,7 +14,7 @@ Modules globalement riches et alignés sur le métier SIAE (freins périphériqu
 |----------|----|
 | BLOQUANT | 4 |
 | MAJEUR   | 10 |
-| MINEUR   | 11 |
+| MINEUR   | 12 |
 
 Note domaine estimée : **5.6 / 10** (métier bien pensé, mais 4 crashs/fonctionnalités mortes + fragilité PII + promesses non tenues sur les jalons/IA).
 
@@ -34,7 +34,7 @@ Note domaine estimée : **5.6 / 10** (métier bien pensé, mais 4 crashs/fonctio
 | Insertion : 3 jalons **M1/M6/M12** | **NON CONFORME** | Réalité = **Diagnostic accueil / M+3 / M+6 / M+10 (+ Bilan Sortie)** — voir MAJEUR-3 |
 | Radar 7 freins | OK (avec bug) | 7 axes `insertion/routes.js:324-325` ; **bug numerique diagnostic** voir MAJEUR-4 |
 | Plans d'action CIP | OK | `insertion/routes.js:433-504` `cip_action_plans` |
-| Alertes entretiens | Partiel | table `insertion_interview_alerts` créée `insertion/index.js:167` mais **aucune route ne l'expose/l'émet** (voir MAJEUR-8) |
+| Alertes entretiens | OK (émission) | `scheduler.js:220-295` émet retard/planification/J-7/J-1 + email Brevo J-1 ; **pas de liste in-app** (MINEUR-12) |
 | Pointage | OK (avec crash mensuel) | `pointage.js` badge RFID + calcul auto heures ; **bug month-31** voir BLOQUANT-2 |
 | Prescripteurs (conformité IAE) | OK | `prescripteurs.js` 8 types dont France Travail/ML/Cap Emploi |
 
@@ -80,7 +80,7 @@ Note domaine estimée : **5.6 / 10** (métier bien pensé, mais 4 crashs/fonctio
 - Impact : (a) contredit la séparation documentée (changelog 2.0.2/2.0.5) ; (b) si `JWT_SECRET` est **rotée** (opération réalisée en 2.0.2), **tous les rapports PCM existants deviennent définitivement indéchiffrables** au sein même du module PCM (`decryptReport` `:730` utilise la même variable) ; (c) le fallback hardcodé est un secret faible pour des données de personnalité (PII). Lié à BLOQUANT-1.
 - Correctif : clé dédiée résolue de façon identique partout, sans fallback en clair ; documenter la procédure de rotation (re-chiffrement).
 
-**MAJEUR-3 — Jalons d'insertion : promesse M1/M6/M12 non tenue + 2 chemins de création divergents**
+**MAJEUR-3 — Jalons d'insertion : promesse M1/M6/M12 non tenue + 3 chemins de création divergents (voir aussi MAJEUR-8)**
 - Preuve : CLAUDE.md §5 module 5 = « 3 jalons (M1/M6/M12) ». Réalité :
   - Conversion candidat→employé `candidates/conversion.js:91-96` crée **4** jalons : Diagnostic accueil (J+30), Bilan M+3, M+6, M+10 — **pas de Bilan Sortie / M12**.
   - Initialize `insertion/routes.js:393-399` crée **5** jalons : Diagnostic accueil (M1), M+3, M+6, M+10, **Bilan Sortie (M12)**.
@@ -107,10 +107,11 @@ Note domaine estimée : **5.6 / 10** (métier bien pensé, mais 4 crashs/fonctio
 - Impact : deux pages RH afficheront **deux taux d'absentéisme différents pour la même période**, sans que l'utilisateur sache lequel fait foi. Perte de confiance dans le reporting (sensible pour un ACI audité par la DREETS).
 - Correctif : choisir une définition unique (recommandé : heures, cohérent avec l'ETP 1607 h) et la réutiliser dans les deux endpoints.
 
-**MAJEUR-8 — Alertes entretiens d'insertion : table créée mais aucune logique ne l'alimente/l'expose**
-- Preuve : `insertion_interview_alerts` créée `insertion/index.js:167-177` ; aucune route dans `insertion/routes.js` ne l'écrit ni ne la lit. Aucun job scheduler visible côté insertion.
-- Impact : la promesse « alertes entretiens » (§5) est **non implémentée** — les CIP ne reçoivent aucun rappel J-7/J-1/retard sur les jalons, alors que la table existe.
-- Correctif : ajouter un job scheduler qui matérialise les alertes depuis `insertion_milestones.due_date` + un endpoint `GET /insertion/alerts`.
+**MAJEUR-8 — 3ᵉ chemin de création de jalons (scheduler) divergent + Bilan Sortie jamais auto-créé**
+- Preuve : `services/scheduler.js:166-211` `checkInsertionMilestones` crée automatiquement **4** jalons à échéance (Diagnostic accueil, M+3, M+6, M+10 — `:178-183`) — **pas de Bilan Sortie**. C'est un **3ᵉ chemin** qui s'ajoute à ceux de MAJEUR-3 (`conversion.js`=4 sans Sortie ; `insertion/routes.js initialize`=5 avec Sortie).
+- Impact : le jalon **Bilan Sortie (M12)** — pièce maîtresse du reporting DREETS des sorties dynamiques — n'est créé QUE si un utilisateur clique manuellement « initialiser » ; ni la conversion, ni le scheduler ne le produisent. Beaucoup de salariés termineront leur CDDI sans jalon de sortie enregistré.
+- Correctif : factoriser une seule liste canonique de jalons (incluant Sortie) partagée par les 3 chemins.
+- Note (correction d'un pré-diagnostic) : les **alertes entretiens SONT bien émises** (`scheduler.js:220-295` : `retard`/`planification`/`rappel_j7`/`rappel_j1` dans `insertion_interview_alerts` + email Brevo J-1). Résidu → MINEUR-12 (pas de liste in-app).
 
 **MAJEUR-9 — WorkHours : horaires saisis (début/fin/pause) jamais persistés → affichage cassé**
 - Preuve : `WorkHours.jsx:62-64` affiche `h.start_time`, `h.end_time`, `h.break_minutes` et le formulaire les envoie (`:145-154`). Mais la table `work_hours` (`init-db.js:283-294`) ne contient QUE `hours_worked`, `overtime_hours`, `type`, `notes` — **aucune colonne `start_time`/`end_time`/`break_minutes`**. Le POST `employees.js:346-368` convertit les créneaux en `hours_worked` (via `computeHoursFromSlots`) et jette les horaires.
@@ -136,6 +137,7 @@ Note domaine estimée : **5.6 / 10** (métier bien pensé, mais 4 crashs/fonctio
 - **MINEUR-9 — Conversion : compétences seulement `confirmed`/`detected` transférées** : `candidates/conversion.js:44` — les compétences `not_mentioned` sont perdues (acceptable) mais aucun log si 0 compétence transférée.
 - **MINEUR-10 — `employees` DELETE `/clear`** : `employees.js:560` purge dur `work_hours/schedule/availability/contracts` de TOUS les employés ; opération très destructive derrière un simple `authorize('ADMIN')` sans confirmation/2e facteur.
 - **MINEUR-11 — `planning-hebdo` exclut RH** : `planning-hebdo.js:8` `authorize('ADMIN','MANAGER')` — le rôle RH (qui gère le planning selon §5 module 4) n'a pas accès au planning hebdo. À confirmer côté métier (intentionnel ou oubli).
+- **MINEUR-12 — Alertes insertion sans consultation in-app** : `scheduler.js` remplit `insertion_interview_alerts` et envoie l'email J-1, mais **aucune route `GET /insertion/alerts`** — le CIP ne dispose d'aucune liste in-app des rappels/retards (dépend de l'email). Ajouter un endpoint + badge sur InsertionParcours.
 
 ---
 

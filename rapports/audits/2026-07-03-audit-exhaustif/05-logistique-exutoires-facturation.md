@@ -118,11 +118,14 @@ Ces deux bugs sont des **régressions de refactor** : le code « propre » (stat
 
 - **MI1 — Course sur la numérotation.** `generateReference` (`commandes-exutoires.js:28-38`) et `BillingService.generateInvoiceNumber` (`BillingService.js:37-55`) font `SELECT MAX(...)+1` sans verrou. Deux créations concurrentes → même référence → collision sur l'index UNIQUE (`migrate-exutoires.js:57`) → 500 pour l'un. Probabilité faible (faible volume), mais réel. Correctif : séquence Postgres dédiée, ou `INSERT … ON CONFLICT` avec retry.
 - **MI2 — `PATCH /preparations/:id/statut` sans `isIn()`.** `preparations.js:329-331` valide seulement `notEmpty()` ; un statut invalide passe le validateur et casse sur le CHECK DB → 500 au lieu de 400.
-- **MI3 — Ajustement stock silencieusement no-op.** `controles-pesee.js:113-123` fait `UPDATE stock_movements WHERE code_barre = 'EXU-'+reference`. Si la préparation n'a jamais atteint `expediee` (donc pas de mouvement créé `preparations.js:395`), l'UPDATE ne touche 0 ligne — logué mais silencieux côté UI. Couplage fragile par `code_barre`. (Le rapport 04 traite la rupture stock plus large ; ici c'est un cas de couplage local.)
+- **MI3 — Ajustement stock silencieusement no-op.** `controles-pesee.js:113-123` fait `UPDATE stock_movements WHERE code_barre = 'EXU-'+reference`. Si la préparation n'a jamais atteint `expediee` (donc pas de mouvement créé `preparations.js:395`), l'UPDATE ne touche 0 ligne — logué mais silencieux côté UI. Couplage fragile par `code_barre` (flux propre au domaine exutoire, distinct de la rupture `colisages.expedition_id` / sortie stock morte du tri → **voir `04-tri-stock-tracabilite.md`**, non redéveloppée ici).
 - **MI4 — `annuler` sans `FOR UPDATE`.** `commandes-exutoires.js:401` lit le statut sans verrou pessimiste, contrairement à `/statut` (`:335`). Fenêtre de course annuler/avancer.
 - **MI5 — Restauration de statut « devinée » à l'unlink.** `factures-exutoires.js:305` remet la commande à `expediee` « (la plus probable) » quand on délie une facture — perd le vrai statut antérieur (qui pouvait être `pesee_recue` ou `facturee`). L'historique existe pourtant pour le retrouver.
 - **MI6 — `preparations.js:236` compare une date string à `.toISOString()`.** `datesChanged` compare `date_expedition` (string reçue) à `current.date_expedition.toISOString()` ; formats hétérogènes → faux positifs de « changement » déclenchant des recalculs de conflit inutiles (non bloquant).
 - **MI7 — `expeditions.js` POST/summary : page supprimée mais route vivante.** La page `Expeditions.jsx` a été retirée (V1.8.0) ; le POST (`expeditions.js:40`) garde son fix d'alias L1 mais n'a plus d'appelant UI connu. `summary` reste utile au reporting. À clarifier (mort partiel).
+- **MI8 — CSV formula injection** dans `refashion.js:213-221` (`toCsv`). Détail en §6. Risque faible (données internes).
+- **MI9 — `partners.js:77-78` : `numero_facture`/`partner_id` inexistants masqués par `.catch()`** → vues interactions vides sans erreur. Détail en §6.
+- **MI10 — Incohérence filtre vs KPI dans le contrôle facturation.** `ExutoiresControleFacturation.jsx:56` : le filtre « validated » requête `statut=ecart_valide`, alors que le KPI `stats.validated` compte `statut_facture = 'validee'` (`factures-exutoires.js:121`). Deux notions de « validée » → le compteur et la liste filtrée ne correspondent pas.
 
 ---
 
@@ -135,7 +138,8 @@ Ces deux bugs sont des **régressions de refactor** : le code « propre » (stat
 | Préparation + contrôle pesée double | Module 11 | Fonctionnels en UPDATE direct, mais hors-transaction (**M5**), vocabulaire SM divergent (**M1**) |
 | Facturation interne HT/TVA/TTC via InvoiceRepository + BillingService | V5.4/V6.3 | **Propre et correct** : arrondi centime (`BillingService.js:69-75`), garde-fou injection (`:41`), repo transactionnel. Le meilleur code du domaine. |
 | Contrôle facturation Pennylane (match auto + manuel, écart pesée/facturé, tolérance, bascule cloturee) | V1.8.0 / 23bis | **Cassé des deux côtés (B1)** ; tolérance et écart calculés mais jamais atteignables en pratique |
-| DPAV + taux subvention versionnés + 5 vues SQL CSV | V2.0.0 | À vérifier (section 6) |
+| DPAV + taux subvention versionnés + 5 vues SQL CSV | V2.0.0 | **Livré et sain** (audit-trail JSONB, taux versionnés, exports whitelistés) ; bémol : 2 modèles de subvention coexistent (§6) |
+| Facteurs CO2 exutoire / tarifs alignés sur le référentiel produit | V1.8.2 | **Désynchronisés** : CO2=0 pour essuyage/tricot/merinos, tarifs impossibles pour ces types (**M6**) |
 
 ---
 
@@ -181,15 +185,18 @@ Ces deux bugs sont des **régressions de refactor** : le code « propre » (stat
 ## 10. Quick wins sûrs
 
 1. **B1** — `motif→commentaire`, `modifie_par→utilisateur_id` dans les 3 INSERT (`factures-exutoires.js:265,309` ; `pennylane.js:609`). Débloque tout le module 23bis. Aucune migration.
-2. **B2** — aligner `state-machines.js` COMMANDE_EXUTOIRE sur `en_attente` (initial + states + transitions). Débloque le bouton Confirmer.
-3. Ajouter les endpoints `factures-exutoires/*` et `commandes-exutoires/:id/statut` au smoke-test (`scripts/tests/api-smoke.js`).
+2. **B2** — aligner `state-machines.js` COMMANDE_EXUTOIRE sur `en_attente` (initial + states + `transitions.en_attente = { confirmee, annulee }`, retirer `brouillon`). Débloque le bouton Confirmer.
+3. **M6** — remettre `essuyage/tricot/merinos` dans `FACTEURS_CO2` (`commandes-exutoires.js:17`), `TYPES_PRODUIT_VALIDES` (`tarifs-exutoires.js:10`) et le CHECK `tarifs_exutoires`. Restaure le KPI CO2 et le tarif des nouveaux types.
+4. Ajouter `factures-exutoires/*`, `commandes-exutoires/:id/statut` et `pennylane/sync/customer-invoices` au smoke-test (`scripts/tests/api-smoke.js`) — ces 3 endpoints portent les 2 bloquants et aucun n'y figure.
+
+*Note : ne PAS toucher aux transitions par effet de bord (préparation/pesée/facture) sans d'abord décider de la stratégie C1 — les corriger isolément pourrait re-bloquer un pipeline qui ne « marche » aujourd'hui que grâce à ces contournements.*
 
 ---
 
 ## Top 5 anomalies (fichier:ligne)
 
-1. **B1** `factures-exutoires.js:265,309` + `pennylane.js:609` — INSERT `motif/modifie_par` inexistants → rapprochement Pennylane 500 / données perdues.
-2. **B2** `state-machines.js:23` vs `commandes-exutoires.js:265` — état initial `brouillon` ≠ `en_attente` → 409 INVALID_SOURCE à la confirmation.
-3. **C1** `commandes-exutoires.js:348` seul appelant SM ; `preparations.js:192,386`, `controles-pesee.js:97,161`, `factures-exutoires.js:261` la contournent.
-4. **M1** `state-machines.js:59` vs `migrate-exutoires.js:91` — vocabulaire préparation disjoint (code mort trompeur).
-5. **M4** `controles-pesee.js:72` vs `factures-exutoires.js:38` — dénominateurs d'écart % différents (pesée interne vs client).
+1. **B1** `factures-exutoires.js:265,309` + `pennylane.js:609` — INSERT dans colonnes `motif/modifie_par` inexistantes (`historique_commandes_exutoires` a `commentaire/utilisateur_id`) → rapprochement Pennylane 500 (manuel) / données perdues (auto). Module 23bis non-fonctionnel.
+2. **B2** `state-machines.js:23` (initial `brouillon`) vs `commandes-exutoires.js:265` / DB `en_attente` — `PATCH /statut` renvoie 409 INVALID_SOURCE ; bouton « Confirmer » mort (`ExutoiresCommandes.jsx:102,697`).
+3. **M6** `commandes-exutoires.js:17-25` + `tarifs-exutoires.js:10` (types `effilo_*`) vs `init-db.js:4112` (types migrés `essuyage/tricot/merinos`) → CO2 évité = 0 pour la filière recyclage + aucun tarif possible.
+4. **C1** `commandes-exutoires.js:348` seul appelant de la state machine ; `preparations.js:192,386`, `controles-pesee.js:97,161`, `factures-exutoires.js:261,355`, `pennylane.js:605` la contournent en UPDATE direct.
+5. **M4** `controles-pesee.js:72` (dénominateur pesée interne) vs `factures-exutoires.js:38` (dénominateur pesée client) — deux « % d'écart » du même dossier sur des bases différentes.
