@@ -18,10 +18,10 @@
 const COMMANDE_EXUTOIRE = {
   name: 'commande_exutoire',
   description: 'Workflow d\'une commande exutoire : réception → préparation → expédition → facturation.',
-  initial: 'brouillon',
+  initial: 'en_attente',
   terminal: ['cloturee', 'annulee'],
   states: [
-    'brouillon',       // créée, pas encore confirmée
+    'en_attente',      // créée, pas encore confirmée (défaut DB commandes_exutoires.statut)
     'confirmee',       // ordre client validé
     'en_preparation',  // préparation logistique en cours
     'chargee',         // chargement remorque effectué (= ancienne 'chargée')
@@ -39,7 +39,7 @@ const COMMANDE_EXUTOIRE = {
     'annulée': 'annulee',
   },
   transitions: {
-    brouillon: { confirmee: { roles: ['ADMIN', 'MANAGER'] }, annulee: { roles: ['ADMIN', 'MANAGER'] } },
+    en_attente: { confirmee: { roles: ['ADMIN', 'MANAGER'] }, annulee: { roles: ['ADMIN', 'MANAGER'] } },
     confirmee: { en_preparation: { roles: ['ADMIN', 'MANAGER'] }, annulee: { roles: ['ADMIN', 'MANAGER'] } },
     en_preparation: { chargee: { roles: ['ADMIN', 'MANAGER'] }, annulee: { roles: ['ADMIN', 'MANAGER'] } },
     chargee: { expediee: { roles: ['ADMIN', 'MANAGER'] } },

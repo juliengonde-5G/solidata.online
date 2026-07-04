@@ -1,44 +1,44 @@
 const statusMappings = {
   // Candidats (recrutement)
-  received: { label: 'Recu', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  received: { label: 'Reçu', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   interview: { label: 'Entretien', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
-  recruited: { label: 'Recrute', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
-  rejected: { label: 'Refuse', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
+  recruited: { label: 'Recruté', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  rejected: { label: 'Refusé', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 
   // Commandes logistiques
   draft: { label: 'Brouillon', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
   pending: { label: 'En attente', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
-  confirmed: { label: 'Confirmee', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
-  prepared: { label: 'Preparee', color: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
-  weighed: { label: 'Pesee', color: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
-  validated: { label: 'Validee', color: 'bg-teal-100 text-teal-700', dot: 'bg-teal-500' },
-  invoiced: { label: 'Facturee', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
-  closed: { label: 'Cloturee', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
-  cancelled: { label: 'Annulee', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
+  confirmed: { label: 'Confirmée', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  prepared: { label: 'Préparée', color: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
+  weighed: { label: 'Pesée', color: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
+  validated: { label: 'Validée', color: 'bg-teal-100 text-teal-700', dot: 'bg-teal-500' },
+  invoiced: { label: 'Facturée', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  closed: { label: 'Clôturée', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
+  cancelled: { label: 'Annulée', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 
   // Tournees
-  planned: { label: 'Planifiee', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  planned: { label: 'Planifiée', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   in_progress: { label: 'En cours', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
-  completed: { label: 'Terminee', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  completed: { label: 'Terminée', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
 
   // Facturation
-  sent: { label: 'Envoyee', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
-  paid: { label: 'Payee', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  sent: { label: 'Envoyée', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  paid: { label: 'Payée', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   overdue: { label: 'En retard', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 
   // Vehicules
-  operationnel: { label: 'Operationnel', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  operationnel: { label: 'Opérationnel', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   en_panne: { label: 'En panne', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
   maintenance: { label: 'Maintenance', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
 
   // Stock / mouvements
-  entree: { label: 'Entree', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  entree: { label: 'Entrée', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   sortie: { label: 'Sortie', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 
   // Heures de travail
   travail: { label: 'Travail', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   absence: { label: 'Absence', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
-  conge: { label: 'Conge', color: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
+  conge: { label: 'Congé', color: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
   maladie: { label: 'Maladie', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
   formation: { label: 'Formation', color: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
 
@@ -47,7 +47,8 @@ const statusMappings = {
   MANAGER: { label: 'Manager', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   RH: { label: 'RH', color: 'bg-teal-100 text-teal-700', dot: 'bg-teal-500' },
   COLLABORATEUR: { label: 'Collaborateur', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
-  AUTORITE: { label: 'Autorite', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  AUTORITE: { label: 'Autorité', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  RESP_BTQ: { label: 'Resp. Boutique', color: 'bg-pink-100 text-pink-700', dot: 'bg-pink-500' },
 
   // Qualite produits finis
   A: { label: 'A', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
@@ -68,12 +69,12 @@ const statusMappings = {
 
   // Types clients exutoires
   recycleur: { label: 'Recycleur', color: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
-  negociant: { label: 'Negociant', color: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  negociant: { label: 'Négociant', color: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
   industriel: { label: 'Industriel', color: 'bg-orange-50 text-orange-700', dot: 'bg-orange-500' },
   autre: { label: 'Autre', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
 
   // Expeditions
-  shipped: { label: 'Expediee', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  shipped: { label: 'Expédiée', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   loading: { label: 'Chargement', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
 
   // Generiques
@@ -86,19 +87,19 @@ const statusMappings = {
 // Type-specific overrides for when the same status key needs different labels
 const typeOverrides = {
   candidat: {
-    received: { label: 'Recu' },
+    received: { label: 'Reçu' },
     interview: { label: 'Entretien' },
-    recruited: { label: 'Recrute' },
-    rejected: { label: 'Refuse' },
+    recruited: { label: 'Recruté' },
+    rejected: { label: 'Refusé' },
   },
   commande: {
     pending: { label: 'En attente' },
-    confirmed: { label: 'Confirmee' },
+    confirmed: { label: 'Confirmée' },
   },
   tournee: {
-    planned: { label: 'Planifiee' },
+    planned: { label: 'Planifiée' },
     in_progress: { label: 'En cours' },
-    completed: { label: 'Terminee' },
+    completed: { label: 'Terminée' },
   },
 };
 

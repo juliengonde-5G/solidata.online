@@ -79,7 +79,7 @@ export default function CollectionsLive() {
     loadActive();
     const interval = setInterval(loadActive, 30000);
 
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('accessToken');
     const socket = io(window.location.origin, { auth: { token } });
     socketRef.current = socket;
 

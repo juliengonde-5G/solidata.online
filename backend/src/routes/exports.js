@@ -4,6 +4,7 @@ const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { monthBounds } = require('../utils/month-range');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER', 'RH'));
 
@@ -55,7 +56,7 @@ router.get('/production', async (req, res) => {
     const month = req.query.month || new Date().toISOString().slice(0, 7);
     const result = await pool.query(
       'SELECT * FROM production_daily WHERE date BETWEEN $1 AND $2 ORDER BY date',
-      [month + '-01', month + '-31']
+      monthBounds(month)
     );
 
     const workbook = new ExcelJS.Workbook();

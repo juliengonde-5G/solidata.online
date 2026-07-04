@@ -191,14 +191,14 @@ const NAV_TREE = [
     icon: BarChart3,
     children: [
       { label: 'Performance', path: '/performance', icon: Activity, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'Collecte', path: '/reporting-collecte', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Collecte', path: '/reporting-collecte', icon: BarChart3, roles: ['ADMIN', 'MANAGER', 'AUTORITE'] },
       { label: 'RH', path: '/reporting-rh', icon: BarChart2, roles: ['ADMIN', 'RH'] },
       {
         label: 'Reporting',
         icon: PieChart,
         children: [
           { label: 'Refashion', path: '/refashion', icon: RefreshCw, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Métropole Rouen', path: '/reporting-metropole', icon: Building2, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Métropole Rouen', path: '/reporting-metropole', icon: Building2, roles: ['ADMIN', 'MANAGER', 'AUTORITE'] },
           { label: 'Production', path: '/reporting-production', icon: Factory, roles: ['ADMIN', 'MANAGER'] },
         ],
       },

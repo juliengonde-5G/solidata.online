@@ -262,7 +262,7 @@ router.post('/:id/link-commande', async (req, res) => {
       [commandeId]
     );
     await client.query(
-      `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, motif, modifie_par)
+      `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, commentaire, utilisateur_id)
        VALUES ($1, NULL, 'cloturee', $2, $3)`,
       [commandeId, `Rapprochement manuel facture #${factureId}`, req.user.id]
     );
@@ -306,7 +306,7 @@ router.post('/:id/unlink', authorize('ADMIN'), async (req, res) => {
         [oldCommandeId]
       );
       await client.query(
-        `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, motif, modifie_par)
+        `INSERT INTO historique_commandes_exutoires (commande_id, ancien_statut, nouveau_statut, commentaire, utilisateur_id)
          VALUES ($1, 'cloturee', 'expediee', 'Désouplage manuel facture', $2)`,
         [oldCommandeId, req.user.id]
       );

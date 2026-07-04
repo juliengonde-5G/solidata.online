@@ -61,11 +61,11 @@ describe('GET /api/billing', () => {
   });
 });
 
-describe('GET /api/billing/:id', () => {
+describe('GET /api/billing/invoices/:id', () => {
   it('should return 404 if invoice not found', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] });
     const res = await request(app)
-      .get('/api/billing/999')
+      .get('/api/billing/invoices/999')
       .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(404);
   });
@@ -76,7 +76,7 @@ describe('GET /api/billing/:id', () => {
       .mockResolvedValueOnce({ rows: [{ id: 1, description: 'Balles crème', quantity: 10, unit_price_ht: 100 }] });
 
     const res = await request(app)
-      .get('/api/billing/1')
+      .get('/api/billing/invoices/1')
       .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(1);

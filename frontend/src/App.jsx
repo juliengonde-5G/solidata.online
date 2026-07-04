@@ -136,7 +136,7 @@ function App() {
               <Route path="/admin/vak/sumup-config" element={<ProtectedRoute roles={['ADMIN']}><VakSumupConfig /></ProtectedRoute>} />
 
               {/* Recrutement */}
-              <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Candidates /></ProtectedRoute>} />
+              <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Candidates /></ProtectedRoute>} />
               <Route path="/recruitment-plan" element={<ProtectedRoute roles={['ADMIN', 'RH']}><RecruitmentPlan /></ProtectedRoute>} />
               <Route path="/pcm" element={<ProtectedRoute roles={['ADMIN', 'RH']}><PersonalityMatrix /></ProtectedRoute>} />
 
@@ -185,12 +185,12 @@ function App() {
               {/* Reporting */}
               <Route path="/performance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PerformanceDashboard /></ProtectedRoute>} />
               <Route path="/dashboard-executif" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><DashboardExecutif /></ProtectedRoute>} />
-              <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingCollecte /></ProtectedRoute>} />
+              <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE']}><ReportingCollecte /></ProtectedRoute>} />
               <Route path="/reporting-rh" element={<ProtectedRoute roles={['ADMIN', 'RH']}><ReportingRH /></ProtectedRoute>} />
               <Route path="/reporting-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingProduction /></ProtectedRoute>} />
               <Route path="/reporting" element={<Navigate to="/reporting-collecte" />} />
               <Route path="/refashion" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Refashion /></ProtectedRoute>} />
-              <Route path="/reporting-metropole" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingMetropole /></ProtectedRoute>} />
+              <Route path="/reporting-metropole" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE']}><ReportingMetropole /></ProtectedRoute>} />
 
               {/* Facturation */}
               <Route path="/billing" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Billing /></ProtectedRoute>} />
