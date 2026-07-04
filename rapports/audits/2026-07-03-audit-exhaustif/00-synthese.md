@@ -176,8 +176,8 @@ Intégrant tes 4 décisions : traçabilité **carton/balle**, sonde **convoyeur 
 - ✅ **I1** — lien carton → lot : `produits_finis.batch_id` écrit à l'étiquetage (backend + tests).
 - ✅ **I2** — UI Lots de tri (onglet ChaineTri : créer/démarrer/suivre) + sélecteur de lot au poste d'étiquetage.
 - ✅ **I3** — fiche traçabilité lot → cartons → sortie (chaîne rendue interrogeable et visible).
+- ✅ **I4** — stock trié alimenté depuis le tri (une entrée par sortie catégorisée, transaction idempotente) **et bug A1 résolu** : `stock_movements.matiere_id` repointé de la table legacy `matieres` (vide) vers `categories_sortantes` (la vraie classification) → saisie stock catégorisée débloquée, stock trié enfin classé.
 - ✅ **I5** — `vw_dpav_communes` corrigée (produit cartésien → tonnage territorial gonflé ~×nb_cav).
-- ☐ **I4** — reverser `operation_outputs` en stock trié : **différé** (bloqué par le seed `matieres`, bug A1).
 - ☐ Vues Refashion « sortants » (colisages inutilisés) : repointer sur `produits_finis` — décision métier.
 - ☐ **Puis** : schéma haut débit de la sonde matière/couleur convoyeur (§5.3), fondations posées par I1-I3.
 
