@@ -3522,6 +3522,11 @@ async function initDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_segment ON boutique_ventes(segment)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_batch ON boutique_ventes(batch_id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_ticket ON boutique_ventes(ticket_id)`);
+    // Index composites (boutique + date) — le dashboard filtre toujours par
+    // boutique ET plage de dates ; les index mono-colonne obligeaient un
+    // bitmap-and. (VAK a déjà ses équivalents (vak_id, date_*).)
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_boutique_date ON boutique_ventes(boutique_id, date_vente)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_tickets_boutique_date ON boutique_tickets(boutique_id, date_ticket)`);
 
     // Table 5 : boutique_commandes (en-tête commandes)
     await client.query(`
