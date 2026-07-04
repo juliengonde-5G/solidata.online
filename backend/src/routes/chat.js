@@ -175,23 +175,23 @@ async function queryStock({ categorie = '' }) {
   let result;
   if (categorie.trim()) {
     result = await pool.query(`
-      SELECT m.categorie, m.sous_categorie,
+      SELECT m.nom AS categorie, m.famille AS sous_categorie,
              COALESCE(SUM(CASE WHEN sm.type='entree' THEN sm.poids_kg ELSE 0 END), 0)
              - COALESCE(SUM(CASE WHEN sm.type='sortie' THEN sm.poids_kg ELSE 0 END), 0) AS stock_kg
-      FROM matieres m
+      FROM categories_sortantes m
       LEFT JOIN stock_movements sm ON sm.matiere_id = m.id
-      WHERE LOWER(m.categorie) LIKE $1
-      GROUP BY m.categorie, m.sous_categorie
+      WHERE LOWER(m.nom) LIKE $1
+      GROUP BY m.nom, m.famille
       ORDER BY stock_kg DESC
     `, [`%${categorie.toLowerCase()}%`]);
   } else {
     result = await pool.query(`
-      SELECT m.categorie,
+      SELECT m.nom AS categorie,
              COALESCE(SUM(CASE WHEN sm.type='entree' THEN sm.poids_kg ELSE 0 END), 0)
              - COALESCE(SUM(CASE WHEN sm.type='sortie' THEN sm.poids_kg ELSE 0 END), 0) AS stock_kg
-      FROM matieres m
+      FROM categories_sortantes m
       LEFT JOIN stock_movements sm ON sm.matiere_id = m.id
-      GROUP BY m.categorie
+      GROUP BY m.nom
       HAVING COALESCE(SUM(CASE WHEN sm.type='entree' THEN sm.poids_kg ELSE 0 END), 0)
              - COALESCE(SUM(CASE WHEN sm.type='sortie' THEN sm.poids_kg ELSE 0 END), 0) > 0
       ORDER BY stock_kg DESC

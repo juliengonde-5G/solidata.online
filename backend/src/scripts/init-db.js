@@ -2269,6 +2269,29 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_incidents_tour_id ON incidents(tour_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_gps_positions_vehicle_recorded ON gps_positions(vehicle_id, recorded_at DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_stock_movements_matiere ON stock_movements(matiere_id);');
+
+    // A1 (audit 07/2026) — stock_movements.matiere_id classe en réalité le stock
+    // par categories_sortantes (front Stock.jsx + inventaire), mais la FK pointait
+    // la table legacy matieres (jamais seedée, vide) → toute saisie catégorisée
+    // violait la FK (500) et le stock trié restait « Non classé ». matieres étant
+    // vide, tous les matiere_id existants sont NULL → repointage sûr vers
+    // categories_sortantes (source de classification vivante depuis la refonte P1).
+    await client.query(`
+      UPDATE stock_movements SET matiere_id = NULL
+      WHERE matiere_id IS NOT NULL
+        AND matiere_id NOT IN (SELECT id FROM categories_sortantes)
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                   WHERE constraint_name = 'stock_movements_matiere_id_fkey'
+                     AND table_name = 'stock_movements') THEN
+          ALTER TABLE stock_movements DROP CONSTRAINT stock_movements_matiere_id_fkey;
+        END IF;
+        ALTER TABLE stock_movements ADD CONSTRAINT stock_movements_matiere_id_fkey
+          FOREIGN KEY (matiere_id) REFERENCES categories_sortantes(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_tour_weights_tour ON tour_weights(tour_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_driver_date ON tours(driver_employee_id, date DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);');

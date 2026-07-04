@@ -48,15 +48,22 @@
 - [x] I1 — Lien carton → lot (backend + tests)
 - [x] I2 — UI Lots de tri (ChaineTri onglet « Lots de tri ») + sélecteur de lot dans EtiquetteGenerer + endpoint `GET /etiquettes/lots-actifs` (COLLABORATEUR)
 - [x] I3 — Fiche traçabilité lot → cartons → sortie (`GET /tri/batches/:id` enrichi + panneau ChaineTri) ; couche colisage laissée en non-objectif
-- [ ] I4 — Alimentation stock trié *(différé — entremêlé avec le seed `matieres`, bug A1 ; à cadrer)*
+- [x] I4 — Alimentation du stock trié + résolution du bug A1 (repointage FK `stock_movements.matiere_id` → `categories_sortantes`)
 - [x] I5 — `vw_dpav_communes` corrigée (produit cartésien) ; vues colisages documentées (décision métier)
+
+### Détail I4 (livré)
+Le bug A1 était un **conflit sémantique** : `stock_movements.matiere_id` classait le stock par
+`categories_sortantes` (front + inventaire) mais sa FK pointait la table legacy `matieres` (vide) → toute
+saisie catégorisée violait la FK et le stock trié restait « Non classé ». `matieres` étant vide, tous les
+`matiere_id` sont NULL → **FK repointée vers `categories_sortantes`** (migration idempotente + null-out de
+sécurité) et les 4 lectures incohérentes (`stock.js` liste/résumé, `finance.js`, `chat.js`) réalignées.
+Puis **reversement du tri en stock** : `PUT /tri/executions/:id/complete` réécrit en transaction idempotente
+(verrou `FOR UPDATE`, garde anti re-complétion) qui insère une entrée `stock_movements` par sortie
+catégorisée (rupture R2/R5 fermée). Bonus : suppression d'une référence à `operation_executions.updated_at`
+(colonne inexistante — le handler était cassé). 7 tests tri.
 
 ## Reste à cadrer (hors incréments livrés)
 
-- **I4** : reverser `operation_outputs` en `stock_movements` (entrée par catégorie) à la complétion d'une
-  exécution. Bloqué par le bug A1 (rapport 04) : `stock_movements.matiere_id` référence `matieres`, table
-  jamais seedée → le stock trié tombe en « Non classé ». Prérequis : seeder/relier `matieres` ↔
-  `categories_sortantes`. À traiter comme un chantier stock dédié.
 - **Vues Refashion sortants** : repointer `vw_dpav_sortants`/`vw_coherence_tri_filiere` sur `produits_finis`
   (sorties réelles) au lieu des colisages, une fois le mapping vers `famille_refashion` tranché.
 - **Sonde matière/couleur (convoyeur)** : dépend de l'activation effective des lots (I1-I3 posent les

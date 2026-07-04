@@ -1281,11 +1281,11 @@ router.get('/rentabilite/:year', async (req, res) => {
     let qualiteData = qualites.rows;
     if (qualiteData.length === 0) {
       const flux = await pool.query(`
-        SELECT m.name as qualite, SUM(sm.poids_kg) / 1000.0 as tonnes
+        SELECT m.nom as qualite, SUM(sm.poids_kg) / 1000.0 as tonnes
         FROM stock_movements sm
-        JOIN matieres m ON sm.matiere_id = m.id
+        JOIN categories_sortantes m ON sm.matiere_id = m.id
         WHERE sm.type = 'sortie' AND EXTRACT(YEAR FROM sm.date) = $1
-        GROUP BY m.name
+        GROUP BY m.nom
       `, [year]).catch(() => ({ rows: [] }));
       qualiteData = flux.rows;
     }

@@ -13,8 +13,9 @@ router.use(autoLogActivity('stock'));
 router.get('/', async (req, res) => {
   try {
     const { type, date_from, date_to, limit: lim } = req.query;
-    let query = `SELECT sm.*, m.categorie as matiere_categorie, m.sous_categorie
-       FROM stock_movements sm LEFT JOIN matieres m ON sm.matiere_id = m.id WHERE 1=1`;
+    // matiere_id référence categories_sortantes (cf. A1, migration init-db)
+    let query = `SELECT sm.*, m.nom as matiere_categorie, m.famille as matiere_famille
+       FROM stock_movements sm LEFT JOIN categories_sortantes m ON sm.matiere_id = m.id WHERE 1=1`;
     const params = [];
 
     if (type) { params.push(type); query += ` AND sm.type = $${params.length}`; }
@@ -40,15 +41,15 @@ router.get('/summary', async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-        COALESCE(m.categorie, 'Non classé') as categorie,
+        COALESCE(m.nom, 'Non classé') as categorie,
         SUM(CASE WHEN sm.type = 'entree' THEN sm.poids_kg ELSE 0 END) as total_entrees_kg,
         SUM(CASE WHEN sm.type = 'sortie' THEN sm.poids_kg ELSE 0 END) as total_sorties_kg,
         SUM(CASE WHEN sm.type = 'entree' THEN sm.poids_kg ELSE -sm.poids_kg END) as solde_kg,
         COUNT(*) as nb_mouvements
       FROM stock_movements sm
-      LEFT JOIN matieres m ON sm.matiere_id = m.id
+      LEFT JOIN categories_sortantes m ON sm.matiere_id = m.id
       WHERE sm.date >= NOW() - make_interval(days => $1)
-      GROUP BY m.categorie
+      GROUP BY m.nom
       ORDER BY solde_kg DESC`,
       [days]
     );
