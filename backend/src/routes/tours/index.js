@@ -239,7 +239,7 @@ router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
   }
 });
 
-// POST /api/tours/:id/scan-public — Enregistrer un scan QR (mobile sans auth)
+// POST /api/tours/:id/scan-public — Enregistrer un scan QR (JWT chauffeur requis)
 router.post('/:id/scan-public', async (req, res) => {
   try {
     const { cav_id, scanned_at } = req.body;
@@ -252,6 +252,44 @@ router.post('/:id/scan-public', async (req, res) => {
   } catch (err) {
     console.error('[TOURS] Erreur scan-public:', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/gps-batch-public — Flush des positions GPS bufferisées hors-ligne.
+// Le suivi temps réel passe par Socket.IO (gps-update) quand le réseau est là ;
+// hors zone de couverture, le mobile bufferise localement (IndexedDB) et rejoue
+// ici par lots à la reconnexion. Auth : JWT chauffeur (route « -public », voir
+// le middleware MOBILE_DRIVER_PATH en tête de ce routeur).
+router.post('/gps-batch-public', async (req, res) => {
+  const positions = Array.isArray(req.body?.positions) ? req.body.positions : [];
+  if (positions.length === 0) return res.json({ inserted: 0 });
+  if (positions.length > 500) {
+    return res.status(400).json({ error: 'Lot trop volumineux (max 500 positions)' });
+  }
+  // On ne garde que les positions complètes (tour_id + vehicle_id NOT NULL en
+  // base) ; une position incomplète est ignorée sans faire échouer tout le lot.
+  const valid = positions.filter((p) =>
+    p && p.tour_id != null && p.vehicle_id != null &&
+    p.latitude != null && p.longitude != null);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const p of valid) {
+      await client.query(
+        `INSERT INTO gps_positions (tour_id, vehicle_id, latitude, longitude, speed, recorded_at)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW()))`,
+        [p.tour_id, p.vehicle_id, p.latitude, p.longitude, p.speed ?? null, p.recorded_at || null]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ inserted: valid.length, skipped: positions.length - valid.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[TOURS] Erreur gps-batch-public:', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

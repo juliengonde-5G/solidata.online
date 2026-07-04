@@ -8,9 +8,15 @@
  *   - 'pending' : { counts: { scans, weights, gps, incidents, collects, total } }
  *
  * Politique :
- *   - succès (2xx)  : élément supprimé de la file
- *   - 4xx           : élément supprimé (données invalides — éviter une boucle)
- *   - 5xx / réseau  : conservé pour retry (boucle périodique 5 min + reconnexion)
+ *   - succès (2xx)     : élément supprimé de la file
+ *   - 4xx (sauf 401)   : élément supprimé (données invalides — éviter une boucle)
+ *   - 401 / `retryable`: conservé — problème d'auth, jamais une donnée invalide
+ *                        (la ré-auth chauffeur d'authedFetch/api le résout)
+ *   - 5xx / réseau     : conservé pour retry (boucle 5 min + reconnexion)
+ *
+ * Endpoints : écritures via authedFetch/api (JWT chauffeur + ré-auth). Le GPS
+ * hors-couverture est bufferisé par TourMap (addGpsPosition) puis rejoué en lot
+ * sur POST /tours/gps-batch-public ; les scans QR sur POST /tours/:id/scan-public.
  */
 
 import {
@@ -93,7 +99,7 @@ export async function syncPendingScans() {
   let synced = 0; let failed = 0;
   for (const scan of scans) {
     try {
-      await api.post(`/tours/${scan.tourId}/scan`, {
+      await api.post(`/tours/${scan.tourId}/scan-public`, {
         cav_id: scan.cavId,
         scanned_at: scan.scannedAt,
         client_id: scan.clientId || null,
@@ -191,7 +197,7 @@ export async function syncGpsBuffer() {
   for (let i = 0; i < positions.length; i += batchSize) {
     const batch = positions.slice(i, i + batchSize);
     try {
-      await api.post('/tours/gps-batch', {
+      await api.post('/tours/gps-batch-public', {
         positions: batch.map(p => ({
           tour_id: p.tourId,
           vehicle_id: p.vehicleId,
