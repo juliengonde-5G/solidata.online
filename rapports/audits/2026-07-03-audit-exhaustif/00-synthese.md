@@ -171,11 +171,15 @@ Intégrant tes 4 décisions : traçabilité **carton/balle**, sonde **convoyeur 
 - ☐ **Cloisonnement des boutiques** (RESP_BTQ limité à sa boutique — aujourd'hui aucun cloisonnement) et durcissement RGPD/PII (santé/finances ouvertes aux MANAGER).
 - ☐ **Router toutes les transitions de statut par la state machine** (5 modules).
 
-### P2 — Traçabilité carton/balle bout-en-bout (mois) — **chantier structurant**
-- ☐ UI workflow de lots (2 écrans) → remplir les 6 tables vides (§4.2).
-- ☐ Écrire `batch_id` et `colisages.expedition_id` ; réconciliation des 3 registres de stock.
-- ☐ Corriger les 2 vues Refashion fausses.
-- ☐ **Puis seulement** : schéma haut débit de la sonde matière/couleur convoyeur (§5.3).
+### P2 — Traçabilité carton/balle bout-en-bout (mois) — **chantier structurant EN COURS**
+> Détail et suivi : `10-chantier-tracabilite-carton-balle.md`.
+- ✅ **I1** — lien carton → lot : `produits_finis.batch_id` écrit à l'étiquetage (backend + tests).
+- ✅ **I2** — UI Lots de tri (onglet ChaineTri : créer/démarrer/suivre) + sélecteur de lot au poste d'étiquetage.
+- ✅ **I3** — fiche traçabilité lot → cartons → sortie (chaîne rendue interrogeable et visible).
+- ✅ **I5** — `vw_dpav_communes` corrigée (produit cartésien → tonnage territorial gonflé ~×nb_cav).
+- ☐ **I4** — reverser `operation_outputs` en stock trié : **différé** (bloqué par le seed `matieres`, bug A1).
+- ☐ Vues Refashion « sortants » (colisages inutilisés) : repointer sur `produits_finis` — décision métier.
+- ☐ **Puis** : schéma haut débit de la sonde matière/couleur convoyeur (§5.3), fondations posées par I1-I3.
 
 ### Différé (par ta décision)
 - Réglementaire (RNDTS, e-facturation Factur-X 09/2026, DPP textile) : **veille active**, pas de chantier maintenant. ⚠️ Rappel : la **réception** d'e-factures devient obligatoire au 09/2026 — à re-arbitrer d'ici la rentrée.
