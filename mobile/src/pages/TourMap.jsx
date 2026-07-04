@@ -8,6 +8,8 @@ import { useUsageMode } from '../contexts/UsageModeContext';
 import { USAGE_MODES } from '../services/usageMode';
 import UsageModeBanner from '../components/UsageModeBanner';
 import PrimaryActionBar from '../components/PrimaryActionBar';
+import { authedFetch } from '../services/authedFetch';
+import { addGpsPosition } from '../services/db';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -72,7 +74,7 @@ export default function TourMap() {
     const pollReopt = async () => {
       if (!tourId) return;
       try {
-        const res = await fetch(`/api/tours/${tourId}/reoptimize/pending-public`);
+        const res = await authedFetch(`/api/tours/${tourId}/reoptimize/pending-public`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.id) setReoptProposal(data);
@@ -92,7 +94,7 @@ export default function TourMap() {
 
   const loadTour = async () => {
     try {
-      const res = await fetch(`/api/tours/${tourId}/public`);
+      const res = await authedFetch(`/api/tours/${tourId}/public`);
       const data = await res.json();
       setTour(data);
       setCavs(data.cavs || []);
@@ -154,14 +156,28 @@ export default function TourMap() {
     // Envoi de la position GPS toutes les 10 secondes
     // Event name aligné sur backend/src/index.js (gps-update)
     intervalRef.current = setInterval(() => {
-      if (positionRef.current && socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit('gps-update', {
-          tourId: parseInt(tourId),
-          vehicleId: parseInt(vehicleId) || null,
-          latitude: positionRef.current.lat,
-          longitude: positionRef.current.lng,
-          speed: 0,
-        });
+      if (!positionRef.current) return;
+      const sample = {
+        tourId: parseInt(tourId),
+        vehicleId: parseInt(vehicleId) || null,
+        latitude: positionRef.current.lat,
+        longitude: positionRef.current.lng,
+        speed: 0,
+      };
+      if (socketRef.current && socketRef.current.connected) {
+        // En ligne : le socket persiste la position (backend gps-update).
+        socketRef.current.emit('gps-update', sample);
+      } else {
+        // Hors couverture : on bufferise localement pour rejeu à la
+        // reconnexion (POST /tours/gps-batch-public via sync.js). Pas de
+        // double-insertion : en ligne c'est le socket, hors-ligne le buffer.
+        addGpsPosition({
+          tourId: sample.tourId,
+          vehicleId: sample.vehicleId,
+          latitude: sample.latitude,
+          longitude: sample.longitude,
+          speed: sample.speed,
+        }).catch(() => { /* IndexedDB indisponible — position perdue, best-effort */ });
       }
     }, 10000);
   };
@@ -212,7 +228,7 @@ export default function TourMap() {
     if (!reoptProposal || reoptProcessing) return;
     setReoptProcessing(true);
     try {
-      await fetch(`/api/tours/${tourId}/reoptimize/${reoptProposal.id}/${action}-public`, {
+      await authedFetch(`/api/tours/${tourId}/reoptimize/${reoptProposal.id}/${action}-public`, {
         method: 'POST',
       });
       setReoptProposal(null);

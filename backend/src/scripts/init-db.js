@@ -1643,6 +1643,13 @@ async function initDatabase() {
     `);
 
     await client.query(`
+      -- NOTE audit 07/2026 : cette vue (et vw_coherence_tri_filiere plus bas)
+      -- s'appuient sur la table colisages, une couche de conditionnement aujourd'hui
+      -- NON adoptée (la sortie carton réelle passe par produits_finis / scan
+      -- douchette). Elles restent donc vides. Les rendre fiables = soit adopter
+      -- le workflow de colisage, soit les repointer sur produits_finis avec un
+      -- mapping vers famille_refashion — décision métier (voir chantier
+      -- traçabilité, rapport 04 §1.5 et 10-chantier-tracabilite-carton-balle.md).
       CREATE OR REPLACE VIEW vw_dpav_sortants AS
       SELECT EXTRACT(YEAR FROM c.scelle_at)::int AS annee,
              EXTRACT(QUARTER FROM c.scelle_at)::int AS trimestre,
@@ -1661,17 +1668,32 @@ async function initDatabase() {
     `);
 
     await client.query(`
+      -- Correctif audit 07/2026 : l'ancienne définition joignait tours × tour_weights
+      -- × tour_cav dans le même GROUP BY → produit cartésien. Chaque pesée était
+      -- comptée une fois PAR CAV collecté et attribuée en TOTAL à chaque commune,
+      -- gonflant le tonnage territorial (~×nb_cav). On calcule maintenant le poids
+      -- total par tournée et le nombre de CAV collectés dans des CTE SÉPARÉES, puis
+      -- on répartit uniformément (total / nb_cav) sur chaque CAV collecté et on
+      -- agrège par commune — total conservé, plus de double-comptage.
       CREATE OR REPLACE VIEW vw_dpav_communes AS
+      WITH poids_tour AS (
+        SELECT tour_id, SUM(weight_kg) AS poids_total_kg
+        FROM tour_weights GROUP BY tour_id
+      ), cav_par_tour AS (
+        SELECT tour_id, COUNT(*) AS nb_cav_collectes
+        FROM tour_cav WHERE status = 'collected' GROUP BY tour_id
+      )
       SELECT EXTRACT(YEAR FROM t.date)::int AS annee,
              EXTRACT(QUARTER FROM t.date)::int AS trimestre,
              COALESCE(rc.code_insee, '')::text AS code_insee,
              COALESCE(rc.nom, c.commune, '(non rattaché)') AS commune,
              COALESCE(rc.code_postal, '') AS code_postal,
-             COALESCE(SUM(tw.weight_kg), 0)::int AS poids_kg
+             COALESCE(ROUND(SUM(pt.poids_total_kg::numeric / NULLIF(cpt.nb_cav_collectes, 0))), 0)::int AS poids_kg
       FROM tours t
-      JOIN tour_weights tw ON tw.tour_id = t.id
       JOIN tour_cav tc ON tc.tour_id = t.id AND tc.status = 'collected'
       JOIN cav c ON tc.cav_id = c.id
+      JOIN poids_tour pt ON pt.tour_id = t.id
+      JOIN cav_par_tour cpt ON cpt.tour_id = t.id
       LEFT JOIN referentiel_communes rc ON c.code_insee_commune = rc.code_insee
       WHERE t.status = 'completed'
       GROUP BY annee, trimestre, rc.code_insee, COALESCE(rc.nom, c.commune, '(non rattaché)'), rc.code_postal
@@ -2247,6 +2269,29 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_incidents_tour_id ON incidents(tour_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_gps_positions_vehicle_recorded ON gps_positions(vehicle_id, recorded_at DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_stock_movements_matiere ON stock_movements(matiere_id);');
+
+    // A1 (audit 07/2026) — stock_movements.matiere_id classe en réalité le stock
+    // par categories_sortantes (front Stock.jsx + inventaire), mais la FK pointait
+    // la table legacy matieres (jamais seedée, vide) → toute saisie catégorisée
+    // violait la FK (500) et le stock trié restait « Non classé ». matieres étant
+    // vide, tous les matiere_id existants sont NULL → repointage sûr vers
+    // categories_sortantes (source de classification vivante depuis la refonte P1).
+    await client.query(`
+      UPDATE stock_movements SET matiere_id = NULL
+      WHERE matiere_id IS NOT NULL
+        AND matiere_id NOT IN (SELECT id FROM categories_sortantes)
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+                   WHERE constraint_name = 'stock_movements_matiere_id_fkey'
+                     AND table_name = 'stock_movements') THEN
+          ALTER TABLE stock_movements DROP CONSTRAINT stock_movements_matiere_id_fkey;
+        END IF;
+        ALTER TABLE stock_movements ADD CONSTRAINT stock_movements_matiere_id_fkey
+          FOREIGN KEY (matiere_id) REFERENCES categories_sortantes(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_tour_weights_tour ON tour_weights(tour_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_driver_date ON tours(driver_employee_id, date DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);');
@@ -2524,19 +2569,14 @@ async function initDatabase() {
     // ══════════════════════════════════════════
     // MODULE : Objectifs periodiques
     // ══════════════════════════════════════════
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS periodic_objectives (
-        id SERIAL PRIMARY KEY,
-        section VARCHAR(50) NOT NULL,
-        label VARCHAR(255) NOT NULL,
-        target_value DOUBLE PRECISION NOT NULL,
-        period VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (period IN ('daily', 'weekly', 'monthly', 'quarterly', 'yearly')),
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log('[INIT-DB] Module Periodic Objectives ✓');
+    // NOTE (audit 07/2026) : la table periodic_objectives est créée et possédée
+    // par routes/settings.js (schéma domaine/indicateur/valeur_cible/periode/
+    // annee/mois — utilisé par le CRUD Settings, le dashboard /objectifs et le
+    // scorecard). Un second CREATE incompatible (section/label/target_value/
+    // is_active) existait ici et entrait en course avec le premier selon
+    // l'ordre de chargement → schéma imprévisible. Supprimé : une seule
+    // définition canonique, côté settings.js.
+    console.log('[INIT-DB] Module Periodic Objectives → défini dans settings.js');
 
     // ══════════════════════════════════════════
     // MODULE : Parcours insertion — Jalons obligatoires (Diagnostic, M+3, M+6, M+10, Sortie)
@@ -3527,6 +3567,11 @@ async function initDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_segment ON boutique_ventes(segment)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_batch ON boutique_ventes(batch_id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_ticket ON boutique_ventes(ticket_id)`);
+    // Index composites (boutique + date) — le dashboard filtre toujours par
+    // boutique ET plage de dates ; les index mono-colonne obligeaient un
+    // bitmap-and. (VAK a déjà ses équivalents (vak_id, date_*).)
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_ventes_boutique_date ON boutique_ventes(boutique_id, date_vente)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_boutique_tickets_boutique_date ON boutique_tickets(boutique_id, date_ticket)`);
 
     // Table 5 : boutique_commandes (en-tête commandes)
     await client.query(`

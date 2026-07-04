@@ -24,21 +24,27 @@ export default function EtiquetteGenerer() {
   const [dimensions, setDimensions] = useState({ categorie_eco_org: [], genre: [], saison: [], gamme: [] });
   const [produits, setProduits] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Traçabilité carton → lot (optionnel) : lot de tri en cours à rattacher aux
+  // cartons étiquetés. Persiste sur la session d'étiquetage (réglé une fois).
+  const [lots, setLots] = useState([]);
+  const [selectedLot, setSelectedLot] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     (async () => {
       try {
-        const [p, d, o] = await Promise.all([
+        const [p, d, o, l] = await Promise.all([
           api.get('/etiquettes/postes'),
           api.get('/etiquettes/dimensions'),
           api.get('/etiquettes/options'),
+          api.get('/etiquettes/lots-actifs').catch(() => ({ data: [] })),
         ]);
         if (cancelled) return;
         setPoste(p.data[0] || null);
         setDimensions(d.data || { categorie_eco_org: [], genre: [], saison: [], gamme: [] });
         setProduits(o.data || []);
+        setLots(l.data || []);
       } catch (e) {
         if (!cancelled) setError(e.response?.data?.error || e.message || 'Erreur réseau');
       } finally {
@@ -81,6 +87,7 @@ export default function EtiquetteGenerer() {
         saison: sel.saison,
         gamme: sel.gamme,
         poids_kg: parseFloat(sel.poids.replace(',', '.')),
+        batch_id: selectedLot || undefined,
       });
       setSuccess(data);
       setTimeout(() => window.print(), 250);
@@ -112,6 +119,24 @@ export default function EtiquetteGenerer() {
         <header className="bg-white border-b px-6 py-4 flex items-center gap-4 shadow-sm">
           <Tag className="w-7 h-7 text-emerald-600" />
           <h1 className="text-2xl font-bold text-slate-800 flex-1">Génération d'étiquette</h1>
+          {lots.length > 0 && (
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-slate-500">Lot&nbsp;:</span>
+              <select
+                value={selectedLot}
+                onChange={(e) => setSelectedLot(e.target.value)}
+                className="border border-slate-300 rounded-lg px-2 py-1.5 bg-white text-slate-700 max-w-[200px]"
+                title="Rattacher les cartons étiquetés à un lot de tri (traçabilité)"
+              >
+                <option value="">Aucun lot</option>
+                {lots.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.code}{l.chaine_nom ? ` — ${l.chaine_nom}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="text-sm text-slate-500">{poste ? poste.nom : '—'}</div>
         </header>
 

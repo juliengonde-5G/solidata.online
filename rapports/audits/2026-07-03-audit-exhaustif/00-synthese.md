@@ -35,7 +35,7 @@ Cette richesse a un revers : la vélocité de construction a laissé une **dette
 
 ## 2. Ce qui a déjà été corrigé pendant l'audit
 
-15 bloquants confirmés (vérifiés contre le schéma, testés — Jest 180/180 vert à chaque étape) ont été corrigés et poussés sur la branche `claude/solidata-erp-audit-265e2e` :
+27 bloquants/majeurs confirmés (vérifiés contre le schéma, testés — Jest 180/180 vert à chaque étape) ont été corrigés et poussés sur la branche `claude/solidata-erp-audit-265e2e`. **Première passe** :
 
 | # | Correctif | Impact utilisateur avant | Commit |
 |---|-----------|--------------------------|--------|
@@ -53,7 +53,26 @@ Cette richesse a un revers : la vélocité de construction a laissé une **dette
 | 12 | **Unité CO₂ reporting collecte** | Affichait « kg » pour des tonnes | `65cce89` |
 | 13-15 | UX : recherche factice retirée, accents rétablis sur 20 statuts, `/candidates` ouvert aux MANAGER | Faux espoirs / illisibilité / retours silencieux au dashboard | `65cce89` |
 
-**Ces correctifs ne touchent que du câblage** (noms de colonnes, clés, bornes) — aucun changement de logique métier, chacun aligné sur une source de vérité existante (le schéma DB ou un usage correct ailleurs dans le code).
+**Seconde passe** (13 correctifs supplémentaires) :
+
+| # | Correctif | Impact utilisateur avant | Commit |
+|---|-----------|--------------------------|--------|
+| 16 | **Insertion IA** (3 endpoints /profil, /entretien, /cohorte) | 500 (colonnes `position_id`/`hire_date`/`mobilite` inexistantes) → tout le volet IA insertion mort | `1ebbdb5` |
+| 17 | **Planning employés** | Toute sauvegarde échouait (`ON CONFLICT` sur contrainte supprimée) | `1ebbdb5` |
+| 18 | **RGPD candidats** (anonymisation/export/purge) | ROLLBACK silencieux (table `pcm_profiles` inexistante) → non-conformité Art. 15/17 | `1ebbdb5` |
+| 19 | **Radar « 7 freins »** | Axe Numérique toujours à 1 (colonne omise) | `1ebbdb5` |
+| 20 | **CO₂ & tarifs exutoires** | Gammes P1 (essuyage/tricot/mérinos) → CO₂ = 0 et tarification impossible | `1ebbdb5` |
+| 21 | **Import CSV temps réel boutiques** | Webhook 401 systématique (monté derrière le JWT) | `e1e81e3` |
+| 22 | **Fuite PII chauffeurs** | `GET /vehicles/available` public exposait les noms | `e1e81e3` |
+| 23 | **Rapports PCM côté insertion** | Illisibles dès que `PCM_ENCRYPTION_KEY` câblée (clés désalignées) | `e1e81e3` |
+| 24 | **KPIs industriels / Reporting RH** | 403 avalé pour le rôle RH → bloc vide | `e1e81e3` |
+| 25 | **Objectifs vs réalisé (scorecard)** | 500 + double schéma `periodic_objectives` → réalisé toujours 0 | `d19d3f0` |
+| 26 | **Ré-import CSV VAK** | Duplication des lignes (segments/annuel double-comptés) | `04e0d1c` |
+| 27 | **Perf dashboard boutiques** | Index composites (boutique + date) manquants | `04e0d1c` |
+
+**Ces correctifs ne touchent que du câblage** (noms de colonnes, clés, bornes, alignement de schéma) — aucun changement de logique métier, chacun aligné sur une source de vérité existante (le schéma DB ou un usage correct ailleurs dans le code). Suite Jest 180/180 verte à chaque étape.
+
+**Total : 27 bloquants/majeurs corrigés, testés et poussés.**
 
 ---
 
@@ -71,7 +90,7 @@ Au-delà des bugs individuels, **six motifs récurrents** traversent tous les do
 
 5. **State machines contournées.** Le moteur centralisé (bien conçu) n'est appelé que par 1 route sur 5 concernées ; les autres font des `UPDATE statut` directs → la garantie d'intégrité est illusoire. **Remède** : router toutes les transitions par le moteur (chantier V6 déjà amorcé).
 
-6. **Incohérences d'unités et de définitions.** kg vs tonnes vs pièces/paires non modélisés ; panier moyen, IPT, % écart pesée, absentéisme calculés avec **deux définitions différentes** selon l'écran ; objectif HT comparé à un réalisé TTC. **Remède** : un module de KPI unique (une seule définition par indicateur).
+6. **Incohérences d'unités et de définitions.** kg vs tonnes vs pièces/paires non modélisés ; panier moyen, IPT, % écart pesée, absentéisme calculés avec **deux définitions différentes** selon l'écran ; **objectif boutique en HT comparé à un réalisé TTC** (surestime l'atteinte de ~20 %). Ces points **n'ont pas été corrigés** car ils demandent une **décision métier** (un objectif de CA est-il exprimé HT ou TTC ?) plutôt qu'un simple câblage. **Remède** : un module de KPI unique (une seule définition par indicateur) — à cadrer avec la direction.
 
 ---
 
@@ -141,9 +160,10 @@ Côté web, les 5 frictions majeures pour un public peu à l'aise :
 Intégrant tes 4 décisions : traçabilité **carton/balle**, sonde **convoyeur industriel**, réglementaire **différé**, essaimage **préparé mais interne d'abord**.
 
 ### P0 — Fiabilité immédiate (fait, ou < 1 jour)
-- ✅ **Les 15 bloquants confirmés** (§2) — corrigés et poussés.
-- ☐ **Reste 9 bloquants** identifiés non encore corrigés (nécessitent vérif ou décision) : insertion-ai morte (rapport 02, colonnes `position_id`/`hire_date`/`mobilite`), 14 endpoints tournée mobile non authentifiés + RGPD `pcm_profiles` (rapport 01), types produit `effilo_*` → CO₂ recyclage = 0 (rapport 05), webhook email boutique 401 (rapport 07). **Recommandation : une seconde passe de correctifs sûrs.**
-- ☐ **Filet de sécurité** : test d'intégration exécutant chaque requête SQL (détecte les désalignements colonne) + rendre le smoke-test strict sur les 5xx.
+- ✅ **28 bloquants/majeurs confirmés** (§2, deux passes) — corrigés, testés et poussés. Couvre insertion IA, planning, RGPD candidats, radar freins, types produit/CO₂, webhook boutiques, PII véhicules, clé PCM, KPIs RH, scorecard/objectifs, ré-import VAK.
+- ✅ **Sécurisation des 13 endpoints tournée mobile** (`commit bf08932`) : les routes chauffeur (détail tournée, démarrer/collecter/peser/incident/statut/scan/ré-optim + `/vehicle/:id/today`) étaient ouvertes sans authentification, sur un `:id` énumérable → lecture des tournées et falsification anonyme de tonnage/pesées possibles. Elles exigent désormais le JWT chauffeur, avec **ré-auth transparente** côté mobile (helper `authedFetch` + `driverAuth`, `vehicle_token` persisté) pour zéro perte de données offline. Corrige au passage la purge des données de collecte sur 401. Validé : backend 180/180, mobile 40/40, builds OK.
+- ✅ **Reliquat scan/GPS traité** (`commit ad52ea8`, rapport 03 A7) : la file de sync visait deux endpoints inexistants (`/tours/:id/scan`, `/tours/gps-batch`). Scans rebranchés sur `/scan-public` ; **bufferisation GPS hors-ligne complétée** (nouvel endpoint batch `POST /tours/gps-batch-public` + capture locale dans TourMap quand le réseau tombe, sans double-insertion avec le socket temps réel) → les traces GPS en zone blanche ne sont plus perdues.
+- ☐ **Filet de sécurité** : test d'intégration exécutant chaque requête SQL (détecte les désalignements colonne — cause n°1 des bloquants) + rendre le smoke-test strict sur les 5xx.
 
 ### P1 — Robustesse & préparation matérielle (semaines)
 - ☐ **Registre de décodeurs multi-sondes + seuils par CAV** — **avant** la commande des nouvelles sondes (§5.2).
@@ -151,11 +171,15 @@ Intégrant tes 4 décisions : traçabilité **carton/balle**, sonde **convoyeur 
 - ☐ **Cloisonnement des boutiques** (RESP_BTQ limité à sa boutique — aujourd'hui aucun cloisonnement) et durcissement RGPD/PII (santé/finances ouvertes aux MANAGER).
 - ☐ **Router toutes les transitions de statut par la state machine** (5 modules).
 
-### P2 — Traçabilité carton/balle bout-en-bout (mois) — **chantier structurant**
-- ☐ UI workflow de lots (2 écrans) → remplir les 6 tables vides (§4.2).
-- ☐ Écrire `batch_id` et `colisages.expedition_id` ; réconciliation des 3 registres de stock.
-- ☐ Corriger les 2 vues Refashion fausses.
-- ☐ **Puis seulement** : schéma haut débit de la sonde matière/couleur convoyeur (§5.3).
+### P2 — Traçabilité carton/balle bout-en-bout (mois) — **chantier structurant EN COURS**
+> Détail et suivi : `10-chantier-tracabilite-carton-balle.md`.
+- ✅ **I1** — lien carton → lot : `produits_finis.batch_id` écrit à l'étiquetage (backend + tests).
+- ✅ **I2** — UI Lots de tri (onglet ChaineTri : créer/démarrer/suivre) + sélecteur de lot au poste d'étiquetage.
+- ✅ **I3** — fiche traçabilité lot → cartons → sortie (chaîne rendue interrogeable et visible).
+- ✅ **I4** — stock trié alimenté depuis le tri (une entrée par sortie catégorisée, transaction idempotente) **et bug A1 résolu** : `stock_movements.matiere_id` repointé de la table legacy `matieres` (vide) vers `categories_sortantes` (la vraie classification) → saisie stock catégorisée débloquée, stock trié enfin classé.
+- ✅ **I5** — `vw_dpav_communes` corrigée (produit cartésien → tonnage territorial gonflé ~×nb_cav).
+- ☐ Vues Refashion « sortants » (colisages inutilisés) : repointer sur `produits_finis` — décision métier.
+- ☐ **Puis** : schéma haut débit de la sonde matière/couleur convoyeur (§5.3), fondations posées par I1-I3.
 
 ### Différé (par ta décision)
 - Réglementaire (RNDTS, e-facturation Factur-X 09/2026, DPP textile) : **veille active**, pas de chantier maintenant. ⚠️ Rappel : la **réception** d'e-factures devient obligatoire au 09/2026 — à re-arbitrer d'ici la rentrée.

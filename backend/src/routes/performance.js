@@ -3,7 +3,15 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate);
+// /industrial-kpis alimente aussi la page Reporting RH (rôle RH) — KPIs
+// agrégés sans PII. Le reste du routeur reste ADMIN/MANAGER.
+router.use((req, res, next) => {
+  const roles = req.path === '/industrial-kpis'
+    ? ['ADMIN', 'MANAGER', 'RH']
+    : ['ADMIN', 'MANAGER'];
+  return authorize(...roles)(req, res, next);
+});
 
 // ══════════════════════════════════════════
 // GET /api/performance/dashboard — KPIs consolides
@@ -207,9 +215,15 @@ router.get('/activity-heatmap', async (req, res) => {
 // ══════════════════════════════════════════
 router.get('/scorecard', async (req, res) => {
   try {
-    const monthStart = new Date().toISOString().slice(0, 7) + '-01';
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const monthStart = now.toISOString().slice(0, 7) + '-01';
+    const annee = now.getFullYear();
+    const mois = now.getMonth() + 1;
 
+    // Schéma réel de periodic_objectives = celui de settings.js (domaine /
+    // indicateur / valeur_cible / periode / annee / mois). L'ancienne requête
+    // filtrait sur `is_active` (colonne du schéma dupliqué, inexistante ici)
+    // → 500, et lisait `obj.realise` qui n'est stocké nulle part → réalisé 0.
     const [collecte, production, objectifs] = await Promise.all([
       pool.query(
         `SELECT COALESCE(SUM(total_weight_kg), 0) as kg FROM tours WHERE status = 'completed' AND date >= $1`,
@@ -219,13 +233,26 @@ router.get('/scorecard', async (req, res) => {
         `SELECT COALESCE(SUM(total_jour_t), 0) as total_t FROM production_daily WHERE date >= $1`,
         [monthStart]
       ),
-      pool.query(`SELECT * FROM periodic_objectives WHERE is_active = true ORDER BY indicateur`),
+      pool.query(
+        `SELECT * FROM periodic_objectives
+         WHERE periode = 'mensuel' AND annee = $1 AND (mois = $2 OR mois IS NULL)
+         ORDER BY domaine, indicateur`,
+        [annee, mois]
+      ),
     ]);
 
+    // Réalisé calculé depuis les données du mois (mêmes sources que le
+    // dashboard /objectifs) : collecte en kg, production/tri en tonnes.
+    const realiseParDomaine = {
+      collecte: parseFloat(collecte.rows[0].kg) || 0,
+      production: parseFloat(production.rows[0].total_t) || 0,
+      tri: parseFloat(production.rows[0].total_t) || 0,
+    };
+
     const scorecard = objectifs.rows.map(obj => {
-      const realise = parseFloat(obj.realise || 0);
+      const realise = realiseParDomaine[obj.domaine] ?? 0;
       const cible = parseFloat(obj.valeur_cible || 1);
-      const pct = Math.round((realise / cible) * 100);
+      const pct = cible > 0 ? Math.round((realise / cible) * 100) : 0;
       return {
         indicateur: obj.indicateur,
         unite: obj.unite,

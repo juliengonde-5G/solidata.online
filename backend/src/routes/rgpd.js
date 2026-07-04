@@ -69,7 +69,8 @@ router.get('/export/:type/:id', authorize('ADMIN', 'RH'), async (req, res) => {
       data.candidate = candidate.rows[0];
       data.skills = (await pool.query('SELECT * FROM candidate_skills WHERE candidate_id = $1', [id])).rows;
       data.history = (await pool.query('SELECT * FROM candidate_history WHERE candidate_id = $1', [id])).rows;
-      data.pcm = (await pool.query('SELECT id, dominant_type, scores, created_at FROM pcm_profiles WHERE candidate_id = $1', [id])).rows;
+      // Le schéma PCM réel est pcm_sessions/pcm_reports (pas de table pcm_profiles)
+      data.pcm = (await pool.query('SELECT id, base_type, phase_type, created_at FROM pcm_reports WHERE candidate_id = $1', [id])).rows;
     } else if (type === 'employee') {
       const employee = await pool.query('SELECT * FROM employees WHERE id = $1', [id]);
       if (employee.rows.length === 0) return res.status(404).json({ error: 'Employé non trouvé' });
@@ -123,8 +124,10 @@ router.post('/anonymize/:type/:id', authorize('ADMIN'), [
            WHERE id = $1`, [id]
         );
         await client.query('DELETE FROM candidate_skills WHERE candidate_id = $1', [id]);
-        // Supprimer le profil PCM (données sensibles)
-        await client.query('DELETE FROM pcm_profiles WHERE candidate_id = $1', [id]);
+        // Supprimer les données PCM (sensibles) — sessions (cascade answers +
+        // reports liés) puis reports rattachés directement au candidat
+        await client.query('DELETE FROM pcm_sessions WHERE candidate_id = $1', [id]);
+        await client.query('DELETE FROM pcm_reports WHERE candidate_id = $1', [id]);
 
       } else if (type === 'employee') {
         const employee = await client.query('SELECT first_name, last_name FROM employees WHERE id = $1', [id]);
@@ -268,7 +271,8 @@ router.post('/purge-expired', authorize('ADMIN'), async (req, res) => {
          comment = NULL, updated_at = NOW() WHERE id = $1`, [c.id]
       );
       await pool.query('DELETE FROM candidate_skills WHERE candidate_id = $1', [c.id]);
-      await pool.query('DELETE FROM pcm_profiles WHERE candidate_id = $1', [c.id]);
+      await pool.query('DELETE FROM pcm_sessions WHERE candidate_id = $1', [c.id]);
+      await pool.query('DELETE FROM pcm_reports WHERE candidate_id = $1', [c.id]);
       count++;
     }
 

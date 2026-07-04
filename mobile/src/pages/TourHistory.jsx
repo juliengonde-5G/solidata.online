@@ -4,6 +4,7 @@ import MobileShell from '../components/MobileShell';
 import OfflineActionBadge from '../components/OfflineActionBadge';
 import { getAllItems, STORES } from '../services/db';
 import { syncAll, syncEvents } from '../services/sync';
+import { authedFetch } from '../services/authedFetch';
 
 /**
  * Historique des actions de la tournée courante.
@@ -36,7 +37,7 @@ export default function TourHistory() {
     try {
       if (tourId) {
         try {
-          const res = await fetch(`/api/tours/${tourId}/public`);
+          const res = await authedFetch(`/api/tours/${tourId}/public`);
           if (res.ok) {
             const data = await res.json();
             setServerCavs((data.cavs || []).map(c => ({ ...c, _tourId: tourId })));

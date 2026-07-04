@@ -720,15 +720,26 @@ function calculatePCMProfile(answers) {
   };
 }
 
-// Clé de chiffrement AES-256
-const ENCRYPTION_KEY = process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
+// Clé de chiffrement AES-256 — alignée sur les lecteurs du module insertion
+// (insertion/routes.js, insertion-ai.js) qui déchiffrent avec
+// PCM_ENCRYPTION_KEY || JWT_SECRET. Avant ce correctif, pcm.js chiffrait
+// toujours avec JWT_SECRET : dès que PCM_ENCRYPTION_KEY était câblée (v2.0.5),
+// les rapports devenaient illisibles côté insertion.
+const ENCRYPTION_KEY = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
+// Clé de repli en lecture : rapports historiques chiffrés avec JWT_SECRET
+const LEGACY_KEY = process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
 
 function encryptReport(report) {
   return CryptoJS.AES.encrypt(JSON.stringify(report), ENCRYPTION_KEY).toString();
 }
 
 function decryptReport(encrypted) {
-  const bytes = CryptoJS.AES.decrypt(encrypted, ENCRYPTION_KEY);
+  try {
+    const bytes = CryptoJS.AES.decrypt(encrypted, ENCRYPTION_KEY);
+    const text = bytes.toString(CryptoJS.enc.Utf8);
+    if (text) return JSON.parse(text);
+  } catch { /* tente la clé historique */ }
+  const bytes = CryptoJS.AES.decrypt(encrypted, LEGACY_KEY);
   return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
 }
 

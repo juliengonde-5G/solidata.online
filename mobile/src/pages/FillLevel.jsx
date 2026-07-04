@@ -10,6 +10,7 @@ import {
   draftKey, saveDraft, readDraft, clearDraft,
 } from '../services/db';
 import { sendCollect, getPendingCount } from '../services/sync';
+import { authedFetch } from '../services/authedFetch';
 
 // 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
 // (plein) avec une anomalie 'debordement' automatiquement posée.
@@ -85,7 +86,7 @@ export default function FillLevel() {
     setError('');
     try {
       // 1) charger la tournée pour retrouver le CAV à marquer.
-      const tourRes = await fetch(`/api/tours/${tourId}/public`);
+      const tourRes = await authedFetch(`/api/tours/${tourId}/public`);
       if (!tourRes.ok) throw new Error('Impossible de charger la tournée');
       const tourData = await tourRes.json();
       const cavs = tourData.cavs || [];

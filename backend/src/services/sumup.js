@@ -499,7 +499,14 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
         nbArticlesPesee, totalTTC, totalHT, totalTVA, batchId, source]);
     const ticketId = tickRes.rows[0].id;
 
-    // INSERT lignes — on re-crée à chaque batch (DELETE auto via CASCADE batch_id)
+    // Reset des lignes avant réinsertion — un ré-import CSV du même ticket crée
+    // un NOUVEAU batch (le batch_id du ticket est mis à jour), donc l'ancien
+    // batch n'est jamais supprimé et sa cascade ne joue pas : sans ce DELETE,
+    // les lignes se cumulaient (segments/annuel double-comptés). Aligné sur le
+    // chemin API qui fait déjà ce DELETE.
+    await pool.query('DELETE FROM vak_ventes WHERE ticket_id = $1', [ticketId]);
+
+    // INSERT lignes
     for (const l of tk.lignes) {
       await pool.query(`
         INSERT INTO vak_ventes

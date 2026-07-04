@@ -306,14 +306,14 @@ router.get('/milestones/:employeeId/radar', async (req, res) => {
 
     // Diagnostic initial
     const diagRes = await pool.query(
-      'SELECT frein_mobilite, frein_sante, frein_finances, frein_famille, frein_linguistique, frein_administratif FROM insertion_diagnostics WHERE employee_id = $1',
+      'SELECT frein_mobilite, frein_sante, frein_finances, frein_famille, frein_linguistique, frein_administratif, frein_numerique FROM insertion_diagnostics WHERE employee_id = $1',
       [empId]
     );
 
     // Jalons réalisés avec scores
     const milestonesRes = await pool.query(
       `SELECT milestone_type, completed_date,
-        frein_mobilite, frein_sante, frein_finances, frein_famille, frein_linguistique, frein_administratif
+        frein_mobilite, frein_sante, frein_finances, frein_famille, frein_linguistique, frein_administratif, frein_numerique
        FROM insertion_milestones
        WHERE employee_id = $1 AND status = 'realise'
        AND frein_mobilite IS NOT NULL
@@ -583,6 +583,11 @@ router.get('/:employeeId', async (req, res) => {
         if (pcmRes.rows[0]?.encrypted_report) {
           const bytes = CryptoJS.AES.decrypt(pcmRes.rows[0].encrypted_report, PCM_KEY);
           pcmReport = bytes.toString(CryptoJS.enc.Utf8);
+          if (!pcmReport && process.env.JWT_SECRET && PCM_KEY !== process.env.JWT_SECRET) {
+            // Rapports historiques chiffrés avec JWT_SECRET (avant alignement clé PCM)
+            const legacy = CryptoJS.AES.decrypt(pcmRes.rows[0].encrypted_report, process.env.JWT_SECRET);
+            pcmReport = legacy.toString(CryptoJS.enc.Utf8);
+          }
         }
       } catch (err) { /* pcm might not exist */ }
     }

@@ -44,9 +44,8 @@ Réponds toujours en français, de façon structurée et actionnable.`;
 async function getEmployeeInsertionData(employeeId) {
   const [employee, diagnostic, milestones, actionPlans, pcmReport, candidate] = await Promise.all([
     pool.query(`
-      SELECT e.*, p.name as position_name, t.name as team_name
+      SELECT e.*, e.position as position_name, t.name as team_name
       FROM employees e
-      LEFT JOIN positions p ON e.position_id = p.id
       LEFT JOIN teams t ON e.team_id = t.id
       WHERE e.id = $1
     `, [employeeId]),
@@ -80,7 +79,11 @@ async function getEmployeeInsertionData(employeeId) {
     try {
       const CryptoJS = require('crypto-js');
       const key = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
-      const decrypted = CryptoJS.AES.decrypt(pcmReport.rows[0].encrypted_report, key).toString(CryptoJS.enc.Utf8);
+      let decrypted = CryptoJS.AES.decrypt(pcmReport.rows[0].encrypted_report, key).toString(CryptoJS.enc.Utf8);
+      if (!decrypted && process.env.JWT_SECRET && key !== process.env.JWT_SECRET) {
+        // Rapports historiques chiffrés avec JWT_SECRET (avant alignement clé PCM)
+        decrypted = CryptoJS.AES.decrypt(pcmReport.rows[0].encrypted_report, process.env.JWT_SECRET).toString(CryptoJS.enc.Utf8);
+      }
       pcmData = JSON.parse(decrypted);
     } catch {
       pcmData = { base_type: pcmReport.rows[0].base_type, phase_type: pcmReport.rows[0].phase_type };
@@ -117,7 +120,7 @@ async function analyseProfilComplet(employeeId) {
       equipe: emp.team_name || 'Non affecté',
       filiere: emp.team_name || emp.position_name || 'Non précisé',
       insertion_status: emp.insertion_status,
-      date_debut: emp.insertion_start_date || emp.hire_date,
+      date_debut: emp.insertion_start_date || emp.contract_start,
     },
     pcm: data.pcm ? {
       type_base: data.pcm.base?.type || data.pcm.base_type,
@@ -259,15 +262,12 @@ async function bilanCohorte() {
   // Tous les salariés en parcours actif avec diagnostic
   const actifs = await pool.query(`
     SELECT e.id, e.first_name, e.last_name, e.insertion_status,
-           e.insertion_start_date, e.hire_date,
-           p.name as position_name, t.name as team_name,
+           e.insertion_start_date, e.contract_start,
+           e.position as position_name, t.name as team_name,
            d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
-           d.frein_linguistique, d.frein_administratif, d.frein_numerique,
-           d.mobilite, d.sante, d.finances, d.famille,
-           d.linguistique, d.administratif, d.numerique
+           d.frein_linguistique, d.frein_administratif, d.frein_numerique
     FROM employees e
     LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
-    LEFT JOIN positions p ON e.position_id = p.id
     LEFT JOIN teams t ON e.team_id = t.id
     WHERE e.is_active = true
       AND (e.insertion_status = 'en_parcours' OR d.id IS NOT NULL)

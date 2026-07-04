@@ -256,7 +256,17 @@ router.get('/batches/:id', async (req, res) => {
       exec.outputs = outputs.rows;
     }
 
-    res.json({ ...batch.rows[0], executions: executions.rows });
+    // Traçabilité aval (R6) : cartons étiquetés rattachés à ce lot, avec leur
+    // sortie de stock (statut + type de commande + date). Rend visible la
+    // chaîne lot → carton → sortie.
+    const cartons = await pool.query(
+      `SELECT id, code_barre, produit, categorie_eco_org, gamme, poids_kg,
+              status, sortie_commande_type, date_sortie, date_fabrication
+       FROM produits_finis WHERE batch_id = $1 ORDER BY date_fabrication DESC`,
+      [req.params.id]
+    );
+
+    res.json({ ...batch.rows[0], executions: executions.rows, cartons: cartons.rows });
   } catch (err) {
     console.error('[TRI] Erreur détail lot :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -302,42 +312,76 @@ router.post('/executions', authorize('ADMIN', 'MANAGER'), [
 });
 
 // PUT /api/tri/executions/:id/complete — Terminer une opération
+// Transactionnel + idempotent : verrou FOR UPDATE et garde anti re-complétion
+// (sinon poids restant du lot et stock trié seraient comptés en double). I4 :
+// à la complétion, les sorties triées sont reversées en stock (une entrée par
+// catégorie sortante) — auparavant le stock trié par catégorie n'était alimenté
+// par RIEN (rupture R2/R5 de l'audit).
 router.put('/executions/:id/complete', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const client = await pool.connect();
   try {
     const { notes } = req.body;
+    await client.query('BEGIN');
 
-    // Calculer le total des sorties
-    const outputsTotal = await pool.query(
-      'SELECT COALESCE(SUM(poids_kg), 0) as total FROM operation_outputs WHERE execution_id = $1',
+    const exec = await client.query(
+      `SELECT oe.*, bt.code AS batch_code FROM operation_executions oe
+       JOIN batch_tracking bt ON bt.id = oe.batch_id
+       WHERE oe.id = $1 FOR UPDATE`,
       [req.params.id]
     );
+    if (exec.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Exécution non trouvée' });
+    }
+    if (exec.rows[0].status === 'termine') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Opération déjà terminée' });
+    }
 
-    const exec = await pool.query('SELECT * FROM operation_executions WHERE id = $1', [req.params.id]);
-    if (exec.rows.length === 0) return res.status(404).json({ error: 'Exécution non trouvée' });
-
+    const outputs = await client.query(
+      'SELECT id, poids_kg, categorie_sortante_id FROM operation_outputs WHERE execution_id = $1',
+      [req.params.id]
+    );
     const poidsEntree = exec.rows[0].poids_entree_kg || 0;
-    const poidsSortie = parseFloat(outputsTotal.rows[0].total);
+    const poidsSortie = outputs.rows.reduce((s, o) => s + parseFloat(o.poids_kg || 0), 0);
     const perte = Math.max(0, poidsEntree - poidsSortie);
 
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE operation_executions SET status = 'termine', poids_sortie_total_kg = $1,
-       perte_kg = $2, completed_at = NOW(), completed_by = $3, notes = $4, updated_at = NOW()
+       perte_kg = $2, completed_at = NOW(), completed_by = $3, notes = $4
        WHERE id = $5 RETURNING *`,
-      [poidsSortie, perte, req.user.id, notes, req.params.id]
+      [poidsSortie, perte, req.user.id, notes || null, req.params.id]
     );
 
-    // Mettre à jour le poids restant du lot
-    const batchId = exec.rows[0].batch_id;
-    await pool.query(
+    await client.query(
       `UPDATE batch_tracking SET poids_restant_kg = poids_restant_kg - $1, updated_at = NOW()
        WHERE id = $2`,
-      [poidsSortie, batchId]
+      [poidsSortie, exec.rows[0].batch_id]
     );
 
-    res.json(result.rows[0]);
+    // I4 — reversement des sorties triées en stock (entrée par catégorie).
+    // matiere_id référence categories_sortantes (cf. A1) → categorie_sortante_id
+    // est une FK valide.
+    let stockLines = 0;
+    for (const o of outputs.rows) {
+      if (o.categorie_sortante_id && parseFloat(o.poids_kg) > 0) {
+        await client.query(
+          `INSERT INTO stock_movements (type, date, poids_kg, matiere_id, origine, notes, created_by)
+           VALUES ('entree', CURRENT_DATE, $1, $2, 'tri', $3, $4)`,
+          [o.poids_kg, o.categorie_sortante_id, `Tri lot ${exec.rows[0].batch_code} (exécution #${req.params.id})`, req.user.id]
+        );
+        stockLines++;
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ ...result.rows[0], stock_lines_created: stockLines });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[TRI] Erreur complétion exécution :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

@@ -23,7 +23,14 @@ const storage = multer.diskStorage({
 // SVG, HTML qui pourraient être réfléchis via /uploads.
 const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 }, fileFilter: csvFilter });
 
-router.use(authenticate);
+// POST /webhook-email est un endpoint M2M (Power Automate) qui porte sa
+// propre authentification par X-Webhook-Secret (voir le handler plus bas).
+// Il doit contourner le JWT utilisateur, sinon Power Automate reçoit 401
+// avant même d'atteindre la vérification du secret.
+router.use((req, res, next) => {
+  if (req.path === '/webhook-email') return next();
+  return authenticate(req, res, next);
+});
 router.use(autoLogActivity('boutique_vente'));
 
 // ══════════════════════════════════════════

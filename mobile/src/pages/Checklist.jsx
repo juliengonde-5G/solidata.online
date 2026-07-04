@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { vibrateTap, vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
+import { authedFetch } from '../services/authedFetch';
 
 const CHECKLIST_ITEMS = [
   { id: 'papiers', label: 'Papiers du véhicule', sub: 'carte grise, assurance', icon: '📄' },
@@ -28,7 +29,7 @@ export default function Checklist() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`/api/tours/${tourId}/public`);
+        const res = await authedFetch(`/api/tours/${tourId}/public`);
         const data = await res.json();
         setTour(data);
       } catch (e) {}
@@ -44,7 +45,7 @@ export default function Checklist() {
   const submit = async () => {
     try {
       // Sauvegarder la checklist et démarrer la tournée (endpoints publics)
-      await fetch(`/api/tours/${tourId}/checklist-public`, {
+      await authedFetch(`/api/tours/${tourId}/checklist-public`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -55,7 +56,7 @@ export default function Checklist() {
           notes,
         }),
       });
-      await fetch(`/api/tours/${tourId}/start-public`, { method: 'PUT' });
+      await authedFetch(`/api/tours/${tourId}/start-public`, { method: 'PUT' });
       vibrateSuccess();
       navigate('/tour-map');
     } catch (err) { vibrateError(); console.error(err); }

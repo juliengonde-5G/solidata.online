@@ -23,12 +23,19 @@ export default function ChaineTri() {
   const [categories, setCategories] = useState([]);
   const [selectedChain, setSelectedChain] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [vue, setVue] = useState('diagramme'); // diagramme | chaines | production
+  const [vue, setVue] = useState('diagramme'); // diagramme | chaines | production | lots
   const [prodData, setProdData] = useState([]);
   const [prodMonth, setProdMonth] = useState(new Date().toISOString().slice(0, 7));
+  // Lots de tri (traçabilité carton/balle) — ouverture/suivi des lots matière.
+  const [lots, setLots] = useState([]);
+  const [lotForm, setLotForm] = useState({ chaine_id: '', poids_initial_kg: '' });
+  const [lotMsg, setLotMsg] = useState(null);
+  const [lotBusy, setLotBusy] = useState(false);
+  const [lotDetail, setLotDetail] = useState(null); // lot + cartons rattachés
 
   useEffect(() => { loadData(); }, []);
   useEffect(() => { if (vue === 'production') loadProdData(); }, [vue, prodMonth]);
+  useEffect(() => { if (vue === 'lots') loadLots(); }, [vue]);
 
   const loadData = async () => {
     try {
@@ -47,6 +54,55 @@ export default function ChaineTri() {
       const res = await api.get(`/production?month=${prodMonth}`);
       setProdData(res.data || []);
     } catch (err) { console.error(err); }
+  };
+
+  const loadLots = async () => {
+    try {
+      const res = await api.get('/tri/batches');
+      setLots(res.data || []);
+    } catch (err) {
+      setLotMsg({ type: 'error', text: err.response?.data?.error || 'Impossible de charger les lots' });
+    }
+  };
+
+  const createLot = async () => {
+    const chaineId = parseInt(lotForm.chaine_id);
+    const poids = parseFloat(String(lotForm.poids_initial_kg).replace(',', '.'));
+    if (!chaineId || !poids || poids <= 0) {
+      setLotMsg({ type: 'error', text: 'Choisis une chaîne et saisis un poids initial (> 0).' });
+      return;
+    }
+    setLotBusy(true);
+    setLotMsg(null);
+    try {
+      const res = await api.post('/tri/batches', { chaine_id: chaineId, poids_initial_kg: poids });
+      setLotForm({ chaine_id: '', poids_initial_kg: '' });
+      setLotMsg({ type: 'success', text: `Lot ${res.data.code} créé.` });
+      loadLots();
+    } catch (err) {
+      setLotMsg({ type: 'error', text: err.response?.data?.error || 'Création du lot impossible' });
+    } finally {
+      setLotBusy(false);
+    }
+  };
+
+  const startLot = async (id) => {
+    try {
+      await api.put(`/tri/batches/${id}/start`);
+      loadLots();
+    } catch (err) {
+      setLotMsg({ type: 'error', text: err.response?.data?.error || 'Démarrage impossible' });
+    }
+  };
+
+  const openLotDetail = async (id) => {
+    setLotDetail(null);
+    try {
+      const res = await api.get(`/tri/batches/${id}`);
+      setLotDetail(res.data);
+    } catch (err) {
+      setLotMsg({ type: 'error', text: err.response?.data?.error || 'Détail du lot indisponible' });
+    }
   };
 
   const loadChainDetail = async (id) => {
@@ -101,6 +157,12 @@ export default function ChaineTri() {
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'production' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
               >
                 Production & Effectifs
+              </button>
+              <button
+                onClick={() => setVue('lots')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'lots' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                Lots de tri
               </button>
               <button
                 onClick={handleExportPDF}
@@ -314,6 +376,139 @@ export default function ChaineTri() {
                 />
               );
             })()}
+          </div>
+        )}
+
+        {/* ═══ VUE LOTS DE TRI (traçabilité carton/balle) ═══ */}
+        {vue === 'lots' && (
+          <div>
+            <p className="text-sm text-gray-500 mb-4">
+              Un lot suit une quantité de matière depuis son entrée en tri jusqu'aux cartons
+              étiquetés. Ouvre un lot ici, puis sélectionne-le sur le poste d'étiquetage pour
+              relier chaque carton à son lot d'origine.
+            </p>
+
+            {lotMsg && (
+              <div className={`mb-4 rounded-lg px-4 py-2 text-sm ${lotMsg.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                {lotMsg.text}
+              </div>
+            )}
+
+            {/* Nouveau lot */}
+            <div className="card-modern p-5 mb-6">
+              <h3 className="font-semibold text-slate-800 mb-3">Ouvrir un nouveau lot</h3>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-gray-500">Chaîne</span>
+                  <select
+                    value={lotForm.chaine_id}
+                    onChange={(e) => setLotForm({ ...lotForm, chaine_id: e.target.value })}
+                    className="input-modern w-auto min-w-[200px]"
+                  >
+                    <option value="">Choisir une chaîne…</option>
+                    {chains.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-gray-500">Poids initial (kg)</span>
+                  <input
+                    type="number" min="0" step="0.1" inputMode="decimal"
+                    value={lotForm.poids_initial_kg}
+                    onChange={(e) => setLotForm({ ...lotForm, poids_initial_kg: e.target.value })}
+                    className="input-modern w-32"
+                    placeholder="0"
+                  />
+                </label>
+                <button
+                  onClick={createLot}
+                  disabled={lotBusy}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-white disabled:opacity-50"
+                >
+                  {lotBusy ? 'Création…' : 'Ouvrir le lot'}
+                </button>
+              </div>
+            </div>
+
+            {/* Liste des lots */}
+            {(() => {
+              const lotColumns = [
+                { key: 'code', label: 'Lot', sortable: true, render: (l) => <span className="font-mono font-medium">{l.code}</span> },
+                { key: 'chaine_nom', label: 'Chaîne', render: (l) => l.chaine_nom || '—' },
+                { key: 'poids_initial_kg', label: 'Poids initial (kg)', align: 'right', render: (l) => (l.poids_initial_kg || 0).toLocaleString('fr-FR') },
+                { key: 'poids_restant_kg', label: 'Restant (kg)', align: 'right', render: (l) => l.poids_restant_kg != null ? Number(l.poids_restant_kg).toLocaleString('fr-FR') : '—' },
+                { key: 'nb_operations', label: 'Opérations', align: 'center', render: (l) => l.nb_operations || 0 },
+                { key: 'status', label: 'Statut', align: 'center', render: (l) => <StatusBadge status={l.status === 'en_cours' ? 'in_progress' : l.status === 'termine' ? 'completed' : l.status === 'annule' ? 'cancelled' : 'pending'} size="sm" /> },
+                { key: 'actions', label: '', align: 'right', render: (l) => (
+                  <div className="flex items-center justify-end gap-3">
+                    {l.status === 'en_attente' && (
+                      <button onClick={() => startLot(l.id)} className="text-primary text-sm font-medium hover:underline">Démarrer</button>
+                    )}
+                    <button onClick={() => openLotDetail(l.id)} className="text-slate-500 text-sm font-medium hover:underline">Traçabilité</button>
+                  </div>
+                )},
+              ];
+              return (
+                <DataTable
+                  columns={lotColumns}
+                  data={lots}
+                  loading={false}
+                  emptyIcon={Factory}
+                  emptyMessage="Aucun lot ouvert. Crée-en un ci-dessus."
+                  dense
+                />
+              );
+            })()}
+
+            {/* Détail lot : cartons rattachés + leur sortie (chaîne lot → carton → sortie) */}
+            {lotDetail && (
+              <div className="card-modern p-6 mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-slate-800">
+                    Traçabilité du lot <span className="font-mono">{lotDetail.code}</span>
+                  </h3>
+                  <button onClick={() => setLotDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm">Fermer</button>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5 text-sm">
+                  <div><span className="text-gray-500">Chaîne</span><p className="font-medium">{lotDetail.chaine_nom || '—'}</p></div>
+                  <div><span className="text-gray-500">Poids initial</span><p className="font-medium">{(lotDetail.poids_initial_kg || 0).toLocaleString('fr-FR')} kg</p></div>
+                  <div><span className="text-gray-500">Cartons étiquetés</span><p className="font-medium">{(lotDetail.cartons || []).length}</p></div>
+                  <div><span className="text-gray-500">Cartons sortis</span><p className="font-medium">{(lotDetail.cartons || []).filter(c => c.status !== 'en_stock').length}</p></div>
+                </div>
+                <h4 className="text-sm font-semibold text-slate-600 mb-2">Cartons rattachés</h4>
+                {(lotDetail.cartons || []).length === 0 ? (
+                  <p className="text-sm text-gray-400 py-4">Aucun carton étiqueté sur ce lot pour l'instant. Sélectionne ce lot sur le poste d'étiquetage pour les rattacher.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b">
+                          <th className="py-2 pr-3">Code-barre</th>
+                          <th className="py-2 pr-3">Produit</th>
+                          <th className="py-2 pr-3 text-right">Poids</th>
+                          <th className="py-2 pr-3 text-center">Statut</th>
+                          <th className="py-2 pr-3">Sortie</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lotDetail.cartons.map((c) => (
+                          <tr key={c.id} className="border-b border-slate-100">
+                            <td className="py-2 pr-3 font-mono">{c.code_barre}</td>
+                            <td className="py-2 pr-3">{c.produit}{c.gamme ? ` · ${c.gamme}` : ''}</td>
+                            <td className="py-2 pr-3 text-right">{(c.poids_kg || 0).toLocaleString('fr-FR')} kg</td>
+                            <td className="py-2 pr-3 text-center">
+                              <StatusBadge status={c.status === 'en_stock' ? 'active' : c.status === 'vendu' ? 'completed' : 'shipped'} size="sm" label={c.status} />
+                            </td>
+                            <td className="py-2 pr-3 text-gray-500">
+                              {c.date_sortie ? `${c.sortie_commande_type || ''} · ${new Date(c.date_sortie).toLocaleDateString('fr-FR')}` : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

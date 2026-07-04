@@ -7,7 +7,9 @@ const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
-const TYPES_PRODUIT_VALIDES = ['original', 'csr', 'effilo_blanc', 'effilo_couleur', 'jean', 'coton_blanc', 'coton_couleur'];
+// Aligné sur le CHECK de commandes_exutoires (refonte gammes P1) ; les types
+// effilo_* historiques restent acceptés pour la lecture des anciens tarifs.
+const TYPES_PRODUIT_VALIDES = ['original', 'csr', 'essuyage', 'tricot', 'merinos', 'jean', 'coton_blanc', 'coton_couleur', 'effilo_blanc', 'effilo_couleur'];
 
 // GET /api/tarifs-exutoires/prix — Résolution de prix
 router.get('/prix', async (req, res) => {
