@@ -375,6 +375,11 @@ async function autoFeedNews() {
           { title: 'Marche du reemploi textile en croissance', tags: ['reemploi', 'seconde-main', 'economie'], summary: 'Le marche de la seconde main textile continue sa croissance portee par la sensibilisation environnementale et le pouvoir d\'achat.' },
           { title: 'REP textiles : bilan et perspectives', tags: ['REP', 'Refashion', 'reglementation'], summary: 'Refashion publie son bilan annuel de la filiere REP textiles. Objectifs, resultats et enjeux pour l\'annee a venir.' },
           { title: 'Logistique verte dans la collecte textile', tags: ['logistique', 'environnement', 'CO2'], summary: 'Les solutions de logistique durable se developpent : vehicules electriques, optimisation de tournees, reduction de l\'empreinte carbone.' },
+          { title: 'Tri optique et automatisation des centres de tri', tags: ['tri', 'innovation', 'automatisation'], summary: 'Les technologies de tri optique (proche infrarouge) permettent d\'identifier automatiquement les compositions de fibres. Un levier de productivite pour les centres de tri.' },
+          { title: 'Recyclage chimique des textiles : ou en est-on ?', tags: ['recyclage', 'innovation', 'fibres'], summary: 'Le recyclage chimique promet de regenerer des fibres de qualite vierge a partir de textiles usages. Etat des lieux des projets industriels en France et en Europe.' },
+          { title: 'Filiere CSR : valorisation energetique des refus de tri', tags: ['CSR', 'valorisation', 'dechets'], summary: 'Les combustibles solides de recuperation offrent un debouche aux textiles non reemployables ni recyclables. Cadre reglementaire et perspectives.' },
+          { title: 'Eco-conception et durabilite des vetements', tags: ['eco-conception', 'durabilite', 'REP'], summary: 'La modulation de l\'eco-contribution Refashion recompense les vetements durables et reparables. Impact attendu sur la qualite du gisement collecte.' },
+          { title: 'Affichage environnemental des produits textiles', tags: ['reglementation', 'affichage', 'consommation'], summary: 'Le deploiement de l\'affichage environnemental vise a informer le consommateur sur l\'impact des vetements. Un signal pour la seconde main et le reemploi.' },
         ],
       },
       // ESS / Insertion
@@ -387,6 +392,11 @@ async function autoFeedNews() {
           { title: 'Formation professionnelle et insertion par l\'activite economique', tags: ['formation', 'IAE', 'competences'], summary: 'Les formations accessibles aux salaries en insertion : CleA, FLE, qualifications metiers. Comment articuler parcours et formation.' },
           { title: 'Levee des freins a l\'emploi : bonnes pratiques', tags: ['freins', 'accompagnement', 'CIP'], summary: 'Retour d\'experience sur les methodes efficaces pour lever les freins peripheriques a l\'emploi dans les structures d\'insertion.' },
           { title: 'Economie circulaire et emploi social', tags: ['economie-circulaire', 'ESS', 'emploi'], summary: 'L\'economie circulaire genere des emplois locaux non delocalisables. Focus sur le secteur textile et les perspectives.' },
+          { title: 'Clauses sociales dans les marches publics', tags: ['clauses-sociales', 'marches-publics', 'insertion'], summary: 'Les clauses sociales d\'insertion dans la commande publique ouvrent des heures de travail aux structures de l\'IAE. Comment se positionner et repondre.' },
+          { title: 'Numerique inclusif : lutter contre l\'illectronisme', tags: ['numerique', 'inclusion', 'freins'], summary: 'La maitrise des outils numeriques est devenue un frein a l\'emploi a part entiere. Ateliers, mediation et accompagnement dans les parcours d\'insertion.' },
+          { title: 'Sante et prevention des risques dans l\'IAE', tags: ['sante', 'prevention', 'QHSE'], summary: 'La prevention des troubles musculo-squelettiques et des risques professionnels est un enjeu majeur pour les postes de collecte et de tri. Bonnes pratiques QHSE.' },
+          { title: 'Partenariats France Travail et structures d\'insertion', tags: ['France-Travail', 'prescription', 'IAE'], summary: 'Le conventionnement et la prescription avec France Travail structurent l\'entree en parcours. Fluidifier les orientations et le suivi des salaries en insertion.' },
+          { title: 'Sortie dynamique : mesurer l\'impact de l\'insertion', tags: ['sortie-dynamique', 'DREETS', 'evaluation'], summary: 'Les taux de sortie dynamique (emploi durable, formation) sont au coeur de l\'evaluation des SIAE par la DREETS et l\'ASP. Methodes de suivi et leviers d\'amelioration.' },
         ],
       },
     ];
@@ -395,9 +405,16 @@ async function autoFeedNews() {
     for (const source of veilleSources) {
       const randomTheme = source.themes[Math.floor(Math.random() * source.themes.length)];
 
-      // Verifier si un article similaire existe deja
+      // Ne republier un theme que s'il n'a PAS paru recemment (fenetre de
+      // rotation de 21 jours). Au-dela, le theme redevient eligible → le fil
+      // ne s'asseche jamais. Avant : dedup « title deja existant » DEFINITIF,
+      // donc une fois les ~12 titres du catalogue tous publies (≈6 j a 2/j),
+      // chaque tirage tombait sur un titre existant → plus aucune publication
+      // → le fil se figeait (« ne s'actualise plus automatiquement »).
       const similar = await pool.query(
-        `SELECT id FROM news_articles WHERE title = $1`,
+        `SELECT 1 FROM news_articles
+         WHERE title = $1 AND created_at > NOW() - INTERVAL '21 days'
+         LIMIT 1`,
         [randomTheme.title]
       );
       if (similar.rows.length > 0) continue;
