@@ -95,6 +95,7 @@ export default function Employees() {
       residence_permit_number: emp.residence_permit_number || '',
       seniority_date: emp.seniority_date ? emp.seniority_date.slice(0, 10) : '',
       visite_medicale_date: emp.visite_medicale_date ? emp.visite_medicale_date.slice(0, 10) : '',
+      prescripteur: emp.prescripteur || '',
     });
     try {
       const [cRes, aRes] = await Promise.all([
@@ -207,6 +208,7 @@ export default function Employees() {
         residence_permit_number: clean(editForm.residence_permit_number),
         seniority_date: editForm.seniority_date || null,
         visite_medicale_date: editForm.visite_medicale_date || null,
+        prescripteur: clean(editForm.prescripteur),
       };
       const res = await api.put(`/employees/${selected.id}`, payload);
       setSelected({ ...selected, ...res.data, team_name: teams.find(t => t.id === res.data.team_id)?.name });
@@ -509,6 +511,10 @@ export default function Employees() {
                             <div>
                               <label className="text-gray-500 text-xs">Statut handicap (RQTH)</label>
                               <input value={editForm.disability_status} onChange={e => setEditForm({ ...editForm, disability_status: e.target.value })} className="input-modern mt-1" />
+                            </div>
+                            <div>
+                              <label className="text-gray-500 text-xs">Prescripteur / orienteur (IAE)</label>
+                              <input value={editForm.prescripteur} onChange={e => setEditForm({ ...editForm, prescripteur: e.target.value })} className="input-modern mt-1" placeholder="Ex: France Travail, Mission locale…" />
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div>

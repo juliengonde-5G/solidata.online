@@ -161,7 +161,7 @@ function TimelineView({ timeline }) {
 // BILAN PANEL — Formulaire d'un jalon
 // ═══════════════════════════════════════
 
-function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave, onClose }) {
+function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave, onClose, onDirtyChange }) {
   const [form, setForm] = useState({ ...milestone });
   const [template, setTemplate] = useState(null);
   const [actionPlans, setActionPlans] = useState([]);
@@ -169,6 +169,13 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
   const [saving, setSaving] = useState(false);
   const [radarData, setRadarData] = useState(null);
   const [bilanError, setBilanError] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const markDirty = () => { setDirty(true); if (onDirtyChange) onDirtyChange(true); };
+  const clearDirty = () => { setDirty(false); if (onDirtyChange) onDirtyChange(false); };
+  const requestClose = () => {
+    if (dirty && !window.confirm('Des modifications de ce bilan ne sont pas enregistrées. Fermer sans enregistrer ?')) return;
+    clearDirty(); onClose();
+  };
 
   useEffect(() => {
     // Pré-remplissage : si ce jalon n'a pas encore de freins, reprendre ceux du
@@ -190,7 +197,7 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
     api.get(`/insertion/interview-template/${milestone.milestone_type}`).then(r => setTemplate(r.data)).catch(() => setBilanError('Questionnaire indisponible — rechargez la page.'));
     api.get(`/insertion/action-plans/${employeeId}`).then(r => {
       setActionPlans(r.data.filter(a => a.milestone_id === milestone.id));
-    }).catch(() => {});
+    }).catch(() => setBilanError('Plans d\'action indisponibles — rechargez la page.'));
     api.get(`/insertion/milestones/${employeeId}/radar`).then(r => setRadarData(r.data)).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [milestone.id, milestone.milestone_type, employeeId]);
@@ -199,6 +206,7 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
     setSaving(true); setBilanError(null);
     try {
       await api.put(`/insertion/milestones/${milestone.id}`, form);
+      clearDirty();
       onSave();
     } catch (err) {
       setBilanError('Erreur : ' + (err.response?.data?.error || err.message));
@@ -232,12 +240,12 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
   const isSortie = milestone.milestone_type === 'Bilan Sortie';
 
   return (
-    <div className="bg-white border rounded-lg p-4 space-y-6">
+    <div className="bg-white border rounded-lg p-4 space-y-6" onChange={markDirty}>
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold text-gray-800">{milestone.milestone_type}</h3>
+        <h3 className="text-lg font-bold text-gray-800">{milestone.milestone_type}{dirty && <span className="ml-2 text-xs text-amber-600 font-normal">• non enregistré</span>}</h3>
         <div className="flex items-center gap-3">
           <button onClick={() => exportBilanJalonPDF(employeeName || '', form)} className="text-teal-700 text-sm font-medium hover:underline">Exporter PDF</button>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">Fermer</button>
+          <button onClick={requestClose} className="text-gray-400 hover:text-gray-600">Fermer</button>
         </div>
       </div>
 
@@ -465,7 +473,7 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
 
       {/* Bouton sauvegarder */}
       <div className="flex justify-end gap-2 pt-2 border-t">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Annuler</button>
+        <button onClick={requestClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Annuler</button>
         <button onClick={handleSave} disabled={saving}
           className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50">
           {saving ? 'Enregistrement...' : 'Enregistrer le bilan'}
@@ -649,6 +657,9 @@ function CohortePanel({ onSelect }) {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [ia, setIa] = useState(null);
+  const [iaLoading, setIaLoading] = useState(false);
+  const [iaError, setIaError] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -659,6 +670,17 @@ function CohortePanel({ onSelect }) {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, []);
+
+  const runIaCohorte = async () => {
+    setIaLoading(true); setIaError(null);
+    try {
+      const r = await api.get('/insertion/ia/cohorte');
+      setIa(r.data);
+    } catch (err) {
+      setIaError(err.response?.status === 503 ? 'Analyse IA non configurée (clé Anthropic absente).' : (err.response?.data?.error || err.message));
+    }
+    setIaLoading(false);
+  };
 
   if (loading) return <LoadingSpinner size="lg" message="Chargement du tableau de bord..." />;
   if (error) return <div className="bg-white rounded-lg border p-4"><div className="text-red-600 text-sm p-3 bg-red-50 rounded border border-red-200">Impossible de charger le tableau de bord : {error}</div></div>;
@@ -672,13 +694,36 @@ function CohortePanel({ onSelect }) {
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-lg border p-4">
-        <h3 className="font-semibold text-gray-800 mb-3">Tableau de bord CIP — pilotage de la cohorte</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-800">Tableau de bord CIP — pilotage de la cohorte</h3>
+          <button onClick={runIaCohorte} disabled={iaLoading}
+            className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
+            {iaLoading ? 'Analyse IA…' : 'Analyser la cohorte (IA)'}
+          </button>
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <DashCard label="En parcours" value={stats.nb_actifs} tone="blue" />
           <DashCard label="Jalons en retard" value={stats.nb_jalons_en_retard} tone={stats.nb_jalons_en_retard ? 'red' : 'green'} sub={`${stats.taux_retard_jalons}% des jalons`} />
           <DashCard label="À venir (7 j)" value={stats.nb_jalons_a_venir} tone={stats.nb_jalons_a_venir ? 'amber' : 'slate'} />
           <DashCard label={`Sorties dynamiques ${stats.annee}`} value={s.taux_dynamiques != null ? s.taux_dynamiques + '%' : '—'} tone="green" sub={`${s.positives || 0}/${s.total || 0} sorties`} />
         </div>
+        {iaError && <div className="mt-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{iaError}</div>}
+        {ia && (
+          <div className="mt-3 bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-2">
+            {ia.synthese && <p className="text-sm text-slate-700">{ia.synthese}</p>}
+            {ia.alertes?.length > 0 && (
+              <div className="text-xs text-red-700"><span className="font-semibold">Alertes :</span> {ia.alertes.join(' · ')}</div>
+            )}
+            {ia.recommandations_cip?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-violet-700 mb-1">Recommandations CIP</p>
+                <ul className="list-disc list-inside text-xs text-slate-700 space-y-0.5">
+                  {ia.recommandations_cip.map((r, i) => <li key={i}>{typeof r === 'string' ? r : (r.action || JSON.stringify(r))}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -789,6 +834,8 @@ export default function InsertionParcours() {
   const [loadError, setLoadError] = useState(null);
   const [panelError, setPanelError] = useState(null);
   const [showDashboard, setShowDashboard] = useState(true);
+  const [diagDirty, setDiagDirty] = useState(false);
+  const [bilanDirty, setBilanDirty] = useState(false);
   const [iaAnalyse, setIaAnalyse] = useState(null);
   const [iaEntretien, setIaEntretien] = useState(null);
   const [iaError, setIaError] = useState(null);
@@ -808,8 +855,16 @@ export default function InsertionParcours() {
 
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
   useEffect(() => {
-    api.get('/insertion/freins-definitions').then(r => setFreinsDefinitions(r.data)).catch(() => {});
+    api.get('/insertion/freins-definitions').then(r => setFreinsDefinitions(r.data)).catch((err) => console.error('[Insertion] freins-definitions indisponible:', err));
   }, []);
+
+  // Garde-fou : prévient la perte de saisie non enregistrée (diagnostic ou bilan).
+  const confirmLeave = () => ((!diagDirty && !bilanDirty) || window.confirm('Des modifications ne sont pas enregistrées. Continuer sans les enregistrer ?'));
+  useEffect(() => {
+    const handler = (e) => { if (diagDirty || bilanDirty) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [diagDirty, bilanDirty]);
 
   const selectEmployee = async (emp) => {
     setSelectedEmployee(emp);
@@ -817,6 +872,7 @@ export default function InsertionParcours() {
     setActiveTab('timeline');
     setActiveBilan(null);
     setPanelError(null);
+    setDiagDirty(false); setBilanDirty(false);
     setIaAnalyse(null); setIaEntretien(null); setIaError(null);
     setLoading(true);
     try {
@@ -854,6 +910,7 @@ export default function InsertionParcours() {
     setPanelError(null);
     try {
       await api.put(`/insertion/diagnostic/${selectedEmployee.id}`, diagnostic);
+      setDiagDirty(false);
       selectEmployee(selectedEmployee);
     } catch (err) {
       setPanelError(err.response?.data?.error || err.message || 'Erreur lors de l\'enregistrement du diagnostic');
@@ -882,7 +939,7 @@ export default function InsertionParcours() {
         <div className="grid grid-cols-12 gap-4">
           {/* Liste employes */}
           <div className="col-span-3 bg-white rounded-lg border p-3 max-h-[80vh] overflow-y-auto">
-            <button onClick={() => { setShowDashboard(true); setSelectedEmployee(null); setPanelError(null); }}
+            <button onClick={() => { if (!confirmLeave()) return; setShowDashboard(true); setSelectedEmployee(null); setPanelError(null); setDiagDirty(false); setBilanDirty(false); }}
               className={`w-full mb-3 px-3 py-2 rounded text-sm font-semibold transition ${showDashboard ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               Tableau de bord CIP
             </button>
@@ -890,7 +947,7 @@ export default function InsertionParcours() {
             {loadError && <div className="text-red-600 text-xs mb-2 p-2 bg-red-50 rounded">{loadError}</div>}
             {!loadError && employees.length === 0 && <div className="text-gray-400 text-sm p-2">Aucun salarie actif trouve</div>}
             {employees.map(emp => (
-              <button key={emp.id} onClick={() => selectEmployee(emp)}
+              <button key={emp.id} onClick={() => { if (confirmLeave()) selectEmployee(emp); }}
                 className={`w-full text-left p-2 rounded mb-1 text-sm transition ${
                   selectedEmployee?.id === emp.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'
                 }`}>
@@ -961,7 +1018,7 @@ export default function InsertionParcours() {
                 {/* Tabs */}
                 <div className="flex gap-1 bg-white rounded-lg border p-1">
                   {tabs.map(tab => (
-                    <button key={tab.id} onClick={() => { setActiveTab(tab.id); setActiveBilan(null); }}
+                    <button key={tab.id} onClick={() => { if (!confirmLeave()) return; setActiveTab(tab.id); setActiveBilan(null); setBilanDirty(false); }}
                       className={`px-3 py-1.5 rounded text-sm font-medium transition ${
                         activeTab === tab.id ? 'bg-blue-500 text-white' : 'text-gray-600 hover:bg-gray-100'
                       }`}>
@@ -980,8 +1037,8 @@ export default function InsertionParcours() {
 
                 {/* Tab: Diagnostic CIP */}
                 {activeTab === 'diagnostic' && diagnostic && (
-                  <div className="bg-white rounded-lg border p-4 space-y-4">
-                    <h3 className="font-semibold text-gray-800">Diagnostic CIP</h3>
+                  <div className="bg-white rounded-lg border p-4 space-y-4" onChange={() => setDiagDirty(true)}>
+                    <h3 className="font-semibold text-gray-800">Diagnostic CIP {diagDirty && <span className="ml-2 text-xs text-amber-600 font-normal">• non enregistré</span>}</h3>
                     <p className="text-sm text-gray-500">Remplir lors du diagnostic d'accueil (M+1 max). Le PCM est automatiquement recupere depuis le module recrutement.</p>
 
                     <div>
@@ -1051,8 +1108,9 @@ export default function InsertionParcours() {
                       <BilanPanel milestone={activeBilan} employeeId={selectedEmployee.id}
                         employeeName={`${analysis.employee.first_name} ${analysis.employee.last_name}`}
                         allMilestones={analysis.milestones}
-                        onSave={() => { setActiveBilan(null); selectEmployee(selectedEmployee); }}
-                        onClose={() => setActiveBilan(null)} />
+                        onDirtyChange={setBilanDirty}
+                        onSave={() => { setBilanDirty(false); setActiveBilan(null); selectEmployee(selectedEmployee); }}
+                        onClose={() => { setBilanDirty(false); setActiveBilan(null); }} />
                     ) : (
                       <div className="bg-white rounded-lg border p-4">
                         <h3 className="font-semibold text-gray-800 mb-4">Jalons du parcours</h3>
