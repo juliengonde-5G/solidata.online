@@ -327,12 +327,17 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
   for (const t of teamRows.rows) teamIdByType[t.type] = t.id;
 
   for (const c of collaborators) {
-    try {
-      if (!c.first_name || !c.last_name) {
-        errors.push({ collaborator: `${c.first_name || '?'} ${c.last_name || '?'}`, error: 'Prénom/Nom manquant' });
-        continue;
-      }
+    if (!c.first_name || !c.last_name) {
+      errors.push({ collaborator: `${c.first_name || '?'} ${c.last_name || '?'}`, error: 'Prénom/Nom manquant' });
+      continue;
+    }
 
+    // SAVEPOINT par collaborateur : isole les échecs (ex. valeur trop longue)
+    // pour qu'UNE ligne fautive n'avorte pas toute la transaction — sinon tous
+    // les collaborateurs suivants échouent en cascade (« current transaction is
+    // aborted, commands ignored until end of transaction block »).
+    await db.query('SAVEPOINT collab_sp');
+    try {
       const teamType = resolveTeamType(c.position, c.equipe_label);
       const teamId = teamType ? teamIdByType[teamType] || null : null;
       const contractType = c.contract_type || 'CDD';
@@ -453,7 +458,10 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
         await upsertCurrentContract(db, newId, { contractType, teamId, c });
         created.push({ id: newId, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
       }
+      await db.query('RELEASE SAVEPOINT collab_sp');
     } catch (err) {
+      // Rollback ciblé : la transaction reste utilisable pour les suivants.
+      try { await db.query('ROLLBACK TO SAVEPOINT collab_sp'); } catch (_) { /* transaction déjà close */ }
       errors.push({ collaborator: `${c.first_name} ${c.last_name}`, error: err.message });
     }
   }
