@@ -69,7 +69,7 @@ services:
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       OPENAGENDA_API_KEY: ${OPENAGENDA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-20250514}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CENTRE_TRI_LAT: 49.4231
@@ -95,6 +95,7 @@ services:
       PCM_ENCRYPTION_KEY: ${PCM_ENCRYPTION_KEY:-}
     volumes:
       - uploads:/app/uploads
+      - backups:/app/backups
       - ./boutiques-csv:/data/boutiques-csv
       - "./Liste PAV.xlsx:/data/Liste PAV.xlsx:ro"
       - ./tournee.xlsx:/data/tournee.xlsx:ro
@@ -197,6 +198,8 @@ volumes:
     name: solidata-pgdata
   uploads:
     name: solidata-uploads
+  backups:
+    name: solidata-backups
   certbot-etc:
     name: solidata-certbot-etc
   certbot-var:

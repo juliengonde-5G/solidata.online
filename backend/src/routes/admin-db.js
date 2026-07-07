@@ -27,6 +27,16 @@ function buildPgEnv() {
   };
 }
 
+// Indice lisible pour une erreur pg_dump / psql (endpoint ADMIN-only → on peut
+// exposer un message technique tronqué, ça rend le 500 diagnosticable).
+function execHint(err) {
+  if (err.code === 'ENOENT') {
+    return "Client PostgreSQL absent du conteneur API — reconstruire l'image (postgresql-client).";
+  }
+  const stderr = (err.stderr && err.stderr.toString ? err.stderr.toString() : '').trim();
+  return stderr ? stderr.split('\n').filter(Boolean).slice(-2).join(' ') : (err.message || undefined);
+}
+
 // ══════════════════════════════════════════
 // INFORMATIONS BASE DE DONNÉES
 // ══════════════════════════════════════════
@@ -109,8 +119,8 @@ router.post('/backup', async (req, res) => {
       created_at: new Date().toISOString(),
     });
   } catch (err) {
-    console.error('[ADMIN-DB] Erreur backup :', err);
-    res.status(500).json({ error: 'Erreur lors de la sauvegarde' });
+    console.error('[ADMIN-DB] Erreur backup :', err.message, execHint(err));
+    res.status(500).json({ error: 'Erreur lors de la sauvegarde', hint: execHint(err) });
   }
 });
 
@@ -160,8 +170,8 @@ router.post('/restore', async (req, res) => {
 
     res.json({ message: 'Restauration effectuée', filename, restored_at: new Date().toISOString() });
   } catch (err) {
-    console.error('[ADMIN-DB] Erreur restore :', err);
-    res.status(500).json({ error: 'Erreur lors de la restauration' });
+    console.error('[ADMIN-DB] Erreur restore :', err.message, execHint(err));
+    res.status(500).json({ error: 'Erreur lors de la restauration', hint: execHint(err) });
   }
 });
 

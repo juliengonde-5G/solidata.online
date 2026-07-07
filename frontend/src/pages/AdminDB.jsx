@@ -39,7 +39,7 @@ export default function AdminDB() {
       const r = await api.post('/admin-db/backup');
       alert(`Sauvegarde créée : ${r.data.filename} (${r.data.size})`);
       loadData();
-    } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
+    } catch (err) { const d = err.response?.data; alert((d?.error || 'Erreur') + (d?.hint ? `\n\n${d.hint}` : '')); }
     setActionLoading(false);
   };
 
@@ -55,7 +55,7 @@ export default function AdminDB() {
     try {
       await api.post('/admin-db/restore', { filename });
       alert('Restauration effectuée');
-    } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
+    } catch (err) { const d = err.response?.data; alert((d?.error || 'Erreur') + (d?.hint ? `\n\n${d.hint}` : '')); }
     setActionLoading(false);
   };
 
