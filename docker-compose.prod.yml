@@ -199,7 +199,9 @@ volumes:
   uploads:
     name: solidata-uploads
   backups:
-    name: solidata-backups
+    # -v2 : force la recréation du volume (l'ancien avait été créé en root car
+    # /app/backups n'existait pas encore dans l'image → écriture impossible).
+    name: solidata-backups-v2
   certbot-etc:
     name: solidata-certbot-etc
   certbot-var:

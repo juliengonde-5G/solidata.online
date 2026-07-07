@@ -18,7 +18,10 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=appuser:appgroup . .
 
-RUN mkdir -p /app/uploads
+# Créés en tant qu'appuser → un volume nommé monté ici hérite de cet
+# owner à sa 1re création (sinon Docker crée le point de montage en root et
+# l'écriture des sauvegardes échoue en « Permission denied »).
+RUN mkdir -p /app/uploads /app/backups
 
 EXPOSE 3001
 CMD ["node", "src/index.js"]
