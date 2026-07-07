@@ -165,6 +165,7 @@ app.use('/api/webhooks', require('./routes/webhooks'));
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
+app.use('/api/permissions', require('./routes/permissions'));
 app.use('/api/settings', require('./routes/settings'));
 
 // Lot 2 : Recrutement + PCM + Équipes

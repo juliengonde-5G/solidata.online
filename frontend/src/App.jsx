@@ -41,6 +41,7 @@ const DashboardCollecte = lazy(() => import('./pages/DashboardCollecte'));
 const PCMTest = lazy(() => import('./pages/PCMTest'));
 const RGPD = lazy(() => import('./pages/RGPD'));
 const AdminDB = lazy(() => import('./pages/AdminDB'));
+const AdminPermissions = lazy(() => import('./pages/AdminPermissions'));
 const AdminCAV = lazy(() => import('./pages/AdminCAV'));
 const AdminSensors = lazy(() => import('./pages/AdminSensors'));
 const AdminAssociations = lazy(() => import('./pages/AdminAssociations'));
@@ -209,6 +210,7 @@ function App() {
 
               {/* Administration */}
               <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />
+              <Route path="/admin/permissions" element={<ProtectedRoute roles={['ADMIN']}><AdminPermissions /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute roles={['ADMIN']}><Settings /></ProtectedRoute>} />
               <Route path="/referentiels" element={<Navigate to="/admin/catalogue" replace />} />
               <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />

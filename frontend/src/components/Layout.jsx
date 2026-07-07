@@ -264,6 +264,7 @@ const NAV_TREE = [
         icon: Users,
         children: [
           { label: 'Utilisateurs', path: '/users', icon: Users, roles: ['ADMIN'] },
+          { label: 'Habilitations modules', path: '/admin/permissions', icon: ShieldCheck, roles: ['ADMIN'] },
           { label: 'Registre RGPD', path: '/rgpd', icon: Lock, roles: ['ADMIN'] },
         ],
       },
@@ -303,7 +304,7 @@ const persistedState = {
 };
 
 export default function Layout({ children }) {
-  const { user } = useAuth();
+  const { user, canAccessModule } = useAuth();
 
   const [collapsed, setCollapsed] = useState(persistedState.collapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -315,8 +316,12 @@ export default function Layout({ children }) {
     try { localStorage.setItem('solidata_sidebar_collapsed', collapsed ? '1' : '0'); } catch { /* noop */ }
   }, [collapsed]);
 
-  // Arbre filtré par rôle
-  const filteredTree = useMemo(() => filterByRole(NAV_TREE, user?.role), [user?.role]);
+  // Arbre filtré par rôle PUIS par habilitation module (une section de 1er
+  // niveau refusée au rôle est masquée ; l'ADMIN voit tout).
+  const filteredTree = useMemo(() => {
+    const byRole = filterByRole(NAV_TREE, user?.role);
+    return byRole.filter((section) => !section.id || canAccessModule(section.id));
+  }, [user?.role, canAccessModule]);
 
   // Charger alertes + compteurs sidebar (best-effort)
   useEffect(() => {

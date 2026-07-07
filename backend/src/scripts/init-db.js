@@ -53,6 +53,18 @@ async function initDatabase() {
       );
     `);
 
+    // Habilitations par module (V2.4) : DENY-overlay par rôle sur les sections
+    // de 1er niveau de la sidebar. Absence de ligne = autorisé (défaut).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS role_module_access (
+        role VARCHAR(30) NOT NULL,
+        module_key VARCHAR(50) NOT NULL,
+        allowed BOOLEAN NOT NULL DEFAULT true,
+        updated_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (role, module_key)
+      );
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS message_templates (
         id SERIAL PRIMARY KEY,
