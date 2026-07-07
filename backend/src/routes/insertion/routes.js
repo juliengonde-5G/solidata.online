@@ -837,18 +837,33 @@ router.get('/:employeeId', async (req, res) => {
 // ANALYSE IA — Endpoints utilisant Claude pour l'insertion
 // ══════════════════════════════════════════════════════════════
 
+// Traduit une erreur du service IA (SDK Anthropic) en réponse diagnosticable.
+// Endpoints ADMIN/RH → on peut exposer un indice technique (modèle/clé/quota).
+function handleIaError(res, err, where) {
+  const status = err.status || err.statusCode;
+  console.error(`[INSERTION] Erreur IA ${where} :`, status || '', err.message);
+  if (err.message?.includes('ANTHROPIC_API_KEY')) {
+    return res.status(503).json({ error: "Service IA non configuré — clé ANTHROPIC_API_KEY absente côté serveur." });
+  }
+  const model = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
+  let hint;
+  if (status === 404 || /not[_ ]?found|model:/i.test(err.message || '')) {
+    hint = `Le modèle IA « ${model} » n'est pas disponible pour cette clé API. Définissez CLAUDE_MODEL (dans le .env serveur) sur un modèle autorisé pour votre compte Anthropic, puis redémarrez le backend.`;
+  } else if (status === 401 || /authentication|invalid.*api.?key|x-api-key/i.test(err.message || '')) {
+    hint = "Clé ANTHROPIC_API_KEY invalide ou révoquée.";
+  } else if (status === 429 || /rate.?limit|overloaded/i.test(err.message || '')) {
+    hint = "Limite de débit / quota Anthropic atteinte — réessayez dans un instant.";
+  }
+  return res.status(500).json({ error: 'Erreur analyse IA', detail: err.message, hint });
+}
+
 // GET /api/insertion/ia/profil/:employeeId — Analyse approfondie IA du profil
 router.get('/ia/profil/:employeeId', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { analyseProfilComplet } = require('../../services/insertion-ai');
-    const result = await analyseProfilComplet(parseInt(req.params.employeeId));
-    res.json(result);
+    res.json(await analyseProfilComplet(parseInt(req.params.employeeId)));
   } catch (err) {
-    console.error('[INSERTION] Erreur analyse IA profil :', err);
-    if (err.message?.includes('ANTHROPIC_API_KEY')) {
-      return res.status(503).json({ error: 'Service IA non configuré' });
-    }
-    res.status(500).json({ error: 'Erreur analyse IA' });
+    handleIaError(res, err, 'profil');
   }
 });
 
@@ -857,14 +872,9 @@ router.get('/ia/entretien/:employeeId', authorize('ADMIN', 'RH'), async (req, re
   try {
     const { preparerEntretien } = require('../../services/insertion-ai');
     const milestoneType = req.query.type || 'Bilan M+3';
-    const result = await preparerEntretien(parseInt(req.params.employeeId), milestoneType);
-    res.json(result);
+    res.json(await preparerEntretien(parseInt(req.params.employeeId), milestoneType));
   } catch (err) {
-    console.error('[INSERTION] Erreur entretien IA :', err);
-    if (err.message?.includes('ANTHROPIC_API_KEY')) {
-      return res.status(503).json({ error: 'Service IA non configuré' });
-    }
-    res.status(500).json({ error: 'Erreur analyse IA' });
+    handleIaError(res, err, 'entretien');
   }
 });
 
@@ -872,14 +882,9 @@ router.get('/ia/entretien/:employeeId', authorize('ADMIN', 'RH'), async (req, re
 router.get('/ia/cohorte', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { bilanCohorte } = require('../../services/insertion-ai');
-    const result = await bilanCohorte();
-    res.json(result);
+    res.json(await bilanCohorte());
   } catch (err) {
-    console.error('[INSERTION] Erreur bilan cohorte IA :', err);
-    if (err.message?.includes('ANTHROPIC_API_KEY')) {
-      return res.status(503).json({ error: 'Service IA non configuré' });
-    }
-    res.status(500).json({ error: 'Erreur analyse IA' });
+    handleIaError(res, err, 'cohorte');
   }
 });
 
