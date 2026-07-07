@@ -1285,7 +1285,7 @@ export default function InsertionParcours() {
                             try {
                               const res = await api.get(`/insertion/ia/profil/${selectedEmployee.id}`);
                               setIaAnalyse(res.data);
-                            } catch (err) { const d = err.response?.data; setIaError((d?.error || 'Erreur analyse IA') + (d?.hint ? ' — ' + d.hint : '')); }
+                            } catch (err) { const d = err.response?.data; setIaError((d?.error || 'Erreur analyse IA') + (d?.hint ? ' — ' + d.hint : (d?.detail ? ' — ' + d.detail : ''))); }
                             setIaLoadingProfil(false);
                           }} disabled={iaLoadingProfil}
                             className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
@@ -1298,7 +1298,7 @@ export default function InsertionParcours() {
                               const mType = nextMilestone?.milestone_type || 'Bilan M+3';
                               const res = await api.get(`/insertion/ia/entretien/${selectedEmployee.id}?type=${encodeURIComponent(mType)}`);
                               setIaEntretien(res.data);
-                            } catch (err) { const d = err.response?.data; setIaError((d?.error || 'Erreur préparation entretien') + (d?.hint ? ' — ' + d.hint : '')); }
+                            } catch (err) { const d = err.response?.data; setIaError((d?.error || 'Erreur préparation entretien') + (d?.hint ? ' — ' + d.hint : (d?.detail ? ' — ' + d.detail : ''))); }
                             setIaLoadingEntretien(false);
                           }} disabled={iaLoadingEntretien}
                             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">

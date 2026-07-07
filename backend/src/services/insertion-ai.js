@@ -44,18 +44,31 @@ Réponds toujours en français, de façon structurée et actionnable.`;
 // ──────────────────────────────────────────────────────────────
 
 async function getEmployeeInsertionData(employeeId) {
+  // Fault-isolation : une requête AUXILIAIRE qui échoue (colonne absente sur
+  // une base ancienne, table non migrée, jointure candidat manquante…) ne doit
+  // PAS faire échouer toute l'analyse IA. Chaque requête secondaire dégrade en
+  // { rows: [] } et logue sa cause côté serveur ; seule la requête « salarié »
+  // est essentielle (avec repli minimal SELECT * si une colonne jointe manque).
+  const soft = (text, params, label) => pool.query(text, params).catch((e) => {
+    console.error(`[INSERTION-AI] requête « ${label} » ignorée (${e.code || '?'}) : ${e.message}`);
+    return { rows: [] };
+  });
+
   const [employee, diagnostic, milestones, actionPlans, pcmReport, candidate] = await Promise.all([
     pool.query(`
       SELECT e.*, e.position as position_name, t.name as team_name
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       WHERE e.id = $1
-    `, [employeeId]),
-    pool.query(`SELECT * FROM insertion_diagnostics WHERE employee_id = $1`, [employeeId]),
-    pool.query(`SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date`, [employeeId]),
-    pool.query(`SELECT * FROM cip_action_plans WHERE employee_id = $1 ORDER BY priority, created_at`, [employeeId]),
+    `, [employeeId]).catch((e) => {
+      console.error(`[INSERTION-AI] requête salarié dégradée (${e.code || '?'}) : ${e.message}`);
+      return pool.query(`SELECT * FROM employees WHERE id = $1`, [employeeId]);
+    }),
+    soft(`SELECT * FROM insertion_diagnostics WHERE employee_id = $1`, [employeeId], 'diagnostic'),
+    soft(`SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date`, [employeeId], 'jalons'),
+    soft(`SELECT * FROM cip_action_plans WHERE employee_id = $1 ORDER BY priority, created_at`, [employeeId], 'plans'),
     // PCM : chercher via le candidat lié
-    pool.query(`
+    soft(`
       SELECT pr.encrypted_report, pr.base_type, pr.phase_type, pr.risk_alert
       FROM pcm_reports pr
       JOIN pcm_sessions ps ON pr.session_id = ps.id
@@ -63,14 +76,14 @@ async function getEmployeeInsertionData(employeeId) {
       JOIN employees e ON e.candidate_id = c.id
       WHERE e.id = $1
       ORDER BY pr.created_at DESC LIMIT 1
-    `, [employeeId]),
-    pool.query(`
+    `, [employeeId], 'pcm'),
+    soft(`
       SELECT c.interview_comment, c.practical_test_result, c.cv_raw_text,
              c.first_name, c.last_name
       FROM candidates c
       JOIN employees e ON e.candidate_id = c.id
       WHERE e.id = $1
-    `, [employeeId]),
+    `, [employeeId], 'candidat'),
   ]);
 
   if (!employee.rows[0]) throw new Error('Salarié non trouvé');
@@ -276,7 +289,7 @@ async function bilanCohorte() {
     ORDER BY e.insertion_start_date NULLS LAST
   `);
 
-  // Jalons en retard
+  // Jalons en retard (secondaire : ne doit pas casser le bilan si colonne absente)
   const retards = await pool.query(`
     SELECT m.employee_id, e.first_name, e.last_name, m.milestone_type,
            m.due_date, m.status
@@ -285,9 +298,9 @@ async function bilanCohorte() {
     WHERE m.status IN ('a_planifier', 'planifie')
       AND m.due_date < CURRENT_DATE
       AND e.is_active = true
-  `);
+  `).catch((e) => { console.error(`[INSERTION-AI] cohorte/retards ignoré (${e.code || '?'}) : ${e.message}`); return { rows: [] }; });
 
-  // Actions en retard
+  // Actions en retard (secondaire)
   const actionsRetard = await pool.query(`
     SELECT a.employee_id, e.first_name, e.last_name, a.action_label,
            a.echeance, a.priority
@@ -296,7 +309,7 @@ async function bilanCohorte() {
     WHERE a.status = 'a_faire'
       AND a.echeance < CURRENT_DATE
       AND e.is_active = true
-  `);
+  `).catch((e) => { console.error(`[INSERTION-AI] cohorte/actions ignoré (${e.code || '?'}) : ${e.message}`); return { rows: [] }; });
 
   const cohorteData = {
     nb_salaries_actifs: actifs.rows.length,
