@@ -13,9 +13,9 @@
 >
 > **Faits — Structurants** : S1 dashboard ; S2 taux de sorties dynamiques ; S3 export PDF fiche + bilan ; S4 alertes de jalons J-7/J-1/retard + notif Brevo (jobs `scheduler.js`, alignés sur le contrat réel) ; S5 prescripteur **affiché** (page insertion) **et saisissable** (fiche collaborateur) ; S6 assistant IA clarifié + sorties IA masquées affichées.
 >
-> **Faits — Réduction de saisie** : report intelligent d'un jalon à l'autre (freins + objectifs) ; **garde-fou « modifications non enregistrées »** (bilan et diagnostic : indicateur visuel, confirmation à la fermeture / au changement d'onglet ou de salarié, `beforeunload`).
+> **Faits — Réduction de saisie** : **questionnaire progressif** (diagnostic et bilan découpés en sections repliables avec compteur de remplissage « 3/7 », les blocs secondaires repliés par défaut) ; report intelligent d'un jalon à l'autre (freins + objectifs) ; **garde-fou « modifications non enregistrées »** (bilan et diagnostic : indicateur visuel, confirmation à la fermeture / au changement d'onglet ou de salarié, `beforeunload`).
 >
-> **Restent volontairement en « vision »** : questionnaire progressif (repli des sections peu utilisées), pré-remplissage IA **complet** du bilan (l'IA rédige, la CIP valide), suivi post-sortie M+6, export PDF du bilan de cohorte.
+> **Restent volontairement en « vision »** : pré-remplissage IA **complet** du bilan (l'IA rédige, la CIP valide), suivi post-sortie M+6, export PDF du bilan de cohorte.
 >
 > Les sections ci-dessous décrivent l'état **AVANT** correctif (elles documentent le pourquoi de chaque chantier).
 

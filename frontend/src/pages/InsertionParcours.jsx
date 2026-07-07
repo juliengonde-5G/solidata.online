@@ -39,6 +39,31 @@ const ACTION_CATEGORIES = { competence: 'Competence', insertion: 'Insertion', so
 
 const RADAR_COLORS = ['#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899'];
 
+// Section repliable (questionnaire progressif) — évite le « mur de champs ».
+// `badge` affiche le remplissage (ex. « 3/7 ») sans avoir à déplier.
+function Collapsible({ title, subtitle, defaultOpen = true, badge, badgeTone = 'slate', children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const tones = { slate: 'bg-slate-200 text-slate-600', green: 'bg-green-100 text-green-700', amber: 'bg-amber-100 text-amber-700' };
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 text-left">
+        <span className="text-sm font-semibold text-slate-700">
+          {title}{subtitle && <span className="ml-2 text-xs font-normal text-slate-400">{subtitle}</span>}
+        </span>
+        <span className="flex items-center gap-2">
+          {badge != null && <span className={`text-xs px-2 py-0.5 rounded-full ${tones[badgeTone] || tones.slate}`}>{badge}</span>}
+          <span className={`text-slate-400 text-xs transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        </span>
+      </button>
+      {open && <div className="p-3 space-y-3">{children}</div>}
+    </div>
+  );
+}
+
+// Compte les champs non vides parmi une liste de clés d'un objet.
+const countFilled = (obj, keys) => keys.filter((k) => { const v = obj && obj[k]; return v != null && v !== '' && v !== 0; }).length;
+
 // ═══════════════════════════════════════
 // RADAR CHART SVG
 // ═══════════════════════════════════════
@@ -238,6 +263,9 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
   };
 
   const isSortie = milestone.milestone_type === 'Bilan Sortie';
+  const nbFreinsEval = FREIN_KEYS.filter((k) => form['frein_' + k]).length;
+  const nbQuestionnaire = template ? countFilled(form, template.sections.map((s) => s.champ)) : 0;
+  const nbBilan = countFilled(form, ['bilan_professionnel', 'bilan_social', 'objectifs_realises', 'objectifs_prochaine_periode', 'observations']);
 
   return (
     <div className="bg-white border rounded-lg p-4 space-y-6" onChange={markDirty}>
@@ -284,8 +312,9 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
 
       {/* Questionnaire CIP */}
       {template && (
-        <div className="space-y-4">
-          <h4 className="font-semibold text-gray-700 border-b pb-1">{template.titre}</h4>
+        <Collapsible title={template.titre || "Questionnaire d'entretien"} defaultOpen
+          badge={nbQuestionnaire + '/' + template.sections.length}
+          badgeTone={nbQuestionnaire === template.sections.length ? 'green' : (nbQuestionnaire ? 'amber' : 'slate')}>
           <p className="text-sm text-gray-500">{template.description}</p>
           {template.sections.map((section, si) => (
             <div key={si} className="bg-gray-50 rounded p-3 space-y-2">
@@ -298,12 +327,12 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
                 className="input-modern py-1 mt-1" rows={3} />
             </div>
           ))}
-        </div>
+        </Collapsible>
       )}
 
       {/* Evaluation des freins */}
-      <div>
-        <h4 className="font-semibold text-gray-700 border-b pb-1 mb-3">Evaluation des freins</h4>
+      <Collapsible title="Évaluation des freins" defaultOpen badge={nbFreinsEval + '/7'}
+        badgeTone={nbFreinsEval === 7 ? 'green' : (nbFreinsEval ? 'amber' : 'slate')}>
         <div className="grid grid-cols-2 gap-3">
           {FREIN_KEYS.map(key => (
             <div key={key} className="flex items-center gap-2">
@@ -317,7 +346,7 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
             </div>
           ))}
         </div>
-      </div>
+      </Collapsible>
 
       {/* Radar chart */}
       {radarData && radarData.series.length > 0 && (
@@ -328,6 +357,7 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
       )}
 
       {/* Bilan */}
+      <Collapsible title="Bilan & objectifs" defaultOpen badge={nbBilan + '/5'} badgeTone={nbBilan === 5 ? 'green' : (nbBilan ? 'amber' : 'slate')}>
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Bilan professionnel</label>
@@ -355,6 +385,7 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
             className="input-modern py-1" rows={2} />
         </div>
       </div>
+      </Collapsible>
 
       {/* Avis global */}
       <div>
@@ -434,8 +465,7 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
       )}
 
       {/* Plan d'action CIP */}
-      <div>
-        <h4 className="font-semibold text-gray-700 border-b pb-1 mb-3">Plan d'action CIP</h4>
+      <Collapsible title="Plan d'action CIP" defaultOpen={actionPlans.length > 0} badge={actionPlans.length || null} badgeTone="amber">
         {actionPlans.length > 0 && (
           <div className="space-y-2 mb-3">
             {actionPlans.map(ap => (
@@ -469,7 +499,7 @@ function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave
           </select>
           <button onClick={handleAddAction} className="btn-primary text-xs">+</button>
         </div>
-      </div>
+      </Collapsible>
 
       {/* Bouton sauvegarder */}
       <div className="flex justify-end gap-2 pt-2 border-t">
@@ -1041,56 +1071,64 @@ export default function InsertionParcours() {
                     <h3 className="font-semibold text-gray-800">Diagnostic CIP {diagDirty && <span className="ml-2 text-xs text-amber-600 font-normal">• non enregistré</span>}</h3>
                     <p className="text-sm text-gray-500">Remplir lors du diagnostic d'accueil (M+1 max). Le PCM est automatiquement recupere depuis le module recrutement.</p>
 
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Parcours anterieur</label>
-                      <textarea value={diagnostic.parcours_anterieur || ''} onChange={e => setDiagnostic({ ...diagnostic, parcours_anterieur: e.target.value })}
-                        className="input-modern py-1" rows={3} />
-                    </div>
-
-                    {/* Freins avec questions indirectes */}
-                    <h4 className="font-semibold text-gray-700 border-b pb-1">Evaluation des freins</h4>
-                    <p className="text-xs text-gray-400">Utilisez les questions ci-dessous pour guider l'entretien. Evaluez ensuite le niveau de frein.</p>
-                    {freinsDefinitions && FREIN_KEYS.map(key => {
-                      const def = freinsDefinitions[key];
-                      if (!def) return null;
+                    {(() => {
+                      const nbFreins = FREIN_KEYS.filter(k => diagnostic[`frein_${k}`]).length;
+                      const obsKeys = ['obs_points_forts', 'obs_difficultes', 'obs_comportement_equipe', 'obs_autonomie_ponctualite', 'pref_aime_faire', 'pref_ne_veut_plus'];
+                      const nbObs = countFilled(diagnostic, obsKeys);
                       return (
-                        <div key={key} className="bg-gray-50 rounded p-3 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <h5 className="font-medium text-gray-700">{def.label}</h5>
-                            <div className="flex items-center gap-2">
-                              <input type="range" min="1" max="5" value={diagnostic[`frein_${key}`] || 3}
-                                onChange={e => setDiagnostic({ ...diagnostic, [`frein_${key}`]: parseInt(e.target.value) })} />
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${diagnostic[`frein_${key}`] ? FREIN_COLORS[diagnostic[`frein_${key}`]] : 'bg-gray-100 text-gray-400'}`}>
-                                {diagnostic[`frein_${key}`] ? `${diagnostic[`frein_${key}`]}/5` : 'à évaluer'}
-                              </span>
-                            </div>
-                          </div>
-                          {def.questions_indirectes && def.questions_indirectes.map((qi, i) => (
-                            <p key={i} className="text-xs text-gray-500 italic ml-2">- {qi.q}</p>
-                          ))}
-                          <textarea value={diagnostic[`frein_${key}_detail`] || ''}
-                            onChange={e => setDiagnostic({ ...diagnostic, [`frein_${key}_detail`]: e.target.value })}
-                            placeholder={`Observations ${def.label}...`}
-                            className="input-modern py-1 text-xs" rows={2} />
-                        </div>
-                      );
-                    })}
+                        <>
+                          <Collapsible title="Parcours antérieur" defaultOpen badge={diagnostic.parcours_anterieur ? '✓' : null} badgeTone="green">
+                            <textarea value={diagnostic.parcours_anterieur || ''} onChange={e => setDiagnostic({ ...diagnostic, parcours_anterieur: e.target.value })}
+                              className="input-modern py-1" rows={3} placeholder="Ce que la personne a fait avant d'arriver…" />
+                          </Collapsible>
 
-                    {/* Observations & preferences */}
-                    <h4 className="font-semibold text-gray-700 border-b pb-1">Observations professionnelles</h4>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[
-                        ['obs_points_forts', 'Points forts observes'], ['obs_difficultes', 'Difficultes observees'],
-                        ['obs_comportement_equipe', 'Comportement en equipe'], ['obs_autonomie_ponctualite', 'Autonomie / Ponctualite'],
-                        ['pref_aime_faire', 'Ce que la personne aime faire'], ['pref_ne_veut_plus', 'Ce qu\'elle ne veut plus faire'],
-                      ].map(([key, label]) => (
-                        <div key={key}>
-                          <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                          <textarea value={diagnostic[key] || ''} onChange={e => setDiagnostic({ ...diagnostic, [key]: e.target.value })}
-                            className="input-modern py-1" rows={2} />
-                        </div>
-                      ))}
-                    </div>
+                          <Collapsible title="Freins périphériques" subtitle="évaluez chaque frein" defaultOpen badge={`${nbFreins}/7`} badgeTone={nbFreins === 7 ? 'green' : nbFreins ? 'amber' : 'slate'}>
+                            <p className="text-xs text-gray-400 -mt-1">Utilisez les questions pour guider l'entretien, puis évaluez le niveau (laissez « à évaluer » si non abordé).</p>
+                            {freinsDefinitions && FREIN_KEYS.map(key => {
+                              const def = freinsDefinitions[key];
+                              if (!def) return null;
+                              return (
+                                <div key={key} className="bg-gray-50 rounded p-3 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <h5 className="font-medium text-gray-700">{def.label}</h5>
+                                    <div className="flex items-center gap-2">
+                                      <input type="range" min="1" max="5" value={diagnostic[`frein_${key}`] || 3}
+                                        onChange={e => setDiagnostic({ ...diagnostic, [`frein_${key}`]: parseInt(e.target.value) })} />
+                                      <span className={`text-xs px-1.5 py-0.5 rounded ${diagnostic[`frein_${key}`] ? FREIN_COLORS[diagnostic[`frein_${key}`]] : 'bg-gray-100 text-gray-400'}`}>
+                                        {diagnostic[`frein_${key}`] ? `${diagnostic[`frein_${key}`]}/5` : 'à évaluer'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {def.questions_indirectes && def.questions_indirectes.map((qi, i) => (
+                                    <p key={i} className="text-xs text-gray-500 italic ml-2">- {qi.q}</p>
+                                  ))}
+                                  <textarea value={diagnostic[`frein_${key}_detail`] || ''}
+                                    onChange={e => setDiagnostic({ ...diagnostic, [`frein_${key}_detail`]: e.target.value })}
+                                    placeholder={`Observations ${def.label}...`}
+                                    className="input-modern py-1 text-xs" rows={2} />
+                                </div>
+                              );
+                            })}
+                          </Collapsible>
+
+                          <Collapsible title="Observations professionnelles" defaultOpen={false} badge={`${nbObs}/6`} badgeTone={nbObs === 6 ? 'green' : nbObs ? 'amber' : 'slate'}>
+                            <div className="grid grid-cols-2 gap-3">
+                              {[
+                                ['obs_points_forts', 'Points forts observes'], ['obs_difficultes', 'Difficultes observees'],
+                                ['obs_comportement_equipe', 'Comportement en equipe'], ['obs_autonomie_ponctualite', 'Autonomie / Ponctualite'],
+                                ['pref_aime_faire', 'Ce que la personne aime faire'], ['pref_ne_veut_plus', 'Ce qu\'elle ne veut plus faire'],
+                              ].map(([key, label]) => (
+                                <div key={key}>
+                                  <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                                  <textarea value={diagnostic[key] || ''} onChange={e => setDiagnostic({ ...diagnostic, [key]: e.target.value })}
+                                    className="input-modern py-1" rows={2} />
+                                </div>
+                              ))}
+                            </div>
+                          </Collapsible>
+                        </>
+                      );
+                    })()}
 
                     <div className="flex justify-end pt-2 border-t">
                       <button onClick={saveDiagnostic} disabled={savingDiag}
