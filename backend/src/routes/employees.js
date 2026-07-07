@@ -9,7 +9,8 @@ const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { monthBounds } = require('../utils/month-range');
 const { autoLogActivity } = require('../middleware/activity-logger');
-const { imageFilter } = require('../utils/upload-filters');
+const { imageFilter, spreadsheetFilter } = require('../utils/upload-filters');
+const { parseWorkbookBuffer, upsertCollaborators } = require('../services/collaborator-import');
 
 // Upload photo
 const photoStorage = multer.diskStorage({
@@ -29,6 +30,18 @@ const photoStorage = multer.diskStorage({
 // T1.1 : whitelist image uniquement (jpg/png/webp/heic) — bloque le
 // upload de .svg+JS, .html, .exe, etc.
 const upload = multer({ storage: photoStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
+
+// Import RH — fichier tableur (.xlsx / .csv) gardé en mémoire (pas de disque)
+// puis parsé par le service collaborator-import. 10 Mo suffisent largement
+// pour un export complet Malibou.
+const uploadSpreadsheet = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: spreadsheetFilter });
+
+// Exécute un middleware multer en convertissant ses erreurs (mauvais type,
+// taille dépassée) en 400 JSON propre plutôt qu'un 500 par défaut.
+const runUpload = (mw) => (req, res, next) => mw(req, res, (err) => {
+  if (err) return res.status(400).json({ error: err.message || 'Fichier invalide' });
+  next();
+});
 
 router.use(authenticate);
 router.use(autoLogActivity('employee'));
@@ -105,11 +118,19 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
     const allowed = ['first_name', 'last_name', 'phone', 'email', 'team_id', 'position',
       'contract_type', 'contract_start', 'contract_end', 'has_permis_b', 'has_caces',
       'weekly_hours', 'skills', 'is_active', 'user_id', 'candidate_id',
-      'insertion_status', 'insertion_start_date', 'insertion_end_date', 'prescripteur', 'visite_medicale_date'];
+      'insertion_status', 'insertion_start_date', 'insertion_end_date', 'prescripteur', 'visite_medicale_date',
+      // Champs étendus import Malibou (identité, coordonnées, naissance, IAE, contrat)
+      'malibou_id', 'birth_name', 'gender', 'birth_date', 'nationality', 'qualification', 'personal_email',
+      'address', 'city', 'postal_code', 'country', 'civility',
+      'birth_city', 'birth_country', 'birth_department',
+      'disability_status', 'residence_permit_type', 'residence_permit_number', 'residence_permit_renewal',
+      'medical_visit_frequency', 'seniority_date', 'manager_malibou_id', 'manager_name', 'manager_id',
+      'work_time_type', 'gross_salary', 'siret', 'establishment'];
 
     // Nettoyer les types : strings vides → null pour les champs numériques/date/boolean
-    const intFields = ['team_id', 'user_id', 'candidate_id'];
-    const dateFields = ['contract_start', 'contract_end', 'insertion_start_date', 'insertion_end_date', 'visite_medicale_date'];
+    const intFields = ['team_id', 'user_id', 'candidate_id', 'manager_id'];
+    const dateFields = ['contract_start', 'contract_end', 'insertion_start_date', 'insertion_end_date',
+      'visite_medicale_date', 'birth_date', 'seniority_date'];
     for (const f of intFields) {
       if (fields[f] !== undefined && !fields[f] && fields[f] !== 0) fields[f] = null;
       else if (fields[f]) fields[f] = Number(fields[f]);
@@ -708,135 +729,123 @@ router.put('/:id/availability', authorize('ADMIN', 'RH'), async (req, res) => {
 // IMPORT COLLABORATEURS
 // ══════════════════════════════════════════
 
-// POST /api/employees/import/csv — Import collaborateurs depuis CSV
+// POST /api/employees/import/csv — Import collaborateurs (upsert idempotent)
+//
+// Le front envoie un tableau `collaborators` déjà parsé (copier-coller CSV
+// d'une feuille Malibou). L'ancien comportement « supprimer tout puis insérer »
+// créait un doublon inactif à chaque réimport → remplacé par un upsert :
+//   • appariement par matricule (malibou_id) puis nom+prénom ;
+//   • mise à jour non destructive de l'existant, création des seuls nouveaux.
 router.post('/import/csv', authorize('ADMIN'), async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { collaborators } = req.body; // Array of collaborators
-
+    const { collaborators } = req.body;
     if (!Array.isArray(collaborators) || collaborators.length === 0) {
       return res.status(400).json({ error: 'Tableau de collaborateurs requis' });
     }
 
-    const positionToTeamMap = {
-      'Encadrante Technique': 'tri',
-      'Conseillère En Insertion Principale / Référente': 'administration',
-      'Salarie Polyvalent Cddi': 'tri',
-      'Operateur De Tri Cddi': 'tri',
-      'Operatrice De Tri Cddi': 'tri',
-      'Chauffeur / Suiveur / Manutentionnaire Cddi': 'collecte',
-      'Chauffeur Suiveur Polyvalent': 'collecte',
-      'Chauffeur / Suiveur Cddi': 'collecte',
-      'Operateur De Presse / Manutentionnaire Cddi': 'tri',
-      'Conducteur De Presse / Manutentionnaire Cddi': 'tri',
-      'Responsable Logistique': 'logistique',
-      'Operatrice De Production': 'tri',
-      'Cariste Manutentionnaire': 'logistique',
-      'Assistant technique': 'administration',
-      'Directeur des Opérations': 'administration',
-      'Assistant Technique': 'administration',
-      'Assistante Administrative': 'administration',
-      'Apprenti CIP': 'administration',
-    };
+    await client.query('BEGIN');
+    const { created, updated, errors } = await upsertCollaborators(client, collaborators, { userId: req.user.id });
+    await client.query('COMMIT');
 
-    const contractTypeMap = {
-      'CDI': 'CDI',
-      'CDD': 'CDD',
-      'CDDI': 'CDDI',
-      'Apprentissage': 'apprentissage',
-    };
+    res.json({
+      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''}`,
+      created,
+      updated,
+      errors,
+      total: created.length + updated.length + errors.length,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[EMPLOYEES] Erreur import CSV :', err.message);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
 
-    const created = [];
-    const errors = [];
+// POST /api/employees/import/xlsx — Import direct de l'export complet Malibou (.xlsx)
+//
+// Accepte le classeur tel quel (feuilles « Informations salariés » + « Contrats »)
+// via multipart/form-data (champ `file`). Parse côté serveur avec exceljs puis
+// applique le même upsert idempotent que la voie CSV.
+router.post('/import/xlsx', authorize('ADMIN'), runUpload(uploadSpreadsheet.single('file')), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'Fichier .xlsx requis (champ « file »)' });
+    }
 
-    // Normalise un sexe arbitraire vers F / M (laisse tel quel sinon)
-    const normalizeGender = (g) => {
-      if (!g) return null;
-      const u = String(g).trim().toUpperCase();
-      if (u === 'F' || u === 'FEMME' || u === 'FEMININ') return 'F';
-      if (u === 'M' || u === 'H' || u === 'HOMME' || u === 'MASCULIN') return 'M';
-      return u || null;
-    };
+    const collaborators = await parseWorkbookBuffer(req.file.buffer);
+    if (!collaborators.length) {
+      return res.status(400).json({ error: 'Aucun collaborateur exploitable trouvé dans le classeur (feuille « Informations salariés »).' });
+    }
 
-    // Accepte une date au format YYYY-MM-DD (déjà parsé côté front) ou null/empty
-    const safeDate = (d) => {
-      if (!d) return null;
-      const s = String(d).trim();
-      return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
-    };
+    await client.query('BEGIN');
+    const { created, updated, errors } = await upsertCollaborators(client, collaborators, { userId: req.user.id });
+    await client.query('COMMIT');
 
-    for (const collab of collaborators) {
+    res.json({
+      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''} — ${collaborators.length} ligne(s) lue(s)`,
+      created,
+      updated,
+      errors,
+      total: created.length + updated.length + errors.length,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[EMPLOYEES] Erreur import XLSX :', err.message);
+    res.status(500).json({ error: err.message || 'Erreur lecture du fichier' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/employees/import/dedupe-ghosts — Nettoyage des doublons hérités
+//
+// Les anciens imports (delete-then-insert) ont laissé des fiches « fantômes »
+// inactives (is_active=false, malibou_id NULL) en doublon d'une fiche active
+// homonyme. Cette route supprime ces fantômes UNIQUEMENT s'ils n'ont aucune
+// référence métier (contrats/tournées/pointages…) — chaque suppression est
+// isolée : un fantôme protégé par une FK est simplement conservé et compté.
+router.post('/import/dedupe-ghosts', authorize('ADMIN'), async (req, res) => {
+  try {
+    // Fantômes = inactifs sans matricule dont le nom correspond à un actif.
+    const ghosts = await pool.query(`
+      SELECT g.id, g.first_name, g.last_name
+      FROM employees g
+      WHERE g.is_active = false AND g.malibou_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM employees a
+          WHERE a.is_active = true AND a.id <> g.id
+            AND LOWER(a.first_name) = LOWER(g.first_name)
+            AND LOWER(a.last_name) = LOWER(g.last_name)
+        )
+    `);
+
+    let purged = 0;
+    const kept = [];
+    for (const g of ghosts.rows) {
       try {
-        const position = collab.position || '';
-        const contractType = contractTypeMap[collab.contract_type] || 'CDD';
-        const teamType = positionToTeamMap[position] || 'administration';
-
-        // Récupérer l'ID de l'équipe
-        const teamResult = await pool.query(
-          'SELECT id FROM teams WHERE type = $1 LIMIT 1',
-          [teamType]
-        );
-        const team_id = teamResult.rows[0]?.id || null;
-
-        // Créer l'employé avec tous les champs Malibou
-        const employeeResult = await pool.query(
-          `INSERT INTO employees (
-             first_name, last_name, team_id, position, contract_type, is_active,
-             malibou_id, birth_name, gender, birth_date, nationality, qualification,
-             personal_email, visite_medicale_date
-           )
-           VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9, $10, $11, $12, $13)
-           RETURNING id`,
-          [
-            collab.first_name,
-            collab.last_name,
-            team_id,
-            position,
-            contractType,
-            collab.malibou_id || null,
-            collab.birth_name || null,
-            normalizeGender(collab.gender),
-            safeDate(collab.birth_date),
-            collab.nationality || null,
-            collab.qualification || null,
-            collab.personal_email || null,
-            safeDate(collab.last_medical_visit),
-          ]
-        );
-
-        const employee_id = employeeResult.rows[0].id;
-
-        // Créer le contrat
-        const today = new Date().toISOString().split('T')[0];
-        await pool.query(
-          `INSERT INTO employee_contracts (employee_id, contract_type, start_date, team_id, is_current)
-           VALUES ($1, $2, $3, $4, true)`,
-          [employee_id, contractType, today, team_id]
-        );
-
-        created.push({
-          id: employee_id,
-          malibou_id: collab.malibou_id || null,
-          first_name: collab.first_name,
-          last_name: collab.last_name,
-          position,
-          contract_type: contractType,
-        });
+        await pool.query('DELETE FROM employee_contracts WHERE employee_id = $1', [g.id]);
+        await pool.query('DELETE FROM employee_availability WHERE employee_id = $1', [g.id]);
+        await pool.query('DELETE FROM employees WHERE id = $1', [g.id]);
+        purged++;
       } catch (err) {
-        errors.push({
-          collaborator: `${collab.first_name} ${collab.last_name}`,
-          error: err.message,
-        });
+        // Référencé ailleurs (historique tournées, etc.) → on conserve la fiche.
+        kept.push(`${g.first_name} ${g.last_name}`);
       }
     }
 
     res.json({
-      message: `${created.length} collaborateurs importés`,
-      created,
-      errors,
-      total: created.length + errors.length,
+      message: purged > 0
+        ? `${purged} doublon(s) inactif(s) supprimé(s)${kept.length ? `, ${kept.length} conservé(s) (rattachés à l'historique)` : ''}.`
+        : 'Aucun doublon inactif à nettoyer.',
+      purged,
+      kept,
     });
   } catch (err) {
-    console.error('[EMPLOYEES] Erreur import :', err);
+    console.error('[EMPLOYEES] Erreur dedupe-ghosts :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

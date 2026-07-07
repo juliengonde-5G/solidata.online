@@ -75,6 +75,26 @@ export default function Employees() {
       contract_end: emp.contract_end ? emp.contract_end.slice(0, 10) : '',
       weekly_hours: emp.weekly_hours ?? 35,
       is_active: emp.is_active !== false,
+      // Champs étendus (import Malibou) — édition complète de la fiche
+      malibou_id: emp.malibou_id || '',
+      birth_name: emp.birth_name || '',
+      civility: emp.civility || '',
+      gender: emp.gender || '',
+      birth_date: emp.birth_date ? emp.birth_date.slice(0, 10) : '',
+      birth_city: emp.birth_city || '',
+      birth_country: emp.birth_country || '',
+      nationality: emp.nationality || '',
+      personal_email: emp.personal_email || '',
+      address: emp.address || '',
+      postal_code: emp.postal_code || '',
+      city: emp.city || '',
+      country: emp.country || '',
+      qualification: emp.qualification || '',
+      disability_status: emp.disability_status || '',
+      residence_permit_type: emp.residence_permit_type || '',
+      residence_permit_number: emp.residence_permit_number || '',
+      seniority_date: emp.seniority_date ? emp.seniority_date.slice(0, 10) : '',
+      visite_medicale_date: emp.visite_medicale_date ? emp.visite_medicale_date.slice(0, 10) : '',
     });
     try {
       const [cRes, aRes] = await Promise.all([
@@ -154,18 +174,39 @@ export default function Employees() {
     }
     setSaving(true);
     try {
+      const clean = (v) => { const s = (v || '').toString().trim(); return s || null; };
       const payload = {
         first_name: firstName,
         last_name: lastName,
-        email: (editForm.email || '').trim() || null,
-        phone: (editForm.phone || '').trim() || null,
+        email: clean(editForm.email),
+        phone: clean(editForm.phone),
         team_id: editForm.team_id ? Number(editForm.team_id) : null,
-        position: (editForm.position || '').trim() || null,
+        position: clean(editForm.position),
         contract_type: editForm.contract_type || null,
         contract_start: editForm.contract_start || null,
         contract_end: editForm.contract_end || null,
         weekly_hours: editForm.weekly_hours != null && editForm.weekly_hours !== '' ? Number(editForm.weekly_hours) : 35,
         is_active: editForm.is_active,
+        // Champs étendus
+        malibou_id: clean(editForm.malibou_id),
+        birth_name: clean(editForm.birth_name),
+        civility: clean(editForm.civility),
+        gender: clean(editForm.gender),
+        birth_date: editForm.birth_date || null,
+        birth_city: clean(editForm.birth_city),
+        birth_country: clean(editForm.birth_country),
+        nationality: clean(editForm.nationality),
+        personal_email: clean(editForm.personal_email),
+        address: clean(editForm.address),
+        postal_code: clean(editForm.postal_code),
+        city: clean(editForm.city),
+        country: clean(editForm.country),
+        qualification: clean(editForm.qualification),
+        disability_status: clean(editForm.disability_status),
+        residence_permit_type: clean(editForm.residence_permit_type),
+        residence_permit_number: clean(editForm.residence_permit_number),
+        seniority_date: editForm.seniority_date || null,
+        visite_medicale_date: editForm.visite_medicale_date || null,
       };
       const res = await api.put(`/employees/${selected.id}`, payload);
       setSelected({ ...selected, ...res.data, team_name: teams.find(t => t.id === res.data.team_id)?.name });
@@ -384,6 +425,103 @@ export default function Employees() {
                             <input type="date" value={editForm.contract_end} onChange={e => setEditForm({ ...editForm, contract_end: e.target.value })} className="input-modern mt-1" />
                           </div>
                         </div>
+                        <details className="rounded-lg border border-slate-200 bg-slate-50/50">
+                          <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                            Informations détaillées (identité, coordonnées, IAE)
+                          </summary>
+                          <div className="p-3 space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-gray-500 text-xs">Matricule (Malibou)</label>
+                                <input value={editForm.malibou_id} onChange={e => setEditForm({ ...editForm, malibou_id: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">Nom de naissance</label>
+                                <input value={editForm.birth_name} onChange={e => setEditForm({ ...editForm, birth_name: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">Civilité</label>
+                                <select value={editForm.civility} onChange={e => setEditForm({ ...editForm, civility: e.target.value })} className="input-modern mt-1">
+                                  <option value="">—</option>
+                                  <option value="M.">M.</option>
+                                  <option value="Mme">Mme</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">Sexe</label>
+                                <select value={editForm.gender} onChange={e => setEditForm({ ...editForm, gender: e.target.value })} className="input-modern mt-1">
+                                  <option value="">—</option>
+                                  <option value="F">Féminin</option>
+                                  <option value="M">Masculin</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-gray-500 text-xs">Email personnel</label>
+                              <input type="email" value={editForm.personal_email} onChange={e => setEditForm({ ...editForm, personal_email: e.target.value })} className="input-modern mt-1" />
+                            </div>
+                            <div>
+                              <label className="text-gray-500 text-xs">Adresse</label>
+                              <input value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} className="input-modern mt-1" />
+                            </div>
+                            <div className="grid grid-cols-3 gap-3">
+                              <div>
+                                <label className="text-gray-500 text-xs">Code postal</label>
+                                <input value={editForm.postal_code} onChange={e => setEditForm({ ...editForm, postal_code: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                              <div className="col-span-2">
+                                <label className="text-gray-500 text-xs">Ville</label>
+                                <input value={editForm.city} onChange={e => setEditForm({ ...editForm, city: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-gray-500 text-xs">Date de naissance</label>
+                                <input type="date" value={editForm.birth_date} onChange={e => setEditForm({ ...editForm, birth_date: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">Nationalité</label>
+                                <input value={editForm.nationality} onChange={e => setEditForm({ ...editForm, nationality: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">Ville de naissance</label>
+                                <input value={editForm.birth_city} onChange={e => setEditForm({ ...editForm, birth_city: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">Pays de naissance</label>
+                                <input value={editForm.birth_country} onChange={e => setEditForm({ ...editForm, birth_country: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-gray-500 text-xs">Qualification</label>
+                              <input value={editForm.qualification} onChange={e => setEditForm({ ...editForm, qualification: e.target.value })} className="input-modern mt-1" placeholder="Ex: Niveau C, coeff. 345" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-gray-500 text-xs">Ancienneté (date)</label>
+                                <input type="date" value={editForm.seniority_date} onChange={e => setEditForm({ ...editForm, seniority_date: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">Dernière visite médicale</label>
+                                <input type="date" value={editForm.visite_medicale_date} onChange={e => setEditForm({ ...editForm, visite_medicale_date: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-gray-500 text-xs">Statut handicap (RQTH)</label>
+                              <input value={editForm.disability_status} onChange={e => setEditForm({ ...editForm, disability_status: e.target.value })} className="input-modern mt-1" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-gray-500 text-xs">Titre de séjour</label>
+                                <input value={editForm.residence_permit_type} onChange={e => setEditForm({ ...editForm, residence_permit_type: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">N° titre de séjour</label>
+                                <input value={editForm.residence_permit_number} onChange={e => setEditForm({ ...editForm, residence_permit_number: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                            </div>
+                          </div>
+                        </details>
                         <div className="flex items-center gap-2">
                           <input type="checkbox" id="emp-active" checked={editForm.is_active} onChange={e => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" />
                           <label htmlFor="emp-active" className="text-sm">Actif</label>

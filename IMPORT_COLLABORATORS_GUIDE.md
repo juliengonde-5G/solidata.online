@@ -2,7 +2,9 @@
 
 ## Vue d'ensemble
 
-Solidata inclut maintenant une fonctionnalité complète pour importer rapidement une liste de collaborateurs depuis un CSV.
+Solidata importe les collaborateurs depuis l'**export du logiciel de gestion (Malibou)**, soit en déposant directement le **classeur `.xlsx`** (recommandé), soit en collant une feuille au format **CSV**.
+
+> **Import idempotent (depuis la V2.2)** — l'import **ne supprime plus** la base. Il **met à jour** les collaborateurs déjà présents (appariés par **matricule** puis par **nom + prénom**) et ne **crée que les nouveaux**. Réimporter le même fichier ne produit donc **aucun doublon**. L'ancienne méthode « tout supprimer puis réinsérer » laissait un fantôme inactif par salarié à chaque passage ; c'est corrigé.
 
 ## Accès à la page d'import
 
@@ -151,16 +153,17 @@ Les 45 collaborateurs suivants sont prêts à être importés :
 
 ## Points importants
 
-⚠️ **Attention** : 
-- L'import supprime **tous les employés existants** avant d'importer les nouveaux
-- Cette action est irreversible sans backup préalable
-- Confirmez bien votre choix dans la boîte de dialogue de confirmation
+✅ **Fonctionnement (V2.2+)** :
+- **Aucune suppression** : l'import est un **upsert** (met à jour l'existant, crée les nouveaux). Réimporter le même fichier ne crée pas de doublon.
+- **Clé d'appariement** : matricule (`malibou_id`) d'abord, puis nom + prénom (insensible casse/accents).
+- **Fusion non destructive** : un champ vide dans l'export **n'écrase pas** une valeur déjà saisie en base.
+- **Statut actif/inactif** piloté par la colonne « Contrat actif » de l'export.
+- **Assignation automatique aux équipes** (tri, collecte, logistique, administration) via le poste puis le libellé « Équipe ».
+- **Compteurs** en retour : créés / mis à jour / erreurs.
 
-✅ **Avantages** :
-- Assignation automatique aux équipes (tri, collecte, logistique, administration)
-- Types de contrat correctement mappés
-- Préparation rapide de la base de données
-- Gestion des erreurs avec messages détaillés
+🔒 **Confidentialité (RGPD — minimisation)** : le n° de sécurité sociale, l'IBAN et le BIC présents dans l'export **ne sont pas importés** (données de paie, hors périmètre ERP).
+
+🧹 **Doublons hérités** : si d'anciens imports (méthode « tout remplacer ») ont laissé des fiches inactives en double, le bouton **« Nettoyer les doublons inactifs »** de la page d'import (ou `POST /api/employees/import/dedupe-ghosts`) les supprime, en conservant celles rattachées à un historique métier.
 
 ## Dépannage
 
@@ -198,22 +201,27 @@ Import des collaborateurs depuis un tableau JSON.
 **Réponse:**
 ```json
 {
-  "message": "X collaborateurs importés",
+  "message": "X créé(s), Y mis à jour",
   "created": [ {...} ],
+  "updated": [ {...} ],
   "errors": [ {...} ],
   "total": number
 }
 ```
 
-### DELETE /api/employees/clear
-Supprime tous les employés, contrats, et données associées.
+### POST /api/employees/import/xlsx  *(recommandé)*
+Import direct du classeur `.xlsx` exporté depuis Malibou (multipart/form-data, champ `file`).
+Lit les feuilles « Informations salariés » + « Contrats » et applique le même upsert idempotent.
 
-**Réponse:**
-```json
-{
-  "message": "Tous les employés ont été supprimés"
-}
-```
+### POST /api/employees/import/dedupe-ghosts
+Nettoie les fiches fantômes inactives (sans matricule) en doublon d'un collaborateur actif homonyme.
+Les fiches rattachées à un historique métier sont conservées.
+
+**Réponse:** `{ "message": "...", "purged": number, "kept": [ "Nom Prénom", ... ] }`
+
+### DELETE /api/employees/clear
+Désactive (soft-delete) tous les collaborateurs actifs — **remise à zéro manuelle**, hors du flux d'import normal.
+L'historique métier (tournées, expéditions…) est préservé.
 
 ---
 

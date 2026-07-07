@@ -2358,6 +2358,41 @@ async function initDatabase() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_employees_malibou_id ON employees(malibou_id) WHERE malibou_id IS NOT NULL`);
 
+    // V2.2 : Import complet Malibou (feuilles « Informations salariés » + « Contrats »).
+    // Toutes les infos exploitables opérationnellement de l'export sont accueillies.
+    // NB RGPD (minimisation) : le N° de sécurité sociale, l'IBAN et le BIC de
+    // l'export NE SONT PAS repris ici — ils restent dans le logiciel de paie
+    // (aucun usage métier dans l'ERP, réduction de la surface d'exposition).
+    await client.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS address VARCHAR(255);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS city VARCHAR(120);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS postal_code VARCHAR(20);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS country VARCHAR(80);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS civility VARCHAR(15);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_city VARCHAR(120);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_country VARCHAR(80);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_department VARCHAR(10);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS disability_status VARCHAR(60);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS residence_permit_type VARCHAR(120);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS residence_permit_number VARCHAR(60);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS residence_permit_renewal VARCHAR(30);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS medical_visit_frequency VARCHAR(20);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS seniority_date DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS manager_malibou_id VARCHAR(50);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS manager_name VARCHAR(150);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_time_type VARCHAR(40);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS gross_salary VARCHAR(60);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS siret VARCHAR(14);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS establishment VARCHAR(120);
+    `);
+    // Lien hiérarchique résolu (manager_id) — FK auto-référente, ajout tolérant.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN manager_id INTEGER REFERENCES employees(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_employees_manager_id ON employees(manager_id)`);
+
     // ── Conformité IAE — Prescripteurs (P1#14)
     await client.query(`
       CREATE TABLE IF NOT EXISTS prescripteur_orgas (

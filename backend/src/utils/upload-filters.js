@@ -63,4 +63,18 @@ const documentFilter = makeFilter({
   ],
 });
 
-module.exports = { imageFilter, csvFilter, documentFilter, makeFilter };
+// Import RH — export tableur du logiciel de gestion (Malibou) : .xlsx / .xls / .csv.
+// Accepte text/plain et octet-stream car certains navigateurs/OS envoient un
+// MIME générique pour les .xlsx joints.
+const spreadsheetFilter = makeFilter({
+  label: 'tableur (xlsx/csv)',
+  extensions: ['.xlsx', '.xls', '.csv'],
+  mimes: [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'text/csv', 'application/csv', 'text/plain',
+    'application/octet-stream',
+  ],
+});
+
+module.exports = { imageFilter, csvFilter, documentFilter, spreadsheetFilter, makeFilter };
