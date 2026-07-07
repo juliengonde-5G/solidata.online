@@ -68,6 +68,29 @@ const { authenticate, authorize } = require('../../middleware/auth');
     await addCol('explorama_environnements', 'TEXT');
     await addCol('explorama_rythme', 'TEXT');
 
+    // Garantit que TOUTES les colonnes écrites par PUT /diagnostic existent, quel
+    // que soit l'âge de la base (les deux définitions CREATE TABLE ont divergé et
+    // d'anciennes bases n'ont pas toutes les colonnes → « column ... does not
+    // exist » = « Erreur serveur » à l'enregistrement du diagnostic). Idempotent.
+    const DIAG_TEXT_COLS = [
+      'parcours_anterieur', 'contraintes_sante', 'contraintes_mobilite', 'contraintes_familiales', 'autres_contraintes',
+      'frein_mobilite_detail', 'frein_sante_detail', 'frein_finances_detail', 'frein_famille_detail',
+      'frein_linguistique_detail', 'frein_administratif_detail', 'frein_numerique_detail',
+      'obs_taches_realisees', 'obs_points_forts', 'obs_difficultes', 'obs_comportement_equipe', 'obs_autonomie_ponctualite',
+      'pref_aime_faire', 'pref_ne_veut_plus', 'pref_environnement_prefere', 'pref_environnement_eviter', 'pref_objectifs',
+      'explorama_interets', 'explorama_rejets',
+      'cip_hypotheses_metiers', 'cip_questions',
+    ];
+    for (const col of DIAG_TEXT_COLS) await addCol(col, 'TEXT');
+    // Freins (INTEGER, sans CHECK ici : une colonne recréée ne doit pas rejeter
+    // les valeurs existantes ; le PUT envoie 1-5 ou NULL, tous deux valides).
+    for (const f of ['mobilite', 'sante', 'finances', 'famille', 'linguistique', 'administratif', 'numerique']) {
+      await addCol(`frein_${f}`, 'INTEGER');
+    }
+    await addCol('created_by', 'INTEGER');
+    await addCol('updated_by', 'INTEGER');
+    await addCol('updated_at', 'TIMESTAMP DEFAULT NOW()');
+
     try {
       await pool.query(`
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_status VARCHAR(30) DEFAULT 'none';

@@ -220,7 +220,12 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic PUT :', err.message, err.detail || '');
-    res.status(500).json({ error: 'Erreur serveur' });
+    // On expose le code SQLSTATE (sans détail sensible) pour rendre l'erreur
+    // diagnosticable ; 42703 = colonne manquante (base non migrée).
+    const hint = err.code === '42703'
+      ? 'Base non à jour (colonne manquante) — un redéploiement applique la migration.'
+      : undefined;
+    res.status(500).json({ error: 'Erreur serveur', code: err.code, hint });
   }
 });
 
