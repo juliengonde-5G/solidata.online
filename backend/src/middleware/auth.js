@@ -30,20 +30,43 @@ function authenticate(req, res, next) {
   }
 }
 
+// Cache { role_key personnalisé → base_role intégré }. Rafraîchi périodiquement
+// et à chaud à la création/suppression d'un rôle (refreshCustomRoles).
+let customRoleBase = {};
+async function refreshCustomRoles() {
+  try {
+    const r = await pool.query('SELECT role_key, base_role FROM custom_roles');
+    const map = {};
+    for (const row of r.rows) map[row.role_key] = row.base_role;
+    customRoleBase = map;
+  } catch (_) { /* table pas encore créée : aucun rôle custom */ }
+}
+refreshCustomRoles();
+const _t = setInterval(refreshCustomRoles, 60000);
+if (_t.unref) _t.unref();
+
+// Rôle « effectif » : un rôle personnalisé hérite des accès de son rôle de base.
+function resolveBaseRole(role) {
+  return customRoleBase[role] || role;
+}
+
 /**
  * Middleware d'autorisation par rôles
  * Usage : authorize('ADMIN', 'MANAGER')
+ * Un rôle personnalisé passe s'il l'est explicitement OU si son rôle de base
+ * figure dans la liste (les rôles intégrés se résolvent vers eux-mêmes).
  */
 function authorize(...roles) {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Non authentifié' });
     }
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Accès non autorisé pour ce rôle' });
+    const role = req.user.role;
+    if (roles.includes(role) || roles.includes(resolveBaseRole(role))) {
+      return next();
     }
-    next();
+    return res.status(403).json({ error: 'Accès non autorisé pour ce rôle' });
   };
 }
 
-module.exports = { authenticate, authorize };
+module.exports = { authenticate, authorize, refreshCustomRoles, resolveBaseRole };

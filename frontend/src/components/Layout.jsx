@@ -318,10 +318,11 @@ export default function Layout({ children }) {
 
   // Arbre filtré par rôle PUIS par habilitation module (une section de 1er
   // niveau refusée au rôle est masquée ; l'ADMIN voit tout).
+  // base_role : un rôle personnalisé hérite des accès de son rôle intégré.
   const filteredTree = useMemo(() => {
-    const byRole = filterByRole(NAV_TREE, user?.role);
+    const byRole = filterByRole(NAV_TREE, user?.base_role || user?.role);
     return byRole.filter((section) => !section.id || canAccessModule(section.id));
-  }, [user?.role, canAccessModule]);
+  }, [user?.base_role, user?.role, canAccessModule]);
 
   // Charger alertes + compteurs sidebar (best-effort)
   useEffect(() => {

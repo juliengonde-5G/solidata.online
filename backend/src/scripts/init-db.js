@@ -57,12 +57,43 @@ async function initDatabase() {
     // de 1er niveau de la sidebar. Absence de ligne = autorisé (défaut).
     await client.query(`
       CREATE TABLE IF NOT EXISTS role_module_access (
-        role VARCHAR(30) NOT NULL,
+        role VARCHAR(50) NOT NULL,
         module_key VARCHAR(50) NOT NULL,
         allowed BOOLEAN NOT NULL DEFAULT true,
         updated_at TIMESTAMP DEFAULT NOW(),
         PRIMARY KEY (role, module_key)
       );
+    `);
+    // Élargit role si la table préexistait en VARCHAR(30) (clés de rôles custom).
+    await client.query(`DO $$ BEGIN ALTER TABLE role_module_access ALTER COLUMN role TYPE VARCHAR(50); EXCEPTION WHEN others THEN NULL; END $$;`);
+
+    // Rôles personnalisés (V2.4.1) : un rôle custom hérite des accès d'un rôle
+    // de base intégré (base_role) et se restreint via role_module_access.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS custom_roles (
+        role_key VARCHAR(50) PRIMARY KEY,
+        label VARCHAR(100) NOT NULL,
+        base_role VARCHAR(30) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // users.role : lever la contrainte CHECK (limitée aux 6 rôles intégrés) et
+    // élargir la colonne pour accueillir les clés de rôles personnalisés.
+    // La validation du rôle est faite au niveau applicatif (built-in ∪ custom).
+    await client.query(`
+      DO $$
+      DECLARE cname text;
+      BEGIN
+        BEGIN ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(50); EXCEPTION WHEN others THEN NULL; END;
+        FOR cname IN
+          SELECT conname FROM pg_constraint
+          WHERE conrelid = 'users'::regclass AND contype = 'c'
+            AND pg_get_constraintdef(oid) ILIKE '%role%'
+        LOOP
+          EXECUTE 'ALTER TABLE users DROP CONSTRAINT ' || quote_ident(cname);
+        END LOOP;
+      END $$;
     `);
 
     await client.query(`

@@ -104,7 +104,8 @@ function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
   if (loading) return <PageFallback />;
   if (!user) return <Navigate to="/login" />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/" />;
+  // Un rôle personnalisé est autorisé si son rôle de base (base_role) l'est.
+  if (roles && !roles.includes(user.role) && !roles.includes(user.base_role)) return <Navigate to="/" />;
   return children;
 }
 

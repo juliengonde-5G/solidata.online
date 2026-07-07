@@ -6,11 +6,16 @@ import api from '../services/api';
 
 const ROLE_LABELS = { ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines', COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité', RESP_BTQ: 'Responsable Boutique' };
 
+const BUILTIN_ROLE_OPTIONS = Object.entries(ROLE_LABELS).map(([key, label]) => ({ key, label, builtin: true }));
+
 export default function Users() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ username: '', email: '', password: '', role: 'COLLABORATEUR', first_name: '', last_name: '' });
+  // Rôles assignables : intégrés + personnalisés (créés dans « Habilitations »).
+  const [roleOptions, setRoleOptions] = useState(BUILTIN_ROLE_OPTIONS);
+  const roleLabel = (key) => roleOptions.find((r) => r.key === key)?.label || ROLE_LABELS[key] || key;
 
   // Édition
   const [editUser, setEditUser] = useState(null);
@@ -21,6 +26,11 @@ export default function Users() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { loadUsers(); }, []);
+  useEffect(() => {
+    api.get('/permissions/roles')
+      .then((r) => { if (Array.isArray(r.data?.roles) && r.data.roles.length) setRoleOptions(r.data.roles); })
+      .catch(() => { /* garde les rôles intégrés par défaut */ });
+  }, []);
 
   const loadUsers = async () => {
     try {
@@ -106,7 +116,7 @@ export default function Users() {
       ),
     },
     { key: 'email', label: 'Email', sortable: true, render: (u) => u.email || '—' },
-    { key: 'role', label: 'Rôle', sortable: true, render: (u) => <StatusBadge status={u.role} size="sm" /> },
+    { key: 'role', label: 'Rôle', sortable: true, render: (u) => <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-medium">{roleLabel(u.role)}</span> },
     { key: 'is_active', label: 'Statut', sortable: true, render: (u) => <StatusBadge status={u.is_active ? 'active' : 'inactive'} size="sm" /> },
     {
       key: 'actions',
@@ -153,7 +163,7 @@ export default function Users() {
               <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="input-modern" />
               <input placeholder="Mot de passe *" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className="input-modern" required />
               <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="select-modern">
-                {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                {roleOptions.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
               </select>
             </div>
             <div className="flex gap-2 mt-4">
@@ -188,7 +198,7 @@ export default function Users() {
                 <div>
                   <label className="text-xs text-slate-500 font-medium">Rôle (habilitation)</label>
                   <select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })} className="select-modern mt-1">
-                    {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    {roleOptions.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
                   <p className="text-[11px] text-slate-400 mt-1">La visibilité des modules par rôle se règle dans « Habilitations modules ».</p>
                 </div>

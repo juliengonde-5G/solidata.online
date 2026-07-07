@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const pool = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, resolveBaseRole } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { logActivity } = require('../middleware/activity-logger');
@@ -308,7 +308,9 @@ router.get('/me', authenticate, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Utilisateur non trouvé' });
     }
-    res.json(result.rows[0]);
+    const u = result.rows[0];
+    // base_role : rôle intégré effectif (pour un rôle personnalisé, son modèle).
+    res.json({ ...u, base_role: resolveBaseRole(u.role) });
   } catch (err) {
     console.error('[AUTH] Erreur me :', err);
     res.status(500).json({ error: 'Erreur serveur' });

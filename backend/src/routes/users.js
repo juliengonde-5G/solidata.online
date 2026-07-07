@@ -11,6 +11,16 @@ const { autoLogActivity } = require('../middleware/activity-logger');
 router.use(authenticate, authorize('ADMIN'));
 router.use(autoLogActivity('user'));
 
+const BUILTIN_ROLES = ['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ'];
+// Un rôle est valide s'il est intégré ou personnalisé (table custom_roles).
+async function isValidRole(role) {
+  if (BUILTIN_ROLES.includes(role)) return true;
+  try {
+    const r = await pool.query('SELECT 1 FROM custom_roles WHERE role_key = $1', [role]);
+    return r.rows.length > 0;
+  } catch (_) { return false; }
+}
+
 // GET /api/users
 router.get('/', async (req, res) => {
   try {
@@ -29,7 +39,7 @@ router.get('/', async (req, res) => {
 router.post('/', [
   body('username').notEmpty().withMessage('Nom d\'utilisateur requis'),
   body('password').isLength({ min: 6 }).withMessage('Mot de passe de 6 caractères minimum requis'),
-  body('role').isIn(['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ']).withMessage('Rôle invalide'),
+  body('role').notEmpty().withMessage('Rôle requis'),
 ], validate, async (req, res) => {
   try {
     const { username, password, email, role, first_name, last_name, phone, team_id } = req.body;
@@ -38,8 +48,7 @@ router.post('/', [
       return res.status(400).json({ error: 'Nom d\'utilisateur, mot de passe et rôle requis' });
     }
 
-    const validRoles = ['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ'];
-    if (!validRoles.includes(role)) {
+    if (!(await isValidRole(role))) {
       return res.status(400).json({ error: 'Rôle invalide' });
     }
 
@@ -68,6 +77,10 @@ router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { email, role, first_name, last_name, phone, team_id, is_active } = req.body;
+
+    if (role != null && !(await isValidRole(role))) {
+      return res.status(400).json({ error: 'Rôle invalide' });
+    }
 
     const result = await pool.query(
       `UPDATE users SET email = COALESCE($1, email), role = COALESCE($2, role),
