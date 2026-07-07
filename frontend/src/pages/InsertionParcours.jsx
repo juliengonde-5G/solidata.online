@@ -4,6 +4,23 @@ import { LoadingSpinner, PageHeader } from '../components';
 import { Heart } from 'lucide-react';
 import api from '../services/api';
 
+// Les endpoints IA (Claude) génèrent 1500-2500 tokens et peuvent dépasser le
+// timeout axios global de 30 s (l'analyse de profil est plus longue que le
+// simple « ping » de la sonde). On leur accorde un délai dédié de 2 min
+// (nginx autorise déjà 300 s sur /api).
+const IA_TIMEOUT = 120000;
+
+// Formate une erreur d'appel IA de façon lisible : timeout explicite, 503
+// (clé absente), sinon message backend + hint/detail (endpoints ADMIN/RH).
+function formatIaError(err, fallback = 'Erreur analyse IA') {
+  if (err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '')) {
+    return "L'analyse IA a dépassé le délai d'attente (le modèle met parfois 1 à 2 min). Réessayez.";
+  }
+  if (err.response?.status === 503) return err.response?.data?.error || 'Service IA non configuré (clé Anthropic absente).';
+  const d = err.response?.data;
+  return (d?.error || err.message || fallback) + (d?.hint ? ' — ' + d.hint : (d?.detail ? ' — ' + d.detail : ''));
+}
+
 const URGENCY_COLORS = {
   critique: 'bg-red-100 text-red-700 border-red-200',
   attention: 'bg-yellow-100 text-yellow-700 border-yellow-200',
@@ -704,13 +721,10 @@ function CohortePanel({ onSelect }) {
   const runIaCohorte = async () => {
     setIaLoading(true); setIaError(null);
     try {
-      const r = await api.get('/insertion/ia/cohorte');
+      const r = await api.get('/insertion/ia/cohorte', { timeout: IA_TIMEOUT });
       setIa(r.data);
     } catch (err) {
-      const d = err.response?.data;
-      setIaError(err.response?.status === 503
-        ? (d?.error || 'Analyse IA non configurée (clé Anthropic absente).')
-        : ((d?.error || err.message) + (d?.hint ? ' — ' + d.hint : '')));
+      setIaError(formatIaError(err, 'Erreur analyse IA de cohorte'));
     }
     setIaLoading(false);
   };
@@ -1283,9 +1297,9 @@ export default function InsertionParcours() {
                           <button onClick={async () => {
                             setIaLoadingProfil(true); setIaError(null);
                             try {
-                              const res = await api.get(`/insertion/ia/profil/${selectedEmployee.id}`);
+                              const res = await api.get(`/insertion/ia/profil/${selectedEmployee.id}`, { timeout: IA_TIMEOUT });
                               setIaAnalyse(res.data);
-                            } catch (err) { const d = err.response?.data; setIaError((d?.error || 'Erreur analyse IA') + (d?.hint ? ' — ' + d.hint : (d?.detail ? ' — ' + d.detail : ''))); }
+                            } catch (err) { setIaError(formatIaError(err, 'Erreur analyse IA')); }
                             setIaLoadingProfil(false);
                           }} disabled={iaLoadingProfil}
                             className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
@@ -1296,9 +1310,9 @@ export default function InsertionParcours() {
                             try {
                               const nextMilestone = analysis.milestones?.find(m => m.status !== 'realise');
                               const mType = nextMilestone?.milestone_type || 'Bilan M+3';
-                              const res = await api.get(`/insertion/ia/entretien/${selectedEmployee.id}?type=${encodeURIComponent(mType)}`);
+                              const res = await api.get(`/insertion/ia/entretien/${selectedEmployee.id}?type=${encodeURIComponent(mType)}`, { timeout: IA_TIMEOUT });
                               setIaEntretien(res.data);
-                            } catch (err) { const d = err.response?.data; setIaError((d?.error || 'Erreur préparation entretien') + (d?.hint ? ' — ' + d.hint : (d?.detail ? ' — ' + d.detail : ''))); }
+                            } catch (err) { setIaError(formatIaError(err, 'Erreur préparation entretien')); }
                             setIaLoadingEntretien(false);
                           }} disabled={iaLoadingEntretien}
                             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
