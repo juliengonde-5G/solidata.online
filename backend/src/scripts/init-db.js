@@ -2393,6 +2393,28 @@ async function initDatabase() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_employees_manager_id ON employees(manager_id)`);
 
+    // V2.3.1 : les champs texte issus de l'export (longueur non maîtrisée côté
+    // Malibou) passent en TEXT pour éliminer les « value too long for type
+    // character varying(N) » à l'import (ex. « Renouvellement titre de séjour »
+    // qui était en VARCHAR(30)). Idempotent : ne convertit que si pas déjà TEXT.
+    await client.query(`
+      DO $$
+      DECLARE col text;
+      BEGIN
+        FOREACH col IN ARRAY ARRAY[
+          'address','city','postal_code','country','civility','birth_city','birth_country',
+          'birth_department','disability_status','residence_permit_type','residence_permit_number',
+          'residence_permit_renewal','medical_visit_frequency','manager_malibou_id','manager_name',
+          'work_time_type','gross_salary','siret','establishment','qualification'
+        ] LOOP
+          IF EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_name='employees' AND column_name=col AND data_type <> 'text') THEN
+            EXECUTE format('ALTER TABLE employees ALTER COLUMN %I TYPE TEXT', col);
+          END IF;
+        END LOOP;
+      END $$;
+    `);
+
     // ── Conformité IAE — Prescripteurs (P1#14)
     await client.query(`
       CREATE TABLE IF NOT EXISTS prescripteur_orgas (

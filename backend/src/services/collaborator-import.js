@@ -327,12 +327,17 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
   for (const t of teamRows.rows) teamIdByType[t.type] = t.id;
 
   for (const c of collaborators) {
-    try {
-      if (!c.first_name || !c.last_name) {
-        errors.push({ collaborator: `${c.first_name || '?'} ${c.last_name || '?'}`, error: 'Prénom/Nom manquant' });
-        continue;
-      }
+    if (!c.first_name || !c.last_name) {
+      errors.push({ collaborator: `${c.first_name || '?'} ${c.last_name || '?'}`, error: 'Prénom/Nom manquant' });
+      continue;
+    }
 
+    // SAVEPOINT par collaborateur : isole les échecs (ex. valeur trop longue)
+    // pour qu'UNE ligne fautive n'avorte pas toute la transaction — sinon tous
+    // les collaborateurs suivants échouent en cascade (« current transaction is
+    // aborted, commands ignored until end of transaction block »).
+    await db.query('SAVEPOINT collab_sp');
+    try {
       const teamType = resolveTeamType(c.position, c.equipe_label);
       const teamId = teamType ? teamIdByType[teamType] || null : null;
       const contractType = c.contract_type || 'CDD';
@@ -415,6 +420,13 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
         updated.push({ id: existing.id, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
       } else {
         // ── INSERT nouveau collaborateur ──
+        // Contrat d'insertion (poste « … Cddi ») → démarre le parcours pour
+        // qu'il apparaisse directement dans le suivi CIP (les jalons seront
+        // posés à la 1re ouverture de la fiche). Uniquement à la création :
+        // on ne réactive jamais un parcours clôturé au réimport.
+        const isInsertion = /cddi/i.test(c.position || '');
+        const insertionStatus = isInsertion ? 'en_parcours' : 'none';
+        const insertionStart = isInsertion ? (c.contract_start || null) : null;
         const ins = await db.query(
           `INSERT INTO employees (
              first_name, last_name, malibou_id, birth_name, email, personal_email, phone,
@@ -425,10 +437,10 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
              manager_malibou_id, manager_name,
              position, qualification, contract_type, contract_start, contract_end,
              weekly_hours, work_time_type, gross_salary, siret, establishment,
-             team_id, is_active
+             team_id, is_active, insertion_status, insertion_start_date
            ) VALUES (
              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-             $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39
+             $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41
            ) RETURNING id`,
           [
             c.first_name, c.last_name, c.malibou_id, c.birth_name, c.email, c.personal_email, c.phone,
@@ -439,14 +451,17 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
             c.manager_malibou_id, c.manager_name,
             c.position, c.qualification, contractType, c.contract_start, c.contract_end,
             c.weekly_hours, c.work_time_type, c.gross_salary, c.siret, c.establishment,
-            teamId, isActive,
+            teamId, isActive, insertionStatus, insertionStart,
           ]
         );
         const newId = ins.rows[0].id;
         await upsertCurrentContract(db, newId, { contractType, teamId, c });
         created.push({ id: newId, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
       }
+      await db.query('RELEASE SAVEPOINT collab_sp');
     } catch (err) {
+      // Rollback ciblé : la transaction reste utilisable pour les suivants.
+      try { await db.query('ROLLBACK TO SAVEPOINT collab_sp'); } catch (_) { /* transaction déjà close */ }
       errors.push({ collaborator: `${c.first_name} ${c.last_name}`, error: err.message });
     }
   }

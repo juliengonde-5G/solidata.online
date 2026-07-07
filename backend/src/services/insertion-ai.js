@@ -15,7 +15,9 @@ function getClient() {
   return client;
 }
 
-const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
+// Modèle par défaut à jour (claude-sonnet-4-20250514 était déprécié).
+// Surchargeable sans redéploiement via la variable d'env CLAUDE_MODEL.
+const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
 
 const SYSTEM_INSERTION = `Tu es l'IA d'accompagnement insertion de Solidata, une SIAE (Structure d'Insertion par l'Activité Économique) spécialisée dans le textile à Rouen.
 

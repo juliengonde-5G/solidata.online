@@ -7,6 +7,18 @@
 
 ---
 
+> **Mise à jour (V2.3.0, même jour) — feuille de route implémentée.** Ce diagnostic a été suivi d'une livraison immédiate.
+>
+> **Faits — Quick wins** : QW1 tableau de bord CIP **+ analyse IA de cohorte branchée** (la fonction `bilanCohorte`, jusque-là morte, est désormais appelée depuis le dashboard) ; QW2 auto-initialisation du parcours ; QW3 jalons calés sur le contrat réel ; QW4 freins non faussés (`null` ≠ « 1 ») + pré-remplissage du bilan ; QW5 modèle IA à jour ; QW6 erreurs remontées (fin des `catch {}`/`alert()`) ; QW7 auto-statut à l'import.
+>
+> **Faits — Structurants** : S1 dashboard ; S2 taux de sorties dynamiques ; S3 export PDF fiche + bilan ; S4 alertes de jalons J-7/J-1/retard + notif Brevo (jobs `scheduler.js`, alignés sur le contrat réel) ; S5 prescripteur **affiché** (page insertion) **et saisissable** (fiche collaborateur) ; S6 assistant IA clarifié + sorties IA masquées affichées.
+>
+> **Faits — Réduction de saisie** : **questionnaire progressif** (diagnostic et bilan découpés en sections repliables avec compteur de remplissage « 3/7 », les blocs secondaires repliés par défaut) ; report intelligent d'un jalon à l'autre (freins + objectifs) ; **garde-fou « modifications non enregistrées »** (bilan et diagnostic : indicateur visuel, confirmation à la fermeture / au changement d'onglet ou de salarié, `beforeunload`).
+>
+> **Restent volontairement en « vision »** : pré-remplissage IA **complet** du bilan (l'IA rédige, la CIP valide), suivi post-sortie M+6, export PDF du bilan de cohorte.
+>
+> Les sections ci-dessous décrivent l'état **AVANT** correctif (elles documentent le pourquoi de chaque chantier).
+
 ## 1. En une page (pour la direction)
 
 Le module est **riche et bien pensé sur le fond** : le référentiel des 7 freins, les questionnaires d'entretien en langage simple, la timeline, le radar d'évolution et l'analyse IA couvrent le vrai métier de CIP. **Ce n'est pas un outil vide.**

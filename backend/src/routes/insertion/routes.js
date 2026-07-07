@@ -9,7 +9,7 @@ const { authorize } = require('../../middleware/auth');
 const { body, param } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const CryptoJS = require('crypto-js');
-const { FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, analyzeInsertion, buildTimeline } = require('./engine');
+const { FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, analyzeInsertion, buildTimeline, computeMilestoneSchedule } = require('./engine');
 const { autoLogActivity } = require('../../middleware/activity-logger');
 
 const PCM_KEY = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
@@ -19,6 +19,40 @@ if (!PCM_KEY) {
 }
 
 router.use(autoLogActivity('insertion'));
+
+// Crée (idempotent) les jalons d'un salarié en calant les échéances sur son
+// contrat réel. Réutilisé par l'endpoint /initialize et par l'auto-init.
+async function generateMilestones(db, employeeId, userId) {
+  const empRes = await db.query(
+    `SELECT e.insertion_start_date, e.contract_start, e.contract_end,
+            ec.start_date AS c_start, ec.end_date AS c_end
+     FROM employees e
+     LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+     WHERE e.id = $1`,
+    [employeeId]
+  );
+  if (empRes.rows.length === 0) return [];
+  const r = empRes.rows[0];
+  const start = r.insertion_start_date || r.c_start || r.contract_start || new Date();
+  const end = r.c_end || r.contract_end || null;
+  const schedule = computeMilestoneSchedule(start, end);
+
+  const results = [];
+  for (const d of schedule) {
+    const existing = await db.query(
+      'SELECT * FROM insertion_milestones WHERE employee_id = $1 AND milestone_type = $2',
+      [employeeId, d.type]
+    );
+    if (existing.rows.length > 0) { results.push(existing.rows[0]); continue; }
+    const ins = await db.query(
+      `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [employeeId, d.type, d.due, userId || null]
+    );
+    results.push(ins.rows[0]);
+  }
+  return results;
+}
 
 // GET /api/insertion — Vue d'ensemble de tous les employés actifs
 // IMPORTANT: doit etre AVANT /:employeeId pour ne pas etre intercepte
@@ -164,13 +198,13 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
       d.parcours_anterieur || null, d.contraintes_sante || null,
       d.contraintes_mobilite || null, d.contraintes_familiales || null,
       d.autres_contraintes || null,
-      d.frein_mobilite || 1, d.frein_mobilite_detail || null, d.frein_mobilite_causes || null,
-      d.frein_sante || 1, d.frein_sante_detail || null, d.frein_sante_causes || null,
-      d.frein_finances || 1, d.frein_finances_detail || null, d.frein_finances_causes || null,
-      d.frein_famille || 1, d.frein_famille_detail || null, d.frein_famille_causes || null,
-      d.frein_linguistique || 1, d.frein_linguistique_detail || null, d.frein_linguistique_causes || null,
-      d.frein_administratif || 1, d.frein_administratif_detail || null, d.frein_administratif_causes || null,
-      d.frein_numerique || 1, d.frein_numerique_detail || null, d.frein_numerique_causes || null,
+      d.frein_mobilite || null, d.frein_mobilite_detail || null, d.frein_mobilite_causes || null,
+      d.frein_sante || null, d.frein_sante_detail || null, d.frein_sante_causes || null,
+      d.frein_finances || null, d.frein_finances_detail || null, d.frein_finances_causes || null,
+      d.frein_famille || null, d.frein_famille_detail || null, d.frein_famille_causes || null,
+      d.frein_linguistique || null, d.frein_linguistique_detail || null, d.frein_linguistique_causes || null,
+      d.frein_administratif || null, d.frein_administratif_detail || null, d.frein_administratif_causes || null,
+      d.frein_numerique || null, d.frein_numerique_detail || null, d.frein_numerique_causes || null,
       d.obs_taches_realisees || null, d.obs_points_forts || null,
       d.obs_difficultes || null, d.obs_comportement_equipe || null,
       d.obs_autonomie_ponctualite || null,
@@ -381,44 +415,30 @@ router.get('/interview-template/:milestoneType', (req, res) => {
 router.post('/milestones/:employeeId/initialize', async (req, res) => {
   try {
     const empId = req.params.employeeId;
-    const emp = await pool.query('SELECT insertion_start_date FROM employees WHERE id = $1', [empId]);
+    const emp = await pool.query(
+      `SELECT e.insertion_status, e.insertion_start_date, e.contract_start,
+              ec.start_date AS c_start
+       FROM employees e
+       LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+       WHERE e.id = $1`,
+      [empId]
+    );
     if (emp.rows.length === 0) return res.status(404).json({ error: 'Employe non trouve' });
+    const e = emp.rows[0];
 
-    const startDate = emp.rows[0].insertion_start_date || new Date().toISOString().split('T')[0];
-    function addMonths(dateStr, months) {
-      const d = new Date(dateStr);
-      d.setMonth(d.getMonth() + months);
-      return d.toISOString().split('T')[0];
-    }
-    const milestonesDef = [
-      { type: 'Diagnostic accueil', months: 1 },
-      { type: 'Bilan M+3', months: 3 },
-      { type: 'Bilan M+6', months: 6 },
-      { type: 'Bilan M+10', months: 10 },
-      { type: 'Bilan Sortie', months: 12 },
-    ];
+    // Un seul geste : démarrer le parcours ET poser les jalons.
+    // insertion_start_date par défaut = début de contrat (sinon aujourd'hui).
+    const startDate = e.insertion_start_date || e.c_start || e.contract_start || new Date().toISOString().split('T')[0];
+    await pool.query(
+      `UPDATE employees SET
+         insertion_status = CASE WHEN insertion_status IN ('termine','abandon') THEN insertion_status ELSE 'en_parcours' END,
+         insertion_start_date = COALESCE(insertion_start_date, $2),
+         updated_at = NOW()
+       WHERE id = $1`,
+      [empId, startDate]
+    );
 
-    // Insert milestones one by one (pas de ON CONFLICT pour éviter problème de contrainte UNIQUE manquante)
-    const results = [];
-    for (const ms of milestonesDef) {
-      const dueDate = addMonths(startDate, ms.months);
-      // Vérifier si le jalon existe déjà
-      const existing = await pool.query(
-        'SELECT * FROM insertion_milestones WHERE employee_id = $1 AND milestone_type = $2',
-        [empId, ms.type]
-      );
-      if (existing.rows.length > 0) {
-        results.push(existing.rows[0]);
-      } else {
-        const ins = await pool.query(
-          `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
-           VALUES ($1, $2, $3, $4) RETURNING *`,
-          [empId, ms.type, dueDate, req.user.id]
-        );
-        results.push(ins.rows[0]);
-      }
-    }
-
+    const results = await generateMilestones(pool, empId, req.user.id);
     res.status(201).json(results);
   } catch (err) {
     console.error('[INSERTION] Erreur initialize milestones :', err);
@@ -529,6 +549,128 @@ router.get('/timeline/:employeeId', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// GET /api/insertion/cohorte/stats — Tableau de bord CIP (algorithmique)
+// Toujours disponible (sans dépendance IA) : retards, à-venir, risques,
+// répartition des freins, taux de sorties dynamiques.
+// IMPORTANT: AVANT /:employeeId.
+// ══════════════════════════════════════════════════════════════
+router.get('/cohorte/stats', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+
+    // Cohorte active
+    const cohorte = await pool.query(`
+      SELECT e.id, e.first_name, e.last_name, e.insertion_start_date,
+             ec.end_date AS contract_end
+      FROM employees e
+      LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+    `);
+
+    // Jalons non réalisés des salariés en parcours
+    const jalons = await pool.query(`
+      SELECT im.id, im.employee_id, im.milestone_type, im.due_date, im.status,
+             e.first_name, e.last_name,
+             (im.due_date - CURRENT_DATE) AS days_until
+      FROM insertion_milestones im
+      JOIN employees e ON im.employee_id = e.id
+      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+        AND im.status <> 'realise'
+      ORDER BY im.due_date
+    `);
+    const enRetard = jalons.rows.filter((j) => j.days_until < 0);
+    const aVenir7 = jalons.rows.filter((j) => j.days_until >= 0 && j.days_until <= 7);
+
+    // Salariés à risque : fin de contrat dans 60 jours
+    const now = Date.now();
+    const aRisque = cohorte.rows
+      .filter((c) => c.contract_end)
+      .map((c) => ({ id: c.id, first_name: c.first_name, last_name: c.last_name, contract_end: c.contract_end, days: Math.round((new Date(c.contract_end) - now) / 86400000) }))
+      .filter((c) => c.days <= 60)
+      .sort((a, b) => a.days - b.days);
+
+    // Répartition des freins : dernière évaluation par salarié (jalon réalisé, sinon diagnostic)
+    const axes = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif', 'frein_numerique'];
+    const freinsRows = await pool.query(`
+      WITH last_ms AS (
+        SELECT DISTINCT ON (im.employee_id) im.employee_id,
+          im.frein_mobilite, im.frein_sante, im.frein_finances, im.frein_famille,
+          im.frein_linguistique, im.frein_administratif, im.frein_numerique
+        FROM insertion_milestones im
+        JOIN employees e ON e.id = im.employee_id
+        WHERE e.insertion_status='en_parcours' AND e.is_active=true
+          AND im.status='realise' AND im.frein_mobilite IS NOT NULL
+        ORDER BY im.employee_id, im.due_date DESC
+      ),
+      diag AS (
+        SELECT d.employee_id, d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
+          d.frein_linguistique, d.frein_administratif, d.frein_numerique
+        FROM insertion_diagnostics d
+        JOIN employees e ON e.id=d.employee_id
+        WHERE e.insertion_status='en_parcours' AND e.is_active=true
+      )
+      SELECT COALESCE(lm.employee_id, dg.employee_id) AS employee_id,
+        COALESCE(lm.frein_mobilite, dg.frein_mobilite) AS frein_mobilite,
+        COALESCE(lm.frein_sante, dg.frein_sante) AS frein_sante,
+        COALESCE(lm.frein_finances, dg.frein_finances) AS frein_finances,
+        COALESCE(lm.frein_famille, dg.frein_famille) AS frein_famille,
+        COALESCE(lm.frein_linguistique, dg.frein_linguistique) AS frein_linguistique,
+        COALESCE(lm.frein_administratif, dg.frein_administratif) AS frein_administratif,
+        COALESCE(lm.frein_numerique, dg.frein_numerique) AS frein_numerique
+      FROM diag dg FULL OUTER JOIN last_ms lm ON lm.employee_id = dg.employee_id
+    `);
+    const freinsMoyennes = {};
+    let freinDominant = null, maxMoy = 0;
+    for (const axe of axes) {
+      const vals = freinsRows.rows.map((r) => r[axe]).filter((v) => v != null && +v >= 1);
+      const moy = vals.length ? +(vals.reduce((a, b) => a + +b, 0) / vals.length).toFixed(2) : null;
+      freinsMoyennes[axe] = moy;
+      if (moy && moy > maxMoy) { maxMoy = moy; freinDominant = axe; }
+    }
+
+    // Taux de sorties dynamiques sur l'année
+    const sorties = await pool.query(`
+      SELECT sortie_classification, sortie_type, COUNT(*)::int AS n
+      FROM insertion_milestones
+      WHERE milestone_type = 'Bilan Sortie' AND status = 'realise'
+        AND sortie_classification IS NOT NULL
+        AND COALESCE(completed_date, updated_at::date) BETWEEN $1 AND $2
+      GROUP BY sortie_classification, sortie_type
+    `, [`${year}-01-01`, `${year}-12-31`]);
+    let nbPositives = 0, nbNegatives = 0;
+    const parType = {};
+    for (const s of sorties.rows) {
+      if (s.sortie_classification === 'positive') nbPositives += s.n; else nbNegatives += s.n;
+      if (s.sortie_type) parType[s.sortie_type] = (parType[s.sortie_type] || 0) + s.n;
+    }
+    const totalSorties = nbPositives + nbNegatives;
+
+    res.json({
+      annee: year,
+      nb_actifs: cohorte.rows.length,
+      nb_jalons_en_retard: enRetard.length,
+      nb_jalons_a_venir: aVenir7.length,
+      taux_retard_jalons: jalons.rows.length ? Math.round((enRetard.length / jalons.rows.length) * 100) : 0,
+      jalons_en_retard: enRetard,
+      jalons_a_venir_7j: aVenir7,
+      salaries_a_risque: aRisque,
+      freins_moyennes: freinsMoyennes,
+      frein_dominant: freinDominant,
+      sorties: {
+        total: totalSorties,
+        positives: nbPositives,
+        negatives: nbNegatives,
+        taux_dynamiques: totalSorties > 0 ? Math.round((nbPositives / totalSorties) * 100) : null,
+        par_type: parType,
+      },
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur cohorte stats :', err.message, err.detail || '');
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // GET /api/insertion/:employeeId — Analyse complete d'un salarié
 // IMPORTANT: DOIT etre la DERNIERE route GET car /:employeeId capture tout
 // ══════════════════════════════════════════════════════════════
@@ -536,12 +678,14 @@ router.get('/:employeeId', async (req, res) => {
   try {
     const empId = req.params.employeeId;
 
-    // 1. Données employé
+    // 1. Données employé (+ prescripteur / orienteur si rattaché)
     const empRes = await pool.query(`
-      SELECT e.*, t.name as team_name, p.title as position_title
+      SELECT e.*, t.name as team_name, p.title as position_title,
+             po.nom AS prescripteur_nom, po.type AS prescripteur_type
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       LEFT JOIN positions p ON p.title = e.position
+      LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
       WHERE e.id = $1
     `, [empId]);
     if (empRes.rows.length === 0) return res.status(404).json({ error: 'Employé non trouvé' });
@@ -621,14 +765,18 @@ router.get('/:employeeId', async (req, res) => {
       diagnostic = diagRes.rows[0] || null;
     } catch (err) { /* table might not exist yet */ }
 
-    // 8. Jalons insertion
+    // 8. Jalons insertion — auto-initialisés si le salarié est en parcours et
+    // n'en a encore aucun (supprime le clic manuel « Initialiser jalons »).
     let milestones = [];
     try {
       const msRes = await pool.query(
         'SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date', [empId]
       );
       milestones = msRes.rows;
-    } catch (err) { /* table might not exist yet */ }
+      if (milestones.length === 0 && employee.insertion_status === 'en_parcours') {
+        milestones = await generateMilestones(pool, empId, req.user.id);
+      }
+    } catch (err) { console.warn('[INSERTION] Jalons auto-init :', err.message); }
 
     // 9. Plan d'action CIP
     let actionPlans = [];
@@ -658,6 +806,10 @@ router.get('/:employeeId', async (req, res) => {
         is_active: employee.is_active,
         insertion_start_date: employee.insertion_start_date,
         insertion_status: employee.insertion_status,
+        contract_end: employee.contract_end,
+        prescripteur: employee.prescripteur || null,
+        prescripteur_nom: employee.prescripteur_nom || null,
+        prescripteur_type: employee.prescripteur_type || null,
       },
       has_pcm: !!pcmReport,
       has_candidate_data: !!candidate,
