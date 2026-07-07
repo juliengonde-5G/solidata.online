@@ -256,7 +256,7 @@ export default function Dashboard() {
         </div>
 
         {/* Fil d'actualité — sous les indicateurs */}
-        <NewsWidget items={news} onSeeAll={() => navigate('/news')} />
+        <NewsWidget items={news} onSeeAll={() => navigate('/news')} onOpen={(id) => navigate(`/news?article=${id}`)} />
 
         {/* Objectifs vs Realise (jauges) - ADMIN uniquement */}
         {user?.role === 'ADMIN' && objectifs.length > 0 && (
@@ -484,7 +484,7 @@ function KpiTile({ label, value, unit, icon: Icon, color, trend }) {
 // News Widget — fil d'actualité compact
 // ══════════════════════════════════════════
 
-function NewsWidget({ items, onSeeAll }) {
+function NewsWidget({ items, onSeeAll, onOpen }) {
   const fmt = (d) => {
     if (!d) return '';
     const date = new Date(d);
@@ -513,16 +513,21 @@ function NewsWidget({ items, onSeeAll }) {
         <ul className="space-y-2 overflow-y-auto max-h-64">
           {items.map((item) => (
             <li key={item.id} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
-              <div className="flex items-start gap-2">
+              <button
+                type="button"
+                onClick={() => onOpen?.(item.id)}
+                className="w-full text-left flex items-start gap-2 rounded-lg -mx-1 px-1 py-1 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none transition"
+                title="Ouvrir l'article"
+              >
                 {item.is_pinned && <Pin className="w-3 h-3 text-amber-500 flex-shrink-0 mt-0.5" />}
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-700 truncate">{item.title}</p>
+                  <p className="text-xs font-semibold text-slate-700 truncate hover:text-primary">{item.title}</p>
                   <p className="text-[10px] text-slate-400 mt-0.5">
                     {fmt(item.created_at)}
                     {item.category && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 uppercase">{item.category}</span>}
                   </p>
                 </div>
-              </div>
+              </button>
             </li>
           ))}
         </ul>

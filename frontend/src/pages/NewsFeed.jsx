@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
 import { Newspaper } from 'lucide-react';
@@ -23,11 +24,30 @@ export default function NewsFeed() {
   const [filter, setFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [expandedArticle, setExpandedArticle] = useState(null);
+  const [highlightId, setHighlightId] = useState(null);
   const [form, setForm] = useState({ category: 'metier', title: '', summary: '', content: '', source_url: '', source_name: '', tags: [], is_pinned: false });
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'RH';
 
   useEffect(() => { loadArticles(); }, [filter]);
+
+  // Ouverture directe d'un article (deep-link depuis le widget d'accueil :
+  // /news?article=<id>) : on déplie (si contenu/source), on défile jusqu'à lui
+  // et on le surligne brièvement pour que l'utilisateur le repère.
+  useEffect(() => {
+    const target = searchParams.get('article');
+    if (!target || articles.length === 0) return;
+    const id = parseInt(target, 10);
+    const art = articles.find((a) => a.id === id);
+    if (!art) return;
+    if ((art.content && art.content.length > 0) || art.source_url) setExpandedArticle(id);
+    setHighlightId(id);
+    const el = document.getElementById(`news-${id}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const t = setTimeout(() => setHighlightId(null), 2800);
+    return () => clearTimeout(t);
+  }, [articles, searchParams]);
 
   const loadArticles = async () => {
     try {
@@ -117,7 +137,7 @@ export default function NewsFeed() {
             const hasFullContent = article.content && article.content.length > 0;
             const hasMore = hasFullContent || article.source_url;
             return (
-            <div key={article.id} className={`card-modern p-5 transition-all ${article.is_pinned ? 'border-l-4 border-l-amber-400' : ''}`}>
+            <div key={article.id} id={`news-${article.id}`} className={`card-modern p-5 transition-all ${article.is_pinned ? 'border-l-4 border-l-amber-400' : ''} ${highlightId === article.id ? 'ring-2 ring-primary ring-offset-2' : ''}`}>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
@@ -130,7 +150,11 @@ export default function NewsFeed() {
                     <span className="text-xs text-gray-400">{formatDate(article.created_at)}</span>
                     {article.author_name && <span className="text-xs text-gray-400">• {article.author_name}</span>}
                   </div>
-                  <h3 className="text-lg font-semibold text-gray-800 mb-1">{article.title}</h3>
+                  <h3
+                    className={`text-lg font-semibold text-gray-800 mb-1 ${hasMore ? 'cursor-pointer hover:text-primary transition' : ''}`}
+                    onClick={hasMore ? () => setExpandedArticle(isExpanded ? null : article.id) : undefined}
+                    title={hasMore ? "Cliquer pour lire l'article" : undefined}
+                  >{article.title}</h3>
                   {article.summary && <p className="text-sm text-gray-600 mb-2 leading-relaxed">{article.summary}</p>}
 
                   {/* Contenu complet : affiché si article expandé */}
