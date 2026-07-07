@@ -165,42 +165,39 @@ async function checkContractEndings() {
  */
 async function checkInsertionMilestones() {
   try {
+    // Échéancier calé sur le contrat réel (même logique que les routes) — évite
+    // de créer un M+10 pour un contrat de 6 mois.
+    const { computeMilestoneSchedule } = require('../routes/insertion/engine');
     const today = new Date().toISOString().split('T')[0];
 
     const employees = await pool.query(
-      `SELECT e.id, e.first_name, e.last_name, e.email, e.insertion_start_date
+      `SELECT e.id, e.first_name, e.last_name, e.insertion_start_date, e.contract_end,
+              ec.start_date AS c_start, ec.end_date AS c_end
        FROM employees e
+       LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
        WHERE e.insertion_status = 'en_parcours'
        AND e.insertion_start_date IS NOT NULL
        AND e.is_active = true`
     );
 
-    const milestones = [
-      { months: 1, label: 'Diagnostic accueil' },
-      { months: 3, label: 'Bilan M+3' },
-      { months: 6, label: 'Bilan M+6' },
-      { months: 10, label: 'Bilan M+10' },
-    ];
-
     for (const emp of employees.rows) {
-      const startDate = new Date(emp.insertion_start_date);
-      for (const ms of milestones) {
-        const milestoneDate = new Date(startDate);
-        milestoneDate.setMonth(milestoneDate.getMonth() + ms.months);
-        const msStr = milestoneDate.toISOString().split('T')[0];
-
-        if (msStr === today) {
+      const schedule = computeMilestoneSchedule(
+        emp.insertion_start_date || emp.c_start,
+        emp.c_end || emp.contract_end
+      );
+      for (const ms of schedule) {
+        if (ms.due === today) {
           const existing = await pool.query(
             `SELECT id FROM insertion_milestones WHERE employee_id = $1 AND milestone_type = $2`,
-            [emp.id, ms.label]
+            [emp.id, ms.type]
           );
           if (existing.rows.length === 0) {
             await pool.query(
               `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, status)
                VALUES ($1, $2, $3, 'a_planifier')`,
-              [emp.id, ms.label, today]
+              [emp.id, ms.type, today]
             );
-            console.log(`[SCHEDULER] Jalon ${ms.label} cree pour ${emp.first_name} ${emp.last_name}`);
+            console.log(`[SCHEDULER] Jalon ${ms.type} cree pour ${emp.first_name} ${emp.last_name}`);
           }
         }
       }

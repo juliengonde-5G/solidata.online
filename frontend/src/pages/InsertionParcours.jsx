@@ -161,38 +161,54 @@ function TimelineView({ timeline }) {
 // BILAN PANEL — Formulaire d'un jalon
 // ═══════════════════════════════════════
 
-function BilanPanel({ milestone, employeeId, onSave, onClose }) {
+function BilanPanel({ milestone, employeeId, employeeName, allMilestones, onSave, onClose }) {
   const [form, setForm] = useState({ ...milestone });
   const [template, setTemplate] = useState(null);
   const [actionPlans, setActionPlans] = useState([]);
   const [newAction, setNewAction] = useState({ action_label: '', category: 'competence', priority: 'moyenne', frein_type: '' });
   const [saving, setSaving] = useState(false);
   const [radarData, setRadarData] = useState(null);
+  const [bilanError, setBilanError] = useState(null);
 
   useEffect(() => {
-    // Load CIP questionnaire template
-    api.get(`/insertion/interview-template/${milestone.milestone_type}`).then(r => setTemplate(r.data)).catch(() => {});
-    // Load action plans
+    // Pré-remplissage : si ce jalon n'a pas encore de freins, reprendre ceux du
+    // dernier jalon réalisé, et les objectifs « prochaine période » précédents.
+    const hasFreins = FREIN_KEYS.some((k) => milestone[`frein_${k}`]);
+    if (!hasFreins && Array.isArray(allMilestones)) {
+      const prev = allMilestones
+        .filter((m) => m.id !== milestone.id && m.status === 'realise' && FREIN_KEYS.some((k) => m[`frein_${k}`]))
+        .sort((a, b) => new Date(b.due_date) - new Date(a.due_date))[0];
+      if (prev) {
+        setForm((f) => {
+          const next = { ...f };
+          FREIN_KEYS.forEach((k) => { if (!next[`frein_${k}`] && prev[`frein_${k}`]) next[`frein_${k}`] = prev[`frein_${k}`]; });
+          if (!next.objectifs_realises && prev.objectifs_prochaine_periode) next.objectifs_realises = prev.objectifs_prochaine_periode;
+          return next;
+        });
+      }
+    }
+    api.get(`/insertion/interview-template/${milestone.milestone_type}`).then(r => setTemplate(r.data)).catch(() => setBilanError('Questionnaire indisponible — rechargez la page.'));
     api.get(`/insertion/action-plans/${employeeId}`).then(r => {
       setActionPlans(r.data.filter(a => a.milestone_id === milestone.id));
     }).catch(() => {});
-    // Load radar data
     api.get(`/insertion/milestones/${employeeId}/radar`).then(r => setRadarData(r.data)).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [milestone.id, milestone.milestone_type, employeeId]);
 
   const handleSave = async () => {
-    setSaving(true);
+    setSaving(true); setBilanError(null);
     try {
       await api.put(`/insertion/milestones/${milestone.id}`, form);
       onSave();
     } catch (err) {
-      alert('Erreur: ' + (err.response?.data?.error || err.message));
+      setBilanError('Erreur : ' + (err.response?.data?.error || err.message));
     }
     setSaving(false);
   };
 
   const handleAddAction = async () => {
     if (!newAction.action_label) return;
+    setBilanError(null);
     try {
       const res = await api.post('/insertion/action-plans', {
         milestone_id: milestone.id,
@@ -202,7 +218,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
       setActionPlans([...actionPlans, res.data]);
       setNewAction({ action_label: '', category: 'competence', priority: 'moyenne', frein_type: '' });
     } catch (err) {
-      alert('Erreur: ' + (err.response?.data?.error || err.message));
+      setBilanError('Erreur : ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -210,7 +226,7 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
     try {
       const res = await api.put(`/insertion/action-plans/${id}`, updates);
       setActionPlans(actionPlans.map(a => a.id === id ? res.data : a));
-    } catch {}
+    } catch (err) { setBilanError('Erreur mise à jour action : ' + (err.response?.data?.error || err.message)); }
   };
 
   const isSortie = milestone.milestone_type === 'Bilan Sortie';
@@ -219,8 +235,18 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
     <div className="bg-white border rounded-lg p-4 space-y-6">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-bold text-gray-800">{milestone.milestone_type}</h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">Fermer</button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => exportBilanJalonPDF(employeeName || '', form)} className="text-teal-700 text-sm font-medium hover:underline">Exporter PDF</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">Fermer</button>
+        </div>
       </div>
+
+      {bilanError && (
+        <div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 flex items-start gap-2">
+          <span aria-hidden="true">⚠</span><span>{bilanError}</span>
+          <button onClick={() => setBilanError(null)} className="ml-auto text-red-500" aria-label="Fermer">×</button>
+        </div>
+      )}
 
       {/* Status et date */}
       <div className="grid grid-cols-3 gap-4">
@@ -274,11 +300,11 @@ function BilanPanel({ milestone, employeeId, onSave, onClose }) {
           {FREIN_KEYS.map(key => (
             <div key={key} className="flex items-center gap-2">
               <label className="text-xs w-24 text-gray-600">{FREIN_LABELS[key]}</label>
-              <input type="range" min="1" max="5" value={form[`frein_${key}`] || 1}
+              <input type="range" min="1" max="5" value={form[`frein_${key}`] || 3}
                 onChange={e => setForm({ ...form, [`frein_${key}`]: parseInt(e.target.value) })}
                 className="flex-1" />
-              <span className={`text-xs px-1.5 py-0.5 rounded ${FREIN_COLORS[form[`frein_${key}`] || 1]}`}>
-                {form[`frein_${key}`] || 1}/5
+              <span className={`text-xs px-1.5 py-0.5 rounded ${form[`frein_${key}`] ? FREIN_COLORS[form[`frein_${key}`]] : 'bg-gray-100 text-gray-400'}`}>
+                {form[`frein_${key}`] ? `${form[`frein_${key}`]}/5` : 'à évaluer'}
               </span>
             </div>
           ))}
@@ -504,6 +530,251 @@ function AIRecommendationsPanel({ recommendations }) {
 // MAIN PAGE
 // ═══════════════════════════════════════
 
+// ═══════════════════════════════════════
+// EXPORT PDF (impression navigateur A4 — même mécanisme que le PCM)
+// ═══════════════════════════════════════
+
+const MILESTONE_STATUS_HEX = { a_planifier: '#6b7280', planifie: '#2563eb', realise: '#16a34a', reporte: '#ea580c' };
+const FREIN_LABEL_BY_KEY = { frein_mobilite: 'Mobilité', frein_sante: 'Santé', frein_finances: 'Finances', frein_famille: 'Famille', frein_linguistique: 'Langue', frein_administratif: 'Administratif', frein_numerique: 'Numérique' };
+
+function openPrintWindow(title, bodyHtml) {
+  const w = window.open('', '_blank', 'width=820,height=1100');
+  if (!w) { alert('Popup bloquée — autorisez les popups pour exporter le PDF.'); return; }
+  w.document.write('<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"/><title>' + title + '</title><style>'
+    + '@page { size: A4; margin: 15mm 12mm; }'
+    + '* { box-sizing: border-box; margin: 0; padding: 0; }'
+    + "body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; line-height: 1.45; }"
+    + '.header { background: #0D9488; color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }'
+    + '.header h1 { font-size: 18px; font-weight: 700; }'
+    + '.header .sub { font-size: 11px; opacity: .9; }'
+    + '.section { margin: 12px 0; padding: 0 4px; }'
+    + '.section-title { font-size: 13px; font-weight: 700; color: #0D9488; border-bottom: 2px solid #0D9488; padding-bottom: 3px; margin-bottom: 8px; }'
+    + '.card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; white-space: pre-wrap; }'
+    + '.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 10px; font-weight: 600; }'
+    + 'table { width: 100%; border-collapse: collapse; font-size: 10px; }'
+    + 'th { background: #f9fafb; text-align: left; padding: 5px 6px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e5e7eb; }'
+    + 'td { padding: 5px 6px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }'
+    + '.footer { text-align: center; color: #9ca3af; font-size: 9px; margin-top: 16px; padding-top: 8px; border-top: 1px solid #e5e7eb; }'
+    + '@media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }'
+    + '</style></head><body>' + bodyHtml + '</body></html>');
+  w.document.close();
+  setTimeout(() => w.print(), 400);
+}
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const frDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
+
+function exportFicheParcoursPDF(analysis, diagnostic) {
+  const e = analysis.employee || {};
+  const nom = (e.first_name || '') + ' ' + (e.last_name || '');
+  const today = new Date().toLocaleDateString('fr-FR');
+
+  const freinsRows = FREIN_KEYS.map((k) => {
+    const v = diagnostic && diagnostic['frein_' + k];
+    const det = diagnostic && diagnostic['frein_' + k + '_detail'];
+    return '<tr><td>' + esc(FREIN_LABELS[k]) + '</td><td>' + (v ? v + '/5' : '<em>non évalué</em>') + '</td><td>' + esc(det || '') + '</td></tr>';
+  }).join('');
+
+  const jalonsRows = (analysis.milestones || []).map((m) =>
+    '<tr><td>' + esc(m.milestone_type) + '</td><td><span class="badge" style="background:' + (MILESTONE_STATUS_HEX[m.status] || '#6b7280') + '">' + esc(MILESTONE_STATUS_LABELS[m.status] || m.status) + '</span></td><td>' + frDate(m.due_date) + '</td><td>' + frDate(m.completed_date) + '</td></tr>'
+  ).join('');
+
+  const presc = e.prescripteur_nom ? esc(e.prescripteur_nom) + (e.prescripteur_type ? ' (' + esc(e.prescripteur_type) + ')' : '') : (e.prescripteur ? esc(e.prescripteur) : '—');
+
+  const body =
+    '<div class="header"><div><h1>SOLIDATA — Fiche parcours d\'insertion</h1>'
+    + '<div class="sub">' + esc(nom) + ' — édité le ' + today + '</div></div>'
+    + '<div class="sub" style="text-align:right">Suivi CIP</div></div>'
+    + '<div class="section"><div class="section-title">Situation</div><div class="card">'
+    + '<strong>Poste :</strong> ' + esc(e.position || '—') + '   <strong>Équipe :</strong> ' + esc(e.team_name || '—') + '\n'
+    + '<strong>Début de parcours :</strong> ' + frDate(e.insertion_start_date) + '   <strong>Fin de contrat :</strong> ' + frDate(e.contract_end) + '\n'
+    + '<strong>Prescripteur / orienteur :</strong> ' + presc + '</div></div>'
+    + '<div class="section"><div class="section-title">Diagnostic — parcours antérieur</div><div class="card">' + esc((diagnostic && diagnostic.parcours_anterieur) || '—') + '</div></div>'
+    + '<div class="section"><div class="section-title">Freins périphériques</div><table><thead><tr><th>Frein</th><th>Niveau</th><th>Observations</th></tr></thead><tbody>' + freinsRows + '</tbody></table></div>'
+    + '<div class="section"><div class="section-title">Jalons du parcours</div><table><thead><tr><th>Jalon</th><th>Statut</th><th>Échéance</th><th>Réalisé le</th></tr></thead><tbody>' + jalonsRows + '</tbody></table></div>'
+    + '<div class="footer">SOLIDATA ERP — Document confidentiel (RGPD) — ' + today + '</div>';
+
+  openPrintWindow('Parcours_' + (e.last_name || e.id), body);
+}
+
+function exportBilanJalonPDF(employeeName, ms) {
+  const today = new Date().toLocaleDateString('fr-FR');
+  const sections = [
+    ['cip_integration', 'Intégration / accueil'], ['cip_competences', 'Compétences'],
+    ['cip_projet_pro', 'Projet professionnel'], ['cip_socialisation', 'Vie sociale / quotidien'],
+    ['bilan_professionnel', 'Bilan professionnel'], ['bilan_social', 'Bilan social'],
+    ['objectifs_realises', 'Objectifs réalisés'], ['objectifs_prochaine_periode', 'Objectifs — prochaine période'],
+    ['observations', 'Observations'],
+  ].filter(([k]) => ms[k]).map(([k, label]) =>
+    '<div class="section"><div class="section-title">' + label + '</div><div class="card">' + esc(ms[k]) + '</div></div>'
+  ).join('');
+
+  const freins = FREIN_KEYS.map((k) => ms['frein_' + k] ? esc(FREIN_LABELS[k]) + ' ' + ms['frein_' + k] + '/5' : null).filter(Boolean).join(' · ') || '—';
+
+  const body =
+    '<div class="header"><div><h1>SOLIDATA — Bilan ' + esc(ms.milestone_type) + '</h1>'
+    + '<div class="sub">' + esc(employeeName) + ' — édité le ' + today + '</div></div></div>'
+    + '<div class="section"><div class="card"><strong>Statut :</strong> ' + esc(MILESTONE_STATUS_LABELS[ms.status] || ms.status || '—')
+    + '   <strong>Échéance :</strong> ' + frDate(ms.due_date) + '   <strong>Réalisé le :</strong> ' + frDate(ms.completed_date)
+    + (ms.avis_global ? '\n<strong>Avis global :</strong> ' + esc(ms.avis_global.replace('_', ' ')) : '') + '</div></div>'
+    + '<div class="section"><div class="section-title">Freins évalués</div><div class="card">' + freins + '</div></div>'
+    + sections
+    + '<div class="footer">SOLIDATA ERP — Document confidentiel (RGPD) — ' + today + '</div>';
+
+  openPrintWindow('Bilan_' + esc(ms.milestone_type) + '_' + employeeName, body);
+}
+
+// ═══════════════════════════════════════
+// COHORTE PANEL — Tableau de bord CIP (pilotage)
+// ═══════════════════════════════════════
+
+function DashCard({ label, value, tone, sub }) {
+  const tones = {
+    slate: 'bg-slate-50 border-slate-200 text-slate-700',
+    red: 'bg-red-50 border-red-200 text-red-700',
+    amber: 'bg-amber-50 border-amber-200 text-amber-700',
+    green: 'bg-green-50 border-green-200 text-green-700',
+    blue: 'bg-blue-50 border-blue-200 text-blue-700',
+  };
+  return (
+    <div className={`rounded-lg border p-3 ${tones[tone] || tones.slate}`}>
+      <div className="text-2xl font-bold">{value}</div>
+      <div className="text-xs uppercase tracking-wide">{label}</div>
+      {sub && <div className="text-[11px] opacity-70 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function CohortePanel({ onSelect }) {
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    api.get('/insertion/cohorte/stats')
+      .then((r) => { if (alive) { setStats(r.data); setError(null); } })
+      .catch((err) => { if (alive) setError(err.response?.data?.error || err.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  if (loading) return <LoadingSpinner size="lg" message="Chargement du tableau de bord..." />;
+  if (error) return <div className="bg-white rounded-lg border p-4"><div className="text-red-600 text-sm p-3 bg-red-50 rounded border border-red-200">Impossible de charger le tableau de bord : {error}</div></div>;
+  if (!stats) return null;
+
+  const s = stats.sorties || {};
+  const freinsSorted = Object.entries(stats.freins_moyennes || {})
+    .filter(([, v]) => v != null)
+    .sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-lg border p-4">
+        <h3 className="font-semibold text-gray-800 mb-3">Tableau de bord CIP — pilotage de la cohorte</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <DashCard label="En parcours" value={stats.nb_actifs} tone="blue" />
+          <DashCard label="Jalons en retard" value={stats.nb_jalons_en_retard} tone={stats.nb_jalons_en_retard ? 'red' : 'green'} sub={`${stats.taux_retard_jalons}% des jalons`} />
+          <DashCard label="À venir (7 j)" value={stats.nb_jalons_a_venir} tone={stats.nb_jalons_a_venir ? 'amber' : 'slate'} />
+          <DashCard label={`Sorties dynamiques ${stats.annee}`} value={s.taux_dynamiques != null ? s.taux_dynamiques + '%' : '—'} tone="green" sub={`${s.positives || 0}/${s.total || 0} sorties`} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Jalons en retard */}
+        <div className="bg-white rounded-lg border p-4">
+          <h4 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-red-500" /> Jalons en retard ({stats.jalons_en_retard?.length || 0})
+          </h4>
+          {stats.jalons_en_retard?.length ? (
+            <div className="space-y-1 max-h-60 overflow-y-auto">
+              {stats.jalons_en_retard.map((j) => (
+                <button key={j.id} onClick={() => onSelect(j.employee_id)}
+                  className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-red-50 text-sm">
+                  <span>{j.first_name} {j.last_name} — <span className="text-gray-500">{j.milestone_type}</span></span>
+                  <span className="text-xs text-red-600 font-medium">{Math.abs(j.days_until)} j</span>
+                </button>
+              ))}
+            </div>
+          ) : <p className="text-sm text-gray-400 py-2">Aucun jalon en retard 👍</p>}
+        </div>
+
+        {/* À venir 7j */}
+        <div className="bg-white rounded-lg border p-4">
+          <h4 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500" /> À planifier / à venir (7 j)
+          </h4>
+          {stats.jalons_a_venir_7j?.length ? (
+            <div className="space-y-1 max-h-60 overflow-y-auto">
+              {stats.jalons_a_venir_7j.map((j) => (
+                <button key={j.id} onClick={() => onSelect(j.employee_id)}
+                  className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-amber-50 text-sm">
+                  <span>{j.first_name} {j.last_name} — <span className="text-gray-500">{j.milestone_type}</span></span>
+                  <span className="text-xs text-amber-600 font-medium">J-{j.days_until}</span>
+                </button>
+              ))}
+            </div>
+          ) : <p className="text-sm text-gray-400 py-2">Rien dans les 7 jours.</p>}
+        </div>
+
+        {/* Salariés à risque */}
+        <div className="bg-white rounded-lg border p-4">
+          <h4 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-orange-500" /> Fins de contrat (&lt; 60 j)
+          </h4>
+          {stats.salaries_a_risque?.length ? (
+            <div className="space-y-1 max-h-60 overflow-y-auto">
+              {stats.salaries_a_risque.map((c) => (
+                <button key={c.id} onClick={() => onSelect(c.id)}
+                  className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-orange-50 text-sm">
+                  <span>{c.first_name} {c.last_name}</span>
+                  <span className={`text-xs font-medium ${c.days <= 15 ? 'text-red-600' : 'text-orange-600'}`}>
+                    {c.days < 0 ? 'échu' : c.days + ' j'} — {frDate(c.contract_end)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : <p className="text-sm text-gray-400 py-2">Aucune fin de contrat proche.</p>}
+        </div>
+
+        {/* Freins moyens de la cohorte */}
+        <div className="bg-white rounded-lg border p-4">
+          <h4 className="font-semibold text-gray-700 mb-2">Freins moyens de la cohorte</h4>
+          {freinsSorted.length ? (
+            <div className="space-y-1.5">
+              {freinsSorted.map(([key, val]) => (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="w-24 text-xs text-gray-600">{FREIN_LABEL_BY_KEY[key] || key}</span>
+                  <div className="flex-1 bg-gray-200 rounded-full h-2.5">
+                    <div className={`h-2.5 rounded-full ${val <= 2 ? 'bg-green-500' : val < 4 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${(val / 5) * 100}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-500 w-8 text-right">{val}</span>
+                </div>
+              ))}
+              {stats.frein_dominant && (
+                <p className="text-xs text-gray-500 mt-2">Frein dominant : <strong>{FREIN_LABEL_BY_KEY[stats.frein_dominant]}</strong></p>
+              )}
+            </div>
+          ) : <p className="text-sm text-gray-400 py-2">Pas encore d'évaluation de freins.</p>}
+        </div>
+      </div>
+
+      {/* Sorties par type */}
+      {s.total > 0 && (
+        <div className="bg-white rounded-lg border p-4">
+          <h4 className="font-semibold text-gray-700 mb-2">Sorties {stats.annee} — {s.positives}/{s.total} positives ({s.taux_dynamiques}%)</h4>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(s.par_type || {}).map(([type, n]) => (
+              <span key={type} className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700">{type} : <strong>{n}</strong></span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InsertionParcours() {
   const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -516,10 +787,13 @@ export default function InsertionParcours() {
   const [freinsDefinitions, setFreinsDefinitions] = useState(null);
 
   const [loadError, setLoadError] = useState(null);
+  const [panelError, setPanelError] = useState(null);
+  const [showDashboard, setShowDashboard] = useState(true);
   const [iaAnalyse, setIaAnalyse] = useState(null);
   const [iaEntretien, setIaEntretien] = useState(null);
-  const [iaCohorte, setIaCohorte] = useState(null);
-  const [iaLoading, setIaLoading] = useState(false);
+  const [iaError, setIaError] = useState(null);
+  const [iaLoadingProfil, setIaLoadingProfil] = useState(false);
+  const [iaLoadingEntretien, setIaLoadingEntretien] = useState(false);
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -539,8 +813,11 @@ export default function InsertionParcours() {
 
   const selectEmployee = async (emp) => {
     setSelectedEmployee(emp);
+    setShowDashboard(false);
     setActiveTab('timeline');
     setActiveBilan(null);
+    setPanelError(null);
+    setIaAnalyse(null); setIaEntretien(null); setIaError(null);
     setLoading(true);
     try {
       const [analysisRes, diagRes] = await Promise.all([
@@ -549,29 +826,37 @@ export default function InsertionParcours() {
       ]);
       setAnalysis(analysisRes.data);
       setDiagnostic(diagRes.data || {});
-    } catch {}
+    } catch (err) {
+      setPanelError(err.response?.data?.error || err.message || 'Erreur de chargement du parcours');
+    }
     setLoading(false);
+  };
+
+  const selectEmployeeById = (id) => {
+    const emp = employees.find((e) => e.id === id) || { id };
+    selectEmployee(emp);
   };
 
   const initializeMilestones = async () => {
     if (!selectedEmployee) return;
+    setPanelError(null);
     try {
       await api.post(`/insertion/milestones/${selectedEmployee.id}/initialize`);
       selectEmployee(selectedEmployee);
     } catch (err) {
-      const detail = err.response?.data?.detail ? `\n${err.response.data.detail}` : '';
-      alert('Erreur: ' + (err.response?.data?.error || err.message) + detail);
+      setPanelError((err.response?.data?.error || err.message) + (err.response?.data?.detail ? ` — ${err.response.data.detail}` : ''));
     }
   };
 
   const saveDiagnostic = async () => {
     if (!selectedEmployee || !diagnostic) return;
     setSavingDiag(true);
+    setPanelError(null);
     try {
       await api.put(`/insertion/diagnostic/${selectedEmployee.id}`, diagnostic);
       selectEmployee(selectedEmployee);
     } catch (err) {
-      alert('Erreur: ' + (err.response?.data?.error || err.message));
+      setPanelError(err.response?.data?.error || err.message || 'Erreur lors de l\'enregistrement du diagnostic');
     }
     setSavingDiag(false);
   };
@@ -581,8 +866,8 @@ export default function InsertionParcours() {
     { id: 'diagnostic', label: 'Diagnostic CIP' },
     { id: 'bilans', label: 'Bilans & Jalons' },
     { id: 'freins', label: 'Freins' },
-    { id: 'analyse', label: 'Analyse IA' },
-    { id: 'ai', label: 'Recommandations IA' },
+    { id: 'analyse', label: 'Synthèse & métiers' },
+    { id: 'ai', label: 'Assistant IA' },
   ];
 
   return (
@@ -597,6 +882,10 @@ export default function InsertionParcours() {
         <div className="grid grid-cols-12 gap-4">
           {/* Liste employes */}
           <div className="col-span-3 bg-white rounded-lg border p-3 max-h-[80vh] overflow-y-auto">
+            <button onClick={() => { setShowDashboard(true); setSelectedEmployee(null); setPanelError(null); }}
+              className={`w-full mb-3 px-3 py-2 rounded text-sm font-semibold transition ${showDashboard ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              Tableau de bord CIP
+            </button>
             <h2 className="font-semibold text-gray-700 mb-2">Salaries en parcours ({employees.length})</h2>
             {loadError && <div className="text-red-600 text-xs mb-2 p-2 bg-red-50 rounded">{loadError}</div>}
             {!loadError && employees.length === 0 && <div className="text-gray-400 text-sm p-2">Aucun salarie actif trouve</div>}
@@ -618,17 +907,22 @@ export default function InsertionParcours() {
 
           {/* Contenu principal */}
           <div className="col-span-9 space-y-4">
-            {!selectedEmployee && (
-              <div className="bg-white rounded-lg border p-8 text-center text-gray-400">
-                Selectionnez un salarie pour voir son parcours d'insertion
-              </div>
+            {(!selectedEmployee || showDashboard) && (
+              <CohortePanel onSelect={selectEmployeeById} />
             )}
 
-            {selectedEmployee && loading && (
+            {selectedEmployee && !showDashboard && loading && (
               <LoadingSpinner size="lg" message="Chargement des parcours..." />
             )}
 
-            {selectedEmployee && !loading && analysis && (
+            {selectedEmployee && !showDashboard && panelError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm flex items-start gap-2">
+                <span aria-hidden="true">⚠</span><span>{panelError}</span>
+                <button onClick={() => setPanelError(null)} className="ml-auto text-red-500 hover:text-red-700" aria-label="Fermer">×</button>
+              </div>
+            )}
+
+            {selectedEmployee && !showDashboard && !loading && analysis && (
               <>
                 {/* Header employe */}
                 <div className="bg-white rounded-lg border p-4 flex items-center justify-between">
@@ -637,19 +931,31 @@ export default function InsertionParcours() {
                     <div className="text-sm text-gray-500">
                       {analysis.employee.position} - {analysis.employee.team_name}
                       {analysis.employee.insertion_start_date && ` | Debut: ${new Date(analysis.employee.insertion_start_date).toLocaleDateString('fr-FR')}`}
+                      {analysis.employee.contract_end && ` | Fin contrat: ${new Date(analysis.employee.contract_end).toLocaleDateString('fr-FR')}`}
                     </div>
-                    <div className="flex gap-2 mt-1">
+                    <div className="flex gap-2 mt-1 flex-wrap items-center">
                       {analysis.has_pcm && <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700">PCM recrutement</span>}
                       {analysis.has_diagnostic && <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">Diagnostic CIP</span>}
                       <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">
                         Confiance: {Math.round((analysis.confiance || 0) * 100)}%
                       </span>
+                      {(analysis.employee.prescripteur_nom || analysis.employee.prescripteur) && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-sky-100 text-sky-700">
+                          Prescripteur : {analysis.employee.prescripteur_nom || analysis.employee.prescripteur}
+                          {analysis.employee.prescripteur_type ? ` (${analysis.employee.prescripteur_type})` : ''}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <button onClick={initializeMilestones}
-                    className="btn-primary text-sm">
-                    Initialiser jalons
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    <button onClick={initializeMilestones} className="btn-primary text-sm whitespace-nowrap">
+                      Initialiser jalons
+                    </button>
+                    <button onClick={() => exportFicheParcoursPDF(analysis, diagnostic)}
+                      className="px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 text-sm font-medium hover:bg-teal-50 whitespace-nowrap">
+                      Exporter la fiche PDF
+                    </button>
+                  </div>
                 </div>
 
                 {/* Tabs */}
@@ -695,10 +1001,10 @@ export default function InsertionParcours() {
                           <div className="flex items-center justify-between">
                             <h5 className="font-medium text-gray-700">{def.label}</h5>
                             <div className="flex items-center gap-2">
-                              <input type="range" min="1" max="5" value={diagnostic[`frein_${key}`] || 1}
+                              <input type="range" min="1" max="5" value={diagnostic[`frein_${key}`] || 3}
                                 onChange={e => setDiagnostic({ ...diagnostic, [`frein_${key}`]: parseInt(e.target.value) })} />
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${FREIN_COLORS[diagnostic[`frein_${key}`] || 1]}`}>
-                                {diagnostic[`frein_${key}`] || 1}/5
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${diagnostic[`frein_${key}`] ? FREIN_COLORS[diagnostic[`frein_${key}`]] : 'bg-gray-100 text-gray-400'}`}>
+                                {diagnostic[`frein_${key}`] ? `${diagnostic[`frein_${key}`]}/5` : 'à évaluer'}
                               </span>
                             </div>
                           </div>
@@ -743,6 +1049,8 @@ export default function InsertionParcours() {
                   <div className="space-y-4">
                     {activeBilan ? (
                       <BilanPanel milestone={activeBilan} employeeId={selectedEmployee.id}
+                        employeeName={`${analysis.employee.first_name} ${analysis.employee.last_name}`}
+                        allMilestones={analysis.milestones}
                         onSave={() => { setActiveBilan(null); selectEmployee(selectedEmployee); }}
                         onClose={() => setActiveBilan(null)} />
                     ) : (
@@ -872,31 +1180,37 @@ export default function InsertionParcours() {
                         <h3 className="font-semibold text-gray-800">Analyse IA approfondie (Claude)</h3>
                         <div className="flex gap-2">
                           <button onClick={async () => {
-                            setIaLoading(true);
+                            setIaLoadingProfil(true); setIaError(null);
                             try {
                               const res = await api.get(`/insertion/ia/profil/${selectedEmployee.id}`);
                               setIaAnalyse(res.data);
-                            } catch (err) { setIaAnalyse({ synthese: err.response?.data?.error || 'Erreur' }); }
-                            setIaLoading(false);
-                          }} disabled={iaLoading}
+                            } catch (err) { setIaError(err.response?.data?.error || 'Erreur analyse IA'); }
+                            setIaLoadingProfil(false);
+                          }} disabled={iaLoadingProfil}
                             className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
-                            {iaLoading ? 'Analyse...' : 'Analyser le profil'}
+                            {iaLoadingProfil ? 'Analyse…' : 'Analyser le profil'}
                           </button>
                           <button onClick={async () => {
-                            setIaLoading(true);
+                            setIaLoadingEntretien(true); setIaError(null);
                             try {
                               const nextMilestone = analysis.milestones?.find(m => m.status !== 'realise');
                               const mType = nextMilestone?.milestone_type || 'Bilan M+3';
                               const res = await api.get(`/insertion/ia/entretien/${selectedEmployee.id}?type=${encodeURIComponent(mType)}`);
                               setIaEntretien(res.data);
-                            } catch (err) { setIaEntretien({ intro_conseillee: err.response?.data?.error || 'Erreur' }); }
-                            setIaLoading(false);
-                          }} disabled={iaLoading}
+                            } catch (err) { setIaError(err.response?.data?.error || 'Erreur préparation entretien'); }
+                            setIaLoadingEntretien(false);
+                          }} disabled={iaLoadingEntretien}
                             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
-                            Preparer entretien
+                            {iaLoadingEntretien ? 'Préparation…' : 'Préparer entretien'}
                           </button>
                         </div>
                       </div>
+
+                      {iaError && (
+                        <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 flex items-start gap-2">
+                          <span aria-hidden="true">⚠</span><span>{iaError}</span>
+                        </div>
+                      )}
 
                       {iaAnalyse && (
                         <div className="bg-violet-50 rounded-xl border border-violet-200 p-4 mb-4 space-y-3">
@@ -926,6 +1240,17 @@ export default function InsertionParcours() {
                               Risque decrochage : <strong>{iaAnalyse.risque_decrochage.niveau}</strong>
                               {iaAnalyse.risque_decrochage.facteurs?.length > 0 && ` — ${iaAnalyse.risque_decrochage.facteurs.join(', ')}`}
                             </div>
+                          )}
+                          {iaAnalyse.risque_decrochage?.signaux_alerte?.length > 0 && (
+                            <div className="text-xs text-red-700 bg-red-50 rounded-lg p-2 border border-red-200">
+                              <span className="font-semibold">Signaux d'alerte :</span> {iaAnalyse.risque_decrochage.signaux_alerte.join(' · ')}
+                            </div>
+                          )}
+                          {iaAnalyse.freins_prioritaires?.length > 0 && (
+                            <div className="text-xs"><span className="font-semibold text-violet-700">Freins prioritaires :</span> {iaAnalyse.freins_prioritaires.join(', ')}</div>
+                          )}
+                          {iaAnalyse.pcm_adaptation?.vigilances && (
+                            <div className="text-xs bg-white rounded-lg p-2 border"><span className="font-semibold text-violet-700">Vigilances PCM :</span> {iaAnalyse.pcm_adaptation.vigilances}</div>
                           )}
                           {iaAnalyse.plan_action_propose?.length > 0 && (
                             <div>
@@ -967,6 +1292,16 @@ export default function InsertionParcours() {
                                   </div>
                                 ))}
                               </div>
+                            </div>
+                          )}
+                          {iaEntretien.freins_a_aborder?.length > 0 && (
+                            <div className="text-xs bg-white rounded-lg p-2 border">
+                              <span className="font-semibold text-blue-700">Freins à aborder :</span> {iaEntretien.freins_a_aborder.join(', ')}
+                            </div>
+                          )}
+                          {iaEntretien.points_vigilance?.length > 0 && (
+                            <div className="text-xs bg-amber-50 rounded-lg p-2 border border-amber-200 text-amber-800">
+                              <span className="font-semibold">Points de vigilance :</span> {iaEntretien.points_vigilance.join(' · ')}
                             </div>
                           )}
                           {iaEntretien.conclusion_conseillee && (

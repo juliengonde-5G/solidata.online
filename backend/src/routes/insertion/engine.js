@@ -1383,6 +1383,41 @@ function calculateProgression(events) {
   return milestones.length > 0 ? Math.round((realised / milestones.length) * 100) : 0;
 }
 
+/**
+ * Calcule l'échéancier des jalons calé sur la DURÉE RÉELLE du contrat, au lieu
+ * du gabarit fixe M+1/3/6/10/12 qui plaçait des jalons après la fin des contrats
+ * courts (source de « jalons fantômes » toujours en retard).
+ *
+ * Règles :
+ *   • Diagnostic accueil : début + 1 mois
+ *   • Bilans M+3 / M+6 / M+10 : uniquement ceux qui tombent AVANT la fin
+ *   • Bilan Sortie : fin de contrat − 15 jours
+ *
+ * @param {string|Date} startDate  début du parcours (insertion_start_date ou contrat)
+ * @param {string|Date|null} endDate  fin de contrat (null → +12 mois par défaut)
+ * @returns {Array<{type:string, due:string}>}  due au format 'YYYY-MM-DD'
+ */
+function computeMilestoneSchedule(startDate, endDate) {
+  const add = (d, m) => { const x = new Date(d); x.setMonth(x.getMonth() + m); return x; };
+  const addDays = (d, days) => { const x = new Date(d); x.setDate(x.getDate() + days); return x; };
+  const iso = (d) => new Date(d).toISOString().split('T')[0];
+
+  const start = new Date(startDate || Date.now());
+  const end = endDate ? new Date(endDate) : add(start, 12);
+  const durationMonths = Math.max(1, Math.round((end - start) / (30.44 * 86400000)));
+  const sortieDue = addDays(end, -15);
+
+  const defs = [{ type: 'Diagnostic accueil', due: add(start, 1) }];
+  for (const [type, m] of [['Bilan M+3', 3], ['Bilan M+6', 6], ['Bilan M+10', 10]]) {
+    if (m < durationMonths) {
+      let due = add(start, m);
+      if (due > sortieDue) due = addDays(sortieDue, -15);
+      defs.push({ type, due });
+    }
+  }
+  defs.push({ type: 'Bilan Sortie', due: sortieDue });
+  return defs.map((d) => ({ type: d.type, due: iso(d.due) }));
+}
 
 module.exports = {
   PCM_KNOWLEDGE,
@@ -1392,4 +1427,5 @@ module.exports = {
   analyzeInsertion,
   buildAIRecommendations,
   buildTimeline,
+  computeMilestoneSchedule,
 };

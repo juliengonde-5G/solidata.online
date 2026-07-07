@@ -7,6 +7,8 @@
 
 ---
 
+> **Mise à jour (V2.3.0, même jour) — feuille de route implémentée.** Ce diagnostic a été suivi d'une livraison immédiate. Sont **faits** : tableau de bord CIP (QW1/S1) avec taux de sorties dynamiques (S2), jalons calés sur le contrat réel (QW3), auto-initialisation du parcours (QW2) + auto-statut à l'import (QW7), freins non faussés (QW4), modèle IA à jour (QW5), erreurs remontées (QW6), export PDF fiche + bilan (S3), prescripteur affiché (S5), assistant IA clarifié + sorties IA masquées affichées (S6), pré-remplissage du bilan. Déjà présents côté serveur : alertes de jalons J-7/J-1/retard + notification Brevo (S4, jobs `scheduler.js`). **Restent en vision** : pré-remplissage IA complet du bilan et suivi post-sortie M+6. Les sections ci-dessous décrivent l'état AVANT correctif (elles documentent le pourquoi).
+
 ## 1. En une page (pour la direction)
 
 Le module est **riche et bien pensé sur le fond** : le référentiel des 7 freins, les questionnaires d'entretien en langage simple, la timeline, le radar d'évolution et l'analyse IA couvrent le vrai métier de CIP. **Ce n'est pas un outil vide.**
