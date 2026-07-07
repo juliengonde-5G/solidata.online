@@ -857,6 +857,45 @@ function handleIaError(res, err, where) {
   return res.status(500).json({ error: 'Erreur analyse IA', detail: err.message, hint });
 }
 
+// GET /api/insertion/ia/diagnostic — Sonde isolée de l'appel Anthropic.
+// Ne dépend d'AUCUN salarié : teste purement clé + modèle + connectivité réseau,
+// hors de toute logique de collecte de données. ADMIN/RH uniquement
+// (expose le status HTTP + message bruts du SDK pour le diagnostic).
+router.get('/ia/diagnostic', authorize('ADMIN', 'RH'), async (req, res) => {
+  const model = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
+  const key = process.env.ANTHROPIC_API_KEY || '';
+  if (!key) {
+    return res.json({ configured: false, model, ok: false, message: "ANTHROPIC_API_KEY absente côté serveur (variable non transmise au conteneur backend)." });
+  }
+  const t0 = Date.now();
+  try {
+    const Anthropic = require('@anthropic-ai/sdk');
+    const probe = new Anthropic({ apiKey: key });
+    const r = await probe.messages.create({
+      model,
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'ping' }],
+    });
+    return res.json({
+      configured: true, ok: true, model,
+      key_length: key.length,
+      latency_ms: Date.now() - t0,
+      reply: (r.content?.[0]?.text || '').slice(0, 40),
+    });
+  } catch (err) {
+    const status = err.status || err.statusCode || null;
+    console.error('[INSERTION] Diagnostic IA échec :', status || '', err.name, err.message);
+    return res.json({
+      configured: true, ok: false, model,
+      key_length: key.length,
+      latency_ms: Date.now() - t0,
+      status,
+      type: err.name || null,
+      message: err.message || String(err),
+    });
+  }
+});
+
 // GET /api/insertion/ia/profil/:employeeId — Analyse approfondie IA du profil
 router.get('/ia/profil/:employeeId', authorize('ADMIN', 'RH'), async (req, res) => {
   try {

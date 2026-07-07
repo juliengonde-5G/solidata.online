@@ -874,6 +874,8 @@ export default function InsertionParcours() {
   const [iaError, setIaError] = useState(null);
   const [iaLoadingProfil, setIaLoadingProfil] = useState(false);
   const [iaLoadingEntretien, setIaLoadingEntretien] = useState(false);
+  const [iaDiag, setIaDiag] = useState(null);
+  const [iaDiagLoading, setIaDiagLoading] = useState(false);
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -1302,8 +1304,46 @@ export default function InsertionParcours() {
                             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
                             {iaLoadingEntretien ? 'Préparation…' : 'Préparer entretien'}
                           </button>
+                          <button onClick={async () => {
+                            setIaDiagLoading(true); setIaDiag(null); setIaError(null);
+                            try {
+                              const res = await api.get('/insertion/ia/diagnostic');
+                              setIaDiag(res.data);
+                            } catch (err) { setIaDiag(err.response?.data || { ok: false, message: err.message }); }
+                            setIaDiagLoading(false);
+                          }} disabled={iaDiagLoading}
+                            title="Teste la connexion à Claude sans dépendre d'un salarié (clé, modèle, réseau)"
+                            className="px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 text-xs font-medium hover:bg-slate-300 disabled:opacity-50">
+                            {iaDiagLoading ? 'Test…' : 'Tester la connexion IA'}
+                          </button>
                         </div>
                       </div>
+
+                      {iaDiag && (
+                        <div className={`mb-3 text-xs rounded-lg p-3 border ${iaDiag.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                          <p className="font-semibold mb-1">
+                            {iaDiag.ok ? '✓ Connexion IA opérationnelle' : '✗ Échec de la connexion IA'}
+                          </p>
+                          <ul className="space-y-0.5 font-mono text-[11px]">
+                            <li>configured : {String(iaDiag.configured)}{iaDiag.key_length ? ` (clé longueur ${iaDiag.key_length})` : ''}</li>
+                            <li>model : {iaDiag.model || '—'}</li>
+                            {iaDiag.status != null && <li>status HTTP : {iaDiag.status}</li>}
+                            {iaDiag.type && <li>type : {iaDiag.type}</li>}
+                            {iaDiag.latency_ms != null && <li>latence : {iaDiag.latency_ms} ms</li>}
+                            {iaDiag.message && <li className="whitespace-pre-wrap break-words">message : {iaDiag.message}</li>}
+                            {iaDiag.reply && <li>réponse : « {iaDiag.reply} »</li>}
+                          </ul>
+                          {!iaDiag.ok && iaDiag.configured === false && (
+                            <p className="mt-2 not-italic">→ La variable <code>ANTHROPIC_API_KEY</code> n'est pas transmise au conteneur backend. Vérifiez le <code>.env</code> serveur puis <code>docker compose ... restart backend</code>.</p>
+                          )}
+                          {!iaDiag.ok && iaDiag.status === 404 && (
+                            <p className="mt-2">→ Le modèle <code>{iaDiag.model}</code> n'est pas disponible pour cette clé. Définissez <code>CLAUDE_MODEL</code> sur un modèle autorisé puis redémarrez le backend.</p>
+                          )}
+                          {!iaDiag.ok && iaDiag.status === 401 && (
+                            <p className="mt-2">→ Clé <code>ANTHROPIC_API_KEY</code> invalide ou révoquée.</p>
+                          )}
+                        </div>
+                      )}
 
                       {iaError && (
                         <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 flex items-start gap-2">
