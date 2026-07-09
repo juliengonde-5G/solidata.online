@@ -517,4 +517,138 @@ router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
   }
 });
 
+// GET /api/exports/insertion — Extraction COMPLÈTE des données d'insertion
+// (parcours salariés, diagnostics CIP, jalons, plans d'action) au format
+// Excel multi-feuilles. Données personnelles sensibles (freins santé/social)
+// → restreint à ADMIN/RH (le router autorise ADMIN/MANAGER/RH, on resserre).
+router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
+  // Requête résiliente : une requête qui échoue (colonne absente sur une base
+  // ancienne) n'annule pas tout l'export — la feuille concernée est juste vide.
+  const soft = async (label, text, params = []) => {
+    try { return (await pool.query(text, params)).rows; }
+    catch (err) { console.error(`[EXPORTS] insertion « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); return []; }
+  };
+
+  // Normalise une valeur de cellule (dates ISO, tableaux/JSON en texte).
+  const fmtCell = (v) => {
+    if (v === null || v === undefined) return '';
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    if (Array.isArray(v)) return v.join(', ');
+    if (typeof v === 'object') return JSON.stringify(v);
+    return v;
+  };
+
+  // Ajoute une feuille à colonnes DYNAMIQUES (toutes les colonnes présentes),
+  // en plaçant matricule/nom/prénom en tête. Résilient au schéma variable.
+  const addDataSheet = (workbook, name, rows, leadKeys = []) => {
+    const sheet = workbook.addWorksheet(name);
+    if (!rows.length) { sheet.addRow(['(aucune donnée)']); return; }
+    const allKeys = Object.keys(rows[0]);
+    const ordered = [
+      ...leadKeys.filter((k) => allKeys.includes(k)),
+      ...allKeys.filter((k) => !leadKeys.includes(k)),
+    ];
+    sheet.columns = ordered.map((k) => ({ header: k, key: k, width: Math.min(Math.max(k.length + 2, 12), 42) }));
+    for (const r of rows) {
+      const o = {};
+      for (const k of ordered) o[k] = fmtCell(r[k]);
+      sheet.addRow(o);
+    }
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  };
+
+  try {
+    // 1) Salariés en insertion (vue synthèse curée).
+    let salaries = await soft('salaries', `
+      SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom,
+             e.position AS poste, t.name AS equipe,
+             e.insertion_status AS statut,
+             e.insertion_start_date AS debut_parcours,
+             COALESCE(e.insertion_end_date, e.contract_end) AS fin_prevue,
+             e.prescripteur, po.nom AS prescripteur_orga, po.type AS prescripteur_type,
+             e.visite_medicale_date,
+             d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
+             d.frein_linguistique, d.frein_administratif, d.frein_numerique,
+             (SELECT COUNT(*) FROM insertion_milestones m WHERE m.employee_id = e.id) AS nb_jalons,
+             (SELECT COUNT(*) FROM insertion_milestones m WHERE m.employee_id = e.id AND m.status = 'realise') AS jalons_realises
+      FROM employees e
+      LEFT JOIN teams t ON e.team_id = t.id
+      LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
+      LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
+      WHERE e.insertion_status IS DISTINCT FROM 'none'
+         OR d.employee_id IS NOT NULL
+         OR EXISTS (SELECT 1 FROM insertion_milestones m WHERE m.employee_id = e.id)
+      ORDER BY e.last_name, e.first_name
+    `);
+    if (!salaries.length) {
+      // Repli minimal (colonnes garanties) si la requête curée a échoué.
+      salaries = await soft('salaries-min', `
+        SELECT e.id AS employee_id, e.last_name AS nom, e.first_name AS prenom,
+               e.insertion_status AS statut, e.insertion_start_date AS debut_parcours
+        FROM employees e
+        WHERE e.insertion_status IS DISTINCT FROM 'none'
+        ORDER BY e.last_name, e.first_name
+      `);
+    }
+
+    // 2) Diagnostics CIP — toutes les colonnes.
+    const diagnostics = await soft('diagnostics', `
+      SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom, d.*
+      FROM insertion_diagnostics d
+      JOIN employees e ON e.id = d.employee_id
+      ORDER BY e.last_name, e.first_name
+    `);
+
+    // 3) Jalons — toutes les colonnes.
+    const jalons = await soft('jalons', `
+      SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom, m.*
+      FROM insertion_milestones m
+      JOIN employees e ON e.id = m.employee_id
+      ORDER BY e.last_name, e.first_name, m.due_date
+    `);
+
+    // 4) Plans d'action CIP — toutes les colonnes.
+    const actions = await soft('actions', `
+      SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom, a.*
+      FROM cip_action_plans a
+      JOIN employees e ON e.id = a.employee_id
+      ORDER BY e.last_name, e.first_name
+    `);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'SOLIDATA';
+
+    // Feuille d'informations / RGPD.
+    const info = workbook.addWorksheet('Informations');
+    info.columns = [{ header: 'Champ', key: 'k', width: 26 }, { header: 'Valeur', key: 'v', width: 70 }];
+    info.addRows([
+      { k: 'Export', v: "Données d'insertion — extraction complète" },
+      { k: 'Généré le', v: new Date().toISOString() },
+      { k: 'Salariés (insertion)', v: salaries.length },
+      { k: 'Diagnostics CIP', v: diagnostics.length },
+      { k: 'Jalons', v: jalons.length },
+      { k: "Plans d'action", v: actions.length },
+      { k: 'Confidentialité', v: 'Données personnelles sensibles (freins santé/social). Diffusion restreinte — RGPD, durée de conservation limitée.' },
+    ]);
+    info.getRow(1).font = { bold: true };
+    info.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
+
+    addDataSheet(workbook, 'Salariés', salaries, ['matricule', 'nom', 'prenom']);
+    addDataSheet(workbook, 'Diagnostics CIP', diagnostics, ['matricule', 'nom', 'prenom']);
+    addDataSheet(workbook, 'Jalons', jalons, ['matricule', 'nom', 'prenom']);
+    addDataSheet(workbook, "Plans d'action", actions, ['matricule', 'nom', 'prenom']);
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=insertion_complet_${stamp}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[EXPORTS] Erreur export insertion :', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+});
+
 module.exports = router;

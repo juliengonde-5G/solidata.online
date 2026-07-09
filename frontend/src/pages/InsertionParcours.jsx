@@ -3,6 +3,7 @@ import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
 import { Heart } from 'lucide-react';
 import api from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 // Les endpoints IA (Claude) génèrent 1500-2500 tokens et peuvent dépasser le
 // timeout axios global de 30 s (l'analyse de profil est plus longue que le
@@ -701,12 +702,41 @@ function DashCard({ label, value, tone, sub }) {
 }
 
 function CohortePanel({ onSelect }) {
+  const { user } = useAuth();
+  const canExport = ['ADMIN', 'RH'].includes(user?.base_role || user?.role);
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [ia, setIa] = useState(null);
   const [iaLoading, setIaLoading] = useState(false);
   const [iaError, setIaError] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
+
+  // Télécharge l'extraction complète des données d'insertion (Excel
+  // multi-feuilles). Endpoint authentifié → passage par axios (blob) plutôt
+  // qu'un lien direct, pour transmettre le token Bearer.
+  const downloadExport = async () => {
+    setExporting(true); setExportError(null);
+    try {
+      const res = await api.get('/exports/insertion', { responseType: 'blob', timeout: IA_TIMEOUT });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `insertion_complet_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      // La réponse d'erreur est un blob → on tente de lire le JSON dedans.
+      let msg = "Erreur lors de l'export des données d'insertion.";
+      try { const txt = await err.response?.data?.text?.(); if (txt) msg = JSON.parse(txt).error || msg; } catch { /* garde le message générique */ }
+      setExportError(msg);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -743,11 +773,21 @@ function CohortePanel({ onSelect }) {
       <div className="bg-white rounded-lg border p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-gray-800">Tableau de bord CIP — pilotage de la cohorte</h3>
-          <button onClick={runIaCohorte} disabled={iaLoading}
-            className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
-            {iaLoading ? 'Analyse IA…' : 'Analyser la cohorte (IA)'}
-          </button>
+          <div className="flex items-center gap-2">
+            {canExport && (
+              <button onClick={downloadExport} disabled={exporting}
+                title="Télécharger toutes les données d'insertion (Excel) : salariés, diagnostics, jalons, plans d'action"
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
+                {exporting ? 'Export…' : 'Exporter (Excel)'}
+              </button>
+            )}
+            <button onClick={runIaCohorte} disabled={iaLoading}
+              className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
+              {iaLoading ? 'Analyse IA…' : 'Analyser la cohorte (IA)'}
+            </button>
+          </div>
         </div>
+        {exportError && <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{exportError}</div>}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <DashCard label="En parcours" value={stats.nb_actifs} tone="blue" />
           <DashCard label="Jalons en retard" value={stats.nb_jalons_en_retard} tone={stats.nb_jalons_en_retard ? 'red' : 'green'} sub={`${stats.taux_retard_jalons}% des jalons`} />
