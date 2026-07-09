@@ -712,22 +712,31 @@ function CohortePanel({ onSelect }) {
   const [iaError, setIaError] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
+  // 'xlsx' = classeur complet (5 feuilles) ; sinon un dataset CSV.
+  const [exportChoice, setExportChoice] = useState('xlsx');
 
-  // Télécharge l'extraction complète des données d'insertion (Excel
-  // multi-feuilles). Endpoint authentifié → passage par axios (blob) plutôt
-  // qu'un lien direct, pour transmettre le token Bearer.
+  // Télécharge l'extraction des données d'insertion (Excel multi-feuilles ou
+  // CSV d'un jeu de données). Endpoint authentifié → passage par axios (blob)
+  // plutôt qu'un lien direct, pour transmettre le token Bearer.
   const downloadExport = async () => {
     setExporting(true); setExportError(null);
     try {
-      const res = await api.get('/exports/insertion', { responseType: 'blob', timeout: IA_TIMEOUT });
-      const url = URL.createObjectURL(res.data);
+      const stamp = new Date().toISOString().slice(0, 10);
+      let url = '/exports/insertion';
+      let filename = `insertion_complet_${stamp}.xlsx`;
+      if (exportChoice !== 'xlsx') {
+        url += `?format=csv&dataset=${exportChoice}`;
+        filename = `insertion_${exportChoice}_${stamp}.csv`;
+      }
+      const res = await api.get(url, { responseType: 'blob', timeout: IA_TIMEOUT });
+      const objUrl = URL.createObjectURL(res.data);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `insertion_complet_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.href = objUrl;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(objUrl);
     } catch (err) {
       // La réponse d'erreur est un blob → on tente de lire le JSON dedans.
       let msg = "Erreur lors de l'export des données d'insertion.";
@@ -775,11 +784,21 @@ function CohortePanel({ onSelect }) {
           <h3 className="font-semibold text-gray-800">Tableau de bord CIP — pilotage de la cohorte</h3>
           <div className="flex items-center gap-2">
             {canExport && (
-              <button onClick={downloadExport} disabled={exporting}
-                title="Télécharger toutes les données d'insertion (Excel) : salariés, diagnostics, jalons, plans d'action"
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
-                {exporting ? 'Export…' : 'Exporter (Excel)'}
-              </button>
+              <div className="flex items-center gap-1.5">
+                <select value={exportChoice} onChange={(e) => setExportChoice(e.target.value)}
+                  title="Choisir le contenu et le format de l'export"
+                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-700">
+                  <option value="xlsx">Excel — tout (5 feuilles)</option>
+                  <option value="salaries">CSV — Salariés</option>
+                  <option value="diagnostics">CSV — Diagnostics CIP</option>
+                  <option value="jalons">CSV — Jalons</option>
+                  <option value="actions">CSV — Plans d'action</option>
+                </select>
+                <button onClick={downloadExport} disabled={exporting}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
+                  {exporting ? 'Export…' : 'Exporter'}
+                </button>
+              </div>
             )}
             <button onClick={runIaCohorte} disabled={iaLoading}
               className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">

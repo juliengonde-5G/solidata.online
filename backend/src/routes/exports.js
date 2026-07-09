@@ -559,6 +559,23 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
   };
 
+  // Sérialise un jeu de lignes en CSV point-virgule + BOM (ouverture directe
+  // dans Excel FR), colonnes matricule/nom/prénom en tête, valeurs échappées.
+  const toCsv = (rows, leadKeys = []) => {
+    if (!rows.length) return '﻿(aucune donnée)\n';
+    const allKeys = Object.keys(rows[0]);
+    const cols = [
+      ...leadKeys.filter((k) => allKeys.includes(k)),
+      ...allKeys.filter((k) => !leadKeys.includes(k)),
+    ];
+    const esc = (v) => {
+      const s = String(fmtCell(v));
+      return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = rows.map((r) => cols.map((k) => esc(r[k])).join(';'));
+    return '﻿' + cols.join(';') + '\n' + lines.join('\n') + '\n';
+  };
+
   try {
     // 1) Salariés en insertion (vue synthèse curée).
     let salaries = await soft('salaries', `
@@ -617,6 +634,20 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
       ORDER BY e.last_name, e.first_name
     `);
 
+    const stamp = new Date().toISOString().slice(0, 10);
+    const lead = ['matricule', 'nom', 'prenom'];
+
+    // ─── Format CSV (une entité par fichier ; CSV est mono-table) ───
+    if ((req.query.format || 'xlsx').toLowerCase() === 'csv') {
+      const datasets = { salaries, diagnostics, jalons, actions, plans: actions };
+      const key = (req.query.dataset || 'salaries').toLowerCase();
+      const rows = datasets[key] || salaries;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=insertion_${datasets[key] ? key : 'salaries'}_${stamp}.csv`);
+      return res.send(toCsv(rows, lead));
+    }
+
+    // ─── Format Excel (défaut) : classeur multi-feuilles ───
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'SOLIDATA';
 
@@ -640,7 +671,6 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     addDataSheet(workbook, 'Jalons', jalons, ['matricule', 'nom', 'prenom']);
     addDataSheet(workbook, "Plans d'action", actions, ['matricule', 'nom', 'prenom']);
 
-    const stamp = new Date().toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename=insertion_complet_${stamp}.xlsx`);
     await workbook.xlsx.write(res);
