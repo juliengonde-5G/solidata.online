@@ -676,6 +676,183 @@ router.get('/cohorte/stats', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// AUDIT INSERTION — Synthèse de la situation d'insertion de la structure
+// ══════════════════════════════════════════════════════════════
+
+const MILESTONE_ORDER = ['Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie'];
+const FREIN_AXES = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif', 'frein_numerique'];
+
+// Agrège les indicateurs chiffrés de l'audit. Résilient : chaque requête qui
+// échoue (colonne absente sur base ancienne) dégrade au lieu de tout casser.
+async function gatherAuditKpis(year) {
+  const soft = async (label, text, params = []) => {
+    try { return (await pool.query(text, params)).rows; }
+    catch (err) { console.error(`[INSERTION][AUDIT] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); return []; }
+  };
+
+  // Nombre de salariés en parcours
+  const enParcours = await soft('en_parcours',
+    `SELECT COUNT(*)::int AS n FROM employees WHERE insertion_status = 'en_parcours' AND is_active = true`);
+  const nbEnParcours = enParcours[0]?.n || 0;
+
+  // Taux de réalisation des jalons par type (échéance)
+  const msRows = await soft('milestones', `
+    SELECT im.milestone_type AS type,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE im.due_date <= CURRENT_DATE)::int AS echus,
+      COUNT(*) FILTER (WHERE im.status = 'realise')::int AS realises,
+      COUNT(*) FILTER (WHERE im.status = 'realise' AND im.due_date <= CURRENT_DATE)::int AS realises_echus
+    FROM insertion_milestones im
+    JOIN employees e ON e.id = im.employee_id
+    WHERE e.is_active = true
+    GROUP BY im.milestone_type`);
+  const msByType = {};
+  for (const r of msRows) msByType[r.type] = r;
+  const milestonesParType = MILESTONE_ORDER.map((type) => {
+    const r = msByType[type] || { total: 0, echus: 0, realises: 0, realises_echus: 0 };
+    return {
+      type,
+      total: r.total, echus: r.echus, realises: r.realises, realises_echus: r.realises_echus,
+      taux_echeance: r.echus ? Math.round((r.realises_echus / r.echus) * 100) : null,
+    };
+  });
+  const g = milestonesParType.reduce((a, m) => ({
+    total: a.total + m.total, echus: a.echus + m.echus,
+    realises: a.realises + m.realises, realises_echus: a.realises_echus + m.realises_echus,
+  }), { total: 0, echus: 0, realises: 0, realises_echus: 0 });
+  const milestonesGlobal = { ...g, taux: g.echus ? Math.round((g.realises_echus / g.echus) * 100) : null };
+
+  // Freins consolidés (dernière éval par salarié : jalon réalisé sinon diagnostic)
+  const freinsRows = await soft('freins', `
+    WITH last_ms AS (
+      SELECT DISTINCT ON (im.employee_id) im.employee_id,
+        im.frein_mobilite, im.frein_sante, im.frein_finances, im.frein_famille,
+        im.frein_linguistique, im.frein_administratif, im.frein_numerique
+      FROM insertion_milestones im
+      JOIN employees e ON e.id = im.employee_id
+      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+        AND im.status = 'realise' AND im.frein_mobilite IS NOT NULL
+      ORDER BY im.employee_id, im.due_date DESC
+    ),
+    diag AS (
+      SELECT d.employee_id, d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
+        d.frein_linguistique, d.frein_administratif, d.frein_numerique
+      FROM insertion_diagnostics d
+      JOIN employees e ON e.id = d.employee_id
+      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+    )
+    SELECT COALESCE(lm.frein_mobilite, dg.frein_mobilite) AS frein_mobilite,
+      COALESCE(lm.frein_sante, dg.frein_sante) AS frein_sante,
+      COALESCE(lm.frein_finances, dg.frein_finances) AS frein_finances,
+      COALESCE(lm.frein_famille, dg.frein_famille) AS frein_famille,
+      COALESCE(lm.frein_linguistique, dg.frein_linguistique) AS frein_linguistique,
+      COALESCE(lm.frein_administratif, dg.frein_administratif) AS frein_administratif,
+      COALESCE(lm.frein_numerique, dg.frein_numerique) AS frein_numerique
+    FROM diag dg FULL OUTER JOIN last_ms lm ON lm.employee_id = dg.employee_id`);
+  const freinsMoyennes = {};
+  let freinDominant = null, maxMoy = 0, nbEvalues = 0;
+  for (const axe of FREIN_AXES) {
+    const vals = freinsRows.map((r) => r[axe]).filter((v) => v != null && +v >= 1);
+    if (vals.length > nbEvalues) nbEvalues = vals.length;
+    const moy = vals.length ? +(vals.reduce((a, b) => a + +b, 0) / vals.length).toFixed(2) : null;
+    freinsMoyennes[axe] = moy;
+    if (moy && moy > maxMoy) { maxMoy = moy; freinDominant = axe; }
+  }
+
+  // Plans d'action en cours
+  const actRows = await soft('actions', `
+    SELECT a.status, a.category, a.priority, COUNT(*)::int AS n
+    FROM cip_action_plans a
+    JOIN employees e ON e.id = a.employee_id
+    WHERE e.is_active = true AND a.status IN ('a_faire', 'en_cours')
+    GROUP BY a.status, a.category, a.priority`);
+  const actions = { total_en_cours: 0, par_statut: {}, par_categorie: {}, par_priorite: {} };
+  for (const r of actRows) {
+    actions.total_en_cours += r.n;
+    actions.par_statut[r.status] = (actions.par_statut[r.status] || 0) + r.n;
+    if (r.category) actions.par_categorie[r.category] = (actions.par_categorie[r.category] || 0) + r.n;
+    if (r.priority) actions.par_priorite[r.priority] = (actions.par_priorite[r.priority] || 0) + r.n;
+  }
+
+  // Sorties de l'année + statistiques
+  const sortiesRows = await soft('sorties', `
+    SELECT sortie_classification, sortie_type, COUNT(*)::int AS n
+    FROM insertion_milestones
+    WHERE milestone_type = 'Bilan Sortie' AND status = 'realise'
+      AND sortie_classification IS NOT NULL
+      AND COALESCE(completed_date, updated_at::date) BETWEEN $1 AND $2
+    GROUP BY sortie_classification, sortie_type`, [`${year}-01-01`, `${year}-12-31`]);
+  let nbPositives = 0, nbNegatives = 0;
+  const parType = {};
+  for (const s of sortiesRows) {
+    if (s.sortie_classification === 'positive') nbPositives += s.n; else nbNegatives += s.n;
+    if (s.sortie_type) parType[s.sortie_type] = (parType[s.sortie_type] || 0) + s.n;
+  }
+  const totalSorties = nbPositives + nbNegatives;
+
+  return {
+    annee: year,
+    nb_en_parcours: nbEnParcours,
+    freins_nb_evalues: nbEvalues,
+    milestones: { par_type: milestonesParType, global: milestonesGlobal },
+    freins_moyennes: freinsMoyennes,
+    frein_dominant: freinDominant,
+    actions,
+    sorties: {
+      total: totalSorties, positives: nbPositives, negatives: nbNegatives,
+      taux_dynamiques: totalSorties > 0 ? Math.round((nbPositives / totalSorties) * 100) : null,
+      par_type: parType,
+    },
+  };
+}
+
+// Collecte les verbatims (anonymisés) des CIP/agents pour le rapport IA.
+async function gatherAuditVerbatims() {
+  const soft = async (text) => { try { return (await pool.query(text)).rows; } catch { return []; } };
+  const observations = await soft(`
+    SELECT d.obs_points_forts, d.obs_difficultes, d.obs_comportement_equipe, d.parcours_anterieur
+    FROM insertion_diagnostics d JOIN employees e ON e.id = d.employee_id
+    WHERE e.is_active = true
+      AND (d.obs_points_forts IS NOT NULL OR d.obs_difficultes IS NOT NULL OR d.obs_comportement_equipe IS NOT NULL)
+    LIMIT 60`);
+  const bilans = await soft(`
+    SELECT im.milestone_type, im.avis_global, im.bilan_professionnel, im.bilan_social, im.observations
+    FROM insertion_milestones im JOIN employees e ON e.id = im.employee_id
+    WHERE e.is_active = true AND im.status = 'realise'
+      AND (im.bilan_professionnel IS NOT NULL OR im.bilan_social IS NOT NULL OR im.observations IS NOT NULL)
+    ORDER BY im.completed_date DESC NULLS LAST LIMIT 80`);
+  const notesActions = await soft(`
+    SELECT a.category, a.notes FROM cip_action_plans a JOIN employees e ON e.id = a.employee_id
+    WHERE e.is_active = true AND a.notes IS NOT NULL AND a.notes <> '' LIMIT 60`);
+  return { observations_diagnostics: observations, bilans_jalons: bilans, notes_actions: notesActions };
+}
+
+// GET /api/insertion/audit — Indicateurs chiffrés de l'audit (sans IA).
+// IMPORTANT: AVANT /:employeeId.
+router.get('/audit', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    res.json(await gatherAuditKpis(year));
+  } catch (err) {
+    console.error('[INSERTION][AUDIT] Erreur :', err.message);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+});
+
+// GET /api/insertion/audit/ia — Rapport IA de situation globale (ADMIN/RH).
+// Croise indicateurs chiffrés + verbatims anonymisés CIP/agents.
+router.get('/audit/ia', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const [kpis, verbatims] = await Promise.all([gatherAuditKpis(year), gatherAuditVerbatims()]);
+    const { auditGlobalReport } = require('../../services/insertion-ai');
+    res.json(await auditGlobalReport({ kpis, verbatims }));
+  } catch (err) {
+    handleIaError(res, err, 'audit');
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // GET /api/insertion/:employeeId — Analyse complete d'un salarié
 // IMPORTANT: DOIT etre la DERNIERE route GET car /:employeeId capture tout
 // ══════════════════════════════════════════════════════════════

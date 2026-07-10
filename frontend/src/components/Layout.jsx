@@ -164,6 +164,7 @@ const NAV_TREE = [
         children: [
           { label: 'Collaborateurs', path: '/employees', icon: Users, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: "Parcours d'insertion", path: '/insertion', icon: Heart, roles: ['ADMIN', 'RH', 'MANAGER'] },
+          { label: 'Audit insertion', path: '/insertion/audit', icon: ClipboardList, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Compétences', path: '/skills', icon: Star, roles: ['ADMIN', 'RH'] },
         ],
       },

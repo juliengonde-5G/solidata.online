@@ -372,9 +372,58 @@ Réponds en JSON :
   }
 }
 
+// ──────────────────────────────────────────────────────────────
+// Audit insertion — Rapport de situation globale de la structure
+// (direction + CIP) à partir des indicateurs chiffrés ET des
+// verbatims anonymisés des CIP/agents.
+// ──────────────────────────────────────────────────────────────
+
+async function auditGlobalReport({ kpis, verbatims }) {
+  const anthropic = getClient();
+  if (!anthropic) throw new Error('ANTHROPIC_API_KEY non configurée');
+
+  const payload = { indicateurs_chiffres: kpis, verbatims_anonymises: verbatims };
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 3000,
+    system: SYSTEM_INSERTION,
+    messages: [{
+      role: 'user',
+      content: `Tu rédiges un RAPPORT DE SITUATION GLOBALE d'insertion, destiné à la DIRECTION et aux CIP d'une SIAE (Solidarité Textiles). Ce rapport sera partagé pour alimenter les actions d'accompagnement global des publics.
+
+Appuie-toi sur DEUX sources :
+1. Les indicateurs chiffrés consolidés (parcours, taux de réalisation des jalons, freins moyens, plans d'action, sorties).
+2. Les verbatims ANONYMISÉS des CIP et agents (observations de diagnostic, bilans de jalons, notes d'actions) — ils reflètent le vécu de terrain et le profil réel du public.
+
+Ne cite AUCUN nom. Reste factuel, nuancé et actionnable. Adapte le ton à un comité de direction.
+
+${JSON.stringify(payload, null, 2)}
+
+Réponds STRICTEMENT en JSON avec les clés :
+- synthese_direction : string (5-6 phrases, l'essentiel pour la direction)
+- situation_globale : string (état des lieux détaillé de l'insertion dans la structure)
+- profil_public : string (portrait du public accompagné : freins dominants, dynamique, difficultés récurrentes issues des verbatims)
+- points_forts : string[] (ce qui fonctionne, appuyé sur les chiffres et les verbatims)
+- points_vigilance : string[] (risques, retards, freins critiques, signaux faibles)
+- recommandations_structure : [{ action: string, objectif: string, echeance_suggeree: string }] (actions concrètes au niveau de la STRUCTURE, pas individuelles)
+- conclusion : string (1-2 phrases de cadrage pour la direction)`,
+    }],
+  });
+
+  const text = response.content[0]?.text || '{}';
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { synthese_direction: text };
+  } catch {
+    return { synthese_direction: text };
+  }
+}
+
 module.exports = {
   analyseProfilComplet,
   preparerEntretien,
   bilanCohorte,
+  auditGlobalReport,
   getEmployeeInsertionData,
 };
