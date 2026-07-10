@@ -17,7 +17,10 @@ router.use(autoLogActivity('candidate'));
 router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
     const { status, search, team_id } = req.query;
-    let query = `SELECT c.*, t.name as team_name FROM candidates c LEFT JOIN teams t ON c.assigned_team_id = t.id WHERE 1=1`;
+    let query = `SELECT c.*, t.name as team_name,
+      (SELECT em.id FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_id,
+      (SELECT em.first_name || ' ' || em.last_name FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_name
+      FROM candidates c LEFT JOIN teams t ON c.assigned_team_id = t.id WHERE 1=1`;
     const params = [];
 
     if (status) {
@@ -46,7 +49,10 @@ router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 router.get('/kanban', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT c.*, t.name as team_name FROM candidates c
+      `SELECT c.*, t.name as team_name,
+        (SELECT em.id FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_id,
+        (SELECT em.first_name || ' ' || em.last_name FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_name
+       FROM candidates c
        LEFT JOIN teams t ON c.assigned_team_id = t.id
        ORDER BY c.updated_at DESC`
     );

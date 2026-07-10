@@ -29,6 +29,20 @@ const logger = require('../config/logger');
 const crypto = require('crypto');
 
 // ══════════════════════════════════════════
+// Classification centralisée du moyen de paiement (SQL)
+// Reconnaît à la fois les libellés SumUp bruts (POS = carte sur terminal, ECOM,
+// VISA, Mastercard…) ET les libellés normalisés à l'ingestion ('CB', 'Espèces').
+// Un paiement carte encaissé sur le terminal SumUp (`payment_type` = 'POS') est
+// donc bien comptabilisé en CB partout. Voir services/sumup.normalizePaymentMethod.
+// `col` est un nom de colonne contrôlé (constantes ci-dessous), jamais une
+// entrée utilisateur → pas d'injection.
+// ══════════════════════════════════════════
+const payIsEspeces = (col) => `(${col} ILIKE '%esp%' OR ${col} ILIKE '%cash%' OR ${col} ILIKE '%numer%' OR ${col} ILIKE '%numér%' OR ${col} ILIKE '%liquide%')`;
+const payIsCb = (col) => `(${col} ILIKE '%cb%' OR ${col} ILIKE '%pos%' OR ${col} ILIKE '%carte%' OR ${col} ILIKE '%card%' OR ${col} ILIKE '%visa%' OR ${col} ILIKE '%master%' OR ${col} ILIKE '%maestro%' OR ${col} ILIKE '%amex%' OR ${col} ILIKE '%ecom%' OR ${col} ILIKE '%contact%' OR ${col} ILIKE '%bancaire%')`;
+const payLabel = (col) => `CASE WHEN ${payIsEspeces(col)} THEN 'Espèces' WHEN ${payIsCb(col)} THEN 'CB' ELSE COALESCE(NULLIF(TRIM(${col}), ''), 'Autre') END`;
+const payCategorie = (col) => `CASE WHEN ${payIsEspeces(col)} THEN 'especes' WHEN ${payIsCb(col)} THEN 'cb' ELSE 'autre' END`;
+
+// ══════════════════════════════════════════
 // Upload CSV (fallback)
 // ══════════════════════════════════════════
 const uploadDir = path.join(__dirname, '../../uploads/vak-csv');
@@ -262,10 +276,10 @@ router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res
         COUNT(*)::INT                                  AS nb_tickets,
         COALESCE(AVG(total_ttc), 0)::FLOAT             AS panier_moyen,
         COALESCE(SUM(nb_articles), 0)::INT             AS total_articles,
-        COALESCE(SUM(CASE WHEN moyen_paiement ILIKE '%espèce%' OR moyen_paiement ILIKE '%cash%' THEN total_ttc END), 0)::FLOAT AS ca_especes,
-        COALESCE(SUM(CASE WHEN moyen_paiement ILIKE '%visa%' OR moyen_paiement ILIKE '%mastercard%' OR moyen_paiement ILIKE '%carte%' THEN total_ttc END), 0)::FLOAT AS ca_cb,
-        COUNT(CASE WHEN moyen_paiement ILIKE '%espèce%' OR moyen_paiement ILIKE '%cash%' THEN 1 END)::INT AS nb_especes,
-        COUNT(CASE WHEN moyen_paiement ILIKE '%visa%' OR moyen_paiement ILIKE '%mastercard%' OR moyen_paiement ILIKE '%carte%' THEN 1 END)::INT AS nb_cb
+        COALESCE(SUM(CASE WHEN ${payIsEspeces('moyen_paiement')} THEN total_ttc END), 0)::FLOAT AS ca_especes,
+        COALESCE(SUM(CASE WHEN ${payIsCb('moyen_paiement')} THEN total_ttc END), 0)::FLOAT AS ca_cb,
+        COUNT(CASE WHEN ${payIsEspeces('moyen_paiement')} THEN 1 END)::INT AS nb_especes,
+        COUNT(CASE WHEN ${payIsCb('moyen_paiement')} THEN 1 END)::INT AS nb_cb
       FROM vak_tickets WHERE vak_id = $1
     `, [vakId]);
     const a = v.rows[0]; const b = t.rows[0];
@@ -348,15 +362,17 @@ router.get('/:id/analytics/payments', authorize('ADMIN', 'MANAGER'), async (req,
     // MAX(entry_mode) plutôt que sous-requête corrélée : Postgres refuse
     // (avec raison) une sous-requête qui référence une colonne non agrégée
     // sous GROUP BY. MAX d'un VARCHAR donne un échantillon stable.
+    // Regroupe sur le libellé normalisé : les tickets historiques stockés 'POS'
+    // et les nouveaux stockés 'CB' fusionnent dans une seule tranche 'CB'.
     const r = await pool.query(`
-      SELECT moyen_paiement,
+      SELECT ${payLabel('moyen_paiement')} AS moyen_paiement,
              COUNT(*)::INT AS nb_tickets,
              COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
              COALESCE(SUM(poids_kg),0)::FLOAT AS poids_kg,
              COALESCE(AVG(total_ttc),0)::FLOAT AS panier_moyen,
              MAX(entry_mode) AS entry_mode_sample
       FROM vak_tickets WHERE vak_id = $1
-      GROUP BY moyen_paiement ORDER BY ca_ttc DESC
+      GROUP BY 1 ORDER BY ca_ttc DESC
     `, [req.params.id]);
     res.json(r.rows);
   } catch (err) {
@@ -460,10 +476,10 @@ router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, r
                COALESCE(SUM(t.poids_kg),0)::FLOAT                         AS poids_kg,
                COALESCE(SUM(t.nb_articles),0)::INT                        AS nb_articles,
                COALESCE(AVG(t.total_ttc),0)::FLOAT                        AS panier_moyen,
-               COALESCE(SUM(CASE WHEN t.moyen_paiement ILIKE '%espèce%' OR t.moyen_paiement ILIKE '%cash%' THEN t.total_ttc END),0)::FLOAT AS ca_especes,
-               COALESCE(SUM(CASE WHEN t.moyen_paiement ILIKE '%visa%' OR t.moyen_paiement ILIKE '%mastercard%' OR t.moyen_paiement ILIKE '%carte%' THEN t.total_ttc END),0)::FLOAT AS ca_cb,
-               COUNT(CASE WHEN t.moyen_paiement ILIKE '%espèce%' OR t.moyen_paiement ILIKE '%cash%' THEN 1 END)::INT AS nb_especes,
-               COUNT(CASE WHEN t.moyen_paiement ILIKE '%visa%' OR t.moyen_paiement ILIKE '%mastercard%' OR t.moyen_paiement ILIKE '%carte%' THEN 1 END)::INT AS nb_cb,
+               COALESCE(SUM(CASE WHEN ${payIsEspeces('t.moyen_paiement')} THEN t.total_ttc END),0)::FLOAT AS ca_especes,
+               COALESCE(SUM(CASE WHEN ${payIsCb('t.moyen_paiement')} THEN t.total_ttc END),0)::FLOAT AS ca_cb,
+               COUNT(CASE WHEN ${payIsEspeces('t.moyen_paiement')} THEN 1 END)::INT AS nb_especes,
+               COUNT(CASE WHEN ${payIsCb('t.moyen_paiement')} THEN 1 END)::INT AS nb_cb,
                MIN(t.date_ticket) AS premiere_vente,
                MAX(t.date_ticket) AS derniere_vente
         FROM vak_tickets t WHERE t.vak_id = $1
@@ -486,11 +502,11 @@ router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, r
         GROUP BY jour, segment ORDER BY jour, segment
       `, [vakId]),
       pool.query(`
-        SELECT DATE(date_ticket) AS jour, moyen_paiement,
+        SELECT DATE(date_ticket) AS jour, ${payLabel('moyen_paiement')} AS moyen_paiement,
                COUNT(*)::INT AS nb_tickets,
                COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc
         FROM vak_tickets WHERE vak_id = $1
-        GROUP BY jour, moyen_paiement ORDER BY jour, ca_ttc DESC
+        GROUP BY 1, 2 ORDER BY jour, ca_ttc DESC
       `, [vakId]),
       pool.query(`SELECT * FROM vak_meteo_quotidien WHERE vak_id = $1 ORDER BY date`, [vakId]),
     ]);
@@ -607,10 +623,7 @@ router.get('/annual/payment-mix', authorize('ADMIN', 'MANAGER'), async (req, res
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const r = await pool.query(`
       SELECT v.id AS vak_id, v.libelle, v.date_debut,
-             CASE
-               WHEN t.moyen_paiement ILIKE '%espèce%' OR t.moyen_paiement ILIKE '%cash%' THEN 'especes'
-               WHEN t.moyen_paiement ILIKE '%visa%' OR t.moyen_paiement ILIKE '%mastercard%' OR t.moyen_paiement ILIKE '%carte%' THEN 'cb'
-               ELSE 'autre' END AS categorie,
+             ${payCategorie('t.moyen_paiement')} AS categorie,
              COUNT(*)::INT AS nb_tickets,
              COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc
       FROM vak_tickets t JOIN vaks v ON v.id = t.vak_id

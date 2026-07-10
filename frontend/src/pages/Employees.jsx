@@ -13,12 +13,10 @@ const DAYS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dima
 
 export default function Employees() {
   const [selected, setSelected] = useState(null);
-  const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState({ team_id: '', search: '' });
-  const [form, setForm] = useState({
-    first_name: '', last_name: '', email: '', phone: '',
-    position_id: '', team_id: '', contract_type: 'CDI', hire_date: '',
-  });
+
+  // Liaison fiche de recrutement (candidat) ↔ ce collaborateur
+  const [linkCandidateOpen, setLinkCandidateOpen] = useState(false);
 
   // Detail tabs
   const [detailTab, setDetailTab] = useState('info');
@@ -120,25 +118,30 @@ export default function Employees() {
     }
   };
 
-  const createEmployee = async (e) => {
-    e.preventDefault();
+  // Rattache CE collaborateur à une fiche de recrutement (candidat) existante.
+  // Réutilise l'endpoint candidat (POST /candidates/:candidateId/link-employee).
+  const linkCandidate = async (candidateId) => {
     try {
-      const selectedPosition = positions.find(p => String(p.id) === String(form.position_id));
-      const payload = {
-        first_name: form.first_name,
-        last_name: form.last_name,
-        email: form.email || null,
-        phone: form.phone || null,
-        team_id: form.team_id ? Number(form.team_id) : null,
-        position: selectedPosition ? (selectedPosition.title || selectedPosition.name) : null,
-        contract_type: form.contract_type || 'CDI',
-        contract_start: form.hire_date || null,
-      };
-      await api.post('/employees', payload);
-      setShowForm(false);
-      setForm({ first_name: '', last_name: '', email: '', phone: '', position_id: '', team_id: '', contract_type: 'CDI', hire_date: '' });
+      await api.post(`/candidates/${candidateId}/link-employee`, { employee_id: selected.id });
+      setLinkCandidateOpen(false);
+      setSelected(prev => ({ ...prev, candidate_id: candidateId }));
       loadData();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur lors de la liaison');
+    }
+  };
+
+  const unlinkCandidate = async () => {
+    if (!selected?.candidate_id) return;
+    try {
+      await api.post(`/candidates/${selected.candidate_id}/unlink-employee`);
+      setSelected(prev => ({ ...prev, candidate_id: null }));
+      setPcmProfile(null);
+      setCandidateData(null);
+      loadData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erreur lors du retrait du lien');
+    }
   };
 
   const addContract = async (e) => {
@@ -243,9 +246,9 @@ export default function Employees() {
           subtitle={`${employees.length} collaborateur${employees.length > 1 ? 's' : ''}`}
           icon={Users}
           actions={
-            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-              + Nouveau collaborateur
-            </button>
+            <span className="text-xs text-slate-400 max-w-[240px] text-right hidden sm:block">
+              Les collaborateurs sont créés via la synchronisation RH (import du logiciel de paye).
+            </span>
           }
         />
 
@@ -639,11 +642,23 @@ export default function Employees() {
                 {detailTab === 'pcm' && (
                   <div className="space-y-3 text-sm">
                     {!selected.candidate_id ? (
-                      <p className="text-gray-500 italic">Cet employé n'est pas lié à un candidat. Pas de profil PCM disponible.</p>
+                      <div className="space-y-3">
+                        <p className="text-gray-500 italic">Ce collaborateur n'est lié à aucune fiche de recrutement. Le profil PCM du recrutement ne remonte donc pas ici ni dans le module Insertion.</p>
+                        <button onClick={() => setLinkCandidateOpen(true)} className="btn-primary text-sm">
+                          Lier une fiche de recrutement
+                        </button>
+                        <p className="text-[11px] text-gray-400">Rattache la fiche candidat (recrutement) à ce collaborateur. Aucune donnée RH n'est modifiée.</p>
+                      </div>
                     ) : !pcmProfile ? (
-                      <p className="text-gray-500 italic">Aucun profil PCM enregistré pour ce candidat.</p>
+                      <div className="space-y-3">
+                        <p className="text-gray-500 italic">Aucun profil PCM enregistré pour la fiche de recrutement liée.</p>
+                        <button onClick={unlinkCandidate} className="text-xs px-2.5 py-1 rounded-full bg-white border border-red-200 text-red-600 hover:bg-red-50 font-medium">Délier la fiche de recrutement</button>
+                      </div>
                     ) : (
                       <>
+                        <div className="flex justify-end">
+                          <button onClick={unlinkCandidate} className="text-xs px-2.5 py-1 rounded-full bg-white border border-red-200 text-red-600 hover:bg-red-50 font-medium">Délier</button>
+                        </div>
                         <div className="bg-purple-50 rounded-lg p-3">
                           <p className="font-semibold text-purple-800 mb-1">Type de base</p>
                           <p className="text-lg font-bold text-purple-900 capitalize">{pcmProfile.baseType || pcmProfile.base_type || '—'}</p>
@@ -705,40 +720,76 @@ export default function Employees() {
           </div>
         )}
 
-        {/* New Employee Form */}
-        {showForm && (
-          <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Nouveau collaborateur" size="sm">
-            <form onSubmit={createEmployee} className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="Prénom *" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} className="input-modern" required />
-                  <input placeholder="Nom *" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} className="input-modern" required />
-                </div>
-                <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="input-modern" />
-                <input placeholder="Téléphone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="input-modern" />
-                <select value={form.team_id} onChange={e => setForm({ ...form, team_id: e.target.value })} className="input-modern">
-                  <option value="">Équipe</option>
-                  {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-                <select value={form.position_id} onChange={e => setForm({ ...form, position_id: e.target.value })} className="input-modern">
-                  <option value="">Poste</option>
-                  {positions.map(p => <option key={p.id} value={p.id}>{p.name || p.title}</option>)}
-                </select>
-                <select value={form.contract_type} onChange={e => setForm({ ...form, contract_type: e.target.value })} className="input-modern">
-                  {Object.entries(CONTRACT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
-                <div>
-                  <label className="text-xs text-gray-500">Date d'embauche</label>
-                  <input type="date" value={form.hire_date} onChange={e => setForm({ ...form, hire_date: e.target.value })} className="input-modern" />
-                </div>
-              <div className="flex gap-2 mt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
-                <button type="submit" className="flex-1 btn-primary text-sm">Créer</button>
-              </div>
-            </form>
-          </Modal>
+        {/* Liaison à une fiche de recrutement (candidat) */}
+        {linkCandidateOpen && selected && (
+          <LinkCandidateModal
+            employee={selected}
+            onClose={() => setLinkCandidateOpen(false)}
+            onLink={linkCandidate}
+          />
         )}
       </div>
     </Layout>
+  );
+}
+
+// Modale : rattache une fiche de recrutement (candidat) à CE collaborateur, afin
+// que le profil PCM passé au recrutement remonte dans le module Insertion.
+function LinkCandidateModal({ employee, onClose, onLink }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setError('');
+    api.get(`/employees/${employee.id}/candidate-matches`)
+      .then(r => { if (active) setSuggestions(r.data?.suggestions || []); })
+      .catch(err => { if (active) setError(err.response?.data?.error || 'Erreur de chargement des candidats'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [employee.id]);
+
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const filtered = search.trim()
+    ? suggestions.filter(c => norm(`${c.first_name} ${c.last_name} ${c.email || ''}`).includes(norm(search).trim()))
+    : suggestions;
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Lier une fiche de recrutement à ${employee.first_name} ${employee.last_name}`} size="md">
+      <div className="space-y-3">
+        <p className="text-xs text-slate-500">
+          Sélectionnez la fiche de recrutement (candidat) correspondant à ce collaborateur.
+          Le profil PCM du candidat sera alors visible ici et dans le module Insertion.
+        </p>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
+        <input autoFocus placeholder="Rechercher un candidat (nom, email)…" value={search}
+          onChange={e => setSearch(e.target.value)} className="input-modern w-full" />
+        {loading ? (
+          <p className="text-sm text-slate-400 py-6 text-center">Chargement…</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-slate-400 py-6 text-center">Aucune fiche de recrutement disponible.</p>
+        ) : (
+          <ul className="max-h-72 overflow-y-auto divide-y border rounded-lg">
+            {filtered.slice(0, 100).map(c => (
+              <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-800 truncate">
+                    {c.first_name} {c.last_name}
+                    {c.match_score >= 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">correspondance exacte</span>}
+                    {c.match_score >= 40 && c.match_score < 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">nom proche</span>}
+                    {c.has_pcm && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-semibold">PCM</span>}
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">{c.email || 'Email non renseigné'}</div>
+                </div>
+                <button onClick={() => onLink(c.id)} className="text-xs px-3 py-1.5 rounded-lg btn-primary shrink-0">Lier</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Modal>
   );
 }
 

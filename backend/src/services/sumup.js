@@ -284,6 +284,23 @@ function getSegment(description) {
   return 'autre';
 }
 
+// ── Normalisation moyen de paiement → libellé métier ('CB' / 'Espèces') ──
+// SumUp expose des types techniques : `payment_type` = 'POS' (carte présentée
+// sur le terminal en boutique), 'ECOM' (carte en ligne), et/ou une marque via
+// `card.type` ('VISA', 'MASTERCARD'…). Le CSV peut contenir 'Carte', 'Espèces',
+// etc. On ramène tout à deux libellés lisibles pour les tableaux de bord VAK :
+//   - 'CB'      = carte bancaire (POS, ECOM, VISA, Mastercard, sans contact…)
+//   - 'Espèces' = paiement en numéraire
+// Toute valeur non reconnue est conservée telle quelle (ex. 'Chèque').
+function normalizePaymentMethod(raw) {
+  const s = (raw == null ? '' : String(raw)).trim();
+  if (!s) return 'Inconnu';
+  const k = s.toLowerCase();
+  if (/esp[eè]ce|cash|num[eé]raire|liquide/.test(k)) return 'Espèces';
+  if (/\bpos\b|\bcb\b|\becom\b|carte|card|visa|master|maestro|amex|american express|contactless|sans[\s-]?contact|bancaire/.test(k)) return 'CB';
+  return s;
+}
+
 // ── Parse date FR "15 mai 2026 10:15" ──
 const MOIS_FR = {
   'janv.': 0, janvier: 0, 'janv': 0,
@@ -313,7 +330,12 @@ function parseFRDate(str) {
   const hh = parseInt(m[4], 10);
   const mm = parseInt(m[5], 10);
   const ss = m[6] ? parseInt(m[6], 10) : 0;
-  return new Date(year, moisIdx, day, hh, mm, ss);
+  // L'export SumUp est horodaté en GMT/UTC. On interprète l'heure comme UTC
+  // (Date.UTC) — et NON dans le fuseau local du serveur — pour que l'heure
+  // stockée soit identique quel que soit le fuseau du conteneur, et cohérente
+  // avec le flux API (`tx.timestamp` déjà en UTC). Évite le décalage de ±1-2 h
+  // entre les ventes importées par CSV et celles synchronisées par l'API.
+  return new Date(Date.UTC(year, moisIdx, day, hh, mm, ss));
 }
 
 function parseNumberFR(str) {
@@ -427,11 +449,12 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       const segment = getSegment(description);
       const sign = (type && type.toLowerCase() === 'remboursement') ? -1 : 1;
 
+      const moyenPaiementNorm = normalizePaymentMethod(moyenPaiement);
       const ref = (refTx || '').trim() || `unknown-${i}`;
       if (!ticketsMap.has(ref)) {
         ticketsMap.set(ref, {
           date_ticket: dateVente,
-          moyen_paiement: moyenPaiement.trim(),
+          moyen_paiement: moyenPaiementNorm,
           lignes: [],
         });
       }
@@ -441,7 +464,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
 
       tk.lignes.push({
         date_vente: dateVente,
-        moyen_paiement: moyenPaiement.trim(),
+        moyen_paiement: moyenPaiementNorm,
         description: (description || '').trim(),
         segment,
         unite: (unite || '').trim().toLowerCase(),
@@ -495,7 +518,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
         total_tva = EXCLUDED.total_tva,
         batch_id = EXCLUDED.batch_id
       RETURNING id
-    `, [vakId, ref, tk.date_ticket, tk.moyen_paiement, nbArticles,
+    `, [vakId, ref, tk.date_ticket.toISOString(), tk.moyen_paiement, nbArticles,
         nbArticlesPesee, totalTTC, totalHT, totalTVA, batchId, source]);
     const ticketId = tickRes.rows[0].id;
 
@@ -514,7 +537,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
            description, segment, unite, quantite, prix_unitaire_ttc, remise,
            total_ht, total_ttc, total_tva, taux_tva, compte, source)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-      `, [vakId, ticketId, batchId, l.date_vente, ref, l.moyen_paiement,
+      `, [vakId, ticketId, batchId, l.date_vente.toISOString(), ref, l.moyen_paiement,
           l.description, l.segment, l.unite, l.quantite, l.prix_unitaire_ttc,
           l.remise, l.total_ht, l.total_ttc, l.total_tva, l.taux_tva, l.compte, source]);
     }
@@ -676,7 +699,10 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
       catch (_) { /* keep summary */ }
     }
     const refTx = detail.transaction_code || detail.transaction_id || detail.id || `sumup-${Date.now()}`;
-    const moyenPaiement = detail.payment_type || detail.card?.type || detail.payment_method || 'Inconnu';
+    // `payment_type` = 'POS' pour une vente carte sur le terminal en boutique
+    // (cas nominal VAK). On le ramène au libellé métier 'CB'. Voir
+    // normalizePaymentMethod.
+    const moyenPaiement = normalizePaymentMethod(detail.payment_type || detail.card?.type || detail.payment_method || 'Inconnu');
     const entryMode = detail.entry_mode || null;
     const items = detail.line_items || detail.products || [];
 
@@ -743,7 +769,7 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
         total_tva = EXCLUDED.total_tva,
         source = EXCLUDED.source
       RETURNING id, (xmax = 0) AS inserted
-    `, [vakId, txId || null, refTx, txDate, moyenPaiement, entryMode,
+    `, [vakId, txId || null, refTx, txDate.toISOString(), moyenPaiement, entryMode,
         nbArticles, poidsTicket, totalTTC, totalHT, totalTVA, source]);
     const ticketId = tickRes.rows[0].id;
     const wasInserted = tickRes.rows[0].inserted;
@@ -757,7 +783,7 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
            description, segment, unite, quantite, prix_unitaire_ttc,
            total_ht, total_ttc, total_tva, taux_tva, source)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-      `, [vakId, ticketId, txDate, refTx, moyenPaiement,
+      `, [vakId, ticketId, txDate.toISOString(), refTx, moyenPaiement,
           l.description, l.segment, l.unite, l.quantite, l.prix_unitaire_ttc,
           l.total_ht, l.total_ttc, l.total_tva, l.taux_tva, source]);
     }
@@ -860,6 +886,7 @@ module.exports = {
   importCSVContent,
   parseFRDate,
   getSegment,
+  normalizePaymentMethod,
   // Live
   emitLiveUpdate,
   captureWeatherForVak,

@@ -215,7 +215,7 @@ export default function VakAnnuel() {
             {hourly.length > 0 && (
               <div className="bg-white rounded-card shadow-card p-4 mb-6">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">
-                  Activité par tranche horaire — toutes les VAK {annee}
+                  Activité par tranche horaire — toutes les VAK {annee} <span className="text-xs font-normal text-slate-400">(heures GMT)</span>
                 </h3>
                 <ResponsiveContainer width="100%" height={240}>
                   <ComposedChart data={hourly.map((h) => ({ ...h, heure: `${h.heure}h` }))}>

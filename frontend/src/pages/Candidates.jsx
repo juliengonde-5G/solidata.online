@@ -118,23 +118,33 @@ export default function Candidates() {
     } catch (err) { console.error(err); }
   };
 
-  const handleConvertToEmployee = async (candidate) => {
+  // Liaison recrutement ↔ collaborateur : un collaborateur est créé UNIQUEMENT
+  // par la synchro RH (paye). Ici on RATTACHE le candidat à un collaborateur
+  // déjà existant → le profil PCM du recrutement remonte alors dans l'Insertion.
+  const [linkModal, setLinkModal] = useState(null); // candidat concerné, ou null
+
+  const handleUnlink = async (candidate) => {
     const ok = await confirm({
-      title: 'Convertir en employé',
-      message: `Confirmer la conversion de ${candidate.first_name} ${candidate.last_name} en employé ? Un parcours d'insertion sera créé.`,
-      confirmLabel: 'Convertir',
-      confirmVariant: 'primary',
+      title: 'Délier le collaborateur',
+      message: `Retirer le lien entre ${candidate.first_name} ${candidate.last_name} et le collaborateur ${candidate.linked_employee_name || ''} ? La fiche RH n'est pas supprimée.`,
+      confirmLabel: 'Délier',
+      confirmVariant: 'danger',
     });
     if (!ok) return;
     try {
-      const res = await api.post(`/candidates/${candidate.id}/convert-to-employee`, {
-        contract_type: 'CDD',
-        contract_start: new Date().toISOString().split('T')[0],
-      });
-      alert(`Employé créé avec succès (#${res.data.employee.id})`);
+      await api.post(`/candidates/${candidate.id}/unlink-employee`);
       loadAll();
+      if (selected?.id === candidate.id) setSelected(prev => ({ ...prev, linked_employee_id: null, linked_employee_name: null }));
     } catch (err) {
-      alert(err.response?.data?.error || 'Erreur lors de la conversion');
+      alert(err.response?.data?.error || 'Erreur lors du retrait du lien');
+    }
+  };
+
+  const onLinked = (candidateId, employee) => {
+    setLinkModal(null);
+    loadAll();
+    if (selected?.id === candidateId) {
+      setSelected(prev => ({ ...prev, linked_employee_id: employee.id, linked_employee_name: `${employee.first_name} ${employee.last_name}` }));
     }
   };
 
@@ -524,7 +534,7 @@ export default function Candidates() {
               <div className="p-5">
                 {detailTab === 'info' && (editing
                   ? <EditForm ef={editForm} set={setEditForm} save={saveEdit} cancel={() => setEditing(false)} positions={positions} />
-                  : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} onConvert={handleConvertToEmployee} />
+                  : <InfoView s={selected} skills={skills} positions={positions} onMove={(st) => moveCandidate(selected.id, st)} onLink={() => setLinkModal(selected)} onUnlink={() => handleUnlink(selected)} />
                 )}
                 {detailTab === 'entretien' && <InterviewFormView candidateId={selected.id} data={interviewForm} onSaved={(d) => setInterviewForm(d)} />}
                 {detailTab === 'situation' && <MiseEnSituationView candidateId={selected.id} data={miseEnSituation} onSaved={(d) => setMiseEnSituation(d)} />}
@@ -618,8 +628,99 @@ export default function Candidates() {
             </div>
           </Modal>
         )}
+
+        {linkModal && (
+          <LinkEmployeeModal
+            candidate={linkModal}
+            onClose={() => setLinkModal(null)}
+            onLinked={(emp) => onLinked(linkModal.id, emp)}
+          />
+        )}
       </div>
     </Layout>
+  );
+}
+
+// Modale de liaison : rattache un candidat (recrutement) à un collaborateur
+// EXISTANT (créé par la synchro RH). Aucune création de collaborateur ici.
+function LinkEmployeeModal({ candidate, onClose, onLinked }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(null);
+  const [search, setSearch] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setError('');
+    api.get(`/candidates/${candidate.id}/employee-matches`)
+      .then(r => { if (active) setSuggestions(r.data?.suggestions || []); })
+      .catch(err => { if (active) setError(err.response?.data?.error || 'Erreur de chargement des collaborateurs'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [candidate.id]);
+
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const filtered = useMemo(() => {
+    const q = norm(search).trim();
+    if (!q) return suggestions;
+    return suggestions.filter(e => norm(`${e.first_name} ${e.last_name} ${e.malibou_id || ''}`).includes(q));
+  }, [search, suggestions]);
+
+  const doLink = async (emp) => {
+    setSaving(emp.id); setError('');
+    try {
+      const r = await api.post(`/candidates/${candidate.id}/link-employee`, { employee_id: emp.id });
+      onLinked(r.data.employee || emp);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la liaison');
+      setSaving(null);
+    }
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Lier ${candidate.first_name} ${candidate.last_name} à un collaborateur`} size="md">
+      <div className="space-y-3">
+        <p className="text-xs text-slate-500">
+          Sélectionnez le collaborateur (importé depuis le logiciel de paye) correspondant à ce candidat.
+          Les collaborateurs déjà liés à une autre fiche n'apparaissent pas.
+        </p>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
+        <input
+          autoFocus
+          placeholder="Rechercher un collaborateur (nom, matricule)…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="input-modern w-full"
+        />
+        {loading ? (
+          <p className="text-sm text-slate-400 py-6 text-center">Chargement…</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-slate-400 py-6 text-center">
+            Aucun collaborateur disponible. Vérifiez que l'import RH (logiciel de paye) a bien été effectué.
+          </p>
+        ) : (
+          <ul className="max-h-72 overflow-y-auto divide-y border rounded-lg">
+            {filtered.slice(0, 100).map(e => (
+              <li key={e.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-800 truncate">
+                    {e.first_name} {e.last_name}
+                    {e.match_score >= 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">correspondance exacte</span>}
+                    {e.match_score >= 40 && e.match_score < 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">nom proche</span>}
+                    {!e.is_active && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold">inactif</span>}
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">{e.position || 'Poste non défini'}{e.malibou_id ? ` · Mat. ${e.malibou_id}` : ''}</div>
+                </div>
+                <button disabled={saving === e.id} onClick={() => doLink(e)} className="text-xs px-3 py-1.5 rounded-lg btn-primary shrink-0 disabled:opacity-50">
+                  {saving === e.id ? '…' : 'Lier'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -639,7 +740,7 @@ function Tag({ text, c }) {
   return <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${m[c] || m.gray}`}>{text}</span>;
 }
 
-function InfoView({ s, skills, positions, onMove, onConvert }) {
+function InfoView({ s, skills, positions, onMove, onLink, onUnlink }) {
   const pos = positions.find(p => p.id === s.position_id);
   return (
     <div className="space-y-3 text-sm">
@@ -656,13 +757,26 @@ function InfoView({ s, skills, positions, onMove, onConvert }) {
           ))}
         </div>
       </div>
-      {s.status === 'hired' && !s.employee_id && (
-        <div className="pt-3">
-          <button onClick={() => onConvert && onConvert(s)} className="w-full btn-primary text-sm flex items-center justify-center gap-2">
-            <span>Créer un employé</span>
-          </button>
-        </div>
-      )}
+      {/* Liaison au collaborateur RH (le collaborateur est créé par la paye, pas ici). */}
+      <div className="pt-3 border-t">
+        <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Collaborateur (RH)</p>
+        {s.linked_employee_id ? (
+          <div className="flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+            <div className="text-sm text-emerald-800">
+              Lié à <strong>{s.linked_employee_name || `#${s.linked_employee_id}`}</strong>
+              <span className="block text-[11px] text-emerald-600">Le profil PCM remonte dans le module Insertion.</span>
+            </div>
+            <button onClick={() => onUnlink && onUnlink(s)} className="text-xs px-2.5 py-1 rounded-full bg-white border border-red-200 text-red-600 hover:bg-red-50 font-medium shrink-0">Délier</button>
+          </div>
+        ) : (
+          <>
+            <button onClick={() => onLink && onLink(s)} className="w-full btn-primary text-sm flex items-center justify-center gap-2">
+              <span>Lier à un collaborateur</span>
+            </button>
+            <p className="text-[11px] text-gray-400 mt-1.5">Rattache cette fiche de recrutement à un collaborateur existant (importé depuis le logiciel de paye). Aucun collaborateur n'est créé ici.</p>
+          </>
+        )}
+      </div>
       {skills.length > 0 && (
         <div className="pt-2"><p className="text-xs font-semibold text-gray-500 uppercase mb-2">Compétences</p>
           <div className="flex flex-wrap gap-1">{skills.map(sk => <Tag key={sk.skill_name} text={sk.skill_name.replace(/_/g, ' ')} c={sk.status === 'confirmed' ? 'green' : 'orange'} />)}</div>

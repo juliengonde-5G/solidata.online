@@ -83,31 +83,18 @@ router.get('/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 });
 
 // POST /api/employees
-router.post('/', authorize('ADMIN', 'RH'), [
-  body('first_name').notEmpty().withMessage('Prénom requis'),
-  body('last_name').notEmpty().withMessage('Nom requis'),
-], validate, async (req, res) => {
-  try {
-    const { user_id, first_name, last_name, phone, email, team_id, position,
-      contract_type, contract_start, contract_end, has_permis_b, has_caces, weekly_hours, skills, candidate_id } = req.body;
-
-    if (!first_name || !last_name) return res.status(400).json({ error: 'Nom et prénom requis' });
-
-    const result = await pool.query(
-      `INSERT INTO employees (user_id, first_name, last_name, phone, email, team_id, position,
-       contract_type, contract_start, contract_end, has_permis_b, has_caces, weekly_hours, skills, candidate_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
-      [user_id || null, first_name, last_name, phone || null, email || null,
-       team_id ? Number(team_id) : null, position || null,
-       contract_type || null, contract_start || null, contract_end || null,
-       has_permis_b || false, has_caces || false, weekly_hours || 35, skills || [], candidate_id || null]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error('[EMPLOYEES] Erreur création :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+// POST /api/employees — DÉSACTIVÉ (409)
+// Règle métier : un collaborateur est créé UNIQUEMENT par la synchronisation RH
+// (import du logiciel de paye Malibou : POST /api/employees/import/xlsx|csv,
+// service collaborator-import.js). La création manuelle est bloquée pour
+// garantir que la base collaborateurs reste le miroir de la paye et éviter les
+// doublons/fiches fantômes. Le lien avec le recrutement se fait via
+// POST /api/candidates/:id/link-employee (liaison, pas création).
+router.post('/', authorize('ADMIN', 'RH'), async (req, res) => {
+  return res.status(409).json({
+    error: 'La création manuelle de collaborateur est désactivée.',
+    hint: "Les collaborateurs sont créés uniquement par la synchronisation RH (import du logiciel de paye, onglet « Importer »). Pour rattacher un candidat, utilisez « Lier à un collaborateur ».",
+  });
 });
 
 // PUT /api/employees/:id
@@ -165,6 +152,56 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[EMPLOYEES] Erreur modification :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/employees/:id/candidate-matches — fiches de recrutement candidates à la liaison
+// Renvoie le candidat déjà lié (le cas échéant) + les candidats NON encore liés
+// à un collaborateur, classés par proximité de nom. Sert au bouton « Lier une
+// fiche de recrutement » de la fiche collaborateur (le PCM du recrutement
+// remonte alors dans le module Insertion).
+router.get('/:id/candidate-matches', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const emp = await pool.query('SELECT id, first_name, last_name, candidate_id FROM employees WHERE id = $1', [id]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Collaborateur non trouvé' });
+    const e = emp.rows[0];
+
+    const linked = e.candidate_id
+      ? await pool.query('SELECT id, first_name, last_name, status, email FROM candidates WHERE id = $1', [e.candidate_id])
+      : { rows: [] };
+
+    // Candidats non encore rattachés à un collaborateur.
+    const cands = await pool.query(`
+      SELECT c.id, c.first_name, c.last_name, c.status, c.email,
+             EXISTS(SELECT 1 FROM pcm_sessions ps JOIN pcm_reports pr ON pr.session_id = ps.id
+                    WHERE ps.candidate_id = c.id) AS has_pcm
+      FROM candidates c
+      WHERE NOT EXISTS (SELECT 1 FROM employees em WHERE em.candidate_id = c.id)
+      ORDER BY c.last_name, c.first_name`);
+
+    const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+    const ef = norm(e.first_name); const el = norm(e.last_name);
+    const scored = cands.rows.map((c) => {
+      const cf = norm(c.first_name); const cl = norm(c.last_name);
+      let score = 0;
+      if (cf && cl && cf === ef && cl === el) score = 100;
+      else if (el && cl === el && cf && (cf.startsWith(ef) || ef.startsWith(cf))) score = 80;
+      else if (el && cl === el) score = 60;
+      else if (ef && cf === ef) score = 40;
+      else if (el && cl && (cl.includes(el) || el.includes(cl))) score = 20;
+      return { ...c, match_score: score };
+    }).sort((a, b) => b.match_score - a.match_score
+      || String(a.last_name || '').localeCompare(String(b.last_name || '')));
+
+    res.json({
+      employee: { id: e.id, first_name: e.first_name, last_name: e.last_name },
+      linked_candidate: linked.rows[0] || null,
+      suggestions: scored,
+    });
+  } catch (err) {
+    console.error('[EMPLOYEES] Erreur candidate-matches :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

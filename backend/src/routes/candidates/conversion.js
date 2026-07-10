@@ -4,129 +4,152 @@ const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
 
 // ══════════════════════════════════════════
-// CONVERSION CANDIDAT → EMPLOYÉ
+// LIAISON CANDIDAT (recrutement) ↔ COLLABORATEUR (RH)
+// ──────────────────────────────────────────
+// Règle métier : un collaborateur (table `employees`) est créé UNIQUEMENT par
+// la synchronisation RH (import du logiciel de paye Malibou, cf.
+// services/collaborator-import.js). Le recrutement ne crée jamais de
+// collaborateur — il se contente de LIER une fiche de recrutement à un
+// collaborateur déjà existant, en renseignant `employees.candidate_id`.
+//
+// Pourquoi : la base recrutement est saisie à la main, la base RH est alimentée
+// par la paye. Sans ce lien, le profil de personnalité PCM passé pendant le
+// recrutement ne remonte pas dans le module Insertion (celui-ci joint
+// pcm_reports → candidates → employees via `employees.candidate_id`).
 // ══════════════════════════════════════════
 
-// POST /api/candidates/:id/convert-to-employee — Convertir candidat en employé
+/** Normalise un nom pour l'appariement (sans accents, minuscules, trim). */
+function normName(s) {
+  return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+}
+
+// POST /api/candidates/:id/convert-to-employee — DÉSACTIVÉ (410 Gone)
+// Ancien flux qui CRÉAIT un collaborateur depuis le recrutement. Contraire à la
+// règle « seul le logiciel RH crée un collaborateur ». Conservé en stub pour
+// renvoyer un message explicite aux anciens clients.
 router.post('/:id/convert-to-employee', authorize('ADMIN', 'RH'), async (req, res) => {
+  return res.status(410).json({
+    error: "La création d'un collaborateur depuis le recrutement est désactivée.",
+    hint: "Les collaborateurs sont créés uniquement par la synchronisation RH (import du logiciel de paye). Utilisez « Lier à un collaborateur » pour rattacher cette fiche de recrutement à un collaborateur existant.",
+  });
+});
+
+// GET /api/candidates/:id/employee-matches — collaborateurs candidats à la liaison
+// Renvoie le collaborateur déjà lié (le cas échéant) + la liste des
+// collaborateurs NON liés, classés par proximité de nom avec le candidat.
+router.get('/:id/employee-matches', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cand = await pool.query('SELECT id, first_name, last_name FROM candidates WHERE id = $1', [id]);
+    if (cand.rows.length === 0) return res.status(404).json({ error: 'Candidat non trouvé' });
+    const c = cand.rows[0];
+
+    const linked = await pool.query(
+      `SELECT id, first_name, last_name, position, malibou_id, is_active
+       FROM employees WHERE candidate_id = $1`, [id]);
+
+    const emps = await pool.query(
+      `SELECT id, first_name, last_name, position, malibou_id, is_active
+       FROM employees WHERE candidate_id IS NULL
+       ORDER BY is_active DESC, last_name, first_name`);
+
+    const cf = normName(c.first_name); const cl = normName(c.last_name);
+    const scored = emps.rows.map((e) => {
+      const ef = normName(e.first_name); const el = normName(e.last_name);
+      let score = 0;
+      if (cf && cl && ef === cf && el === cl) score = 100;               // nom + prénom exacts
+      else if (cl && el === cl && cf && (ef.startsWith(cf) || cf.startsWith(ef))) score = 80;
+      else if (cl && el === cl) score = 60;                             // même nom de famille
+      else if (cf && ef === cf) score = 40;                            // même prénom
+      else if (el && cl && (el.includes(cl) || cl.includes(el))) score = 20;
+      return { ...e, match_score: score };
+    }).sort((a, b) => b.match_score - a.match_score
+      || String(a.last_name || '').localeCompare(String(b.last_name || '')));
+
+    res.json({
+      candidate: c,
+      linked_employee: linked.rows[0] || null,
+      suggestions: scored,
+    });
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur employee-matches :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/candidates/:id/link-employee { employee_id } — lier à un collaborateur existant
+router.post('/:id/link-employee', authorize('ADMIN', 'RH'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { team_id, position, contract_type, contract_start, weekly_hours } = req.body;
+    const employeeId = parseInt(req.body?.employee_id, 10);
+    if (!employeeId) { client.release(); return res.status(400).json({ error: 'employee_id requis' }); }
 
-    // Vérifier que le candidat existe et est au statut 'hired'
-    const candidate = await client.query('SELECT * FROM candidates WHERE id = $1', [id]);
-    if (candidate.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Candidat non trouvé' }); }
-    if (candidate.rows[0].status !== 'hired') {
+    const cand = await client.query('SELECT id, first_name, last_name, status FROM candidates WHERE id = $1', [id]);
+    if (cand.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Candidat non trouvé' }); }
+    const emp = await client.query('SELECT id, candidate_id, first_name, last_name FROM employees WHERE id = $1', [employeeId]);
+    if (emp.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Collaborateur non trouvé' }); }
+
+    // Ce collaborateur est-il déjà lié à un AUTRE candidat ?
+    if (emp.rows[0].candidate_id && Number(emp.rows[0].candidate_id) !== Number(id)) {
       client.release();
-      return res.status(400).json({ error: 'Le candidat doit être au statut "hired" pour être converti' });
+      return res.status(409).json({ error: 'Ce collaborateur est déjà lié à une autre fiche de recrutement.', candidate_id: emp.rows[0].candidate_id });
     }
-
-    // Vérifier qu'il n'est pas déjà converti
-    const existing = await client.query('SELECT id FROM employees WHERE candidate_id = $1', [id]);
-    if (existing.rows.length > 0) {
+    // Ce candidat est-il déjà lié à un AUTRE collaborateur ? (candidate_id est UNIQUE)
+    const other = await client.query('SELECT id FROM employees WHERE candidate_id = $1 AND id <> $2', [id, employeeId]);
+    if (other.rows.length > 0) {
       client.release();
-      return res.status(409).json({ error: 'Ce candidat a déjà été converti en employé', employee_id: existing.rows[0].id });
-    }
-
-    const c = candidate.rows[0];
-
-    // Vérifier que le candidat a un nom/prénom
-    if (!c.first_name || !c.last_name) {
-      client.release();
-      return res.status(400).json({ error: 'Le candidat doit avoir un prénom et un nom avant d\'être converti. Complétez sa fiche.' });
+      return res.status(409).json({ error: 'Ce candidat est déjà lié à un autre collaborateur.', employee_id: other.rows[0].id });
     }
 
     await client.query('BEGIN');
+    await client.query('UPDATE employees SET candidate_id = $1, updated_at = NOW() WHERE id = $2', [id, employeeId]);
 
-    // Récupérer les compétences confirmées du candidat
-    const skillsResult = await client.query(
-      "SELECT skill_name FROM candidate_skills WHERE candidate_id = $1 AND status IN ('confirmed', 'detected')",
-      [id]
-    );
-    const skills = skillsResult.rows.map(r => r.skill_name);
-
-    // Créer l'employé avec les données du candidat
-    const employee = await client.query(
-      `INSERT INTO employees (candidate_id, first_name, last_name, phone, email,
-       team_id, position, contract_type, contract_start, has_permis_b, has_caces,
-       weekly_hours, skills)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
-      [id, c.first_name, c.last_name, c.phone, c.email,
-       team_id || null, position || null, contract_type || 'CDD',
-       contract_start || new Date().toISOString().split('T')[0],
-       c.has_permis_b || false, c.has_caces || false,
-       weekly_hours || 35, skills]
-    );
-
-    // Logger dans l'historique du candidat
-    await client.query(
-      'INSERT INTO candidate_history (candidate_id, from_status, to_status, comment, changed_by) VALUES ($1, $2, $3, $4, $5)',
-      [id, 'hired', 'converted', `Converti en employé #${employee.rows[0].id}`, req.user.id]
-    );
-
-    // Créer le squelette du parcours d'insertion : diagnostic vide à compléter
-    // par le CIP au premier entretien d'accueil + jalons standards CDDI.
-    //
-    // Important : si l'une de ces étapes échoue, on rollback la conversion
-    // entière (vs ancienne version qui avalait silencieusement l'erreur,
-    // laissant un employé sans parcours d'insertion).
-    const empId = employee.rows[0].id;
-
-    // Diagnostic skeleton : employee_id + created_by suffisent. Les freins
-    // gardent leur DEFAULT 1 (= "pas de frein" — neutre, à ajuster par CIP).
-    // Aucune valeur sentinelle (l'ancien code mettait 3 partout, biaisant les
-    // plans d'action). Le CIP doit explicitement saisir au premier entretien.
-    await client.query(
-      `INSERT INTO insertion_diagnostics (employee_id, created_by)
-       VALUES ($1, $2)
-       ON CONFLICT (employee_id) DO NOTHING`,
-      [empId, req.user.id]
-    );
-
-    // Jalons standards CDDI : Diagnostic accueil (J+30), Bilan M+3, M+6, M+10.
-    // La sortie est créée manuellement par le CIP à la fin du contrat.
-    // Schéma canonique : milestone_type / due_date / status.
-    const startDate = new Date(contract_start || Date.now());
-    const milestones = [
-      { type: 'Diagnostic accueil', daysOffset: 30 },
-      { type: 'Bilan M+3', daysOffset: 90 },
-      { type: 'Bilan M+6', daysOffset: 180 },
-      { type: 'Bilan M+10', daysOffset: 300 },
-    ];
-    for (const m of milestones) {
-      const dueDate = new Date(startDate);
-      dueDate.setDate(dueDate.getDate() + m.daysOffset);
+    // Squelette de diagnostic d'insertion : garantit que le profil PCM du
+    // candidat remonte dans le module Insertion. Best effort — ne bloque pas la
+    // liaison si la table/contrainte n'existe pas sur une base ancienne.
+    try {
       await client.query(
-        `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, status)
-         VALUES ($1, $2, $3, 'a_planifier')
-         ON CONFLICT (employee_id, milestone_type) DO NOTHING`,
-        [empId, m.type, dueDate.toISOString().split('T')[0]]
-      );
-    }
+        `INSERT INTO insertion_diagnostics (employee_id, created_by)
+         VALUES ($1, $2) ON CONFLICT (employee_id) DO NOTHING`,
+        [employeeId, req.user.id]);
+    } catch (e) { /* non bloquant */ }
 
-    // Marquer l'employé comme en parcours d'insertion + dates indicatives
     await client.query(
-      `UPDATE employees
-       SET insertion_status = 'en_parcours',
-           insertion_start_date = $1
-       WHERE id = $2`,
-      [contract_start || new Date().toISOString().split('T')[0], empId]
-    );
-
+      'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
+      [id, cand.rows[0].status,
+        `Fiche de recrutement liée au collaborateur #${employeeId} (${emp.rows[0].first_name || ''} ${emp.rows[0].last_name || ''})`.trim(),
+        req.user.id]);
     await client.query('COMMIT');
 
-    res.status(201).json({
-      message: 'Candidat converti en employé avec succès',
-      employee: employee.rows[0],
-      skills_transferred: skills.length,
-    });
+    const updated = await pool.query(
+      'SELECT id, first_name, last_name, position, malibou_id, candidate_id, is_active FROM employees WHERE id = $1',
+      [employeeId]);
+    res.json({ message: 'Fiche de recrutement liée au collaborateur.', employee: updated.rows[0] });
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('[CANDIDATES] Erreur conversion :', err);
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[CANDIDATES] Erreur link-employee :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
     client.release();
+  }
+});
+
+// POST /api/candidates/:id/unlink-employee — délier
+router.post('/:id/unlink-employee', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const emp = await pool.query('SELECT id, first_name, last_name FROM employees WHERE candidate_id = $1', [id]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Aucun collaborateur lié à ce candidat.' });
+    const cand = await pool.query('SELECT status FROM candidates WHERE id = $1', [id]);
+    await pool.query('UPDATE employees SET candidate_id = NULL, updated_at = NOW() WHERE candidate_id = $1', [id]);
+    await pool.query(
+      'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
+      [id, cand.rows[0]?.status || null, `Liaison au collaborateur #${emp.rows[0].id} supprimée`, req.user.id]);
+    res.json({ message: 'Liaison supprimée.', employee_id: emp.rows[0].id });
+  } catch (err) {
+    console.error('[CANDIDATES] Erreur unlink-employee :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

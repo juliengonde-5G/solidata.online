@@ -221,7 +221,7 @@ export default function VakLive() {
       {/* Charts + Ticker */}
       <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
         <div className="col-span-2 bg-white/5 backdrop-blur rounded-2xl p-4 border border-white/10">
-          <h3 className="text-lg font-semibold text-slate-200 mb-2">CA & tickets par heure</h3>
+          <h3 className="text-lg font-semibold text-slate-200 mb-2">CA & tickets par heure <span className="text-xs font-normal text-slate-500">(GMT)</span></h3>
           {hourlyChart.length === 0 ? (
             <p className="text-slate-400 text-center py-8">En attente des premières ventes…</p>
           ) : (
@@ -241,7 +241,7 @@ export default function VakLive() {
         </div>
 
         <div className="bg-white/5 backdrop-blur rounded-2xl p-4 border border-white/10 flex flex-col">
-          <h3 className="text-lg font-semibold text-slate-200 mb-3">Dernières ventes</h3>
+          <h3 className="text-lg font-semibold text-slate-200 mb-3">Dernières ventes <span className="text-xs font-normal text-slate-500">(heures GMT)</span></h3>
           {ticker.length === 0 ? (
             <p className="text-slate-400 text-sm">En attente…</p>
           ) : (
@@ -250,7 +250,8 @@ export default function VakLive() {
                 <li key={t.id || i} className={`bg-white/5 rounded-lg px-3 py-2 flex items-center justify-between ${i === 0 ? 'ring-2 ring-orange-400 animate-pulse-once' : ''}`}>
                   <div>
                     <div className="text-xs text-slate-400">
-                      {new Date(t.date_ticket || Date.now()).toLocaleTimeString('fr-FR')}
+                      {/* Horaires SumUp en GMT/UTC — affichés tels quels pour rester cohérents avec l'export SumUp et les graphes par heure. */}
+                      {new Date(t.date_ticket || Date.now()).toLocaleTimeString('fr-FR', { timeZone: 'UTC' })}
                     </div>
                     <div className="text-sm text-slate-200">
                       {t.moyen_paiement || '—'}{' • '}
