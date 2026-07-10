@@ -120,44 +120,95 @@ export default function AuditInsertion() {
     const freins = data.freins_moyennes || {};
     const s = data.sorties || {};
     const act = data.actions || {};
+    const date = new Date().toLocaleDateString('fr-FR');
+    const barColor = (pct) => (pct == null ? '#94a3b8' : pct >= 80 ? '#16a34a' : pct >= 50 ? '#d97706' : '#dc2626');
     const li = (arr) => (arr && arr.length ? '<ul>' + arr.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : '<p style="color:#9ca3af">—</p>');
+    const kpi = (l, v, sub) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ''}</div>`;
+    const miniTable = (title, obj, labels) => `<div style="flex:1"><div class="mini-h">${title}</div>${Object.keys(obj || {}).length ? Object.entries(obj).map(([k, n]) => `<div class="mini-row"><span>${esc(labels?.[k] || k)}</span><span>${n}</span></div>`).join('') : '<div class="mini-row" style="color:#9ca3af">—</div>'}</div>`;
 
-    let body = `<div class="header"><div><h1>Audit Insertion — Situation de la structure</h1>`
-      + `<div class="sub">Solidarité Textiles • Année ${data.annee} • Édité le ${new Date().toLocaleDateString('fr-FR')}</div></div></div>`;
-
-    body += `<div class="section"><div class="section-title">Indicateurs clés</div><table>`
-      + `<tr><th>Personnes en parcours</th><td>${data.nb_en_parcours}</td></tr>`
-      + `<tr><th>Taux de réalisation des jalons (échus)</th><td>${data.milestones?.global?.taux ?? '—'} %</td></tr>`
-      + `<tr><th>Plans d'action en cours</th><td>${act.total_en_cours || 0}</td></tr>`
-      + `<tr><th>Sorties (${data.annee})</th><td>${s.total || 0} — dont ${s.positives || 0} dynamiques (${s.taux_dynamiques ?? '—'} %)</td></tr>`
-      + `</table></div>`;
-
-    body += `<div class="section"><div class="section-title">Réalisation des entretiens / bilans par échéance</div><table>`
-      + `<tr><th>Jalon</th><th>Échus</th><th>Réalisés (échus)</th><th>Taux</th></tr>`
-      + ms.map((m) => `<tr><td>${esc(m.type)}</td><td>${m.echus}</td><td>${m.realises_echus}</td><td>${m.taux_echeance ?? '—'} %</td></tr>`).join('')
-      + `</table></div>`;
-
-    body += `<div class="section"><div class="section-title">Cartographie consolidée des 7 freins (moyenne /5)</div><table>`
-      + Object.keys(FREIN_LABELS).map((k) => `<tr><th>${FREIN_LABELS[k]}</th><td>${freins[k] ?? '—'}</td></tr>`).join('')
-      + `</table></div>`;
-
-    body += `<div class="section"><div class="section-title">Sorties par type</div><table>`
-      + (Object.keys(s.par_type || {}).length ? Object.entries(s.par_type).map(([t, n]) => `<tr><th>${esc(t)}</th><td>${n}</td></tr>`).join('') : '<tr><td colspan="2" style="color:#9ca3af">Aucune sortie sur la période</td></tr>')
-      + `</table></div>`;
-
-    if (ia) {
-      body += `<div class="section"><div class="section-title">Rapport IA — Situation globale</div>`;
-      if (ia.synthese_direction) body += `<div class="card"><strong>Synthèse direction</strong>\n${esc(ia.synthese_direction)}</div>`;
-      if (ia.situation_globale) body += `<div class="card" style="margin-top:8px"><strong>Situation globale</strong>\n${esc(ia.situation_globale)}</div>`;
-      if (ia.profil_public) body += `<div class="card" style="margin-top:8px"><strong>Profil du public</strong>\n${esc(ia.profil_public)}</div>`;
-      if (ia.points_forts) body += `<div class="section" style="margin-top:8px"><strong>Points forts</strong>${li(ia.points_forts)}</div>`;
-      if (ia.points_vigilance) body += `<div class="section"><strong>Points de vigilance</strong>${li(ia.points_vigilance)}</div>`;
-      if (ia.recommandations_structure && ia.recommandations_structure.length) {
-        body += `<div class="section"><strong>Recommandations pour la structure</strong><table><tr><th>Action</th><th>Objectif</th><th>Échéance</th></tr>`
-          + ia.recommandations_structure.map((r) => `<tr><td>${esc(r.action)}</td><td>${esc(r.objectif)}</td><td>${esc(r.echeance_suggeree)}</td></tr>`).join('')
-          + `</table></div>`;
+    // Radar SVG des 7 freins (toile d'araignée), même géométrie que l'écran.
+    const radarSvg = (m) => {
+      const keys = Object.keys(FREIN_LABELS);
+      const size = 300, cx = 150, cy = 150, r = 90;
+      const n = keys.length, step = (2 * Math.PI) / n;
+      const pt = (i, v) => { const a = step * i - Math.PI / 2; const d = (Math.max(0, Math.min(5, v)) / 5) * r; return [cx + d * Math.cos(a), cy + d * Math.sin(a)]; };
+      const poly = (v) => keys.map((_, i) => pt(i, v).map((x) => x.toFixed(1)).join(',')).join(' ');
+      const vals = keys.map((k) => Number(m?.[k]) || 0);
+      let g = '';
+      [1, 2, 3, 4, 5].forEach((lvl) => { g += `<polygon points="${poly(lvl)}" fill="none" stroke="#e5e7eb" stroke-width="${lvl === 5 ? 1.2 : 0.5}"/>`; });
+      keys.forEach((k, i) => { const [x, y] = pt(i, 5); g += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#e5e7eb" stroke-width="0.5"/>`; });
+      keys.forEach((k, i) => { const [x, y] = pt(i, 5.75); g += `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" font-size="9.5" fill="#475569">${FREIN_LABELS[k]}</text>`; });
+      if (vals.some((v) => v > 0)) {
+        g += `<polygon points="${keys.map((_, i) => pt(i, vals[i]).map((x) => x.toFixed(1)).join(',')).join(' ')}" fill="#0D9488" fill-opacity="0.18" stroke="#0D9488" stroke-width="2"/>`;
+        vals.forEach((v, i) => { const [x, y] = pt(i, v); g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="#0D9488"/>`; });
       }
-      if (ia.conclusion) body += `<div class="card" style="margin-top:8px"><strong>Conclusion</strong>\n${esc(ia.conclusion)}</div>`;
+      return `<svg width="240" height="240" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+    };
+
+    let body = `<div class="header"><div><h1>SOLIDATA — Audit Insertion</h1>`
+      + `<div class="sub">Situation d'insertion de la structure • Année ${data.annee}</div></div>`
+      + `<div style="text-align:right"><div class="sub">Solidarité Textiles</div><div class="sub">Édité le ${date}</div></div></div>`;
+
+    // 1. Indicateurs clés — cartes KPI
+    body += `<div class="section"><div class="section-title">Indicateurs clés</div><div class="kpis">`
+      + kpi('Personnes en parcours', data.nb_en_parcours, null)
+      + kpi('Réalisation jalons (échus)', (data.milestones?.global?.taux ?? '—') + ' %', `${data.milestones?.global?.realises_echus || 0}/${data.milestones?.global?.echus || 0} échus`)
+      + kpi("Plans d'action en cours", act.total_en_cours || 0, null)
+      + kpi(`Sorties dynamiques ${data.annee}`, (s.taux_dynamiques ?? '—') + (s.taux_dynamiques != null ? ' %' : ''), `${s.positives || 0}/${s.total || 0} sorties`)
+      + `</div></div>`;
+
+    // 2. Réalisation par échéance — barres
+    body += `<div class="section"><div class="section-title">Réalisation des entretiens / bilans par échéance</div>`
+      + ms.map((m) => {
+        const pct = m.taux_echeance;
+        const w = pct == null ? 0 : Math.max(pct, 2);
+        return `<div class="bar-row"><div class="bar-label">${esc(m.type)}</div><div class="bar-bg"><div class="bar-fill" style="width:${w}%;background:${barColor(pct)}"></div></div><div class="bar-val">${pct == null ? 'n/a' : pct + '%'} (${m.realises_echus}/${m.echus})</div></div>`;
+      }).join('')
+      + `<div class="note">Taux = jalons réalisés parmi ceux dont l'échéance est passée.</div></div>`;
+
+    // 3. Radar des 7 freins + barres
+    body += `<div class="section"><div class="section-title">Cartographie consolidée des 7 freins (moyenne /5)</div><div class="two">`
+      + `<div style="flex:0 0 250px;text-align:center">${radarSvg(freins)}</div>`
+      + `<div style="flex:1">`
+      + Object.keys(FREIN_LABELS).map((k) => {
+        const v = freins[k]; const pct = v ? (v / 5) * 100 : 0;
+        return `<div class="bar-row"><div class="bar-label" style="width:88px">${FREIN_LABELS[k]}</div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:#0D9488"></div></div><div class="bar-val" style="width:30px">${v != null ? v : '—'}</div></div>`;
+      }).join('')
+      + `<div class="note">Sur ${data.freins_nb_evalues || 0} salarié(s) évalué(s)${data.frein_dominant ? ` — frein dominant : ${FREIN_LABELS[data.frein_dominant]}` : ''}.</div>`
+      + `</div></div></div>`;
+
+    // 4. Sorties & statistiques
+    const sortieBox = (v, l, color) => `<div class="statbox"><div class="statv" style="color:${color}">${v}</div><div class="statl">${l}</div></div>`;
+    body += `<div class="section"><div class="section-title">Sorties &amp; statistiques (${data.annee})</div><div class="statrow">`
+      + sortieBox(s.total || 0, 'Total', '#0f172a') + sortieBox(s.positives || 0, 'Dynamiques', '#16a34a') + sortieBox(s.negatives || 0, 'Autres', '#64748b')
+      + `</div>`
+      + (s.total > 0 ? `<div class="bar-row" style="margin-top:6px"><div class="bar-label">Taux dynamiques</div><div class="bar-bg"><div class="bar-fill" style="width:${s.taux_dynamiques ?? 0}%;background:#16a34a"></div></div><div class="bar-val">${s.taux_dynamiques ?? '—'} %</div></div>` : '')
+      + (Object.keys(s.par_type || {}).length ? `<table><tr><th>Type de sortie</th><th style="text-align:right">Nombre</th></tr>${Object.entries(s.par_type).map(([t, n]) => `<tr><td>${esc(t)}</td><td style="text-align:right">${n}</td></tr>`).join('')}</table>` : `<div class="note">Aucune sortie enregistrée sur la période.</div>`)
+      + `</div>`;
+
+    // 5. Plans d'action en cours
+    body += `<div class="section"><div class="section-title">Plans d'action en cours</div>`
+      + `<div style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:6px">${act.total_en_cours || 0} <span style="font-size:11px;font-weight:400;color:#94a3b8">action(s) active(s)</span></div>`
+      + `<div class="two">${miniTable('Par statut', act.par_statut, STATUS_LABELS)}${miniTable('Par catégorie', act.par_categorie, CATEGORY_LABELS)}${miniTable('Par priorité', act.par_priorite, PRIORITY_LABELS)}</div></div>`;
+
+    // 6. Rapport IA
+    if (ia) {
+      body += `<div class="section brk"><div class="section-title">Rapport IA — Situation globale &amp; public</div>`;
+      if (ia.synthese_direction) body += `<div class="card hl"><div class="lbl">Synthèse direction</div>${esc(ia.synthese_direction)}</div>`;
+      if (ia.situation_globale) body += `<div class="card"><div class="lbl">Situation globale</div>${esc(ia.situation_globale)}</div>`;
+      if (ia.profil_public) body += `<div class="card"><div class="lbl">Profil du public accompagné</div>${esc(ia.profil_public)}</div>`;
+      if ((ia.points_forts && ia.points_forts.length) || (ia.points_vigilance && ia.points_vigilance.length)) {
+        body += `<div class="two">`
+          + `<div style="flex:1"><div class="lbl" style="color:#16a34a">Points forts</div>${li(ia.points_forts)}</div>`
+          + `<div style="flex:1"><div class="lbl" style="color:#d97706">Points de vigilance</div>${li(ia.points_vigilance)}</div></div>`;
+      }
+      if (ia.recommandations_structure && ia.recommandations_structure.length) {
+        body += `<div class="lbl" style="margin-top:6px">Recommandations pour la structure</div><table><tr><th>Action</th><th>Objectif</th><th>Échéance</th></tr>`
+          + ia.recommandations_structure.map((r) => `<tr><td>${esc(r.action)}</td><td>${esc(r.objectif)}</td><td>${esc(r.echeance_suggeree)}</td></tr>`).join('')
+          + `</table>`;
+      }
+      if (ia.conclusion) body += `<div style="margin-top:6px;font-style:italic;color:#475569">${esc(ia.conclusion)}</div>`;
+      if (ia._raw) body += `<div class="card">${esc(ia._raw)}</div>`;
       body += `</div>`;
     }
 
@@ -166,17 +217,26 @@ export default function AuditInsertion() {
     const w = window.open('', '_blank', 'width=820,height=1100');
     if (!w) { alert('Popup bloquée — autorisez les popups pour exporter le PDF.'); return; }
     w.document.write('<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"/><title>Audit_Insertion_' + data.annee + '</title><style>'
-      + '@page { size: A4; margin: 15mm 12mm; } * { box-sizing: border-box; margin: 0; padding: 0; }'
+      + '@page { size: A4; margin: 14mm 12mm; } * { box-sizing: border-box; margin: 0; padding: 0; }'
       + "body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; line-height: 1.45; }"
-      + '.header { background: #0D9488; color: white; padding: 14px 20px; }'
+      + '.header { background: #0D9488; color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }'
       + '.header h1 { font-size: 18px; font-weight: 700; } .header .sub { font-size: 11px; opacity: .9; }'
-      + '.section { margin: 12px 0; padding: 0 4px; }'
+      + '.section { margin: 12px 0; padding: 0 4px; page-break-inside: avoid; } .brk { page-break-before: auto; }'
       + '.section-title { font-size: 13px; font-weight: 700; color: #0D9488; border-bottom: 2px solid #0D9488; padding-bottom: 3px; margin-bottom: 8px; }'
-      + '.card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; white-space: pre-wrap; }'
-      + 'ul { margin: 4px 0 4px 18px; } li { margin: 2px 0; }'
+      + '.kpis { display: flex; gap: 8px; } .kpi { flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; background: #fafafa; }'
+      + '.kpi .l { font-size: 8px; color: #64748b; text-transform: uppercase; font-weight: 600; letter-spacing: .02em; } .kpi .v { font-size: 19px; font-weight: 800; color: #0f172a; line-height: 1.2; } .kpi .s { font-size: 8px; color: #94a3b8; }'
+      + '.bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; } .bar-label { width: 130px; font-size: 10px; color: #475569; flex-shrink: 0; }'
+      + '.bar-bg { flex: 1; background: #f1f5f9; border-radius: 4px; height: 15px; overflow: hidden; } .bar-fill { height: 15px; border-radius: 4px; } .bar-val { width: 92px; text-align: right; font-size: 9px; color: #64748b; flex-shrink: 0; }'
+      + '.two { display: flex; gap: 14px; align-items: flex-start; }'
+      + '.statrow { display: flex; gap: 8px; } .statbox { flex: 1; text-align: center; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; } .statv { font-size: 22px; font-weight: 800; } .statl { font-size: 9px; color: #64748b; }'
+      + '.mini-h { font-size: 8px; color: #64748b; text-transform: uppercase; font-weight: 700; margin-bottom: 3px; } .mini-row { display: flex; justify-content: space-between; font-size: 10px; padding: 1px 0; border-bottom: 1px solid #f3f4f6; }'
+      + '.card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; white-space: pre-wrap; margin-top: 6px; } .card.hl { background: #F0FDFA; border-color: #99f6e4; }'
+      + '.lbl { font-size: 9px; font-weight: 700; color: #0D9488; text-transform: uppercase; margin-bottom: 3px; }'
+      + '.note { font-size: 8.5px; color: #9ca3af; margin-top: 4px; }'
+      + 'ul { margin: 3px 0 3px 16px; } li { margin: 2px 0; font-size: 10px; }'
       + 'table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }'
-      + 'th { background: #f9fafb; text-align: left; padding: 5px 6px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e5e7eb; }'
-      + 'td { padding: 5px 6px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }'
+      + 'th { background: #f9fafb; text-align: left; padding: 4px 6px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e5e7eb; }'
+      + 'td { padding: 4px 6px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }'
       + '.footer { text-align: center; color: #9ca3af; font-size: 9px; margin-top: 16px; padding-top: 8px; border-top: 1px solid #e5e7eb; }'
       + '@media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }'
       + '</style></head><body>' + body + '</body></html>');
