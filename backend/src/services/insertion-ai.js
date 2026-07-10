@@ -31,6 +31,20 @@ function extractText(response) {
     .trim();
 }
 
+// Parse tolérant du JSON renvoyé par le modèle : retire les fences markdown
+// (```json … ```), tente le parse direct puis, en repli, du 1er { au dernier }.
+// Renvoie null si rien d'exploitable (ex. JSON tronqué par max_tokens).
+function parseJsonLoose(text) {
+  if (!text) return null;
+  const cleaned = text.trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '');
+  try { return JSON.parse(cleaned); } catch { /* essaie l'extraction par accolades */ }
+  const m = cleaned.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch { /* tronqué / invalide */ } }
+  return null;
+}
+
 const SYSTEM_INSERTION = `Tu es l'IA d'accompagnement insertion de Solidata, une SIAE (Structure d'Insertion par l'Activité Économique) spécialisée dans le textile à Rouen.
 
 Tu accompagnes le CIP (Conseiller en Insertion Professionnelle) dans le suivi des salariés en parcours d'insertion (CDDI max 24 mois).
@@ -190,7 +204,7 @@ async function analyseProfilComplet(employeeId) {
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 2500,
+    max_tokens: 4000,
     system: SYSTEM_INSERTION,
     messages: [{
       role: 'user',
@@ -209,13 +223,8 @@ Réponds en JSON avec les clés :
     }],
   });
 
-  const text = extractText(response) || '{}';
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { synthese: text };
-  } catch {
-    return { synthese: text };
-  }
+  const text = extractText(response);
+  return parseJsonLoose(text) || { synthese: text || 'Aucun contenu renvoyé par le modèle.' };
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -251,7 +260,7 @@ async function preparerEntretien(employeeId, milestoneType) {
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 1500,
+    max_tokens: 3000,
     system: SYSTEM_INSERTION,
     messages: [{
       role: 'user',
@@ -269,13 +278,8 @@ Réponds en JSON :
     }],
   });
 
-  const text = extractText(response) || '{}';
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { intro_conseillee: text };
-  } catch {
-    return { intro_conseillee: text };
-  }
+  const text = extractText(response);
+  return parseJsonLoose(text) || { intro_conseillee: text || 'Aucun contenu renvoyé par le modèle.' };
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -357,7 +361,7 @@ async function bilanCohorte() {
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 2000,
+    max_tokens: 4000,
     system: SYSTEM_INSERTION,
     messages: [{
       role: 'user',
@@ -375,13 +379,8 @@ Réponds en JSON :
     }],
   });
 
-  const text = extractText(response) || '{}';
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { synthese: text };
-  } catch {
-    return { synthese: text };
-  }
+  const text = extractText(response);
+  return parseJsonLoose(text) || { synthese: text || 'Aucun contenu renvoyé par le modèle.' };
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -398,7 +397,7 @@ async function auditGlobalReport({ kpis, verbatims }) {
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 3000,
+    max_tokens: 6000,
     system: SYSTEM_INSERTION,
     messages: [{
       role: 'user',
@@ -431,16 +430,10 @@ Réponds STRICTEMENT en JSON avec les clés :
     // raisonnement, refus, ou format inattendu).
     return { synthese_direction: `Le modèle IA n'a renvoyé aucun contenu texte (blocs=[${blocs}], stop=${response.stop_reason}). Réessayez ; si cela persiste, vérifiez CLAUDE_MODEL et le quota Anthropic (logs serveur [AUDIT-IA]).` };
   }
-  let parsed = null;
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    console.warn('[INSERTION][AUDIT-IA] JSON non parsable (', e.message, ') — repli texte brut');
-  }
+  const parsed = parseJsonLoose(text);
   // JAMAIS silencieux : si le JSON attendu n'est pas exploitable (parse KO,
   // objet vide, clés inattendues, ou réponse tronquée max_tokens), on renvoie
-  // au moins le texte brut sous synthese_direction pour que l'UI affiche qqch.
+  // le texte brut sous `_raw` (l'UI l'affiche en bloc, pas dans « Synthèse »).
   const hasContent = parsed && (parsed.synthese_direction || parsed.situation_globale || parsed.profil_public
     || (Array.isArray(parsed.points_forts) && parsed.points_forts.length)
     || (Array.isArray(parsed.recommandations_structure) && parsed.recommandations_structure.length));
@@ -448,7 +441,8 @@ Réponds STRICTEMENT en JSON avec les clés :
     if (response.stop_reason === 'max_tokens') parsed._tronque = true;
     return parsed;
   }
-  return { synthese_direction: text };
+  console.warn(`[INSERTION][AUDIT-IA] JSON non exploitable (stop=${response.stop_reason}) — repli texte brut`);
+  return { _raw: text, _tronque: response.stop_reason === 'max_tokens' };
 }
 
 module.exports = {

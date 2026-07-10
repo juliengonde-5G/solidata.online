@@ -5,7 +5,7 @@ import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks } f
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
-const IA_TIMEOUT = 120000;
+const IA_TIMEOUT = 180000; // rapport riche (max_tokens élevé) — nginx autorise 300 s sur /api
 
 const FREIN_LABELS = {
   frein_mobilite: 'Mobilité', frein_sante: 'Santé', frein_finances: 'Finances',
@@ -366,7 +366,7 @@ export default function AuditInsertion() {
                   {!ia.synthese_direction && !ia.situation_globale && !ia.profil_public
                     && !(ia.points_forts?.length) && !(ia.points_vigilance?.length)
                     && !(ia.recommandations_structure?.length) && !ia.conclusion && (
-                    <pre className="text-xs whitespace-pre-wrap text-slate-600 bg-gray-50 border rounded p-3">{typeof ia === 'string' ? ia : JSON.stringify(ia, null, 2)}</pre>
+                    <pre className="text-xs whitespace-pre-wrap text-slate-600 bg-gray-50 border rounded p-3">{ia._raw || (typeof ia === 'string' ? ia : JSON.stringify(ia, null, 2))}</pre>
                   )}
                 </div>
               )}
