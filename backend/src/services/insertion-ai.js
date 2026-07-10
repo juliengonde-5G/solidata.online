@@ -411,13 +411,30 @@ Réponds STRICTEMENT en JSON avec les clés :
     }],
   });
 
-  const text = response.content[0]?.text || '{}';
+  const text = response.content[0]?.text || '';
+  console.log(`[INSERTION][AUDIT-IA] réponse reçue : ${text.length} car., stop_reason=${response.stop_reason}, tokens_out=${response.usage?.output_tokens}`);
+  if (!text.trim()) {
+    // Le modèle n'a rien renvoyé (contenu vide, refus, ou format inattendu).
+    return { synthese_direction: "Le modèle IA n'a renvoyé aucun contenu exploitable. Réessayez ; si cela persiste, vérifiez CLAUDE_MODEL et le quota Anthropic (logs serveur [AUDIT-IA])." };
+  }
+  let parsed = null;
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { synthese_direction: text };
-  } catch {
-    return { synthese_direction: text };
+    if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    console.warn('[INSERTION][AUDIT-IA] JSON non parsable (', e.message, ') — repli texte brut');
   }
+  // JAMAIS silencieux : si le JSON attendu n'est pas exploitable (parse KO,
+  // objet vide, clés inattendues, ou réponse tronquée max_tokens), on renvoie
+  // au moins le texte brut sous synthese_direction pour que l'UI affiche qqch.
+  const hasContent = parsed && (parsed.synthese_direction || parsed.situation_globale || parsed.profil_public
+    || (Array.isArray(parsed.points_forts) && parsed.points_forts.length)
+    || (Array.isArray(parsed.recommandations_structure) && parsed.recommandations_structure.length));
+  if (hasContent) {
+    if (response.stop_reason === 'max_tokens') parsed._tronque = true;
+    return parsed;
+  }
+  return { synthese_direction: text };
 }
 
 module.exports = {

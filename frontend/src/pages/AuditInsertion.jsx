@@ -324,6 +324,7 @@ export default function AuditInsertion() {
 
               {ia && (
                 <div className="space-y-3">
+                  {ia._tronque && <div className="text-xs bg-amber-50 border border-amber-200 text-amber-700 rounded-lg p-2">Rapport tronqué (limite de longueur du modèle atteinte) — le contenu peut être incomplet.</div>}
                   {ia.synthese_direction && (
                     <div className="bg-violet-50 border border-violet-200 rounded-lg p-3">
                       <p className="text-xs font-semibold text-violet-700 mb-1">Synthèse direction</p>
@@ -360,6 +361,12 @@ export default function AuditInsertion() {
                   )}
                   {ia.conclusion && (
                     <div className="border-t pt-2"><p className="text-sm italic text-slate-600 whitespace-pre-wrap">{ia.conclusion}</p></div>
+                  )}
+                  {/* Filet de sécurité : jamais silencieux si le format est inattendu */}
+                  {!ia.synthese_direction && !ia.situation_globale && !ia.profil_public
+                    && !(ia.points_forts?.length) && !(ia.points_vigilance?.length)
+                    && !(ia.recommandations_structure?.length) && !ia.conclusion && (
+                    <pre className="text-xs whitespace-pre-wrap text-slate-600 bg-gray-50 border rounded p-3">{typeof ia === 'string' ? ia : JSON.stringify(ia, null, 2)}</pre>
                   )}
                 </div>
               )}
