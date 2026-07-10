@@ -19,6 +19,18 @@ function getClient() {
 // Surchargeable sans redéploiement via la variable d'env CLAUDE_MODEL.
 const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
 
+// Extrait le texte de TOUS les blocs `text` de la réponse (et pas seulement
+// content[0]) : selon le modèle, le 1er bloc peut être autre chose (ex. bloc
+// de raisonnement), et lire content[0].text renverrait alors une chaîne vide.
+function extractText(response) {
+  const blocks = (response && response.content) || [];
+  return blocks
+    .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+}
+
 const SYSTEM_INSERTION = `Tu es l'IA d'accompagnement insertion de Solidata, une SIAE (Structure d'Insertion par l'Activité Économique) spécialisée dans le textile à Rouen.
 
 Tu accompagnes le CIP (Conseiller en Insertion Professionnelle) dans le suivi des salariés en parcours d'insertion (CDDI max 24 mois).
@@ -197,7 +209,7 @@ Réponds en JSON avec les clés :
     }],
   });
 
-  const text = response.content[0]?.text || '{}';
+  const text = extractText(response) || '{}';
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { synthese: text };
@@ -257,7 +269,7 @@ Réponds en JSON :
     }],
   });
 
-  const text = response.content[0]?.text || '{}';
+  const text = extractText(response) || '{}';
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { intro_conseillee: text };
@@ -363,7 +375,7 @@ Réponds en JSON :
     }],
   });
 
-  const text = response.content[0]?.text || '{}';
+  const text = extractText(response) || '{}';
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { synthese: text };
@@ -411,11 +423,13 @@ Réponds STRICTEMENT en JSON avec les clés :
     }],
   });
 
-  const text = response.content[0]?.text || '';
-  console.log(`[INSERTION][AUDIT-IA] réponse reçue : ${text.length} car., stop_reason=${response.stop_reason}, tokens_out=${response.usage?.output_tokens}`);
-  if (!text.trim()) {
-    // Le modèle n'a rien renvoyé (contenu vide, refus, ou format inattendu).
-    return { synthese_direction: "Le modèle IA n'a renvoyé aucun contenu exploitable. Réessayez ; si cela persiste, vérifiez CLAUDE_MODEL et le quota Anthropic (logs serveur [AUDIT-IA])." };
+  const text = extractText(response);
+  const blocs = (response.content || []).map((b) => b.type).join(',');
+  console.log(`[INSERTION][AUDIT-IA] blocs=[${blocs}] len=${text.length} stop=${response.stop_reason} out=${response.usage?.output_tokens}`);
+  if (!text) {
+    // Le modèle n'a produit aucun bloc texte (budget consommé par le
+    // raisonnement, refus, ou format inattendu).
+    return { synthese_direction: `Le modèle IA n'a renvoyé aucun contenu texte (blocs=[${blocs}], stop=${response.stop_reason}). Réessayez ; si cela persiste, vérifiez CLAUDE_MODEL et le quota Anthropic (logs serveur [AUDIT-IA]).` };
   }
   let parsed = null;
   try {
