@@ -113,15 +113,39 @@ function decode(fport, hexPayload) {
 }
 
 /**
- * Calcule le % de remplissage à partir de la distance mesurée et de la hauteur
- * du CAV vide (calibration terrain).
- * @param {number} distance_cm   — distance entre le capteur et le textile, en cm
- * @param {number} sensor_height_cm — hauteur vide mesurée, en cm
- * @returns {number|null} — 0 à 100, ou null si calibration manquante
+ * Calcule le % de remplissage à partir de la distance mesurée et de la calibration
+ * terrain du CAV. Modèle **deux points** (recommandé) :
+ *
+ *   - `distance_empty_cm` : distance sonde → contenu quand le CAV est **vide** → 0 %
+ *   - `distance_full_cm`  : distance sonde → contenu quand le CAV est **plein** → 100 %
+ *
+ *   remplissage% = (empty − d) / (empty − full) × 100, borné 0–100.
+ *
+ * Pourquoi deux points : la sonde Milesight EM400-MUD est posée dans le dôme/couvercle,
+ * au-dessus de l'ouverture du conteneur, et possède une zone morte. Un CAV « plein »
+ * (bon à collecter) n'est donc jamais à distance 0 : le textile plafonne à une distance
+ * `distance_full_cm` sous la sonde (typiquement 25–45 cm). Sans ce second point, un CAV
+ * réellement plein plafonne artificiellement à ~85 % et n'atteint jamais 100 %.
+ *
+ * **Rétro-compatibilité** : si `distance_full_cm` est absent / invalide, on retombe
+ * exactement sur le modèle historique mono-point (plein = distance 0), soit
+ * remplissage% = (1 − d/empty) × 100 — aucune régression sur les CAV non recalibrés.
+ *
+ * @param {number} distance_cm        — distance mesurée sonde→textile, en cm
+ * @param {number} distance_empty_cm  — distance à vide (ex-`sensor_height_cm`), en cm
+ * @param {number} [distance_full_cm] — distance à plein (zone morte / niveau de collecte), en cm
+ * @returns {number|null} — 0 à 100, ou null si calibration manquante/incohérente
  */
-function computeFillPercent(distance_cm, sensor_height_cm) {
-  if (distance_cm == null || !sensor_height_cm || sensor_height_cm <= 0) return null;
-  const clamped = Math.max(0, Math.min(1, 1 - distance_cm / sensor_height_cm));
+function computeFillPercent(distance_cm, distance_empty_cm, distance_full_cm) {
+  if (distance_cm == null || !distance_empty_cm || distance_empty_cm <= 0) return null;
+  // Second point valide uniquement s'il est ≥ 0 et strictement inférieur à la distance à vide.
+  const full =
+    distance_full_cm != null && distance_full_cm >= 0 && distance_full_cm < distance_empty_cm
+      ? distance_full_cm
+      : 0;
+  const span = distance_empty_cm - full;
+  if (span <= 0) return null;
+  const clamped = Math.max(0, Math.min(1, (distance_empty_cm - distance_cm) / span));
   return Math.round(clamped * 1000) / 10; // 1 décimale, 0–100
 }
 

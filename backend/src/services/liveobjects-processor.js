@@ -89,14 +89,14 @@ function normalizeLiveObjectsUplink(raw) {
 async function resolveCav({ devEui, sensorReference }) {
   if (devEui) {
     const r = await pool.query(
-      'SELECT id, sensor_reference, sensor_height_cm, sensor_reporting_interval_min, estimated_fill_rate FROM cav WHERE lora_deveui = $1 LIMIT 1',
+      'SELECT id, sensor_reference, sensor_height_cm, sensor_distance_full_cm, sensor_reporting_interval_min, estimated_fill_rate FROM cav WHERE lora_deveui = $1 LIMIT 1',
       [devEui]
     );
     if (r.rows.length > 0) return r.rows[0];
   }
   if (sensorReference) {
     const r = await pool.query(
-      'SELECT id, sensor_reference, sensor_height_cm, sensor_reporting_interval_min, estimated_fill_rate FROM cav WHERE sensor_reference = $1 LIMIT 1',
+      'SELECT id, sensor_reference, sensor_height_cm, sensor_distance_full_cm, sensor_reporting_interval_min, estimated_fill_rate FROM cav WHERE sensor_reference = $1 LIMIT 1',
       [sensorReference]
     );
     if (r.rows.length > 0) return r.rows[0];
@@ -155,10 +155,11 @@ async function processUplink(rawUplink, io) {
     return { error: 'cav_not_found', devEui: uplink.devEui };
   }
 
-  // Calcul du fill_level
+  // Calcul du fill_level — modèle deux points (vide/plein) si distance à plein calibrée,
+  // sinon repli mono-point (cf. computeFillPercent).
   let fillPercent = uplink.fillLevelPrecomputed;
   if (fillPercent == null && uplink.distanceCm != null && cav.sensor_height_cm) {
-    fillPercent = computeFillPercent(uplink.distanceCm, cav.sensor_height_cm);
+    fillPercent = computeFillPercent(uplink.distanceCm, cav.sensor_height_cm, cav.sensor_distance_full_cm);
   }
   if (fillPercent == null) {
     logger.warn('LiveObjects: fill_level non calculable (distance ou hauteur manquante)', {

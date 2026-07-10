@@ -627,7 +627,7 @@ router.get('/sensors', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       SELECT
         c.id, c.name, c.commune, c.latitude, c.longitude,
         c.sensor_reference, c.sensor_type, c.lora_deveui,
-        c.sensor_height_cm, c.sensor_install_date, c.sensor_reporting_interval_min,
+        c.sensor_height_cm, c.sensor_distance_full_cm, c.sensor_install_date, c.sensor_reporting_interval_min,
         c.sensor_last_reading, c.sensor_last_reading_at,
         c.sensor_battery_level, c.sensor_last_rssi,
         CASE
@@ -706,14 +706,20 @@ router.post('/sensors/alerts/:alertId/ack', authorize('ADMIN', 'MANAGER'), async
 router.post('/:id/sensor/provision', authorize('ADMIN', 'MANAGER'), [
   body('dev_eui').isString().isLength({ min: 8 }).withMessage('DevEUI requis'),
   body('sensor_height_cm').isInt({ min: 30, max: 500 }).withMessage('Hauteur 30-500 cm requise'),
+  body('sensor_distance_full_cm').optional({ nullable: true }).isInt({ min: 0, max: 499 }).withMessage('Distance à plein 0-499 cm'),
 ], validate, async (req, res) => {
   try {
     const { encryptAppKey } = require('../utils/lora-crypto');
     const {
       dev_eui, app_eui, app_key,
-      sensor_reference, sensor_type, sensor_height_cm,
+      sensor_reference, sensor_type, sensor_height_cm, sensor_distance_full_cm,
       sensor_install_date, sensor_reporting_interval_min,
     } = req.body;
+
+    // Cohérence : la distance à plein doit rester strictement sous la hauteur vide.
+    if (sensor_distance_full_cm != null && sensor_distance_full_cm >= sensor_height_cm) {
+      return res.status(400).json({ error: 'La distance à plein doit être inférieure à la hauteur vide' });
+    }
 
     // Unicité du DevEUI
     const dup = await pool.query(
@@ -735,15 +741,16 @@ router.post('/:id/sensor/provision', authorize('ADMIN', 'MANAGER'), [
          sensor_reference = $4,
          sensor_type = COALESCE($5, 'ultrasonic'),
          sensor_height_cm = $6,
-         sensor_install_date = COALESCE($7, CURRENT_DATE),
-         sensor_reporting_interval_min = COALESCE($8, 180),
+         sensor_distance_full_cm = $7,
+         sensor_install_date = COALESCE($8, CURRENT_DATE),
+         sensor_reporting_interval_min = COALESCE($9, 180),
          sensor_status = 'active'
-       WHERE id = $9
+       WHERE id = $10
        RETURNING id, name, lora_deveui, lora_appeui, sensor_reference, sensor_type,
-                 sensor_height_cm, sensor_install_date, sensor_reporting_interval_min, sensor_status`,
+                 sensor_height_cm, sensor_distance_full_cm, sensor_install_date, sensor_reporting_interval_min, sensor_status`,
       [
         dev_eui.toUpperCase(), app_eui || null, encrypted,
-        ref, sensor_type, sensor_height_cm,
+        ref, sensor_type, sensor_height_cm, sensor_distance_full_cm ?? null,
         sensor_install_date || null, sensor_reporting_interval_min || 180,
         req.params.id,
       ]
@@ -793,7 +800,7 @@ router.get('/:id/sensor-status', async (req, res) => {
   try {
     const cav = await pool.query(
       `SELECT id, name, lora_deveui, sensor_reference, sensor_type,
-              sensor_height_cm, sensor_install_date, sensor_reporting_interval_min,
+              sensor_height_cm, sensor_distance_full_cm, sensor_install_date, sensor_reporting_interval_min,
               sensor_last_reading, sensor_last_reading_at,
               sensor_battery_level, sensor_last_rssi, sensor_status
        FROM cav WHERE id = $1`,
@@ -1052,7 +1059,7 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
   try {
     const cavResult = await pool.query(
       `SELECT id, name, commune, lora_deveui, sensor_reference, sensor_type,
-              sensor_height_cm, sensor_install_date, sensor_reporting_interval_min,
+              sensor_height_cm, sensor_distance_full_cm, sensor_install_date, sensor_reporting_interval_min,
               sensor_status, sensor_last_reading_at, sensor_battery_level
        FROM cav WHERE id = $1`,
       [req.params.id]
@@ -1083,6 +1090,8 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
         sensor_reference: cav.sensor_reference,
         sensor_type: cav.sensor_type,
         sensor_height_cm: cav.sensor_height_cm,
+        sensor_distance_full_cm: cav.sensor_distance_full_cm,
+        calibration_model: cav.sensor_distance_full_cm != null ? 'deux points (vide/plein)' : 'mono-point (plein = 0 cm)',
         sensor_install_date: cav.sensor_install_date,
         reporting_interval_min: reportingMin,
         sensor_status: cav.sensor_status,
@@ -1105,6 +1114,51 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
     const dbRow = dbStats.rows[0];
     const dbHasRecent = dbRow.last_reading_at &&
       (Date.now() - new Date(dbRow.last_reading_at).getTime()) < expectedGapMin * 60 * 1000;
+
+    // ───── Détecteur de lecture figée (obstruction physique probable) ─────
+    // Symptôme fréquent : « la sonde indique toujours un niveau de remplissage équivalent ».
+    // Si la distance BRUTE varie très peu sur les dernières lectures alors que plusieurs
+    // cycles de reporting se sont écoulés, la sonde vise probablement une cible FIXE
+    // (obstruction dans le cône de mesure, volet d'apport, textile coincé sous la sonde,
+    // angle de pose) et non la surface réelle du textile. L'ERP enregistre fidèlement ce que
+    // la sonde transmet : ce n'est alors pas un problème de config ERP mais d'installation.
+    let stuck = null;
+    try {
+      const distStats = await pool.query(
+        `SELECT COUNT(*)::int AS n,
+                MIN(distance_cm) AS dmin, MAX(distance_cm) AS dmax,
+                AVG(distance_cm) AS davg, STDDEV_POP(distance_cm) AS dstd
+         FROM (
+           SELECT distance_cm FROM cav_sensor_readings
+           WHERE cav_id = $1 AND distance_cm IS NOT NULL
+           ORDER BY reading_at DESC LIMIT 20
+         ) t`,
+        [cav.id]
+      );
+      const ds = distStats.rows[0];
+      if (ds.n >= 8 && ds.dmax != null && ds.dmin != null) {
+        const spread = Number(ds.dmax) - Number(ds.dmin);
+        stuck = {
+          readings_analyzed: ds.n,
+          distance_min_cm: Number(ds.dmin),
+          distance_max_cm: Number(ds.dmax),
+          distance_avg_cm: Math.round(Number(ds.davg) * 10) / 10,
+          distance_spread_cm: Math.round(spread * 10) / 10,
+          distance_stddev_cm: ds.dstd != null ? Math.round(Number(ds.dstd) * 100) / 100 : null,
+          suspected: spread <= 5, // < 5 cm d'amplitude sur ≥ 8 lectures = quasi figé
+        };
+        if (stuck.suspected) {
+          if (layer1.status === 'ok') layer1.status = 'warning';
+          layer1Issues.push(
+            `Distance quasi constante (${stuck.distance_min_cm}–${stuck.distance_max_cm} cm, ` +
+            `amplitude ${stuck.distance_spread_cm} cm) sur les ${ds.n} dernières lectures : ` +
+            `la sonde vise probablement une cible fixe (obstruction dans le cône de mesure, ` +
+            `volet d'apport, textile coincé sous la sonde) plutôt que la surface réelle du textile.`
+          );
+        }
+      }
+    } catch (_) { /* distance_cm peut être NULL sur d'anciens schémas — non bloquant */ }
+    layer1.details.stuck_reading = stuck;
 
     // ───── Couche 2 : Plateforme Orange Live Objects ─────
     let layer2 = {
@@ -1272,6 +1326,25 @@ router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, 
     // ───── Recommandations ─────
     const recommendations = [];
     if (layer1.status !== 'ok') recommendations.push("Compléter la calibration côté SOLIDATA (hauteur capteur, date d'installation).");
+    if (stuck && stuck.suspected) {
+      recommendations.push(
+        "Distance figée : inspecter physiquement l'installation de la sonde — obstruction dans l'axe " +
+        "de mesure, volet d'apport dans le champ, textile accroché sous la sonde, ou angle de pose. " +
+        "L'ERP enregistre fidèlement la distance transmise ; c'est ici un problème de mesure terrain, pas de paramétrage ERP."
+      );
+      recommendations.push(
+        "Test dans l'app Milesight ToolBox (onglet Calibration) : désactiver temporairement « Measure Outlier " +
+        "Calibration » puis « Read ». Si la distance brute se met alors à varier, le filtrage d'outliers " +
+        "verrouillait la mesure sur une cible proche — élargir « Outlier Value » ou laisser ce filtre désactivé."
+      );
+      if (cav.sensor_distance_full_cm == null) {
+        recommendations.push(
+          "Calibration deux points recommandée : renseigner « Distance à plein » (distance sonde→textile " +
+          "quand le CAV est bon à collecter, typ. 25–45 cm) pour que le remplissage atteigne réellement 100 % " +
+          "au lieu de plafonner vers 85 %."
+        );
+      }
+    }
     if (layer2.status === 'error') {
       if (layer2.issues.some((i) => i.includes('API_KEY'))) recommendations.push('Renseigner LIVEOBJECTS_API_KEY dans /opt/solidata.online/.env puis redémarrer le backend.');
       else if (layer2.issues.some((i) => i.includes('n\'existe pas'))) recommendations.push('Provisionner le device dans Orange Live Objects (Devices → Create) ou vérifier le DevEUI.');
@@ -1319,22 +1392,38 @@ function formatDuration(minutes) {
 // (sans toucher au DevEUI / AppKey, contrairement à /sensor/provision)
 router.patch('/:id/sensor-calibration', authorize('ADMIN', 'MANAGER'), [
   body('sensor_height_cm').optional().isInt({ min: 30, max: 500 }).withMessage('Hauteur 30-500 cm'),
+  body('sensor_distance_full_cm').optional({ nullable: true }).isInt({ min: 0, max: 499 }).withMessage('Distance à plein 0-499 cm'),
   body('sensor_reporting_interval_min').optional().isInt({ min: 5, max: 1440 }).withMessage('Intervalle 5-1440 min'),
   body('sensor_install_date').optional().isISO8601().withMessage('Date ISO8601 attendue'),
 ], validate, async (req, res) => {
   try {
-    const { sensor_height_cm, sensor_reporting_interval_min, sensor_install_date } = req.body;
+    const { sensor_height_cm, sensor_distance_full_cm, sensor_reporting_interval_min, sensor_install_date } = req.body;
+
+    // Cohérence vide/plein : la distance à plein doit rester strictement sous la hauteur vide.
+    // La hauteur vide de référence est celle envoyée dans la requête, à défaut celle en base.
+    if (sensor_distance_full_cm != null) {
+      let effectiveEmpty = sensor_height_cm;
+      if (effectiveEmpty == null) {
+        const cur = await pool.query('SELECT sensor_height_cm FROM cav WHERE id = $1', [req.params.id]);
+        effectiveEmpty = cur.rows[0]?.sensor_height_cm;
+      }
+      if (effectiveEmpty != null && sensor_distance_full_cm >= effectiveEmpty) {
+        return res.status(400).json({ error: 'La distance à plein doit être inférieure à la hauteur vide' });
+      }
+    }
+
     const fields = [];
     const values = [];
     let i = 1;
     if (sensor_height_cm !== undefined) { fields.push(`sensor_height_cm = $${i++}`); values.push(sensor_height_cm); }
+    if (sensor_distance_full_cm !== undefined) { fields.push(`sensor_distance_full_cm = $${i++}`); values.push(sensor_distance_full_cm); }
     if (sensor_reporting_interval_min !== undefined) { fields.push(`sensor_reporting_interval_min = $${i++}`); values.push(sensor_reporting_interval_min); }
     if (sensor_install_date !== undefined) { fields.push(`sensor_install_date = $${i++}`); values.push(sensor_install_date); }
     if (fields.length === 0) return res.status(400).json({ error: 'Aucun champ à mettre à jour' });
     values.push(req.params.id);
     const result = await pool.query(
       `UPDATE cav SET ${fields.join(', ')} WHERE id = $${i}
-       RETURNING id, name, sensor_height_cm, sensor_reporting_interval_min, sensor_install_date`,
+       RETURNING id, name, sensor_height_cm, sensor_distance_full_cm, sensor_reporting_interval_min, sensor_install_date`,
       values
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });

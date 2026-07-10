@@ -102,7 +102,9 @@ export default function SensorSection({ cavId, onUpdated }) {
             <Row label="DevEUI" value={<span className="font-mono">{status.lora_deveui || '—'}</span>} />
             <Row label="Référence" value={status.sensor_reference || '—'} />
             <Row label="Type" value={status.sensor_type || 'ultrasonic'} />
-            <Row label="Hauteur calibration" value={status.sensor_height_cm ? `${status.sensor_height_cm} cm` : '—'} />
+            <Row label="Hauteur vide (0 %)" value={status.sensor_height_cm ? `${status.sensor_height_cm} cm` : '—'} />
+            <Row label="Distance à plein (100 %)"
+              value={status.sensor_distance_full_cm != null ? `${status.sensor_distance_full_cm} cm` : 'non calibrée (plein = 0 cm)'} />
             <Row label="Intervalle reporting" value={status.sensor_reporting_interval_min ? `${status.sensor_reporting_interval_min} min` : '—'} />
             <Row label="Installation" value={status.sensor_install_date ? new Date(status.sensor_install_date).toLocaleDateString('fr-FR') : '—'} />
             <hr className="my-2" />
@@ -147,10 +149,11 @@ export default function SensorSection({ cavId, onUpdated }) {
                   </summary>
                   <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                     {status.recent_readings.map((r, i) => (
-                      <div key={i} className="flex justify-between text-[10px] text-gray-600 border-b pb-1">
-                        <span>{new Date(r.reading_at).toLocaleString('fr-FR')}</span>
-                        <span className="font-semibold">{Math.round(r.fill_level_percent)} %</span>
-                        <span>{r.battery_level ? `${r.battery_level}%` : '—'}</span>
+                      <div key={i} className="flex justify-between gap-2 text-[10px] text-gray-600 border-b pb-1">
+                        <span className="flex-1">{new Date(r.reading_at).toLocaleString('fr-FR')}</span>
+                        <span className="text-gray-500">{r.distance_cm != null ? `${r.distance_cm} cm` : '—'}</span>
+                        <span className="font-semibold w-10 text-right">{Math.round(r.fill_level_percent)} %</span>
+                        <span className="w-8 text-right">{r.battery_level ? `${r.battery_level}%` : '—'}</span>
                       </div>
                     ))}
                   </div>
@@ -181,6 +184,7 @@ export default function SensorSection({ cavId, onUpdated }) {
 function CalibrationModal({ isOpen, onClose, cavId, current, onDone }) {
   const [form, setForm] = useState({
     sensor_height_cm: 260,
+    sensor_distance_full_cm: '',
     sensor_reporting_interval_min: 180,
     sensor_install_date: new Date().toISOString().split('T')[0],
   });
@@ -191,6 +195,7 @@ function CalibrationModal({ isOpen, onClose, cavId, current, onDone }) {
     if (isOpen && current) {
       setForm({
         sensor_height_cm: current.sensor_height_cm || 260,
+        sensor_distance_full_cm: current.sensor_distance_full_cm != null ? current.sensor_distance_full_cm : '',
         sensor_reporting_interval_min: current.sensor_reporting_interval_min || 180,
         sensor_install_date: current.sensor_install_date
           ? new Date(current.sensor_install_date).toISOString().split('T')[0]
@@ -202,10 +207,17 @@ function CalibrationModal({ isOpen, onClose, cavId, current, onDone }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    const full = form.sensor_distance_full_cm === '' || form.sensor_distance_full_cm == null
+      ? null
+      : parseInt(form.sensor_distance_full_cm, 10);
+    if (full != null && full >= form.sensor_height_cm) {
+      setError('La distance à plein doit être inférieure à la hauteur vide.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      await sensorsApi.updateCalibration(cavId, form);
+      await sensorsApi.updateCalibration(cavId, { ...form, sensor_distance_full_cm: full });
       if (onDone) onDone();
     } catch (err) {
       setError(err.response?.data?.error || err.message);
@@ -219,13 +231,19 @@ function CalibrationModal({ isOpen, onClose, cavId, current, onDone }) {
       <form onSubmit={submit} className="space-y-4 text-sm">
         <p className="text-xs text-slate-500">
           Calibration physique du capteur — ne touche pas au DevEUI / clés LoRa.
-          La <strong>hauteur vide</strong> est la distance entre la sonde et le fond du conteneur quand il est vide.
-          C'est la valeur de référence pour calculer le pourcentage de remplissage.
+          La <strong>hauteur vide</strong> est la distance sonde→fond quand le conteneur est vide (= 0 %).
+          La <strong>distance à plein</strong> (facultative) est la distance sonde→textile quand le CAV
+          est bon à collecter (= 100 %) : sans elle, un CAV réellement plein plafonne vers 85 % au lieu d'atteindre 100 %.
         </p>
         <Field label="Hauteur vide (cm)" required>
           <input type="number" min={30} max={500} value={form.sensor_height_cm}
             onChange={(e) => setForm({ ...form, sensor_height_cm: parseInt(e.target.value, 10) })}
             className="input-modern" required />
+        </Field>
+        <Field label="Distance à plein (cm)">
+          <input type="number" min={0} max={499} value={form.sensor_distance_full_cm}
+            onChange={(e) => setForm({ ...form, sensor_distance_full_cm: e.target.value })}
+            className="input-modern" placeholder="ex. 35 — laisser vide = plein à 0 cm (historique)" />
         </Field>
         <Field label="Intervalle de reporting (min)">
           <input type="number" min={5} max={1440} value={form.sensor_reporting_interval_min}
@@ -275,6 +293,7 @@ function ProvisionModal({ isOpen, onClose, cavId, onDone }) {
     app_eui: '',
     app_key: '',
     sensor_height_cm: 260,
+    sensor_distance_full_cm: '',
     sensor_reporting_interval_min: 180,
     sensor_install_date: new Date().toISOString().split('T')[0],
   });
@@ -317,10 +336,17 @@ function ProvisionModal({ isOpen, onClose, cavId, onDone }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    const full = form.sensor_distance_full_cm === '' || form.sensor_distance_full_cm == null
+      ? null
+      : parseInt(form.sensor_distance_full_cm, 10);
+    if (full != null && full >= form.sensor_height_cm) {
+      setError('La distance à plein doit être inférieure à la hauteur vide.');
+      return;
+    }
     setError(null);
     setSaving(true);
     try {
-      await sensorsApi.provision(cavId, form);
+      await sensorsApi.provision(cavId, { ...form, sensor_distance_full_cm: full });
       if (onDone) onDone();
     } catch (err) {
       setError(err.response?.data?.error || err.message);
@@ -441,6 +467,11 @@ function ProvisionModal({ isOpen, onClose, cavId, onDone }) {
               className="input-modern" />
           </Field>
         </div>
+        <Field label="Distance à plein (cm)">
+          <input type="number" min={0} max={499} value={form.sensor_distance_full_cm}
+            onChange={(e) => setForm({ ...form, sensor_distance_full_cm: e.target.value })}
+            className="input-modern" placeholder="facultatif — distance sonde→textile quand plein (ex. 35)" />
+        </Field>
         <Field label="Date d'installation">
           <input type="date" value={form.sensor_install_date}
             onChange={(e) => setForm({ ...form, sensor_install_date: e.target.value })}

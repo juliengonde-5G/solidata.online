@@ -2848,6 +2848,11 @@ async function initDatabase() {
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_appeui VARCHAR(23);
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS lora_appkey_encrypted TEXT;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_height_cm INTEGER;
+      -- Calibration deux points (10/07/2026) : distance sonde→textile quand le CAV est PLEIN
+      -- (zone morte / niveau de collecte, typ. 25–45 cm). NULL = modèle mono-point historique
+      -- (plein = distance 0). Permet à un CAV réellement plein d'atteindre 100 % au lieu de
+      -- plafonner artificiellement (cf. remplissage figé ~85 %). Cf. utils/milesight-em400mud.js.
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_distance_full_cm INTEGER;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_install_date DATE;
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS sensor_reporting_interval_min INTEGER DEFAULT 180;
       -- Migration 15/05/2026 : alignement défaut 360 → 180 min (cf. paramétrage Milesight EM400-MUD)
