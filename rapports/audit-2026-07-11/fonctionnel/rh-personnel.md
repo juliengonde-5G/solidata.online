@@ -1,0 +1,69 @@
+# Audit fonctionnel — Module « Gestion RH, temps & planning »
+
+**Date** : 11 juillet 2026
+**Périmètre** : `backend/src/routes/{employees.js, teams.js, pointage.js, planning-hebdo.js}`, `backend/src/services/{collaborator-import.js, holidays.js}`, pages `Employees`, `Skills`, `WorkHours`, `PlanningHebdo`, `Pointage`, `AdminCollaboratorsImport`.
+**Utilisateurs cibles** : Chargé RH, managers de filière, direction.
+
+---
+
+## 1. Couverture fonctionnelle réelle
+
+Le module couvre cinq briques distinctes qui s'articulent autour d'une base employés qui n'a **plus le droit d'être saisie à la main** : `POST /api/employees` renvoie volontairement un 409 (`backend/src/routes/employees.js:93-98`), la fiche collaborateur ne pouvant naître que de la synchronisation avec le logiciel de paie Malibou (`services/collaborator-import.js`) ou d'une liaison à une fiche de recrutement déjà créée (`candidates/:id/link-employee`). C'est un choix structurant assumé et cohérent : la base RH reste le miroir de la paie.
+
+- **Collaborateurs** (`employees.js`, `Employees.jsx`) : liste/recherche/filtre par équipe, fiche détaillée (info, contrats, disponibilités, profil PCM), édition complète (état civil, coordonnées, IAE : RQTH, titre de séjour, prescripteur), photo, historique de contrats (`employee_contracts`), gestion des jours d'indisponibilité hebdomadaire, désactivation individuelle ou en masse (`DELETE /clear`, soft-delete qui préserve l'historique métier — bien pensé).
+- **Conformité** : visite médicale d'embauche avec échéance, alertes J-30/J-14 (`GET /visite-medicale/alertes`), enregistrement du résultat — une fonctionnalité IAE dédiée assez rare dans un ERP maison.
+- **Pilotage RH** : trois endpoints KPI (`/kpi/formation`, `/kpi/etp` base 1607 h, `/kpi/absenteisme`) et un comparatif planning prévu vs réel (`/absenteeism/monthly`), consommés notamment par le Reporting RH.
+- **Import** (`collaborator-import.js`, `AdminCollaboratorsImport.jsx`) : upsert idempotent (matricule puis nom/prénom), fusion non destructive (COALESCE), SAVEPOINT par ligne pour isoler les échecs, double voie XLSX (classeur Malibou complet) et CSV, nettoyage des doublons hérités, exclusion volontaire du NIR/IBAN/BIC (minimisation RGPD affichée à l'écran).
+- **Compétences** (`Skills.jsx`) : matrice visuelle par collaborateur, mais **lecture seule** — voir §4.
+- **Heures de travail** (`employees.js`, `WorkHours.jsx`) : saisie par créneaux ou en volume, validation RH, résumé mensuel.
+- **Pointage** (`pointage.js`, `Pointage.jsx`) : borne physique (Raspberry Pi) authentifiée par clé API, anti-doublon 60 s, plafond 4 badgeages/jour, calcul automatique des heures, saisie manuelle de secours, alertes « planifié mais non badgé », registre des mouvements.
+- **Planning hebdomadaire** (`planning-hebdo.js`, `PlanningHebdo.jsx`) : grille par demi-journée et par filière (tri/collecte/logistique/boutiques), postes obligatoires vs facultatifs, alerte de couverture, contrôle de disponibilité/absence à l'affectation, distinction provisoire/confirmé.
+- **Équipes** (`teams.js`) : CRUD simple, compteur de membres actifs.
+
+## 2. Adéquation au contexte SIAE textile
+
+Le module est globalement bien calé sur le métier : champs IAE (RQTH, titre de séjour, prescripteur), filières réelles (tri/collecte/logistique/boutiques), visite médicale réglementaire, KPI ETP/absentéisme utiles à la direction et aux financeurs. Le pointage par badge est un bon choix pour un public parfois éloigné du numérique — plus simple qu'une saisie déclarative — avec repli manuel géré par le manager.
+
+En revanche, l'outil reste presque exclusivement **orienté RH/manager** : aucune des pages du périmètre n'offre de vue « self-service » au salarié (mon planning, mes heures), alors que l'API le permettrait déjà en partie (`GET /employees/:id/hours` autorise le rôle `COLLABORATEUR`, `employees.js:353`) — la route frontend `/work-hours` reste réservée à `ADMIN/RH/MANAGER` (`App.jsx:148`). Pour un salarié en CDDI, ne pas pouvoir consulter son propre planning ou ses heures numériquement est un manque, d'autant que c'est un standard des outils cités en §3.
+
+Sur le plan réglementaire, deux angles morts concrets :
+- **Durée du CDDI (24 mois)** : le modèle stocke `employee_contracts.duration_months` et l'historique des renouvellements, mais rien ne calcule la durée cumulée ni n'alerte à l'approche du plafond légal (confirmé 24 mois, dérogeable à 60 mois pour RQTH/50 ans+/difficultés particulières). Ce suivi repose entièrement sur la mémoire du CIP/RH.
+- **Visite médicale** : le mécanisme d'alerte est réel, mais `visite_medicale_due_date` n'est renseignée qu'une fois, lors de la migration historique (`init-db.js:2521-2526`, J+90 après `contract_start`). Ni `collaborator-import.js` ni aucun job planifié ne la recalculent à l'embauche d'un nouveau collaborateur : au fil du temps, les nouvelles fiches sortent silencieusement du filet de conformité tant que RH n'appelle pas manuellement `PUT /:id/visite-medicale/programmer`.
+
+## 3. Benchmark marché
+
+Face aux SIRH PME (Lucca, Kelio, Combo, Skello), SOLIDATA a une vraie spécificité : une grille de planning par **poste/filière** avec compétences requises (permis B, CACES) directement branchée sur l'organisation réelle d'un centre de tri — ce que ces outils génériques ne modélisent pas nativement (Skello/Combo sont pensés pour la restauration/retail, Kelio pour le temps/accès). C'est un atout différenciant, à condition que les données de compétences soient fiables (voir §4).
+
+En face, ces solutions du marché couvrent presque toutes un socle que SOLIDATA n'a pas : portail salarié en self-service, **workflow de demande de congés avec solde de jours acquis/pris** (absent ici : aucune table ni route de solde ou de demande de congé n'existe dans le périmètre), export natif vers la paie (SOLIDATA reste en **PULL uniquement** depuis Malibou, comme le choix déjà fait pour Pennylane sur la facturation — cohérent avec la doctrine du projet mais signifie qu'il n'y a aucun retour automatique des heures badgées vers la paie), et suivi des habilitations avec date d'expiration (CACES/SST se périment ; le modèle actuel n'a que des booléens `has_caces`/`has_permis_b` sans échéance).
+
+## 4. Forces, faiblesses, manques et bugs constatés
+
+**Points forts** : import idempotent robuste avec SAVEPOINT par ligne (`collaborator-import.js:339-466`) ; blocage de la création manuelle pour préserver la source de vérité paie ; soft-delete respectueux des FK historiques ; alerte de couverture des postes obligatoires dans le planning hebdo ; registre de mouvements et alertes de pointage bien pensés pour l'audit interne.
+
+**Bugs vérifiés dans le code** (par gravité décroissante) :
+
+1. **Saisie d'heures qui fausse les données** — `WorkHours.jsx:58` propose un type `type: 'overtime' | 'conge' | 'maladie'` dans le formulaire de saisie, mais `POST /api/employees/:id/hours` (`employees.js:418`) n'accepte que `['normal', 'training', 'absence', 'sick', 'holiday']` et **rabat silencieusement tout le reste sur `'normal'`**. Concrètement, un manager qui saisit une maladie ou un congé via cette page enregistre une journée « normale » sans message d'erreur. Cela fausse directement le KPI d'absentéisme et la synthèse mensuelle. Par ailleurs, le type `training` n'est saisissable nulle part dans l'UI : le KPI `/kpi/formation` n'a probablement jamais de données réelles à afficher.
+2. **Compétences planning jamais réellement éditables** — le filtrage par compétence du planning hebdo repose sur `employees.has_permis_b`/`has_caces` (`planning-hebdo.js:272-276, 393-397`). Or ces deux champs ne sont éditables que sur la fiche **candidat** (recrutement, `Candidates.jsx:882-883`) ; l'écran `Employees.jsx` ne les expose pas, la liaison candidat→collaborateur ne les recopie pas (`candidates/conversion.js:106`), et l'import Malibou ne les renseigne pas non plus. En l'état, tout collaborateur affiche `has_permis_b`/`has_caces = false`, et l'affectation « Chauffeur collecte » ou « Cariste » via le picker du planning renverra systématiquement « Aucun employé disponible avec les compétences requises » tant qu'aucune intervention base de données n'est faite.
+3. **Données personnelles sensibles accessibles sans restriction de rôle** — contrairement à `employees.js` (systématiquement `authorize('ADMIN','RH','MANAGER')`), les routes `GET /api/teams` et `GET /api/teams/:id` (`teams.js:13-44`) n'ont que `authenticate`, sans `authorize`. `GET /teams/:id` renvoie `SELECT * FROM employees` pour les membres de l'équipe, donc n'importe quel compte authentifié (COLLABORATEUR, RESP_BTQ, AUTORITE…) peut lire salaire brut, statut handicap, titre de séjour, adresse et date de naissance de tous les collaborateurs d'une équipe. C'est un écart net avec la règle du projet (« toute route sensible doit utiliser authenticate + authorize », CLAUDE.md §7) et un point d'attention RGPD.
+4. **Matrice de compétences peu fiable** — `Skills.jsx:42` interroge `/candidates/${emp.candidate_id || emp.id}/skills` : si le collaborateur n'est pas lié à une fiche de recrutement (le cas courant pour un import Malibou direct, cf. changelog v2.6.0), le code retombe sur `emp.id` utilisé comme un id de **candidat** — un espace d'identifiants totalement différent. Résultat : la matrice est vide (404 silencieux) ou, pire, pourrait afficher les compétences d'un tout autre candidat si les identifiants coïncident. La page ne partage d'ailleurs aucune donnée avec les champs `employees.has_permis_b/has_caces/skills` utilisés par le planning — deux modèles de compétences déconnectés.
+5. **Colonne « Poste » toujours vide** — `Employees.jsx:281` et `:310` affichent `emp.position_name`, un champ que ni `GET /employees` ni `GET /employees/:id` (`employees.js:50-83`) ne renvoient (pas de jointure vers `positions`, pas d'alias de `e.position`). La liste des collaborateurs affiche donc systématiquement « — » en colonne Poste alors que la donnée existe bien (`emp.position`, alimentée par l'import).
+6. **Temps partiel dénaturé à l'import** — `employee_contracts.weekly_hours` est contraint par `CHECK (weekly_hours IN (26, 35))` (`init-db.js:292`). `upsertCurrentContract` (`collaborator-import.js:505`) rabat silencieusement toute autre valeur (24h, 28h, 30h — fréquentes en parcours IAE progressif) sur **35h**, alors que `employees.weekly_hours` conserve la vraie valeur. L'historique de contrat devient donc incohérent avec la fiche collaborateur.
+7. **KPI d'écart planning structurellement à zéro** — `GET /absenteeism/monthly` (`employees.js:572-593`) compte les absences prévues via `schedule.status IN ('absence', 'maladie', 'sick')`, alors que la contrainte `CHECK` de `schedule` n'autorise que `('work','training','rest','leave','vak')` (`init-db.js:315`). Cette portion de métrique ne peut jamais matcher : « absences planifiées » vaut toujours 0.
+
+**Manques** : pas de suivi de durée cumulée CDDI (24 mois) ; pas de solde/demande de congés ; pas d'échéance sur les habilitations (CACES/SST) ; 3 des 4 filières du planning hebdo (collecte, logistique, boutiques) ont leurs postes codés en dur dans `planning-hebdo.js:57-126` (contrairement au tri, piloté par la table `postes_operation`) — ouvrir une 3ᵉ boutique ou changer l'organisation logistique demande un déploiement, pas un paramétrage ; `holidays.js` (jours fériés/vacances scolaires) est bien implémenté et synchronisé (`scheduler.js`) mais uniquement consommé par le module prédictif de collecte (`AdminPredictive.jsx`) — le planning RH n'a aucune conscience des jours fériés.
+
+**Irritants UX** : `Skills.jsx` fait un appel API par collaborateur (N+1) ; la page ne propose aucune action d'édition, seulement de la lecture ; dans `PlanningHebdo`, retirer une affectation se fait via un `confirm()` navigateur générique plutôt qu'une modale cohérente avec le reste de l'UI.
+
+## 5. Recommandations priorisées
+
+- **P0 / effort S** — Aligner les valeurs du sélecteur `type` de `WorkHours.jsx` sur l'enum réel (`normal/training/absence/sick/holiday`) et faire échouer explicitement (400) une valeur non reconnue côté `employees.js` au lieu de la rabattre sur `normal`.
+- **P0 / effort S** — Ajouter `authorize('ADMIN','RH','MANAGER')` sur les GET de `teams.js`, ou a minima ne plus renvoyer `SELECT *` sur `employees` dans `GET /teams/:id`.
+- **P0 / effort M** — Fiabiliser `has_permis_b`/`has_caces` : les exposer en édition sur `Employees.jsx`, les recopier lors de `link-employee`, et supprimer ou justifier le doublon avec `Skills.jsx`.
+- **P1 / effort M** — Refondre `Skills.jsx` pour lire `employees.skills`/`has_permis_b`/`has_caces` (source utilisée par le planning) plutôt que `candidates/:id/skills`, avec un vrai mode édition.
+- **P1 / effort S** — Corriger l'affichage `position_name` dans `Employees.jsx` (utiliser `emp.position`).
+- **P1 / effort M** — Ajouter un calcul de durée cumulée CDDI (somme des contrats liés) avec alerte à l'approche de 24 mois, sur le modèle de l'alerte visite médicale déjà en place.
+- **P1 / effort S** — Recalculer `visite_medicale_due_date` (contract_start + 90 j) à chaque création de collaborateur dans `collaborator-import.js`, pas seulement lors de la migration historique.
+- **P1 / effort S** — Élargir ou documenter le `CHECK` sur `employee_contracts.weekly_hours` pour accepter les temps partiels réels au lieu de les écraser à 35h.
+- **P2 / effort S** — Corriger la clause `schedule.status IN ('absence','maladie','sick')` de `/absenteeism/monthly` (utiliser `'leave'`).
+- **P2 / effort L** — Faire piloter les postes collecte/logistique/boutiques par un référentiel en base (à l'image de `postes_operation`) plutôt que par du code en dur.
+- **P2 / effort M** — Étudier une vue self-service simplifiée (planning + heures de la semaine) pour le rôle COLLABORATEUR, l'API le permettant déjà partiellement.
