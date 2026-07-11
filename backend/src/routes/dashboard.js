@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 const { cacheMiddleware } = require('../middleware/cache');
 
 router.use(authenticate);
@@ -499,7 +499,7 @@ function pctVariation(current, previous) {
   return Math.round(((current - previous) / previous) * 1000) / 10;
 }
 
-router.get('/executive', cacheMiddleware(dashboardKey('executive'), 300), async (req, res) => {
+router.get('/executive', authorize('ADMIN', 'MANAGER'), cacheMiddleware(dashboardKey('executive'), 300), async (req, res) => {
   try {
     const now = new Date();
     const year = now.getFullYear();
@@ -581,12 +581,14 @@ router.get('/executive', cacheMiddleware(dashboardKey('executive'), 300), async 
           AND completed_date >= NOW() - INTERVAL '12 months'
       `).catch(() => ({ rows: [{ positives: 0, total: 0 }] })),
       // 7. Subvention Refashion trimestre (en cours)
+      // NB : aucune ligne pour la période (ou table absente via .catch) ⇒ rows vide
+      // ⇒ le KPI est marqué « non disponible » plus bas au lieu d'afficher un faux 0 €.
       pool.query(`
         SELECT COALESCE(montant_total, 0)::float AS total
         FROM refashion_subventions
         WHERE annee = $1 AND trimestre = $2
         LIMIT 1
-      `, [year, trimestre]).catch(() => ({ rows: [{ total: 0 }] })),
+      `, [year, trimestre]).catch(() => ({ rows: [] })),
       // Seuils configurés
       pool.query(`
         SELECT indicateur, seuil_min, seuil_max, severite
@@ -621,7 +623,11 @@ router.get('/executive', cacheMiddleware(dashboardKey('executive'), 300), async 
     const co2EvitedT = Math.round((collecte / 1000) * 1.567 * 10) / 10;
     const co2EvitedN1T = Math.round((collecteN1Val / 1000) * 1.567 * 10) / 10;
 
-    const refashionEur = parseFloat(refashionTrimestre.rows[0].total);
+    // La subvention Refashion n'est alimentée par aucune UI : distinguer
+    // « aucune donnée saisie » (→ non disponible) d'un vrai montant nul.
+    const refashionRow = refashionTrimestre.rows[0];
+    const refashionDisponible = !!refashionRow;
+    const refashionEur = refashionDisponible ? parseFloat(refashionRow.total) : null;
 
     // Trésorerie : placeholder (à brancher sur Pennylane si sync OK)
     const tresorerie = null; // null = "à connecter"
@@ -701,11 +707,15 @@ router.get('/executive', cacheMiddleware(dashboardKey('executive'), 300), async 
         {
           id: 'subvention_refashion_trimestre',
           label: `Subvention Refashion ${year} T${trimestre}`,
-          value: Math.round(refashionEur),
+          value: refashionDisponible ? Math.round(refashionEur) : null,
           unite: '€',
           variation_pct: null,
           previous: null,
-          alerte: refashionEur === 0 ? 'info' : null,
+          disponible: refashionDisponible,
+          alerte: refashionDisponible ? null : 'unavailable',
+          context: refashionDisponible
+            ? undefined
+            : { reason: 'En attente de saisie des subventions Refashion (aucune donnée pour ce trimestre)' },
         },
         {
           id: 'tresorerie',

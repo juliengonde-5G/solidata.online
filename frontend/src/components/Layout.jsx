@@ -49,11 +49,11 @@ const NAV_TREE = [
             ],
           },
           { label: 'Collecte en direct', path: '/collections-live', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['ADMIN', 'MANAGER'] },
           {
             label: 'Réglages',
             icon: Settings,
             children: [
-              { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['ADMIN', 'MANAGER'] },
               { label: 'Associations', path: '/admin-associations', icon: Handshake, roles: ['ADMIN', 'MANAGER'] },
             ],
           },
@@ -191,6 +191,7 @@ const NAV_TREE = [
     label: 'Analyse',
     icon: BarChart3,
     children: [
+      { label: 'Dashboard exécutif', path: '/dashboard-executif', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Performance', path: '/performance', icon: Activity, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Collecte', path: '/reporting-collecte', icon: BarChart3, roles: ['ADMIN', 'MANAGER', 'AUTORITE'] },
       { label: 'RH', path: '/reporting-rh', icon: BarChart2, roles: ['ADMIN', 'RH'] },
@@ -244,7 +245,7 @@ const NAV_TREE = [
           { label: 'Véhicules', path: '/vehicles', icon: Car, roles: ['ADMIN'] },
           { label: 'Maintenance', path: '/vehicle-maintenance', icon: Wrench, roles: ['ADMIN'] },
           { label: 'Moteur prédictif', path: '/admin-predictive', icon: Brain, roles: ['ADMIN'] },
-          { label: 'Gestion des CAV', path: '/admin-cav', icon: Map, roles: ['ADMIN'] },
+          { label: 'Gestion des CAV', path: '/admin-cav', icon: Map, roles: ['ADMIN', 'MANAGER'] },
           { label: 'Capteurs CAV', path: '/admin-sensors', icon: Radio, roles: ['ADMIN', 'MANAGER'] },
           { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN', 'MANAGER'] },
         ],
@@ -257,6 +258,7 @@ const NAV_TREE = [
         ],
       },
       { label: 'Configuration', path: '/settings', icon: Settings, roles: ['ADMIN'] },
+      { label: "Seuils d'alerte", path: '/admin-alert-thresholds', icon: Target, roles: ['ADMIN'] },
       { label: 'Catalogue & référentiels', path: '/admin/catalogue', icon: Tag, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Configuration Refashion', path: '/admin/refashion-config', icon: ShieldCheck, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Exports DPAV Refashion', path: '/admin/refashion-exports', icon: Download, roles: ['ADMIN', 'MANAGER'] },
@@ -273,7 +275,7 @@ const NAV_TREE = [
         label: 'Utilitaires',
         icon: Wrench,
         children: [
-          { label: 'Importer collaborateurs', path: '/admin-collaborators-import', icon: UserPlus, roles: ['ADMIN'] },
+          { label: 'Importer collaborateurs', path: '/admin-collaborators-import', icon: UserPlus, roles: ['ADMIN', 'RH'] },
           { label: "Journal d'activité", path: '/activity-log', icon: FileText, roles: ['ADMIN'] },
           { label: 'Base de données', path: '/admin-db', icon: Database, roles: ['ADMIN'] },
         ],

@@ -184,12 +184,25 @@ module.exports = function createExecutionRouter(upload) {
       }
 
       params.push(req.params.id);
+      // Idempotence de la clôture : une tournée déjà 'completed' ne doit pas ré-exécuter
+      // les effets de bord (stock, tonnage, feedback d'apprentissage). Un double clic sur
+      // « Terminer » (ou un rejeu) ne met alors à jour aucune ligne → on répond sans dupliquer.
+      let whereClause = `id = $${params.length}`;
+      if (status === 'completed') whereClause += " AND status <> 'completed'";
       const result = await pool.query(
-        `UPDATE tours SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+        `UPDATE tours SET ${updates.join(', ')} WHERE ${whereClause} RETURNING *`,
         params
       );
 
-      if (result.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
+      if (result.rows.length === 0) {
+        // Sur une clôture, 0 ligne = tournée déjà terminée (no-op idempotent) ou inexistante.
+        if (status === 'completed') {
+          const existing = await pool.query('SELECT * FROM tours WHERE id = $1', [req.params.id]);
+          if (existing.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
+          return res.json(existing.rows[0]); // déjà terminée : succès sans effets de bord
+        }
+        return res.status(404).json({ error: 'Tournée non trouvée' });
+      }
 
       // Actions post-tournée si terminé
       if (status === 'completed' || status === 'cancelled') {

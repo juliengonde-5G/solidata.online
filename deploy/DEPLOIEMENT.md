@@ -103,8 +103,11 @@ crontab deploy/crontab.txt
 
 **Compte admin par défaut :**
 - Identifiant : `admin`
-- Mot de passe : `admin123`
-- **CHANGER IMMÉDIATEMENT après connexion**
+- Mot de passe : **généré aléatoirement** à la première initialisation de la base.
+  Il est affiché **une seule fois** dans les logs de démarrage du backend (encadré
+  « MOT DE PASSE ADMIN INITIAL »). Récupérez-le via :
+  `docker compose -f docker-compose.prod.yml logs backend | grep -A6 "MOT DE PASSE ADMIN INITIAL"`
+- **Changement OBLIGATOIRE à la première connexion** (écran bloquant, ≥ 10 caractères).
 
 ## Scripts de déploiement et de tests
 

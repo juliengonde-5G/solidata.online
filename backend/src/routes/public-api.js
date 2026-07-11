@@ -24,9 +24,11 @@ router.get('/health', apiKeyAuth(), async (req, res) => {
 router.get('/cav', apiKeyAuth(['cav:read']), async (req, res) => {
   try {
     const { commune, status } = req.query;
+    // estimated_fill_rate retiré : colonne jamais alimentée (figée à 0), l'exposer à des
+    // partenaires (Métropole) était trompeur. Un taux de remplissage réel pourra être
+    // ré-exposé plus tard via un calcul à la volée (cf. cav.js /fill-rate).
     let query = `SELECT id, name, address, commune, code_postal, latitude, longitude,
-                        nb_containers, status, ref_refashion,
-                        estimated_fill_rate
+                        nb_containers, status, ref_refashion
                    FROM cav
                   WHERE status <> 'deleted'`;
     const params = [];

@@ -148,6 +148,19 @@ router.post('/login', [
       return res.status(401).json({ error: 'Identifiants invalides' });
     }
 
+    // Item 1 (audit) : filet de rattrapage pour les installations existantes —
+    // un login réussi avec le mot de passe historique « admin123 » force le
+    // changement au prochain écran, même si la colonne était restée à false.
+    let mustChangePassword = user.must_change_password === true;
+    if (password === 'admin123' && !mustChangePassword) {
+      mustChangePassword = true;
+      try {
+        await pool.query('UPDATE users SET must_change_password = true WHERE id = $1', [user.id]);
+      } catch (e) {
+        console.error('[AUTH] Impossible de marquer must_change_password :', e.message);
+      }
+    }
+
     const tokenPayload = {
       id: user.id,
       username: user.username,
@@ -198,6 +211,7 @@ router.post('/login', [
         last_name: user.last_name,
         phone: user.phone,
         team_id: user.team_id,
+        must_change_password: mustChangePassword,
       },
     });
   } catch (err) {
@@ -225,6 +239,13 @@ router.post('/refresh', async (req, res) => {
     }
 
     const row = result.rows[0];
+
+    // Item 4 (audit) : un compte désactivé ne doit plus pouvoir rafraîchir sa
+    // session. On révoque le refresh token présenté et on refuse l'accès.
+    if (row.is_active === false) {
+      await pool.query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
+      return res.status(401).json({ error: 'Compte désactivé' });
+    }
 
     // Supprimer l'ancien token
     await pool.query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
@@ -301,7 +322,7 @@ router.post('/logout', authenticate, async (req, res) => {
 router.get('/me', authenticate, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, username, email, role, first_name, last_name, phone, team_id, is_active, created_at
+      `SELECT id, username, email, role, first_name, last_name, phone, team_id, is_active, must_change_password, created_at
        FROM users WHERE id = $1`,
       [req.user.id]
     );
@@ -317,18 +338,20 @@ router.get('/me', authenticate, async (req, res) => {
   }
 });
 
-// PUT /api/auth/password
+// PUT /api/auth/password — changement de mot de passe par l'utilisateur lui-même.
+// Sert aussi d'écran de changement forcé (must_change_password) : réinitialise le
+// drapeau et révoque les refresh tokens pour un re-login propre (audit item 1).
 router.put('/password', authenticate, [
   body('currentPassword').notEmpty().withMessage('Mot de passe actuel requis'),
-  body('newPassword').isLength({ min: 6 }).withMessage('Le nouveau mot de passe doit contenir au moins 6 caractères'),
+  body('newPassword').isLength({ min: 10 }).withMessage('Le nouveau mot de passe doit contenir au moins 10 caractères'),
 ], validate, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Mot de passe actuel et nouveau requis' });
     }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 6 caractères' });
+    if (newPassword.length < 10) {
+      return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 10 caractères' });
     }
 
     const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
@@ -338,7 +361,13 @@ router.put('/password', authenticate, [
     }
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, req.user.id]);
+    await pool.query(
+      'UPDATE users SET password_hash = $1, must_change_password = false, updated_at = NOW() WHERE id = $2',
+      [hash, req.user.id]
+    );
+
+    // Re-login propre : invalider les sessions renouvelables existantes.
+    await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [req.user.id]);
 
     logActivity({ userId: req.user.id, username: req.user.username, action: 'password_change', ip: req.ip });
 

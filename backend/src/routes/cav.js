@@ -425,7 +425,7 @@ router.get('/:id/qr-code', async (req, res) => {
 });
 
 // POST /api/cav/batch-generate-qr — Générer les QR codes manquants
-router.post('/batch-generate-qr', authorize('ADMIN'), async (req, res) => {
+router.post('/batch-generate-qr', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const cavs = await pool.query('SELECT id, name FROM cav WHERE qr_code_data IS NULL OR qr_code_data = \'\'');
 

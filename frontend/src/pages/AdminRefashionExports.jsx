@@ -35,18 +35,25 @@ export default function AdminRefashionExports() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [annee, trimestre]);
 
-  const downloadCsv = (slug) => {
+  const downloadCsv = async (slug) => {
+    setError(null);
     const q = new URLSearchParams({ annee, ...(trimestre ? { trimestre } : {}), format: 'csv' });
-    const token = localStorage.getItem('token');
-    fetch(`/api/refashion/exports/${slug}?${q}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.blob())
-      .then(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `${slug}_${annee}${trimestre ? `_T${trimestre}` : ''}.csv`;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-      });
+    try {
+      // Instance axios partagée : porte le Bearer (accessToken) + refresh auto —
+      // remplace le fetch qui lisait localStorage.getItem('token') (clé inexistante),
+      // ce qui téléchargeait silencieusement un CSV contenant l'erreur JSON 401.
+      const res = await api.get(`/refashion/exports/${slug}?${q}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${slug}_${annee}${trimestre ? `_T${trimestre}` : ''}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      // La réponse d'erreur est un blob → on tente de lire le JSON dedans.
+      let msg = `${slug} : échec du téléchargement CSV.`;
+      try { const txt = await e.response?.data?.text?.(); if (txt) msg = `${slug} : ${JSON.parse(txt).error || msg}`; } catch { /* garde le message générique */ }
+      setError(msg);
+    }
   };
 
   return (

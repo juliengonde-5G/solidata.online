@@ -31,8 +31,14 @@ router.get('/:id', async (req, res) => {
     const team = await pool.query('SELECT * FROM teams WHERE id = $1', [req.params.id]);
     if (team.rows.length === 0) return res.status(404).json({ error: 'Équipe non trouvée' });
 
+    // Projection réduite : cette route n'est protégée que par `authenticate`
+    // (accès large volontaire — le planning en a besoin), on ne doit donc JAMAIS
+    // exposer les données personnelles sensibles des membres (salaire brut, statut
+    // handicap, titre de séjour, date/lieu de naissance, adresse…). On ne renvoie
+    // que l'identité et l'affectation, non sensibles.
     const members = await pool.query(
-      'SELECT * FROM employees WHERE team_id = $1 AND is_active = true ORDER BY last_name',
+      `SELECT id, first_name, last_name, position, team_id, is_active
+       FROM employees WHERE team_id = $1 AND is_active = true ORDER BY last_name`,
       [req.params.id]
     );
 

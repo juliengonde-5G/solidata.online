@@ -331,7 +331,34 @@ router.put('/milestones/:id', async (req, res) => {
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Jalon non trouve' });
-    res.json(result.rows[0]);
+    const ms = result.rows[0];
+
+    // Clôture du parcours d'insertion à la sortie : quand le « Bilan Sortie » est
+    // marqué réalisé, on solde le parcours du salarié (insertion_status='termine'
+    // + insertion_end_date) — sinon les cohortes double-comptent les sortis.
+    // Idempotent : ne réactive pas un parcours déjà terminé et n'écrase pas une
+    // date de sortie déjà posée (date = date de bilan réalisé, repli fin de contrat).
+    if (ms.milestone_type === 'Bilan Sortie' && ms.status === 'realise') {
+      await pool.query(
+        `UPDATE employees
+           SET insertion_status = 'termine',
+               insertion_end_date = COALESCE(insertion_end_date, $2::date, contract_end, CURRENT_DATE),
+               updated_at = NOW()
+         WHERE id = $1 AND insertion_status <> 'termine'`,
+        [ms.employee_id, ms.completed_date || null]
+      );
+    } else if (ms.milestone_type === 'Bilan Sortie' && d.status && d.status !== 'realise') {
+      // Retour arrière : le bilan de sortie n'est plus « réalisé » → rouvre le
+      // parcours précédemment clôturé par ce jalon (ne touche pas abandon/none).
+      await pool.query(
+        `UPDATE employees
+           SET insertion_status = 'en_parcours', insertion_end_date = NULL, updated_at = NOW()
+         WHERE id = $1 AND insertion_status = 'termine'`,
+        [ms.employee_id]
+      );
+    }
+
+    res.json(ms);
   } catch (err) {
     console.error('[INSERTION] Erreur milestones PUT :', err);
     res.status(500).json({ error: 'Erreur serveur' });

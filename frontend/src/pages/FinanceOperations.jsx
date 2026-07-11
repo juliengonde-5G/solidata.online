@@ -56,6 +56,7 @@ export default function FinanceOperations() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
@@ -66,8 +67,10 @@ export default function FinanceOperations() {
       setAutoData(res.data.auto || {});
       setOverrides(res.data.overrides || {});
       setResults(res.data.results || null);
+      setError(null);
     } catch (err) {
       console.error('Erreur chargement operations:', err);
+      setError('Impossible de charger les données opérationnelles. Vérifiez votre connexion puis réessayez.');
     }
     setLoading(false);
   }, [year]);
@@ -91,9 +94,11 @@ export default function FinanceOperations() {
     try {
       await api.put(`/finance/operations/${year}`, { overrides });
       setSaved(true);
+      setError(null);
       loadData();
     } catch (err) {
       console.error('Erreur sauvegarde operations:', err);
+      setError(err.response?.data?.error || 'Échec de l\'enregistrement des corrections. Réessayez.');
     }
     setSaving(false);
   };
@@ -139,6 +144,12 @@ export default function FinanceOperations() {
             </div>
           }
         />
+
+        {error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            {error}
+          </div>
+        )}
 
         {/* KPI calculees */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

@@ -34,6 +34,7 @@ const API_PASSWORD = process.env.API_PASSWORD;
 const STRICT = process.env.SMOKE_STRICT === 'true';
 
 const TODAY = new Date().toISOString().slice(0, 10);
+const YEAR = new Date().getFullYear();
 
 let token = null;
 let passed = 0;
@@ -188,10 +189,12 @@ async function run() {
   // ═══ §5 Reporting ═══
   if (authH) {
     console.log('\n─── §5 Reporting ───');
-    await checkEndpoint('T-REP-01', '/api/reporting/collecte',   'Reporting collecte', { authH });
-    await checkEndpoint('T-REP-02', '/api/reporting/production', 'Reporting production', { authH });
-    await checkEndpoint('T-REP-03', '/api/reporting/rh',         'Reporting RH', { authH });
-    await checkEndpoint('T-REP-04', '/api/reporting/metropole',  'Reporting Métropole Rouen', { authH });
+    await checkEndpoint('T-REP-01', '/api/reporting/collecte',           'Reporting collecte', { authH });
+    // NB: reporting.js n'expose que /dashboard, /collecte, /cav-map. Les écrans
+    // Reporting Production / RH / Métropole consomment d'autres routes réelles.
+    await checkEndpoint('T-REP-02', '/api/production/dashboard',          'Reporting production (production/dashboard)', { authH });
+    await checkEndpoint('T-REP-03', '/api/performance/industrial-kpis',   'Reporting RH (performance/industrial-kpis)', { authH });
+    await checkEndpoint('T-REP-04', '/api/metropole/dashboard',           'Reporting Métropole Rouen (metropole/dashboard)', { authH });
   }
 
   // ═══ §6 Collecte ═══
@@ -211,7 +214,7 @@ async function run() {
     console.log('\n─── §7 Stock & Tri ───');
     await checkEndpoint('T-STO-01', '/api/stock',                       'Stock — listing', { authH });
     await checkEndpoint('T-STO-02', '/api/stock/summary',               'Stock — résumé', { authH });
-    await checkEndpoint('T-STO-03', '/api/stock-original/grand-livre',  'Stock original — grand livre', { authH });
+    await checkEndpoint('T-STO-03', '/api/stock-original/ledger',       'Stock original — grand livre (ledger)', { authH });
     await checkEndpoint('T-STO-04', '/api/tri/chaines',                 'Chaînes de tri', { authH });
   }
 
@@ -242,9 +245,9 @@ async function run() {
   // ═══ §10 Finance ═══
   if (authH) {
     console.log('\n─── §10 Finance ───');
-    await checkEndpoint('T-FIN-01', '/api/finance/pl',         'Finance — P&L', { authH });
-    await checkEndpoint('T-FIN-02', '/api/finance/tresorerie', 'Finance — Trésorerie', { authH });
-    await checkEndpoint('T-FIN-03', '/api/finance/operations', 'Finance — Opérations', { authH });
+    await checkEndpoint('T-FIN-01', `/api/finance/gl/${YEAR}/pl`,         'Finance — P&L', { authH });
+    await checkEndpoint('T-FIN-02', `/api/finance/gl/${YEAR}/tresorerie`, 'Finance — Trésorerie', { authH });
+    await checkEndpoint('T-FIN-03', `/api/finance/operations/${YEAR}`,    'Finance — Opérations', { authH });
   }
 
   // ═══ §11 Boutiques ═══

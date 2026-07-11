@@ -139,7 +139,16 @@ export default function ExutoiresCommandes() {
   const loadStats = async () => {
     try {
       const res = await api.get('/commandes-exutoires/stats');
-      setStats(res.data);
+      const d = res.data || {};
+      // Le backend renvoie total_tonnage_prevu / total_ca_prevu (en tonnes / €) ;
+      // les cartes KPI lisent tonnage_prevu / ca_previsionnel. On aligne les noms
+      // pour ne plus afficher « — ». actives / en_attente restent dérivés du kanban.
+      setStats((prev) => ({
+        ...prev,
+        ...d,
+        tonnage_prevu: d.total_tonnage_prevu ?? 0,
+        ca_previsionnel: d.total_ca_prevu ?? 0,
+      }));
     } catch (err) { console.error(err); }
   };
 

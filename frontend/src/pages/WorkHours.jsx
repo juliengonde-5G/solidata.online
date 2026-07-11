@@ -55,7 +55,9 @@ export default function WorkHours() {
     } catch (err) { console.error(err); }
   };
 
-  const TYPE_LABELS = { normal: 'Normal', overtime: 'Heures sup.', absence: 'Absence', conge: 'Congé', maladie: 'Maladie' };
+  // Types alignés sur l'enum réel de work_hours.type (backend + KPI + planning).
+  // Congé = 'holiday', Maladie = 'sick' (mapping historique de planning-hebdo).
+  const TYPE_LABELS = { normal: 'Normal', training: 'Formation', absence: 'Absence', sick: 'Maladie', holiday: 'Congé' };
 
   const hoursColumns = [
     { key: 'date', label: 'Date', sortable: true, render: (h) => <span className="font-medium">{new Date(h.date).toLocaleDateString('fr-FR')}</span> },

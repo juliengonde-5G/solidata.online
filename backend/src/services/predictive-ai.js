@@ -254,8 +254,9 @@ async function recommanderAjustements() {
 
   const data = await getHistoricalData(90);
 
-  // Charger les facteurs actuels
-  const { getSeasonalFactors, getDayOfWeekFactors } = require('./tours/predictions');
+  // Charger les facteurs actuels (require paresseux : le moteur de prédiction vit
+  // dans routes/tours/, pas dans services/tours/ qui n'existe pas)
+  const { getSeasonalFactors, getDayOfWeekFactors } = require('../routes/tours/predictions');
   const currentFactors = {
     saisonniers: getSeasonalFactors(),
     jours_semaine: getDayOfWeekFactors(),

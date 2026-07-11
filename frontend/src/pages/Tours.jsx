@@ -14,6 +14,7 @@ export default function Tours() {
   const [vehicles, setVehicles] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [selectedTour, setSelectedTour] = useState(null);
+  const [statusUpdating, setStatusUpdating] = useState({}); // { [tourId]: true } pendant le PUT statut
 
   // Wizard form
   const [wizForm, setWizForm] = useState({
@@ -82,10 +83,20 @@ export default function Tours() {
   };
 
   const updateStatus = async (id, status) => {
+    if (statusUpdating[id]) return; // évite le double envoi (double clic sur « Terminer »)
+    setStatusUpdating(prev => ({ ...prev, [id]: true }));
     try {
       await api.put(`/tours/${id}/status`, { status });
-      loadTours();
-    } catch (err) { console.error(err); }
+      await loadTours();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setStatusUpdating(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
   };
 
   const loadTourDetail = async (id) => {
@@ -140,10 +151,10 @@ export default function Tours() {
         <div className="flex gap-2">
           <button onClick={() => loadTourDetail(t.id)} className="text-teal-600 text-xs font-semibold hover:text-teal-700 hover:underline">Détails</button>
           {t.status === 'planned' && (
-            <button onClick={() => updateStatus(t.id, 'in_progress')} className="text-orange-500 text-xs font-semibold hover:underline">Démarrer</button>
+            <button onClick={() => updateStatus(t.id, 'in_progress')} disabled={!!statusUpdating[t.id]} className="text-orange-500 text-xs font-semibold hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline">{statusUpdating[t.id] ? '…' : 'Démarrer'}</button>
           )}
           {t.status === 'in_progress' && (
-            <button onClick={() => updateStatus(t.id, 'completed')} className="text-emerald-600 text-xs font-semibold hover:underline">Terminer</button>
+            <button onClick={() => updateStatus(t.id, 'completed')} disabled={!!statusUpdating[t.id]} className="text-emerald-600 text-xs font-semibold hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline">{statusUpdating[t.id] ? '…' : 'Terminer'}</button>
           )}
         </div>
       ),
@@ -253,10 +264,10 @@ export default function Tours() {
                 </div>
                 <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
                   {t.status === 'planned' && (
-                    <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'in_progress'); }} className="flex-1 text-center py-2 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold hover:bg-amber-100 transition-colors">Démarrer</button>
+                    <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'in_progress'); }} disabled={!!statusUpdating[t.id]} className="flex-1 text-center py-2 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{statusUpdating[t.id] ? '…' : 'Démarrer'}</button>
                   )}
                   {t.status === 'in_progress' && (
-                    <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'completed'); }} className="flex-1 text-center py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 transition-colors">Terminer</button>
+                    <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'completed'); }} disabled={!!statusUpdating[t.id]} className="flex-1 text-center py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{statusUpdating[t.id] ? '…' : 'Terminer'}</button>
                   )}
                   <button onClick={(e) => { e.stopPropagation(); loadTourDetail(t.id); }} className="flex-1 text-center py-2 rounded-lg bg-teal-50 text-teal-700 text-xs font-semibold hover:bg-teal-100 transition-colors">Détails</button>
                 </div>

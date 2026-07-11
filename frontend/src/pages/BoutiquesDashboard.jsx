@@ -214,7 +214,8 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
     const caByHour = {};
     for (const t of tickets) {
       const h = new Date(t.date_ticket).getHours();
-      caByHour[h] = (caByHour[h] || 0) + Number(t.total_ttc);
+      // CA HT (base cohérente avec l'objectif jour, dérivé de ca_objectif_ht).
+      caByHour[h] = (caByHour[h] || 0) + Number(t.total_ht || 0);
     }
     const meteoByHour = {};
     for (const p of (meteoHourly || [])) {
@@ -255,7 +256,7 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
 
       {/* Bloc 1 : KPIs principaux avec deltas vs J-1 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <KpiCard title="CA HT du jour" value={formatEuro(kpis?.ca_ttc)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={v.ca_ttc} />} />
+        <KpiCard title="CA HT du jour" value={formatEuro(kpis?.ca_ht)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={v.ca_ht} />} />
         <KpiCard title="Nb tickets" value={(kpis?.nb_tickets || 0).toLocaleString('fr-FR')} icon={Receipt} accent="slate" footer={<DeltaBadge value={v.nb_tickets} />} />
         <KpiCard title="Panier moyen" value={formatEuro(kpis?.panier_moyen, 2)} icon={Target} accent="amber" footer={<DeltaBadge value={v.panier_moyen} />} />
         <KpiCard title="IPT (articles/ticket)" value={(kpis?.ipt || 0).toFixed(2)} icon={ShoppingBag} accent="slate" footer={<DeltaBadge value={v.ipt} />} />
@@ -323,7 +324,7 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
         ) : (
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
-              <tr><th className="text-left py-2">Rayon</th><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA HT</th></tr>
+              <tr><th className="text-left py-2">Rayon</th><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA TTC</th></tr>
             </thead>
             <tbody>
               {rayons.map((r, i) => (
@@ -345,7 +346,8 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
 function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, evolution }) {
   if (!data) return null;
   const objectifCA = Number(data.objectif?.ca_objectif_ht || 0);
-  const realiseCA = data.realise?.ca_ttc || 0;
+  // Réalisé en HT pour comparer à un objectif HT (le % d'atteinte était faussé par ~la TVA).
+  const realiseCA = data.realise?.ca_ht || 0;
   const pctAtteinte = objectifCA > 0 ? (realiseCA / objectifCA) * 100 : null;
   const ev = evolution?.variations || {};
 
@@ -357,7 +359,7 @@ function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, 
       const w = weatherByDate.get(key);
       return {
         jour: key ? new Date(key).getDate() : '',
-        ca: Math.round(d.ca_ttc || 0),
+        ca: Math.round(d.ca_ht || 0),
         pluie: w?.precipitation_mm ? Number(w.precipitation_mm) : 0,
       };
     });
@@ -374,7 +376,7 @@ function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, 
 
       {/* KPIs budgétaires */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <KpiCard title="CA HT réalisé" value={formatEuro(realiseCA)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={ev.ca_ttc} />} />
+        <KpiCard title="CA HT réalisé" value={formatEuro(realiseCA)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={ev.ca_ht} />} />
         <KpiCard title="Objectif CA" value={formatEuro(objectifCA)} icon={Target} accent="slate" />
         <KpiCard title="% atteinte" value={pctAtteinte !== null ? `${pctAtteinte.toFixed(0)}%` : '—'} icon={TrendingUp} accent={pctAtteinte >= 100 ? 'primary' : pctAtteinte >= 80 ? 'amber' : 'slate'} />
         <KpiCard title="Nb tickets" value={(kpis?.nb_tickets ?? data.realise?.nb_tickets ?? 0).toLocaleString('fr-FR')} icon={Receipt} accent="slate" footer={<DeltaBadge value={ev.nb_tickets} />} />
@@ -409,7 +411,7 @@ function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, 
           <h3 className="text-sm font-semibold text-slate-700 mb-3">Segments (CA)</h3>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
-              <Pie data={data.segments.map(s => ({ name: SEGMENT_LABELS[s.segment], value: Math.round(s.ca_ttc) }))} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(e) => `${e.name}`}>
+              <Pie data={data.segments.map(s => ({ name: SEGMENT_LABELS[s.segment], value: Math.round(s.ca_ht) }))} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(e) => `${e.name}`}>
                 {data.segments.map((s, i) => <Cell key={i} fill={SEGMENT_COLORS[s.segment]} />)}
               </Pie>
               <Tooltip formatter={(v) => `${v.toLocaleString('fr-FR')} €`} />
@@ -438,7 +440,7 @@ function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, 
               <YAxis yAxisId="right" orientation="right" fontSize={11} />
               <Tooltip formatter={(v, n) => n === 'CA (€)' ? formatEuro(v, 2) : v} />
               <Legend />
-              <Bar yAxisId="left" dataKey="ca_ttc" fill="#EC4899" name="CA HT (€)" />
+              <Bar yAxisId="left" dataKey="ca_ht" fill="#EC4899" name="CA HT (€)" />
               <Line yAxisId="right" type="monotone" dataKey="nb_tickets" stroke="#0EA5E9" name="Tickets" dot={{ r: 3 }} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -457,7 +459,7 @@ function MonthView({ mois, annee, setMois, setAnnee, data, meteo, kpis, hourly, 
                 <td className="py-2">{a.article}</td>
                 <td className="py-2 text-slate-500 text-xs">{a.rayon}</td>
                 <td className="py-2 text-right">{a.nb_articles}</td>
-                <td className="py-2 text-right font-medium">{Number(a.ca_ttc).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
+                <td className="py-2 text-right font-medium">{Number(a.ca_ht).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
               </tr>
             ))}
           </tbody>
@@ -479,7 +481,7 @@ function YearView({ annee, setAnnee, data, budget, boutique }) {
     const o = budget.objectifs_par_mois.find(o => o.mois === i + 1);
     return {
       mois: m,
-      realise: v?.ca_ttc || 0,
+      realise: v?.ca_ht || 0,
       objectif: Number(o?.ca_objectif_ht || 0),
     };
   });
@@ -536,7 +538,7 @@ function YearView({ annee, setAnnee, data, budget, boutique }) {
               const v = data.find(d => d.mois === i + 1);
               const o = budget.objectifs_par_mois.find(o => o.mois === i + 1);
               const objNum = Number(o?.ca_objectif_ht || 0);
-              const realise = v?.ca_ttc || 0;
+              const realise = v?.ca_ht || 0;
               const pct = objNum > 0 ? (realise / objNum) * 100 : null;
               return (
                 <tr key={i} className="border-b border-slate-100">

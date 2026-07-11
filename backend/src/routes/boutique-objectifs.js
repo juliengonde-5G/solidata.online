@@ -40,9 +40,12 @@ router.get('/compare', async (req, res) => {
       [boutique_id, year]
     );
 
+    // Réalisé comparé aux objectifs (saisis en HT) : on expose ca_ht comme base de pilotage,
+    // ca_ttc reste disponible pour compat.
     const ventes = await pool.query(`
       SELECT EXTRACT(MONTH FROM date_vente)::INT AS mois,
              segment,
+             COALESCE(SUM(total_ht), 0)::FLOAT AS ca_ht,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
              COUNT(DISTINCT ticket_id)::INT AS nb_tickets,
              CASE WHEN COUNT(DISTINCT ticket_id) > 0
@@ -55,7 +58,8 @@ router.get('/compare', async (req, res) => {
     // Global = somme de tous segments par mois
     const globalVentes = {};
     for (const v of ventes.rows) {
-      if (!globalVentes[v.mois]) globalVentes[v.mois] = { mois: v.mois, ca_ttc: 0, nb_tickets: 0 };
+      if (!globalVentes[v.mois]) globalVentes[v.mois] = { mois: v.mois, ca_ht: 0, ca_ttc: 0, nb_tickets: 0 };
+      globalVentes[v.mois].ca_ht += v.ca_ht;
       globalVentes[v.mois].ca_ttc += v.ca_ttc;
       globalVentes[v.mois].nb_tickets += v.nb_tickets;
     }

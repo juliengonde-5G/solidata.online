@@ -20,6 +20,7 @@ export default function FinanceControles() {
   const [checks, setChecks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
@@ -28,8 +29,10 @@ export default function FinanceControles() {
     try {
       const res = await api.get(`/finance/controls/${year}`);
       setChecks(res.data?.checks || res.data || []);
+      setError(null);
     } catch (err) {
       console.error('Erreur chargement controles:', err);
+      setError('Impossible de charger les contrôles. Vérifiez votre connexion puis réessayez.');
     }
     setLoading(false);
   }, [year]);
@@ -38,30 +41,44 @@ export default function FinanceControles() {
     loadChecks();
   }, [loadChecks]);
 
+  // « Actualiser » = relancer les contrôles (re-lecture du GET, qui recalcule côté serveur)
   const handleRefresh = async () => {
     setRefreshing(true);
-    try {
-      await api.post(`/finance/controles/${year}/refresh`);
-      await loadChecks();
-    } catch (err) {
-      console.error('Erreur rafraichissement:', err);
-    }
+    await loadChecks();
     setRefreshing(false);
   };
 
-  const handleExport = async () => {
+  // « Exporter » = génération CSV côté client (séparateur ; + BOM UTF-8 pour Excel FR)
+  const handleExport = () => {
     try {
-      const res = await api.get(`/finance/controles/${year}/export`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      if (!checks.length) { setError('Aucun contrôle à exporter.'); return; }
+      const statusLabel = { ok: 'OK', warning: 'Attention', error: 'Erreur' };
+      const esc = (v) => {
+        const s = (v ?? '').toString();
+        return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = ['Controle', 'Statut', 'Detail', 'Explication', 'Action'];
+      const rows = checks.map((c) => [
+        c.name || c.label || '',
+        statusLabel[c.status] || c.status || '',
+        c.desc || c.detail || '',
+        c.explanation || '',
+        c.action || '',
+      ].map(esc).join(';'));
+      const csv = '﻿' + [header.join(';'), ...rows].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `controles_finance_${year}.xlsx`);
+      link.setAttribute('download', `controles_finance_${year}.csv`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
+      setError(null);
     } catch (err) {
       console.error('Erreur export:', err);
+      setError('Erreur lors de la génération du fichier CSV.');
     }
   };
 
@@ -112,6 +129,12 @@ export default function FinanceControles() {
             </div>
           }
         />
+
+        {error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            {error}
+          </div>
+        )}
 
         {/* Synthese badges */}
         {!loading && checks.length > 0 && (

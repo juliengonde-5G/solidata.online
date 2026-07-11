@@ -1,6 +1,7 @@
 require('dotenv').config();
 const pool = require('../config/database');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 async function initDatabase() {
   const client = await pool.connect();
@@ -32,6 +33,10 @@ async function initDatabase() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    // must_change_password (audit 2026-07-11, item 1) : force le changement du
+    // mot de passe au premier login (compte admin initial notamment). Idempotent.
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;`);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -1813,16 +1818,30 @@ async function initDatabase() {
     // DONNÉES INITIALES (Seeds)
     // ══════════════════════════════════════════
 
-    // Admin par défaut
+    // Admin par défaut (audit 2026-07-11, item 1)
+    // On ne réécrase JAMAIS un compte admin existant (garde-fou historique conservé).
+    // Sur une base fraîche, le mot de passe est ALÉATOIRE (jamais de valeur connue
+    // type « admin123 ») : il est affiché UNE SEULE FOIS dans les logs de démarrage,
+    // et le compte est marqué must_change_password=true (changement obligatoire au
+    // premier login).
     const adminExists = await client.query("SELECT id FROM users WHERE username = 'admin'");
     if (adminExists.rows.length === 0) {
-      const hash = await bcrypt.hash('admin123', 10);
+      const initialPassword = crypto.randomBytes(16).toString('hex'); // 32 caractères hex, entropie forte
+      const hash = await bcrypt.hash(initialPassword, 10);
       await client.query(
-        `INSERT INTO users (username, password_hash, email, role, first_name, last_name)
-         VALUES ('admin', $1, 'admin@solidata.fr', 'ADMIN', 'Administrateur', 'Système')`,
+        `INSERT INTO users (username, password_hash, email, role, first_name, last_name, must_change_password)
+         VALUES ('admin', $1, 'admin@solidata.fr', 'ADMIN', 'Administrateur', 'Système', true)`,
         [hash]
       );
-      console.log('[INIT-DB] Utilisateur admin créé (admin / admin123)');
+      console.log('');
+      console.log('================================================================');
+      console.log('  MOT DE PASSE ADMIN INITIAL — notez-le, il ne sera PLUS affiché.');
+      console.log('  Changement OBLIGATOIRE à la première connexion.');
+      console.log('  --------------------------------------------------------------');
+      console.log('  Identifiant  : admin');
+      console.log(`  Mot de passe : ${initialPassword}`);
+      console.log('================================================================');
+      console.log('');
     }
 
     // Migration: update teams constraint + data — drop ALL check constraints on type column

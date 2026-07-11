@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BookOpen, CircleDollarSign, Download, ExternalLink, RefreshCw, Zap } from 'lucide-react';
+import { BookOpen, CircleDollarSign, Download, ExternalLink, Zap } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, DataTable, Modal, PageHeader, Section } from '../components';
 import api from '../services/api';
@@ -76,14 +76,16 @@ export default function Pennylane() {
     }
   };
 
+  // Import PULL des factures clients émises sur Pennylane (pour le contrôle facturation).
+  // Le flux PUSH « Solidata → Pennylane » a été retiré le 03/05/2026 (doctrine PULL-only).
   const syncInvoices = async () => {
     setSyncing(true);
     try {
-      const res = await api.post('/pennylane/sync/invoices');
-      alert(res.data.message);
+      const res = await api.post('/pennylane/sync/customer-invoices');
+      alert(res.data.message || 'Import des factures clients terminé.');
       loadAll();
     } catch (err) {
-      alert(err.response?.data?.error || 'Erreur synchronisation');
+      alert(err.response?.data?.error || 'Erreur lors de l\'import des factures clients');
     }
     setSyncing(false);
   };
@@ -200,18 +202,18 @@ export default function Pennylane() {
               </div>
             </button>
 
-            {/* Push factures */}
+            {/* Pull factures clients (contrôle facturation) */}
             <button
               onClick={syncInvoices}
               disabled={syncing || !status?.active}
               className="flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-slate-200 hover:border-green-300 hover:bg-green-50 transition disabled:opacity-50"
             >
               <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
-                <RefreshCw className="w-5 h-5 text-green-600" />
+                <Download className="w-5 h-5 text-green-600" />
               </div>
               <div className="text-left">
-                <p className="font-medium text-sm">{syncing ? 'Synchronisation...' : 'Synchroniser factures'}</p>
-                <p className="text-xs text-slate-400">Pousser vers Pennylane</p>
+                <p className="font-medium text-sm">{syncing ? 'Import en cours...' : 'Importer les factures clients'}</p>
+                <p className="text-xs text-slate-400">Depuis Pennylane (contrôle facturation)</p>
               </div>
             </button>
 

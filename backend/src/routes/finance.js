@@ -802,12 +802,25 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     }
 
     const cashFlow = Object.entries(byCategory)
-      .map(([label, months]) => ({
-        key: label,
-        label,
-        months: months.map(v => Math.round(v * 100) / 100),
-        lines: [],
-      }))
+      .map(([label, months]) => {
+        // Classification Revenus / Dépenses dérivée du signe du montant net.
+        // Côté Pennylane : encaissement = montant positif, décaissement = montant négatif.
+        const net = months.reduce((s, v) => s + v, 0);
+        const type = net >= 0 ? 'revenue' : 'expense';
+        // Les dépenses sont présentées en magnitude positive : le front calcule
+        // « Solde net = Revenus − Dépenses » en sommant directement les mois.
+        const displayMonths = months.map(v =>
+          Math.round((type === 'expense' ? Math.abs(v) : v) * 100) / 100
+        );
+        return {
+          key: label,
+          label,
+          type,
+          class: type === 'revenue' ? '7' : '6',
+          months: displayMonths,
+          lines: [],
+        };
+      })
       .sort((a, b) => {
         const totalA = a.months.reduce((s, v) => s + Math.abs(v), 0);
         const totalB = b.months.reduce((s, v) => s + Math.abs(v), 0);
@@ -923,72 +936,229 @@ router.get('/operations/:year', async (req, res) => {
 router.put('/operations/:year', async (req, res) => {
   try {
     const year = parseInt(req.params.year);
-    const { data } = req.body; // [{ field_id, month, value }]
+    const { overrides, data } = req.body;
     const exerciseId = await getOrCreateExercise(year);
 
-    for (const item of data) {
-      await pool.query(
-        `INSERT INTO financial_operational_data (exercise_id, field_id, month, value, source, updated_by)
-         VALUES ($1,$2,$3,$4,'manual',$5)
-         ON CONFLICT (exercise_id, field_id, month) DO UPDATE SET value = $4, source = 'manual', updated_by = $5, updated_at = NOW()`,
-        [exerciseId, item.field_id, item.month, item.value, req.user.id]
-      );
+    // Contrat principal (FinanceOperations.jsx) : corrections manuelles annuelles
+    // sous la forme { field_id: valeur }. Persistées au mois 0 (valeur annuelle).
+    if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
+      let count = 0;
+      for (const [fieldId, raw] of Object.entries(overrides)) {
+        const val = (raw === '' || raw == null) ? null : parseFloat(raw);
+        if (val == null || Number.isNaN(val)) {
+          // Champ vidé → on retire la correction manuelle éventuelle.
+          await pool.query(
+            `DELETE FROM financial_operational_data
+             WHERE exercise_id = $1 AND field_id = $2 AND source = 'manual'`,
+            [exerciseId, fieldId]
+          );
+          continue;
+        }
+        await pool.query(
+          `INSERT INTO financial_operational_data (exercise_id, field_id, month, value, source, updated_by)
+           VALUES ($1, $2, 0, $3, 'manual', $4)
+           ON CONFLICT (exercise_id, field_id, month)
+           DO UPDATE SET value = EXCLUDED.value, source = 'manual', updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+          [exerciseId, fieldId, val, req.user.id]
+        );
+        count++;
+      }
+      return res.json({ ok: true, count });
     }
-    res.json({ ok: true, count: data.length });
+
+    // Rétro-compatibilité : ancien contrat data = [{ field_id, month, value }]
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        await pool.query(
+          `INSERT INTO financial_operational_data (exercise_id, field_id, month, value, source, updated_by)
+           VALUES ($1,$2,$3,$4,'manual',$5)
+           ON CONFLICT (exercise_id, field_id, month) DO UPDATE SET value = $4, source = 'manual', updated_by = $5, updated_at = NOW()`,
+          [exerciseId, item.field_id, item.month, item.value, req.user.id]
+        );
+      }
+      return res.json({ ok: true, count: data.length });
+    }
+
+    return res.status(400).json({ error: 'Corps de requête invalide : fournir { overrides } ou { data }.' });
   } catch (err) {
+    console.error('[FINANCE] Erreur PUT operations :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// Auto-populated data from solidata tables
+// Données opérationnelles : valeurs auto-calculées (scalaires annuels), corrections
+// manuelles persistées et résultats dérivés (coûts complets + P&L par centre).
+// Contrat consommé par FinanceOperations.jsx : { auto, overrides, results }.
 router.get('/operations/:year/auto', async (req, res) => {
   try {
     const year = parseInt(req.params.year);
+    const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
     const auto = {};
 
-    // Tonnes collectees par mois (from tours)
-    const tours = await pool.query(`
-      SELECT EXTRACT(MONTH FROM date)::int - 1 as month, SUM(total_weight_kg) / 1000.0 as tonnes
+    // ── 1. Valeurs auto-calculées depuis les tables métier (annuelles) ──────────
+    // Volumes collectés (tournées terminées)
+    const toursR = await pool.query(`
+      SELECT COALESCE(SUM(total_weight_kg), 0) / 1000.0 AS tonnes
       FROM tours WHERE EXTRACT(YEAR FROM date) = $1 AND status = 'completed'
-      GROUP BY EXTRACT(MONTH FROM date) ORDER BY month
     `, [year]);
-    auto.tonnes_collectees = {};
-    for (const r of tours.rows) auto.tonnes_collectees[r.month] = parseFloat(r.tonnes) || 0;
+    const tonnesCollectees = parseFloat(toursR.rows[0]?.tonnes) || 0;
+    if (tonnesCollectees > 0) auto.tonnes_collectees = round2(tonnesCollectees);
 
-    // Tonnes au tri par mois (from production_daily)
-    const prod = await pool.query(`
-      SELECT EXTRACT(MONTH FROM date)::int - 1 as month, SUM(entree_ligne_kg) / 1000.0 as tonnes
+    // Volumes triés (production quotidienne)
+    const prodR = await pool.query(`
+      SELECT COALESCE(SUM(entree_ligne_kg), 0) / 1000.0 AS tonnes
       FROM production_daily WHERE EXTRACT(YEAR FROM date) = $1
-      GROUP BY EXTRACT(MONTH FROM date) ORDER BY month
     `, [year]);
-    auto.tonnes_au_tri = {};
-    for (const r of prod.rows) auto.tonnes_au_tri[r.month] = parseFloat(r.tonnes) || 0;
+    const tonnesTriees = parseFloat(prodR.rows[0]?.tonnes) || 0;
+    if (tonnesTriees > 0) auto.tonnes_triees = round2(tonnesTriees);
 
-    // ETP collecte (employees in collecte team)
-    const etpColl = await pool.query(`
-      SELECT COUNT(*) as count FROM employees e
-      JOIN teams t ON e.team_id = t.id
-      WHERE t.type = 'collecte' AND e.is_active = true
-    `);
-    auto.etp_collecte = parseInt(etpColl.rows[0].count) || 0;
+    // Expéditions / exutoires (tolérant au schéma)
+    let tonnesExpedites = 0, caExutoires = 0, nbExutoires = 0;
+    try {
+      const expR = await pool.query(`
+        SELECT COALESCE(SUM(poids_kg), 0) / 1000.0 AS tonnes,
+               COALESCE(SUM(valeur_euros), 0) AS ca,
+               COUNT(DISTINCT exutoire_id) AS nb
+        FROM expeditions WHERE EXTRACT(YEAR FROM date) = $1
+      `, [year]);
+      tonnesExpedites = parseFloat(expR.rows[0]?.tonnes) || 0;
+      caExutoires = parseFloat(expR.rows[0]?.ca) || 0;
+      nbExutoires = parseInt(expR.rows[0]?.nb) || 0;
+    } catch (e) {
+      console.error('[FINANCE] ops auto — expéditions ignorées :', e.code || e.message);
+    }
+    if (tonnesExpedites > 0) auto.tonnes_expedites = round2(tonnesExpedites);
+    if (caExutoires > 0) auto.ca_exutoires = round2(caExutoires);
+    if (nbExutoires > 0) auto.nb_exutoires = nbExutoires;
+    if (tonnesExpedites > 0 && caExutoires > 0) auto.prix_moyen_tonne = round2(caExutoires / tonnesExpedites);
+    if (tonnesCollectees > 0 && tonnesExpedites > 0) auto.taux_valorisation = round2((tonnesExpedites / tonnesCollectees) * 100);
 
-    // ETP tri
-    const etpTri = await pool.query(`
-      SELECT COUNT(*) as count FROM employees e
-      JOIN teams t ON e.team_id = t.id
-      WHERE t.type = 'tri' AND e.is_active = true
-    `);
-    auto.etp_tri = parseInt(etpTri.rows[0].count) || 0;
+    // Flotte
+    const vehiR = await pool.query(`SELECT COUNT(*) AS c FROM vehicles WHERE status != 'out_of_service'`);
+    const nbVehicules = parseInt(vehiR.rows[0]?.c) || 0;
+    if (nbVehicules > 0) auto.nb_vehicules = nbVehicules;
 
-    // Vehicules actifs
-    const vehi = await pool.query(`SELECT COUNT(*) as count FROM vehicles WHERE status != 'out_of_service'`);
-    auto.nb_vehicules = parseInt(vehi.rows[0].count) || 0;
+    // Effectifs (proxy ETP = collaborateurs actifs — corrigeable manuellement)
+    const etpR = await pool.query(`SELECT COUNT(*) AS c FROM employees WHERE is_active = true`);
+    const etpTotal = parseInt(etpR.rows[0]?.c) || 0;
+    if (etpTotal > 0) auto.etp_total = etpTotal;
 
-    // Points de collecte actifs
-    const cav = await pool.query(`SELECT COUNT(*) as count FROM cav WHERE status = 'active'`);
-    auto.nb_points_collecte = parseInt(cav.rows[0].count) || 0;
+    // ── 2. Corrections manuelles persistées (annuelles, stockées au mois 0) ─────
+    const ovR = await pool.query(`
+      SELECT o.field_id, o.value
+      FROM financial_operational_data o
+      JOIN financial_exercises e ON o.exercise_id = e.id
+      WHERE e.year = $1 AND o.source = 'manual'
+      ORDER BY o.month
+    `, [year]);
+    const overrides = {};
+    for (const r of ovR.rows) {
+      if (overrides[r.field_id] == null) overrides[r.field_id] = parseFloat(r.value);
+    }
 
-    res.json(auto);
+    // Valeur effective : correction manuelle si saisie, sinon valeur auto
+    const eff = (k) => {
+      const o = overrides[k];
+      if (o != null && !Number.isNaN(Number(o))) return Number(o);
+      return Number(auto[k]) || 0;
+    };
+    const effCollectees = eff('tonnes_collectees');
+    const effTriees = eff('tonnes_triees');
+    const effEtp = eff('etp_total');
+
+    // ── 3. Résultats : coûts complets + P&L par centre (depuis le GL Pennylane) ─
+    let produitsTotal = 0, chargesTotal = 0;
+    const centreMap = {};
+    try {
+      const glR = await pool.query(`
+        SELECT g.category AS centre,
+          SUM(CASE WHEN g.account LIKE '6%' THEN g.debit - g.credit ELSE 0 END) AS charges,
+          SUM(CASE WHEN g.account LIKE '7%' THEN g.credit - g.debit ELSE 0 END) AS produits
+        FROM financial_gl_entries g
+        JOIN financial_exercises e ON g.exercise_id = e.id
+        WHERE e.year = $1 AND g.family_category = 'Centre P&L'
+        GROUP BY g.category
+      `, [year]);
+      for (const r of glR.rows) {
+        centreMap[r.centre] = { charges: parseFloat(r.charges) || 0, produits: parseFloat(r.produits) || 0 };
+      }
+      const totR = await pool.query(`
+        SELECT
+          SUM(CASE WHEN g.account LIKE '7%' THEN g.credit - g.debit ELSE 0 END) AS produits,
+          SUM(CASE WHEN g.account LIKE '6%' THEN g.debit - g.credit ELSE 0 END) AS charges
+        FROM financial_gl_entries g
+        JOIN financial_exercises e ON g.exercise_id = e.id
+        WHERE e.year = $1
+      `, [year]);
+      produitsTotal = parseFloat(totR.rows[0]?.produits) || 0;
+      chargesTotal = parseFloat(totR.rows[0]?.charges) || 0;
+    } catch (e) {
+      console.error('[FINANCE] ops auto — GL ignoré :', e.code || e.message);
+    }
+
+    // Répartition des frais généraux (clé volumique) + transfert interne collecte → tri
+    const cCollecte = centreMap['Collecte & Original'] || { charges: 0, produits: 0 };
+    const cTri = centreMap['Tri & Recyclage - 2nde main'] || { charges: 0, produits: 0 };
+    const cFG = centreMap['Frais Generaux'] || centreMap['Frais Généraux'] || { charges: 0, produits: 0 };
+    const chargesFG = cFG.charges || 0;
+
+    const ratioTri = effCollectees > 0 ? effTriees / effCollectees : 0;
+    const fgCollecte = chargesFG * (1 - ratioTri);
+    const fgTri = chargesFG * ratioTri;
+    const coutCompletCollecte = cCollecte.charges + fgCollecte;
+    const coutTonneCollecte = effCollectees > 0 ? coutCompletCollecte / effCollectees : 0;
+    const transfertInterne = coutTonneCollecte * effTriees;
+    const coutCompletTri = cTri.charges + fgTri + transfertInterne;
+    const coutTonneTri = effTriees > 0 ? coutCompletTri / effTriees : 0;
+
+    // Tableau par centre — les Frais Généraux sont répartis (pas de ligne propre),
+    // les transferts internes se compensent (nets à 0 au total).
+    const FG_NAMES = ['Frais Generaux', 'Frais Généraux'];
+    const centres = [];
+    for (const [centre, v] of Object.entries(centreMap)) {
+      if (FG_NAMES.includes(centre)) continue;
+      let fgAlloues = 0, transferts = 0;
+      if (centre === 'Collecte & Original') { fgAlloues = fgCollecte; transferts = transfertInterne; }
+      else if (centre === 'Tri & Recyclage - 2nde main') { fgAlloues = fgTri; transferts = -transfertInterne; }
+      const resultat = v.produits - v.charges - fgAlloues + transferts;
+      centres.push({
+        centre,
+        produits: round2(v.produits),
+        charges_directes: round2(v.charges),
+        fg_alloues: round2(fgAlloues),
+        transferts: round2(transferts),
+        resultat: round2(resultat),
+        marge: v.produits > 0 ? round2((resultat / v.produits) * 100) : 0,
+      });
+    }
+    centres.sort((a, b) => b.produits - a.produits);
+
+    const totalAcc = centres.reduce((t, c) => ({
+      produits: t.produits + c.produits,
+      charges_directes: t.charges_directes + c.charges_directes,
+      fg_alloues: t.fg_alloues + c.fg_alloues,
+      transferts: t.transferts + c.transferts,
+      resultat: t.resultat + c.resultat,
+    }), { produits: 0, charges_directes: 0, fg_alloues: 0, transferts: 0, resultat: 0 });
+    const total = centres.length > 0 ? {
+      produits: round2(totalAcc.produits),
+      charges_directes: round2(totalAcc.charges_directes),
+      fg_alloues: round2(totalAcc.fg_alloues),
+      transferts: round2(totalAcc.transferts),
+      resultat: round2(totalAcc.resultat),
+      marge: totalAcc.produits > 0 ? round2((totalAcc.resultat / totalAcc.produits) * 100) : 0,
+    } : null;
+
+    const results = {
+      cout_tonne_collecte: round2(coutTonneCollecte),
+      cout_tonne_trie: round2(coutTonneTri),
+      marge_operationnelle: produitsTotal > 0 ? round2(((produitsTotal - chargesTotal) / produitsTotal) * 100) : 0,
+      ca_par_etp: effEtp > 0 ? round2(produitsTotal / effEtp) : 0,
+      centres,
+      total,
+    };
+
+    res.json({ auto, overrides, results });
   } catch (err) {
     console.error('[FINANCE] Erreur ops auto :', err);
     res.status(500).json({ error: 'Erreur serveur' });

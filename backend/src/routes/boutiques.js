@@ -154,9 +154,11 @@ router.get('/:id/budget', async (req, res) => {
     const btq = await pool.query('SELECT id, nom, budget_annuel FROM boutiques WHERE id = $1', [req.params.id]);
     if (btq.rows.length === 0) return res.status(404).json({ error: 'Boutique introuvable' });
 
-    // Réalisé par mois (TTC)
+    // Réalisé par mois — CA HT (base cohérente avec les objectifs, saisis en HT).
+    // ca_ttc reste exposé pour compat, mais le pilotage (ca_total_realise) est en HT.
     const realise = await pool.query(`
       SELECT EXTRACT(MONTH FROM date_vente)::INT AS mois,
+             COALESCE(SUM(total_ht), 0)::FLOAT AS ca_ht,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
              COUNT(DISTINCT ticket_id)::INT AS nb_tickets
       FROM boutique_ventes
@@ -179,7 +181,8 @@ router.get('/:id/budget', async (req, res) => {
       annee: year,
       realise_par_mois: realise.rows,
       objectifs_par_mois: objectifs.rows,
-      ca_total_realise: realise.rows.reduce((s, r) => s + r.ca_ttc, 0),
+      // Réalisé et objectif comparés sur la même base HT (les objectifs sont saisis en HT).
+      ca_total_realise: realise.rows.reduce((s, r) => s + r.ca_ht, 0),
       ca_total_objectif: objectifs.rows.reduce((s, r) => s + Number(r.ca_objectif_ht), 0),
     });
   } catch (err) {

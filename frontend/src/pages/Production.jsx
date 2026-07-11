@@ -61,6 +61,7 @@ export default function Production() {
     encadrant_atelier: '', controleur_tri: '', consigne: '',
     effectif_tri: '', effectif_recuperation: '', effectif_cp: '',
     effectif_formation: '', effectif_abs_injustifiee: '', effectif_am: '',
+    entree_recyclage_r3_kg: '', entree_recyclage_r4_kg: '',
     objectif_entree_ligne_kg: 900, objectif_entree_r3_kg: 900, objectif_entree_r4_kg: 900,
     objectif_recyclage_pct: 70, objectif_reutilisation_pct: 30, objectif_csr_pct: '<10%',
     encadrant: '',
@@ -100,6 +101,8 @@ export default function Production() {
           effectif_formation: d.effectif_formation || '',
           effectif_abs_injustifiee: d.effectif_abs_injustifiee || '',
           effectif_am: d.effectif_am || '',
+          entree_recyclage_r3_kg: d.entree_recyclage_r3_kg || '',
+          entree_recyclage_r4_kg: d.entree_recyclage_r4_kg || '',
           objectif_entree_ligne_kg: d.objectif_entree_ligne_kg || 900,
           objectif_entree_r3_kg: d.objectif_entree_r3_kg || 900,
           objectif_entree_r4_kg: d.objectif_entree_r4_kg || 900,
@@ -113,6 +116,7 @@ export default function Production() {
           encadrant_atelier: '', controleur_tri: '', consigne: '',
           effectif_tri: '', effectif_recuperation: '', effectif_cp: '',
           effectif_formation: '', effectif_abs_injustifiee: '', effectif_am: '',
+          entree_recyclage_r3_kg: '', entree_recyclage_r4_kg: '',
           objectif_entree_ligne_kg: 900, objectif_entree_r3_kg: 900, objectif_entree_r4_kg: 900,
           objectif_recyclage_pct: 70, objectif_reutilisation_pct: 30, objectif_csr_pct: '<10%',
           encadrant: '',
@@ -164,14 +168,21 @@ export default function Production() {
     try {
       // Totaux alimentés depuis la page balance (sorties "Vers Atelier de tri")
       const totalAtelierLocal = (feuille?.balance_entrees || []).reduce((s, e) => s + (parseFloat(e.poids_kg) || 0), 0);
+      // Entrées recyclage R3/R4 : saisie manuelle (pas de source balance dédiée)
+      const r3Kg = parseFloat(form.entree_recyclage_r3_kg) || 0;
+      const r4Kg = parseFloat(form.entree_recyclage_r4_kg) || 0;
+      const objLigne = parseFloat(form.objectif_entree_ligne_kg) || 0;
+      const objR3 = parseFloat(form.objectif_entree_r3_kg) || 0;
+      const objR4 = parseFloat(form.objectif_entree_r4_kg) || 0;
+      const entreeTotaleReelle = totalAtelierLocal + r3Kg + r4Kg;
       await api.post('/production', {
         date: selectedDate,
         effectif_reel: effectifTotal || nbAffectes,
         entree_ligne_kg: totalAtelierLocal,
         objectif_entree_ligne_kg: form.objectif_entree_ligne_kg,
-        entree_recyclage_r3_kg: 0,
+        entree_recyclage_r3_kg: r3Kg,
         objectif_entree_r3_kg: form.objectif_entree_r3_kg,
-        entree_recyclage_r4_kg: 0,
+        entree_recyclage_r4_kg: r4Kg,
         objectif_entree_r4_kg: form.objectif_entree_r4_kg,
         encadrant: form.encadrant,
         encadrant_atelier: form.encadrant_atelier,
@@ -186,10 +197,10 @@ export default function Production() {
         objectif_recyclage_pct: form.objectif_recyclage_pct,
         objectif_reutilisation_pct: form.objectif_reutilisation_pct,
         objectif_csr_pct: form.objectif_csr_pct,
-        resultat_ligne_ok: totalAtelierLocal >= ((parseFloat(form.objectif_entree_ligne_kg) || 0) + (parseFloat(form.objectif_entree_r3_kg) || 0) + (parseFloat(form.objectif_entree_r4_kg) || 0)),
-        resultat_r3_ok: true,
-        resultat_r4_ok: true,
-        resultat_general_ok: totalAtelierLocal >= ((parseFloat(form.objectif_entree_ligne_kg) || 0) + (parseFloat(form.objectif_entree_r3_kg) || 0) + (parseFloat(form.objectif_entree_r4_kg) || 0)),
+        resultat_ligne_ok: totalAtelierLocal >= objLigne,
+        resultat_r3_ok: r3Kg >= objR3,
+        resultat_r4_ok: r4Kg >= objR4,
+        resultat_general_ok: entreeTotaleReelle >= (objLigne + objR3 + objR4),
       });
 
       await loadFeuille();
@@ -665,6 +676,27 @@ export default function Production() {
                     </div>
                   </div>
                 )}
+
+                {/* Entrées recyclage R3 / R4 — saisie manuelle (pas de source balance) */}
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  <p className="text-[10px] font-semibold text-slate-500 mb-2">Entrées recyclage — saisie manuelle (kg)</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-slate-500">R3 (kg)</label>
+                      <input type="number" min="0" value={form.entree_recyclage_r3_kg}
+                        onChange={e => setForm({ ...form, entree_recyclage_r3_kg: e.target.value })}
+                        disabled={!!feuille?.daily?.validated_at}
+                        className="input-modern text-sm disabled:bg-slate-100 disabled:cursor-not-allowed" placeholder="0" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500">R4 (kg)</label>
+                      <input type="number" min="0" value={form.entree_recyclage_r4_kg}
+                        onChange={e => setForm({ ...form, entree_recyclage_r4_kg: e.target.value })}
+                        disabled={!!feuille?.daily?.validated_at}
+                        className="input-modern text-sm disabled:bg-slate-100 disabled:cursor-not-allowed" placeholder="0" />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

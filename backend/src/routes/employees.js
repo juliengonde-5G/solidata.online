@@ -338,6 +338,14 @@ router.post('/schedule/bulk', authorize('ADMIN', 'RH', 'MANAGER'), [
 // end_time / break_minutes. On convertit vers hours_worked et on expose
 // `validated` comme booléen dérivé de validated_by.
 
+// Types d'heures autorisés — alignés sur le CHECK de work_hours.type (init-db.js)
+// ET sur les consommateurs qui les comptent : kpi/formation → 'training',
+// kpi/absenteisme → 'absence'/'sick', résumés → 'holiday', planning-hebdo →
+// 'absence'/'sick'/'holiday'. Toute autre valeur est refusée (400) au lieu d'être
+// silencieusement rabattue sur 'normal' (ce rabattement faussait l'absentéisme et
+// rendait la formation non renseignable).
+const VALID_WORK_HOUR_TYPES = ['normal', 'training', 'absence', 'sick', 'holiday'];
+
 function computeHoursFromSlots(start_time, end_time, break_minutes) {
   if (!start_time || !end_time) return null;
   const [sh, sm] = String(start_time).split(':').map(Number);
@@ -415,7 +423,12 @@ router.post('/:id/hours', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) 
     if (hours_worked === null || Number.isNaN(hours_worked)) {
       return res.status(400).json({ error: 'Heures travaillées invalides (start_time/end_time requis)' });
     }
-    const dbType = ['normal', 'training', 'absence', 'sick', 'holiday'].includes(type) ? type : 'normal';
+    // Type : défaut 'normal' si absent, sinon doit être un type reconnu.
+    // Plus de rabattement silencieux — une valeur inconnue est refusée (400).
+    const dbType = (type === undefined || type === null || type === '') ? 'normal' : type;
+    if (!VALID_WORK_HOUR_TYPES.includes(dbType)) {
+      return res.status(400).json({ error: `Type d'heures invalide « ${dbType} ». Valeurs autorisées : ${VALID_WORK_HOUR_TYPES.join(', ')}.` });
+    }
     const result = await pool.query(
       `INSERT INTO work_hours (employee_id, date, hours_worked, overtime_hours, type, notes)
        VALUES ($1, $2, $3, $4, $5, $6)
@@ -492,6 +505,10 @@ router.post('/work-hours', authorize('ADMIN', 'RH', 'MANAGER'), [
     if (!employee_id || !date || hours_worked === undefined) {
       return res.status(400).json({ error: 'employee_id, date et hours_worked requis' });
     }
+    const dbType = (type === undefined || type === null || type === '') ? 'normal' : type;
+    if (!VALID_WORK_HOUR_TYPES.includes(dbType)) {
+      return res.status(400).json({ error: `Type d'heures invalide « ${dbType} ». Valeurs autorisées : ${VALID_WORK_HOUR_TYPES.join(', ')}.` });
+    }
 
     const result = await pool.query(
       `INSERT INTO work_hours (employee_id, date, hours_worked, overtime_hours, type, notes)
@@ -499,7 +516,7 @@ router.post('/work-hours', authorize('ADMIN', 'RH', 'MANAGER'), [
        ON CONFLICT (employee_id, date) DO UPDATE SET
        hours_worked = $3, overtime_hours = $4, type = $5, notes = $6
        RETURNING *`,
-      [employee_id, date, hours_worked, overtime_hours || 0, type || 'normal', notes]
+      [employee_id, date, hours_worked, overtime_hours || 0, dbType, notes]
     );
 
     res.json(result.rows[0]);
@@ -773,7 +790,7 @@ router.put('/:id/availability', authorize('ADMIN', 'RH'), async (req, res) => {
 // créait un doublon inactif à chaque réimport → remplacé par un upsert :
 //   • appariement par matricule (malibou_id) puis nom+prénom ;
 //   • mise à jour non destructive de l'existant, création des seuls nouveaux.
-router.post('/import/csv', authorize('ADMIN'), async (req, res) => {
+router.post('/import/csv', authorize('ADMIN', 'RH'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { collaborators } = req.body;
@@ -806,7 +823,7 @@ router.post('/import/csv', authorize('ADMIN'), async (req, res) => {
 // Accepte le classeur tel quel (feuilles « Informations salariés » + « Contrats »)
 // via multipart/form-data (champ `file`). Parse côté serveur avec exceljs puis
 // applique le même upsert idempotent que la voie CSV.
-router.post('/import/xlsx', authorize('ADMIN'), runUpload(uploadSpreadsheet.single('file')), async (req, res) => {
+router.post('/import/xlsx', authorize('ADMIN', 'RH'), runUpload(uploadSpreadsheet.single('file')), async (req, res) => {
   const client = await pool.connect();
   try {
     if (!req.file || !req.file.buffer) {
@@ -845,7 +862,7 @@ router.post('/import/xlsx', authorize('ADMIN'), runUpload(uploadSpreadsheet.sing
 // homonyme. Cette route supprime ces fantômes UNIQUEMENT s'ils n'ont aucune
 // référence métier (contrats/tournées/pointages…) — chaque suppression est
 // isolée : un fantôme protégé par une FK est simplement conservé et compté.
-router.post('/import/dedupe-ghosts', authorize('ADMIN'), async (req, res) => {
+router.post('/import/dedupe-ghosts', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     // Fantômes = inactifs sans matricule dont le nom correspond à un actif.
     const ghosts = await pool.query(`

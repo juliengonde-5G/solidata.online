@@ -40,10 +40,16 @@ const SEGMENT_COLORS = {
   autre: '#CBD5E1',
 };
 
+// Aligné sur la classification backend ('CB' / 'Espèces' normalisés par payLabel),
+// tolérant aux libellés bruts historiques (POS, VISA, contactless…).
 function getPaymentCategory(moyen) {
   const k = (moyen || '').toLowerCase();
-  if (k.includes('espèce') || k.includes('cash')) return 'especes';
-  if (k.includes('visa') || k.includes('mastercard') || k.includes('carte')) return 'cb';
+  if (k.includes('esp') || k.includes('cash') || k.includes('numer') || k.includes('numér') || k.includes('liquide')) return 'especes';
+  if (
+    k.includes('cb') || k.includes('carte') || k.includes('card') || k.includes('visa') ||
+    k.includes('master') || k.includes('maestro') || k.includes('amex') || k.includes('pos') ||
+    k.includes('ecom') || k.includes('contact') || k.includes('bancaire')
+  ) return 'cb';
   return 'autre';
 }
 function weatherIcon(code) {

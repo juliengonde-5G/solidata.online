@@ -89,14 +89,14 @@ function normalizeLiveObjectsUplink(raw) {
 async function resolveCav({ devEui, sensorReference }) {
   if (devEui) {
     const r = await pool.query(
-      'SELECT id, sensor_reference, sensor_height_cm, sensor_distance_full_cm, sensor_reporting_interval_min, estimated_fill_rate FROM cav WHERE lora_deveui = $1 LIMIT 1',
+      'SELECT id, sensor_reference, sensor_height_cm, sensor_distance_full_cm, sensor_reporting_interval_min FROM cav WHERE lora_deveui = $1 LIMIT 1',
       [devEui]
     );
     if (r.rows.length > 0) return r.rows[0];
   }
   if (sensorReference) {
     const r = await pool.query(
-      'SELECT id, sensor_reference, sensor_height_cm, sensor_distance_full_cm, sensor_reporting_interval_min, estimated_fill_rate FROM cav WHERE sensor_reference = $1 LIMIT 1',
+      'SELECT id, sensor_reference, sensor_height_cm, sensor_distance_full_cm, sensor_reporting_interval_min FROM cav WHERE sensor_reference = $1 LIMIT 1',
       [sensorReference]
     );
     if (r.rows.length > 0) return r.rows[0];
@@ -172,7 +172,6 @@ async function processUplink(rawUplink, io) {
   fillPercent = Math.max(0, Math.min(120, fillPercent));
 
   const sensorRef = cav.sensor_reference || uplink.devEui || 'unknown';
-  const previousFill = cav.estimated_fill_rate;
 
   const client = await pool.connect();
   try {
@@ -211,8 +210,8 @@ async function processUplink(rawUplink, io) {
     );
     const readingId = readingResult.rows[0].id;
 
-    // UPDATE cav (sensor_last_reading est la source de vérité pour le realtime ; on garde
-    // estimated_fill_rate pour le fallback heuristique, donc on ne l'écrase plus ici)
+    // UPDATE cav (sensor_last_reading est la source de vérité pour le realtime).
+    // estimated_fill_rate n'est plus touché ni lu ici (colonne jamais alimentée, figée à 0).
     const batteryLow = uplink.battery != null && uplink.battery <= ALARM_THRESHOLDS.BATTERY_LOW;
     const newStatus = batteryLow ? 'low_battery' : 'active';
     await client.query(
@@ -226,19 +225,35 @@ async function processUplink(rawUplink, io) {
       [fillPercent, uplink.readingAt, uplink.battery, uplink.rssi, newStatus, cav.id]
     );
 
-    // Feedback loop : capture l'ancienne heuristique vs la vérité terrain
-    if (previousFill != null) {
-      try {
+    // Feedback loop : compare la DERNIÈRE PRÉDICTION RÉELLE (ml_fill_predictions) à la
+    // vérité terrain capteur. On n'utilise plus cav.estimated_fill_rate (colonne jamais
+    // alimentée, figée à 0) qui polluait les métriques d'exactitude. Sans prédiction réelle
+    // disponible pour cette date, on n'écrit rien (mieux vaut pas de donnée qu'une fausse).
+    // SAVEPOINT : une table/colonne absente (vieux schéma) ne doit pas avorter tout l'uplink.
+    try {
+      await client.query('SAVEPOINT feedback_loop');
+      const predRes = await client.query(
+        `SELECT predicted_fill_rate FROM ml_fill_predictions
+          WHERE cav_id = $1 AND predicted_fill_rate IS NOT NULL AND predicted_date <= $2::date
+          ORDER BY predicted_date DESC, created_at DESC
+          LIMIT 1`,
+        [cav.id, uplink.readingAt]
+      );
+      const predicted = predRes.rows[0]?.predicted_fill_rate;
+      if (predicted != null) {
         await client.query(
           `INSERT INTO collection_learning_feedback
              (cav_id, predicted_fill_rate, observed_fill_rate, source, created_at)
            VALUES ($1, $2, $3, 'sensor', NOW())`,
-          [cav.id, previousFill, fillPercent]
+          [cav.id, predicted, fillPercent]
         );
-      } catch (err) {
-        // Schéma ancien (sans les colonnes source / observed_fill_rate) : on tombe silencieusement
-        logger.debug('Feedback loop non alimentée (colonnes absentes ?)', { error: err.message });
       }
+      await client.query('RELEASE SAVEPOINT feedback_loop');
+    } catch (err) {
+      // Table ml_fill_predictions absente ou schéma feedback ancien (sans source /
+      // observed_fill_rate) : on ignore sans casser l'ingestion (lecture + alertes commitées).
+      await client.query('ROLLBACK TO SAVEPOINT feedback_loop').catch(() => {});
+      logger.debug('Feedback loop non alimentée (table/colonnes absentes ?)', { error: err.message });
     }
 
     // Alertes

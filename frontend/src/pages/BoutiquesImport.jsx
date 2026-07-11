@@ -95,7 +95,13 @@ export default function BoutiquesImport() {
   }
 
   async function deleteBatch(id) {
-    if (!confirm('Supprimer ce batch et toutes ses ventes ?')) return;
+    const ok = await confirm({
+      title: 'Supprimer ce batch ?',
+      message: 'Le batch, ainsi que toutes ses ventes et tickets, seront supprimés définitivement. Cette action est irréversible.',
+      confirmLabel: 'Supprimer',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/boutique-ventes/batches/${id}`);
       toast.success('Batch supprimé');

@@ -1539,7 +1539,11 @@ Types : interne (boutiques), repreneur, recycleur, association
 
 ### Utilisateur admin par defaut
 - Username : `admin`
-- Password : `admin123` (hash bcrypt pre-calcule)
+- Password : **genere aleatoirement** a la premiere initialisation de la base (plus de `admin123`).
+  Le mot de passe est affiche **une seule fois** dans les logs de demarrage du backend
+  (encadre « MOT DE PASSE ADMIN INITIAL »). Notez-le immediatement.
+- `must_change_password = true` : changement **obligatoire** a la premiere connexion
+  (ecran bloquant, nouveau mot de passe >= 10 caracteres).
 - Role : ADMIN
 
 ### Equipes par defaut
@@ -1685,7 +1689,9 @@ docker compose exec backend node scripts/migrate-v2.js
 ### Etape 9 : Verification
 - Acceder a http://localhost:3000 (web)
 - Acceder a http://localhost:3002 (mobile)
-- Se connecter : admin / admin123
+- Se connecter : identifiant `admin` + mot de passe genere affiche dans les logs de demarrage
+  du backend (`docker compose logs backend | grep -A6 "MOT DE PASSE ADMIN INITIAL"`) ;
+  changement obligatoire au premier login
 - Verifier : Dashboard, Candidats, CAV, Production, Chaine de tri
 
 ---

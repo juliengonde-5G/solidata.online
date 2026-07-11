@@ -82,6 +82,31 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Rôle invalide' });
     }
 
+    // État courant (pour le garde-fou « dernier ADMIN » et la purge de sessions).
+    const currentRes = await pool.query('SELECT role, is_active FROM users WHERE id = $1', [id]);
+    if (currentRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    }
+    const current = currentRes.rows[0];
+
+    // Item 2 (audit) : interdit de désactiver ou de rétrograder le DERNIER compte
+    // ADMIN actif (verrouillage total de l'administration sinon). On ne compte que
+    // le rôle intégré 'ADMIN' — un rôle personnalisé dérivé d'ADMIN ne compte pas.
+    const currentIsActiveAdmin = current.role === 'ADMIN' && current.is_active === true;
+    const nextRole = (role == null) ? current.role : role;
+    const nextActive = (is_active == null) ? current.is_active : is_active;
+    const stillActiveAdmin = nextRole === 'ADMIN' && nextActive === true;
+    if (currentIsActiveAdmin && !stillActiveAdmin) {
+      const { rows: cnt } = await pool.query(
+        "SELECT COUNT(*)::int AS n FROM users WHERE role = 'ADMIN' AND is_active = true"
+      );
+      if ((cnt[0]?.n || 0) <= 1) {
+        return res.status(409).json({
+          error: "Impossible : c'est le dernier administrateur actif. Créez ou activez un autre administrateur avant de le désactiver ou de changer son rôle.",
+        });
+      }
+    }
+
     const result = await pool.query(
       `UPDATE users SET email = COALESCE($1, email), role = COALESCE($2, role),
        first_name = COALESCE($3, first_name), last_name = COALESCE($4, last_name),
@@ -94,6 +119,12 @@ router.put('/:id', async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    }
+
+    // Item 4 (audit) : un compte désactivé ne doit plus conserver de session
+    // renouvelable → on purge ses refresh tokens.
+    if (result.rows[0].is_active === false) {
+      await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
     }
 
     res.json(result.rows[0]);

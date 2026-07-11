@@ -65,10 +65,18 @@ const PAYMENT_COLORS = {
   autre: '#94A3B8',
 };
 
+// Aligné sur la classification backend (services/sumup.normalizePaymentMethod +
+// routes/vak.payIsEspeces/payIsCb) : le backend renvoie déjà les libellés normalisés
+// 'CB' / 'Espèces' via payLabel. On reconnaît ces libellés ET les variantes brutes
+// historiques (POS, VISA, Mastercard, contactless…) pour rester tolérant aux données anciennes.
 function getPaymentCategory(moyen) {
   const k = (moyen || '').toLowerCase();
-  if (k.includes('espèce') || k.includes('cash')) return 'especes';
-  if (k.includes('visa') || k.includes('mastercard') || k.includes('carte')) return 'cb';
+  if (k.includes('esp') || k.includes('cash') || k.includes('numer') || k.includes('numér') || k.includes('liquide')) return 'especes';
+  if (
+    k.includes('cb') || k.includes('carte') || k.includes('card') || k.includes('visa') ||
+    k.includes('master') || k.includes('maestro') || k.includes('amex') || k.includes('pos') ||
+    k.includes('ecom') || k.includes('contact') || k.includes('bancaire')
+  ) return 'cb';
   return 'autre';
 }
 

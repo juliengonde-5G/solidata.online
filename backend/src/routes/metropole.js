@@ -303,23 +303,30 @@ router.get('/evolution', async (req, res) => {
 router.get('/sortie-dynamique', async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    // Définition unifiée avec le module insertion (routes/insertion/routes.js,
+    // cohorte/stats) : une sortie est « dynamique » si sortie_classification = 'positive'.
+    // Le jalon de sortie est 'Bilan Sortie' (status = 'realise'), daté par
+    // completed_date (repli updated_at). La ventilation par type de sortie utilise
+    // les valeurs réelles du formulaire de bilan (CDI / CDD / CDD_court / formation /
+    // creation_activite).
     const { rows } = await pool.query(`
       WITH sorties AS (
         SELECT im.sortie_type, im.sortie_classification
         FROM insertion_milestones im
-        WHERE im.type = 'sortie'
-          AND im.statut = 'realise'
-          AND EXTRACT(YEAR FROM im.date_realisation) = $1
+        WHERE im.milestone_type = 'Bilan Sortie'
+          AND im.status = 'realise'
+          AND im.sortie_classification IS NOT NULL
+          AND EXTRACT(YEAR FROM COALESCE(im.completed_date, im.updated_at::date)) = $1
       )
       SELECT
         COUNT(*)::int AS total_sorties,
-        COUNT(*) FILTER (WHERE sortie_type IN ('CDI','CDD','formation','creation'))::int AS dynamiques,
+        COUNT(*) FILTER (WHERE sortie_classification = 'positive')::int AS dynamiques,
         COUNT(*) FILTER (WHERE sortie_type = 'CDI')::int AS cdi,
-        COUNT(*) FILTER (WHERE sortie_type = 'CDD')::int AS cdd,
+        COUNT(*) FILTER (WHERE sortie_type IN ('CDD','CDD_court'))::int AS cdd,
         COUNT(*) FILTER (WHERE sortie_type = 'formation')::int AS formation,
-        COUNT(*) FILTER (WHERE sortie_type = 'creation')::int AS creation,
-        COUNT(*) FILTER (WHERE sortie_type IN ('abandon','fin'))::int AS non_dynamiques,
-        ROUND(100.0 * COUNT(*) FILTER (WHERE sortie_type IN ('CDI','CDD','formation','creation'))::numeric
+        COUNT(*) FILTER (WHERE sortie_type = 'creation_activite')::int AS creation,
+        COUNT(*) FILTER (WHERE sortie_classification = 'negative')::int AS non_dynamiques,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE sortie_classification = 'positive')::numeric
               / NULLIF(COUNT(*), 0), 1) AS taux_dynamique_pct
       FROM sorties
     `, [annee]);
