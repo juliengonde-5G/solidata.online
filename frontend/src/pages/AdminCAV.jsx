@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
 import SensorSection from '../components/SensorSection';
 import useConfirm from '../hooks/useConfirm';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
@@ -54,6 +55,10 @@ const EMPTY_FORM = { name: '', address: '', commune: '', latitude: '', longitude
 
 export default function AdminCAV() {
   const { confirm, ConfirmDialogElement } = useConfirm();
+  const { user } = useAuth();
+  // DELETE /cav/:id reste réservé à l'ADMIN côté backend : on masque le bouton
+  // aux MANAGER (qui ont désormais accès à la page) pour éviter un clic → 403.
+  const isAdmin = (user?.base_role || user?.role) === 'ADMIN';
   const [cavList, setCavList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -488,10 +493,12 @@ export default function AdminCAV() {
                     }`}>
                     {detailCav.status === 'active' ? 'Désactiver' : 'Réactiver'}
                   </button>
-                  <button onClick={() => deleteCav(detailCav)}
-                    className="bg-red-50 text-red-700 border border-red-200 rounded-lg px-3 py-1.5 text-xs hover:bg-red-100">
-                    Supprimer
-                  </button>
+                  {isAdmin && (
+                    <button onClick={() => deleteCav(detailCav)}
+                      className="bg-red-50 text-red-700 border border-red-200 rounded-lg px-3 py-1.5 text-xs hover:bg-red-100">
+                      Supprimer
+                    </button>
+                  )}
                 </div>
               </div>
 

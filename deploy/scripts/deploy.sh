@@ -301,8 +301,9 @@ case "${ACTION}" in
     log ""
     log "Compte admin par défaut :"
     log "  Identifiant : admin"
-    log "  Mot de passe : admin123"
-    warn "CHANGEZ CE MOT DE PASSE IMMÉDIATEMENT !"
+    log "  Mot de passe : généré aléatoirement, affiché UNE FOIS dans les logs de démarrage :"
+    log "    docker compose -f ${COMPOSE_FILE} logs backend | grep -A6 'MOT DE PASSE ADMIN INITIAL'"
+    warn "Notez-le maintenant — changement obligatoire à la première connexion (≥ 10 caractères)."
     ;;
 
   # ===============================
