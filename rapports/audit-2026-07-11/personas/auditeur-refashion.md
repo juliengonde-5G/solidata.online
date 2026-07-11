@@ -1,0 +1,48 @@
+# Test persona — Auditeur Refashion (éco-organisme)
+
+**Date** : 11 juillet 2026
+**Rôle applicatif incarné** : AUTORITE
+**Méthode** : lecture du code réel (routes backend, `App.jsx`, `Layout.jsx`, `init-db.js`) — aucune modification, aucune exécution de l'application
+
+---
+
+## 1. Ma promesse
+
+Je suis mandaté par Refashion pour le contrôle annuel de Solidarité Textiles, opérateur conventionné de la filière REP textile. Pour mener ma mission, l'ERP doit me permettre de **vérifier de façon autonome et traçable** les tonnages déclarés en DPAV trimestrielle, de **rapprocher** ce qui entre (collecte, tri) et ce qui sort (réemploi, recyclage, CSR, élimination), de **contrôler** que les données ayant servi à la déclaration n'ont pas été modifiées après coup, et de **justifier** le montant des subventions versées (taux conventionné × tonnage par famille). Je dois pouvoir faire tout cela avec un accès qui m'est propre, sans dépendre du bon vouloir de l'opérateur pour me montrer un écran.
+
+## 2. Mon parcours
+
+J'ai d'abord vérifié ce que le code accorde réellement au rôle `AUTORITE` — celui que la matrice de rôles de SOLIDATA (`backend/src/routes/permissions.js`, `frontend/src/pages/Users.jsx`) qualifie d'« Autorité », seul rôle plausible pour un tiers de contrôle externe.
+
+**Constat d'accès, avant même de commencer l'audit métier.** Sur les 78 routes protégées de `frontend/src/App.jsx`, seules deux incluent `AUTORITE` : `/reporting-collecte` et `/reporting-metropole` (lignes 192 et 197). En y ajoutant les deux routes ouvertes à tout utilisateur authentifié (`/` et `/news`), mon rôle donne accès à **quatre pages sur environ quatre-vingts**. Le menu (`frontend/src/components/Layout.jsx`, fonction `filterByRole`) confirme la même restriction côté navigation : aucune entrée « Refashion », aucune entrée « Stock Original », aucune entrée « Exports DPAV ».
+
+- **DPAV trimestrielle** : la page `/refashion` (`frontend/src/App.jsx` ligne 196) est réservée à `['ADMIN', 'MANAGER']`. Côté API, `backend/src/routes/refashion.js` ligne 8 pose `router.use(authenticate, authorize('ADMIN', 'MANAGER'))` **en tête de fichier**, avant toute route — donc même le `GET /api/refashion/dpav`, pourtant en lecture seule, m'est interdit. Je ne peux voir aucun chiffre de DPAV, aucun trimestre, aucune ligne saisie.
+- **Rapprochement entrants/sortants** : le même verrou s'applique à `GET /api/refashion/dpav-source` et `/reconciliation-jour`, qui exposent pourtant une fonctionnalité récente et bien pensée — les vues `vw_tonnage_reconciliation_jour` et `vw_refashion_dpav_source` (`backend/src/scripts/init-db.js` lignes 721-767) comparent collecte brute et tri entrant jour par jour, avec un indicateur de sévérité (`ok`/`attention`/`critique`) au-delà de 2 % ou 5 % d'écart. Je ne peux pas l'utiliser.
+- **Cohérence tri↔filière** (`vw_coherence_tri_filiere`) : même verrou d'accès, mais j'ai aussi trouvé, en lisant `init-db.js` (lignes 1689-1695) et le rapport `rapports/audits/2026-07-03-audit-exhaustif/10-chantier-tracabilite-carton-balle.md`, que cette vue et `vw_dpav_sortants` **reposent sur la table `colisages`, jamais alimentée en production** (aucune page frontend n'appelle `/tri/colisages` — vérifié par recherche exhaustive). Le commentaire du code est explicite : « Elles restent donc vides ». Même avec un accès, ces deux vues ne me donneraient aujourd'hui aucune répartition par famille (réemploi/recyclage/CSR/élimination) des sortants — le cœur de ce que je suis censé auditer.
+- **Verrouillage trimestriel du stock original** : `backend/src/routes/stock-original.js` implémente un vrai mécanisme (`stock_period_locks`, lignes 163-173) qui bloque toute correction d'un mouvement une fois le trimestre verrouillé (lignes 364-450) — exactement le contrôle qu'un auditeur attend pour garantir que les chiffres déclarés ne bougent plus. Mais le routeur entier est `authorize('ADMIN', 'MANAGER')` (ligne 160) et la page `/admin-stock-original` est réservée à `ADMIN` seul (`App.jsx` ligne 226) : je ne peux même pas consulter la liste des verrous (`GET /locks`) pour vérifier qu'un trimestre a bien été clôturé avant déclaration.
+- **Calcul des subventions** : en lisant `refashion.js`, j'ai trouvé **deux formules différentes qui coexistent** sans être réconciliées : `POST /dpav` calcule `total_subvention = tri_t × taux_entree` (un seul taux, sur le seul tonnage entrant en tri, lignes 51-53), tandis que `POST /subventions` calcule cinq montants distincts (réemploi 80 €/t, recyclage 295 €/t, CSR 210 €/t, énergie 20 €/t, entrée 193 €/t par défaut, lignes 348-359) et les additionne. Rien dans le code ne garantit que ces deux montants concordent pour un même trimestre. Je n'ai pas pu le vérifier en conditions réelles puisque les deux routes me sont fermées, mais c'est un point que je signalerais à l'opérateur si j'y avais accès.
+- **Audit trail** : `refashion_dpav_history` (`init-db.js` lignes 1527-1538) est bien conçu — snapshot JSONB complet, action INSERT/UPDATE/DELETE, `changed_by`/`changed_at` — et `refashion_dpav.created_by`/`updated_by` sont correctement renseignés à chaque écriture (`refashion.js` lignes 100-118). C'est exactement l'historique qu'un contrôle exige. Mais il n'est exposé que dans la réponse de `GET /api/refashion/dpav`, verrouillée ADMIN/MANAGER.
+- **Export CSV des vues** : la page `/admin/refashion-exports` (`frontend/src/pages/AdminRefashionExports.jsx`) est un bon outil — cinq exports nommés explicitement pour Refashion (« DPAV — Tonnages par commune », « DPAV — Sortants par exutoire »…), CSV téléchargeable. Réservée `ADMIN`/`MANAGER` (`App.jsx` ligne 176).
+- **Traçabilité CAV → exutoire** : le rapport `10-chantier-tracabilite-carton-balle.md` confirme qu'une chaîne `batch_tracking → operation_executions → operation_outputs` existe et qu'une « fiche traçabilité » (lot → cartons → sortie) a été ajoutée à `/chaine-tri` — mais le lien colisage↔expédition reste volontairement non câblé, et la page est de toute façon `ADMIN`/`MANAGER` uniquement.
+
+Ce que j'ai pu réellement consulter : le tonnage global collecté et une estimation de CO2 évité sur `/reporting-collecte` (`frontend/src/pages/ReportingCollecte.jsx`), ainsi qu'un tableau de bord territorial sur `/reporting-metropole` (tonnage, CAV, taux de captation par commune) — dont le calcul de mix CO2 dépend lui aussi de `colisages` et retombe sur un mix forfaitaire 40/35/15/10 (`backend/src/routes/metropole.js` lignes 40-66). Aucune de ces deux pages ne ventile par famille Refashion, n'affiche de DPAV ni de subvention.
+
+Fait notable : `backend/src/routes/historique.js` autorise bien `AUTORITE` (ligne 6) sur des données de tonnage historique — mais aucune page frontend ni entrée de menu n'appelle jamais cette route (recherche exhaustive sans résultat) : c'est un accès accordé côté API mais mort côté interface, inutilisable en pratique.
+
+Enfin, en testant une navigation directe vers une page interdite, `ProtectedRoute` (`App.jsx` lignes 104-111) me redirige silencieusement vers `/` sans aucun message — je ne saurais même pas si la page existe mais m'est refusée, ou si elle n'existe pas.
+
+## 3. Ce que je remonte
+
+**Forces.** Là où le module Refashion est implémenté pour les rôles qui y ont droit, la conception est sérieuse : audit-trail JSONB complet, taux de subvention versionnés avec clôture automatique de l'ancien taux (`refashion_taux_subvention`), verrouillage trimestriel réel du stock, page d'export CSV pensée pour mes besoins déclaratifs, et une réconciliation collecte↔tri récente avec seuils d'alerte. Les commentaires de code sont honnêtes sur les limites connues (colisages non adoptés) — une transparence rare et appréciable pour un audit.
+
+**Faiblesses.** Redirection silencieuse sans message d'erreur en cas d'accès refusé ; deux formules de subvention non réconciliées ; un accès API accordé (`historique.js`) mais jamais câblé côté écran.
+
+**Défaillances vérifiées dans le code.** Le rôle `AUTORITE` n'a accès à **aucune** route du module Refashion (`refashion.js` ligne 8), ni au stock original verrouillé (`stock-original.js` ligne 160), ni aux exports DPAV (`App.jsx` ligne 176) : sur les huit étapes de mon parcours métier, sept me sont fermées par construction. `vw_coherence_tri_filiere` et `vw_dpav_sortants`, les deux vues censées prouver la cohérence tri↔filière par famille, sont vides en production faute d'alimentation de `colisages` (confirmé par le code et par le rapport d'audit interne du 3 juillet).
+
+**Manques fonctionnels.** Aucun espace « auditeur externe » en lecture seule scopé à mes besoins ; aucune attestation liant une déclaration DPAV à l'état de verrouillage du trimestre correspondant ; aucun workflow de validation/soumission formelle de la DPAV (au-delà de simples champs `created_by`/`updated_by`) ; aucun rattachement de pièce justificative (convention/avenant) au taux appliqué au-delà d'un champ texte libre ; surtout, aucune donnée de sortie par famille Refashion réconciliée à l'entrée, ce qui est le socle même de mon contrôle.
+
+## 4. Verdict
+
+**Promesse rompue.** Le module Refashion, quand on peut le lire dans le code, montre une intention de conformité sérieuse et des fonctionnalités globalement bien pensées. Mais le rôle qui m'est concrètement attribué dans l'application n'ouvre aucune des pages ni aucune des routes nécessaires à ma mission — je vois du tonnage collecté générique et rien de plus. Même en imaginant un accès élargi, la vue de cohérence tri↔filière que je viendrais vérifier en premier est vide par construction. Je ne peux mener aucune étape de mon audit de façon autonome dans l'outil.
+
+**Note : 2/10**
