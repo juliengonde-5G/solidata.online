@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
-const { isHoliday, getSchoolVacationStatus, getSeasonalFactors, getDayOfWeekFactors } = require('./predictions');
+const { isHoliday, getSchoolVacationStatus } = require('./predictions');
+// v1-6 : source unique des facteurs (résolution appris > manuel > défaut).
+const fillFactors = require('../../utils/fill-factors');
 
 // ══════ REPORTING & ALERTES ══════
 
@@ -279,8 +281,9 @@ router.get('/predictive/accuracy', authorize('ADMIN'), async (req, res) => {
 // Format prêt pour XGBoost/scikit-learn : une ligne par (CAV, date) avec tous les features
 router.get('/predictive/export-training', authorize('ADMIN'), async (req, res) => {
   try {
-    const SEASONAL_FACTORS = getSeasonalFactors();
-    const DAY_OF_WEEK_FACTORS = getDayOfWeekFactors();
+    // v1-6 : features exportés avec les facteurs EFFECTIFS du moteur
+    // (appris > manuel > défaut) au lieu de la seule couche manuelle/défaut.
+    const resolvedFactors = await fillFactors.getResolvedFactors();
 
     const days = parseInt(req.query.days) || 365;
     const format = req.query.format || 'json'; // json ou csv
@@ -346,8 +349,8 @@ router.get('/predictive/export-training', authorize('ADMIN'), async (req, res) =
         month: parseInt(r.month),
         day_of_week: dowIdx,
         day_of_year: parseInt(r.day_of_year),
-        seasonal_factor: SEASONAL_FACTORS[monthIdx],
-        dow_factor: DAY_OF_WEEK_FACTORS[dowIdx],
+        seasonal_factor: fillFactors.seasonalFactorFor(resolvedFactors, monthIdx),
+        dow_factor: fillFactors.dayFactorFor(resolvedFactors, dow),
         is_holiday: isHoliday(r.date.toISOString ? r.date.toISOString().split('T')[0] : r.date) ? 1 : 0,
         vacation_status: getSchoolVacationStatus(r.date.toISOString ? r.date.toISOString().split('T')[0] : r.date).status || 'none',
         weather_code: r.weather_code,

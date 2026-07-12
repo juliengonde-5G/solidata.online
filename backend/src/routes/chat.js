@@ -599,7 +599,11 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     const userMessage = message.trim().slice(0, MAX_MSG_LENGTH);
-    const userId = req.user.userId;
+    // Le JWT porte `id` (cf. routes/auth.js). L'ancien `req.user.userId` était
+    // toujours undefined → rate-limit partagé globalement + outils self-scope
+    // (planning/heures) incapables de résoudre l'employé courant. On privilégie
+    // `id`, avec repli `userId` pour tout autre format de jeton.
+    const userId = req.user.id ?? req.user.userId;
 
     if (!checkRateLimit(userId)) {
       return res.status(429).json({ error: 'Trop de messages. Attends un peu ! ⏳' });
@@ -638,6 +642,30 @@ router.get('/suggestions', authenticate, async (req, res) => {
   const base = resolveBaseRole(req.user.role);
   const hour = new Date().getHours();
 
+  // Suggestion contextuelle selon l'heure (une seule).
+  const contextuelle = [];
+  if (hour < 10) {
+    contextuelle.push({ icon: '☀️', text: 'Quelles sont mes missions aujourd\'hui ?', category: 'planning' });
+  } else if (hour >= 16) {
+    contextuelle.push({ icon: '📊', text: 'Bilan collecte de la journée', category: 'collecte' });
+  }
+
+  // Suggestions de PILOTAGE (item 60d) — filtrées RGPD par rôle et priorisées :
+  // ce sont précisément les usages (finance / insertion / ventes) que la Vague 2
+  // veut rendre visibles au directeur. On les place AVANT les suggestions
+  // génériques pour qu'elles survivent au plafonnement à 8 (bug corrigé : elles
+  // étaient poussées en fin de liste puis coupées par slice(0, 8)).
+  const pilotage = [];
+  if (['ADMIN', 'MANAGER', 'FINANCE'].includes(base)) {
+    pilotage.push({ icon: '💶', text: 'Résume la finance de cette année', category: 'finance' });
+  }
+  if (['ADMIN', 'RH', 'MANAGER'].includes(base)) {
+    pilotage.push({ icon: '🤝', text: 'Où en est la cohorte insertion ?', category: 'insertion' });
+  }
+  if (['ADMIN', 'MANAGER', 'RESP_BTQ'].includes(base)) {
+    pilotage.push({ icon: '🛍️', text: 'Synthèse des ventes boutiques', category: 'ventes' });
+  }
+
   const baseSuggestions = [
     { icon: '📦', text: 'Quel est le stock actuel ?', category: 'stock' },
     { icon: '🚛', text: 'Stats collecte du jour', category: 'collecte' },
@@ -646,31 +674,18 @@ router.get('/suggestions', authenticate, async (req, res) => {
     { icon: '📍', text: 'Liste des CAV actifs', category: 'cav' },
   ];
 
-  // Suggestions contextuelles selon l'heure
-  if (hour < 10) {
-    baseSuggestions.unshift({ icon: '☀️', text: 'Quelles sont mes missions aujourd\'hui ?', category: 'planning' });
-  } else if (hour >= 16) {
-    baseSuggestions.unshift({ icon: '📊', text: 'Bilan collecte de la journée', category: 'collecte' });
-  }
-
-  // Suggestions selon le rôle — alignées sur les outils réellement disponibles.
+  // Extras admin/manager (moins prioritaires que le pilotage).
+  const adminExtras = [];
   if (['ADMIN', 'MANAGER'].includes(base)) {
-    baseSuggestions.push(
+    adminExtras.push(
       { icon: '📈', text: 'Stats collecte cette semaine', category: 'collecte' },
       { icon: '🗺️', text: 'CAV indisponibles', category: 'cav' },
     );
   }
-  if (['ADMIN', 'MANAGER', 'FINANCE'].includes(base)) {
-    baseSuggestions.push({ icon: '💶', text: 'Résume la finance de cette année', category: 'finance' });
-  }
-  if (['ADMIN', 'RH', 'MANAGER'].includes(base)) {
-    baseSuggestions.push({ icon: '🤝', text: 'Où en est la cohorte insertion ?', category: 'insertion' });
-  }
-  if (['ADMIN', 'MANAGER', 'RESP_BTQ'].includes(base)) {
-    baseSuggestions.push({ icon: '🛍️', text: 'Synthèse des ventes boutiques', category: 'ventes' });
-  }
 
-  res.json({ suggestions: baseSuggestions.slice(0, 8) });
+  // Ordre : contextuelle → pilotage (Vague 2) → base → extras admin, puis plafond à 8.
+  const suggestions = [...contextuelle, ...pilotage, ...baseSuggestions, ...adminExtras].slice(0, 8);
+  res.json({ suggestions });
 });
 
 // GET /api/chat/alerts/cav-uncollected — CAV non ramassés alors que prévus en tournée

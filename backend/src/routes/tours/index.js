@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { authenticate } = require('../../middleware/auth');
+const { authenticate, authorize } = require('../../middleware/auth');
 const { imageFilter } = require('../../utils/upload-filters');
 
 // Upload photos incidents
@@ -693,8 +693,170 @@ router.get('/:id/summary-public', async (req, res) => {
   }
 });
 
+// ── Vague 2 (item 62) — Canal manager → chauffeur (côté mobile) ────────────
+// Ces routes « -public » sont authentifiées par le JWT chauffeur (middleware
+// MOBILE_DRIVER_PATH en tête de ce routeur) — pas d'accès anonyme.
+
+// GET /api/tours/vehicle/:vehicleId/messages-public — consignes NON LUES pour
+// le véhicule du chauffeur. Sert la bannière DriverMessageBanner (poll mobile).
+router.get('/vehicle/:vehicleId/messages-public', async (req, res) => {
+  try {
+    const vehicleId = parseInt(req.params.vehicleId, 10);
+    if (!vehicleId) return res.status(400).json({ error: 'vehicleId invalide' });
+    const r = await pool.query(
+      `SELECT id, tour_id, vehicle_id, message, created_at, read_at
+         FROM driver_messages
+        WHERE vehicle_id = $1 AND read_at IS NULL
+        ORDER BY created_at ASC`,
+      [vehicleId]
+    );
+    res.json({ messages: r.rows });
+  } catch (err) {
+    console.error('[TOURS] Erreur messages-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/messages/:id/read-public — accusé de lecture (« J'ai compris »).
+// Idempotent : le premier accusé fixe read_at ; un rejeu (file de sync offline)
+// répond 200 sans effet de bord (jamais d'erreur qui bloquerait la file).
+router.post('/messages/:id/read-public', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'id invalide' });
+    const r = await pool.query(
+      `UPDATE driver_messages SET read_at = NOW()
+        WHERE id = $1 AND read_at IS NULL
+        RETURNING id, read_at`,
+      [id]
+    );
+    if (r.rows.length === 0) {
+      const existing = await pool.query('SELECT id, read_at FROM driver_messages WHERE id = $1', [id]);
+      if (existing.rows.length === 0) return res.status(404).json({ error: 'Message non trouvé' });
+      return res.json({ id: existing.rows[0].id, read_at: existing.rows[0].read_at, already: true });
+    }
+    res.json({ id: r.rows[0].id, read_at: r.rows[0].read_at });
+  } catch (err) {
+    console.error('[TOURS] Erreur read-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/:id/history-public — historique SERVEUR enrichi d'une tournée
+// pour le mobile (points, incidents déclarés, pesées enregistrées). Permet au
+// chauffeur de vérifier que « sa pesée est bien passée » au-delà de sa file
+// locale (qui se vide après synchronisation).
+router.get('/:id/history-public', async (req, res) => {
+  try {
+    const tourId = parseInt(req.params.id, 10);
+    if (!tourId) return res.status(400).json({ error: 'id invalide' });
+    const tourCheck = await pool.query('SELECT id, collection_type FROM tours WHERE id = $1', [tourId]);
+    if (tourCheck.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
+    const collectionType = tourCheck.rows[0].collection_type || 'pav';
+
+    let cavs = [];
+    if (collectionType === 'association') {
+      const r = await pool.query(
+        `SELECT tap.id, tap.association_point_id AS cav_id, tap.position, tap.status,
+                tap.fill_level, tap.collected_at, tap.notes,
+                ap.name AS cav_name, ap.ville AS commune
+           FROM tour_association_point tap
+           JOIN association_points ap ON ap.id = tap.association_point_id
+          WHERE tap.tour_id = $1 ORDER BY tap.position`,
+        [tourId]
+      );
+      cavs = r.rows;
+    } else {
+      const r = await pool.query(
+        `SELECT tc.id, tc.cav_id, tc.position, tc.status, tc.fill_level,
+                tc.collected_at, tc.notes, tc.skip_reason,
+                c.name AS cav_name, c.commune
+           FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id
+          WHERE tc.tour_id = $1 ORDER BY tc.position`,
+        [tourId]
+      );
+      cavs = r.rows;
+    }
+
+    const incidents = await pool.query(
+      `SELECT id, type, description, photo_path, created_at
+         FROM incidents WHERE tour_id = $1 ORDER BY created_at`,
+      [tourId]
+    );
+    const weights = await pool.query(
+      `SELECT id, weight_kg, tare_kg, is_intermediate, notes, recorded_at
+         FROM tour_weights WHERE tour_id = $1 ORDER BY recorded_at`,
+      [tourId]
+    );
+
+    res.json({ cavs, incidents: incidents.rows, weights: weights.rows });
+  } catch (err) {
+    console.error('[TOURS] Erreur history-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // All routes below require authentication
 router.use(authenticate);
+
+// ── Vague 2 (item 62) — Canal manager → chauffeur (côté web) ───────────────
+// Le responsable logistique envoie une consigne à un chauffeur en tournée
+// (consigne, CAV ajouté, danger signalé) depuis la Collecte en direct.
+// LECTURE + ÉCRITURE réservées ADMIN/MANAGER (aucune écriture pour AUTORITE).
+
+// POST /api/tours/messages — envoyer une consigne au chauffeur d'un véhicule.
+router.post('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const vehicleId = parseInt(req.body?.vehicle_id, 10);
+    const tourId = req.body?.tour_id != null && req.body.tour_id !== ''
+      ? parseInt(req.body.tour_id, 10) : null;
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (!vehicleId) return res.status(400).json({ error: 'vehicle_id requis' });
+    if (!message) return res.status(400).json({ error: 'Message vide' });
+    if (message.length > 1000) return res.status(400).json({ error: 'Message trop long (max 1000 caractères)' });
+
+    const veh = await pool.query('SELECT id FROM vehicles WHERE id = $1', [vehicleId]);
+    if (veh.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    const r = await pool.query(
+      `INSERT INTO driver_messages (tour_id, vehicle_id, message, created_by)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, tour_id, vehicle_id, message, created_by, created_at, read_at`,
+      [tourId, vehicleId, message, req.user.id]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    console.error('[TOURS] Erreur POST messages:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/messages?vehicle_id=&tour_id= — consignes envoyées (lu/non lu).
+router.get('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const vehicleId = req.query.vehicle_id ? parseInt(req.query.vehicle_id, 10) : null;
+    const tourId = req.query.tour_id ? parseInt(req.query.tour_id, 10) : null;
+    const conds = [];
+    const params = [];
+    if (vehicleId) { params.push(vehicleId); conds.push(`dm.vehicle_id = $${params.length}`); }
+    if (tourId) { params.push(tourId); conds.push(`dm.tour_id = $${params.length}`); }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const r = await pool.query(
+      `SELECT dm.id, dm.tour_id, dm.vehicle_id, dm.message, dm.created_at, dm.read_at,
+              u.first_name AS sender_first_name, u.last_name AS sender_last_name
+         FROM driver_messages dm
+         LEFT JOIN users u ON u.id = dm.created_by
+         ${where}
+        ORDER BY dm.created_at DESC
+        LIMIT 100`,
+      params
+    );
+    res.json({ messages: r.rows });
+  } catch (err) {
+    console.error('[TOURS] Erreur GET messages:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 // Mount live-summary route (supervision d'une tournée en cours)
 router.use('/', liveSummaryRouter);

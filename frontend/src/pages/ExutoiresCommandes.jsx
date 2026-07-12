@@ -98,16 +98,26 @@ const EMPTY_FORM = {
   notes: '',
 };
 
-// Item 38b — Le passage chargee → expediee est retiré des raccourcis directs :
-// seule la Préparation d'expédition décrémente le stock (mouvement de sortie).
-// L'action « Marquer expédiée » depuis la fiche commande sautait ce chemin et
-// faisait « avancer » la commande sans jamais sortir la marchandise du stock.
-// On grise donc l'action avec une explication (le backend renvoie aussi un 409
-// si on force ce passage sans préparation/mouvement de stock lié).
+// Item 38b + résiduel v1-3 — Les passages confirmée → en_préparation → chargée →
+// expédiée sont retirés des raccourcis directs de la fiche commande : c'est la page
+// « Préparation d'expédition » qui pilote ce cycle (planification transporteur,
+// chargement, pesée interne) et, à l'expédition, décrémente le stock (mouvement de
+// sortie). Avancer le statut depuis la fiche sautait ce chemin et faisait « avancer »
+// la commande sans jamais préparer ni sortir la marchandise. On grise donc ces actions
+// avec une explication (le backend renvoie aussi un 409 sur le passage → expédiée sans
+// préparation liée).
 const STATUS_TRANSITIONS = {
   en_attente: { action: 'Confirmer', next: 'confirmee' },
-  confirmee: { action: 'Préparer', next: 'en_preparation' },
-  en_preparation: { action: 'Marquer chargée', next: 'chargee' },
+  confirmee: {
+    action: 'Préparer',
+    blocked: true,
+    hint: "La préparation se planifie depuis la page « Préparation d'expédition » (transporteur, chargement, pesée interne) — c'est elle qui fait avancer la commande.",
+  },
+  en_preparation: {
+    action: 'Marquer chargée',
+    blocked: true,
+    hint: "Le chargement se suit depuis la page « Préparation d'expédition » — c'est elle qui fait avancer la commande.",
+  },
   chargee: {
     action: 'Marquer expédiée',
     blocked: true,
@@ -651,69 +661,109 @@ export default function ExutoiresCommandes() {
                 </div>
               </div>
 
-              {/* Préparation */}
+              {/* Préparation d'expédition (préparations_expedition) — v1-3 : champs réels de l'API */}
               {showDetail.preparation && (
                 <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-gray-600 mb-2">Préparation</h3>
+                  <h3 className="text-sm font-semibold text-gray-600 mb-2">Préparation d'expédition</h3>
                   <div className="bg-yellow-50 rounded-lg p-3 grid grid-cols-2 gap-3 text-sm">
+                    {showDetail.preparation.transporteur && (
+                      <div>
+                        <span className="text-gray-500">Transporteur :</span>{' '}
+                        <span className="font-medium">{showDetail.preparation.transporteur}</span>
+                      </div>
+                    )}
                     <div>
-                      <span className="text-gray-500">Date préparation :</span>{' '}
-                      <span className="font-medium">{formatDate(showDetail.preparation.date)}</span>
+                      <span className="text-gray-500">Date d'expédition :</span>{' '}
+                      <span className="font-medium">{formatDate(showDetail.preparation.date_expedition)}</span>
                     </div>
-                    <div>
-                      <span className="text-gray-500">Tonnage préparé :</span>{' '}
-                      <span className="font-medium">{formatTonnage(showDetail.preparation.tonnage)} t</span>
-                    </div>
-                    {showDetail.preparation.notes && (
+                    {showDetail.preparation.pesee_interne != null && (
+                      <div>
+                        <span className="text-gray-500">Pesée interne :</span>{' '}
+                        <span className="font-medium">{formatTonnage(showDetail.preparation.pesee_interne)} t</span>
+                      </div>
+                    )}
+                    {showDetail.preparation.statut_preparation && (
+                      <div>
+                        <span className="text-gray-500">Statut préparation :</span>{' '}
+                        <span className="font-medium">{({ planifiee: 'Planifiée', remorque_livree: 'Remorque livrée', en_chargement: 'En chargement', prete: 'Prête', expediee: 'Expédiée' }[showDetail.preparation.statut_preparation]) || showDetail.preparation.statut_preparation}</span>
+                      </div>
+                    )}
+                    {showDetail.preparation.notes_preparation && (
                       <div className="col-span-2">
                         <span className="text-gray-500">Notes :</span>{' '}
-                        <span className="font-medium">{showDetail.preparation.notes}</span>
+                        <span className="font-medium">{showDetail.preparation.notes_preparation}</span>
                       </div>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Pesée */}
-              {showDetail.pesee && (
+              {/* Contrôle pesée client (controles_pesee) — v1-3 : clé controle_pesee + champs réels */}
+              {showDetail.controle_pesee && (
                 <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-gray-600 mb-2">Pesée</h3>
+                  <h3 className="text-sm font-semibold text-gray-600 mb-2">Contrôle pesée</h3>
                   <div className="bg-indigo-50 rounded-lg p-3 grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <span className="text-gray-500">Date pesée :</span>{' '}
-                      <span className="font-medium">{formatDate(showDetail.pesee.date)}</span>
+                      <span className="text-gray-500">Réception ticket :</span>{' '}
+                      <span className="font-medium">{formatDate(showDetail.controle_pesee.date_reception_ticket)}</span>
                     </div>
                     <div>
-                      <span className="text-gray-500">Tonnage pesé :</span>{' '}
-                      <span className="font-medium">{formatTonnage(showDetail.pesee.tonnage)} t</span>
+                      <span className="text-gray-500">Pesée client :</span>{' '}
+                      <span className="font-medium">{formatTonnage(showDetail.controle_pesee.pesee_client)} t</span>
                     </div>
-                    {showDetail.pesee.ecart != null && (
+                    {showDetail.controle_pesee.pesee_interne != null && (
+                      <div>
+                        <span className="text-gray-500">Pesée interne :</span>{' '}
+                        <span className="font-medium">{formatTonnage(showDetail.controle_pesee.pesee_interne)} t</span>
+                      </div>
+                    )}
+                    {showDetail.controle_pesee.ecart_pesee != null && (
                       <div>
                         <span className="text-gray-500">Écart :</span>{' '}
-                        <span className="font-medium">{formatTonnage(showDetail.pesee.ecart)} t</span>
+                        <span className="font-medium">
+                          {formatTonnage(showDetail.controle_pesee.ecart_pesee)} t
+                          {showDetail.controle_pesee.ecart_pourcentage != null && ` (${parseFloat(showDetail.controle_pesee.ecart_pourcentage).toFixed(1)} %)`}
+                        </span>
                       </div>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Facture */}
+              {/* Facture (factures_exutoires — factures Pennylane rapprochées, ou OCR historique) */}
               {showDetail.facture && (
                 <div className="mb-4">
                   <h3 className="text-sm font-semibold text-gray-600 mb-2">Facture</h3>
                   <div className="bg-teal-50 rounded-lg p-3 grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <span className="text-gray-500">N° facture :</span>{' '}
-                      <span className="font-medium">{showDetail.facture.numero || '—'}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Montant :</span>{' '}
-                      <span className="font-medium">{formatPrice(showDetail.facture.montant)} €</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Date facture :</span>{' '}
-                      <span className="font-medium">{formatDate(showDetail.facture.date)}</span>
-                    </div>
+                    {(showDetail.facture.pennylane_invoice_number || showDetail.facture.pennylane_external_reference) && (
+                      <div>
+                        <span className="text-gray-500">N° facture :</span>{' '}
+                        <span className="font-medium">{showDetail.facture.pennylane_invoice_number || showDetail.facture.pennylane_external_reference}</span>
+                      </div>
+                    )}
+                    {(() => {
+                      const montant = showDetail.facture.montant_ttc ?? showDetail.facture.montant_ht ?? showDetail.facture.ocr_montant;
+                      if (montant == null) return null;
+                      const suffixe = showDetail.facture.montant_ttc != null ? ' TTC' : showDetail.facture.montant_ht != null ? ' HT' : '';
+                      return (
+                        <div>
+                          <span className="text-gray-500">Montant :</span>{' '}
+                          <span className="font-medium">{formatPrice(montant)} €{suffixe}</span>
+                        </div>
+                      );
+                    })()}
+                    {(showDetail.facture.date_facture || showDetail.facture.ocr_date) && (
+                      <div>
+                        <span className="text-gray-500">Date facture :</span>{' '}
+                        <span className="font-medium">{formatDate(showDetail.facture.date_facture || showDetail.facture.ocr_date)}</span>
+                      </div>
+                    )}
+                    {showDetail.facture.ecart_montant != null && (
+                      <div>
+                        <span className="text-gray-500">Écart montant :</span>{' '}
+                        <span className="font-medium">{formatPrice(showDetail.facture.ecart_montant)} €</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

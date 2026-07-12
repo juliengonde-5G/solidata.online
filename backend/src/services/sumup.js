@@ -301,6 +301,115 @@ function normalizePaymentMethod(raw) {
   return s;
 }
 
+// ── Détection remboursement (unifie CSV + API/webhook) ──
+// L'import CSV traite une ligne « Remboursement » en négatif (voir importCSVContent).
+// On applique la MÊME sémantique aux voies API et webhook : une transaction SumUp
+// de type REFUND (ou CHARGE_BACK) devient un ticket négatif distinct qui vient
+// nette la vente d'origine dans tous les agrégats (KPI, horaire, paiements, live).
+//   - `type` API SumUp : 'PAYMENT' | 'REFUND' | 'CHARGE_BACK'
+//   - colonne « Type » du CSV FR : 'Remboursement'
+// IMPORTANT : un paiement dont seul le STATUT est 'REFUNDED' (l'original remboursé)
+// n'est PAS un événement de remboursement — il reste le ticket de vente positif,
+// annulé par l'événement REFUND distinct que SumUp émet en parallèle. Le traiter
+// en négatif ici sur-déduirait (double comptage du remboursement).
+function isRefundTransaction(tx) {
+  if (!tx) return false;
+  const type = String(tx.type || tx.transaction_type || '').trim().toUpperCase();
+  return type === 'REFUND'
+    || type === 'CHARGE_BACK'
+    || type === 'CHARGEBACK'
+    || type === 'REMBOURSEMENT';
+}
+
+// ── Éligibilité d'une transaction API à l'ingestion ──
+// Retenues : ventes réussies (SUCCESSFUL/PAID), l'original remboursé (statut
+// REFUNDED — reste un vrai ticket, netté par l'événement REFUND), et tout
+// remboursement (négatif). Écartées : échec, annulation, expiration, en attente.
+// Sans statut : on tente l'ingestion (comportement historique conservé).
+function isSyncEligibleTransaction(tx) {
+  if (isRefundTransaction(tx)) return true;
+  const status = String(tx?.status || tx?.transaction_status || '').trim().toUpperCase();
+  if (!status) return true;
+  return ['SUCCESSFUL', 'PAID', 'REFUNDED'].includes(status);
+}
+
+// ── Mapping pur transaction SumUp → ticket + lignes (sans DB ni IO) ──
+// Extrait de ingestSumUpTransaction pour être testable. Applique le signe du
+// remboursement (−1) sur les montants ET les quantités (donc le poids), à
+// l'identique du chemin CSV, afin que le CA et le poids nets tiennent compte
+// des retours. `detail` = charge enrichie (line_items) quand disponible, sinon
+// = la transaction résumée.
+function mapSumUpTransaction(tx, detail = tx) {
+  const refund = isRefundTransaction(detail) || isRefundTransaction(tx);
+  const sign = refund ? -1 : 1;
+  const refTx = detail.transaction_code || detail.transaction_id || detail.id
+    || tx.transaction_code || tx.transaction_id || tx.id || `sumup-${Date.now()}`;
+  const moyenPaiement = normalizePaymentMethod(
+    detail.payment_type || detail.card?.type || detail.payment_method || 'Inconnu');
+  const entryMode = detail.entry_mode || null;
+  const items = detail.line_items || detail.products || [];
+
+  let totalTTC = sign * Math.abs(Number(detail.amount || 0));
+  let totalHT = 0;
+  let totalTVA = 0;
+  let poidsTicket = 0;
+  let nbArticles = 0;
+  const lignes = [];
+
+  if (items.length === 0) {
+    // Ticket sans détail de lignes (rare) : 1 ligne globale
+    const magTTC = Math.abs(Number(detail.amount || 0));
+    const ht = magTTC / 1.2;
+    lignes.push({
+      description: detail.description || (refund ? 'Remboursement' : 'Vente'),
+      segment: 'autre',
+      unite: 'pce',
+      quantite: sign * 1,
+      prix_unitaire_ttc: sign * magTTC,
+      total_ttc: sign * magTTC,
+      total_ht: sign * ht,
+      total_tva: sign * (magTTC - ht),
+      taux_tva: 20,
+    });
+    totalTTC = sign * magTTC;
+    totalHT = sign * ht;
+    totalTVA = sign * (magTTC - ht);
+    nbArticles = 1;
+  } else {
+    for (const it of items) {
+      const desc = (it.description || it.name || '').trim();
+      const qtyMag = Math.abs(Number(it.quantity || 1));
+      const unitPrice = Math.abs(Number(it.price_per_unit || it.unit_price || 0));
+      const lineTTCmag = Math.abs(Number(it.total_price || it.total_with_vat || qtyMag * unitPrice));
+      const tvaMag = Math.abs(Number(it.vat_amount || (lineTTCmag - lineTTCmag / 1.2)));
+      const htMag = Math.abs(Number(it.subtotal || (lineTTCmag - tvaMag)));
+      const taux = Number(it.vat_rate || 20);
+      const unite = (it.unit || 'pce').toLowerCase();
+      const segment = getSegment(desc);
+      lignes.push({
+        description: desc, segment, unite,
+        quantite: sign * qtyMag,
+        prix_unitaire_ttc: sign * unitPrice,
+        total_ttc: sign * lineTTCmag,
+        total_ht: sign * htMag,
+        total_tva: sign * tvaMag,
+        taux_tva: taux,
+      });
+      totalHT += sign * htMag;
+      totalTVA += sign * tvaMag;
+      if (unite.includes('kg')) poidsTicket += sign * qtyMag;
+      nbArticles += 1;
+    }
+    // Si le montant n'est pas donné au header, recalcul depuis les lignes (déjà signées)
+    if (!detail.amount) totalTTC = lignes.reduce((s, l) => s + l.total_ttc, 0);
+  }
+
+  return {
+    refTx, moyenPaiement, entryMode, isRefund: refund,
+    totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes,
+  };
+}
+
 // ── Parse date FR "15 mai 2026 10:15" ──
 const MOIS_FR = {
   'janv.': 0, janvier: 0, 'janv': 0,
@@ -426,10 +535,6 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
         _categorie, _sku, _devise, _prixAvantRed, remiseStr, totalTTCStr, totalHTStr, totalTVAStr, tauxTVAStr, compte,
       ] = parts;
 
-      if (type && type.toLowerCase() === 'remboursement') {
-        // On garde mais en négatif (gestion remboursements)
-      }
-
       const dateVente = parseFRDate(dateStr);
       if (!dateVente) throw new Error(`Date invalide: "${dateStr}"`);
 
@@ -447,7 +552,9 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       const tauxTVA = parseNumberFR((tauxTVAStr || '').replace(/[%\s]/g, ''));
       const remise = parseNumberFR(remiseStr);
       const segment = getSegment(description);
-      const sign = (type && type.toLowerCase() === 'remboursement') ? -1 : 1;
+      // Remboursement (colonne « Type » = Remboursement) → lignes en négatif,
+      // même sémantique que les voies API/webhook. Voir isRefundTransaction.
+      const sign = isRefundTransaction({ type }) ? -1 : 1;
 
       const moyenPaiementNorm = normalizePaymentMethod(moyenPaiement);
       const ref = (refTx || '').trim() || `unknown-${i}`;
@@ -497,9 +604,12 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
 
   // UPSERT tickets + ventes
   for (const [ref, tk] of ticketsMap.entries()) {
-    const nbArticlesPesee = tk.lignes
+    // Poids du ticket = somme SIGNÉE des quantités en kg (un remboursement pèse
+    // négatif) → cohérent avec le CA signé du ticket et avec la voie API, pour
+    // que les vues horaire / live nettent aussi le poids retourné.
+    const poidsTicket = tk.lignes
       .filter((l) => (l.unite || '').includes('kg'))
-      .reduce((s, l) => s + (Number.isFinite(l.quantite) ? Math.abs(l.quantite) : 0), 0);
+      .reduce((s, l) => s + (Number.isFinite(l.quantite) ? l.quantite : 0), 0);
     const nbArticles = tk.lignes.length;
     const totalTTC = tk.lignes.reduce((s, l) => s + l.total_ttc, 0);
     const totalHT = tk.lignes.reduce((s, l) => s + l.total_ht, 0);
@@ -519,7 +629,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
         batch_id = EXCLUDED.batch_id
       RETURNING id
     `, [vakId, ref, tk.date_ticket.toISOString(), tk.moyen_paiement, nbArticles,
-        nbArticlesPesee, totalTTC, totalHT, totalTVA, batchId, source]);
+        poidsTicket, totalTTC, totalHT, totalTVA, batchId, source]);
     const ticketId = tickRes.rows[0].id;
 
     // Reset des lignes avant réinsertion — un ré-import CSV du même ticket crée
@@ -644,8 +754,10 @@ async function syncTransactionsFromApi({ io, triggeredBy = null, sinceOverride =
       received += items.length;
 
       for (const tx of items) {
-        const status = tx.status || tx.transaction_status;
-        if (status && !['SUCCESSFUL', 'PAID'].includes(String(status).toUpperCase())) {
+        // Écarte échec / annulation / en attente ; retient les ventes réussies,
+        // l'original remboursé (statut REFUNDED) et les remboursements (négatifs,
+        // qui nettent la vente d'origine). Voir isSyncEligibleTransaction.
+        if (!isSyncEligibleTransaction(tx)) {
           skipped++;
           continue;
         }
@@ -698,60 +810,15 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
       try { detail = await sumupApiGet(`/v0.1/me/transactions/${txId}`); }
       catch (_) { /* keep summary */ }
     }
-    const refTx = detail.transaction_code || detail.transaction_id || detail.id || `sumup-${Date.now()}`;
-    // `payment_type` = 'POS' pour une vente carte sur le terminal en boutique
-    // (cas nominal VAK). On le ramène au libellé métier 'CB'. Voir
-    // normalizePaymentMethod.
-    const moyenPaiement = normalizePaymentMethod(detail.payment_type || detail.card?.type || detail.payment_method || 'Inconnu');
-    const entryMode = detail.entry_mode || null;
-    const items = detail.line_items || detail.products || [];
-
-    let totalTTC = Number(detail.amount || 0);
-    let totalHT = 0;
-    let totalTVA = 0;
-    let poidsTicket = 0;
-    let nbArticles = 0;
-    const lignes = [];
-    if (items.length === 0) {
-      // Fallback ticket sans détail (rare) : 1 ligne globale
-      lignes.push({
-        description: detail.description || 'Vente',
-        segment: 'autre',
-        unite: 'pce',
-        quantite: 1,
-        prix_unitaire_ttc: totalTTC,
-        total_ttc: totalTTC,
-        total_ht: totalTTC / 1.2,
-        total_tva: totalTTC - totalTTC / 1.2,
-        taux_tva: 20,
-      });
-      totalHT = totalTTC / 1.2;
-      totalTVA = totalTTC - totalHT;
-      nbArticles = 1;
-    } else {
-      for (const it of items) {
-        const desc = (it.description || it.name || '').trim();
-        const qty = Number(it.quantity || 1);
-        const unitPrice = Number(it.price_per_unit || it.unit_price || 0);
-        const lineTTC = Number(it.total_price || it.total_with_vat || qty * unitPrice);
-        const tva = Number(it.vat_amount || lineTTC - lineTTC / 1.2);
-        const ht = Number(it.subtotal || lineTTC - tva);
-        const taux = Number(it.vat_rate || 20);
-        const unite = (it.unit || 'pce').toLowerCase();
-        const segment = getSegment(desc);
-        lignes.push({
-          description: desc, segment, unite,
-          quantite: qty, prix_unitaire_ttc: unitPrice,
-          total_ttc: lineTTC, total_ht: ht, total_tva: tva, taux_tva: taux,
-        });
-        totalHT += ht;
-        totalTVA += tva;
-        if (unite.includes('kg')) poidsTicket += qty;
-        nbArticles += 1;
-      }
-      // Si totaux non donnés au header, recalcul depuis lignes
-      if (!detail.amount) totalTTC = lignes.reduce((s, l) => s + l.total_ttc, 0);
-    }
+    // Mapping pur : montants, quantités et poids signés (négatifs pour un
+    // remboursement, cf. mapSumUpTransaction/isRefundTransaction) → le ticket
+    // de remboursement nette la vente d'origine dans tous les agrégats et
+    // dans les compteurs live. `payment_type` = 'POS' (carte terminal) est
+    // ramené à 'CB' par normalizePaymentMethod.
+    const {
+      refTx, moyenPaiement, entryMode,
+      totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes,
+    } = mapSumUpTransaction(tx, detail);
 
     const tickRes = await pool.query(`
       INSERT INTO vak_tickets
@@ -887,6 +954,10 @@ module.exports = {
   parseFRDate,
   getSegment,
   normalizePaymentMethod,
+  // Remboursements (sémantique partagée CSV / API / webhook)
+  isRefundTransaction,
+  isSyncEligibleTransaction,
+  mapSumUpTransaction,
   // Live
   emitLiveUpdate,
   captureWeatherForVak,

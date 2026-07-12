@@ -42,6 +42,7 @@ export default function VakSessions() {
       lieu: 'Siège - Rouen',
       ca_objectif_ttc: '',
       poids_objectif_kg: '',
+      kg_approvisionnes: '',
       notes: '',
     });
     setModalOpen(true);
@@ -54,6 +55,7 @@ export default function VakSessions() {
       date_fin: v.date_fin?.slice(0, 10),
       ca_objectif_ttc: v.ca_objectif_ttc || '',
       poids_objectif_kg: v.poids_objectif_kg || '',
+      kg_approvisionnes: v.kg_approvisionnes || '',
     });
     setModalOpen(true);
   }
@@ -71,6 +73,7 @@ export default function VakSessions() {
         lieu: editing.lieu,
         ca_objectif_ttc: editing.ca_objectif_ttc || null,
         poids_objectif_kg: editing.poids_objectif_kg || null,
+        kg_approvisionnes: editing.kg_approvisionnes || null,
         notes: editing.notes,
       };
       if (editing.id) {
@@ -161,6 +164,13 @@ export default function VakSessions() {
                 onChange={(e) => setEditing({ ...editing, ca_objectif_ttc: e.target.value })} />
               <FormField type="number" label="Objectif poids (kg)" value={editing.poids_objectif_kg}
                 onChange={(e) => setEditing({ ...editing, poids_objectif_kg: e.target.value })} />
+            </div>
+            <div>
+              <FormField type="number" label="Approvisionnement (kg mis en vente)" value={editing.kg_approvisionnes}
+                onChange={(e) => setEditing({ ...editing, kg_approvisionnes: e.target.value })} />
+              <p className="text-xs text-slate-500 mt-1">
+                Kilos de textile préparés/mis en rayon pour cette VAK. Sert au calcul du <strong>taux d'écoulement</strong> (kg vendus ÷ kg approvisionnés). Saisie manuelle : aucune source stock n'est rattachée à une VAK de détail.
+              </p>
             </div>
             <FormField type="textarea" label="Notes" value={editing.notes || ''}
               onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />

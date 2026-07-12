@@ -10,19 +10,21 @@ import { authedFetch } from '../services/authedFetch';
  * Historique des actions de la tournée courante.
  *
  * Fusionne :
- *   - collectes connues du serveur  (GET /tours/:id/public, champ cavs[])
+ *   - collectes / incidents / pesées SYNCHRONISÉS côté serveur
+ *     (GET /tours/:id/history-public — vague 2, item 62)
  *   - collectes locales encore en file (pendingCollects)
  *   - incidents locaux encore en file (pendingIncidents)
  *   - pesées locales encore en file (pendingWeights)
  *
- * Limites assumées :
- *   - le backend n'expose pas de GET public pour lister les incidents ni
- *     les pesées de la tournée, donc l'historique serveur pour ces types
- *     reste partiel. Cf. DOCUMENTATION_MOBILE.md (contrat backend
- *     recommandé) — endpoints /incidents-public et /weights-public.
+ * Une fois synchronisés, incidents et pesées disparaissaient de l'historique
+ * local (la file offline se vide après envoi) : le chauffeur ne pouvait plus
+ * vérifier « ma pesée est bien passée ». L'endpoint history-public les relit
+ * désormais côté serveur, en LECTURE seule (même auth token véhicule).
  */
 export default function TourHistory() {
   const [serverCavs, setServerCavs] = useState([]);
+  const [serverIncidents, setServerIncidents] = useState([]);
+  const [serverWeights, setServerWeights] = useState([]);
   const [pendingCollects, setPendingCollects] = useState([]);
   const [pendingIncidents, setPendingIncidents] = useState([]);
   const [pendingWeights, setPendingWeights] = useState([]);
@@ -37,10 +39,12 @@ export default function TourHistory() {
     try {
       if (tourId) {
         try {
-          const res = await authedFetch(`/api/tours/${tourId}/public`);
+          const res = await authedFetch(`/api/tours/${tourId}/history-public`);
           if (res.ok) {
             const data = await res.json();
             setServerCavs((data.cavs || []).map(c => ({ ...c, _tourId: tourId })));
+            setServerIncidents(data.incidents || []);
+            setServerWeights(data.weights || []);
           } else {
             setError('Historique serveur indisponible');
           }
@@ -71,7 +75,10 @@ export default function TourHistory() {
 
   // Construit la liste ordonnée d'items à afficher.
   // Item: { key, kind, label, sub, when, status }
-  const items = buildItems({ serverCavs, pendingCollects, pendingIncidents, pendingWeights });
+  const items = buildItems({
+    serverCavs, serverIncidents, serverWeights,
+    pendingCollects, pendingIncidents, pendingWeights,
+  });
 
   return (
     <MobileShell
@@ -141,15 +148,19 @@ export default function TourHistory() {
         )}
 
         <p className="text-[11px] text-gray-400 pt-4">
-          L'historique serveur complet (incidents, pesées) nécessite des
-          endpoints de lecture publics — cf. contrat backend recommandé.
+          Les collectes, incidents et pesées déjà synchronisés sont relus côté
+          serveur (badge « envoyé »). Les actions en attente restent visibles
+          jusqu'à leur envoi.
         </p>
       </div>
     </MobileShell>
   );
 }
 
-function buildItems({ serverCavs, pendingCollects, pendingIncidents, pendingWeights }) {
+function buildItems({
+  serverCavs, serverIncidents, serverWeights,
+  pendingCollects, pendingIncidents, pendingWeights,
+}) {
   const items = [];
 
   // Collectes serveur. On affiche tous les CAV, mais on marque « collecté »
@@ -165,6 +176,35 @@ function buildItems({ serverCavs, pendingCollects, pendingIncidents, pendingWeig
         status: 'sent',
       });
     }
+  }
+
+  // Incidents SYNCHRONISÉS (relus côté serveur) — statut « envoyé ».
+  for (const i of (serverIncidents || [])) {
+    items.push({
+      key: `si-${i.id}`,
+      kind: 'incident',
+      label: incidentLabel(i.type),
+      sub: i.description || null,
+      when: i.created_at || null,
+      status: 'sent',
+    });
+  }
+
+  // Pesées SYNCHRONISÉES (relues côté serveur) — le chauffeur vérifie ainsi que
+  // « sa pesée est bien passée » même après vidage de la file locale.
+  for (const w of (serverWeights || [])) {
+    const kg = w.weight_kg != null ? Number(w.weight_kg) : null;
+    items.push({
+      key: `sw-${w.id}`,
+      kind: 'weight',
+      label: w.is_intermediate ? 'Pesée intermédiaire' : 'Pesée finale',
+      sub: [
+        kg != null ? `${kg.toFixed(0)} kg` : null,
+        w.tare_kg != null ? `tare ${Number(w.tare_kg).toFixed(0)} kg` : null,
+      ].filter(Boolean).join(' · '),
+      when: w.recorded_at || null,
+      status: 'sent',
+    });
   }
 
   for (const c of pendingCollects) {

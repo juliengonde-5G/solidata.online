@@ -185,7 +185,10 @@ app.use('/api/association-points', require('./routes/association-points'));
 // Lot 4 : Tri + Stock + Production + Facturation + Reporting + Refashion
 app.use('/api/stock', require('./routes/stock'));
 app.use('/api/production', require('./routes/production'));
-app.use('/api/billing', require('./routes/billing'));
+// Facturation interne retirée arbitrage A2 audit 2026-07 — tables invoices conservées,
+// routes/billing.js + services/BillingService.js + repositories/InvoiceRepository.js gardés
+// (non montés), réactivable en décommentant la ligne ci-dessous. Flux réel : Pennylane + contrôle facturation.
+// app.use('/api/billing', require('./routes/billing'));
 app.use('/api/reporting', require('./routes/reporting'));
 app.use('/api/exports', require('./routes/exports'));
 app.use('/api/tri', require('./routes/tri'));

@@ -567,6 +567,17 @@ function safeContractType(t) {
   return EC_CONTRACT_TYPES.includes(t) ? t : 'CDD';
 }
 
+// v1-5 — Résout la quotité hebdomadaire à insérer dans employee_contracts.
+// Auparavant l'import coerçait toute valeur ≠ 26/35 vers 35 (à cause du CHECK
+// weekly_hours IN (26,35)), écrasant les temps réels 24/28/30. Le CHECK est
+// désormais une plage 0 < h <= 48 : on CONSERVE la quotité réelle et on ne
+// retombe sur le défaut (35) que si la valeur est absente ou hors plage
+// (donnée inexploitable) — jamais pour un simple 24/28/30.
+function resolveWeeklyHours(raw, fallback = 35) {
+  const n = Number(raw);
+  return (raw != null && Number.isFinite(n) && n > 0 && n <= 48) ? n : fallback;
+}
+
 /**
  * Item 43 — Renseigne les champs de visite médicale de façon NON destructive :
  *  - visite_medicale_date (post-embauche) : fill-if-empty depuis l'export ;
@@ -599,7 +610,7 @@ async function upsertCurrentContract(db, employeeId, { contractType, teamId, c }
     'SELECT id FROM employee_contracts WHERE employee_id = $1 AND is_current = true LIMIT 1',
     [employeeId]
   );
-  const weekly = c.weekly_hours && [26, 35].includes(Math.round(c.weekly_hours)) ? Math.round(c.weekly_hours) : 35;
+  const weekly = resolveWeeklyHours(c.weekly_hours); // v1-5 : quotité réelle conservée
   if (existing.rows.length > 0) {
     await db.query(
       `UPDATE employee_contracts SET
@@ -628,5 +639,6 @@ module.exports = {
   normalizeContractType,
   parseMedicalFrequencyMonths,
   computeMedicalDueDate,
+  resolveWeeklyHours,
   POSITION_TO_TEAM,
 };

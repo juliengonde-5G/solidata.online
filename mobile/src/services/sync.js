@@ -68,15 +68,16 @@ export function __resetBackoffForTests() {
  * @returns {Promise<{ scans, weights, gps, incidents, collects, total }>}
  */
 export async function getPendingCount() {
-  const [scans, weights, gps, incidents, collects] = await Promise.all([
+  const [scans, weights, gps, incidents, collects, messageReads] = await Promise.all([
     countItems(STORES.pendingScans).catch(() => 0),
     countItems(STORES.pendingWeights).catch(() => 0),
     countItems(STORES.gpsBuffer).catch(() => 0),
     countItems(STORES.pendingIncidents).catch(() => 0),
     countItems(STORES.pendingCollects).catch(() => 0),
+    countItems(STORES.pendingMessageReads).catch(() => 0),
   ]);
-  const counts = { scans, weights, gps, incidents, collects };
-  counts.total = scans + weights + gps + incidents + collects;
+  const counts = { scans, weights, gps, incidents, collects, messageReads };
+  counts.total = scans + weights + gps + incidents + collects + messageReads;
   emit('pending', { counts });
   return counts;
 }
@@ -358,6 +359,50 @@ export async function syncPendingCollects() {
   return { synced, failed, pending: items.length - synced - failed };
 }
 
+/**
+ * Envoie un accusé de lecture de consigne (« J'ai compris »). Idempotent côté
+ * serveur (POST /tours/messages/:id/read-public répond 200 même si déjà lu).
+ */
+export async function sendMessageRead(item) {
+  const res = await authedFetch(`/api/tours/messages/${item.messageId}/read-public`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status };
+    throw err;
+  }
+  return res.json().catch(() => ({}));
+}
+
+export async function syncPendingMessageReads() {
+  const store = STORES.pendingMessageReads;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const items = await getAllItems(store);
+  let synced = 0; let failed = 0;
+  for (const it of items) {
+    try {
+      await sendMessageRead(it);
+      await deleteItem(store, it.id);
+      synced++;
+    } catch (err) {
+      if (isClientError(err)) {
+        // 400/404 : accusé sans objet (message supprimé) → purge, pas de boucle.
+        console.warn('[SYNC] Accusé de lecture rejeté, suppression:', err.response?.status);
+        await deleteItem(store, it.id);
+        failed++;
+      } else {
+        recordFailure(store);
+        break;
+      }
+    }
+  }
+  if (synced > 0 || failed > 0) recordSuccess(store);
+  return { synced, failed, pending: items.length - synced - failed };
+}
+
 export async function syncAll() {
   if (!navigator.onLine) {
     emit('state', { state: 'offline' });
@@ -375,6 +420,7 @@ export async function syncAll() {
       gps: await syncGpsBuffer(),
       incidents: await syncPendingIncidents(),
       collects: await syncPendingCollects(),
+      messageReads: await syncPendingMessageReads(),
     };
     const totalSynced = Object.values(results).reduce((a, r) => a + r.synced, 0);
     const totalPending = Object.values(results).reduce((a, r) => a + r.pending, 0);

@@ -189,18 +189,18 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
 router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { libelle, date_debut, date_fin, lieu, latitude, longitude, ca_objectif_ttc, poids_objectif_kg, notes } = req.body;
+    const { libelle, date_debut, date_fin, lieu, latitude, longitude, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, notes } = req.body;
     if (!libelle || !date_debut || !date_fin) {
       return res.status(400).json({ error: 'libelle, date_debut et date_fin requis' });
     }
     const r = await pool.query(`
       INSERT INTO vaks (libelle, date_debut, date_fin, lieu, latitude, longitude,
-                        ca_objectif_ttc, poids_objectif_kg, notes, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                        ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, notes, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       RETURNING *
     `, [libelle, date_debut, date_fin, lieu || 'Siège - Rouen',
         latitude || 49.4231, longitude || 1.0993,
-        ca_objectif_ttc || null, poids_objectif_kg || null, notes || null, req.user.id]);
+        ca_objectif_ttc || null, poids_objectif_kg || null, kg_approvisionnes || null, notes || null, req.user.id]);
     // Préparer la météo en best effort
     sumup.captureWeatherForVak(r.rows[0].id).catch(() => {});
     res.status(201).json(r.rows[0]);
@@ -222,16 +222,17 @@ router.get('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
 router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, notes } = req.body;
+    const { libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, notes } = req.body;
     const r = await pool.query(`
       UPDATE vaks SET libelle = COALESCE($1, libelle),
                       date_debut = COALESCE($2, date_debut),
                       date_fin = COALESCE($3, date_fin),
                       lieu = COALESCE($4, lieu),
                       ca_objectif_ttc = $5, poids_objectif_kg = $6,
-                      notes = $7, updated_at = NOW()
-      WHERE id = $8 RETURNING *
-    `, [libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, notes, req.params.id]);
+                      kg_approvisionnes = $7,
+                      notes = $8, updated_at = NOW()
+      WHERE id = $9 RETURNING *
+    `, [libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, notes, req.params.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'VAK introuvable' });
     res.json(r.rows[0]);
   } catch (err) {
@@ -282,8 +283,11 @@ router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res
         COUNT(CASE WHEN ${payIsCb('moyen_paiement')} THEN 1 END)::INT AS nb_cb
       FROM vak_tickets WHERE vak_id = $1
     `, [vakId]);
+    // Approvisionnement saisi manuellement sur la session (base du taux d'écoulement)
+    const meta = await pool.query('SELECT kg_approvisionnes FROM vaks WHERE id = $1', [vakId]);
     const a = v.rows[0]; const b = t.rows[0];
     const nbTickets = b.nb_tickets || 0;
+    const kgApprov = meta.rows[0]?.kg_approvisionnes != null ? Number(meta.rows[0].kg_approvisionnes) : null;
     res.json({
       ca_ttc: a.ca_ttc,
       ca_ht: a.ca_ht,
@@ -307,6 +311,10 @@ router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res
       taux_cb_volume: nbTickets > 0 ? (b.nb_cb / nbTickets) * 100 : 0,
       taux_cb_ca: a.ca_ttc > 0 ? (b.ca_cb / a.ca_ttc) * 100 : 0,
       remise_totale: a.remise_totale,
+      // Taux d'écoulement = kg vendus (net des remboursements) / kg approvisionnés
+      // (saisie manuelle sur la session). null si l'approvisionnement n'est pas renseigné.
+      kg_approvisionnes: kgApprov,
+      taux_ecoulement: (kgApprov && kgApprov > 0) ? (a.poids_kg / kgApprov) * 100 : null,
     });
   } catch (err) {
     logger.error('VAK kpis', { error: err.message });
@@ -543,6 +551,7 @@ router.get('/annual/overview', authorize('ADMIN', 'MANAGER'), async (req, res) =
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const r = await pool.query(`
       SELECT v.id, v.libelle, v.date_debut, v.date_fin, v.ca_objectif_ttc, v.poids_objectif_kg,
+             v.kg_approvisionnes,
              COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc,
              COALESCE(SUM(t.poids_kg),0)::FLOAT AS poids_kg,
              COUNT(t.id)::INT AS nb_tickets,

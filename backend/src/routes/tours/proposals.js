@@ -6,14 +6,17 @@ const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { getContextForDate } = require('./context');
 const { generateIntelligentTour } = require('./smart-tour');
-const { isHoliday, getSchoolVacationStatus, getSeasonalFactors, getDayOfWeekFactors, getHolidays, getSchoolVacations, getScoringConfig } = require('./predictions');
+const { isHoliday, getSchoolVacationStatus, getHolidays, getSchoolVacations, getScoringConfig } = require('./predictions');
+// v1-6 : source unique des facteurs (résolution appris > manuel > défaut).
+const fillFactors = require('../../utils/fill-factors');
 
 // GET /api/tours/proposals/daily — Propositions de tournées pour une date
 router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const SCORING_CONFIG = getScoringConfig();
-    const SEASONAL_FACTORS = getSeasonalFactors();
-    const DAY_OF_WEEK_FACTORS = getDayOfWeekFactors();
+    // v1-6 : le calendrier de référence affiche désormais les facteurs EFFECTIFS du
+    // moteur (appris > manuel > défaut) au lieu de la seule couche manuelle/défaut.
+    const resolvedFactors = await fillFactors.getResolvedFactors();
     const FRENCH_HOLIDAYS_2026 = getHolidays();
     const SCHOOL_VACATIONS = getSchoolVacations();
 
@@ -90,8 +93,8 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
       referenceCalendar: {
         upcomingVacations,
         nearbyHolidays,
-        seasonalFactor: SEASONAL_FACTORS[d.getMonth()],
-        dayOfWeekFactor: DAY_OF_WEEK_FACTORS[d.getDay() === 0 ? 6 : d.getDay() - 1],
+        seasonalFactor: fillFactors.seasonalFactorFor(resolvedFactors, d.getMonth()),
+        dayOfWeekFactor: fillFactors.dayFactorFor(resolvedFactors, d.getDay()),
       },
       availableVehicles: availableVehicles.length,
       drivers: driversResult.rows,

@@ -127,7 +127,7 @@ solidata.online/
 │   │       ├── tri.js                  # Chaines de tri, operations, postes, flux
 │   │       ├── produits-finis.js       # Produits finis + scan code-barres
 │   │       ├── expeditions.js          # Expeditions + consolidation
-│   │       ├── billing.js              # Factures
+│   │       ├── billing.js              # Factures (NON montée — arbitrage A2 audit 2026-07)
 │   │       ├── exports.js              # Export Excel/PDF
 │   │       ├── reporting.js            # Dashboard + KPI + cartes
 │   │       ├── refashion.js            # DPAV + communes + subventions
@@ -183,7 +183,7 @@ solidata.online/
 │           ├── Expeditions.jsx
 │           ├── Reporting.jsx           # Dashboard principal
 │           ├── Refashion.jsx           # Reporting Refashion
-│           ├── Billing.jsx
+│           ├── Billing.jsx              # SUPPRIMÉE (arbitrage A2 audit 2026-07)
 │           ├── Users.jsx
 │           ├── Settings.jsx
 │           ├── Referentiels.jsx
@@ -1224,7 +1224,7 @@ CREATE TABLE refashion_subventions (
 | PUT | `/:id` | Authentifie | Modifier |
 | DELETE | `/:id` | ADMIN | Supprimer |
 
-#### Facturation (`/api/billing`)
+#### Facturation (`/api/billing`) — RETIRÉE de l'UI (arbitrage A2 audit 2026-07, tables conservées)
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
 | GET | `/invoices` | ADMIN, MANAGER | Liste factures |
@@ -1341,7 +1341,7 @@ colors: {
 /reporting/refashion          -> Reporting Refashion (DPAV, communes, subventions)
 
 -- Facturation --
-/billing                     -> Factures
+/billing                     -> Factures  (route retirée — arbitrage A2 audit 2026-07)
 
 -- Parametres (ADMIN) --
 /settings/referentiels        -> Referentiels metier
@@ -1650,17 +1650,55 @@ mkdir -p mobile/src/{pages,components,services,contexts,utils}
    - auth, users, settings, teams, employees, candidates
    - cav, vehicles, tours
    - stock, production, tri, produits-finis, expeditions
-   - billing, exports, reporting, refashion, referentiels
+   - billing (fichier conservé, NON monté — arbitrage A2), exports, reporting, refashion, referentiels
    - pcm, notifications
 
 ### Etape 5 : Base de donnees
+
+**Base NEUVE (from scratch) — ORDRE OBLIGATOIRE (vérifié sur PostgreSQL 16, 2026-07).**
+Il y a une dépendance **croisée** entre `init-db.js` et les migrations
+`migrate-exutoires.js` / `migrate-finance.js` :
+
+- `migrate-exutoires.js` et `migrate-finance.js` créent leurs tables avec des **FK vers
+  `users` et `employees`** (ex. `controles_pesee.validee_par → users`,
+  `preparation_collaborateurs.employee_id → employees`, `financial_gl_entries.created_by
+  → users`). Ils **échouent** (`relation "employees" does not exist`) si on les lance sur
+  une base vraiment vide.
+- `init-db.js` crée `users` / `employees` **très tôt**, mais fait à la **toute fin** un
+  backfill qui **lit** `clients_exutoires` / `commandes_exutoires` / `factures_exutoires`
+  (module exutoires) — tables créées uniquement par `migrate-exutoires.js`. Sur une base
+  vide, ce backfill final échoue (`relation "clients_exutoires" does not exist`), **mais
+  tout le reste du schéma est déjà créé** (`init-db` commite au fur et à mesure).
+
+L'ordre qui fonctionne est donc **init-db → migrations → init-db** (le 1er passage
+d'`init-db` sert à poser `users`/`employees` ; son erreur finale est **attendue et
+bénigne**) :
+
 ```bash
-npm run db:init          # Schema v1
-node scripts/migrate-v2.js  # Schema v2
-npm run db:seed-cav      # Import CAV (necessite KML)
-npm run db:seed-data     # Import tonnages (necessite Excel)
+# depuis le conteneur backend (WORKDIR /app) ou depuis backend/ en local :
+node src/scripts/init-db.js             # 1er passage : crée users, employees et ~tout le schéma.
+                                        #   ⚠ se termine en erreur sur le backfill exutoires/finance
+                                        #   (clients_exutoires absent) — c'est ATTENDU sur base neuve.
+node src/scripts/migrate-exutoires.js   # clients / commandes / preparations / controles / factures (FK users+employees)
+node src/scripts/migrate-finance.js     # financial_exercises / financial_gl_entries / budgets / ... (FK users)
+node src/scripts/init-db.js             # 2e passage : complète le backfill → « Base de données initialisée avec succès ! »
+node src/scripts/migrate-v2.js          # Complements schema v2 (si present)
+
+# Seeds (optionnels, necessitent les fichiers source)
+npm run db:seed-cav        # Import CAV (necessite KML)
+npm run db:seed-data       # Import tonnages (necessite Excel)
 npm run db:seed-production # Import production (necessite Excel)
 ```
+
+> **Note (correction du backlog vague 1).** La note résiduelle de vague 1 indiquait de
+> lancer les migrations *avant* le premier `init-db` : ce n'est **pas** faisable sur une
+> base réellement vierge (les migrations portent des FK vers `users`/`employees` qui
+> n'existent pas encore). L'ordre correct et vérifié est celui ci-dessus.
+>
+> Sur une base **existante** (mise à jour de prod), `deploy.sh` ne lance qu'`init-db.js`
+> (idempotent) : `users`/`employees` **et** les tables exutoires/finance sont déjà
+> présentes, donc `init-db` réussit d'un seul passage. La séquence ci-dessus ne concerne
+> que la **reconstruction complète** depuis zéro.
 
 ### Etape 6 : Frontend
 1. `main.jsx` + `App.jsx` (routes)
@@ -1682,8 +1720,13 @@ cd mobile && npm install && npm run dev
 
 # Production Docker
 docker compose up -d --build
-docker compose exec backend node scripts/init-db.js
-docker compose exec backend node scripts/migrate-v2.js
+# Base NEUVE : ordre init-db -> migrations -> init-db (cf. Etape 5 pour l'explication ;
+# l'erreur du 1er init-db sur le backfill exutoires/finance est attendue).
+docker compose exec backend node src/scripts/init-db.js || true   # 1er passage (users/employees + schema)
+docker compose exec backend node src/scripts/migrate-exutoires.js
+docker compose exec backend node src/scripts/migrate-finance.js
+docker compose exec backend node src/scripts/init-db.js           # 2e passage : succès complet
+docker compose exec backend node src/scripts/migrate-v2.js
 ```
 
 ### Etape 9 : Verification

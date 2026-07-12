@@ -237,7 +237,7 @@ solidata.online/
 │       │   ├── tours.js           # Tournées de collecte (3 modes)
 │       │   ├── stock.js           # Mouvements de stock
 │       │   ├── production.js      # Production quotidienne
-│       │   ├── billing.js         # Facturation interne
+│       │   ├── billing.js         # Facturation interne (NON montée, arbitrage A2 audit 2026-07)
 │       │   ├── reporting.js       # KPI et statistiques
 │       │   ├── exports.js         # Export Excel/PDF
 │       │   ├── tri.js             # Chaînes de tri, opérations, postes
@@ -791,7 +791,7 @@ Base URL : `https://solidata.online/api`
 | `/api/tours` | `tours.js` | Tournées (création, démarrage, clôture, IA) |
 | `/api/stock` | `stock.js` | Mouvements de stock, code-barres |
 | `/api/production` | `production.js` | Saisie production quotidienne |
-| `/api/billing` | `billing.js` | Factures et lignes |
+| ~~`/api/billing`~~ | `billing.js` | Factures et lignes — **route non montée** (retirée de l'UI, arbitrage A2 audit 2026-07 ; tables `invoices` conservées) |
 | `/api/reporting` | `reporting.js` | KPI et statistiques |
 | `/api/exports` | `exports.js` | Export Excel/PDF |
 | `/api/tri` | `tri.js` | Chaînes de tri, opérations, postes |

@@ -93,7 +93,9 @@ describe('60a — lastBusinessDay / mondayOfWeek', () => {
 
 describe('60a — GET /dashboard/activite-periode', () => {
   const tours = { rows: [{ nb_tournees: 2, terminees: 2, poids_kg: 1500, cav_visites: 20 }] };
-  const prod = { rows: [{ kg_trie: 0.5 }] };
+  // La requête SQL calcule déjà les kg : `SUM(total_jour_t) * 1000 AS kg_trie`.
+  // Le mock renvoie donc la sortie SQL (kg), pas les tonnes brutes. 0.5 t → 500 kg.
+  const prod = { rows: [{ kg_trie: 500 }] };
   const handler = (sql) => {
     const s = String(sql);
     if (/FROM tours WHERE date BETWEEN/.test(s)) return Promise.resolve(tours);
@@ -108,7 +110,7 @@ describe('60a — GET /dashboard/activite-periode', () => {
     expect(res.body.periode).toBe('veille');
     expect(res.body.collecte.tonnage_kg).toBe(1500);
     expect(res.body.collecte.cav_visites).toBe(20);
-    expect(res.body.production.kg_trie).toBe(500); // 0.5 t → 500 kg
+    expect(res.body.production.kg_trie).toBe(500); // conversion t→kg faite en SQL, handler arrondit
     // du = jour ouvré (jamais samedi/dimanche)
     const jour = new Date(res.body.du).getUTCDay();
     expect([0, 6]).not.toContain(jour);

@@ -11,6 +11,10 @@
  *   - pendingIncidents               (file d'envoi : incidents terrain)
  *   - pendingCollects                (file d'envoi : collectes offline)
  *
+ * Stores v3 (vague 2 — item 62) :
+ *   - pendingMessageReads            (file d'envoi : accusés de lecture des
+ *                                     consignes manager → chauffeur)
+ *
  * Chaque entrée "pending*" porte un clientId (uuid) pour permettre une
  * idempotence côté serveur si le backend évolue (cf. contrat recommandé dans
  * DOCUMENTATION_MOBILE.md). Par défaut, on s'appuie sur la politique
@@ -18,7 +22,7 @@
  */
 
 const DB_NAME = 'solidata-mobile';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const STORES = {
   tours: 'tours',
@@ -29,6 +33,7 @@ export const STORES = {
   userData: 'userData',
   pendingIncidents: 'pendingIncidents',
   pendingCollects: 'pendingCollects',
+  pendingMessageReads: 'pendingMessageReads',
 };
 
 export function openDB() {
@@ -66,6 +71,12 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORES.pendingCollects)) {
         const s = db.createObjectStore(STORES.pendingCollects, { keyPath: 'id', autoIncrement: true });
         s.createIndex('clientId', 'clientId', { unique: false });
+      }
+
+      // v3 — accusés de lecture des consignes manager → chauffeur (item 62)
+      if (!db.objectStoreNames.contains(STORES.pendingMessageReads)) {
+        const s = db.createObjectStore(STORES.pendingMessageReads, { keyPath: 'id', autoIncrement: true });
+        s.createIndex('messageId', 'messageId', { unique: false });
       }
     };
 
@@ -237,6 +248,25 @@ export async function addPendingCollect(data) {
     qrScanned: !!data.qrScanned,
     createdAt: new Date().toISOString(),
   });
+}
+
+/**
+ * Ajoute un accusé de lecture de consigne (« J'ai compris ») à envoyer.
+ * Le chauffeur peut acquitter hors ligne — l'accusé est rejoué à la reconnexion
+ * via POST /tours/messages/:id/read-public (idempotent côté serveur).
+ * @param {object} data - { messageId }
+ */
+export async function addPendingMessageRead(data) {
+  return putItem(STORES.pendingMessageReads, {
+    messageId: data.messageId,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/** Liste les IDs de consignes acquittées localement (encore en file). */
+export async function getAckedMessageIds() {
+  const rows = await getAllItems(STORES.pendingMessageReads).catch(() => []);
+  return rows.map((r) => r.messageId).filter((v) => v != null);
 }
 
 // ────────────────────────────────────────────────────────────────────────

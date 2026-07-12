@@ -250,6 +250,7 @@ export default function VakAnnuel() {
                       <th className="text-right py-2 px-3">Objectif</th>
                       <th className="text-right py-2 px-3">%</th>
                       <th className="text-right py-2 px-3">Poids</th>
+                      <th className="text-right py-2 px-3" title="Taux d'écoulement = kg vendus ÷ kg approvisionnés (approvisionnement saisi manuellement sur la session)">Écoulement</th>
                       <th className="text-right py-2 px-3">Tickets</th>
                       <th className="text-right py-2 px-3">Panier moy.</th>
                       <th className="text-right py-2 px-3">€/kg</th>
@@ -260,6 +261,8 @@ export default function VakAnnuel() {
                       const obj = Number(v.ca_objectif_ttc || 0);
                       const pct = obj > 0 ? (v.ca_ttc / obj) * 100 : null;
                       const prixKg = v.poids_kg > 0 ? v.ca_ttc / v.poids_kg : 0;
+                      const kgApprov = Number(v.kg_approvisionnes || 0);
+                      const ecoulement = kgApprov > 0 ? (v.poids_kg / kgApprov) * 100 : null;
                       return (
                         <tr key={v.id} className="border-b border-slate-100 hover:bg-slate-50">
                           <td className="py-2 px-3 font-medium">{v.libelle}</td>
@@ -272,6 +275,14 @@ export default function VakAnnuel() {
                             {pct !== null ? `${pct.toFixed(0)}%` : '—'}
                           </td>
                           <td className="py-2 px-3 text-right">{formatNumber(v.poids_kg, 1)} kg</td>
+                          <td className="py-2 px-3 text-right">
+                            {ecoulement != null ? (
+                              <span className={ecoulement >= 90 ? 'text-green-600 font-medium' : ecoulement >= 60 ? 'text-amber-600' : 'text-slate-600'}
+                                title={`${formatNumber(v.poids_kg, 0)} kg vendus / ${formatNumber(kgApprov, 0)} kg approvisionnés`}>
+                                {ecoulement.toFixed(0)}%
+                              </span>
+                            ) : <span className="text-slate-300">—</span>}
+                          </td>
                           <td className="py-2 px-3 text-right">{formatNumber(v.nb_tickets)}</td>
                           <td className="py-2 px-3 text-right">{formatEuro(v.panier_moyen, 2)}</td>
                           <td className="py-2 px-3 text-right text-orange-600 font-medium">{formatEuro(prixKg, 2)}</td>

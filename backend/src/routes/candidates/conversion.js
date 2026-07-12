@@ -85,9 +85,9 @@ router.post('/:id/link-employee', authorize('ADMIN', 'RH'), async (req, res) => 
     const employeeId = parseInt(req.body?.employee_id, 10);
     if (!employeeId) { client.release(); return res.status(400).json({ error: 'employee_id requis' }); }
 
-    const cand = await client.query('SELECT id, first_name, last_name, status FROM candidates WHERE id = $1', [id]);
+    const cand = await client.query('SELECT id, first_name, last_name, status, has_permis_b, has_caces FROM candidates WHERE id = $1', [id]);
     if (cand.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Candidat non trouvé' }); }
-    const emp = await client.query('SELECT id, candidate_id, first_name, last_name FROM employees WHERE id = $1', [employeeId]);
+    const emp = await client.query('SELECT id, candidate_id, first_name, last_name, has_permis_b, has_caces FROM employees WHERE id = $1', [employeeId]);
     if (emp.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Collaborateur non trouvé' }); }
 
     // Ce collaborateur est-il déjà lié à un AUTRE candidat ?
@@ -105,6 +105,23 @@ router.post('/:id/link-employee', authorize('ADMIN', 'RH'), async (req, res) => 
     await client.query('BEGIN');
     await client.query('UPDATE employees SET candidate_id = $1, updated_at = NOW() WHERE id = $2', [id, employeeId]);
 
+    // Vague 2 (résiduel v1-2, item 40) — Recopie des compétences opérationnelles
+    // (permis B / CACES) du candidat vers le collaborateur AU MOMENT DU LIEN.
+    // OR logique : ne remonte que false→true, jamais de rétrogradation d'une
+    // valeur déjà saisie côté RH. Le backfill idempotent d'init-db (vague 1)
+    // rattrape le stock ; ceci couvre le flux au fil de l'eau. Ces booléens
+    // conditionnent l'affectation « chauffeur » / « cariste » du planning hebdo.
+    const grantedPermis = !!cand.rows[0].has_permis_b && !emp.rows[0].has_permis_b;
+    const grantedCaces = !!cand.rows[0].has_caces && !emp.rows[0].has_caces;
+    await client.query(
+      `UPDATE employees e
+          SET has_permis_b = (COALESCE(e.has_permis_b, false) OR COALESCE(c.has_permis_b, false)),
+              has_caces    = (COALESCE(e.has_caces, false)    OR COALESCE(c.has_caces, false)),
+              updated_at = NOW()
+         FROM candidates c
+        WHERE e.id = $1 AND c.id = $2`,
+      [employeeId, id]);
+
     // Squelette de diagnostic d'insertion : garantit que le profil PCM du
     // candidat remonte dans le module Insertion. Best effort — ne bloque pas la
     // liaison si la table/contrainte n'existe pas sur une base ancienne.
@@ -115,10 +132,14 @@ router.post('/:id/link-employee', authorize('ADMIN', 'RH'), async (req, res) => 
         [employeeId, req.user.id]);
     } catch (e) { /* non bloquant */ }
 
+    const grantedSkills = [];
+    if (grantedPermis) grantedSkills.push('permis B');
+    if (grantedCaces) grantedSkills.push('CACES');
+    const skillNote = grantedSkills.length ? ` — compétences recopiées : ${grantedSkills.join(', ')}` : '';
     await client.query(
       'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
       [id, cand.rows[0].status,
-        `Fiche de recrutement liée au collaborateur #${employeeId} (${emp.rows[0].first_name || ''} ${emp.rows[0].last_name || ''})`.trim(),
+        `Fiche de recrutement liée au collaborateur #${employeeId} (${emp.rows[0].first_name || ''} ${emp.rows[0].last_name || ''})${skillNote}`.trim(),
         req.user.id]);
     await client.query('COMMIT');
 

@@ -294,7 +294,8 @@ async function initDatabase() {
         start_date DATE NOT NULL,
         end_date DATE,
         origin VARCHAR(30) NOT NULL DEFAULT 'embauche' CHECK (origin IN ('embauche', 'renouvellement')),
-        weekly_hours DOUBLE PRECISION NOT NULL DEFAULT 35 CHECK (weekly_hours IN (26, 35)),
+        -- v1-5 : plage raisonnable au lieu de IN (26,35) qui coerçait les temps réels 24/28/30
+        weekly_hours DOUBLE PRECISION NOT NULL DEFAULT 35 CHECK (weekly_hours > 0 AND weekly_hours <= 48),
         team_id INTEGER REFERENCES teams(id),
         position_id INTEGER REFERENCES positions(id),
         is_current BOOLEAN DEFAULT true,
@@ -583,6 +584,28 @@ async function initDatabase() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    // ── Vague 2 (item 62) — Canal manager → chauffeur ─────────────────────
+    // Consignes envoyées par le responsable logistique (web) au chauffeur en
+    // tournée (bannière mobile). vehicle_id = destinataire (« 1 URL = 1 véhicule »),
+    // tour_id optionnel (une consigne peut concerner une tournée précise ou non).
+    // read_at renseigné quand le chauffeur tape « J'ai compris » (accusé de lecture).
+    // CREATE simple + idempotent : users/vehicles/tours existent déjà plus haut,
+    // rien à ALTER → chemin « base neuve » sûr.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS driver_messages (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        message TEXT NOT NULL,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        read_at TIMESTAMP
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_driver_messages_vehicle ON driver_messages(vehicle_id, read_at);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_driver_messages_tour ON driver_messages(tour_id);');
+
     console.log('[INIT-DB] Module 5 (Collecte) ✓');
 
     // ══════════════════════════════════════════
@@ -2727,6 +2750,17 @@ async function initDatabase() {
     await client.query(`ALTER TABLE employee_contracts ADD CONSTRAINT employee_contracts_contract_type_check
       CHECK (contract_type IN ('CDI', 'CDD', 'CDDI', 'interim', 'stage', 'apprentissage'))`);
 
+    // ── v1-5 — Plage de temps de travail réaliste sur employee_contracts.
+    // Le CHECK d'origine weekly_hours IN (26, 35) coerçait les temps réels
+    // (24 / 28 / 30 h) à l'import : la quotité réelle était écrasée à 35. On le
+    // remplace par une plage 0 < h <= 48 (superset : les valeurs 26/35
+    // existantes restent valides). Idempotent (drop-then-add, comme ci-dessus).
+    // employee_contracts est créée bien plus haut dans ce même run → pas de
+    // risque undefined_table sur le chemin « base neuve ».
+    await client.query('ALTER TABLE employee_contracts DROP CONSTRAINT IF EXISTS employee_contracts_weekly_hours_check');
+    await client.query(`ALTER TABLE employee_contracts ADD CONSTRAINT employee_contracts_weekly_hours_check
+      CHECK (weekly_hours > 0 AND weekly_hours <= 48)`);
+
     // ── Item 40 — Recopie des compétences opérationnelles (permis B / CACES)
     // depuis la fiche candidat liée. Ces booléens conditionnent l'affectation
     // « chauffeur » / « cariste » du planning hebdo (planning-hebdo.js) mais
@@ -4178,6 +4212,7 @@ async function initDatabase() {
         longitude DOUBLE PRECISION DEFAULT 1.0993,
         ca_objectif_ttc NUMERIC(10,2),
         poids_objectif_kg NUMERIC(10,2),
+        kg_approvisionnes NUMERIC(10,2),
         notes TEXT,
         created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT NOW(),
@@ -4186,6 +4221,12 @@ async function initDatabase() {
       )
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_vaks_dates ON vaks(date_debut, date_fin)');
+    // Approvisionnement (kg de textile mis en vente pour la VAK) — SAISIE MANUELLE :
+    // il n'existe aucune source stock fiable rattachée à une session VAK de détail
+    // (le flux « VAK » du tri/étiquettes vise l'EXPORT vers exutoires, pas la vente
+    // au kilo au siège). Base du KPI « taux d'écoulement » = kg vendus / kg approvisionnés.
+    // ADD COLUMN IF NOT EXISTS : no-op sur base neuve (colonne déjà créée), migre les bases existantes.
+    await client.query('ALTER TABLE vaks ADD COLUMN IF NOT EXISTS kg_approvisionnes NUMERIC(10,2)');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS vak_import_batches (

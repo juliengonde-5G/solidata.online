@@ -63,7 +63,8 @@ const ExutoiresControleFacturation = lazy(() => import('./pages/ExutoiresControl
 const ExutoiresCalendrier = lazy(() => import('./pages/ExutoiresCalendrier'));
 const ExutoiresClients = lazy(() => import('./pages/ExutoiresClients'));
 const ExutoiresTarifs = lazy(() => import('./pages/ExutoiresTarifs'));
-const Billing = lazy(() => import('./pages/Billing'));
+// Facturation interne (Billing) retirée de l'UI — arbitrage A2 audit 2026-07
+// (le flux réel passe par Pennylane + contrôle facturation ; tables invoices conservées).
 const Pennylane = lazy(() => import('./pages/Pennylane'));
 const PennylaneConfig = lazy(() => import('./pages/PennylaneConfig'));
 const ActivityLog = lazy(() => import('./pages/ActivityLog'));
@@ -225,8 +226,7 @@ function App() {
               <Route path="/refashion" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE', 'QHSE']}><Refashion /></ProtectedRoute>} />
               <Route path="/reporting-metropole" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE']}><ReportingMetropole /></ProtectedRoute>} />
 
-              {/* Facturation */}
-              <Route path="/billing" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Billing /></ProtectedRoute>} />
+              {/* Facturation — la facturation interne /billing est retirée (arbitrage A2 audit 2026-07) */}
               <Route path="/pennylane" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><Pennylane /></ProtectedRoute>} />
               <Route path="/admin/pennylane-config" element={<ProtectedRoute roles={['ADMIN']}><PennylaneConfig /></ProtectedRoute>} />
 

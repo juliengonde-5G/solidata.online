@@ -465,10 +465,13 @@ function ActivitePanel({ data, loading, periode, onPeriodeChange }) {
             teal: 'text-teal-700', blue: 'text-blue-700', amber: 'text-amber-700', emerald: 'text-emerald-700',
           }[t.color];
           const Icon = t.icon;
+          // Valeurs journalières affichées en clair (séparateur de milliers) :
+          // l'unité est déjà portée par le libellé (kg), donc pas de conversion
+          // en tonnes ici — évite un double affichage « 1.5t kg ».
           let display = '-';
           if (!loading) {
             if (t.raw) display = t.value ?? '-';
-            else display = t.value != null ? formatTonnage(t.value) : '0';
+            else display = t.value != null ? Math.round(t.value).toLocaleString('fr-FR') : '0';
           }
           return (
             <div key={i} className="card-modern p-4">

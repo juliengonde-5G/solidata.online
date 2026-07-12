@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   BarChart3, TrendingUp, TrendingDown, Scale, Weight, Receipt, Target,
   ShoppingBag, Tag, CreditCard, Banknote, Cloud, CloudRain, Sun, CloudSnow, Zap, Wind,
+  Percent, Info,
 } from 'lucide-react';
 import {
   Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Line,
@@ -224,6 +225,29 @@ export default function VakPerformance() {
               <KpiCard title="Part CB" value={`${(kpis?.taux_cb_ca || 0).toFixed(0)}%`} icon={CreditCard} accent="slate"
                 footer={<span className="text-xs text-slate-500">{kpis?.nb_cb || 0} tickets</span>} />
               <KpiCard title="Sacs vendus" value={formatNumber(kpis?.nb_sacs)} icon={ShoppingBag} accent="slate" />
+              <KpiCard
+                title="Taux d'écoulement"
+                value={kpis?.taux_ecoulement != null ? `${Number(kpis.taux_ecoulement).toFixed(0)}%` : '—'}
+                icon={Percent}
+                accent="amber"
+                footer={kpis?.kg_approvisionnes ? (
+                  <span
+                    className="text-xs text-slate-500 inline-flex items-center gap-1"
+                    title="Taux d'écoulement = kg vendus (net des remboursements) ÷ kg approvisionnés. L'approvisionnement est saisi manuellement sur la session (onglet Sessions VAK) : aucune source stock n'est rattachée à une VAK de détail."
+                  >
+                    <Info className="w-3 h-3" />
+                    {formatNumber(kpis.poids_kg, 0)} / {formatNumber(kpis.kg_approvisionnes, 0)} kg
+                  </span>
+                ) : (
+                  <span
+                    className="text-xs text-slate-400 inline-flex items-center gap-1"
+                    title="Renseignez l'approvisionnement (kg mis en vente) sur la session VAK pour activer ce calcul."
+                  >
+                    <Info className="w-3 h-3" />
+                    Approvisionnement non renseigné
+                  </span>
+                )}
+              />
             </div>
 
             {/* Bloc 2 : activité horaire */}

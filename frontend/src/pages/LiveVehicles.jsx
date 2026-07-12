@@ -10,6 +10,7 @@ import {
   MapPin, Truck, Gauge, Clock, AlertTriangle,
   CheckCircle2, CircleDashed, XCircle, Activity,
   Route as RouteIcon, Users, ChevronDown, ChevronUp,
+  MessageSquare, Send,
 } from 'lucide-react';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -42,6 +43,11 @@ function fmtDuration(min) {
 function fmtTime(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 export default function CollectionsLive() {
@@ -458,6 +464,125 @@ function ExpandedDetail({ tour, color }) {
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* Canal manager → chauffeur (item 62) */}
+      <TourMessagePanel tour={tour} />
+    </div>
+  );
+}
+
+// ── Consignes manager → chauffeur (item 62) ────────────────────────────────
+// Envoi d'une consigne à un chauffeur en tournée (consigne, CAV ajouté, danger
+// signalé) + suivi de l'accusé de lecture (lu / non lu). ADMIN/MANAGER (la page
+// et l'API l'imposent). Le chauffeur la reçoit en bannière sur son mobile.
+function TourMessagePanel({ tour }) {
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(null);
+
+  const vehicleId = tour.vehicle_id;
+
+  const loadMessages = useCallback(async () => {
+    if (!vehicleId) return;
+    setLoading(true);
+    try {
+      const res = await api.get('/tours/messages', { params: { vehicle_id: vehicleId, tour_id: tour.id } });
+      setMessages(res.data.messages || []);
+      setError(null);
+    } catch (err) {
+      console.error('[CollectionsLive] messages:', err);
+      setError('Impossible de charger les consignes');
+    } finally {
+      setLoading(false);
+    }
+  }, [vehicleId, tour.id]);
+
+  useEffect(() => { loadMessages(); }, [loadMessages]);
+
+  const send = async () => {
+    const msg = text.trim();
+    if (!msg || !vehicleId) return;
+    setSending(true);
+    setError(null);
+    try {
+      await api.post('/tours/messages', { vehicle_id: vehicleId, tour_id: tour.id, message: msg });
+      setText('');
+      await loadMessages();
+    } catch (err) {
+      setError(err.response?.data?.error || "Échec de l'envoi de la consigne");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!vehicleId) {
+    return (
+      <div className="mt-4 text-xs text-slate-400">
+        Aucun véhicule associé à cette tournée — impossible d'envoyer une consigne.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4">
+      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center gap-2">
+        <MessageSquare className="w-3.5 h-3.5" />
+        Consignes au chauffeur — {tour.driver_name || '—'}
+      </h3>
+      <div className="rounded-lg bg-white border border-slate-200 p-3 space-y-3">
+        <div className="flex gap-2">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={2}
+            maxLength={1000}
+            placeholder="Consigne, CAV ajouté, danger signalé…"
+            className="flex-1 text-sm border border-slate-300 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-teal-500"
+          />
+          <button
+            type="button"
+            onClick={send}
+            disabled={sending || !text.trim()}
+            className="self-stretch px-3 rounded-lg bg-teal-600 text-white text-sm font-semibold hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1"
+          >
+            <Send className="w-3.5 h-3.5" />
+            {sending ? '…' : 'Envoyer une consigne'}
+          </button>
+        </div>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        {loading ? (
+          <p className="text-xs text-slate-400">Chargement…</p>
+        ) : messages.length === 0 ? (
+          <p className="text-xs text-slate-400">Aucune consigne envoyée à ce chauffeur.</p>
+        ) : (
+          <ul className="space-y-1.5 max-h-48 overflow-y-auto">
+            {messages.map((m) => (
+              <li key={m.id} className="flex items-start justify-between gap-2 text-xs border-b border-slate-100 pb-1.5 last:border-0">
+                <div className="min-w-0">
+                  <p className="text-slate-700 break-words">{m.message}</p>
+                  <p className="text-[10px] text-slate-400">
+                    {fmtDateTime(m.created_at)}
+                    {(m.sender_first_name || m.sender_last_name)
+                      ? ` · ${[m.sender_first_name, m.sender_last_name].filter(Boolean).join(' ')}`
+                      : ''}
+                  </p>
+                </div>
+                {m.read_at ? (
+                  <span className="flex-shrink-0 inline-flex items-center gap-1 text-emerald-600 font-medium" title={`Lu à ${fmtTime(m.read_at)}`}>
+                    <CheckCircle2 className="w-3 h-3" /> Lu
+                  </span>
+                ) : (
+                  <span className="flex-shrink-0 inline-flex items-center gap-1 text-amber-600 font-medium">
+                    <CircleDashed className="w-3 h-3" /> Non lu
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
