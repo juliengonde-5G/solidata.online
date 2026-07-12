@@ -1,8 +1,68 @@
 import { useEffect, useState, useCallback } from 'react';
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, Info, Crown, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, Info, Crown, RefreshCw, Bell, ChevronRight, ShieldCheck } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, ErrorState } from '../components';
 import api from '../services/api';
+
+// Item 60b — icônes/teintes par catégorie d'alerte consolidée
+const ALERT_CATEGORY = {
+  incidents: { label: 'Incidents', tone: 'rose' },
+  maintenance: { label: 'Maintenance', tone: 'amber' },
+  insertion: { label: 'Insertion', tone: 'amber' },
+  cav_pleins: { label: 'CAV pleins', tone: 'amber' },
+  contrats: { label: 'Contrats CDDI', tone: 'sky' },
+  stock: { label: 'Stock', tone: 'amber' },
+};
+const ALERT_TONE = {
+  rose: 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100',
+  amber: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100',
+  sky: 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100',
+};
+
+function AlertesConsolidees({ data, loading, onNavigate }) {
+  const alertes = data?.alertes || [];
+  return (
+    <section aria-label="Alertes consolidées" className="mb-6 rounded-xl border border-slate-200 bg-white p-5">
+      <header className="flex items-center gap-2 mb-3">
+        <Bell className="w-5 h-5 text-slate-500" aria-hidden="true" />
+        <h2 className="text-sm font-semibold text-slate-700">Alertes consolidées</h2>
+        {alertes.length > 0 && (
+          <span className="ml-1 text-xs font-bold text-white bg-rose-500 rounded-full px-2 py-0.5">{alertes.length}</span>
+        )}
+      </header>
+      {loading ? (
+        <p className="text-sm text-slate-400 py-2">Chargement des alertes…</p>
+      ) : alertes.length === 0 ? (
+        <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+          <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+          Aucune alerte — tout est sous contrôle.
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {alertes.map((a, i) => {
+            const cat = ALERT_CATEGORY[a.categorie] || { label: a.categorie, tone: 'amber' };
+            const toneClass = ALERT_TONE[cat.tone] || ALERT_TONE.amber;
+            return (
+              <li key={i}>
+                <button
+                  type="button"
+                  onClick={() => a.link && onNavigate(a.link)}
+                  className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${toneClass}`}
+                  title={a.details ? a.details.join(' · ') : `Voir ${cat.label}`}
+                >
+                  <span className="text-xs font-bold uppercase tracking-wide opacity-70 w-24 flex-shrink-0">{cat.label}</span>
+                  <span className="text-sm font-medium flex-1 min-w-0">{a.message}</span>
+                  <ChevronRight className="w-4 h-4 flex-shrink-0 opacity-60" aria-hidden="true" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 const SEVERITE_COLORS = {
   ok: 'bg-emerald-50 border-emerald-200 text-emerald-700',
@@ -78,10 +138,13 @@ function KpiCard({ kpi }) {
 }
 
 export default function DashboardExecutif() {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [alertes, setAlertes] = useState(null);
+  const [alertesLoading, setAlertesLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -96,11 +159,24 @@ export default function DashboardExecutif() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadAlertes = useCallback(async () => {
+    setAlertesLoading(true);
+    try {
+      const res = await api.get('/dashboard/alertes');
+      setAlertes(res.data);
+    } catch {
+      setAlertes(null);
+    } finally {
+      setAlertesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); loadAlertes(); }, [load, loadAlertes]);
 
   const handleRefresh = () => {
     setRefreshing(true);
     load();
+    loadAlertes();
   };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement du tableau de bord exécutif..." /></Layout>;
@@ -131,6 +207,9 @@ export default function DashboardExecutif() {
             {' · '}cache 5 min
           </p>
         )}
+
+        {/* Alertes consolidées — véhicules, jalons, stock, incidents (item 60b) */}
+        <AlertesConsolidees data={alertes} loading={alertesLoading} onNavigate={navigate} />
 
         {error ? (
           <ErrorState

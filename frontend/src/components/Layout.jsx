@@ -49,7 +49,7 @@ const NAV_TREE = [
             ],
           },
           { label: 'Collecte en direct', path: '/collections-live', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Incidents', path: '/incidents', icon: AlertTriangle, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Incidents', path: '/incidents', icon: AlertTriangle, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
           { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['ADMIN', 'MANAGER'] },
           {
             label: 'Réglages',
@@ -105,7 +105,9 @@ const NAV_TREE = [
     children: [
       { label: 'Feuille de production', path: '/production', icon: Factory, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Chaîne de tri', path: '/chaine-tri', icon: ArrowUpDown, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Saisie exécution', path: '/tri/execution', icon: ScanLine, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Étiquettes', path: '/tri/etiquettes', icon: Tag, roles: ['ADMIN', 'MANAGER', 'COLLABORATEUR'] },
+      { label: 'Référentiel tri', path: '/admin/tri', icon: ListChecks, roles: ['ADMIN'] },
     ],
   },
   {
@@ -116,6 +118,7 @@ const NAV_TREE = [
       { label: 'Tableau de bord', path: '/boutiques', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
       { label: 'Ventes', path: '/boutiques/ventes', icon: ShoppingBag, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
       { label: 'Commandes', path: '/boutiques/commandes', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+      { label: 'Planning', path: '/boutiques/planning', icon: Calendar, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
       {
         label: 'Réglages',
         icon: Settings,
@@ -189,20 +192,47 @@ const NAV_TREE = [
     ],
   },
   {
+    id: 'qhse',
+    label: 'QHSE',
+    icon: ShieldCheck,
+    children: [
+      { label: "Accidents & presqu'accidents", path: '/qhse/accidents', icon: AlertTriangle, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
+      { label: 'Habilitations', path: '/qhse/habilitations', icon: IdCard, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
+      { label: 'Dotation EPI', path: '/qhse/epi', icon: ShieldCheck, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
+    ],
+  },
+  {
+    // Espace dédié à l'auditeur externe (AUTORITE) — vague 2, item 52/53.
+    // Regroupe les pages de contrôle en lecture seule pour éviter que
+    // l'auditeur n'atterrisse sur un dashboard opérationnel vide. Les leaves
+    // sont AUTORITE-only : ADMIN/MANAGER retrouvent ces pages dans Analyse /
+    // Administration (pas de doublon dans leur menu).
+    id: 'audit',
+    label: 'Audit & conformité',
+    icon: ShieldCheck,
+    children: [
+      { label: 'Reporting Métropole', path: '/reporting-metropole', icon: Building2, roles: ['AUTORITE'] },
+      { label: 'Reporting Collecte', path: '/reporting-collecte', icon: BarChart3, roles: ['AUTORITE'] },
+      { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['AUTORITE'] },
+      { label: 'Refashion (DPAV)', path: '/refashion', icon: RefreshCw, roles: ['AUTORITE'] },
+      { label: "Exports d'audit DPAV", path: '/admin/refashion-exports', icon: Download, roles: ['AUTORITE'] },
+    ],
+  },
+  {
     id: 'analyse',
     label: 'Analyse',
     icon: BarChart3,
     children: [
       { label: 'Dashboard exécutif', path: '/dashboard-executif', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Performance', path: '/performance', icon: Activity, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'Collecte', path: '/reporting-collecte', icon: BarChart3, roles: ['ADMIN', 'MANAGER', 'AUTORITE'] },
+      { label: 'Collecte', path: '/reporting-collecte', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
       { label: 'RH', path: '/reporting-rh', icon: BarChart2, roles: ['ADMIN', 'RH'] },
       {
         label: 'Reporting',
         icon: PieChart,
         children: [
           { label: 'Refashion', path: '/refashion', icon: RefreshCw, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Métropole Rouen', path: '/reporting-metropole', icon: Building2, roles: ['ADMIN', 'MANAGER', 'AUTORITE'] },
+          { label: 'Métropole Rouen', path: '/reporting-metropole', icon: Building2, roles: ['ADMIN', 'MANAGER'] },
           { label: 'Production', path: '/reporting-production', icon: Factory, roles: ['ADMIN', 'MANAGER'] },
         ],
       },
@@ -210,24 +240,24 @@ const NAV_TREE = [
         label: 'Contrôle de gestion',
         icon: ListChecks,
         children: [
-          { label: 'Opérations', path: '/finance/operations', icon: Factory, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Rentabilité', path: '/finance/rentabilite', icon: PieChart, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Opérations', path: '/finance/operations', icon: Factory, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
+          { label: 'Rentabilité', path: '/finance/rentabilite', icon: PieChart, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
         ],
       },
       {
         label: 'Finances',
         icon: CircleDollarSign,
         children: [
-          { label: 'Synthèse', path: '/finance', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Trésorerie', path: '/finance/tresorerie', icon: CircleDollarSign, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'P&L Centre', path: '/finance/pl', icon: PieChart, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Bilan CR', path: '/finance/bilan', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Synthèse', path: '/finance', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
+          { label: 'Trésorerie', path: '/finance/tresorerie', icon: CircleDollarSign, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
+          { label: 'P&L Centre', path: '/finance/pl', icon: PieChart, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
+          { label: 'Bilan CR', path: '/finance/bilan', icon: BarChart3, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
           {
             label: 'Réglages',
             icon: Settings,
             children: [
-              { label: 'Contrôles', path: '/finance/controles', icon: Star, roles: ['ADMIN', 'MANAGER'] },
-              { label: 'Pennylane', path: '/pennylane', icon: CircleDollarSign, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Contrôles', path: '/finance/controles', icon: Star, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
+              { label: 'Pennylane', path: '/pennylane', icon: CircleDollarSign, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
               { label: 'Import', path: '/finance/import', icon: Upload, roles: ['ADMIN', 'MANAGER'] },
             ],
           },
@@ -244,8 +274,8 @@ const NAV_TREE = [
         label: 'Collecte',
         icon: Truck,
         children: [
-          { label: 'Véhicules', path: '/vehicles', icon: Car, roles: ['ADMIN'] },
-          { label: 'Maintenance', path: '/vehicle-maintenance', icon: Wrench, roles: ['ADMIN'] },
+          { label: 'Véhicules', path: '/vehicles', icon: Car, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
+          { label: 'Maintenance', path: '/vehicle-maintenance', icon: Wrench, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
           { label: 'Moteur prédictif', path: '/admin-predictive', icon: Brain, roles: ['ADMIN'] },
           { label: 'Gestion des CAV', path: '/admin-cav', icon: Map, roles: ['ADMIN', 'MANAGER'] },
           { label: 'Capteurs CAV', path: '/admin-sensors', icon: Radio, roles: ['ADMIN', 'MANAGER'] },
@@ -263,14 +293,14 @@ const NAV_TREE = [
       { label: "Seuils d'alerte", path: '/admin-alert-thresholds', icon: Target, roles: ['ADMIN'] },
       { label: 'Catalogue & référentiels', path: '/admin/catalogue', icon: Tag, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Configuration Refashion', path: '/admin/refashion-config', icon: ShieldCheck, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'Exports DPAV Refashion', path: '/admin/refashion-exports', icon: Download, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Exports DPAV Refashion', path: '/admin/refashion-exports', icon: Download, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
       {
         label: 'Utilisateurs & RGPD',
         icon: Users,
         children: [
           { label: 'Utilisateurs', path: '/users', icon: Users, roles: ['ADMIN'] },
           { label: 'Habilitations modules', path: '/admin/permissions', icon: ShieldCheck, roles: ['ADMIN'] },
-          { label: 'Registre RGPD', path: '/rgpd', icon: Lock, roles: ['ADMIN'] },
+          { label: 'Registre RGPD', path: '/rgpd', icon: Lock, roles: ['ADMIN', 'DPO'] },
         ],
       },
       {

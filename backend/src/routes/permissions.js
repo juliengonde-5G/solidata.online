@@ -15,12 +15,14 @@ const pool = require('../config/database');
 const { authenticate, authorize, refreshCustomRoles, resolveBaseRole } = require('../middleware/auth');
 
 // Rôles intégrés (labels affichés). ADMIN n'est jamais restreignable/duplicable.
+// DPO / FINANCE / QHSE : rôles intégrés « parties prenantes » ajoutés en vague 2.
 const BUILTIN_ROLES = {
   ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines',
   COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité', RESP_BTQ: 'Responsable Boutique',
+  DPO: 'Délégué à la protection des données (DPO)', FINANCE: 'Finance (consultation)', QHSE: 'QHSE',
 };
 // Rôles pouvant servir de base à un rôle personnalisé (jamais ADMIN → pas d'escalade).
-const BASE_ROLES = ['MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ'];
+const BASE_ROLES = ['MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE'];
 
 // Génère une clé de rôle sûre et sans collision avec les rôles intégrés.
 function slugRoleKey(label) {

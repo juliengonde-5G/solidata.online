@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
+import { useAuth } from '../contexts/AuthContext';
 import { LoadingSpinner, DataTable, StatusBadge, PageHeader } from '../components';
-import { MapPin, Coins, Recycle, Wand2, Save, Plus, History, AlertTriangle } from 'lucide-react';
+import { MapPin, Coins, Recycle, Wand2, Save, Plus, History, AlertTriangle, Lock, ShieldCheck, Download, Paperclip } from 'lucide-react';
 import api from '../services/api';
 
 // Champs de tonnage de la déclaration DPAV (t)
@@ -58,6 +59,7 @@ export default function Refashion() {
   const [dpavForm, setDpavForm] = useState(emptyDpavForm());
   const [showDpavForm, setShowDpavForm] = useState(false);
   const [savingDpav, setSavingDpav] = useState(false);
+  const [uploadingJustif, setUploadingJustif] = useState(false);
 
   const [communeForm, setCommuneForm] = useState({ commune: '', code_postal: '', poids_kg: '' });
   const [showCommuneForm, setShowCommuneForm] = useState(false);
@@ -66,6 +68,31 @@ export default function Refashion() {
   const [showSubForm, setShowSubForm] = useState(false);
 
   const [year, q] = [quarter.split('-Q')[0], quarter.split('-Q')[1]];
+
+  // Mode LECTURE SEULE pour l'auditeur (AUTORITE) et QHSE : toute la saisie
+  // (DPAV, communes, subventions, justificatif) est masquée ; la consultation
+  // (tableaux, badges d'écart, journal d'audit, attestation, exports) reste.
+  const { user } = useAuth();
+  const readOnly = !['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
+  const isAdmin = (user?.base_role || user?.role) === 'ADMIN';
+
+  // Télécharge la pièce justificative d'un taux via l'instance axios (porte le
+  // Bearer) — même mécanisme que les exports CSV d'audit.
+  const downloadJustificatif = async (tauxId, filename) => {
+    setError(null);
+    try {
+      const res = await api.get(`/refashion/taux/${tauxId}/justificatif`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename || `justificatif-taux-${tauxId}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = 'Téléchargement de la pièce justificative impossible.';
+      try { const txt = await e.response?.data?.text?.(); if (txt) msg = JSON.parse(txt).error || msg; } catch { /* garde le message générique */ }
+      setError(msg);
+    }
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -89,6 +116,22 @@ export default function Refashion() {
   }, [year, q]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Joindre / remplacer la pièce justificative du taux conventionné (ADMIN).
+  const uploadJustificatif = async (tauxId, file) => {
+    if (!tauxId || !file) return;
+    setUploadingJustif(true); setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      await api.post(`/refashion/taux/${tauxId}/justificatif`, fd);
+      await loadData();
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || "Échec de l'envoi de la pièce justificative.");
+    } finally {
+      setUploadingJustif(false);
+    }
+  };
 
   const currentYear = new Date().getFullYear();
   const quarters = [];
@@ -279,10 +322,41 @@ export default function Refashion() {
                     <p className="text-xs text-slate-400 mt-1">Aucune donnée d'activité pour ce trimestre (collecte / production non saisies).</p>
                   )}
                 </div>
-                <button onClick={openDpavForm}
-                  className="px-4 py-2 rounded-lg bg-primary text-white font-semibold text-sm flex items-center gap-2">
-                  <Save className="w-4 h-4" /> {dpav.raw && dpav.raw.id ? 'Modifier la déclaration' : 'Saisir la déclaration'}
-                </button>
+                {!readOnly && (
+                  <button onClick={openDpavForm}
+                    className="px-4 py-2 rounded-lg bg-primary text-white font-semibold text-sm flex items-center gap-2">
+                    <Save className="w-4 h-4" /> {dpav.raw && dpav.raw.id ? 'Modifier la déclaration' : 'Saisir la déclaration'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Attestation d'intégrité (item 52d) — état du verrouillage trimestriel
+                du stock original : preuve que les chiffres déclarés ne bougent plus. */}
+            <div className={`rounded-xl p-4 border flex items-start gap-3 ${
+              dpav.stock_lock?.locked ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+              {dpav.stock_lock?.locked
+                ? <Lock className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+                : <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />}
+              <div className="text-sm">
+                {dpav.stock_lock?.locked ? (
+                  <>
+                    <p className="font-semibold text-emerald-800">Stock original verrouillé pour {quarter}</p>
+                    <p className="text-emerald-700 text-xs mt-0.5">
+                      Verrouillé le {new Date(dpav.stock_lock.locked_at).toLocaleDateString('fr-FR')}
+                      {dpav.stock_lock.locked_by_name ? ` par ${dpav.stock_lock.locked_by_name}` : ''} — les mouvements
+                      de stock de ce trimestre ne peuvent plus être modifiés.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-semibold text-amber-800">Stock original NON verrouillé pour {quarter}</p>
+                    <p className="text-amber-700 text-xs mt-0.5">
+                      Les mouvements de stock de ce trimestre peuvent encore être modifiés. Le verrouillage
+                      trimestriel (module Stock Original) garantit l'intégrité des chiffres déclarés.
+                    </p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -320,6 +394,45 @@ export default function Refashion() {
                 </div>
               </div>
             </div>
+
+            {/* Taux conventionné appliqué + pièce justificative (item 52e) — la
+                pièce (convention/avenant) est consultable par l'auditeur (AUTORITE) ;
+                l'ADMIN peut la joindre / la remplacer. */}
+            {dpav.taux_ref && (
+              <div className="card-modern p-4">
+                <p className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
+                  <ShieldCheck className="w-4 h-4" /> Taux conventionné appliqué
+                </p>
+                <div className="flex items-center justify-between flex-wrap gap-3 text-sm">
+                  <div className="text-slate-600">
+                    <span className="font-bold text-primary">{dpav.taux_ref.taux_euro_par_tonne} €/t</span>
+                    <span className="text-slate-400 mx-2">·</span>
+                    en vigueur depuis {new Date(dpav.taux_ref.valid_from).toLocaleDateString('fr-FR')}
+                    {dpav.taux_ref.valid_to ? ` jusqu'au ${new Date(dpav.taux_ref.valid_to).toLocaleDateString('fr-FR')}` : ''}
+                    {dpav.taux_ref.source_document && <span className="block text-xs text-slate-400 mt-0.5">Référence : {dpav.taux_ref.source_document}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {dpav.taux_ref.has_justificatif ? (
+                      <button onClick={() => downloadJustificatif(dpav.taux_ref.id, dpav.taux_ref.justificatif_original_name)}
+                        className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold flex items-center gap-2 hover:bg-emerald-700">
+                        <Download className="w-4 h-4" /> Pièce justificative
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">Aucune pièce justificative jointe</span>
+                    )}
+                    {isAdmin && (
+                      <label className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold flex items-center gap-2 cursor-pointer">
+                        <Paperclip className="w-4 h-4" />
+                        {uploadingJustif ? 'Envoi…' : dpav.taux_ref.has_justificatif ? 'Remplacer' : 'Joindre'}
+                        <input type="file" className="hidden" disabled={uploadingJustif}
+                          accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadJustificatif(dpav.taux_ref.id, f); e.target.value = ''; }} />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Journal des modifications (audit-trail / soumission tracée) */}
             {Array.isArray(dpav.history) && dpav.history.length > 0 && (
@@ -400,7 +513,7 @@ export default function Refashion() {
         {view === 'communes' && (
           <div className="space-y-4">
             <div className="flex justify-end">
-              {!showCommuneForm && (
+              {!readOnly && !showCommuneForm && (
                 <button onClick={() => setShowCommuneForm(true)}
                   className="px-4 py-2 rounded-lg bg-primary text-white font-semibold text-sm flex items-center gap-2">
                   <Plus className="w-4 h-4" /> Ajouter une commune desservie
@@ -457,7 +570,7 @@ export default function Refashion() {
         {view === 'subventions' && (
           <div className="space-y-4">
             <div className="flex justify-end">
-              {!showSubForm && (
+              {!readOnly && !showSubForm && (
                 <button onClick={openSubForm}
                   className="px-4 py-2 rounded-lg bg-primary text-white font-semibold text-sm flex items-center gap-2">
                   <Plus className="w-4 h-4" /> Saisir une subvention ({quarter})

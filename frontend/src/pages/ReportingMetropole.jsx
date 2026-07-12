@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Building2, Map as MapIcon, BarChart3, Bot, Radio, Filter } from 'lucide-react';
+import { Building2, Map as MapIcon, BarChart3, Bot, Radio, Filter, Download, Printer, Clock, Users } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
@@ -24,6 +24,8 @@ export default function ReportingMetropole() {
   const [sortieDyn, setSortieDyn] = useState(null);
   const [serviceCav, setServiceCav] = useState([]);
   const [captation, setCaptation] = useState([]);
+  const [delaiIncidents, setDelaiIncidents] = useState(null);
+  const [kpiInsertion, setKpiInsertion] = useState(null);
   const [errors, setErrors] = useState({});
 
   const loadDashboard = useCallback(async () => {
@@ -48,7 +50,7 @@ export default function ReportingMetropole() {
 
     // Sections secondaires (en parallèle) : on REMONTE l'erreur au lieu de
     // l'avaler (résidu 6), sans casser l'affichage des sections saines.
-    const [sd, sc, capt] = await Promise.all([
+    const [sd, sc, capt, delai, kpiIns] = await Promise.all([
       api.get(`/metropole/sortie-dynamique?annee=${year}`)
         .then((r) => r.data)
         .catch((err) => { errs.sortie = msg(err, 'Indicateur de sortie dynamique indisponible.'); return null; }),
@@ -58,16 +60,85 @@ export default function ReportingMetropole() {
       api.get(`/metropole/captation-par-commune?annee=${year}`)
         .then((r) => r.data)
         .catch((err) => { errs.captation = msg(err, 'Captation par commune indisponible.'); return []; }),
+      api.get('/metropole/delai-intervention-incidents?months=12')
+        .then((r) => r.data)
+        .catch((err) => { errs.delai = msg(err, "Délai d'intervention des incidents indisponible."); return null; }),
+      api.get(`/metropole/kpi-insertion?annee=${year}`)
+        .then((r) => r.data)
+        .catch((err) => { errs.kpiInsertion = msg(err, 'Indicateurs insertion / ETP indisponibles.'); return null; }),
     ]);
 
     setSortieDyn(sd);
     setServiceCav(sc || []);
     setCaptation(capt || []);
+    setDelaiIncidents(delai);
+    setKpiInsertion(kpiIns);
     setErrors(errs);
     setLoading(false);
   }, [year, month]);
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
+
+  // Export CSV de la captation par commune (donnée clé de la convention) —
+  // génération côté client, BOM UTF-8 pour ouverture directe dans Excel FR.
+  const exportCaptationCsv = () => {
+    const esc = (v) => { if (v == null) return ''; const s = String(v); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const header = ['Commune', 'Code INSEE', 'Population', 'Tournées', 'Poids (kg)', 'kg/hab/an'];
+    const lines = captation.map((c) => [c.commune, c.code_insee || '', c.population || '', c.nb_tournees, c.poids_kg, c.kg_par_hab != null ? c.kg_par_hab : ''].map(esc).join(';'));
+    const csv = '﻿' + [header.join(';'), ...lines].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `captation-par-commune-${year}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  };
+
+  // Revue de convention (PDF) — fenêtre d'impression A4 (même mécanisme que les
+  // autres exports du projet : PCM, parcours d'insertion). Synthèse agrégée non
+  // nominative pour le dossier de l'auditeur Métropole.
+  const printReview = () => {
+    const win = window.open('', '_blank', 'width=900,height=1000');
+    if (!win) return;
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+    const nf = (n, dec = 1) => (n == null || isNaN(Number(n)) ? '—' : Number(n).toLocaleString('fr-FR', { maximumFractionDigits: dec }));
+    const d0 = dashboard || {};
+    const captRows = captation.map((c) => `<tr><td>${esc(c.commune)}</td><td>${esc(c.code_insee || '—')}</td><td class="r">${c.population ? nf(c.population, 0) : '—'}</td><td class="r">${nf((Number(c.poids_kg) || 0) / 1000, 2)} t</td><td class="r">${c.kg_par_hab != null ? nf(c.kg_par_hab, 2) : '—'}</td></tr>`).join('');
+    const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Revue de convention — Métropole ${year}</title>
+      <style>
+        @page { size: A4; margin: 16mm; }
+        body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #1e293b; font-size: 12px; }
+        h1 { background: #0D9488; color: #fff; padding: 12px 16px; border-radius: 8px; font-size: 18px; margin: 0 0 6px; }
+        .sub { color: #64748b; margin: 0 0 16px; }
+        h2 { font-size: 13px; color: #0f766e; border-bottom: 2px solid #99f6e4; padding-bottom: 3px; margin: 18px 0 8px; }
+        .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .kpi { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; }
+        .kpi .l { color: #64748b; font-size: 10px; text-transform: uppercase; }
+        .kpi .v { font-size: 18px; font-weight: 800; }
+        table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+        th, td { border: 1px solid #e2e8f0; padding: 4px 6px; text-align: left; }
+        th { background: #f1f5f9; font-size: 10px; text-transform: uppercase; color: #475569; }
+        td.r, th.r { text-align: right; }
+        .foot { margin-top: 20px; color: #94a3b8; font-size: 10px; }
+      </style></head><body>
+      <h1>SOLIDATA — Revue de convention Métropole de Rouen</h1>
+      <p class="sub">Année ${year} · édité le ${new Date().toLocaleDateString('fr-FR')}</p>
+      <div class="kpis">
+        <div class="kpi"><div class="l">Volume collecté</div><div class="v">${nf(d0.collecte?.total_tonnes, 1)} t</div></div>
+        <div class="kpi"><div class="l">CO2 évité (mix ${d0.emissions_evitees?.mix_source === 'observe' ? 'mesuré' : 'forfaitaire'})</div><div class="v">${nf(d0.emissions_evitees?.co2_total_tonnes, 1)} t</div></div>
+        <div class="kpi"><div class="l">Taux captation</div><div class="v">${d0.taux_captation ? nf(d0.taux_captation.kg_par_hab_an, 2) + ' kg/hab' : '—'}</div></div>
+        <div class="kpi"><div class="l">Sortie dynamique</div><div class="v">${sortieDyn?.taux_dynamique_pct != null ? sortieDyn.taux_dynamique_pct + ' %' : '—'}</div></div>
+        <div class="kpi"><div class="l">ETP réalisés</div><div class="v">${kpiInsertion?.total_etp != null ? nf(kpiInsertion.total_etp, 2) : '—'}</div></div>
+        <div class="kpi"><div class="l">Délai interv. incidents</div><div class="v">${delaiIncidents?.global?.delai_moyen_jours != null ? nf(delaiIncidents.global.delai_moyen_jours, 1) + ' j' : '—'}</div></div>
+      </div>
+      <h2>Captation par commune (kg/habitant/an)</h2>
+      <table><thead><tr><th>Commune</th><th>INSEE</th><th class="r">Population</th><th class="r">Tonnage</th><th class="r">kg/hab/an</th></tr></thead>
+      <tbody>${captRows || '<tr><td colspan="5">Aucune donnée</td></tr>'}</tbody></table>
+      <p class="foot">Document généré par SOLIDATA ERP — Solidarité Textiles. Indicateurs agrégés non nominatifs.</p>
+      </body></html>`;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { try { win.print(); } catch (_) { /* impression annulée */ } }, 400);
+  };
 
   const openCavDetail = async (cav) => {
     setSelectedCav(cav);
@@ -147,6 +218,16 @@ export default function ReportingMetropole() {
                 <option value="">Toutes ({communes.length})</option>
                 {communes.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
+              <button onClick={exportCaptationCsv} disabled={!captation.length}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold disabled:opacity-40"
+                title="Exporter la captation par commune (CSV)">
+                <Download className="w-4 h-4" /> CSV
+              </button>
+              <button onClick={printReview} disabled={!dashboard}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-40"
+                title="Revue de convention (PDF imprimable)">
+                <Printer className="w-4 h-4" /> Revue (PDF)
+              </button>
             </div>
           }
         />
@@ -166,7 +247,7 @@ export default function ReportingMetropole() {
             {/* KPI Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               <KPI label="Volume collecté" value={`${(d.collecte.total_tonnes).toFixed(1)} t`} sub={`${d.collecte.tours_completees} tournées`} color="green" />
-              <KPI label="CO2 évité" value={`${d.emissions_evitees.co2_total_tonnes} t`} sub={`Réemploi: ${d.emissions_evitees.detail.reemploi_tonnes}t / Recyclage: ${d.emissions_evitees.detail.recyclage_tonnes}t`} color="blue" />
+              <KPI label="CO2 évité" value={`${d.emissions_evitees.co2_total_tonnes} t`} sub={`Réemploi ${d.emissions_evitees.detail.reemploi_tonnes}t · mix ${d.emissions_evitees.mix_source === 'observe' ? 'mesuré' : 'forfaitaire'}`} color="blue" />
               <KPI label="Effectifs" value={d.effectifs.total} sub={`CDI/CDD: ${d.effectifs.cdi_cdd} | Intérim: ${d.effectifs.interimaires}`} color="purple" />
               <KPI label="CAV actifs" value={d.cav.actifs} sub={`dont ${d.cav.indisponibles} indisponible(s)`} color="amber" />
               <KPI label="CAV total" value={d.cav.total} sub={`${d.effectifs.formation} en formation`} color="gray" />
@@ -227,6 +308,47 @@ export default function ReportingMetropole() {
                   <div className="text-xs text-slate-400 mt-2">
                     {captation.length} commune(s) · non rattaché {(captTotals.nonRattache / 1000).toFixed(1)}t ({captTotals.nonRattachePct}%)
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* Contrepartie sociale (ETP, absentéisme, formation, insertion) +
+                délai d'intervention incidents — vague 2, items 53b/53c. Agrégats. */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {errors.delai ? (
+                <SectionErrorCard title="Délai d'intervention incidents" msg={errors.delai} />
+              ) : delaiIncidents?.global && (
+                <div className="bg-white rounded-2xl shadow p-5 border border-rose-100">
+                  <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Délai moyen d'intervention</div>
+                  <div className="text-4xl font-extrabold text-rose-600">
+                    {delaiIncidents.global.delai_moyen_jours != null ? `${delaiIncidents.global.delai_moyen_jours} j` : '—'}
+                  </div>
+                  <div className="text-sm text-slate-500 mt-2">
+                    {delaiIncidents.global.resolus}/{delaiIncidents.global.total} incidents résolus · {delaiIncidents.global.ouverts} en cours
+                  </div>
+                </div>
+              )}
+              {errors.kpiInsertion ? (
+                <SectionErrorCard title="Indicateurs insertion / ETP" msg={errors.kpiInsertion} />
+              ) : kpiInsertion && (
+                <div className="bg-white rounded-2xl shadow p-5 border border-indigo-100">
+                  <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 flex items-center gap-1"><Users className="w-3.5 h-3.5" /> ETP réalisés {kpiInsertion.annee}</div>
+                  <div className="text-4xl font-extrabold text-indigo-600">{kpiInsertion.total_etp != null ? kpiInsertion.total_etp : '—'}</div>
+                  <div className="text-sm text-slate-500 mt-2">{kpiInsertion.total_salaries_actifs ?? '—'} salariés actifs · base {kpiInsertion.etp_reference_heures} h/an</div>
+                </div>
+              )}
+              {kpiInsertion && !errors.kpiInsertion && (
+                <div className="bg-white rounded-2xl shadow p-5 border border-amber-100">
+                  <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Absentéisme global {kpiInsertion.annee}</div>
+                  <div className="text-4xl font-extrabold text-amber-600">{kpiInsertion.absenteisme_taux_pct != null ? `${kpiInsertion.absenteisme_taux_pct}%` : '—'}</div>
+                  <div className="text-sm text-slate-500 mt-2">Formation : {kpiInsertion.formation_total_heures != null ? `${Math.round(kpiInsertion.formation_total_heures)} h` : '—'}</div>
+                </div>
+              )}
+              {kpiInsertion?.insertion && !errors.kpiInsertion && (
+                <div className="bg-white rounded-2xl shadow p-5 border border-emerald-100">
+                  <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">En parcours d'insertion</div>
+                  <div className="text-4xl font-extrabold text-emerald-600">{kpiInsertion.insertion.en_parcours ?? '—'}</div>
+                  <div className="text-sm text-slate-500 mt-2">sur {kpiInsertion.insertion.actifs ?? '—'} salariés actifs</div>
                 </div>
               )}
             </div>

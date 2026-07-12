@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, Cloud, CloudRain, Sun, CloudSnow, Zap, TrendingUp, TrendingDown, ShoppingBag, Target, Receipt, Tag, Percent } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { LayoutDashboard, Cloud, CloudRain, Sun, CloudSnow, Zap, TrendingUp, TrendingDown, ShoppingBag, Target, Receipt, Tag, Percent, Store, Users, UserPlus, X } from 'lucide-react';
 import { Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ComposedChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
 import Layout from '../components/Layout';
 import { LoadingSpinner, KpiCard, PageHeader, DateRangePicker } from '../components';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 
 function formatEuro(v, decimals = 0) {
@@ -42,10 +43,21 @@ function weatherIcon(code) {
 }
 
 export default function BoutiquesDashboard() {
+  const { user } = useAuth();
+  const roleEff = user?.base_role || user?.role;
+  const isFullAccess = roleEff === 'ADMIN' || roleEff === 'MANAGER';
+  const isAdmin = roleEff === 'ADMIN';
+
   const [boutiques, setBoutiques] = useState([]);
+  const [boutiquesLoaded, setBoutiquesLoaded] = useState(false);
   const [boutiqueId, setBoutiqueId] = useState('');
   const [tab, setTab] = useState('jour');
   const [loading, setLoading] = useState(true);
+
+  // Consolidation multi-boutiques (item 55c) — ADMIN/MANAGER uniquement
+  const [consoMois, setConsoMois] = useState(new Date().getMonth() + 1);
+  const [consoAnnee, setConsoAnnee] = useState(new Date().getFullYear());
+  const [consoData, setConsoData] = useState(null);
 
   // Jour
   const [dayDate, setDayDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -75,15 +87,16 @@ export default function BoutiquesDashboard() {
     api.get('/boutiques?active=true').then(res => {
       setBoutiques(res.data || []);
       if (res.data?.length > 0) setBoutiqueId(String(res.data[0].id));
-    });
+    }).finally(() => setBoutiquesLoaded(true));
   }, []);
 
   useEffect(() => {
+    if (tab === 'toutes') { loadConso(); return; }
     if (!boutiqueId) return;
     if (tab === 'jour') loadDay();
     if (tab === 'mois') loadMonth();
     if (tab === 'annee') loadYear();
-  }, [boutiqueId, tab, dayDate, mois, annee]);
+  }, [boutiqueId, tab, dayDate, mois, annee, consoMois, consoAnnee]);
 
   async function loadDay() {
     setLoading(true);
@@ -165,6 +178,18 @@ export default function BoutiquesDashboard() {
     setLoading(false);
   }
 
+  async function loadConso() {
+    setLoading(true);
+    try {
+      const dateFrom = `${consoAnnee}-${String(consoMois).padStart(2, '0')}-01`;
+      const lastDay = new Date(consoAnnee, consoMois, 0).getDate();
+      const dateTo = `${consoAnnee}-${String(consoMois).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      const res = await api.get(`/boutiques/analytics/consolidation?date_from=${dateFrom}&date_to=${dateTo}`);
+      setConsoData(res.data);
+    } catch (e) { console.error(e); setConsoData(null); }
+    setLoading(false);
+  }
+
   const selectedBoutique = boutiques.find(b => String(b.id) === boutiqueId);
 
   return (
@@ -175,28 +200,39 @@ export default function BoutiquesDashboard() {
           subtitle="Pilotage quotidien, mensuel et annuel"
           icon={LayoutDashboard}
           actions={
-            <select value={boutiqueId} onChange={(e) => setBoutiqueId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
-              {boutiques.map(b => <option key={b.id} value={b.id}>{b.nom}</option>)}
-            </select>
+            tab === 'toutes' ? null : (
+              <select value={boutiqueId} onChange={(e) => setBoutiqueId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                {boutiques.map(b => <option key={b.id} value={b.id}>{b.nom}</option>)}
+              </select>
+            )
           }
         />
 
-        <div className="flex gap-2 mb-6 border-b border-slate-200">
-          {[['jour', 'Jour'], ['mois', 'Mois'], ['annee', 'Année']].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
-                tab === k ? 'border-pink-500 text-pink-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}>
-              {l}
-            </button>
-          ))}
-        </div>
-
-        {loading ? <LoadingSpinner size="lg" /> : (
+        {boutiquesLoaded && boutiques.length === 0 ? (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+            Aucune boutique ne vous est accessible. Si vous êtes responsable de boutique, demandez à un administrateur de vous affecter à votre boutique.
+          </div>
+        ) : (
           <>
-            {tab === 'jour' && <DayView date={dayDate} setDate={setDayDate} ventes={dayVentes} meteo={dayMeteo} rayons={dayRayons} tickets={dayTickets} kpis={dayKpis} evolution={dayEvolution} meteoHourly={dayMeteoHourly} objectifJour={dayObjectifJour} />}
-            {tab === 'mois' && <MonthView mois={mois} annee={annee} setMois={setMois} setAnnee={setAnnee} data={monthData} meteo={monthMeteo} kpis={monthKpis} hourly={monthHourly} evolution={monthEvolution} />}
-            {tab === 'annee' && <YearView annee={annee} setAnnee={setAnnee} data={yearData} budget={yearBudget} boutique={selectedBoutique} />}
+            <div className="flex gap-2 mb-6 border-b border-slate-200">
+              {[['jour', 'Jour'], ['mois', 'Mois'], ['annee', 'Année'], ...(isFullAccess ? [['toutes', 'Toutes boutiques']] : [])].map(([k, l]) => (
+                <button key={k} onClick={() => setTab(k)}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
+                    tab === k ? 'border-pink-500 text-pink-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {loading ? <LoadingSpinner size="lg" /> : (
+              <>
+                {tab === 'jour' && <DayView date={dayDate} setDate={setDayDate} ventes={dayVentes} meteo={dayMeteo} rayons={dayRayons} tickets={dayTickets} kpis={dayKpis} evolution={dayEvolution} meteoHourly={dayMeteoHourly} objectifJour={dayObjectifJour} />}
+                {tab === 'mois' && <MonthView mois={mois} annee={annee} setMois={setMois} setAnnee={setAnnee} data={monthData} meteo={monthMeteo} kpis={monthKpis} hourly={monthHourly} evolution={monthEvolution} />}
+                {tab === 'annee' && <YearView annee={annee} setAnnee={setAnnee} data={yearData} budget={yearBudget} boutique={selectedBoutique} />}
+                {tab === 'toutes' && isFullAccess && <ConsolidationView mois={consoMois} annee={consoAnnee} setMois={setConsoMois} setAnnee={setConsoAnnee} data={consoData} isAdmin={isAdmin} boutiques={boutiques} />}
+              </>
+            )}
           </>
         )}
       </div>
@@ -624,6 +660,242 @@ function HourlyHeatmap({ data }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
+// Vue consolidée multi-boutiques (item 55c) — ADMIN/MANAGER
+// Agrégat CA HT / tickets / panier moyen par boutique + comparaison N-1.
+// Base HT (acquis vague 0/1). Inclut la gestion des accès RESP_BTQ (ADMIN).
+// ══════════════════════════════════════════
+const MOIS_LONG = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+function ConsolidationView({ mois, annee, setMois, setAnnee, data, isAdmin, boutiques }) {
+  const rows = data?.boutiques || [];
+  const tot = data?.totaux || {};
+  const chartData = rows.map(b => ({
+    nom: b.nom,
+    'CA HT': Number(b.ca_ht || 0),
+    'CA HT N-1': Number(b.ca_ht_n1 || 0),
+  }));
+
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Mois</label>
+          <select value={mois} onChange={(e) => setMois(Number(e.target.value))} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+            {MOIS_LONG.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Année</label>
+          <select value={annee} onChange={(e) => setAnnee(Number(e.target.value))} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+            {[0, 1, 2].map(d => { const y = new Date().getFullYear() - d; return <option key={y} value={y}>{y}</option>; })}
+          </select>
+        </div>
+        <div className="text-xs text-slate-500 pb-2">
+          Comparaison N-1 : {data?.periode_n1 ? `${data.periode_n1.date_from} → ${data.periode_n1.date_to}` : '—'}
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="bg-white rounded-card shadow-card p-6 text-center text-slate-500 text-sm">
+          Aucune donnée de vente pour cette période.
+        </div>
+      ) : (
+        <>
+          {/* KPIs consolidés (réseau) avec delta N-1 */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <KpiCard title="CA HT réseau" value={formatEuro(tot.ca_ht)} icon={TrendingUp} accent="primary" footer={<DeltaBadge value={tot.delta_ca_ht_pct} />} />
+            <KpiCard title="Tickets réseau" value={(tot.nb_tickets || 0).toLocaleString('fr-FR')} icon={Receipt} footer={<DeltaBadge value={tot.delta_tickets_pct} />} />
+            <KpiCard title="Panier moyen HT" value={formatEuro(tot.panier_moyen, 2)} icon={ShoppingBag} />
+            <KpiCard title="Boutiques" value={String(rows.length)} icon={Store} />
+          </div>
+
+          {/* Comparaison CA HT par boutique (période vs N-1) */}
+          <div className="bg-white rounded-card shadow-card p-4 mb-4">
+            <h3 className="font-semibold text-slate-700 mb-3">CA HT par boutique — {MOIS_LONG[mois - 1]} {annee} vs N-1</h3>
+            <ResponsiveContainer width="100%" height={280}>
+              <ComposedChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="nom" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v) => formatEuro(v)} />
+                <Legend />
+                <Bar dataKey="CA HT N-1" fill="#cbd5e1" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="CA HT" fill="#ec4899" radius={[4, 4, 0, 0]} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Tableau comparé : boutiques en colonnes */}
+          <div className="bg-white rounded-card shadow-card p-4 mb-4 overflow-x-auto">
+            <h3 className="font-semibold text-slate-700 mb-3">Détail par boutique</h3>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="text-left py-2 px-2 text-xs uppercase text-slate-500">Indicateur</th>
+                  {rows.map(b => <th key={b.boutique_id} className="text-right py-2 px-2 font-semibold text-slate-700">{b.nom}</th>)}
+                  <th className="text-right py-2 px-2 text-xs uppercase text-slate-500">Total réseau</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-slate-100">
+                  <td className="py-2 px-2 text-slate-600">CA HT</td>
+                  {rows.map(b => <td key={b.boutique_id} className="py-2 px-2 text-right tabular-nums font-medium">{formatEuro(b.ca_ht)}</td>)}
+                  <td className="py-2 px-2 text-right tabular-nums font-semibold">{formatEuro(tot.ca_ht)}</td>
+                </tr>
+                <tr className="border-b border-slate-100">
+                  <td className="py-2 px-2 text-slate-500 text-xs">évol. vs N-1</td>
+                  {rows.map(b => <td key={b.boutique_id} className="py-2 px-2 text-right"><DeltaBadge value={b.delta_ca_ht_pct} /></td>)}
+                  <td className="py-2 px-2 text-right"><DeltaBadge value={tot.delta_ca_ht_pct} /></td>
+                </tr>
+                <tr className="border-b border-slate-100">
+                  <td className="py-2 px-2 text-slate-600">Tickets</td>
+                  {rows.map(b => <td key={b.boutique_id} className="py-2 px-2 text-right tabular-nums">{(b.nb_tickets || 0).toLocaleString('fr-FR')}</td>)}
+                  <td className="py-2 px-2 text-right tabular-nums font-semibold">{(tot.nb_tickets || 0).toLocaleString('fr-FR')}</td>
+                </tr>
+                <tr className="border-b border-slate-100">
+                  <td className="py-2 px-2 text-slate-500 text-xs">évol. vs N-1</td>
+                  {rows.map(b => <td key={b.boutique_id} className="py-2 px-2 text-right"><DeltaBadge value={b.delta_tickets_pct} /></td>)}
+                  <td className="py-2 px-2 text-right"><DeltaBadge value={tot.delta_tickets_pct} /></td>
+                </tr>
+                <tr>
+                  <td className="py-2 px-2 text-slate-600">Panier moyen HT</td>
+                  {rows.map(b => <td key={b.boutique_id} className="py-2 px-2 text-right tabular-nums">{formatEuro(b.panier_moyen, 2)}</td>)}
+                  <td className="py-2 px-2 text-right tabular-nums font-semibold">{formatEuro(tot.panier_moyen, 2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {isAdmin && <AccessManagementCard boutiques={boutiques} />}
+    </>
+  );
+}
+
+// Gestion des accès RESP_BTQ (ADMIN) : affecter/retirer un responsable à une boutique.
+function AccessManagementCard({ boutiques }) {
+  const [selBoutique, setSelBoutique] = useState('');
+  const [assigned, setAssigned] = useState([]);
+  const [assignable, setAssignable] = useState([]);
+  const [toAdd, setToAdd] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (boutiques.length > 0 && !selBoutique) setSelBoutique(String(boutiques[0].id));
+  }, [boutiques, selBoutique]);
+
+  const loadAssignable = useCallback(async () => {
+    try {
+      const res = await api.get('/boutiques/assignable-users');
+      setAssignable(res.data || []);
+    } catch (e) { setAssignable([]); }
+  }, []);
+
+  const loadAssigned = useCallback(async (btqId) => {
+    if (!btqId) return;
+    try {
+      const res = await api.get(`/boutiques/${btqId}/access`);
+      setAssigned(res.data || []);
+    } catch (e) { setAssigned([]); }
+  }, []);
+
+  useEffect(() => { loadAssignable(); }, [loadAssignable]);
+  useEffect(() => { loadAssigned(selBoutique); }, [selBoutique, loadAssigned]);
+
+  async function addAccess() {
+    if (!toAdd || !selBoutique) return;
+    setBusy(true); setError(null);
+    try {
+      await api.post(`/boutiques/${selBoutique}/access`, { user_id: parseInt(toAdd) });
+      setToAdd('');
+      await loadAssigned(selBoutique);
+    } catch (e) {
+      setError(e.response?.data?.error || "Erreur lors de l'affectation");
+    }
+    setBusy(false);
+  }
+
+  async function removeAccess(userId) {
+    setBusy(true); setError(null);
+    try {
+      await api.delete(`/boutiques/${selBoutique}/access/${userId}`);
+      await loadAssigned(selBoutique);
+    } catch (e) {
+      setError(e.response?.data?.error || 'Erreur lors du retrait');
+    }
+    setBusy(false);
+  }
+
+  const assignedIds = new Set(assigned.map(a => a.user_id));
+  const candidates = assignable.filter(u => !assignedIds.has(u.id));
+
+  return (
+    <div className="bg-white rounded-card shadow-card p-4 mb-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Users className="w-4 h-4 text-pink-600" />
+        <h3 className="font-semibold text-slate-700">Accès des responsables de boutique</h3>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        Un responsable (RESP_BTQ) ne voit et ne gère que les boutiques qui lui sont affectées ici. ADMIN et MANAGER voient toujours toutes les boutiques.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-3 mb-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Boutique</label>
+          <select value={selBoutique} onChange={(e) => setSelBoutique(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+            {boutiques.map(b => <option key={b.id} value={b.id}>{b.nom}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {error && <div className="bg-red-50 border border-red-200 rounded-lg p-2 mb-3 text-sm text-red-700">{error}</div>}
+
+      <div className="mb-3">
+        <div className="text-xs font-medium text-slate-600 mb-2">Responsables affectés</div>
+        {assigned.length === 0 ? (
+          <div className="text-sm text-slate-400 italic">Aucun responsable affecté à cette boutique.</div>
+        ) : (
+          <ul className="space-y-1">
+            {assigned.map(u => (
+              <li key={u.user_id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 text-sm">
+                <span>
+                  {u.first_name} {u.last_name}
+                  <span className="text-slate-400 ml-2">({u.username} — {u.role})</span>
+                  {u.is_active === false && <span className="ml-2 text-amber-600 text-xs">inactif</span>}
+                </span>
+                <button onClick={() => removeAccess(u.user_id)} disabled={busy}
+                  className="text-red-500 hover:text-red-700 disabled:opacity-50" title="Retirer l'accès">
+                  <X className="w-4 h-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-xs font-medium text-slate-600 mb-1">Ajouter un responsable</label>
+          <select value={toAdd} onChange={(e) => setToAdd(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">— Choisir un utilisateur RESP_BTQ —</option>
+            {candidates.map(u => <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.username})</option>)}
+          </select>
+        </div>
+        <button onClick={addAccess} disabled={busy || !toAdd}
+          className="inline-flex items-center gap-1 bg-pink-600 hover:bg-pink-700 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50">
+          <UserPlus className="w-4 h-4" /> Affecter
+        </button>
+      </div>
+      {assignable.length === 0 && (
+        <p className="text-xs text-slate-400 mt-2">Aucun utilisateur avec le rôle RESP_BTQ. Créez-en un dans la gestion des utilisateurs.</p>
+      )}
     </div>
   );
 }

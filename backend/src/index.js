@@ -86,7 +86,7 @@ app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { e
 // Créer dossiers uploads (évite 502 si multer ne peut pas créer)
 const fs = require('fs');
 const uploadsDir = path.join(__dirname, '..', 'uploads');
-['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents', 'vehicle-docs', 'vehicle-contracts'].forEach((sub) => {
+['', 'cv', 'photos', 'incidents', 'qrcodes', 'documents', 'vehicle-docs', 'vehicle-contracts', 'refashion-justificatifs'].forEach((sub) => {
   const dir = sub ? path.join(uploadsDir, sub) : uploadsDir;
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -180,6 +180,7 @@ app.use('/api/cav', require('./routes/cav'));
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/tours', require('./routes/tours'));
 app.use('/api/incidents', require('./routes/incidents'));
+app.use('/api/qhse', require('./routes/qhse'));
 app.use('/api/association-points', require('./routes/association-points'));
 // Lot 4 : Tri + Stock + Production + Facturation + Reporting + Refashion
 app.use('/api/stock', require('./routes/stock'));

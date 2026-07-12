@@ -398,7 +398,7 @@ solidata.online/
 
 ### Module 1 — Authentification & Administration
 - Connexion JWT (access token 8h + refresh token 7j)
-- 5 rôles : `ADMIN`, `MANAGER`, `RH`, `COLLABORATEUR`, `AUTORITE`
+- 9 rôles intégrés : `ADMIN`, `MANAGER`, `RH`, `COLLABORATEUR`, `AUTORITE`, `RESP_BTQ`, `DPO`, `FINANCE`, `QHSE` (+ rôles personnalisés par duplication)
 - Gestion des utilisateurs
 - Paramètres de l'application (nom, adresse, SIRET, objectifs production)
 - Templates de messages SMS/Email
@@ -1278,7 +1278,11 @@ Logs dans `/opt/solidata.online/logs/health-check.log`
 | `MANAGER` | Responsable de site | Collecte, production, tri, stock, expéditions, reporting |
 | `RH` | Ressources Humaines | Recrutement, salariés, PCM, heures, reporting RH |
 | `COLLABORATEUR` | Salarié / Chauffeur | Dashboard, application mobile |
-| `AUTORITE` | Autorité de tutelle | Dashboard (lecture seule) |
+| `RESP_BTQ` | Responsable Boutique | Ventes, commandes et objectifs de sa boutique |
+| `AUTORITE` | Auditeur externe (Refashion / Métropole) | **Lecture seule** : espace « Audit & conformité » (Refashion/DPAV, exports d'audit, Reporting Métropole/Collecte, carte des CAV, KPI insertion agrégés) — aucune donnée nominative |
+| `DPO` | Délégué à la protection des données | Écrans RGPD (registre, exports, anonymisation, journal d'audit) sans les pleins droits ADMIN |
+| `FINANCE` | Finance / direction (consultation) | **Lecture seule** du domaine Finance (P&L, bilan, trésorerie, rentabilité, contrôles) + Pennylane (lecture) |
+| `QHSE` | Qualité-Hygiène-Sécurité-Environnement | Incidents (lecture + résolution), véhicules/maintenance, exports d'audit Refashion |
 
 ### Compte par défaut
 - **Identifiant** : `admin`

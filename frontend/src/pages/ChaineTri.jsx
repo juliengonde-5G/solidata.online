@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Factory, FileDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Factory, FileDown, ScanLine } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, DataTable, StatusBadge, PageHeader } from '../components';
 import api from '../services/api';
@@ -19,6 +20,7 @@ const POSTES_LABELS = {
 };
 
 export default function ChaineTri() {
+  const navigate = useNavigate();
   const [chains, setChains] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedChain, setSelectedChain] = useState(null);
@@ -140,6 +142,14 @@ export default function ChaineTri() {
           icon={Factory}
           actions={
             <div className="flex gap-2">
+              <button
+                onClick={() => navigate('/tri/execution')}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-white hover:bg-primary/90 flex items-center gap-1.5"
+                title="Enregistrer un crackage ou un tri fin sur un lot"
+              >
+                <ScanLine size={14} />
+                Saisir une exécution
+              </button>
               <button
                 onClick={() => setVue('diagramme')}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium ${vue === 'diagramme' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}

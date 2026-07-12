@@ -3,6 +3,9 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const {
+  attachBoutiqueScope, enforceBoutiqueParam, enforceBoutiqueForEntity, boutiqueScopeSql,
+} = require('../middleware/boutique-scope');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -30,6 +33,11 @@ const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 }, fileFil
 router.use((req, res, next) => {
   if (req.path === '/webhook-email') return next();
   return authenticate(req, res, next);
+});
+// Cloisonnement RESP_BTQ (item 55a) : idem, le webhook M2M reste hors périmètre.
+router.use((req, res, next) => {
+  if (req.path === '/webhook-email') return next();
+  return attachBoutiqueScope(req, res, next);
 });
 router.use(autoLogActivity('boutique_vente'));
 
@@ -311,6 +319,10 @@ router.post('/import',
       if (!req.file) return res.status(400).json({ error: 'Fichier CSV requis' });
       const boutiqueId = parseInt(req.body.boutique_id);
       if (!boutiqueId) return res.status(400).json({ error: 'boutique_id requis' });
+      if (!enforceBoutiqueParam(req, res, boutiqueId)) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return;
+      }
 
       const force = req.body.force === 'true' || req.body.force === '1';
       const content = fs.readFileSync(req.file.path, 'utf-8');
@@ -341,9 +353,11 @@ router.get('/batches', async (req, res) => {
     `;
     const params = [];
     if (boutique_id) {
+      if (!enforceBoutiqueParam(req, res, boutique_id)) return;
       params.push(boutique_id);
       query += ` AND b.boutique_id = $${params.length}`;
     }
+    query += boutiqueScopeSql(req, 'b.boutique_id', params);
     query += ' ORDER BY b.created_at DESC LIMIT 100';
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -356,6 +370,7 @@ router.get('/batches', async (req, res) => {
 // GET /api/boutique-ventes/batches/:id
 router.get('/batches/:id', async (req, res) => {
   try {
+    if (!(await enforceBoutiqueForEntity(req, res, 'boutique_import_batches', req.params.id))) return;
     const result = await pool.query('SELECT * FROM boutique_import_batches WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Batch introuvable' });
     res.json(result.rows[0]);
@@ -398,7 +413,11 @@ router.get('/', async (req, res) => {
     const { boutique_id, date_from, date_to, rayon, segment, limit = 200, offset = 0 } = req.query;
     let query = 'SELECT * FROM boutique_ventes WHERE 1=1';
     const params = [];
-    if (boutique_id) { params.push(boutique_id); query += ` AND boutique_id = $${params.length}`; }
+    if (boutique_id) {
+      if (!enforceBoutiqueParam(req, res, boutique_id)) return;
+      params.push(boutique_id); query += ` AND boutique_id = $${params.length}`;
+    }
+    query += boutiqueScopeSql(req, 'boutique_id', params);
     if (date_from) { params.push(date_from); query += ` AND date_vente >= $${params.length}`; }
     if (date_to) { params.push(date_to + ' 23:59:59'); query += ` AND date_vente <= $${params.length}`; }
     if (rayon) { params.push(rayon); query += ` AND rayon = $${params.length}`; }
@@ -419,6 +438,7 @@ router.get('/analytics/daily', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to, segment, rayon } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const result = await pool.query(`
       SELECT DATE(date_vente) AS jour,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
@@ -447,6 +467,7 @@ router.get('/analytics/monthly', async (req, res) => {
   try {
     const { boutique_id, annee } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const year = annee || new Date().getFullYear();
     const result = await pool.query(`
       SELECT EXTRACT(MONTH FROM date_vente)::INT AS mois,
@@ -474,6 +495,7 @@ router.get('/analytics/rayons', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to, segment, rayon } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const result = await pool.query(`
       SELECT rayon, segment,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
@@ -501,6 +523,7 @@ router.get('/analytics/segments', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to, segment, rayon } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const result = await pool.query(`
       SELECT segment,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
@@ -527,6 +550,7 @@ router.get('/analytics/articles', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to, segment, rayon, limit = 20 } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const result = await pool.query(`
       SELECT article, rayon,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
@@ -556,6 +580,7 @@ router.get('/analytics/panier-moyen', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const result = await pool.query(`
       SELECT DATE(date_ticket) AS jour,
              COUNT(*)::INT AS nb_tickets,
@@ -584,6 +609,7 @@ router.get('/analytics/kpis', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
 
     // Agrégats ventes (CA, articles, TVA, mix segments)
     const vq = await pool.query(`
@@ -672,6 +698,7 @@ router.get('/analytics/hourly', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
 
     const byHour = await pool.query(`
       SELECT EXTRACT(HOUR FROM t.date_ticket)::INT AS heure,
@@ -717,6 +744,7 @@ router.get('/analytics/evolution', async (req, res) => {
     if (!boutique_id || !date_from || !date_to) {
       return res.status(400).json({ error: 'boutique_id, date_from, date_to requis' });
     }
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
 
     // Calcul de la période N-1 équivalente
     const periodDays = Math.max(
@@ -786,6 +814,7 @@ router.get('/tickets', async (req, res) => {
   try {
     const { boutique_id, date } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     let query = `
       SELECT t.*,
              json_agg(json_build_object(

@@ -424,6 +424,155 @@ router.get('/captation-par-commune', async (req, res) => {
   }
 });
 
+// ══════ Vague 2 — indicateurs agrégés pour l'auditeur Métropole (AUTORITE) ══════
+// Ces deux endpoints sont volontairement NON NOMINATIFS : le rôle AUTORITE ne
+// doit voir que des agrégats (persona auditeur Métropole 2.4). Ils vivent ici
+// (et non dans incidents.js / employees.js, réservés ADMIN/MANAGER/RH) pour
+// éviter d'ouvrir à AUTORITE les listes nominatives sous-jacentes.
+
+// GET /api/metropole/delai-intervention-incidents?months=12
+// Délai moyen d'intervention (création → résolution, en jours) sur les incidents
+// CAV, ventilé par type et par mois + synthèse globale. Aucune donnée nominative.
+router.get('/delai-intervention-incidents', async (req, res) => {
+  try {
+    const months = parseInt(req.query.months) || 12;
+    let parTypeMois = [];
+    let global = { total: 0, resolus: 0, ouverts: 0, delai_moyen_jours: null };
+    try {
+      const r = await pool.query(`
+        SELECT DATE_TRUNC('month', created_at) AS mois,
+               type,
+               COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE resolved_at IS NOT NULL)::int AS resolus,
+               ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 86400.0)
+                     FILTER (WHERE resolved_at IS NOT NULL)::numeric, 1) AS delai_moyen_jours
+        FROM incidents
+        WHERE created_at >= DATE_TRUNC('month', NOW()) - make_interval(months => $1)
+        GROUP BY 1, 2
+        ORDER BY mois DESC, type
+      `, [months]);
+      parTypeMois = r.rows;
+
+      const g = await pool.query(`
+        SELECT COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE resolved_at IS NOT NULL)::int AS resolus,
+               COUNT(*) FILTER (WHERE status IN ('open','in_progress'))::int AS ouverts,
+               ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 86400.0)
+                     FILTER (WHERE resolved_at IS NOT NULL)::numeric, 1) AS delai_moyen_jours
+        FROM incidents
+        WHERE created_at >= DATE_TRUNC('month', NOW()) - make_interval(months => $1)
+      `, [months]);
+      global = {
+        ...g.rows[0],
+        delai_moyen_jours: g.rows[0]?.delai_moyen_jours != null ? Number(g.rows[0].delai_moyen_jours) : null,
+      };
+    } catch (e) {
+      // Table incidents absente d'une base ancienne : agrégats vides plutôt que 500.
+      console.error('[METROPOLE] delai-intervention-incidents (dégradé) :', e.code || e.message);
+    }
+    res.json({ months, global, par_type_mois: parTypeMois });
+  } catch (err) {
+    console.error('[METROPOLE] Erreur delai-intervention-incidents :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/metropole/kpi-insertion?annee=2026
+// Contrepartie sociale de la convention : ETP réalisés, absentéisme, formation,
+// effectifs en parcours d'insertion — TOUT AGRÉGÉ (par équipe / global), jamais
+// nominatif. Reprend les mêmes formules que les KPI RH (employees.js) mais sans
+// exposer le détail par personne, pour le rôle AUTORITE.
+router.get('/kpi-insertion', async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    const heuresPleinTemps = 1607; // base ETP annuelle IAE
+
+    const out = {
+      annee,
+      etp_reference_heures: heuresPleinTemps,
+      total_etp: null,
+      total_salaries_actifs: null,
+      etp_par_equipe: [],
+      formation_total_heures: null,
+      absenteisme_taux_pct: null,
+      absenteisme_par_equipe: [],
+      insertion: { actifs: null, en_parcours: null },
+    };
+
+    // ETP par équipe (nom d'équipe = non nominatif)
+    try {
+      const etpR = await pool.query(`
+        SELECT t.name AS equipe,
+               COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training')), 0)::numeric(10,2) AS heures_travaillees,
+               COUNT(DISTINCT e.id)::int AS nb_salaries
+        FROM employees e
+        LEFT JOIN teams t ON e.team_id = t.id
+        LEFT JOIN work_hours wh ON wh.employee_id = e.id AND EXTRACT(YEAR FROM wh.date) = $1
+        WHERE e.is_active = true
+        GROUP BY t.name
+        ORDER BY heures_travaillees DESC
+      `, [annee]);
+      out.etp_par_equipe = etpR.rows.map((r) => ({
+        equipe: r.equipe,
+        heures_travaillees: Number(r.heures_travaillees),
+        nb_salaries: r.nb_salaries,
+        etp: Math.round((Number(r.heures_travaillees) / heuresPleinTemps) * 100) / 100,
+      }));
+      out.total_etp = Math.round(out.etp_par_equipe.reduce((s, r) => s + r.etp, 0) * 100) / 100;
+      out.total_salaries_actifs = etpR.rows.reduce((s, r) => s + Number(r.nb_salaries), 0);
+    } catch (e) { console.error('[METROPOLE] kpi-insertion ETP (dégradé) :', e.code || e.message); }
+
+    // Formation — heures totales (pas de détail par personne)
+    try {
+      const f = await pool.query(`
+        SELECT COALESCE(SUM(hours_worked) FILTER (WHERE type = 'training'), 0)::numeric(10,2) AS total
+        FROM work_hours WHERE EXTRACT(YEAR FROM date) = $1
+      `, [annee]);
+      out.formation_total_heures = Number(f.rows[0]?.total || 0);
+    } catch (e) { console.error('[METROPOLE] kpi-insertion formation (dégradé) :', e.code || e.message); }
+
+    // Absentéisme — taux global + par équipe
+    try {
+      const globalAbs = await pool.query(`
+        SELECT ROUND(
+                 100.0 * SUM(hours_worked) FILTER (WHERE type IN ('absence','sick'))::numeric
+                 / NULLIF(SUM(hours_worked) FILTER (WHERE type IN ('normal','training','absence','sick')), 0), 2) AS taux_pct
+        FROM work_hours WHERE EXTRACT(YEAR FROM date) = $1
+      `, [annee]);
+      out.absenteisme_taux_pct = globalAbs.rows[0]?.taux_pct != null ? Number(globalAbs.rows[0].taux_pct) : null;
+
+      const byTeam = await pool.query(`
+        SELECT t.name AS equipe,
+               ROUND(
+                 100.0 * SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('absence','sick'))::numeric
+                 / NULLIF(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training','absence','sick')), 0), 2) AS taux_pct
+        FROM employees e
+        LEFT JOIN teams t ON e.team_id = t.id
+        LEFT JOIN work_hours wh ON wh.employee_id = e.id AND EXTRACT(YEAR FROM wh.date) = $1
+        WHERE e.is_active = true
+        GROUP BY t.name
+        ORDER BY taux_pct DESC NULLS LAST
+      `, [annee]);
+      out.absenteisme_par_equipe = byTeam.rows;
+    } catch (e) { console.error('[METROPOLE] kpi-insertion absenteisme (dégradé) :', e.code || e.message); }
+
+    // Effectifs en parcours d'insertion (compteur, non nominatif)
+    try {
+      const ins = await pool.query(`
+        SELECT COUNT(*) FILTER (WHERE is_active = true)::int AS actifs,
+               COUNT(*) FILTER (WHERE is_active = true AND insertion_status = 'en_parcours')::int AS en_parcours
+        FROM employees
+      `);
+      out.insertion = { actifs: ins.rows[0]?.actifs ?? null, en_parcours: ins.rows[0]?.en_parcours ?? null };
+    } catch (e) { console.error('[METROPOLE] kpi-insertion effectifs (dégradé) :', e.code || e.message); }
+
+    res.json(out);
+  } catch (err) {
+    console.error('[METROPOLE] Erreur kpi-insertion :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /**
  * Oracle de calcul (spécification exécutable, verrouillée par metropole.test.js).
  *

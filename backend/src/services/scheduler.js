@@ -349,6 +349,76 @@ async function checkVehicleMaintenance() {
 }
 
 /**
+ * QHSE — Alerte hebdomadaire des habilitations à échéance (item 58).
+ * (1) Recalcule employees.has_caces / has_permis_b pour les salariés suivis en
+ *     QHSE : une expiration purement temporelle ne déclenche aucun write, donc
+ *     ce recalcul périodique fait basculer le booléen qui pilote le planning.
+ * (2) Recense les habilitations expirées ou expirant sous 60 jours et alerte les
+ *     ADMIN/QHSE (log + compteur exposé côté page par /qhse/habilitations/echeances ;
+ *     digest email best-effort si Brevo est configuré).
+ */
+async function checkQhseHabilitationExpiries() {
+  try {
+    // (1) Resynchro des booléens de compétence pour les salariés suivis en QHSE.
+    let syncEmployeeCertBooleans;
+    try {
+      ({ syncEmployeeCertBooleans } = require('../routes/qhse'));
+    } catch (_) { syncEmployeeCertBooleans = null; }
+    if (syncEmployeeCertBooleans) {
+      const suivis = await pool.query(
+        `SELECT DISTINCT employee_id FROM qhse_habilitations
+         WHERE type IN ('caces_1','caces_3','caces_5','permis')`
+      );
+      for (const row of suivis.rows) {
+        try { await syncEmployeeCertBooleans(pool, row.employee_id); }
+        catch (e) { console.error(`[SCHEDULER] QHSE synchro booléen employé #${row.employee_id} :`, e.message); }
+      }
+    }
+
+    // (2) Habilitations expirées ou expirant sous 60 jours.
+    const exp = await pool.query(`
+      SELECT h.id, h.type, h.libelle, h.date_expiration,
+             CONCAT(e.first_name, ' ', e.last_name) AS employe,
+             (h.date_expiration - CURRENT_DATE) AS jours_restants
+      FROM qhse_habilitations h
+      JOIN employees e ON e.id = h.employee_id
+      WHERE h.date_expiration IS NOT NULL
+        AND h.date_expiration <= CURRENT_DATE + INTERVAL '60 days'
+      ORDER BY h.date_expiration ASC
+    `);
+    if (exp.rows.length === 0) {
+      console.log('[SCHEDULER] QHSE : aucune habilitation à échéance sous 60 jours');
+      return;
+    }
+    console.log(`[SCHEDULER] QHSE : ${exp.rows.length} habilitation(s) à échéance sous 60 jours`);
+
+    // Digest email best-effort vers ADMIN/QHSE (si Brevo configuré).
+    if (BREVO_API_KEY) {
+      const dests = await pool.query(
+        `SELECT email FROM users
+         WHERE role IN ('ADMIN','QHSE') AND is_active = true AND email IS NOT NULL AND email <> ''`
+      );
+      if (dests.rows.length > 0) {
+        const lignes = exp.rows.map((r) => {
+          const j = Number(r.jours_restants);
+          const etat = j < 0 ? `expirée depuis ${-j} j` : `expire dans ${j} j`;
+          return `- ${r.employe} : ${r.libelle || r.type} (${etat})`;
+        }).join('\n');
+        const bodyText = `Habilitations QHSE à échéance (sous 60 jours) :\n\n${lignes}\n\nAccédez au module QHSE pour planifier les renouvellements.`;
+        for (const d of dests.rows) {
+          await sendNotification(
+            { type: 'email', subject: `QHSE — ${exp.rows.length} habilitation(s) à renouveler`, body: bodyText },
+            d.email, null, {}
+          ).catch((e) => console.error('[SCHEDULER] QHSE email :', e.message));
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur checkQhseHabilitationExpiries :', err.message);
+  }
+}
+
+/**
  * Veille sectorielle — Auto-alimentation du fil d'actualite
  * Genere automatiquement des articles de veille pertinents pour le secteur
  */
@@ -700,6 +770,12 @@ function startScheduler() {
       }
     } catch (err) {
       console.error('[SCHEDULER] VAK SumUp scheduling:', err.message);
+    }
+
+    // QHSE — alerte hebdomadaire des habilitations à échéance (lundi 8h, item 58)
+    if (now.getDay() === 1 && now.getHours() === 8 && now.getMinutes() < 30) {
+      console.log('[SCHEDULER] Lundi 8h : contrôle des habilitations QHSE à échéance');
+      await checkQhseHabilitationExpiries();
     }
 
     // ══ V1.8.4 — Auto-discovery événements + jours fériés ══

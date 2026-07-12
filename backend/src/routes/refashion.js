@@ -4,8 +4,35 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { documentFilter } = require('../utils/upload-filters');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+// Stockage de la pièce justificative (convention / avenant) du taux conventionné.
+const justifDir = path.join(__dirname, '..', '..', 'uploads', 'refashion-justificatifs');
+try { fs.mkdirSync(justifDir, { recursive: true }); } catch (e) { /* ignore */ }
+const uploadJustif = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, justifDir),
+    filename: (req, file, cb) => cb(null, `taux${req.params.id}-${Date.now()}${path.extname(file.originalname || '').toLowerCase()}`),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: documentFilter,
+});
+
+router.use(authenticate);
+// Vague 2 (item 52) — espace auditeur en LECTURE SEULE : le rôle AUTORITE
+// (auditeur Refashion) et QHSE consultent toutes les données DPAV, taux,
+// subventions, communes, exports et l'audit-trail via les routes GET. Les
+// écritures (POST/PATCH DPAV, communes, subventions, taux) restent réservées à
+// ADMIN/MANAGER (et ADMIN seul pour les taux, cf. authorize par route).
+// Filtrage par méthode → fail-safe : une nouvelle route non-GET reste fermée
+// aux rôles de consultation.
+router.use((req, res, next) => {
+  const roles = req.method === 'GET' ? ['ADMIN', 'MANAGER', 'AUTORITE', 'QHSE'] : ['ADMIN', 'MANAGER'];
+  return authorize(...roles)(req, res, next);
+});
 
 // ══════ DPAV Trimestriel ══════
 
@@ -61,6 +88,52 @@ router.get('/dpav', async (req, res) => {
       [year, quarter]
     );
 
+    // Attestation d'intégrité (item 52d) : état du verrouillage trimestriel du
+    // stock original. C'est la preuve, pour l'auditeur, que les chiffres ayant
+    // servi à la déclaration ne peuvent plus être modifiés (stock_period_locks).
+    let stockLock = { locked: false };
+    try {
+      const lockRes = await pool.query(
+        `SELECT spl.locked_at, spl.notes, COALESCE(u.first_name || ' ' || u.last_name, 'Système') AS locked_by_name
+         FROM stock_period_locks spl LEFT JOIN users u ON spl.locked_by = u.id
+         WHERE spl.year = $1 AND spl.quarter = $2`,
+        [year, quarter]
+      );
+      if (lockRes.rowCount > 0) {
+        stockLock = {
+          locked: true,
+          locked_at: lockRes.rows[0].locked_at,
+          locked_by_name: lockRes.rows[0].locked_by_name,
+          notes: lockRes.rows[0].notes,
+        };
+      }
+    } catch (_) { /* table stock_period_locks absente : verrouillage inconnu */ }
+
+    // Taux conventionné applicable au trimestre + sa pièce justificative (item 52e).
+    let tauxRef = null;
+    try {
+      const tr = await pool.query(
+        `SELECT id, taux_euro_par_tonne, valid_from, valid_to, source_document,
+                justificatif_path, justificatif_original_name
+         FROM refashion_taux_subvention
+         WHERE valid_from <= $1 AND (valid_to IS NULL OR valid_to >= $1)
+         ORDER BY valid_from DESC LIMIT 1`,
+        [refDate]
+      );
+      if (tr.rowCount > 0) {
+        const t = tr.rows[0];
+        tauxRef = {
+          id: t.id,
+          taux_euro_par_tonne: Number(t.taux_euro_par_tonne),
+          valid_from: t.valid_from,
+          valid_to: t.valid_to,
+          source_document: t.source_document,
+          has_justificatif: !!t.justificatif_path,
+          justificatif_original_name: t.justificatif_original_name,
+        };
+      }
+    } catch (_) { /* colonnes justificatif absentes : ignoré */ }
+
     res.json({
       reemploi_t: reemploi,
       recyclage_t: recyclage,
@@ -71,6 +144,8 @@ router.get('/dpav', async (req, res) => {
       taux_entree_euro_par_tonne: tauxEntree,
       total_subvention,
       nb_communes: communesRes.rows[0]?.nb || 0,
+      stock_lock: stockLock,
+      taux_ref: tauxRef,
       raw: dpav,
       history: historyRes.rows,
     });
@@ -201,6 +276,58 @@ router.patch('/taux/:id', authorize('ADMIN'), async (req, res) => {
     if (r.rowCount === 0) return res.status(404).json({ error: 'Introuvable' });
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/refashion/taux/:id/justificatif — joindre la pièce justificative
+// (convention / avenant) au taux conventionné. ADMIN uniquement (comme la
+// création du taux). Consultable ensuite par l'auditeur (AUTORITE) en lecture.
+router.post('/taux/:id/justificatif', authorize('ADMIN'), uploadJustif.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier requis (pdf, image ou document)' });
+    const r = await pool.query(
+      `UPDATE refashion_taux_subvention
+       SET justificatif_path = $1, justificatif_original_name = $2, justificatif_mime = $3
+       WHERE id = $4
+       RETURNING id, justificatif_original_name, justificatif_mime`,
+      [req.file.filename, req.file.originalname, req.file.mimetype, req.params.id]
+    );
+    if (r.rowCount === 0) {
+      // Taux inexistant : nettoyer le fichier orphelin qui vient d'être écrit.
+      try { fs.unlinkSync(path.join(justifDir, req.file.filename)); } catch (_) {}
+      return res.status(404).json({ error: 'Taux introuvable' });
+    }
+    res.status(201).json({ ...r.rows[0], has_justificatif: true });
+  } catch (err) {
+    console.error('[REFASHION] Erreur upload justificatif :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/refashion/taux/:id/justificatif — télécharger la pièce justificative.
+// Route GET → ouverte en lecture à ADMIN/MANAGER/AUTORITE/QHSE (cf. middleware).
+router.get('/taux/:id/justificatif', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT justificatif_path, justificatif_original_name, justificatif_mime FROM refashion_taux_subvention WHERE id = $1',
+      [req.params.id]
+    );
+    if (r.rowCount === 0 || !r.rows[0].justificatif_path) {
+      return res.status(404).json({ error: 'Aucune pièce justificative pour ce taux' });
+    }
+    const doc = r.rows[0];
+    // Résolution sûre contre le path-traversal : on ne garde que le basename.
+    const safeName = path.basename(doc.justificatif_path);
+    const filePath = path.join(justifDir, safeName);
+    if (!filePath.startsWith(justifDir) || !fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Fichier introuvable' });
+    }
+    res.setHeader('Content-Disposition', `attachment; filename="${doc.justificatif_original_name || safeName}"`);
+    res.setHeader('Content-Type', doc.justificatif_mime || 'application/octet-stream');
+    res.sendFile(filePath);
+  } catch (err) {
+    console.error('[REFASHION] Erreur download justificatif :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // Note : les endpoints d'agrément Refashion sur exutoires ont été retirés

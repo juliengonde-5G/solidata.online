@@ -23,7 +23,7 @@ async function initDatabase() {
         username VARCHAR(100) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         email VARCHAR(255),
-        role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ')),
+        role VARCHAR(50) NOT NULL CHECK (role IN ('ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE')),
         first_name VARCHAR(100),
         last_name VARCHAR(100),
         phone VARCHAR(20),
@@ -1297,6 +1297,29 @@ async function initDatabase() {
       ALTER TABLE tour_weights ADD COLUMN IF NOT EXISTS notes TEXT;
     `);
 
+    // ── Vague 2 (item 62) — Canal manager → chauffeur ─────────────────────
+    // Le responsable logistique n'avait aucun moyen de joindre un chauffeur en
+    // tournée (consigne, CAV ajouté, danger signalé). Le manager écrit un message
+    // ciblant un VÉHICULE (le camion physique que le chauffeur conduit), avec
+    // éventuellement la tournée du jour en contexte. Le mobile poll les messages
+    // non lus (read_at NULL) et affiche une bannière ; « J'ai compris » pose
+    // read_at → le manager voit l'accusé de lecture.
+    // CREATE TABLE IF NOT EXISTS : idempotent + sûr sur base neuve (tours,
+    // vehicles, users existent déjà — module 5 plus haut). Pas d'ALTER ici.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS driver_messages (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+        message TEXT NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        read_at TIMESTAMP
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_driver_messages_vehicle ON driver_messages(vehicle_id, read_at);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_driver_messages_tour ON driver_messages(tour_id);');
+
     // Tables pour exécution tri et colisages
     await client.query(`
       CREATE TABLE IF NOT EXISTS batch_tracking (
@@ -1574,6 +1597,13 @@ async function initDatabase() {
       );
       CREATE INDEX IF NOT EXISTS idx_refashion_taux_valid_from ON refashion_taux_subvention(valid_from DESC);
     `);
+    // Vague 2 (item 52e) — pièce justificative (convention / avenant) attachée au
+    // taux conventionné, consultable par l'auditeur Refashion (AUTORITE). Le champ
+    // texte `source_document` reste pour la référence lisible ; ces colonnes portent
+    // le fichier téléchargeable. ADD COLUMN IF NOT EXISTS = idempotent + base-neuve safe.
+    await client.query(`ALTER TABLE refashion_taux_subvention ADD COLUMN IF NOT EXISTS justificatif_path TEXT`);
+    await client.query(`ALTER TABLE refashion_taux_subvention ADD COLUMN IF NOT EXISTS justificatif_original_name TEXT`);
+    await client.query(`ALTER TABLE refashion_taux_subvention ADD COLUMN IF NOT EXISTS justificatif_mime VARCHAR(120)`);
 
     // -- Référentiel communes INSEE (Métropole Rouen)
     await client.query(`
@@ -1681,6 +1711,32 @@ async function initDatabase() {
       DO $$ BEGIN
         ALTER TABLE operation_outputs ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Vague 2 (items 56/57) — UI d'exécution du tri + administration du référentiel tri.
+    // (a) operation_outputs.sortie_id devient NULLABLE : la saisie atelier est pilotée
+    //     par la CATÉGORIE sortante (categorie_sortante_id, qui pilote le reversement
+    //     stock à la complétion). Aucune sortie_operation n'est seedée → sortie_id NOT NULL
+    //     rendait la saisie impossible. Tolère base neuve (table déjà créée plus haut).
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE operation_outputs ALTER COLUMN sortie_id DROP NOT NULL;
+      EXCEPTION WHEN undefined_table THEN NULL; WHEN undefined_column THEN NULL; END $$;
+    `);
+    // (b) operations_tri.is_active : permet la désactivation depuis l'admin référentiel
+    //     (symétrie avec chaines_tri / postes_operation / categories_sortantes).
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE operations_tri ADD COLUMN is_active BOOLEAN DEFAULT true;
+      EXCEPTION WHEN duplicate_column THEN NULL; WHEN undefined_table THEN NULL; END $$;
+    `);
+    // (c) index FK/lecture pour la liste des exécutions du jour et le détail.
+    await client.query(`
+      DO $$ BEGIN
+        CREATE INDEX IF NOT EXISTS idx_operation_executions_batch ON operation_executions(batch_id);
+        CREATE INDEX IF NOT EXISTS idx_operation_executions_started ON operation_executions(started_at);
+        CREATE INDEX IF NOT EXISTS idx_operation_outputs_execution ON operation_outputs(execution_id);
+      EXCEPTION WHEN undefined_table THEN NULL; WHEN undefined_column THEN NULL; END $$;
     `);
     await client.query(`
       DO $$ BEGIN
@@ -2508,6 +2564,11 @@ async function initDatabase() {
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS prescripteur VARCHAR(100);
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
     `);
+    // Vague 2 (item 61b) — CIP référent : rattache un salarié à un conseiller
+    // (utilisateur RH/ADMIN). Permet le filtre « mes salariés » sur le tableau de
+    // bord CIP. users existe déjà (créé plus haut) → FK sûre.
+    await client.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS cip_referent_user_id INTEGER REFERENCES users(id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_employees_cip_referent ON employees(cip_referent_user_id) WHERE cip_referent_user_id IS NOT NULL`);
 
     // V1.8+ : Champs étendus pour import Malibou (CSV 12 colonnes)
     await client.query(`
@@ -3789,7 +3850,13 @@ async function initDatabase() {
     // MODULE BOUTIQUES : performance retail 2nde main
     // ══════════════════════════════════════════
 
-    // Migration : étendre la CHECK constraint du rôle utilisateur pour inclure RESP_BTQ
+    // Migration rôles utilisateurs : la validation du rôle est faite au niveau
+    // APPLICATIF (rôles intégrés ∪ rôles personnalisés `custom_roles`, cf.
+    // users.isValidRole + middleware/auth.resolveBaseRole). On retire donc toute
+    // CHECK constraint résiduelle figée sur users.role : une liste en dur casserait
+    // à la fois les rôles personnalisés (clés CR_*) ET les rôles intégrés ajoutés
+    // ensuite (DPO / FINANCE / QHSE, vague 2). Idempotent + base-neuve safe (la
+    // table users existe déjà, créée en tête de ce script).
     try {
       const roleChecks = await client.query(`
         SELECT con.conname FROM pg_constraint con
@@ -3799,11 +3866,9 @@ async function initDatabase() {
       for (const row of roleChecks.rows) {
         await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS "${row.conname}"`);
       }
-      await client.query(`
-        ALTER TABLE users ADD CONSTRAINT users_role_check
-          CHECK (role IN ('ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ'));
-      `);
-      console.log('[INIT-DB] Migration rôle RESP_BTQ ajouté ✓');
+      // Colonne élargie pour accueillir les clés de rôles personnalisés.
+      await client.query(`ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(50)`).catch(() => {});
+      console.log('[INIT-DB] Migration users.role : validation applicative (aucune CHECK figée) ✓');
     } catch (e) {
       console.warn('[INIT-DB] Migration users_role_check:', e.message);
     }
@@ -3836,6 +3901,24 @@ async function initDatabase() {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+
+    // Cloisonnement RESP_BTQ (audit 2026-07-11, item 55a) : affectation
+    // explicite d'un utilisateur (typiquement RESP_BTQ) à une ou plusieurs
+    // boutiques. Un RESP_BTQ ne voit/gère que les boutiques de son périmètre
+    // (union avec le lien historique boutiques.responsable_id). ADMIN/MANAGER
+    // ne sont jamais cloisonnés. Référence users + boutiques déjà créées.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_boutiques (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        boutique_id INTEGER NOT NULL REFERENCES boutiques(id) ON DELETE CASCADE,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (user_id, boutique_id)
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_user_boutiques_user ON user_boutiques(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_user_boutiques_boutique ON user_boutiques(boutique_id)');
 
     // Table 2 : boutique_import_batches (traçabilité imports CSV)
     await client.query(`
@@ -4248,6 +4331,16 @@ async function initDatabase() {
         ('tri',       'productivite_tri',       'Productivité tri',          600,  null, 'kg/pers/j',   'warning', 'Cible productivité historique.'),
         ('boutique',  'ca_boutique_mois',       'CA boutiques mois',         5000, null, '€',           'warning', 'À calibrer selon objectifs.'),
         ('insertion', 'sorties_positives_12m',  'Sorties positives 12 mois', 55,   null, '%',           'warning', 'Cible IAE >55%.')
+      ON CONFLICT (indicateur) DO NOTHING;
+    `);
+    // Vague 2 (item 60c) — seuil de saturation stock par matière (alertes
+    // consolidées « boîte du directeur »). Désactivé par défaut (actif=false) :
+    // aucune alerte tant que l'admin n'a pas calibré le seuil selon la capacité
+    // de l'entrepôt et activé le seuil depuis /admin-alert-thresholds.
+    await client.query(`
+      INSERT INTO alert_thresholds (domaine, indicateur, libelle, seuil_min, seuil_max, unite, severite, actif, notes)
+      VALUES ('stock', 'stock_matiere_max', 'Saturation stock par matière', null, 10000, 'kg', 'warning', false,
+              'Alerte le tableau de bord si le stock d''une matière dépasse ce seuil. À calibrer selon la capacité de l''entrepôt, puis activer.')
       ON CONFLICT (indicateur) DO NOTHING;
     `);
     console.log('[INIT-DB] Alert thresholds Dashboard exécutif ✓');
@@ -4719,6 +4812,103 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_state_audit_machine ON state_transitions_audit(machine, created_at DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_state_audit_user ON state_transitions_audit(user_id);');
     console.log('[INIT-DB] Audit state-machine ✓');
+
+    // ══════════════════════════════════════════
+    // MODULE QHSE (Qualité-Hygiène-Sécurité-Environnement) — Vague 2, item 58 (A4)
+    //
+    // Module minimal intégré (arbitrage A4) pour le responsable QHSE :
+    //   (a) registre des accidents / presqu'accidents (+ taux de fréquence TF /
+    //       taux de gravité TG)
+    //   (b) habilitations à échéance (CACES, SST, habilitation électrique, permis)
+    //   (c) dotation EPI
+    // Publics : ADMIN, MANAGER, rôle QHSE. Données de santé MINIMISÉES :
+    // description factuelle des faits uniquement, AUCUN diagnostic médical.
+    // Tables créées après users/employees (FK) et rgpd_registre (seed ci-dessous).
+    // ══════════════════════════════════════════
+
+    // (a) Registre accidents / presqu'accidents
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS qhse_events (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(30) NOT NULL CHECK (type IN ('accident_travail','accident_trajet','presqu_accident','soin_benin')),
+        employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+        date_event DATE NOT NULL,
+        lieu VARCHAR(20) NOT NULL DEFAULT 'autre' CHECK (lieu IN ('tri','collecte','boutique','autre')),
+        description TEXT,
+        gravite VARCHAR(20) CHECK (gravite IN ('mineure','moderee','grave','critique')),
+        jours_arret INTEGER NOT NULL DEFAULT 0,
+        avec_arret BOOLEAN NOT NULL DEFAULT false,
+        mesures_prises TEXT,
+        statut VARCHAR(20) NOT NULL DEFAULT 'declare' CHECK (statut IN ('declare','analyse','clos')),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_events_date ON qhse_events(date_event);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_events_statut ON qhse_events(statut);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_events_employee ON qhse_events(employee_id);');
+
+    // (b) Habilitations à échéance (statut calculé au vol depuis date_expiration ;
+    //     la table QHSE devient la source de vérité DATÉE des CACES/permis, et
+    //     synchronise employees.has_caces / has_permis_b qui pilotent le planning).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS qhse_habilitations (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        type VARCHAR(30) NOT NULL CHECK (type IN ('caces_1','caces_3','caces_5','sst','habilitation_electrique','permis','autre')),
+        libelle VARCHAR(150),
+        date_obtention DATE,
+        date_expiration DATE,
+        organisme VARCHAR(150),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_hab_employee ON qhse_habilitations(employee_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_hab_expiration ON qhse_habilitations(date_expiration);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_hab_type ON qhse_habilitations(type);');
+
+    // (c) Dotation EPI
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS qhse_epi_dotations (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        type_epi VARCHAR(30) NOT NULL CHECK (type_epi IN ('chaussures','gants','gilet_hv','casque_antibruit','autre')),
+        taille VARCHAR(30),
+        date_dotation DATE NOT NULL,
+        date_peremption DATE,
+        quantite INTEGER NOT NULL DEFAULT 1,
+        remarque TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_epi_employee ON qhse_epi_dotations(employee_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_epi_peremption ON qhse_epi_dotations(date_peremption);');
+
+    // Registre RGPD — traitement QHSE (idempotent via WHERE NOT EXISTS).
+    // rgpd_registre n'a pas de mécanisme de seed dédié ; on inscrit ici le
+    // traitement QHSE (données de sécurité, sans diagnostic médical) pour la
+    // conformité art. 30 RGPD (registre des activités de traitement).
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Suivi QHSE (accidents, habilitations, EPI)',
+        'Prévention des risques professionnels : registre des accidents du travail et presqu''accidents, suivi des habilitations à échéance (CACES, SST, habilitation électrique, permis), dotation des équipements de protection individuelle.',
+        'Obligation légale (Code du travail, art. L4121-1 et suivants)',
+        'Salariés (y compris salariés en parcours d''insertion)',
+        'Identité, faits d''accident (description factuelle, sans diagnostic médical), jours d''arrêt de travail, habilitations et dates de validité, dotations EPI',
+        'Responsable QHSE, direction, service RH',
+        'Registre de sécurité : 5 ans ; habilitations / EPI : durée du contrat + archivage légal',
+        'Accès restreint aux rôles ADMIN/MANAGER/QHSE, journalisation applicative, minimisation (aucun diagnostic médical stocké)'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Suivi QHSE (accidents, habilitations, EPI)'
+      );
+    `);
+    console.log('[INIT-DB] Module QHSE (accidents, habilitations, EPI) + registre RGPD ✓');
 
     // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL

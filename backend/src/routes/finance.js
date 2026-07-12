@@ -8,7 +8,17 @@ const ExcelJS = require('exceljs');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 const { autoLogActivity } = require('../middleware/activity-logger');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate);
+// Vague 2 (item 54) — rôle FINANCE en LECTURE SEULE : consultation par la
+// direction / le CA. Toute méthode GET est ouverte à ADMIN/MANAGER/FINANCE ;
+// les écritures (POST/PUT imports, budget, opérations, réglages) restent
+// réservées à ADMIN/MANAGER. Filtrage par méthode → fail-safe : une nouvelle
+// route non-GET est automatiquement fermée à FINANCE (jamais d'écriture pour un
+// rôle de consultation).
+router.use((req, res, next) => {
+  const roles = req.method === 'GET' ? ['ADMIN', 'MANAGER', 'FINANCE'] : ['ADMIN', 'MANAGER'];
+  return authorize(...roles)(req, res, next);
+});
 router.use(autoLogActivity('finance'));
 
 // ══════════════════════════════════════════

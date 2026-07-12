@@ -4,7 +4,7 @@ import Layout from '../components/Layout';
 import { DataTable, StatusBadge, LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
-const ROLE_LABELS = { ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines', COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité', RESP_BTQ: 'Responsable Boutique' };
+const ROLE_LABELS = { ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines', COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité', RESP_BTQ: 'Responsable Boutique', DPO: 'DPO (protection des données)', FINANCE: 'Finance (consultation)', QHSE: 'QHSE' };
 
 const BUILTIN_ROLE_OPTIONS = Object.entries(ROLE_LABELS).map(([key, label]) => ({ key, label, builtin: true }));
 

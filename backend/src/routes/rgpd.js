@@ -13,7 +13,7 @@ router.use(authenticate);
 // ══════════════════════════════════════════
 
 // GET /api/rgpd/registre — Registre des traitements de données
-router.get('/registre', authorize('ADMIN'), async (req, res) => {
+router.get('/registre', authorize('ADMIN', 'DPO'), async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM rgpd_registre ORDER BY id');
     res.json(result.rows);
@@ -24,7 +24,7 @@ router.get('/registre', authorize('ADMIN'), async (req, res) => {
 });
 
 // POST /api/rgpd/registre — Ajouter un traitement
-router.post('/registre', authorize('ADMIN'), [
+router.post('/registre', authorize('ADMIN', 'DPO'), [
   body('nom_traitement').notEmpty().withMessage('Nom du traitement requis'),
   body('finalite').notEmpty().withMessage('Finalité requise'),
   body('base_legale').notEmpty().withMessage('Base légale requise'),
@@ -59,7 +59,7 @@ router.post('/registre', authorize('ADMIN'), [
 // ══════════════════════════════════════════
 
 // GET /api/rgpd/export/:type/:id — Exporter toutes les données d'une personne
-router.get('/export/:type/:id', authorize('ADMIN', 'RH'), async (req, res) => {
+router.get('/export/:type/:id', authorize('ADMIN', 'RH', 'DPO'), async (req, res) => {
   try {
     const { type, id } = req.params;
     let data = {};
@@ -99,7 +99,7 @@ router.get('/export/:type/:id', authorize('ADMIN', 'RH'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // POST /api/rgpd/anonymize/:type/:id — Anonymiser les données personnelles
-router.post('/anonymize/:type/:id', authorize('ADMIN'), [
+router.post('/anonymize/:type/:id', authorize('ADMIN', 'DPO'), [
   body('reason').notEmpty().withMessage('Motif d\'anonymisation requis'),
 ], validate, async (req, res) => {
   try {
@@ -156,7 +156,7 @@ router.post('/anonymize/:type/:id', authorize('ADMIN'), [
 // ══════════════════════════════════════════
 
 // GET /api/rgpd/consent/:type/:id — Voir les consentements
-router.get('/consent/:type/:id', authorize('ADMIN', 'RH'), async (req, res) => {
+router.get('/consent/:type/:id', authorize('ADMIN', 'RH', 'DPO'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT * FROM rgpd_consents WHERE entity_type = $1 AND entity_id = $2 ORDER BY created_at DESC',
@@ -170,7 +170,7 @@ router.get('/consent/:type/:id', authorize('ADMIN', 'RH'), async (req, res) => {
 });
 
 // POST /api/rgpd/consent — Enregistrer un consentement
-router.post('/consent', authorize('ADMIN', 'RH'), [
+router.post('/consent', authorize('ADMIN', 'RH', 'DPO'), [
   body('entity_type').notEmpty().withMessage('Type d\'entité requis'),
   body('entity_id').isInt().withMessage('ID entité requis'),
   body('consent_type').notEmpty().withMessage('Type de consentement requis'),
@@ -206,7 +206,7 @@ router.post('/consent', authorize('ADMIN', 'RH'), [
 // ══════════════════════════════════════════
 
 // GET /api/rgpd/audit — Journal des actions RGPD
-router.get('/audit', authorize('ADMIN'), async (req, res) => {
+router.get('/audit', authorize('ADMIN', 'DPO'), async (req, res) => {
   try {
     const { limit: lim, offset: off, action, entity_type } = req.query;
     let query = `SELECT a.*, u.first_name, u.last_name FROM rgpd_audit_log a
@@ -232,7 +232,7 @@ router.get('/audit', authorize('ADMIN'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // POST /api/rgpd/purge-expired — Anonymiser les données expirées
-router.post('/purge-expired', authorize('ADMIN'), async (req, res) => {
+router.post('/purge-expired', authorize('ADMIN', 'DPO'), async (req, res) => {
   try {
     // Candidats non recrutés > 24 mois (durée légale de conservation)
     const expired = await pool.query(

@@ -637,6 +637,25 @@ function exportFicheParcoursPDF(analysis, diagnostic) {
 
   const presc = e.prescripteur_nom ? esc(e.prescripteur_nom) + (e.prescripteur_type ? ' (' + esc(e.prescripteur_type) + ')' : '') : (e.prescripteur ? esc(e.prescripteur) : '—');
 
+  // Plan d'action en cours (item 61d) : actions non soldées (à faire / en cours),
+  // avec leur échéance et leur statut.
+  const PRIO_HEX = { haute: '#dc2626', moyenne: '#d97706', basse: '#6b7280' };
+  const actionsEnCours = (analysis.action_plans || []).filter((a) => a.status === 'a_faire' || a.status === 'en_cours');
+  const actionsRows = actionsEnCours.map((a) =>
+    '<tr><td>' + esc(a.action_label) + '</td>'
+    + '<td>' + esc(ACTION_CATEGORIES[a.category] || a.category || '—') + '</td>'
+    + '<td><span class="badge" style="background:' + (PRIO_HEX[a.priority] || '#6b7280') + '">' + esc(a.priority || '—') + '</span></td>'
+    + '<td>' + esc(ACTION_STATUS[a.status] || a.status || '—') + '</td>'
+    + '<td>' + frDate(a.echeance) + '</td></tr>'
+  ).join('');
+  const actionsSection = '<div class="section"><div class="section-title">Plan d\'action en cours</div>'
+    + (actionsEnCours.length
+      ? '<table><thead><tr><th>Action</th><th>Catégorie</th><th>Priorité</th><th>Statut</th><th>Échéance</th></tr></thead><tbody>' + actionsRows + '</tbody></table>'
+      : '<div class="card">Aucune action en cours.</div>')
+    + '</div>';
+
+  const cipRef = e.cip_referent_nom ? esc(e.cip_referent_nom) : '—';
+
   const body =
     '<div class="header"><div><h1>SOLIDATA — Fiche parcours d\'insertion</h1>'
     + '<div class="sub">' + esc(nom) + ' — édité le ' + today + '</div></div>'
@@ -644,10 +663,11 @@ function exportFicheParcoursPDF(analysis, diagnostic) {
     + '<div class="section"><div class="section-title">Situation</div><div class="card">'
     + '<strong>Poste :</strong> ' + esc(e.position || '—') + '   <strong>Équipe :</strong> ' + esc(e.team_name || '—') + '\n'
     + '<strong>Début de parcours :</strong> ' + frDate(e.insertion_start_date) + '   <strong>Fin de contrat :</strong> ' + frDate(e.contract_end) + '\n'
-    + '<strong>Prescripteur / orienteur :</strong> ' + presc + '</div></div>'
+    + '<strong>Prescripteur / orienteur :</strong> ' + presc + '   <strong>CIP référent :</strong> ' + cipRef + '</div></div>'
     + '<div class="section"><div class="section-title">Diagnostic — parcours antérieur</div><div class="card">' + esc((diagnostic && diagnostic.parcours_anterieur) || '—') + '</div></div>'
     + '<div class="section"><div class="section-title">Freins périphériques</div><table><thead><tr><th>Frein</th><th>Niveau</th><th>Observations</th></tr></thead><tbody>' + freinsRows + '</tbody></table></div>'
     + '<div class="section"><div class="section-title">Jalons du parcours</div><table><thead><tr><th>Jalon</th><th>Statut</th><th>Échéance</th><th>Réalisé le</th></tr></thead><tbody>' + jalonsRows + '</tbody></table></div>'
+    + actionsSection
     + '<div class="footer">SOLIDATA ERP — Document confidentiel (RGPD) — ' + today + '</div>';
 
   openPrintWindow('Parcours_' + (e.last_name || e.id), body);
@@ -701,12 +721,54 @@ function DashCard({ label, value, tone, sub }) {
   );
 }
 
+// Barre réalisé vs objectif conventionné (item 61c) : jauge 0-100 % avec repère
+// vertical sur la cible DREETS. Vert si atteint, ambre si proche, rouge sinon.
+function ObjectifBar({ realise, objectif }) {
+  if (objectif == null) {
+    return (
+      <p className="text-xs text-gray-500">
+        Aucun objectif conventionné défini.{realise != null ? ` Réalisé : ${realise} %.` : ''}
+      </p>
+    );
+  }
+  const r = realise == null ? 0 : realise;
+  const atteint = realise != null && realise >= objectif;
+  const proche = realise != null && !atteint && realise >= objectif * 0.8;
+  const barColor = atteint ? 'bg-green-500' : proche ? 'bg-amber-500' : 'bg-red-500';
+  return (
+    <div>
+      <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
+        <div className={`h-4 ${barColor} rounded-full transition-all`} style={{ width: `${Math.min(100, r)}%` }} />
+        <div className="absolute top-0 bottom-0 w-0.5 bg-slate-800" style={{ left: `${Math.min(100, objectif)}%` }} title={`Objectif ${objectif} %`} />
+      </div>
+      <div className="flex items-center justify-between mt-1 text-xs">
+        <span className={atteint ? 'text-green-700 font-medium' : 'text-gray-600'}>
+          {realise != null ? `${realise} % réalisé` : 'Aucune sortie cette année'}
+        </span>
+        <span className="text-slate-700 font-medium">Objectif : {objectif} %</span>
+      </div>
+      {realise != null && (
+        <p className={`text-xs mt-0.5 ${atteint ? 'text-green-600' : 'text-amber-600'}`}>
+          {atteint ? '✓ Objectif conventionné atteint' : `${Math.max(0, Math.round(objectif - realise))} pt(s) sous l'objectif`}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function CohortePanel({ onSelect }) {
   const { user } = useAuth();
   const canExport = ['ADMIN', 'RH'].includes(user?.base_role || user?.role);
+  const canEditObjectif = canExport; // ADMIN/RH
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [mine, setMine] = useState(false); // filtre « mes salariés » (item 61b)
+  // Édition de l'objectif conventionné de sorties dynamiques (item 61c)
+  const [objEditing, setObjEditing] = useState(false);
+  const [objInput, setObjInput] = useState('');
+  const [objSaving, setObjSaving] = useState(false);
+  const [objError, setObjError] = useState(null);
   const [ia, setIa] = useState(null);
   const [iaLoading, setIaLoading] = useState(false);
   const [iaError, setIaError] = useState(null);
@@ -776,15 +838,30 @@ function CohortePanel({ onSelect }) {
     }
   };
 
-  useEffect(() => {
+  const loadStats = useCallback(() => {
     let alive = true;
     setLoading(true);
-    api.get('/insertion/cohorte/stats')
+    api.get(`/insertion/cohorte/stats${mine ? '?mine=1' : ''}`)
       .then((r) => { if (alive) { setStats(r.data); setError(null); } })
       .catch((err) => { if (alive) setError(err.response?.data?.error || err.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, []);
+  }, [mine]);
+
+  useEffect(() => loadStats(), [loadStats]);
+
+  const saveObjectif = async () => {
+    setObjSaving(true); setObjError(null);
+    try {
+      const val = objInput.trim() === '' ? null : parseFloat(objInput);
+      await api.put('/insertion/objectif-sorties', { objectif: val });
+      setObjEditing(false);
+      loadStats();
+    } catch (err) {
+      setObjError(err.response?.data?.error || err.message || "Erreur d'enregistrement");
+    }
+    setObjSaving(false);
+  };
 
   const runIaCohorte = async () => {
     setIaLoading(true); setIaError(null);
@@ -810,7 +887,13 @@ function CohortePanel({ onSelect }) {
     <div className="space-y-4">
       <div className="bg-white rounded-lg border p-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-gray-800">Tableau de bord CIP — pilotage de la cohorte</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="font-semibold text-gray-800">Tableau de bord CIP — pilotage de la cohorte</h3>
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none whitespace-nowrap" title="N'afficher que les salariés dont je suis le CIP référent">
+              <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} className="rounded border-gray-300" />
+              Mes salariés
+            </label>
+          </div>
           <div className="flex items-center gap-2">
             {canExport && (
               <div className="flex items-center gap-1.5">
@@ -859,6 +942,32 @@ function CohortePanel({ onSelect }) {
           <DashCard label="À venir (7 j)" value={stats.nb_jalons_a_venir} tone={stats.nb_jalons_a_venir ? 'amber' : 'slate'} />
           <DashCard label={`Sorties dynamiques ${stats.annee}`} value={s.taux_dynamiques != null ? s.taux_dynamiques + '%' : '—'} tone="green" sub={`${s.positives || 0}/${s.total || 0} sorties`} />
         </div>
+
+        {/* Objectif conventionné DREETS — réalisé vs cible (item 61c) */}
+        <div className="mt-3 rounded-lg border border-slate-200 p-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-semibold text-slate-600">Sorties dynamiques {stats.annee} — réalisé vs objectif conventionné</span>
+            {canEditObjectif && !objEditing && (
+              <button onClick={() => { setObjEditing(true); setObjError(null); setObjInput(stats.objectif_sorties_dynamiques != null ? String(stats.objectif_sorties_dynamiques) : ''); }}
+                className="text-xs text-teal-700 hover:underline">
+                {stats.objectif_sorties_dynamiques != null ? "Modifier l'objectif" : "Définir l'objectif"}
+              </button>
+            )}
+          </div>
+          {objEditing ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <input type="number" min="0" max="100" step="1" value={objInput} onChange={(e) => setObjInput(e.target.value)}
+                placeholder="% cible" className="input-modern py-1 w-28" />
+              <span className="text-xs text-gray-500">% de sorties dynamiques</span>
+              <button onClick={saveObjectif} disabled={objSaving} className="px-2 py-1 rounded bg-teal-600 text-white text-xs disabled:opacity-50">{objSaving ? '…' : 'Enregistrer'}</button>
+              <button onClick={() => { setObjEditing(false); setObjError(null); }} className="px-2 py-1 text-xs text-gray-500">Annuler</button>
+              {objError && <span className="text-xs text-red-600 w-full">{objError}</span>}
+            </div>
+          ) : (
+            <ObjectifBar realise={s.taux_dynamiques} objectif={stats.objectif_sorties_dynamiques} />
+          )}
+        </div>
+
         {iaError && <div className="mt-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{iaError}</div>}
         {ia && (
           <div className="mt-3 bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-2">
@@ -876,6 +985,27 @@ function CohortePanel({ onSelect }) {
             )}
           </div>
         )}
+      </div>
+
+      {/* Mes prochains entretiens — agenda chronologique 30 j (item 61a) */}
+      <div className="bg-white rounded-lg border p-4">
+        <h4 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-teal-500" /> {mine ? 'Mes prochains entretiens' : 'Prochains entretiens'} (30 j)
+        </h4>
+        {stats.agenda_30j?.length ? (
+          <div className="space-y-1 max-h-72 overflow-y-auto">
+            {stats.agenda_30j.map((j) => (
+              <button key={j.id} onClick={() => onSelect(j.employee_id)}
+                className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-teal-50 text-sm">
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="text-xs text-gray-400 w-14 flex-shrink-0">{frDate(j.due_date)}</span>
+                  <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{j.milestone_type}</span></span>
+                </span>
+                <span className="text-xs text-teal-700 font-medium flex-shrink-0">{j.days_until === 0 ? "aujourd'hui" : `J-${j.days_until}`}</span>
+              </button>
+            ))}
+          </div>
+        ) : <p className="text-sm text-gray-400 py-2">Aucun entretien prévu dans les 30 jours.</p>}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -973,6 +1103,9 @@ function CohortePanel({ onSelect }) {
 }
 
 export default function InsertionParcours() {
+  const { user } = useAuth();
+  const canEditReferent = ['ADMIN', 'RH'].includes(user?.base_role || user?.role);
+  const [referents, setReferents] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [analysis, setAnalysis] = useState(null);
@@ -1010,7 +1143,20 @@ export default function InsertionParcours() {
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
   useEffect(() => {
     api.get('/insertion/freins-definitions').then(r => setFreinsDefinitions(r.data)).catch((err) => console.error('[Insertion] freins-definitions indisponible:', err));
+    api.get('/insertion/cip-referents').then(r => setReferents(Array.isArray(r.data) ? r.data : [])).catch((err) => console.error('[Insertion] cip-referents indisponible:', err));
   }, []);
+
+  // Affecte / retire le CIP référent du salarié courant (ADMIN/RH).
+  const saveReferent = async (userId) => {
+    if (!selectedEmployee) return;
+    setPanelError(null);
+    try {
+      const res = await api.put(`/insertion/${selectedEmployee.id}/cip-referent`, { user_id: userId || null });
+      setAnalysis((a) => a ? { ...a, employee: { ...a.employee, cip_referent_user_id: res.data.cip_referent_user_id, cip_referent_nom: res.data.cip_referent_nom } } : a);
+    } catch (err) {
+      setPanelError(err.response?.data?.error || err.message || 'Erreur lors de la mise à jour du référent');
+    }
+  };
 
   // Garde-fou : prévient la perte de saisie non enregistrée (diagnostic ou bilan).
   const confirmLeave = () => ((!diagDirty && !bilanDirty) || window.confirm('Des modifications ne sont pas enregistrées. Continuer sans les enregistrer ?'));
@@ -1156,6 +1302,24 @@ export default function InsertionParcours() {
                           {analysis.employee.prescripteur_type ? ` (${analysis.employee.prescripteur_type})` : ''}
                         </span>
                       )}
+                      {/* CIP référent (item 61b) — éditable ADMIN/RH, sinon badge lecture */}
+                      {canEditReferent ? (
+                        <label className="text-xs px-2 py-0.5 rounded bg-teal-50 text-teal-700 flex items-center gap-1" title="CIP référent de ce salarié">
+                          CIP référent :
+                          <select
+                            value={analysis.employee.cip_referent_user_id || ''}
+                            onChange={(e) => saveReferent(e.target.value ? parseInt(e.target.value, 10) : null)}
+                            className="bg-transparent text-teal-800 text-xs outline-none cursor-pointer"
+                          >
+                            <option value="">— non affecté —</option>
+                            {referents.map((rf) => (
+                              <option key={rf.id} value={rf.id}>{rf.first_name} {rf.last_name}</option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : analysis.employee.cip_referent_nom ? (
+                        <span className="text-xs px-2 py-0.5 rounded bg-teal-50 text-teal-700">CIP référent : {analysis.employee.cip_referent_nom}</span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex flex-col gap-2">

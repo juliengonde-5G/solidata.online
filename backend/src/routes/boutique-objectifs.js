@@ -4,8 +4,12 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const {
+  attachBoutiqueScope, enforceBoutiqueParam, boutiqueScopeSql,
+} = require('../middleware/boutique-scope');
 
 router.use(authenticate);
+router.use(attachBoutiqueScope);
 
 // GET /api/boutique-objectifs?boutique_id=X&annee=Y
 router.get('/', async (req, res) => {
@@ -13,7 +17,11 @@ router.get('/', async (req, res) => {
     const { boutique_id, annee, segment } = req.query;
     let query = 'SELECT * FROM boutique_objectifs WHERE 1=1';
     const params = [];
-    if (boutique_id) { params.push(boutique_id); query += ` AND boutique_id = $${params.length}`; }
+    if (boutique_id) {
+      if (!enforceBoutiqueParam(req, res, boutique_id)) return;
+      params.push(boutique_id); query += ` AND boutique_id = $${params.length}`;
+    }
+    query += boutiqueScopeSql(req, 'boutique_id', params);
     if (annee) { params.push(annee); query += ` AND annee = $${params.length}`; }
     if (segment) { params.push(segment); query += ` AND segment = $${params.length}`; }
     query += ' ORDER BY annee, mois, segment';
@@ -30,6 +38,7 @@ router.get('/compare', async (req, res) => {
   try {
     const { boutique_id, annee } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const year = annee || new Date().getFullYear();
 
     const objs = await pool.query(

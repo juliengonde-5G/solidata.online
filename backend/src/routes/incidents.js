@@ -56,7 +56,12 @@ function planIncidentTransition(currentStatus, nextStatus, note) {
 }
 
 router.use(authenticate);
-router.use(authorize('ADMIN', 'MANAGER'));
+// Vague 2 (item 54) — le rôle QHSE pilote le suivi des incidents/accidents :
+// lecture (liste + stats) ET résolution (PATCH de statut). Il rejoint donc les
+// ADMIN/MANAGER sur tout le routeur. NB : le délai d'intervention AGRÉGÉ et non
+// nominatif destiné à l'auditeur Métropole est exposé séparément côté
+// routes/metropole.js (le rôle AUTORITE n'accède jamais à la liste nominative ici).
+router.use(authorize('ADMIN', 'MANAGER', 'QHSE'));
 
 // GET /api/incidents — Liste transverse filtrable
 // Filtres : status, type, tour_id, vehicle_id, cav_id, from, to (created_at)
@@ -102,7 +107,10 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/incidents/stats — Compteurs par statut (bandeau de pilotage)
+// GET /api/incidents/stats — Compteurs par statut (bandeau de pilotage) +
+// délai moyen d'intervention (création → résolution). Le délai (item 53c,
+// persona QHSE §3 + auditeur Métropole 2.3) alimente le suivi QHSE. Il est
+// mesuré sur les incidents effectivement résolus (resolved_at renseigné).
 router.get('/stats', async (req, res) => {
   try {
     const r = await pool.query(
@@ -113,6 +121,19 @@ router.get('/stats', async (req, res) => {
       if (stats[row.status] !== undefined) stats[row.status] = row.count;
       stats.total += row.count;
     }
+
+    // Délai moyen d'intervention (jours) sur les incidents résolus.
+    const delai = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE resolved_at IS NOT NULL)::int AS resolus,
+         ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 86400.0)
+               FILTER (WHERE resolved_at IS NOT NULL)::numeric, 1) AS delai_moyen_jours
+       FROM incidents`
+    );
+    stats.resolus = delai.rows[0]?.resolus || 0;
+    stats.delai_moyen_jours = delai.rows[0]?.delai_moyen_jours != null
+      ? Number(delai.rows[0].delai_moyen_jours) : null;
+
     res.json(stats);
   } catch (err) {
     console.error('[INCIDENTS] Erreur stats :', err);

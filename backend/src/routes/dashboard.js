@@ -646,7 +646,7 @@ router.get('/executive', authorize('ADMIN', 'MANAGER'), cacheMiddleware(dashboar
 
     res.json({
       asOf: new Date().toISOString(),
-      periode: { mois: monthStart, jour: today, trimestre, jourMois: dayOfMonth },
+      periode: { mois: monthStart, jour: today, trimestre, jourMois: dayOfMonth, veille: lastBusinessDay().toISOString().slice(0, 10) },
       kpis: [
         {
           id: 'tonnage_collecte_mois',
@@ -735,4 +735,195 @@ router.get('/executive', authorize('ADMIN', 'MANAGER'), cacheMiddleware(dashboar
   }
 });
 
+// ══════════════════════════════════════════
+// Vague 2 (item 60a) — KPIs de la veille
+//
+// Le Dashboard s'ouvre sur « aujourd'hui » (souvent vide le matin). Cet endpoint
+// renvoie l'activité collecte + production pour une période au choix, avec pour
+// défaut « veille » = dernier jour ouvré (lundi → vendredi, samedi/dimanche → vendredi).
+// ══════════════════════════════════════════
+
+// Dernier jour ouvré (lun-ven) strictement avant `ref`. Utilisé comme défaut du
+// sélecteur « veille » : un lundi matin renvoie vendredi, pas dimanche.
+function lastBusinessDay(ref = new Date()) {
+  const d = new Date(ref);
+  d.setDate(d.getDate() - 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1); // 0 = dimanche, 6 = samedi
+  return d;
+}
+
+// Lundi de la semaine de `ref` (semaine ISO commençant lundi).
+function mondayOfWeek(ref = new Date()) {
+  const d = new Date(ref);
+  const dow = d.getDay();
+  d.setDate(d.getDate() - dow + (dow === 0 ? -6 : 1));
+  return d;
+}
+
+const activitePeriodeKey = (req) => {
+  const p = ['veille', 'jour', 'semaine'].includes(req.query.periode) ? req.query.periode : 'veille';
+  const minute = new Date().toISOString().slice(0, 16);
+  return `dashboard:activite:${p}:${minute}`;
+};
+
+// GET /api/dashboard/activite-periode?periode=veille|jour|semaine
+router.get('/activite-periode', cacheMiddleware(activitePeriodeKey, 60), async (req, res) => {
+  try {
+    const periode = ['veille', 'jour', 'semaine'].includes(req.query.periode) ? req.query.periode : 'veille';
+    const iso = (d) => d.toISOString().slice(0, 10);
+    let du, au, label;
+    if (periode === 'jour') {
+      const t = new Date();
+      du = au = iso(t); label = "Aujourd'hui";
+    } else if (periode === 'semaine') {
+      du = iso(mondayOfWeek()); au = iso(new Date()); label = 'Cette semaine';
+    } else {
+      const v = lastBusinessDay();
+      du = au = iso(v); label = 'Veille (dernier jour ouvré)';
+    }
+
+    const [collecte, production] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int AS nb_tournees,
+                COUNT(*) FILTER (WHERE status = 'completed')::int AS terminees,
+                COALESCE(SUM(total_weight_kg) FILTER (WHERE status = 'completed'), 0)::float AS poids_kg,
+                COALESCE(SUM(nb_cav) FILTER (WHERE status = 'completed'), 0)::int AS cav_visites
+         FROM tours WHERE date BETWEEN $1 AND $2`,
+        [du, au]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(total_jour_t) * 1000, 0)::float AS kg_trie
+         FROM production_daily WHERE date BETWEEN $1 AND $2`,
+        [du, au]
+      ).catch(() => ({ rows: [{ kg_trie: 0 }] })),
+    ]);
+
+    const c = collecte.rows[0];
+    res.json({
+      periode, du, au, label,
+      collecte: {
+        tonnage_kg: Math.round(c.poids_kg),
+        nb_tournees: c.nb_tournees,
+        tournees_terminees: c.terminees,
+        cav_visites: c.cav_visites,
+      },
+      production: {
+        kg_trie: Math.round(parseFloat(production.rows[0].kg_trie) || 0),
+      },
+    });
+  } catch (err) {
+    console.error('[DASHBOARD] Erreur activite-periode :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// Vague 2 (item 60b/c) — Alertes consolidées (boîte du directeur)
+//
+// Widget unique agrégeant les signaux qui sortent de la norme, chaque ligne
+// cliquable vers l'écran concerné. Résilient : une source en échec (table/colonne
+// absente sur base ancienne) ne casse pas le widget — elle est simplement omise.
+// Réservé ADMIN/MANAGER (cohérent avec /executive). Non nominatif : compteurs
+// + libellés, pas de liste de personnes (le détail se consulte sur l'écran cible).
+// ══════════════════════════════════════════
+router.get('/alertes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const alertes = [];
+  const soft = async (label, fn) => {
+    try { await fn(); }
+    catch (err) { console.error(`[DASHBOARD][ALERTES] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); }
+  };
+
+  // 1. Incidents ouverts
+  await soft('incidents', async () => {
+    const r = await pool.query(`SELECT COUNT(*)::int AS n FROM incidents WHERE status = 'open'`);
+    const n = r.rows[0].n;
+    if (n > 0) alertes.push({ categorie: 'incidents', severite: 'error', count: n, message: `${n} incident${n > 1 ? 's' : ''} ouvert${n > 1 ? 's' : ''}`, link: '/incidents' });
+  });
+
+  // 2. Alertes maintenance véhicules non résolues
+  await soft('maintenance', async () => {
+    const r = await pool.query(`SELECT COUNT(*)::int AS n FROM vehicle_maintenance_alerts WHERE COALESCE(is_resolved, false) = false`);
+    const n = r.rows[0].n;
+    if (n > 0) alertes.push({ categorie: 'maintenance', severite: 'warning', count: n, message: `${n} alerte${n > 1 ? 's' : ''} maintenance véhicule non résolue${n > 1 ? 's' : ''}`, link: '/vehicles' });
+  });
+
+  // 3. Jalons d'insertion en retard (salariés en parcours actifs)
+  await soft('jalons_insertion', async () => {
+    const r = await pool.query(`
+      SELECT COUNT(*)::int AS n
+      FROM insertion_milestones im
+      JOIN employees e ON e.id = im.employee_id
+      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+        AND im.status <> 'realise' AND im.due_date < CURRENT_DATE`);
+    const n = r.rows[0].n;
+    if (n > 0) alertes.push({ categorie: 'insertion', severite: 'warning', count: n, message: `${n} jalon${n > 1 ? 's' : ''} d'insertion en retard`, link: '/insertion' });
+  });
+
+  // 4. CAV pleins (seuil capteur). Surchargeable via alert_thresholds
+  // (indicateur 'cav_remplissage', seuil_max = % à partir duquel un CAV est « plein »).
+  await soft('cav_pleins', async () => {
+    let seuil = 80;
+    const th = await pool.query(`SELECT seuil_max FROM alert_thresholds WHERE indicateur = 'cav_remplissage' AND actif = true LIMIT 1`).catch(() => ({ rows: [] }));
+    if (th.rows[0]?.seuil_max != null) seuil = parseFloat(th.rows[0].seuil_max);
+    const r = await pool.query(`SELECT COUNT(*)::int AS n FROM cav WHERE status = 'active' AND avg_fill_rate >= $1`, [seuil]);
+    const n = r.rows[0].n;
+    if (n > 0) alertes.push({ categorie: 'cav_pleins', severite: 'warning', count: n, message: `${n} CAV plein${n > 1 ? 's' : ''} (≥ ${Math.round(seuil)} %)`, link: '/fill-rate' });
+  });
+
+  // 5. Contrats CDDI (salariés en parcours) finissant sous 60 jours
+  await soft('contrats_cddi', async () => {
+    const r = await pool.query(`
+      SELECT COUNT(*)::int AS n
+      FROM employees e
+      JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+        AND ec.end_date IS NOT NULL
+        AND ec.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days'`);
+    const n = r.rows[0].n;
+    if (n > 0) alertes.push({ categorie: 'contrats', severite: 'info', count: n, message: `${n} contrat${n > 1 ? 's' : ''} CDDI finiss${n > 1 ? 'ent' : 'e'} sous 60 j`, link: '/insertion' });
+  });
+
+  // 6. Saturation stock par matière (item 60c) — seuil configurable
+  // (alert_thresholds indicateur 'stock_matiere_max', seuil_max en kg). Désactivé
+  // par défaut : aucune alerte tant que l'admin ne l'a pas calibré et activé.
+  let seuilStock = null;
+  await soft('stock_matiere', async () => {
+    const th = await pool.query(`SELECT seuil_max FROM alert_thresholds WHERE indicateur = 'stock_matiere_max' AND actif = true LIMIT 1`);
+    if (th.rows[0]?.seuil_max == null) return;
+    seuilStock = parseFloat(th.rows[0].seuil_max);
+    const r = await pool.query(`
+      SELECT cs.nom,
+             COALESCE(SUM(CASE WHEN sm.type = 'entree' THEN sm.poids_kg ELSE -sm.poids_kg END), 0)::float AS stock_kg
+      FROM categories_sortantes cs
+      LEFT JOIN stock_movements sm ON sm.matiere_id = cs.id
+      GROUP BY cs.id, cs.nom
+      HAVING COALESCE(SUM(CASE WHEN sm.type = 'entree' THEN sm.poids_kg ELSE -sm.poids_kg END), 0) > $1
+      ORDER BY stock_kg DESC`, [seuilStock]);
+    if (r.rows.length > 0) {
+      alertes.push({
+        categorie: 'stock',
+        severite: 'warning',
+        count: r.rows.length,
+        message: `${r.rows.length} matière${r.rows.length > 1 ? 's' : ''} dépasse${r.rows.length > 1 ? 'nt' : ''} le seuil de stock (${Math.round(seuilStock)} kg)`,
+        details: r.rows.slice(0, 8).map((x) => `${x.nom} (${Math.round(x.stock_kg)} kg)`),
+        link: '/stock',
+      });
+    }
+  });
+
+  // Tri par sévérité décroissante (error > warning > info)
+  const rank = { error: 0, critical: 0, warning: 1, info: 2 };
+  alertes.sort((a, b) => (rank[a.severite] ?? 3) - (rank[b.severite] ?? 3));
+
+  res.json({
+    generated_at: new Date().toISOString(),
+    total: alertes.reduce((s, a) => s + (a.count || 0), 0),
+    seuil_stock_matiere: seuilStock,
+    alertes,
+  });
+});
+
 module.exports = router;
+// Exposés pour les tests (calcul de la « veille »). N'affecte pas le routeur.
+module.exports.lastBusinessDay = lastBusinessDay;
+module.exports.mondayOfWeek = mondayOfWeek;

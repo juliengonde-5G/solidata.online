@@ -28,11 +28,13 @@ export default function BoutiquesPlanning() {
   const [postes, setPostes] = useState([]);
   const [affectations, setAffectations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [accessError, setAccessError] = useState(null);
 
   useEffect(() => { load(); }, [weekStart]);
 
   async function load() {
     setLoading(true);
+    setAccessError(null);
     try {
       const [p, a] = await Promise.all([
         api.get('/planning-hebdo/postes'),
@@ -44,7 +46,14 @@ export default function BoutiquesPlanning() {
       // Filtrer uniquement les affectations BTQ
       setAffectations((a.data || []).filter(af => String(af.poste_code || '').toUpperCase().startsWith('BTQ_')));
     } catch (e) {
-      toast.error('Erreur chargement planning');
+      // Le planning hebdo est aujourd'hui réservé à ADMIN/MANAGER côté API :
+      // un responsable de boutique reçoit un 403. On l'affiche clairement plutôt
+      // qu'une erreur générique tant que l'accès lecture RESP_BTQ n'est pas ouvert.
+      if (e.response?.status === 403) {
+        setAccessError("Le planning hebdomadaire n'est pas encore accessible pour votre rôle. Contactez un administrateur pour consulter le planning de votre boutique.");
+      } else {
+        toast.error('Erreur chargement planning');
+      }
     }
     setLoading(false);
   }
@@ -91,6 +100,18 @@ export default function BoutiquesPlanning() {
           <UserCheck className="inline w-4 h-4 mr-1" />
           Vue en lecture seule. Pour affecter ou modifier, utilisez la page <a href="/planning-hebdo" className="underline font-medium">Planning Hebdo</a>.
         </div>
+
+        {accessError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 text-sm text-red-800">
+            {accessError}
+          </div>
+        )}
+
+        {!accessError && Object.keys(postesParBoutique).length === 0 && (
+          <div className="bg-white rounded-card shadow-card p-6 text-center text-slate-500 text-sm">
+            Aucun poste boutique planifié cette semaine.
+          </div>
+        )}
 
         {Object.entries(postesParBoutique).map(([btq, btqPostes]) => (
           <div key={btq} className="bg-white rounded-card shadow-card p-4 mb-4 overflow-x-auto">

@@ -9,6 +9,10 @@ const { autoLogActivity } = require('../middleware/activity-logger');
 router.use(authenticate);
 router.use(autoLogActivity('tri'));
 
+// Familles Refashion officielles (aligne le CHECK de categories_sortantes.famille_refashion,
+// cf. init-db.js). Les vues DPAV/cohérence de la vague 1 en dépendent → obligatoire à la saisie.
+const FAMILLES_REFASHION = ['reutilisation', 'recyclage', 'csr', 'elimination', 'retour'];
+
 // ══════ CHAÎNES DE TRI ══════
 
 // GET /api/tri/chaines
@@ -91,7 +95,48 @@ router.post('/chaines', authorize('ADMIN'), [
   }
 });
 
+// PUT /api/tri/chaines/:id — édition + activation/désactivation (pas de suppression dure)
+router.put('/chaines/:id', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
+  try {
+    const { nom, description, is_active } = req.body;
+    const result = await pool.query(
+      `UPDATE chaines_tri SET nom = $1, description = $2,
+              is_active = COALESCE($3, is_active)
+       WHERE id = $4 RETURNING *`,
+      [nom, description || null, typeof is_active === 'boolean' ? is_active : null, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Chaîne introuvable' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Une chaîne porte déjà ce nom' });
+    console.error('[TRI] Erreur mise à jour chaîne :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ══════ OPÉRATIONS ══════
+
+// GET /api/tri/operations?chaine_id= — liste des opérations (admin : inclut les inactives)
+router.get('/operations', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { chaine_id } = req.query;
+    const params = [];
+    let where = '';
+    if (chaine_id) { params.push(chaine_id); where = 'WHERE ot.chaine_id = $1'; }
+    const result = await pool.query(
+      `SELECT ot.*,
+              (SELECT COUNT(*) FROM postes_operation po WHERE po.operation_id = ot.id) AS nb_postes
+       FROM operations_tri ot ${where} ORDER BY ot.chaine_id, ot.numero`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TRI] Erreur liste opérations :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 // POST /api/tri/operations
 router.post('/operations', authorize('ADMIN', 'MANAGER'), [
@@ -107,12 +152,61 @@ router.post('/operations', authorize('ADMIN', 'MANAGER'), [
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Numéro ou code d’opération déjà utilisé' });
     console.error('[TRI] Erreur création opération :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
+// PUT /api/tri/operations/:id — édition + activation/désactivation
+router.put('/operations/:id', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
+  try {
+    const { numero, nom, code, est_obligatoire, description, is_active } = req.body;
+    const result = await pool.query(
+      `UPDATE operations_tri SET
+              numero = COALESCE($1, numero), nom = $2, code = COALESCE($3, code),
+              est_obligatoire = COALESCE($4, est_obligatoire),
+              description = $5, is_active = COALESCE($6, is_active)
+       WHERE id = $7 RETURNING *`,
+      [
+        (numero != null && numero !== '') ? parseInt(numero) : null,
+        nom, code || null,
+        typeof est_obligatoire === 'boolean' ? est_obligatoire : null,
+        description || null,
+        typeof is_active === 'boolean' ? is_active : null,
+        req.params.id,
+      ]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Opération introuvable' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Numéro ou code d’opération déjà utilisé' });
+    console.error('[TRI] Erreur mise à jour opération :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ══════ POSTES ══════
+
+// GET /api/tri/postes?operation_id= — liste des postes (admin : inclut les inactifs)
+router.get('/postes', authorize('ADMIN'), async (req, res) => {
+  try {
+    const { operation_id } = req.query;
+    const params = [];
+    let where = '';
+    if (operation_id) { params.push(operation_id); where = 'WHERE operation_id = $1'; }
+    const result = await pool.query(
+      `SELECT * FROM postes_operation ${where} ORDER BY operation_id, code`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TRI] Erreur liste postes :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 // POST /api/tri/postes
 router.post('/postes', authorize('ADMIN', 'MANAGER'), [
@@ -128,7 +222,40 @@ router.post('/postes', authorize('ADMIN', 'MANAGER'), [
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Code de poste déjà utilisé' });
     console.error('[TRI] Erreur création poste :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/tri/postes/:id — édition + activation/désactivation
+router.put('/postes/:id', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+], validate, async (req, res) => {
+  try {
+    const { nom, code, est_obligatoire, permet_doublure, competences_requises, is_active } = req.body;
+    const result = await pool.query(
+      `UPDATE postes_operation SET
+              nom = $1, code = COALESCE($2, code),
+              est_obligatoire = COALESCE($3, est_obligatoire),
+              permet_doublure = COALESCE($4, permet_doublure),
+              competences_requises = COALESCE($5, competences_requises),
+              is_active = COALESCE($6, is_active)
+       WHERE id = $7 RETURNING *`,
+      [
+        nom, code || null,
+        typeof est_obligatoire === 'boolean' ? est_obligatoire : null,
+        typeof permet_doublure === 'boolean' ? permet_doublure : null,
+        Array.isArray(competences_requises) ? competences_requises : null,
+        typeof is_active === 'boolean' ? is_active : null,
+        req.params.id,
+      ]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Poste introuvable' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Code de poste déjà utilisé' });
+    console.error('[TRI] Erreur mise à jour poste :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -172,6 +299,71 @@ router.get('/categories-sortantes', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('[TRI] Erreur catégories :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tri/admin/categories — toutes les catégories (ADMIN, inclut les inactives, triées par ordre)
+router.get('/admin/categories', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM categories_sortantes ORDER BY ordre NULLS LAST, nom');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TRI] Erreur catégories (admin) :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tri/categories-sortantes — création (famille_refashion obligatoire)
+router.post('/categories-sortantes', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+  body('famille').notEmpty().withMessage('Famille requise'),
+  body('famille_refashion').isIn(FAMILLES_REFASHION).withMessage('Famille Refashion invalide'),
+], validate, async (req, res) => {
+  try {
+    const { nom, famille, famille_refashion } = req.body;
+    const ordre = (req.body.ordre != null && req.body.ordre !== '') ? parseInt(req.body.ordre) : 100;
+    const result = await pool.query(
+      `INSERT INTO categories_sortantes (nom, famille, famille_refashion, ordre, is_active)
+       VALUES ($1, $2, $3, $4, true) RETURNING *`,
+      [nom, famille, famille_refashion, Number.isNaN(ordre) ? 100 : ordre]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Une catégorie porte déjà ce nom' });
+    console.error('[TRI] Erreur création catégorie :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/tri/categories-sortantes/:id — édition + activation/désactivation.
+// Pas de suppression dure : une catégorie peut être référencée par des mouvements
+// de stock/DPAV → on désactive via is_active (les vues DPAV restent cohérentes).
+router.put('/categories-sortantes/:id', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom requis'),
+  body('famille').notEmpty().withMessage('Famille requise'),
+  body('famille_refashion').isIn(FAMILLES_REFASHION).withMessage('Famille Refashion invalide'),
+], validate, async (req, res) => {
+  try {
+    const { nom, famille, famille_refashion, is_active } = req.body;
+    const ordre = (req.body.ordre != null && req.body.ordre !== '') ? parseInt(req.body.ordre) : null;
+    const result = await pool.query(
+      `UPDATE categories_sortantes SET
+              nom = $1, famille = $2, famille_refashion = $3,
+              ordre = COALESCE($4, ordre), is_active = COALESCE($5, is_active)
+       WHERE id = $6 RETURNING *`,
+      [
+        nom, famille, famille_refashion,
+        (ordre != null && !Number.isNaN(ordre)) ? ordre : null,
+        typeof is_active === 'boolean' ? is_active : null,
+        req.params.id,
+      ]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Catégorie introuvable' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Une catégorie porte déjà ce nom' });
+    console.error('[TRI] Erreur mise à jour catégorie :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -289,25 +481,114 @@ router.put('/batches/:id/start', authorize('ADMIN', 'MANAGER'), async (req, res)
 
 // ══════ EXÉCUTIONS D'OPÉRATIONS ══════
 
-// POST /api/tri/executions — Démarrer une opération sur un lot
+// GET /api/tri/executions?date=YYYY-MM-DD — exécutions du jour (défaut : aujourd'hui).
+// Alimente la page atelier « Saisie d'exécution » (liste en cours / terminées).
+router.get('/executions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const date = req.query.date || null; // null → CURRENT_DATE
+    const result = await pool.query(
+      `SELECT oe.id, oe.batch_id, oe.operation_id, oe.status, oe.poids_entree_kg,
+              oe.poids_sortie_total_kg, oe.perte_kg, oe.started_at, oe.completed_at, oe.notes,
+              bt.code AS batch_code, bt.chaine_id, ct.nom AS chaine_nom,
+              ot.nom AS operation_nom, ot.code AS operation_code, ot.numero,
+              COALESCE((SELECT SUM(oo.poids_kg) FROM operation_outputs oo WHERE oo.execution_id = oe.id), 0) AS poids_sortie_courant,
+              (SELECT COUNT(*) FROM operation_outputs oo WHERE oo.execution_id = oe.id) AS nb_sorties
+       FROM operation_executions oe
+       JOIN batch_tracking bt ON bt.id = oe.batch_id
+       LEFT JOIN chaines_tri ct ON ct.id = bt.chaine_id
+       LEFT JOIN operations_tri ot ON ot.id = oe.operation_id
+       WHERE COALESCE(oe.started_at, oe.created_at)::date = COALESCE($1::date, CURRENT_DATE)
+       ORDER BY COALESCE(oe.started_at, oe.created_at) DESC, oe.id DESC`,
+      [date]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[TRI] Erreur liste exécutions :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tri/executions/:id — détail d'une exécution + ses sorties (reprise atelier)
+router.get('/executions/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const exec = await pool.query(
+      `SELECT oe.*, bt.code AS batch_code, bt.status AS batch_status, bt.poids_restant_kg,
+              bt.poids_initial_kg, bt.chaine_id, ct.nom AS chaine_nom,
+              ot.nom AS operation_nom, ot.code AS operation_code, ot.numero
+       FROM operation_executions oe
+       JOIN batch_tracking bt ON bt.id = oe.batch_id
+       LEFT JOIN chaines_tri ct ON ct.id = bt.chaine_id
+       LEFT JOIN operations_tri ot ON ot.id = oe.operation_id
+       WHERE oe.id = $1`,
+      [req.params.id]
+    );
+    if (exec.rows.length === 0) return res.status(404).json({ error: 'Exécution introuvable' });
+    const outputs = await pool.query(
+      `SELECT oo.*, cs.nom AS categorie_nom, cs.famille, cs.famille_refashion
+       FROM operation_outputs oo
+       LEFT JOIN categories_sortantes cs ON cs.id = oo.categorie_sortante_id
+       WHERE oo.execution_id = $1 ORDER BY oo.created_at`,
+      [req.params.id]
+    );
+    res.json({ ...exec.rows[0], outputs: outputs.rows });
+  } catch (err) {
+    console.error('[TRI] Erreur détail exécution :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tri/executions — Démarrer une opération sur un lot.
+// Transactionnel : verrou sur le lot, refus si lot clôturé/annulé, cohérence
+// opération↔chaîne du lot, et démarrage paresseux du lot (en_attente → en_cours).
 router.post('/executions', authorize('ADMIN', 'MANAGER'), [
   body('batch_id').isInt().withMessage('ID lot requis'),
   body('operation_id').isInt().withMessage('ID opération requis'),
 ], validate, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { batch_id, operation_id, poids_entree_kg } = req.body;
-    if (!batch_id || !operation_id) {
-      return res.status(400).json({ error: 'batch_id et operation_id requis' });
+    const { batch_id, operation_id } = req.body;
+    const rawPoids = req.body.poids_entree_kg;
+    const poidsEntree = (rawPoids != null && rawPoids !== '')
+      ? parseFloat(String(rawPoids).replace(',', '.')) : null;
+
+    await client.query('BEGIN');
+    const batch = await client.query(
+      'SELECT id, status FROM batch_tracking WHERE id = $1 FOR UPDATE', [batch_id]);
+    if (batch.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Lot introuvable' });
     }
-    const result = await pool.query(
+    if (['termine', 'annule'].includes(batch.rows[0].status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: `Lot ${batch.rows[0].status} : impossible de démarrer une opération` });
+    }
+    // L'opération doit appartenir à la chaîne du lot (cohérence référentiel).
+    const op = await client.query(
+      `SELECT ot.id FROM operations_tri ot
+       JOIN batch_tracking bt ON bt.chaine_id = ot.chaine_id
+       WHERE ot.id = $1 AND bt.id = $2`, [operation_id, batch_id]);
+    if (op.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: "L'opération ne fait pas partie de la chaîne de ce lot" });
+    }
+    if (batch.rows[0].status === 'en_attente') {
+      await client.query(
+        `UPDATE batch_tracking SET status = 'en_cours', date_debut = COALESCE(date_debut, NOW()), updated_at = NOW()
+         WHERE id = $1`, [batch_id]);
+    }
+    const result = await client.query(
       `INSERT INTO operation_executions (batch_id, operation_id, poids_entree_kg, status, started_at)
        VALUES ($1, $2, $3, 'en_cours', NOW()) RETURNING *`,
-      [batch_id, operation_id, poids_entree_kg || null]
+      [batch_id, operation_id, (poidsEntree != null && !Number.isNaN(poidsEntree)) ? poidsEntree : null]
     );
+    await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[TRI] Erreur création exécution :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
@@ -385,24 +666,50 @@ router.put('/executions/:id/complete', authorize('ADMIN', 'MANAGER'), async (req
   }
 });
 
-// POST /api/tri/executions/:id/outputs — Ajouter une sortie à une opération
+// POST /api/tri/executions/:id/outputs — Ajouter une sortie (pilotée par la CATÉGORIE).
+// La saisie atelier est catégorie-driven : categorie_sortante_id pilote le reversement
+// stock à la complétion (aucune sortie_operation n'est seedée, sortie_id reste optionnel).
 router.post('/executions/:id/outputs', authorize('ADMIN', 'MANAGER'), [
-  body('sortie_id').isInt().withMessage('ID sortie requis'),
-  body('poids_kg').isFloat({ min: 0 }).withMessage('Poids requis (valeur numérique)'),
+  body('categorie_sortante_id').isInt().withMessage('Catégorie sortante requise'),
+  body('poids_kg').isFloat({ gt: 0 }).withMessage('Poids requis (valeur numérique > 0)'),
 ], validate, async (req, res) => {
   try {
-    const { sortie_id, poids_kg, categorie_sortante_id, notes } = req.body;
-    if (!sortie_id || !poids_kg) {
-      return res.status(400).json({ error: 'sortie_id et poids_kg requis' });
+    const { poids_kg, categorie_sortante_id, sortie_id, notes } = req.body;
+    // L'exécution doit exister et ne pas être terminée (sinon la sortie ne serait
+    // jamais reversée en stock — le reversement a lieu à la complétion).
+    const exec = await pool.query('SELECT status FROM operation_executions WHERE id = $1', [req.params.id]);
+    if (exec.rows.length === 0) return res.status(404).json({ error: 'Exécution introuvable' });
+    if (exec.rows[0].status === 'termine') {
+      return res.status(409).json({ error: 'Opération déjà terminée : impossible d’ajouter une sortie' });
     }
     const result = await pool.query(
-      `INSERT INTO operation_outputs (execution_id, sortie_id, poids_kg, categorie_sortante_id, notes)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [req.params.id, sortie_id, poids_kg, categorie_sortante_id || null, notes]
+      `INSERT INTO operation_outputs (execution_id, sortie_id, poids_kg, categorie_sortante_id, notes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.params.id, sortie_id || null, poids_kg, categorie_sortante_id, notes || null, req.user.id]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[TRI] Erreur ajout sortie :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/tri/executions/:id/outputs/:outputId — corriger une sortie mal saisie
+// (uniquement tant que l'exécution n'est pas terminée).
+router.delete('/executions/:id/outputs/:outputId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const exec = await pool.query('SELECT status FROM operation_executions WHERE id = $1', [req.params.id]);
+    if (exec.rows.length === 0) return res.status(404).json({ error: 'Exécution introuvable' });
+    if (exec.rows[0].status === 'termine') {
+      return res.status(409).json({ error: 'Opération terminée : les sorties sont figées' });
+    }
+    const del = await pool.query(
+      'DELETE FROM operation_outputs WHERE id = $1 AND execution_id = $2 RETURNING id',
+      [req.params.outputId, req.params.id]);
+    if (del.rows.length === 0) return res.status(404).json({ error: 'Sortie introuvable' });
+    res.json({ deleted: del.rows[0].id });
+  } catch (err) {
+    console.error('[TRI] Erreur suppression sortie :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

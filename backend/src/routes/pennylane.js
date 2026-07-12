@@ -321,7 +321,7 @@ router.use(autoLogActivity('pennylane'));
 // ══════════════════════════════════════════
 
 // GET /api/pennylane/config — Récupérer la configuration
-router.get('/config', authorize('ADMIN'), async (req, res) => {
+router.get('/config', authorize('ADMIN', 'FINANCE'), async (req, res) => {
   try {
     const result = await pool.query('SELECT id, company_id, is_active, last_sync_at, sync_invoices, sync_suppliers, sync_journal, created_at, updated_at FROM pennylane_config LIMIT 1');
     res.json(result.rows[0] || { is_active: false, company_id: '', sync_invoices: true, sync_suppliers: true, sync_journal: true });
@@ -974,7 +974,7 @@ router.post('/sync/transactions', authorize('ADMIN', 'MANAGER'), async (req, res
 // ══════════════════════════════════════════
 
 // GET /api/pennylane/sync/balances — Balance des comptes calculée depuis le GL importé en base
-router.get('/sync/balances', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/sync/balances', authorize('ADMIN', 'MANAGER', 'FINANCE'), async (req, res) => {
   try {
     const year = parseInt(req.query.year) || new Date().getFullYear();
 
@@ -1020,7 +1020,7 @@ router.get('/sync/balances', authorize('ADMIN', 'MANAGER'), async (req, res) => 
 // ══════════════════════════════════════════
 
 // GET /api/pennylane/sync/history — Historique des synchronisations
-router.get('/sync/history', authorize('ADMIN'), async (req, res) => {
+router.get('/sync/history', authorize('ADMIN', 'FINANCE'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT psl.*, u.first_name || ' ' || u.last_name as user_name
@@ -1058,7 +1058,7 @@ router.get('/mappings', authorize('ADMIN'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // GET /api/pennylane/status — Statut global de la connexion
-router.get('/status', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/status', authorize('ADMIN', 'MANAGER', 'FINANCE'), async (req, res) => {
   try {
     const config = await pool.query('SELECT is_active, last_sync_at, company_id FROM pennylane_config LIMIT 1');
     const mappingsCount = await pool.query('SELECT COUNT(*) as total FROM pennylane_mappings');

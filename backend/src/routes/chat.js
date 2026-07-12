@@ -8,7 +8,7 @@ const express = require('express');
 const router = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -79,6 +79,8 @@ REGLES :
 - Si tu ne sais pas ou si la question sort du périmètre : "Désolé, je ne peux pas répondre à ça. Demande à un admin ! 🙋"
 - Ne modifie JAMAIS la base de données. Lecture seule.
 - Ne révèle jamais d'informations personnelles d'autres utilisateurs (sauf si ADMIN/RH).
+- Pour les questions de pilotage (finance, insertion, ventes), utilise les outils dédiés SI ils te sont fournis. S'ils ne sont pas disponibles, c'est que l'utilisateur n'y a pas droit : décline poliment.
+- Les données d'insertion que tu communiques sont TOUJOURS agrégées (nombres, taux) — ne cite JAMAIS le nom d'un salarié en parcours.
 - Exemples de réponses :
   * "Stock jeans Rouen : 150 kg 📦"
   * "Ta prochaine mission : collecte mardi 9h 🚛"
@@ -154,22 +156,208 @@ const TOOLS = [
   },
 ];
 
+// ── Outils de pilotage (Vague 2, item 60d) — LECTURE SEULE, réservés par rôle ─
+// Chaque outil est filtré RGPD : seul un utilisateur ayant le rôle de base requis
+// le voit dans la liste envoyée à Claude ET peut l'exécuter (double contrôle).
+const EXTENDED_TOOLS = [
+  {
+    name: 'resume_finance',
+    // Rôles autorisés (rôle de base résolu) : direction / contrôle de gestion.
+    _roles: ['ADMIN', 'MANAGER', 'FINANCE'],
+    tool: {
+      name: 'resume_finance',
+      description: "Synthèse financière de l'année en cours : chiffre d'affaires opérationnel par activité (exutoires, boutiques, vente au kilo) et P&L de synthèse (produits, charges, résultat). Réservé à la direction.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          annee: { type: 'integer', description: "Année (défaut: année en cours)." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    name: 'kpis_insertion',
+    // Agrégats non nominatifs de cohorte insertion.
+    _roles: ['ADMIN', 'RH', 'MANAGER'],
+    tool: {
+      name: 'kpis_insertion',
+      description: "Indicateurs AGRÉGÉS (non nominatifs) de la cohorte en insertion : nombre en parcours, jalons en retard et à venir, taux de sorties dynamiques de l'année. Ne retourne jamais de nom de salarié.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          annee: { type: 'integer', description: "Année pour le taux de sorties (défaut: année en cours)." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    name: 'ventes_synthese',
+    // Performance retail (boutiques + VAK).
+    _roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'],
+    tool: {
+      name: 'ventes_synthese',
+      description: "Synthèse des ventes : chiffre d'affaires HT des boutiques mois par mois (année en cours) et résumé de la dernière Vente au Kilo (CA HT, poids vendu). Réservé aux rôles commerce/direction.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          annee: { type: 'integer', description: "Année (défaut: année en cours)." },
+        },
+        required: [],
+      },
+    },
+  },
+];
+
+// Table { nom d'outil étendu → rôles de base autorisés } pour le contrôle
+// d'exécution (défense en profondeur, indépendante de ce que voit Claude).
+const EXTENDED_TOOL_ROLES = Object.fromEntries(EXTENDED_TOOLS.map((e) => [e.name, e._roles]));
+
+// Construit la liste d'outils exposée à Claude selon le rôle de base de l'user :
+// les 5 outils de base pour tous, + les outils de pilotage autorisés.
+function toolsForRole(role) {
+  const base = resolveBaseRole(role);
+  const extended = EXTENDED_TOOLS.filter((e) => e._roles.includes(base)).map((e) => e.tool);
+  return [...TOOLS, ...extended];
+}
+
 // ── Tool execution (read-only) ──────────────────────────────────────────
 
 async function executeTool(toolName, toolInput, userCtx) {
   try {
+    // Contrôle d'accès des outils de pilotage (défense en profondeur : même si
+    // l'outil n'aurait pas dû être exposé, on refuse ici selon le rôle de base).
+    if (EXTENDED_TOOL_ROLES[toolName]) {
+      const base = resolveBaseRole(userCtx.role);
+      if (!EXTENDED_TOOL_ROLES[toolName].includes(base)) {
+        return JSON.stringify({ error: "Tu n'as pas accès à cette information." });
+      }
+    }
     switch (toolName) {
       case 'query_stock': return await queryStock(toolInput);
       case 'query_planning': return await queryPlanning(toolInput, userCtx);
       case 'query_collecte': return await queryCollecte(toolInput);
       case 'query_heures': return await queryHeures(toolInput, userCtx);
       case 'query_cav': return await queryCav(toolInput);
+      case 'resume_finance': return await queryResumeFinance(toolInput);
+      case 'kpis_insertion': return await queryKpisInsertion(toolInput);
+      case 'ventes_synthese': return await queryVentesSynthese(toolInput);
       default: return JSON.stringify({ error: `Outil inconnu : ${toolName}` });
     }
   } catch (err) {
     console.error(`[SolidataBot] Tool error (${toolName}):`, err.message);
     return JSON.stringify({ error: 'Erreur lors de la requête en base de données.' });
   }
+}
+
+// ── Outils de pilotage (lecture seule) ───────────────────────────────────
+
+// Synthèse finance : CA opérationnel par activité + P&L de synthèse (année en cours).
+// Chaque source est résiliente (table absente → 0 + marqueur d'indisponibilité).
+async function queryResumeFinance({ annee } = {}) {
+  const year = parseInt(annee, 10) || new Date().getFullYear();
+  const rd = (v) => Math.round((Number(v) || 0) * 100) / 100;
+  const soft = async (q, p) => { try { return (await pool.query(q, p)).rows; } catch (e) { console.error('[SolidataBot] resume_finance:', e.code || e.message); return null; } };
+
+  const exutRows = await soft(`
+    SELECT COALESCE(SUM(COALESCE(fx.montant_ht, cp.pesee_client * c.prix_tonne, c.tonnage_prevu * c.prix_tonne, 0)), 0) AS ca
+    FROM commandes_exutoires c
+    LEFT JOIN LATERAL (SELECT pesee_client FROM controles_pesee WHERE commande_id = c.id ORDER BY id DESC LIMIT 1) cp ON true
+    LEFT JOIN LATERAL (SELECT montant_ht FROM factures_exutoires WHERE commande_id = c.id AND source = 'pennylane' AND montant_ht IS NOT NULL ORDER BY id DESC LIMIT 1) fx ON true
+    WHERE EXTRACT(YEAR FROM c.date_commande) = $1 AND c.statut IN ('facturee', 'cloturee')`, [year]);
+  const boutRows = await soft(`SELECT COALESCE(SUM(total_ht), 0) AS ca FROM boutique_ventes WHERE EXTRACT(YEAR FROM date_vente) = $1`, [year]);
+  const vakRows = await soft(`SELECT COALESCE(SUM(total_ht), 0) AS ca FROM vak_ventes WHERE EXTRACT(YEAR FROM date_vente) = $1`, [year]);
+  const plRows = await soft(`
+    SELECT COALESCE(SUM(CASE WHEN g.account LIKE '7%' THEN g.credit - g.debit ELSE 0 END), 0) AS produits,
+           COALESCE(SUM(CASE WHEN g.account LIKE '6%' THEN g.debit - g.credit ELSE 0 END), 0) AS charges
+    FROM financial_gl_entries g JOIN financial_exercises e ON g.exercise_id = e.id
+    WHERE e.year = $1 AND (g.account LIKE '6%' OR g.account LIKE '7%')`, [year]);
+
+  const exut = rd(exutRows?.[0]?.ca);
+  const bout = rd(boutRows?.[0]?.ca);
+  const vak = rd(vakRows?.[0]?.ca);
+  const plAvailable = plRows && plRows.length > 0 && (Number(plRows[0].produits) || Number(plRows[0].charges));
+  const produits = rd(plRows?.[0]?.produits);
+  const charges = rd(plRows?.[0]?.charges);
+
+  return JSON.stringify({
+    annee: year,
+    ca_operationnel_ht: {
+      exutoires: exut,
+      boutiques: bout,
+      vente_au_kilo: vak,
+      total: rd(exut + bout + vak),
+      note: 'Chiffre d\'affaires opérationnel HT (caisses + commandes exutoires clôturées).',
+    },
+    pl_synthese: plAvailable
+      ? { produits, charges, resultat: rd(produits - charges), note: 'Comptes de classe 7 (produits) et 6 (charges) du Grand Livre.' }
+      : { disponible: false, note: 'Aucune écriture comptable importée pour cette année (P&L indisponible).' },
+  });
+}
+
+// Indicateurs AGRÉGÉS (non nominatifs) de la cohorte insertion.
+async function queryKpisInsertion({ annee } = {}) {
+  const year = parseInt(annee, 10) || new Date().getFullYear();
+  const soft = async (q, p) => { try { return (await pool.query(q, p)).rows; } catch (e) { console.error('[SolidataBot] kpis_insertion:', e.code || e.message); return null; } };
+
+  const cohorte = await soft(`SELECT COUNT(*)::int AS n FROM employees WHERE insertion_status = 'en_parcours' AND is_active = true`);
+  const jalons = await soft(`
+    SELECT COUNT(*) FILTER (WHERE im.status <> 'realise' AND im.due_date < CURRENT_DATE)::int AS retard,
+           COUNT(*) FILTER (WHERE im.status <> 'realise' AND im.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days')::int AS avenir
+    FROM insertion_milestones im JOIN employees e ON e.id = im.employee_id
+    WHERE e.insertion_status = 'en_parcours' AND e.is_active = true`);
+  const sorties = await soft(`
+    SELECT COUNT(*) FILTER (WHERE sortie_classification = 'positive')::int AS pos,
+           COUNT(*) FILTER (WHERE sortie_classification IS NOT NULL)::int AS tot
+    FROM insertion_milestones
+    WHERE milestone_type = 'Bilan Sortie' AND status = 'realise'
+      AND COALESCE(completed_date, updated_at::date) BETWEEN $1 AND $2`, [`${year}-01-01`, `${year}-12-31`]);
+
+  const tot = sorties?.[0]?.tot || 0;
+  const pos = sorties?.[0]?.pos || 0;
+  return JSON.stringify({
+    annee: year,
+    nb_en_parcours: cohorte?.[0]?.n || 0,
+    jalons_en_retard: jalons?.[0]?.retard || 0,
+    jalons_a_venir_7j: jalons?.[0]?.avenir || 0,
+    sorties_dynamiques: {
+      positives: pos, total: tot,
+      taux_pct: tot > 0 ? Math.round((pos / tot) * 100) : null,
+    },
+    note: 'Données agrégées et anonymes — aucun nom de salarié.',
+  });
+}
+
+// Synthèse ventes : CA HT boutiques par mois (année en cours) + dernière VAK.
+async function queryVentesSynthese({ annee } = {}) {
+  const year = parseInt(annee, 10) || new Date().getFullYear();
+  const rd = (v) => Math.round((Number(v) || 0) * 100) / 100;
+  const soft = async (q, p) => { try { return (await pool.query(q, p)).rows; } catch (e) { console.error('[SolidataBot] ventes_synthese:', e.code || e.message); return null; } };
+
+  const moisRows = await soft(`
+    SELECT EXTRACT(MONTH FROM date_vente)::int AS mois, COALESCE(SUM(total_ht), 0) AS ca_ht
+    FROM boutique_ventes WHERE EXTRACT(YEAR FROM date_vente) = $1
+    GROUP BY 1 ORDER BY 1`, [year]);
+  const boutiquesMensuel = (moisRows || []).map((r) => ({ mois: r.mois, ca_ht: rd(r.ca_ht) }));
+  const boutiquesTotal = rd(boutiquesMensuel.reduce((s, m) => s + m.ca_ht, 0));
+
+  const vakRows = await soft(`
+    SELECT v.libelle, v.date_debut, v.date_fin,
+           COALESCE(SUM(vv.total_ht), 0) AS ca_ht,
+           COALESCE(SUM(CASE WHEN vv.unite = 'kg' THEN vv.quantite ELSE 0 END), 0) AS poids_kg
+    FROM vaks v LEFT JOIN vak_ventes vv ON vv.vak_id = v.id
+    GROUP BY v.id, v.libelle, v.date_debut, v.date_fin
+    ORDER BY v.date_debut DESC LIMIT 1`);
+  const lastVak = vakRows && vakRows[0]
+    ? { libelle: vakRows[0].libelle, du: vakRows[0].date_debut, au: vakRows[0].date_fin, ca_ht: rd(vakRows[0].ca_ht), poids_kg: rd(vakRows[0].poids_kg) }
+    : null;
+
+  return JSON.stringify({
+    annee: year,
+    boutiques: { mensuel_ht: boutiquesMensuel, total_ht: boutiquesTotal, note: 'CA HT boutiques (caisse LogicS).' },
+    derniere_vak: lastVak || { note: 'Aucune Vente au Kilo enregistrée.' },
+  });
 }
 
 async function queryStock({ categorie = '' }) {
@@ -363,13 +551,16 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
 
   const messages = [...history];
   const maxIterations = 5;
+  // Outils filtrés RGPD selon le rôle de base de l'utilisateur (les outils de
+  // pilotage finance/insertion/ventes ne sont exposés qu'aux rôles autorisés).
+  const tools = toolsForRole(userCtx.role);
 
   for (let i = 0; i < maxIterations; i++) {
     const response = await client.messages.create({
       model: CLAUDE_MODEL,
       max_tokens: 512,
       system: SYSTEM_PROMPT,
-      tools: TOOLS,
+      tools,
       messages,
     });
 
@@ -444,7 +635,7 @@ router.post('/', authenticate, async (req, res) => {
 
 // GET /api/chat/suggestions — suggestions contextuelles
 router.get('/suggestions', authenticate, async (req, res) => {
-  const role = req.user.role;
+  const base = resolveBaseRole(req.user.role);
   const hour = new Date().getHours();
 
   const baseSuggestions = [
@@ -462,13 +653,21 @@ router.get('/suggestions', authenticate, async (req, res) => {
     baseSuggestions.unshift({ icon: '📊', text: 'Bilan collecte de la journée', category: 'collecte' });
   }
 
-  // Suggestions selon le rôle
-  if (['ADMIN', 'MANAGER'].includes(role)) {
+  // Suggestions selon le rôle — alignées sur les outils réellement disponibles.
+  if (['ADMIN', 'MANAGER'].includes(base)) {
     baseSuggestions.push(
       { icon: '📈', text: 'Stats collecte cette semaine', category: 'collecte' },
       { icon: '🗺️', text: 'CAV indisponibles', category: 'cav' },
-      { icon: '📦', text: 'Stock crème disponible', category: 'stock' },
     );
+  }
+  if (['ADMIN', 'MANAGER', 'FINANCE'].includes(base)) {
+    baseSuggestions.push({ icon: '💶', text: 'Résume la finance de cette année', category: 'finance' });
+  }
+  if (['ADMIN', 'RH', 'MANAGER'].includes(base)) {
+    baseSuggestions.push({ icon: '🤝', text: 'Où en est la cohorte insertion ?', category: 'insertion' });
+  }
+  if (['ADMIN', 'MANAGER', 'RESP_BTQ'].includes(base)) {
+    baseSuggestions.push({ icon: '🛍️', text: 'Synthèse des ventes boutiques', category: 'ventes' });
   }
 
   res.json({ suggestions: baseSuggestions.slice(0, 8) });
@@ -698,3 +897,6 @@ router.get('/insights/tour/:id', authenticate, authorize('ADMIN', 'MANAGER'), as
 });
 
 module.exports = router;
+// Exposés pour les tests (RGPD tool-gating). N'affecte pas le montage du routeur.
+module.exports.toolsForRole = toolsForRole;
+module.exports.EXTENDED_TOOL_ROLES = EXTENDED_TOOL_ROLES;

@@ -114,12 +114,26 @@ export default function Dashboard() {
   const [objectifs, setObjectifs] = useState([]);
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Item 60a — activité collecte/production par période (défaut = veille)
+  const [activitePeriode, setActivitePeriode] = useState('veille');
+  const [activite, setActivite] = useState(null);
+  const [activiteLoading, setActiviteLoading] = useState(true);
 
   useEffect(() => {
     loadDashboard();
     loadNews();
     if (user?.role === 'ADMIN') loadObjectifs();
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    setActiviteLoading(true);
+    api.get(`/dashboard/activite-periode?periode=${activitePeriode}`)
+      .then((res) => { if (alive) setActivite(res.data); })
+      .catch(() => { if (alive) setActivite(null); })
+      .finally(() => { if (alive) setActiviteLoading(false); });
+    return () => { alive = false; };
+  }, [activitePeriode]);
 
   const loadNews = async () => {
     try {
@@ -255,6 +269,14 @@ export default function Dashboard() {
             />
         </div>
 
+        {/* Activité collecte/production par période — défaut = veille (item 60a) */}
+        <ActivitePanel
+          data={activite}
+          loading={activiteLoading}
+          periode={activitePeriode}
+          onPeriodeChange={setActivitePeriode}
+        />
+
         {/* Fil d'actualité — sous les indicateurs */}
         <NewsWidget items={news} onSeeAll={() => navigate('/news')} onOpen={(id) => navigate(`/news?article=${id}`)} />
 
@@ -389,6 +411,83 @@ function getQuickActions(role) {
     actions.push({ label: 'Configuration', path: '/settings', icon: Settings });
   }
   return actions.slice(0, 6);
+}
+
+// ══════════════════════════════════════════
+// Activité par période — Veille / Aujourd'hui / Semaine (item 60a)
+// Défaut = veille (dernier jour ouvré) car « aujourd'hui » est souvent vide le matin.
+// ══════════════════════════════════════════
+
+function ActivitePanel({ data, loading, periode, onPeriodeChange }) {
+  const options = [
+    { key: 'veille', label: 'Veille' },
+    { key: 'jour', label: "Aujourd'hui" },
+    { key: 'semaine', label: 'Semaine' },
+  ];
+  const c = data?.collecte || {};
+  const p = data?.production || {};
+  const tiles = [
+    { label: 'Collecté', value: c.tonnage_kg, unit: 'kg', color: 'teal', icon: Truck },
+    { label: 'Tournées', value: c.tournees_terminees != null ? `${c.tournees_terminees}/${c.nb_tournees}` : null, unit: 'terminées', color: 'blue', icon: Truck, raw: true },
+    { label: 'CAV visités', value: c.cav_visites, unit: '', color: 'amber', icon: Package },
+    { label: 'Trié', value: p.kg_trie, unit: 'kg', color: 'emerald', icon: Factory },
+  ];
+
+  return (
+    <Section
+      title="Activité"
+      icon={Clock}
+      subtitle={data?.label || 'Collecte & production'}
+      actions={
+        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="Choisir la période">
+          {options.map((o) => (
+            <button
+              key={o.key}
+              onClick={() => onPeriodeChange(o.key)}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
+                periode === o.key ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+              aria-pressed={periode === o.key}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {tiles.map((t, i) => {
+          const styles = {
+            teal: 'bg-teal-50 text-teal-600', blue: 'bg-blue-50 text-blue-600',
+            amber: 'bg-amber-50 text-amber-600', emerald: 'bg-emerald-50 text-emerald-600',
+          }[t.color];
+          const valStyle = {
+            teal: 'text-teal-700', blue: 'text-blue-700', amber: 'text-amber-700', emerald: 'text-emerald-700',
+          }[t.color];
+          const Icon = t.icon;
+          let display = '-';
+          if (!loading) {
+            if (t.raw) display = t.value ?? '-';
+            else display = t.value != null ? formatTonnage(t.value) : '0';
+          }
+          return (
+            <div key={i} className="card-modern p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-slate-500 truncate">{t.label}</span>
+                <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${styles}`}>
+                  <Icon className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-2xl font-extrabold tracking-tight ${valStyle}`}>{display}</span>
+                {t.unit && <span className="text-xs font-medium text-slate-400">{t.unit}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
 }
 
 // ══════════════════════════════════════════

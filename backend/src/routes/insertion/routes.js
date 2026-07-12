@@ -589,17 +589,26 @@ router.get('/timeline/:employeeId', async (req, res) => {
 router.get('/cohorte/stats', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    // Filtre « mes salariés » (item 61b) : restreint la cohorte au référent CIP courant.
+    const mine = req.query.mine === '1' || req.query.mine === 'true';
+    const refId = mine ? req.user.id : null;
 
     // Cohorte active
+    const cohorteParams = [];
+    let cohorteFilter = '';
+    if (mine) { cohorteParams.push(refId); cohorteFilter = ` AND e.cip_referent_user_id = $${cohorteParams.length}`; }
     const cohorte = await pool.query(`
       SELECT e.id, e.first_name, e.last_name, e.insertion_start_date,
              ec.end_date AS contract_end
       FROM employees e
       LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
-      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
-    `);
+      WHERE e.insertion_status = 'en_parcours' AND e.is_active = true${cohorteFilter}
+    `, cohorteParams);
 
     // Jalons non réalisés des salariés en parcours
+    const jalonsParams = [];
+    let jalonsFilter = '';
+    if (mine) { jalonsParams.push(refId); jalonsFilter = ` AND e.cip_referent_user_id = $${jalonsParams.length}`; }
     const jalons = await pool.query(`
       SELECT im.id, im.employee_id, im.milestone_type, im.due_date, im.status,
              e.first_name, e.last_name,
@@ -607,11 +616,14 @@ router.get('/cohorte/stats', async (req, res) => {
       FROM insertion_milestones im
       JOIN employees e ON im.employee_id = e.id
       WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
-        AND im.status <> 'realise'
+        AND im.status <> 'realise'${jalonsFilter}
       ORDER BY im.due_date
-    `);
+    `, jalonsParams);
     const enRetard = jalons.rows.filter((j) => j.days_until < 0);
     const aVenir7 = jalons.rows.filter((j) => j.days_until >= 0 && j.days_until <= 7);
+    // Agenda « Mes prochains entretiens » : jalons non réalisés à échéance dans
+    // les 30 prochains jours, triés par date (item 61a).
+    const agenda30 = jalons.rows.filter((j) => j.days_until >= 0 && j.days_until <= 30);
 
     // Salariés à risque : fin de contrat dans 60 jours
     const now = Date.now();
@@ -623,6 +635,9 @@ router.get('/cohorte/stats', async (req, res) => {
 
     // Répartition des freins : dernière évaluation par salarié (jalon réalisé, sinon diagnostic)
     const axes = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif', 'frein_numerique'];
+    const freinsParams = [];
+    let freinsFilter = '';
+    if (mine) { freinsParams.push(refId); freinsFilter = ` AND e.cip_referent_user_id = $${freinsParams.length}`; }
     const freinsRows = await pool.query(`
       WITH last_ms AS (
         SELECT DISTINCT ON (im.employee_id) im.employee_id,
@@ -631,7 +646,7 @@ router.get('/cohorte/stats', async (req, res) => {
         FROM insertion_milestones im
         JOIN employees e ON e.id = im.employee_id
         WHERE e.insertion_status='en_parcours' AND e.is_active=true
-          AND im.status='realise' AND im.frein_mobilite IS NOT NULL
+          AND im.status='realise' AND im.frein_mobilite IS NOT NULL${freinsFilter}
         ORDER BY im.employee_id, im.due_date DESC
       ),
       diag AS (
@@ -639,7 +654,7 @@ router.get('/cohorte/stats', async (req, res) => {
           d.frein_linguistique, d.frein_administratif, d.frein_numerique
         FROM insertion_diagnostics d
         JOIN employees e ON e.id=d.employee_id
-        WHERE e.insertion_status='en_parcours' AND e.is_active=true
+        WHERE e.insertion_status='en_parcours' AND e.is_active=true${freinsFilter}
       )
       SELECT COALESCE(lm.employee_id, dg.employee_id) AS employee_id,
         COALESCE(lm.frein_mobilite, dg.frein_mobilite) AS frein_mobilite,
@@ -677,17 +692,24 @@ router.get('/cohorte/stats', async (req, res) => {
     }
     const totalSorties = nbPositives + nbNegatives;
 
+    // Objectif conventionné DREETS (item 61c) : taux de sorties dynamiques cible,
+    // stocké en settings. Toujours structure-wide (indépendant du filtre « mine »).
+    const objectifSorties = await readObjectifSorties();
+
     res.json({
       annee: year,
+      mine,
       nb_actifs: cohorte.rows.length,
       nb_jalons_en_retard: enRetard.length,
       nb_jalons_a_venir: aVenir7.length,
       taux_retard_jalons: jalons.rows.length ? Math.round((enRetard.length / jalons.rows.length) * 100) : 0,
       jalons_en_retard: enRetard,
       jalons_a_venir_7j: aVenir7,
+      agenda_30j: agenda30,
       salaries_a_risque: aRisque,
       freins_moyennes: freinsMoyennes,
       frein_dominant: freinDominant,
+      objectif_sorties_dynamiques: objectifSorties,
       sorties: {
         total: totalSorties,
         positives: nbPositives,
@@ -698,6 +720,62 @@ router.get('/cohorte/stats', async (req, res) => {
     });
   } catch (err) {
     console.error('[INSERTION] Erreur cohorte stats :', err.message, err.detail || '');
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Lit l'objectif conventionné de sorties dynamiques (%) depuis settings.
+// Clé : insertion.objectif_sorties_dynamiques. Résilient (retourne null si absent).
+const OBJECTIF_SORTIES_KEY = 'insertion.objectif_sorties_dynamiques';
+async function readObjectifSorties() {
+  try {
+    const r = await pool.query('SELECT value FROM settings WHERE key = $1', [OBJECTIF_SORTIES_KEY]);
+    const v = r.rows[0]?.value;
+    if (v == null || v === '') return null;
+    const n = parseFloat(v);
+    return Number.isNaN(n) ? null : n;
+  } catch (_) { return null; }
+}
+
+// GET /api/insertion/objectif-sorties — Objectif conventionné DREETS (%). IMPORTANT: avant /:employeeId.
+router.get('/objectif-sorties', async (req, res) => {
+  res.json({ objectif: await readObjectifSorties() });
+});
+
+// PUT /api/insertion/objectif-sorties — Éditer l'objectif (ADMIN/RH). { objectif: number|null }
+router.put('/objectif-sorties', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const raw = req.body?.objectif;
+    const num = (raw === null || raw === undefined || raw === '') ? null : parseFloat(raw);
+    if (num != null && (Number.isNaN(num) || num < 0 || num > 100)) {
+      return res.status(400).json({ error: 'Objectif invalide (attendu : un pourcentage entre 0 et 100).' });
+    }
+    await pool.query(
+      `INSERT INTO settings (key, value, category, updated_at)
+       VALUES ($1, $2, 'insertion', NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [OBJECTIF_SORTIES_KEY, num == null ? null : String(num)]
+    );
+    res.json({ objectif: num });
+  } catch (err) {
+    console.error('[INSERTION] Erreur objectif-sorties PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/cip-referents — Utilisateurs RH/ADMIN actifs (sélecteur de
+// CIP référent). IMPORTANT: avant /:employeeId.
+router.get('/cip-referents', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, first_name, last_name, role
+       FROM users
+       WHERE COALESCE(is_active, true) = true AND role IN ('ADMIN', 'RH')
+       ORDER BY last_name NULLS LAST, first_name NULLS LAST`
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[INSERTION] Erreur cip-referents :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -879,6 +957,42 @@ router.get('/audit/ia', authorize('ADMIN', 'RH'), async (req, res) => {
   }
 });
 
+// PUT /api/insertion/:employeeId/cip-referent — Affecter/retirer le CIP référent
+// (ADMIN/RH). Body : { user_id: number|null }. Valide que l'utilisateur est un
+// référent RH/ADMIN actif. Chemin à 2 segments → non capturé par GET /:employeeId.
+router.put('/:employeeId/cip-referent', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    if (Number.isNaN(empId)) return res.status(400).json({ error: 'ID employé invalide' });
+    const raw = req.body?.user_id;
+    let userId = null;
+    if (raw !== null && raw !== undefined && raw !== '') {
+      userId = parseInt(raw, 10);
+      if (Number.isNaN(userId)) return res.status(400).json({ error: 'user_id invalide' });
+      const u = await pool.query(
+        `SELECT id FROM users WHERE id = $1 AND COALESCE(is_active, true) = true AND role IN ('ADMIN', 'RH')`,
+        [userId]
+      );
+      if (u.rows.length === 0) return res.status(400).json({ error: 'Référent invalide (doit être un utilisateur RH/ADMIN actif).' });
+    }
+    const r = await pool.query(
+      `UPDATE employees SET cip_referent_user_id = $1, updated_at = NOW() WHERE id = $2
+       RETURNING id, cip_referent_user_id`,
+      [userId, empId]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    let nom = null;
+    if (userId) {
+      const n = await pool.query('SELECT first_name, last_name FROM users WHERE id = $1', [userId]);
+      if (n.rows[0]) nom = `${n.rows[0].first_name || ''} ${n.rows[0].last_name || ''}`.trim();
+    }
+    res.json({ ...r.rows[0], cip_referent_nom: nom });
+  } catch (err) {
+    console.error('[INSERTION] Erreur cip-referent PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════
 // GET /api/insertion/:employeeId — Analyse complete d'un salarié
 // IMPORTANT: DOIT etre la DERNIERE route GET car /:employeeId capture tout
@@ -887,14 +1001,16 @@ router.get('/:employeeId', async (req, res) => {
   try {
     const empId = req.params.employeeId;
 
-    // 1. Données employé (+ prescripteur / orienteur si rattaché)
+    // 1. Données employé (+ prescripteur / orienteur + CIP référent si rattaché)
     const empRes = await pool.query(`
       SELECT e.*, t.name as team_name, p.title as position_title,
-             po.nom AS prescripteur_nom, po.type AS prescripteur_type
+             po.nom AS prescripteur_nom, po.type AS prescripteur_type,
+             TRIM(CONCAT(cu.first_name, ' ', cu.last_name)) AS cip_referent_nom
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       LEFT JOIN positions p ON p.title = e.position
       LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
+      LEFT JOIN users cu ON cu.id = e.cip_referent_user_id
       WHERE e.id = $1
     `, [empId]);
     if (empRes.rows.length === 0) return res.status(404).json({ error: 'Employé non trouvé' });
@@ -1019,6 +1135,8 @@ router.get('/:employeeId', async (req, res) => {
         prescripteur: employee.prescripteur || null,
         prescripteur_nom: employee.prescripteur_nom || null,
         prescripteur_type: employee.prescripteur_type || null,
+        cip_referent_user_id: employee.cip_referent_user_id || null,
+        cip_referent_nom: employee.cip_referent_nom || null,
       },
       has_pcm: !!pcmReport,
       has_candidate_data: !!candidate,

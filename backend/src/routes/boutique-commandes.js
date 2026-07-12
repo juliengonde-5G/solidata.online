@@ -6,8 +6,12 @@ const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const stateMachine = require('../services/state-machine');
+const {
+  attachBoutiqueScope, enforceBoutiqueParam, enforceBoutiqueForEntity, boutiqueScopeSql,
+} = require('../middleware/boutique-scope');
 
 router.use(authenticate);
+router.use(attachBoutiqueScope);
 router.use(autoLogActivity('boutique_commande'));
 
 const STATUTS = ['brouillon', 'envoyee', 'ajustee', 'en_preparation', 'expediee', 'annulee'];
@@ -152,7 +156,11 @@ router.get('/', async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    if (boutique_id) { params.push(boutique_id); query += ` AND c.boutique_id = $${params.length}`; }
+    if (boutique_id) {
+      if (!enforceBoutiqueParam(req, res, boutique_id)) return;
+      params.push(boutique_id); query += ` AND c.boutique_id = $${params.length}`;
+    }
+    query += boutiqueScopeSql(req, 'c.boutique_id', params);
     if (statut) { params.push(statut); query += ` AND c.statut = $${params.length}`; }
     if (date_from) { params.push(date_from); query += ` AND c.date_commande >= $${params.length}`; }
     if (date_to) { params.push(date_to); query += ` AND c.date_commande <= $${params.length}`; }
@@ -178,7 +186,11 @@ router.get('/stats', async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    if (boutique_id) { params.push(boutique_id); query += ` AND boutique_id = $${params.length}`; }
+    if (boutique_id) {
+      if (!enforceBoutiqueParam(req, res, boutique_id)) return;
+      params.push(boutique_id); query += ` AND boutique_id = $${params.length}`;
+    }
+    query += boutiqueScopeSql(req, 'boutique_id', params);
     query += ' GROUP BY statut';
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -190,6 +202,7 @@ router.get('/stats', async (req, res) => {
 // GET /api/boutique-commandes/:id — détail avec lignes et historique
 router.get('/:id', async (req, res) => {
   try {
+    if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     const commande = await pool.query(`
       SELECT c.*, b.nom AS boutique_nom,
              u.first_name || ' ' || u.last_name AS created_by_name,
@@ -234,6 +247,8 @@ router.post('/',
   ],
   validate,
   async (req, res) => {
+    // Cloisonnement : un RESP_BTQ ne crée une commande que pour son périmètre.
+    if (!enforceBoutiqueParam(req, res, req.body.boutique_id)) return;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -273,6 +288,7 @@ router.post('/',
 router.put('/:id',
   authorize('ADMIN', 'MANAGER', 'RESP_BTQ'),
   async (req, res) => {
+    if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -323,6 +339,7 @@ router.put('/:id',
 // PATCH /api/boutique-commandes/:id/envoyer (RESP_BTQ, MANAGER, ADMIN)
 router.patch('/:id/envoyer', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (req, res) => {
   try {
+    if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     await checkAndTransition(req.params.id, 'envoyee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -377,6 +394,7 @@ router.patch('/:id/expedier', authorize('ADMIN', 'MANAGER'), async (req, res) =>
 
 router.patch('/:id/annuler', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (req, res) => {
   try {
+    if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     await checkAndTransition(req.params.id, 'annulee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }

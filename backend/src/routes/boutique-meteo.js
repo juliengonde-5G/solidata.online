@@ -3,14 +3,17 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { fetchOpenMeteoDaily, fetchOpenMeteoHourly } = require('../utils/weather');
+const { attachBoutiqueScope, enforceBoutiqueParam } = require('../middleware/boutique-scope');
 
 router.use(authenticate);
+router.use(attachBoutiqueScope);
 
 // GET /api/boutique-meteo?boutique_id=X&date_from=&date_to=
 router.get('/', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     let query = 'SELECT * FROM boutique_meteo_quotidien WHERE boutique_id = $1';
     const params = [boutique_id];
     if (date_from) { params.push(date_from); query += ` AND date >= $${params.length}`; }
@@ -29,6 +32,7 @@ router.get('/correlation', async (req, res) => {
   try {
     const { boutique_id, date_from, date_to } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const result = await pool.query(`
       SELECT m.date, m.weather_label, m.weather_code,
              COALESCE(m.temp_max, 0)::FLOAT AS temp_max,
@@ -57,6 +61,7 @@ router.get('/hourly', async (req, res) => {
   try {
     const { boutique_id } = req.query;
     if (!boutique_id) return res.status(400).json({ error: 'boutique_id requis' });
+    if (!enforceBoutiqueParam(req, res, boutique_id)) return;
     const date = req.query.date || new Date().toISOString().slice(0, 10);
 
     const btq = await pool.query(
