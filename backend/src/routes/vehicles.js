@@ -1299,7 +1299,8 @@ Inclus toutes les opérations d'entretien standard : vidange, filtres (huile, ai
 Base-toi sur les préconisations constructeur officielles.`;
 
     const response = await client.messages.create({
-      model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+      // Modèle par défaut à jour (claude-sonnet-4-20250514 était déprécié → 404).
+      model: process.env.CLAUDE_MODEL || 'claude-sonnet-5',
       max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }],
     });

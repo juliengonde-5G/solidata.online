@@ -329,23 +329,32 @@ router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), asyn
       [commande_type, commande_type === 'libre' ? null : commande_id, req.user.id, c.id]
     );
 
-    // Item 31a : la sortie carton DÉCRÉMENTE le stock moderne (auparavant le
-    // stock trié gonflait indéfiniment, jamais décrémenté au départ des cartons).
+    // Item 31a : la sortie carton DÉCRÉMENTE le stock moderne — UNIQUEMENT pour
+    // les sorties LIBRES (sans commande), le seul flux qui n'avait AUCUNE
+    // écriture de sortie. Les flux btq/vak ont déjà leur décrément canonique en
+    // aval — boutique-commandes.js (passage « expediee » : sortie du poids des
+    // lignes) et preparations.js (mouvement 'EXU-'+référence à l'expédition,
+    // corrigé ensuite par controles-pesee sur la pesée client ; chemin désormais
+    // OBLIGATOIRE via la garde stock de commandes-exutoires, item 38b). Écrire
+    // aussi une sortie par carton pour btq/vak ferait sortir la même marchandise
+    // DEUX FOIS du grand livre (constaté en revue debug Vague 1).
     // Catégorie best-effort : appariement par nom categorie_eco_org ↔
     // categories_sortantes (taxonomies distinctes, pas de FK) ; sinon NULL
     // (« Non classé »), ce qui corrige au moins le total global.
-    const catMatch = await client.query(
-      `SELECT id FROM categories_sortantes WHERE lower(nom) = lower($1) AND is_active = true LIMIT 1`,
-      [c.categorie_eco_org]
-    );
-    const matiereId = catMatch.rows[0]?.id || null;
-    await client.query(
-      `INSERT INTO stock_movements
-         (type, date, poids_kg, matiere_id, code_barre, origine, notes, produit_fini_id, created_by)
-       VALUES ('sortie', CURRENT_DATE, $1, $2, $3, 'sortie_carton', $4, $5, $6)`,
-      [c.poids_kg, matiereId, c.code_barre,
-       `Sortie carton ${c.code_barre} (${commande_type})`, c.id, req.user.id]
-    );
+    if (commande_type === 'libre') {
+      const catMatch = await client.query(
+        `SELECT id FROM categories_sortantes WHERE lower(nom) = lower($1) AND is_active = true LIMIT 1`,
+        [c.categorie_eco_org]
+      );
+      const matiereId = catMatch.rows[0]?.id || null;
+      await client.query(
+        `INSERT INTO stock_movements
+           (type, date, poids_kg, matiere_id, code_barre, origine, notes, produit_fini_id, created_by)
+         VALUES ('sortie', CURRENT_DATE, $1, $2, $3, 'sortie_carton', $4, $5, $6)`,
+        [c.poids_kg, matiereId, c.code_barre,
+         `Sortie carton ${c.code_barre} (${commande_type})`, c.id, req.user.id]
+      );
+    }
 
     await client.query('COMMIT');
     res.json({
@@ -403,8 +412,10 @@ router.post('/sortie-session/:type/:commande_id/annuler-scan', authorize('ADMIN'
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Scan introuvable pour cette commande' });
     }
-    // Item 31a : annuler le scan retire aussi le mouvement de sortie de stock
-    // généré lors du scan (cohérence du ledger tant que la commande est ouverte).
+    // Item 31a : si un mouvement de sortie a été généré lors du scan, on le
+    // retire (cohérence du ledger tant que la commande est ouverte). Depuis la
+    // revue debug Vague 1, seuls les scans LIBRES écrivent un mouvement — pour
+    // btq/vak ce DELETE est un no-op de sécurité (le décrément vit en aval).
     await client.query(
       `DELETE FROM stock_movements WHERE produit_fini_id = $1 AND origine = 'sortie_carton'`,
       [result.rows[0].id]

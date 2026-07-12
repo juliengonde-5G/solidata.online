@@ -1892,13 +1892,18 @@ async function initDatabase() {
     await client.query(`DROP TABLE IF EXISTS flux_sortants CASCADE`);
 
     // V2.4 — P2-C : précision sortie d'insertion (employeur + SIRET + durée contrat)
+    // Fix debug Vague 1 : ce bloc s'exécute AVANT le CREATE TABLE insertion_milestones
+    // (plus bas dans le fichier) → sur une base NEUVE la table n'existe pas encore et
+    // l'erreur undefined_table (42P01) avortait toute l'initialisation (bloquant pour
+    // la reconstruction / un nouvel environnement). On tolère l'absence de table :
+    // les 2 colonnes sont désormais aussi dans la définition canonique de la table.
     await client.query(`DO $$ BEGIN
       ALTER TABLE insertion_milestones ADD COLUMN sortie_employeur_siret VARCHAR(14);
-    EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
+    EXCEPTION WHEN duplicate_column THEN NULL; WHEN undefined_table THEN NULL; END $$;`);
     await client.query(`DO $$ BEGIN
       ALTER TABLE insertion_milestones ADD COLUMN sortie_duree_contrat_mois SMALLINT
         CHECK (sortie_duree_contrat_mois IS NULL OR sortie_duree_contrat_mois >= 0);
-    EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
+    EXCEPTION WHEN duplicate_column THEN NULL; WHEN undefined_table THEN NULL; END $$;`);
 
     console.log('[INIT-DB] Migrations P2 (DROP flux_sortants + employeur sortie) ✓');
 
@@ -2447,7 +2452,13 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_tour_weights_tour ON tour_weights(tour_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_tours_driver_date ON tours(driver_employee_id, date DESC);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_employees_insertion_status ON employees(insertion_status);');
+    // Fix debug Vague 1 : employees.insertion_status est ajoutée par une migration
+    // PLUS BAS dans le fichier — sur une base NEUVE la colonne n'existe pas encore
+    // ici et l'index avortait toute l'initialisation. Tolérant (l'index sera créé
+    // au passage suivant d'init-db, exécuté à chaque déploiement).
+    await client.query(`DO $$ BEGIN
+      CREATE INDEX IF NOT EXISTS idx_employees_insertion_status ON employees(insertion_status);
+    EXCEPTION WHEN undefined_column THEN NULL; END $$;`);
     // Schedule poste_code column for planning hebdo
     await client.query(`
       DO $$ BEGIN ALTER TABLE schedule ADD COLUMN poste_code VARCHAR(50); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
@@ -2866,6 +2877,11 @@ async function initDatabase() {
         sortie_commentaires TEXT,
         sortie_employeur TEXT,
         sortie_formation TEXT,
+        -- P2-C (reporting DREETS / FSE+) : présents aussi dans la définition
+        -- canonique pour qu'une base NEUVE les ait (la migration ALTER plus haut
+        -- ne s'applique qu'aux bases existantes — elle tourne avant ce CREATE).
+        sortie_employeur_siret VARCHAR(14),
+        sortie_duree_contrat_mois SMALLINT CHECK (sortie_duree_contrat_mois IS NULL OR sortie_duree_contrat_mois >= 0),
         -- AI recommendations snapshot
         ai_recommendations JSONB,
         created_by INTEGER REFERENCES users(id),
