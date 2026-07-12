@@ -714,6 +714,12 @@ function CohortePanel({ onSelect }) {
   const [exportError, setExportError] = useState(null);
   // 'xlsx' = classeur complet (5 feuilles) ; sinon un dataset CSV.
   const [exportChoice, setExportChoice] = useState('xlsx');
+  // Export FSE+ (Fonds Social Européen Plus) — CSV trimestriel réglementaire.
+  const now = new Date();
+  const [fseAnnee, setFseAnnee] = useState(now.getFullYear());
+  const [fseTrim, setFseTrim] = useState(Math.ceil((now.getMonth() + 1) / 3));
+  const [fseExporting, setFseExporting] = useState(false);
+  const [fseError, setFseError] = useState(null);
 
   // Télécharge l'extraction des données d'insertion (Excel multi-feuilles ou
   // CSV d'un jeu de données). Endpoint authentifié → passage par axios (blob)
@@ -744,6 +750,29 @@ function CohortePanel({ onSelect }) {
       setExportError(msg);
     } finally {
       setExporting(false);
+    }
+  };
+
+  // Export FSE+ (Fonds Social Européen Plus) : CSV trimestriel des bénéficiaires
+  // CDDI destiné au cofinanceur. Endpoint authentifié → axios blob.
+  const downloadFSE = async () => {
+    setFseExporting(true); setFseError(null);
+    try {
+      const res = await api.get(`/exports/fse-plus?annee=${fseAnnee}&trimestre=${fseTrim}`, { responseType: 'blob', timeout: IA_TIMEOUT });
+      const objUrl = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = `fse-plus_${fseAnnee}_T${fseTrim}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objUrl);
+    } catch (err) {
+      let msg = "Erreur lors de l'export FSE+.";
+      try { const txt = await err.response?.data?.text?.(); if (txt) msg = JSON.parse(txt).error || msg; } catch { /* message générique */ }
+      setFseError(msg);
+    } finally {
+      setFseExporting(false);
     }
   };
 
@@ -798,6 +827,22 @@ function CohortePanel({ onSelect }) {
                   className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
                   {exporting ? 'Export…' : 'Exporter'}
                 </button>
+                <span className="mx-1 h-5 w-px bg-gray-200" aria-hidden="true" />
+                <select value={fseAnnee} onChange={(e) => setFseAnnee(Number(e.target.value))}
+                  title="Année de l'export FSE+"
+                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-700">
+                  {Array.from({ length: 5 }, (_, i) => now.getFullYear() - i).map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <select value={fseTrim} onChange={(e) => setFseTrim(Number(e.target.value))}
+                  title="Trimestre de l'export FSE+"
+                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-700">
+                  {[1, 2, 3, 4].map((t) => <option key={t} value={t}>T{t}</option>)}
+                </select>
+                <button onClick={downloadFSE} disabled={fseExporting}
+                  title="Export réglementaire FSE+ (bénéficiaires CDDI du trimestre)"
+                  className="px-3 py-1.5 rounded-lg bg-blue-700 text-white text-xs font-medium hover:bg-blue-800 disabled:opacity-50">
+                  {fseExporting ? 'Export…' : 'Export FSE+'}
+                </button>
               </div>
             )}
             <button onClick={runIaCohorte} disabled={iaLoading}
@@ -807,6 +852,7 @@ function CohortePanel({ onSelect }) {
           </div>
         </div>
         {exportError && <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{exportError}</div>}
+        {fseError && <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{fseError}</div>}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <DashCard label="En parcours" value={stats.nb_actifs} tone="blue" />
           <DashCard label="Jalons en retard" value={stats.nb_jalons_en_retard} tone={stats.nb_jalons_en_retard ? 'red' : 'green'} sub={`${stats.taux_retard_jalons}% des jalons`} />

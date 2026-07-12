@@ -98,11 +98,21 @@ const EMPTY_FORM = {
   notes: '',
 };
 
+// Item 38b — Le passage chargee → expediee est retiré des raccourcis directs :
+// seule la Préparation d'expédition décrémente le stock (mouvement de sortie).
+// L'action « Marquer expédiée » depuis la fiche commande sautait ce chemin et
+// faisait « avancer » la commande sans jamais sortir la marchandise du stock.
+// On grise donc l'action avec une explication (le backend renvoie aussi un 409
+// si on force ce passage sans préparation/mouvement de stock lié).
 const STATUS_TRANSITIONS = {
   en_attente: { action: 'Confirmer', next: 'confirmee' },
   confirmee: { action: 'Préparer', next: 'en_preparation' },
   en_preparation: { action: 'Marquer chargée', next: 'chargee' },
-  chargee: { action: 'Marquer expédiée', next: 'expediee' },
+  chargee: {
+    action: 'Marquer expédiée',
+    blocked: true,
+    hint: "Pour expédier, passez par la Préparation d'expédition — c'est elle qui décrémente le stock.",
+  },
   expediee: { action: 'Pesée reçue', next: 'pesee_recue' },
   pesee_recue: { action: 'Facturer', next: 'facturee' },
   facturee: { action: 'Clôturer', next: 'cloturee' },
@@ -116,6 +126,7 @@ export default function ExutoiresCommandes() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
+  const [actionError, setActionError] = useState('');
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
@@ -196,6 +207,7 @@ export default function ExutoiresCommandes() {
   };
 
   const openDetail = async (commande) => {
+    setActionError('');
     try {
       const res = await api.get(`/commandes-exutoires/${commande.id}`);
       setShowDetail(res.data);
@@ -257,6 +269,7 @@ export default function ExutoiresCommandes() {
   };
 
   const handleStatusChange = async (commande, newStatut) => {
+    setActionError('');
     try {
       await api.patch(`/commandes-exutoires/${commande.id}/statut`, { statut: newStatut });
       loadCommandes();
@@ -265,7 +278,10 @@ export default function ExutoiresCommandes() {
         const res = await api.get(`/commandes-exutoires/${commande.id}`);
         setShowDetail(res.data);
       }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      setActionError(err.response?.data?.error || 'Le changement de statut a échoué.');
+    }
   };
 
   const handleCancel = async (commande) => {
@@ -276,6 +292,7 @@ export default function ExutoiresCommandes() {
       confirmVariant: 'danger',
     });
     if (!ok) return;
+    setActionError('');
     try {
       await api.patch(`/commandes-exutoires/${commande.id}/annuler`);
       loadCommandes();
@@ -283,7 +300,10 @@ export default function ExutoiresCommandes() {
       if (showDetail && showDetail.id === commande.id) {
         setShowDetail(null);
       }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      setActionError(err.response?.data?.error || "L'annulation a échoué.");
+    }
   };
 
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
@@ -699,17 +719,38 @@ export default function ExutoiresCommandes() {
               )}
 
               {/* Action buttons */}
+              {actionError && (
+                <div className="mt-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                  {actionError}
+                </div>
+              )}
+              {STATUS_TRANSITIONS[showDetail.statut]?.blocked && (
+                <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+                  {STATUS_TRANSITIONS[showDetail.statut].hint}
+                </div>
+              )}
               <div className="flex gap-2 mt-4">
                 <button onClick={() => setShowDetail(null)} className="flex-1 btn-ghost">
                   Fermer
                 </button>
                 {STATUS_TRANSITIONS[showDetail.statut] && (
-                  <button
-                    onClick={() => handleStatusChange(showDetail, STATUS_TRANSITIONS[showDetail.statut].next)}
-                    className="flex-1 btn-primary text-sm"
-                  >
-                    {STATUS_TRANSITIONS[showDetail.statut].action}
-                  </button>
+                  STATUS_TRANSITIONS[showDetail.statut].blocked ? (
+                    <button
+                      type="button"
+                      disabled
+                      title={STATUS_TRANSITIONS[showDetail.statut].hint}
+                      className="flex-1 bg-slate-100 text-slate-400 rounded-lg px-4 py-2 text-sm font-medium cursor-not-allowed"
+                    >
+                      {STATUS_TRANSITIONS[showDetail.statut].action}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleStatusChange(showDetail, STATUS_TRANSITIONS[showDetail.statut].next)}
+                      className="flex-1 btn-primary text-sm"
+                    >
+                      {STATUS_TRANSITIONS[showDetail.statut].action}
+                    </button>
+                  )
                 )}
                 {!['cloturee', 'annulee'].includes(showDetail.statut) && (
                   <button

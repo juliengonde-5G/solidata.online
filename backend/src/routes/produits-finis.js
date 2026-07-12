@@ -4,6 +4,9 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+// Générateur partagé avec la voie « étiquette » (item 32) — même code-barres
+// généré (base24 + compteur poste), mêmes champs, created_by + source systématiques.
+const { generateProduitFini } = require('./etiquettes');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -58,30 +61,36 @@ router.get('/summary', async (req, res) => {
   }
 });
 
-// POST /api/produits-finis
+// POST /api/produits-finis — Voie manuelle (item 32)
+// Harmonisée avec la voie étiquette : mêmes champs (poste + catalogue dérivé),
+// code-barres GÉNÉRÉ (plus de saisie libre), created_by + source='manuel'.
 router.post('/', [
-  body('code_barre').notEmpty().withMessage('Code-barres requis'),
-  body('poids_kg').isFloat({ min: 0 }).withMessage('Poids requis (valeur numérique)'),
+  body('poste_id').notEmpty().withMessage('Poste requis'),
+  body('produit').notEmpty().withMessage('Produit requis'),
+  body('poids_kg').isFloat({ gt: 0 }).withMessage('Poids requis (> 0)'),
 ], validate, async (req, res) => {
+  const { poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg, batch_id } = req.body;
+  if (!poste_id || !produit || !categorie_eco_org || !genre || !gamme || !poids_kg || Number(poids_kg) <= 0) {
+    return res.status(400).json({ error: 'poste_id, produit, categorie_eco_org, genre, gamme et poids_kg (>0) requis' });
+  }
+
+  const client = await pool.connect();
   try {
-    const { code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
-      poids_kg, date_fabrication, poste_id } = req.body;
-
-    if (!code_barre || !poids_kg) return res.status(400).json({ error: 'Code-barres et poids requis' });
-
-    const result = await pool.query(
-      `INSERT INTO produits_finis (code_barre, catalogue_id, produit, categorie_eco_org, genre,
-       saison, gamme, poids_kg, date_fabrication, poste_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [code_barre, catalogue_id, produit, categorie_eco_org, genre,
-       saison || 'Sans Saison', gamme, poids_kg, date_fabrication || new Date(), poste_id, req.user.id]
-    );
-
-    res.status(201).json(result.rows[0]);
+    await client.query('BEGIN');
+    const { row, poste_label } = await generateProduitFini(client, {
+      poste_id, produit, categorie_eco_org, genre, saison: saison || 'Sans Saison', gamme,
+      poids_kg, batch_id, created_by: req.user.id, source: 'manuel',
+    });
+    await client.query('COMMIT');
+    res.status(201).json({ ...row, poste_label });
   } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.pfStatus) return res.status(err.pfStatus).json({ error: err.message });
     if (err.code === '23505') return res.status(409).json({ error: 'Code-barres déjà existant' });
     console.error('[PRODUITS-FINIS] Erreur création :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

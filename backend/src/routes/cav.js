@@ -9,6 +9,10 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+// Source unique des facteurs saisonniers / jour + capacité (item 50).
+// Remplace les 3 jeux de facteurs codés en dur qui divergeaient dans /map,
+// /fill-rate et /:id/activity.
+const fillFactors = require('../utils/fill-factors');
 
 // Multer pour upload photo CAV
 const cavPhotoStorage = multer.diskStorage({
@@ -75,7 +79,8 @@ router.get('/map', async (req, res) => {
 
     const now = new Date();
     const monthIndex = now.getMonth();
-    const seasonalFactors = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
+    const resolved = await fillFactors.getResolvedFactors();
+    const seasonalFactor = fillFactors.seasonalFactorFor(resolved, monthIndex);
     const freshnessMs = (parseInt(process.env.SENSOR_FRESHNESS_HOURS, 10) || 8) * 3600 * 1000;
 
     const cavWithFill = result.rows.map(cav => {
@@ -84,8 +89,11 @@ router.get('/map', async (req, res) => {
         : 30;
       const avgWeight = parseFloat(cav.avg_weight_90d) || 50;
       const dailyAccumulation = avgWeight / 7;
-      const rawFill = (daysSinceCollection * dailyAccumulation / (cav.nb_containers || 1)) * 100;
-      const calculatedFill = Math.min(120, rawFill * seasonalFactors[monthIndex]);
+      // Normalisé par la capacité (item 48/50), cohérent avec /fill-rate :
+      // kg accumulés ÷ (nb conteneurs × 150 kg) × 100 — plus « kg comme % ».
+      const capacityKg = fillFactors.getCapacityKg(cav.nb_containers);
+      const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactor;
+      const calculatedFill = Math.min(120, (accumulatedKg / capacityKg) * 100);
 
       // Fusion capteur / heuristique
       const sensorFresh = cav.sensor_last_reading_at &&
@@ -138,7 +146,8 @@ router.get('/fill-rate', async (req, res) => {
 
     const now = new Date();
     const monthIndex = now.getMonth();
-    const seasonalFactors = [0.8, 0.85, 0.95, 1.05, 1.15, 1.2, 1.15, 1.1, 1.05, 0.95, 0.85, 0.8];
+    const resolved = await fillFactors.getResolvedFactors();
+    const seasonalFactor = fillFactors.seasonalFactorFor(resolved, monthIndex);
     // Fenêtre "fraîcheur" capteur élargie à 48h par défaut (était 8h) — beaucoup
     // de capteurs Milesight EM400-MUD sont configurés à 1 uplink/24h pour économiser
     // la batterie ; passé 8h on retombait sur l'heuristique alors que la donnée
@@ -155,12 +164,12 @@ router.get('/fill-rate', async (req, res) => {
 
       const avgWeight = parseFloat(cav.avg_weight_90d) || 50;
       const avgDaysBetween = parseFloat(cav.avg_days_between_collections) || 14;
-      const capacityKg = (cav.nb_containers || 1) * 150; // ~150kg par conteneur
+      const capacityKg = fillFactors.getCapacityKg(cav.nb_containers); // nb × 150kg
 
       // Taux de remplissage estimé basé sur accumulation journalière
       // Le volume repart à zéro après chaque collecte (daysSinceCollection)
       const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
-      const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactors[monthIndex];
+      const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactor;
       const calculatedFill = Math.min(120, (accumulatedKg / capacityKg) * 100);
 
       // Fusion capteur / heuristique : si on a une lecture capteur on l'utilise toujours
@@ -174,7 +183,7 @@ router.get('/fill-rate', async (req, res) => {
       // Prévision : quand sera-t-il plein (80%)
       const targetKg = capacityKg * 0.8;
       const remainingKg = Math.max(0, targetKg - accumulatedKg);
-      const daysToFull = dailyAccumulation > 0 ? Math.ceil(remainingKg / (dailyAccumulation * seasonalFactors[monthIndex])) : null;
+      const daysToFull = dailyAccumulation > 0 ? Math.ceil(remainingKg / (dailyAccumulation * seasonalFactor)) : null;
       const predictedFullDate = daysToFull != null && daysToFull > 0
         ? new Date(now.getTime() + daysToFull * 86400000).toISOString().split('T')[0]
         : null;
@@ -525,11 +534,10 @@ router.get('/:id/activity', async (req, res) => {
     const nbCollectes90d = parseInt(avgResult.rows[0].nb_collectes) || 0;
     const avgDaysBetween = nbCollectes90d > 1 ? 90 / nbCollectes90d : 14;
     const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
-    const capacityKg = (cav.nb_containers || 1) * 150;
+    const capacityKg = fillFactors.getCapacityKg(cav.nb_containers);
 
-    // Facteurs saisonniers et jour de semaine
-    const SEASONAL = [0.88, 0.82, 0.94, 1.05, 1.12, 0.99, 1.19, 1.27, 1.13, 1.02, 0.84, 0.75];
-    const DOW = [1.1, 1.25, 1.09, 1.05, 0.49, 1.11, 1.15]; // dim, lun, mar, mer, jeu, ven, sam
+    // Facteurs saisonniers et jour de semaine — source unique (item 50).
+    const resolved = await fillFactors.getResolvedFactors();
 
     // 4. Construire les donnees jour par jour
     const days = [];
@@ -542,8 +550,9 @@ router.get('/:id/activity', async (req, res) => {
       d.setDate(d.getDate() + i);
       const dateStr = d.toISOString().slice(0, 10);
       const monthIdx = d.getMonth();
-      const dowIdx = d.getDay();
-      const dailyRate = dailyAccumulation * SEASONAL[monthIdx] * DOW[dowIdx];
+      const dailyRate = dailyAccumulation
+        * fillFactors.seasonalFactorFor(resolved, monthIdx)
+        * fillFactors.dayFactorFor(resolved, d.getDay());
 
       if (i <= 0) {
         // Passe : donnees reelles ou estimation

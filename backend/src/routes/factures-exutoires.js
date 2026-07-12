@@ -118,7 +118,7 @@ router.get('/stats', async (req, res) => {
         COUNT(*) FILTER (WHERE source = 'pennylane') AS total,
         COUNT(*) FILTER (WHERE source = 'pennylane' AND commande_id IS NULL) AS unmatched,
         COUNT(*) FILTER (WHERE source = 'pennylane' AND commande_id IS NOT NULL AND ABS(COALESCE(ecart_quantite_pct, 0)) > $1) AS with_ecart,
-        COUNT(*) FILTER (WHERE source = 'pennylane' AND statut_facture = 'validee') AS validated
+        COUNT(*) FILTER (WHERE source = 'pennylane' AND statut_facture IN ('validee', 'ecart_valide')) AS validated
       FROM factures_exutoires
     `, [tolerance]);
     const orphans = await pool.query(`

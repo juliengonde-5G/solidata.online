@@ -6,8 +6,30 @@ import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
 
 const CONTRACT_LABELS = {
-  CDI: 'CDI', CDD: 'CDD', interim: 'Intérim', stage: 'Stage', apprentissage: 'Apprentissage',
+  CDI: 'CDI', CDD: 'CDD', CDDI: 'CDDI', interim: 'Intérim', stage: 'Stage', apprentissage: 'Apprentissage',
 };
+
+// Badge de durée cumulée CDDI (plafond légal 24 mois) : ambre ≥ 20, rouge ≥ 23.
+function CddiBadge({ data }) {
+  if (!data || !data.is_cddi) return null;
+  const m = data.months_total ?? 0;
+  const tone = m >= 23 ? 'bg-red-100 text-red-700 border-red-200'
+    : m >= 20 ? 'bg-amber-100 text-amber-800 border-amber-200'
+    : 'bg-slate-100 text-slate-600 border-slate-200';
+  return (
+    <div className={`rounded-lg border px-3 py-2 text-sm ${tone}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium">Durée cumulée CDDI</span>
+        <span className="font-semibold">{m} / {data.cap_months} mois</span>
+      </div>
+      <p className="text-xs mt-0.5 opacity-90">
+        {m >= 23 ? '⚠ Plafond légal 24 mois quasi atteint — vérifier une éventuelle dérogation.'
+          : m >= 20 ? 'Approche du plafond légal (24 mois).'
+          : `Écoulé : ${data.months_elapsed} mois · reste ~${data.remaining_months} mois avant le plafond.`}
+      </p>
+    </div>
+  );
+}
 
 const DAYS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 
@@ -28,6 +50,7 @@ export default function Employees() {
   const [editError, setEditError] = useState('');
   const [pcmProfile, setPcmProfile] = useState(null);
   const [candidateData, setCandidateData] = useState(null);
+  const [cddiDuration, setCddiDuration] = useState(null);
   const [saving, setSaving] = useState(false);
   const firstInputRef = useRef(null);
   const [contractForm, setContractForm] = useState({
@@ -40,21 +63,32 @@ export default function Employees() {
     const params = new URLSearchParams();
     if (filter.team_id) params.append('team_id', filter.team_id);
     if (filter.search) params.append('search', filter.search);
-    const [empRes, teamRes, posRes] = await Promise.all([
+    const [empRes, teamRes, posRes, prescRes] = await Promise.all([
       api.get(`/employees?${params}`),
       api.get('/teams'),
       api.get('/referentiels/positions').catch(() => ({ data: [] })),
+      api.get('/prescripteurs').catch(() => ({ data: [] })),
     ]);
     return {
       employees: empRes.data || [],
       teams: teamRes.data || [],
       positions: posRes.data || [],
+      prescripteurs: prescRes.data || [],
     };
   }, [filter.team_id, filter.search]);
   const { data, loading, error, reload: loadData } = useAsyncData(fetchData, {
-    initialData: { employees: [], teams: [], positions: [] },
+    initialData: { employees: [], teams: [], positions: [], prescripteurs: [] },
   });
-  const { employees = [], teams = [], positions = [] } = data || {};
+  const { employees = [], teams = [], positions = [], prescripteurs = [] } = data || {};
+
+  // Collaborateurs dont le contrat se termine sous 60 jours (encart RH — item 41b).
+  const endingSoon = employees.filter((e) => {
+    if (e.is_active === false || !e.contract_end) return false;
+    const end = new Date(e.contract_end);
+    if (isNaN(end)) return false;
+    const days = Math.ceil((end - new Date()) / 86400000);
+    return days >= 0 && days <= 60;
+  }).sort((a, b) => new Date(a.contract_end) - new Date(b.contract_end));
 
   const openDetail = async (emp) => {
     setSelected(emp);
@@ -94,7 +128,12 @@ export default function Employees() {
       seniority_date: emp.seniority_date ? emp.seniority_date.slice(0, 10) : '',
       visite_medicale_date: emp.visite_medicale_date ? emp.visite_medicale_date.slice(0, 10) : '',
       prescripteur: emp.prescripteur || '',
+      prescripteur_id: emp.prescripteur_id || '',
+      date_prescription: emp.date_prescription ? emp.date_prescription.slice(0, 10) : '',
+      has_permis_b: emp.has_permis_b === true,
+      has_caces: emp.has_caces === true,
     });
+    setCddiDuration(null);
     try {
       const [cRes, aRes] = await Promise.all([
         api.get(`/employees/${emp.id}/contracts`),
@@ -102,6 +141,8 @@ export default function Employees() {
       ]);
       setContracts(cRes.data);
       setDaysOff(aRes.data);
+      // Durée cumulée CDDI (plafond 24 mois) — chargée seulement si pertinent.
+      api.get(`/employees/${emp.id}/cddi-duration`).then(r => setCddiDuration(r.data)).catch(() => setCddiDuration(null));
       // Charger le profil PCM et les données candidat si lié
       if (emp.candidate_id) {
         api.get(`/pcm/profiles/${emp.candidate_id}`).then(r => setPcmProfile(r.data)).catch(() => setPcmProfile(null));
@@ -212,6 +253,10 @@ export default function Employees() {
         seniority_date: editForm.seniority_date || null,
         visite_medicale_date: editForm.visite_medicale_date || null,
         prescripteur: clean(editForm.prescripteur),
+        prescripteur_id: editForm.prescripteur_id ? Number(editForm.prescripteur_id) : null,
+        date_prescription: editForm.date_prescription || null,
+        has_permis_b: editForm.has_permis_b === true,
+        has_caces: editForm.has_caces === true,
       };
       const res = await api.put(`/employees/${selected.id}`, payload);
       setSelected({ ...selected, ...res.data, team_name: teams.find(t => t.id === res.data.team_id)?.name });
@@ -252,6 +297,26 @@ export default function Employees() {
           }
         />
 
+        {endingSoon.length > 0 && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <h3 className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+              <span>⏳</span> Contrats se terminant sous 60 jours ({endingSoon.length})
+            </h3>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {endingSoon.map((e) => {
+                const days = Math.ceil((new Date(e.contract_end) - new Date()) / 86400000);
+                return (
+                  <button key={e.id} onClick={() => openDetail(e)}
+                    className="text-left rounded-lg bg-white border border-amber-200 px-3 py-1.5 text-xs hover:border-amber-400">
+                    <span className="font-medium">{e.first_name} {e.last_name}</span>
+                    <span className="text-amber-700"> · fin {new Date(e.contract_end).toLocaleDateString('fr-FR')} ({days} j)</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <Section title="Liste">
           <div className="flex gap-3 mb-4">
             <input placeholder="Rechercher..." value={filter.search}
@@ -278,7 +343,7 @@ export default function Employees() {
               </div>
             )},
             { key: 'team_name', label: 'Équipe', sortable: true, render: (emp) => emp.team_name || '—' },
-            { key: 'position_name', label: 'Poste', sortable: true, render: (emp) => emp.position_name || '—' },
+            { key: 'position_name', label: 'Poste', sortable: true, render: (emp) => emp.position_name || emp.position || '—' },
             { key: 'contract_type', label: 'Contrat', render: (emp) => (
               <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
                 {CONTRACT_LABELS[emp.contract_type] || emp.contract_type || '—'}
@@ -344,11 +409,21 @@ export default function Employees() {
                           <Field label="Équipe" value={selected.team_name} />
                           <Field label="Contrat" value={CONTRACT_LABELS[selected.contract_type] || selected.contract_type} />
                           <Field label="Heures/sem" value={selected.weekly_hours ? `${selected.weekly_hours}h` : null} />
-                          <Field label="Matricule" value={selected.matricule} />
+                          <Field label="Matricule" value={selected.malibou_id} />
                         </div>
                         {(selected.contract_start || selected.hire_date) && (
                           <Field label="Date d'embauche" value={new Date(selected.contract_start || selected.hire_date).toLocaleDateString('fr-FR')} />
                         )}
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                          {selected.has_permis_b && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700">🚗 Permis B</span>}
+                          {selected.has_caces && <span className="px-2 py-0.5 rounded-full text-xs bg-purple-50 text-purple-700">🏗️ CACES</span>}
+                          {(() => {
+                            const p = prescripteurs.find(x => String(x.id) === String(selected.prescripteur_id));
+                            const name = p ? `${p.nom}${p.type ? ` (${p.type})` : ''}` : selected.prescripteur;
+                            return name ? <span className="px-2 py-0.5 rounded-full text-xs bg-indigo-50 text-indigo-700">Prescripteur : {name}</span> : null;
+                          })()}
+                        </div>
+                        {cddiDuration?.is_cddi && <div className="mt-2"><CddiBadge data={cddiDuration} /></div>}
                         {candidateData?.cv_file_path && (
                           <div className="mt-3">
                             <label className="text-xs text-gray-500 block mb-1">CV du candidat</label>
@@ -516,8 +591,38 @@ export default function Employees() {
                               <input value={editForm.disability_status} onChange={e => setEditForm({ ...editForm, disability_status: e.target.value })} className="input-modern mt-1" />
                             </div>
                             <div>
-                              <label className="text-gray-500 text-xs">Prescripteur / orienteur (IAE)</label>
-                              <input value={editForm.prescripteur} onChange={e => setEditForm({ ...editForm, prescripteur: e.target.value })} className="input-modern mt-1" placeholder="Ex: France Travail, Mission locale…" />
+                              <label className="text-gray-500 text-xs block mb-1">Compétences opérationnelles (planning)</label>
+                              <div className="flex items-center gap-5">
+                                <label className="flex items-center gap-2 text-sm">
+                                  <input type="checkbox" checked={editForm.has_permis_b} onChange={e => setEditForm({ ...editForm, has_permis_b: e.target.checked })} className="rounded" />
+                                  🚗 Permis B
+                                </label>
+                                <label className="flex items-center gap-2 text-sm">
+                                  <input type="checkbox" checked={editForm.has_caces} onChange={e => setEditForm({ ...editForm, has_caces: e.target.checked })} className="rounded" />
+                                  🏗️ CACES
+                                </label>
+                              </div>
+                              <p className="text-[11px] text-gray-400 mt-1">Conditionnent l'affectation « chauffeur » / « cariste » dans le planning hebdo.</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-gray-500 text-xs">Prescripteur (organisme IAE)</label>
+                                <select value={editForm.prescripteur_id} onChange={e => setEditForm({ ...editForm, prescripteur_id: e.target.value })} className="input-modern mt-1">
+                                  <option value="">— Aucun / non renseigné</option>
+                                  {prescripteurs.filter(p => p.actif !== false || String(p.id) === String(editForm.prescripteur_id)).map(p => (
+                                    <option key={p.id} value={p.id}>{p.nom}{p.type ? ` (${p.type})` : ''}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-gray-500 text-xs">Date de prescription</label>
+                                <input type="date" value={editForm.date_prescription} onChange={e => setEditForm({ ...editForm, date_prescription: e.target.value })} className="input-modern mt-1" />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-gray-500 text-xs">Prescripteur — texte libre (hérité)</label>
+                              <input value={editForm.prescripteur} onChange={e => setEditForm({ ...editForm, prescripteur: e.target.value })} className="input-modern mt-1" placeholder="Laisser vide si l'organisme est sélectionné ci-dessus" />
+                              <p className="text-[11px] text-gray-400 mt-1">Les organismes se gèrent dans « Prescripteurs » (menu RH et Insertion).</p>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div>

@@ -432,41 +432,48 @@ function extractInvoiceQuantity(invoiceData) {
   return { qty: Math.round(totalT * 1000) / 1000, unit: 't' };
 }
 
-// Tente de retrouver une commande_exutoires depuis les libellés/external_reference de la facture
-async function autoMatchCommande(invoiceData) {
-  const candidates = [
+// Extrait les références de commande COMPLÈTES (format CMD-AAAA-NNNN) présentes
+// dans les champs textuels d'une facture Pennylane. Fonction PURE (testable).
+// On capture la référence entière — et pas seulement « CMD-AAAA » — pour ne pas
+// rapprocher une commande arbitraire de l'année (item 34, Vague 1).
+function extractCommandeReferences(invoiceData) {
+  const fields = [
     invoiceData?.external_reference,
     invoiceData?.reference,
     invoiceData?.invoice_number,
     invoiceData?.label,
     invoiceData?.customer_reference,
-    ...((invoiceData?.invoice_lines || []).map((l) => l.label || l.description).filter(Boolean)),
+    ...((invoiceData?.invoice_lines || invoiceData?.lines || [])
+      .map((l) => l && (l.label || l.description)).filter(Boolean)),
   ].filter(Boolean).map(String);
-  if (candidates.length === 0) return null;
 
-  // 1. Match strict sur reference exacte
-  for (const candidate of candidates) {
-    const m = candidate.match(/CMD-?\d{4,}|EX-?\d{4,}|\b\d{4,8}\b/i);
-    if (!m) continue;
-    const ref = m[0].toUpperCase();
-    const r = await pool.query(
-      `SELECT id, reference, statut FROM commandes_exutoires
-       WHERE UPPER(reference) = $1 OR UPPER(reference) LIKE $2
-       LIMIT 1`,
-      [ref, `%${ref}%`]
-    );
-    if (r.rows.length > 0) return r.rows[0];
+  const refs = new Set();
+  const re = /\bCMD-\d{4}-\d{1,8}\b/gi;
+  for (const field of fields) {
+    const matches = field.match(re);
+    if (matches) for (const m of matches) refs.add(m.toUpperCase());
   }
-  // 2. Recherche libre dans les libellés
-  for (const candidate of candidates) {
-    const r = await pool.query(
-      `SELECT id, reference, statut FROM commandes_exutoires
-       WHERE $1::text ILIKE '%' || reference || '%'
-       LIMIT 1`,
-      [candidate]
-    );
-    if (r.rows.length > 0) return r.rows[0];
-  }
+  return Array.from(refs);
+}
+
+// Tente de retrouver LA commande_exutoires d'une facture par sa référence complète.
+// Règle de fiabilité (item 34, Vague 1) : on ne rapproche/clôture AUTOMATIQUEMENT
+// que si UNE SEULE commande correspond exactement à une référence extraite. En cas
+// d'ambiguïté (aucune référence trouvée, ou plusieurs commandes candidates), on
+// renvoie null → la facture reste « à rapprocher » et l'utilisateur tranche via le
+// rapprochement manuel. Plus de LIKE '%CMD-AAAA%' LIMIT 1 sans ORDER BY.
+async function autoMatchCommande(invoiceData) {
+  const refs = extractCommandeReferences(invoiceData);
+  if (refs.length === 0) return null;
+
+  const r = await pool.query(
+    `SELECT id, reference, statut FROM commandes_exutoires
+     WHERE UPPER(reference) = ANY($1::text[])
+       AND statut <> 'annulee'`,
+    [refs]
+  );
+  // Match automatique uniquement si exactement une commande candidate.
+  if (r.rows.length === 1) return r.rows[0];
   return null;
 }
 
@@ -517,28 +524,28 @@ async function recomputeFactureEcart(client, factureId) {
   return { ecart, ecartPct, montantAttendu, ecartMontant };
 }
 
-// POST /api/pennylane/sync/customer-invoices — Importer les factures clients
-// émises sur Pennylane (incrémental : depuis last_sync_at)
-router.post('/sync/customer-invoices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
-  let syncLogId = null;
+// Import réutilisable des factures clients Pennylane (item 37, Vague 1).
+// Utilisable sans contexte HTTP (scheduler). Incrémental : {since} explicite,
+// sinon depuis last_sync_at, sinon 90 jours en arrière. Idempotent (skip / mise à
+// jour sur pennylane_invoice_id). Renvoie le compte-rendu d'import.
+async function syncCustomerInvoicesAuto({ since, userId } = {}) {
+  const { apiKey } = await getActiveApiKey();
+
+  // Date de référence : {since} forcé, sinon depuis le dernier sync, sinon 90 j
+  const cfg = await pool.query('SELECT last_sync_at FROM pennylane_config LIMIT 1');
+  const sinceDate = since || (cfg.rows[0]?.last_sync_at
+    ? new Date(cfg.rows[0].last_sync_at).toISOString().split('T')[0]
+    : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+
+  const syncLog = await pool.query(
+    `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count, created_by)
+     VALUES ('customer_invoices', 'pull', 'in_progress', 0, $1) RETURNING id`,
+    [userId || null]
+  );
+  const syncLogId = syncLog.rows[0].id;
   try {
-    const { apiKey } = await getActiveApiKey();
-
-    // Date de référence : depuis le dernier sync, ou {since} forcé en body
-    const cfg = await pool.query('SELECT last_sync_at FROM pennylane_config LIMIT 1');
-    const since = req.body?.since || (cfg.rows[0]?.last_sync_at
-      ? new Date(cfg.rows[0].last_sync_at).toISOString().split('T')[0]
-      : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-
-    const syncLog = await pool.query(
-      `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count, created_by)
-       VALUES ('customer_invoices', 'pull', 'in_progress', 0, $1) RETURNING id`,
-      [req.user.id]
-    );
-    syncLogId = syncLog.rows[0].id;
-
     const filter = JSON.stringify([
-      { field: 'date', operator: 'gteq', value: since },
+      { field: 'date', operator: 'gteq', value: sinceDate },
     ]);
     const allInvoices = await fetchAllPages('/customer_invoices', apiKey, { filter });
 
@@ -652,17 +659,28 @@ router.post('/sync/customer-invoices', authorize('ADMIN', 'MANAGER'), async (req
     );
     await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
 
+    return { ...results, since: sinceDate, syncLogId };
+  } catch (err) {
+    try {
+      await pool.query(`UPDATE pennylane_sync_log SET status = 'error', completed_at = NOW(), details = $1 WHERE id = $2`,
+        [JSON.stringify({ error: err.message }), syncLogId]);
+    } catch (_) { /* best-effort */ }
+    console.error('[PENNYLANE] Erreur syncCustomerInvoicesAuto :', err);
+    throw err;
+  }
+}
+
+// POST /api/pennylane/sync/customer-invoices — Importer les factures clients
+// émises sur Pennylane (incrémental : depuis last_sync_at). Rapproche + clôture
+// automatiquement UNIQUEMENT si la référence de commande est sans ambiguïté.
+router.post('/sync/customer-invoices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const results = await syncCustomerInvoicesAuto({ since: req.body?.since, userId: req.user.id });
     res.json({
       message: `Synchronisation terminée — ${results.imported} importée(s), ${results.updated} mise(s) à jour, ${results.matched} rapprochée(s) auto, ${results.unmatched} à rapprocher manuellement, ${results.errors} erreur(s)`,
       ...results,
     });
   } catch (err) {
-    if (syncLogId) {
-      try {
-        await pool.query(`UPDATE pennylane_sync_log SET status = 'error', completed_at = NOW(), details = $1 WHERE id = $2`,
-          [JSON.stringify({ error: err.message }), syncLogId]);
-      } catch (_) { /* best-effort */ }
-    }
     console.error('[PENNYLANE] Erreur sync customer-invoices :', err);
     res.status(err.statusCode || 500).json({ error: err.message || 'Erreur synchronisation' });
   }
@@ -1279,3 +1297,6 @@ async function syncTransactionsAuto(year) {
 module.exports = router;
 module.exports.syncGLAuto = syncGLAuto;
 module.exports.syncTransactionsAuto = syncTransactionsAuto;
+module.exports.syncCustomerInvoicesAuto = syncCustomerInvoicesAuto;
+module.exports.extractCommandeReferences = extractCommandeReferences;
+module.exports.autoMatchCommande = autoMatchCommande;

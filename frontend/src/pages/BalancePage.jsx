@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { Gift, Store, ArrowUpRight, ArrowDownToLine } from 'lucide-react';
 
@@ -246,6 +247,19 @@ function Header({ heure, dateLabel }) {
 
 // ─── Page principale ──────────────────────────────────────────────────────────
 export default function BalancePage() {
+  // Jeton de poste (item 32b) : « 1 URL = 1 poste ». Le manager paramètre une
+  // fois /balance/<token> sur la tablette, le jeton est mémorisé puis nettoyé de
+  // l'URL (comme le flux véhicule). Toute écriture est ensuite tracée par poste.
+  const { token: urlToken } = useParams();
+  const [posteToken, setPosteToken] = useState(() => urlToken || localStorage.getItem('balance_poste_token') || null);
+  useEffect(() => {
+    if (urlToken) {
+      localStorage.setItem('balance_poste_token', urlToken);
+      setPosteToken(urlToken);
+      window.history.replaceState(null, '', '/balance');
+    }
+  }, [urlToken]);
+
   const [heure, setHeure] = useState('');
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState(null);
@@ -266,11 +280,12 @@ export default function BalancePage() {
   }, []);
 
   const chargerHistorique = useCallback(async () => {
+    if (!posteToken) return;
     try {
-      const res = await axios.get('/api/stock-original/balance-historique', { params: { date: todayISO() } });
+      const res = await axios.get('/api/stock-original/balance-historique', { params: { date: todayISO(), poste_token: posteToken } });
       setHistorique(res.data);
     } catch { /* silencieux */ }
-  }, []);
+  }, [posteToken]);
 
   useEffect(() => { chargerHistorique(); }, [chargerHistorique]);
 
@@ -297,7 +312,7 @@ export default function BalancePage() {
     if (!netValide) { setErreur('Poids net invalide — vérifiez la saisie'); return; }
     setSaving(true); setErreur('');
     try {
-      const payload = { date: todayISO(), poids_brut_kg: brut, contenant: contenant.id, tare_kg: tare };
+      const payload = { date: todayISO(), poids_brut_kg: brut, contenant: contenant.id, tare_kg: tare, poste_token: posteToken };
       if (mode === 'entree') {
         payload.origine = motif.id;
         await axios.post('/api/stock-original/balance-entree', payload);
@@ -316,6 +331,26 @@ export default function BalancePage() {
 
   const motifs = mode === 'entree' ? MOTIFS_ENTREE : MOTIFS_SORTIE;
   const dateLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  // Poste non configuré : le kiosque exige un jeton de poste dans l'URL
+  // (/balance/<token>), à paramétrer une fois par le responsable.
+  if (!posteToken) {
+    return (
+      <div className="h-screen flex flex-col bg-white">
+        <Header heure={heure} dateLabel={dateLabel} />
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 px-8 text-center">
+          <div className="w-24 h-24 rounded-full bg-amber-100 flex items-center justify-center text-5xl">⚖️</div>
+          <h1 className="text-2xl font-black text-gray-800">Poste de balance non configuré</h1>
+          <p className="text-gray-500 max-w-md">
+            Cette tablette n'est pas encore rattachée à un poste. Demandez à votre
+            responsable de saisir l'adresse du poste de balance
+            (<span className="font-mono text-gray-600">/balance/…</span>) une seule fois,
+            puis d'ajouter le raccourci à l'écran d'accueil.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (succes) {
     return (

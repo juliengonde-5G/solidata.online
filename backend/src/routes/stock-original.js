@@ -27,13 +27,32 @@ const CONTENANTS_TARES = {
 };
 
 // ══════════════════════════════════════════
-// ENDPOINTS PUBLICS BALANCE (sans authentification)
-// Définis AVANT router.use(authenticate) pour bypasser l'auth
+// ENDPOINTS KIOSQUE BALANCE (item 32b)
+// Définis AVANT router.use(authenticate) : le kiosque n'a pas de session
+// utilisateur, il s'authentifie par un JETON DE POSTE (postes_balance.token)
+// transmis dans l'URL /balance/:token puis renvoyé à chaque requête
+// (body.poste_token / header X-Poste-Token). Pattern identique à vehicles.qr_token.
+// L'identité du poste est enregistrée sur chaque écriture (poste_balance_id).
 // ══════════════════════════════════════════
 
-// POST /api/stock-original/balance-entree — Entrée balance publique
+// Résout le poste de balance depuis le jeton fourni (ou null si invalide/absent)
+async function resolveBalancePoste(req) {
+  const token = req.body?.poste_token || req.headers['x-poste-token'] || req.query?.poste_token;
+  if (!token || typeof token !== 'string') return null;
+  const r = await pool.query(
+    'SELECT id, nom FROM postes_balance WHERE token = $1 AND is_active = true',
+    [token]
+  );
+  return r.rows[0] || null;
+}
+
+// POST /api/stock-original/balance-entree — Entrée balance (kiosque, jeton de poste)
 router.post('/balance-entree', async (req, res) => {
   try {
+    const poste = await resolveBalancePoste(req);
+    if (!poste) {
+      return res.status(401).json({ error: 'Poste de balance non autorisé', code: 'POSTE_INVALID' });
+    }
     const { date, origine, poids_brut_kg, contenant, tare_kg, operateur } = req.body;
 
     if (!date || !origine || poids_brut_kg == null || !contenant) {
@@ -63,9 +82,9 @@ router.post('/balance-entree', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO stock_original_movements
-         (type, date, poids_kg, poids_brut_kg, tare_kg, origine, contenant, source, notes)
-       VALUES ('entree', $1, $2, $3, $4, $5, $6, 'balance', $7) RETURNING *`,
-      [date, poidsNet, poidsBrut, tare, origine, contenant, operateur || null]
+         (type, date, poids_kg, poids_brut_kg, tare_kg, origine, contenant, source, notes, poste_balance_id)
+       VALUES ('entree', $1, $2, $3, $4, $5, $6, 'balance', $7, $8) RETURNING *`,
+      [date, poidsNet, poidsBrut, tare, origine, contenant, operateur || null, poste.id]
     );
 
     res.status(201).json(result.rows[0]);
@@ -75,67 +94,85 @@ router.post('/balance-entree', async (req, res) => {
   }
 });
 
-// POST /api/stock-original/balance-sortie — Sortie balance publique
+// POST /api/stock-original/balance-sortie — Sortie balance (kiosque, jeton de poste)
 router.post('/balance-sortie', async (req, res) => {
+  // Validations d'abord (pool), transaction ensuite (client) — mouvement +
+  // produit fini rendus atomiques (item 32 : voie balance de création PF).
+  const poste = await resolveBalancePoste(req);
+  if (!poste) {
+    return res.status(401).json({ error: 'Poste de balance non autorisé', code: 'POSTE_INVALID' });
+  }
+  const { date, destination, poids_brut_kg, contenant, tare_kg, operateur } = req.body;
+
+  const DESTINATIONS_VALIDES = ['atelier_tri', 'tri_preclasse', 'original_conditionne'];
+
+  if (!date || !destination || poids_brut_kg == null || !contenant) {
+    return res.status(400).json({ error: 'Champs requis : date, destination, poids_brut_kg, contenant' });
+  }
+  if (!DESTINATIONS_VALIDES.includes(destination)) {
+    return res.status(400).json({ error: 'Destination invalide' });
+  }
+  if (!Object.keys(CONTENANTS_TARES).includes(contenant)) {
+    return res.status(400).json({ error: 'Contenant invalide' });
+  }
+
+  let tare;
+  if (contenant === 'tare_manuelle') {
+    tare = parseFloat(tare_kg);
+    if (isNaN(tare)) return res.status(400).json({ error: 'Tare manuelle requise et doit etre un nombre' });
+  } else {
+    tare = CONTENANTS_TARES[contenant];
+  }
+
+  const poidsBrut = parseFloat(poids_brut_kg);
+  const poidsNet = poidsBrut - tare;
+
+  if (poidsNet <= 0) {
+    return res.status(400).json({ error: `Poids net invalide (${poidsBrut} - ${tare} = ${poidsNet}). Verifier la saisie.` });
+  }
+
+  const client = await pool.connect();
   try {
-    const { date, destination, poids_brut_kg, contenant, tare_kg, operateur } = req.body;
-
-    const DESTINATIONS_VALIDES = ['atelier_tri', 'tri_preclasse', 'original_conditionne'];
-
-    if (!date || !destination || poids_brut_kg == null || !contenant) {
-      return res.status(400).json({ error: 'Champs requis : date, destination, poids_brut_kg, contenant' });
-    }
-    if (!DESTINATIONS_VALIDES.includes(destination)) {
-      return res.status(400).json({ error: 'Destination invalide' });
-    }
-    if (!Object.keys(CONTENANTS_TARES).includes(contenant)) {
-      return res.status(400).json({ error: 'Contenant invalide' });
-    }
-
-    let tare;
-    if (contenant === 'tare_manuelle') {
-      tare = parseFloat(tare_kg);
-      if (isNaN(tare)) return res.status(400).json({ error: 'Tare manuelle requise et doit etre un nombre' });
-    } else {
-      tare = CONTENANTS_TARES[contenant];
-    }
-
-    const poidsBrut = parseFloat(poids_brut_kg);
-    const poidsNet = poidsBrut - tare;
-
-    if (poidsNet <= 0) {
-      return res.status(400).json({ error: `Poids net invalide (${poidsBrut} - ${tare} = ${poidsNet}). Verifier la saisie.` });
-    }
-
-    const mvt = await pool.query(
+    await client.query('BEGIN');
+    const mvt = await client.query(
       `INSERT INTO stock_original_movements
-         (type, date, poids_kg, poids_brut_kg, tare_kg, destination, contenant, source, notes)
-       VALUES ('sortie', $1, $2, $3, $4, $5, $6, 'balance', $7) RETURNING *`,
-      [date, poidsNet, poidsBrut, tare, destination, contenant, operateur || null]
+         (type, date, poids_kg, poids_brut_kg, tare_kg, destination, contenant, source, notes, poste_balance_id)
+       VALUES ('sortie', $1, $2, $3, $4, $5, $6, 'balance', $7, $8) RETURNING *`,
+      [date, poidsNet, poidsBrut, tare, destination, contenant, operateur || null, poste.id]
     );
 
     let produitFini = null;
     if (destination === 'tri_preclasse' || destination === 'original_conditionne') {
       const labels = { tri_preclasse: 'Tri pré-classé', original_conditionne: 'Original Conditionné' };
       const codeBarre = `PF-${Date.now()}`;
-      const pfResult = await pool.query(
-        `INSERT INTO produits_finis (code_barre, produit, poids_kg, date_fabrication)
-         VALUES ($1, $2, $3, NOW()) RETURNING *`,
-        [codeBarre, labels[destination], poidsNet]
+      // source='balance' + identité du poste (created_by NULL : pas de session
+      // utilisateur au kiosque, l'auteur est le poste) — item 32c.
+      const pfResult = await client.query(
+        `INSERT INTO produits_finis (code_barre, produit, poids_kg, date_fabrication, source, poste_balance_id)
+         VALUES ($1, $2, $3, NOW(), 'balance', $4) RETURNING *`,
+        [codeBarre, labels[destination], poidsNet, poste.id]
       );
       produitFini = pfResult.rows[0];
     }
 
+    await client.query('COMMIT');
     res.status(201).json({ mouvement: mvt.rows[0], produit_fini: produitFini });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[STOCK-ORIGINAL] Erreur balance-sortie :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
-// GET /api/stock-original/balance-historique — Historique balance du jour (public)
+// GET /api/stock-original/balance-historique — Historique balance du jour (kiosque, jeton de poste)
 router.get('/balance-historique', async (req, res) => {
   try {
+    const poste = await resolveBalancePoste(req);
+    if (!poste) {
+      return res.status(401).json({ error: 'Poste de balance non autorisé', code: 'POSTE_INVALID' });
+    }
     const date = req.query.date || new Date().toISOString().slice(0, 10);
 
     const result = await pool.query(`
@@ -178,6 +215,60 @@ function quarterLabel(date) {
   const quarter = Math.ceil((d.getMonth() + 1) / 3);
   return `Q${quarter} ${year}`;
 }
+
+// ══════════════════════════════════════════
+// POSTES DE BALANCE (jetons kiosque) — item 32b
+// Gestion réservée ADMIN : lister l'URL à paramétrer sur le kiosque,
+// créer un poste, régénérer le jeton (révoque immédiatement l'ancien).
+// ══════════════════════════════════════════
+
+// GET /api/stock-original/balance-postes — Liste des postes + URL kiosque
+router.get('/balance-postes', authorize('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, nom, token, is_active, created_at FROM postes_balance ORDER BY id'
+    );
+    res.json(result.rows.map(p => ({ ...p, url_path: `/balance/${p.token}` })));
+  } catch (err) {
+    console.error('[STOCK-ORIGINAL] Erreur balance-postes :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/stock-original/balance-postes — Créer un poste de balance
+router.post('/balance-postes', authorize('ADMIN'), [
+  body('nom').notEmpty().withMessage('Nom du poste requis'),
+], validate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `INSERT INTO postes_balance (nom) VALUES ($1) RETURNING id, nom, token, is_active, created_at`,
+      [req.body.nom.trim()]
+    );
+    const p = result.rows[0];
+    res.status(201).json({ ...p, url_path: `/balance/${p.token}` });
+  } catch (err) {
+    console.error('[STOCK-ORIGINAL] Erreur création poste balance :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/stock-original/balance-postes/:id/regenerate-token — Révoque l'ancien jeton
+router.post('/balance-postes/:id/regenerate-token', authorize('ADMIN'), async (req, res) => {
+  try {
+    const newToken = require('crypto').randomBytes(16).toString('hex');
+    const result = await pool.query(
+      `UPDATE postes_balance SET token = $1 WHERE id = $2
+       RETURNING id, nom, token, is_active, created_at`,
+      [newToken, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Poste introuvable' });
+    const p = result.rows[0];
+    res.json({ ...p, url_path: `/balance/${p.token}` });
+  } catch (err) {
+    console.error('[STOCK-ORIGINAL] Erreur régénération jeton :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 // ══════════════════════════════════════════
 // MOUVEMENTS

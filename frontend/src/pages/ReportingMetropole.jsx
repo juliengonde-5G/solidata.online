@@ -19,27 +19,51 @@ export default function ReportingMetropole() {
   const [selectedCav, setSelectedCav] = useState(null);
   const [cavDetail, setCavDetail] = useState(null);
   const [cavActivity, setCavActivity] = useState(null);
+  const [cavDetailError, setCavDetailError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sortieDyn, setSortieDyn] = useState(null);
   const [serviceCav, setServiceCav] = useState([]);
   const [captation, setCaptation] = useState([]);
+  const [errors, setErrors] = useState({});
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
+    const errs = {};
+    const msg = (err, fallback) => err?.response?.data?.error || err?.message || fallback;
+
+    // Section critique : tableau de bord + carte CAV
     try {
-      const [dashRes, cavRes, sdRes, scRes, captRes] = await Promise.all([
+      const [dashRes, cavRes] = await Promise.all([
         api.get(`/metropole/dashboard?year=${year}&month=${month}`),
         api.get('/metropole/cav'),
-        api.get(`/metropole/sortie-dynamique?annee=${year}`).catch(() => ({ data: null })),
-        api.get('/metropole/service-cav?months=6').catch(() => ({ data: [] })),
-        api.get(`/metropole/captation-par-commune?annee=${year}`).catch(() => ({ data: [] })),
       ]);
       setDashboard(dashRes.data);
-      setCavList(cavRes.data);
-      setSortieDyn(sdRes.data);
-      setServiceCav(scRes.data || []);
-      setCaptation(captRes.data || []);
-    } catch (err) { console.error(err); }
+      setCavList(cavRes.data || []);
+    } catch (err) {
+      console.error(err);
+      setDashboard(null);
+      setCavList([]);
+      errs.dashboard = msg(err, 'Impossible de charger le tableau de bord Métropole.');
+    }
+
+    // Sections secondaires (en parallèle) : on REMONTE l'erreur au lieu de
+    // l'avaler (résidu 6), sans casser l'affichage des sections saines.
+    const [sd, sc, capt] = await Promise.all([
+      api.get(`/metropole/sortie-dynamique?annee=${year}`)
+        .then((r) => r.data)
+        .catch((err) => { errs.sortie = msg(err, 'Indicateur de sortie dynamique indisponible.'); return null; }),
+      api.get('/metropole/service-cav?months=6')
+        .then((r) => r.data)
+        .catch((err) => { errs.service = msg(err, 'Taux de service CAV indisponible.'); return []; }),
+      api.get(`/metropole/captation-par-commune?annee=${year}`)
+        .then((r) => r.data)
+        .catch((err) => { errs.captation = msg(err, 'Captation par commune indisponible.'); return []; }),
+    ]);
+
+    setSortieDyn(sd);
+    setServiceCav(sc || []);
+    setCaptation(capt || []);
+    setErrors(errs);
     setLoading(false);
   }, [year, month]);
 
@@ -49,14 +73,21 @@ export default function ReportingMetropole() {
     setSelectedCav(cav);
     setCavDetail(null);
     setCavActivity(null);
+    setCavDetailError(null);
     try {
+      // Le détail est essentiel ; la prévision d'activité (J-15/J+15) est optionnelle
+      // et se dégrade sans casser la fiche (le graphe disparaît simplement).
       const [detailRes, actRes] = await Promise.all([
         api.get(`/metropole/cav/${cav.id}/details`),
         api.get(`/cav/${cav.id}/activity?days_before=15&days_after=15`).catch(() => ({ data: null })),
       ]);
       setCavDetail(detailRes.data);
       setCavActivity(actRes.data);
-    } catch (err) { console.error(err); setCavDetail(null); }
+    } catch (err) {
+      console.error(err);
+      setCavDetail(null);
+      setCavDetailError(err.response?.data?.error || err.message || 'Impossible de charger le détail de ce CAV.');
+    }
   };
 
   const d = dashboard;
@@ -71,6 +102,22 @@ export default function ReportingMetropole() {
     if (!communeFilter) return cavList;
     return cavList.filter((c) => c.commune === communeFilter);
   }, [cavList, communeFilter]);
+
+  // Part de tonnage « non rattaché » (CAV sans commune du référentiel INSEE) —
+  // affichée honnêtement plutôt qu'omise (constat auditeur Métropole 2.2).
+  const captTotals = useMemo(() => {
+    const total = captation.reduce((s, c) => s + (Number(c.poids_kg) || 0), 0);
+    const nonRattache = captation
+      .filter((c) => !c.code_insee)
+      .reduce((s, c) => s + (Number(c.poids_kg) || 0), 0);
+    const nbRattachees = captation.filter((c) => c.code_insee).length;
+    return {
+      total,
+      nonRattache,
+      nonRattachePct: total ? Math.round((nonRattache / total) * 1000) / 10 : 0,
+      nbRattachees,
+    };
+  }, [captation]);
 
   // Plage d'années étendue (10 ans en arrière, 1 an en avant)
   const years = useMemo(
@@ -104,6 +151,14 @@ export default function ReportingMetropole() {
           }
         />
 
+        {/* Erreur section critique (résidu 6) — visible même si le tableau de bord ne charge pas */}
+        {!loading && errors.dashboard && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl p-4 text-sm">
+            <p className="font-semibold">Tableau de bord Métropole indisponible</p>
+            <p className="mt-0.5">{errors.dashboard}</p>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
         ) : d && (
@@ -127,7 +182,9 @@ export default function ReportingMetropole() {
 
             {/* KPIs P0-E audit Métropole */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {sortieDyn && (
+              {errors.sortie ? (
+                <SectionErrorCard title={`Taux de sortie dynamique ${year}`} msg={errors.sortie} />
+              ) : sortieDyn && (
                 <div className="bg-white rounded-2xl shadow p-5 border border-emerald-100">
                   <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Taux de sortie dynamique {sortieDyn.annee}</div>
                   <div className="text-4xl font-extrabold text-emerald-600">
@@ -138,7 +195,9 @@ export default function ReportingMetropole() {
                   </div>
                 </div>
               )}
-              {serviceCav.length > 0 && (() => {
+              {errors.service ? (
+                <SectionErrorCard title="Taux de service CAV" msg={errors.service} />
+              ) : serviceCav.length > 0 && (() => {
                 const last = serviceCav[serviceCav.length - 1];
                 return (
                   <div className="bg-white rounded-2xl shadow p-5 border border-blue-100">
@@ -152,18 +211,22 @@ export default function ReportingMetropole() {
                   </div>
                 );
               })()}
-              {captation.length > 0 && (
+              {errors.captation ? (
+                <SectionErrorCard title="Captation par commune" msg={errors.captation} />
+              ) : captation.length > 0 && (
                 <div className="bg-white rounded-2xl shadow p-5 border border-amber-100">
                   <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Captation par commune (top 3)</div>
                   <div className="space-y-1 text-sm mt-2">
                     {captation.slice(0, 3).map((c) => (
-                      <div key={c.commune} className="flex justify-between text-slate-700">
+                      <div key={c.code_insee || c.commune} className="flex justify-between text-slate-700">
                         <span className="truncate font-medium">{c.commune}</span>
                         <span className="tabular-nums text-amber-700 font-bold">{c.kg_par_hab != null ? `${c.kg_par_hab} kg/hab` : `${(c.poids_kg / 1000).toFixed(1)}t`}</span>
                       </div>
                     ))}
                   </div>
-                  <div className="text-xs text-slate-400 mt-2">{captation.length} communes total</div>
+                  <div className="text-xs text-slate-400 mt-2">
+                    {captation.length} commune(s) · non rattaché {(captTotals.nonRattache / 1000).toFixed(1)}t ({captTotals.nonRattachePct}%)
+                  </div>
                 </div>
               )}
             </div>
@@ -185,6 +248,81 @@ export default function ReportingMetropole() {
                     );
                   })}
                 </div>
+              </Section>
+            )}
+
+            {/* Captation par commune (kg/habitant) — vue détaillée, part « non rattaché » affichée honnêtement */}
+            {(errors.captation || captation.length > 0) && (
+              <Section title="Captation par commune (kg/habitant/an)" icon={BarChart3}>
+                {errors.captation ? (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
+                    {errors.captation}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-3 mb-4 text-sm">
+                      <span className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700">
+                        {captTotals.nbRattachees} commune(s) rattachée(s)
+                      </span>
+                      <span className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-700">
+                        Tonnage réparti : {(captTotals.total / 1000).toFixed(1)} t
+                      </span>
+                      <span className={`px-3 py-1.5 rounded-lg border ${captTotals.nonRattache > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                        Non rattaché : {(captTotals.nonRattache / 1000).toFixed(1)} t ({captTotals.nonRattachePct}%)
+                      </span>
+                    </div>
+                    {captTotals.nonRattache > 0 && (
+                      <p className="text-xs text-slate-500 mb-3">
+                        Le tonnage « non rattaché » provient de CAV sans commune du référentiel INSEE : il ne peut pas être rapporté à une population.
+                        Rattachez ces CAV depuis <span className="font-medium">Gestion des CAV</span> pour le ventiler par commune.
+                      </p>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                        <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b border-slate-200">
+                          <tr>
+                            <th className="text-left py-2 px-3">Commune</th>
+                            <th className="text-left py-2 px-3">INSEE</th>
+                            <th className="text-right py-2 px-3">Population</th>
+                            <th className="text-right py-2 px-3">Tournées</th>
+                            <th className="text-right py-2 px-3">Tonnage</th>
+                            <th className="text-right py-2 px-3">kg/hab/an</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {captation.map((c) => {
+                            const kgHab = c.kg_par_hab != null ? Number(c.kg_par_hab) : null;
+                            const objectif = d?.taux_captation?.objectif_refashion_kg || 3.6;
+                            const atteint = kgHab != null ? kgHab >= objectif : null;
+                            return (
+                              <tr key={c.code_insee || c.commune} className={`border-b border-slate-100 last:border-0 ${!c.code_insee ? 'bg-amber-50/40' : ''}`}>
+                                <td className="py-2 px-3 font-medium text-slate-700">
+                                  {c.code_insee ? c.commune : (
+                                    <span className="inline-flex items-center gap-1.5 text-amber-700">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" /> {c.commune}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3 font-mono text-xs text-slate-500">{c.code_insee || '—'}</td>
+                                <td className="py-2 px-3 text-right tabular-nums text-slate-600">{c.population ? Number(c.population).toLocaleString('fr-FR') : '—'}</td>
+                                <td className="py-2 px-3 text-right tabular-nums text-slate-500">{c.nb_tournees}</td>
+                                <td className="py-2 px-3 text-right tabular-nums font-semibold text-slate-700">{(Number(c.poids_kg) / 1000).toFixed(2)} t</td>
+                                <td className="py-2 px-3 text-right tabular-nums">
+                                  {kgHab != null
+                                    ? <span className={atteint ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold'}>{kgHab.toFixed(2)}</span>
+                                    : <span className="text-slate-400">—</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-3">
+                      Tonnage réparti au prorata des CAV collectés par commune dans chaque tournée (objectif Refashion {d?.taux_captation?.objectif_refashion_kg || 3.6} kg/hab/an).
+                    </p>
+                  </>
+                )}
               </Section>
             )}
 
@@ -246,6 +384,14 @@ export default function ReportingMetropole() {
                 <div className="lg:col-span-2">
                   {!selectedCav ? (
                     <div className="flex items-center justify-center h-64 text-gray-400">Cliquez sur un CAV pour voir ses détails</div>
+                  ) : cavDetailError ? (
+                    <div className="flex flex-col items-center justify-center h-64 gap-3 text-center px-4">
+                      <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl p-4 text-sm max-w-sm">
+                        <p className="font-semibold">Détail du CAV indisponible</p>
+                        <p className="mt-0.5">{cavDetailError}</p>
+                      </div>
+                      <button onClick={() => openCavDetail(selectedCav)} className="text-sm text-primary hover:underline">Réessayer</button>
+                    </div>
                   ) : !cavDetail ? (
                     <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
                   ) : (
@@ -395,6 +541,18 @@ function MiniCard({ label, value }) {
     <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
       <p className="text-[10px] text-gray-500 uppercase">{label}</p>
       <p className="text-lg font-bold">{value}</p>
+    </div>
+  );
+}
+
+// Carte d'erreur pour un indicateur secondaire en échec (résidu 6) — remplace
+// le silence : l'auditeur voit qu'un indicateur n'a pas pu être calculé.
+function SectionErrorCard({ title, msg }) {
+  return (
+    <div className="bg-amber-50 rounded-2xl shadow-sm p-5 border border-amber-200">
+      <div className="text-xs uppercase tracking-wider text-amber-600 font-semibold mb-1">{title}</div>
+      <div className="text-sm text-amber-800 font-medium mt-1">Indicateur indisponible</div>
+      <div className="text-xs text-amber-700 mt-1">{msg}</div>
     </div>
   );
 }

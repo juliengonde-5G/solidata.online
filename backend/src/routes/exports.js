@@ -421,6 +421,8 @@ router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
     const { rows } = await pool.query(`
       SELECT
         e.id,
+        e.civility,
+        e.gender,
         e.first_name,
         e.last_name,
         e.contract_type,
@@ -442,11 +444,14 @@ router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
         sortie.milestone_type AS sortie_type_jalon,
         sortie.sortie_classification,
         sortie.sortie_type,
+        sortie.sortie_employeur_siret,
+        sortie.sortie_duree_contrat_mois,
         sortie.completed_date AS sortie_date
       FROM employees e
       LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
       LEFT JOIN LATERAL (
-        SELECT milestone_type, sortie_classification, sortie_type, completed_date
+        SELECT milestone_type, sortie_classification, sortie_type,
+               sortie_employeur_siret, sortie_duree_contrat_mois, completed_date
         FROM insertion_milestones m
         WHERE m.employee_id = e.id
           AND m.milestone_type = 'Bilan Sortie'
@@ -465,14 +470,16 @@ router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
 
     // CSV semi-colon — encodage UTF-8 BOM pour Excel
     const headers = [
-      'ID', 'Prénom', 'Nom', 'Type contrat', 'Début contrat', 'Fin contrat',
+      'ID', 'Civilité', 'Genre', 'Prénom', 'Nom', 'Type contrat', 'Début contrat', 'Fin contrat',
       'Statut insertion', 'Début parcours', 'Fin parcours',
       'Prescripteur (organisme)', 'Prescripteur (type)', 'Date prescription',
       'Heures travaillées (trimestre)',
-      'Sortie type', 'Classification', 'Catégorie', 'Date sortie',
+      'Sortie type', 'Classification', 'Catégorie', 'SIRET employeur sortie', 'Durée contrat sortie (mois)', 'Date sortie',
     ];
     const lines = rows.map(r => [
       r.id,
+      r.civility || '',
+      r.gender || '',
       r.first_name || '',
       r.last_name || '',
       r.contract_type || '',
@@ -488,6 +495,8 @@ router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
       r.sortie_type_jalon || '',
       r.sortie_classification || '',
       r.sortie_type || '',
+      r.sortie_employeur_siret || '',
+      r.sortie_duree_contrat_mois != null ? r.sortie_duree_contrat_mois : '',
       r.sortie_date ? new Date(r.sortie_date).toISOString().slice(0, 10) : '',
     ].map(v => {
       const s = String(v ?? '').replace(/"/g, '""');

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Package } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
@@ -63,6 +63,10 @@ export default function AdminCAV() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterRattach, setFilterRattach] = useState(''); // '', 'linked', 'unlinked'
+  const [communesRef, setCommunesRef] = useState([]);
+  const [communesError, setCommunesError] = useState(null);
+  const [savingRattach, setSavingRattach] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editCav, setEditCav] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -85,6 +89,19 @@ export default function AdminCAV() {
   }, [filterStatus, search]);
 
   useEffect(() => { loadCAVs(); }, [loadCAVs]);
+
+  // Référentiel communes (pour le rattachement CAV↔commune INSEE)
+  useEffect(() => {
+    api.get('/communes')
+      .then((r) => setCommunesRef(r.data || []))
+      .catch((e) => setCommunesError(e.response?.data?.error || 'Référentiel communes indisponible'));
+  }, []);
+
+  const communeByInsee = useMemo(() => {
+    const m = {};
+    for (const c of communesRef) m[c.code_insee] = c;
+    return m;
+  }, [communesRef]);
 
   const showAlert = (msg, type = 'success') => {
     setAlert({ msg, type });
@@ -187,6 +204,23 @@ export default function AdminCAV() {
     }
   };
 
+  // Rattachement d'un CAV à une commune du référentiel INSEE
+  // (alimente la captation par commune du Reporting Métropole).
+  // Écrit via PATCH /communes/cav/:id ; code_insee vide = retire le rattachement.
+  const saveRattachement = async (code_insee) => {
+    if (!detailCav) return;
+    setSavingRattach(true);
+    try {
+      const res = await api.patch(`/communes/cav/${detailCav.id}`, { code_insee: code_insee || null });
+      setDetailCav({ ...detailCav, code_insee_commune: res.data.code_insee_commune });
+      showAlert(code_insee ? 'CAV rattaché à la commune' : 'Rattachement retiré');
+      loadCAVs();
+    } catch (err) {
+      showAlert(err.response?.data?.error || 'Erreur lors du rattachement', 'error');
+    }
+    setSavingRattach(false);
+  };
+
   const deleteCav = async (cav) => {
     const ok = await confirm({
       title: 'Supprimer ce CAV ?',
@@ -281,6 +315,13 @@ export default function AdminCAV() {
   };
 
   const cavWithoutQR = cavList.filter(c => !c.qr_code_data).length;
+  const rattachCount = cavList.filter(c => c.code_insee_commune).length;
+  const rattachRate = cavList.length ? Math.round((rattachCount / cavList.length) * 100) : 0;
+  const displayedCav = cavList.filter(c => {
+    if (filterRattach === 'linked') return !!c.code_insee_commune;
+    if (filterRattach === 'unlinked') return !c.code_insee_commune;
+    return true;
+  });
 
   return (
     <Layout>
@@ -324,7 +365,7 @@ export default function AdminCAV() {
         />
 
         {/* Filters */}
-        <div className="flex gap-3 mb-4">
+        <div className="flex gap-3 mb-4 flex-wrap items-center">
           <input
             type="text"
             placeholder="Rechercher un CAV..."
@@ -337,6 +378,17 @@ export default function AdminCAV() {
             <option value="active">Actifs</option>
             <option value="unavailable">Indisponibles</option>
           </select>
+          <select value={filterRattach} onChange={e => setFilterRattach(e.target.value)} className="select-modern w-auto"
+            title="Filtrer selon le rattachement à une commune du référentiel">
+            <option value="">Rattachement : tous</option>
+            <option value="linked">Rattachés commune</option>
+            <option value="unlinked">Non rattachés</option>
+          </select>
+          <span className={`text-xs px-2.5 py-1 rounded-full border ${
+            rattachRate >= 100 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+          }`} title="Part de CAV rattachés à une commune du référentiel INSEE">
+            {rattachCount}/{cavList.length} CAV rattachés ({rattachRate}%)
+          </span>
         </div>
 
         {/* Layout : Table + Fiche détail */}
@@ -360,7 +412,7 @@ export default function AdminCAV() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {cavList.map(cav => (
+                    {displayedCav.map(cav => (
                       <tr key={cav.id}
                         className={`hover:bg-gray-50 cursor-pointer ${detailCav?.id === cav.id ? 'bg-green-50 border-l-4 border-l-primary' : ''}`}
                         onClick={() => openDetail(cav)}
@@ -369,7 +421,19 @@ export default function AdminCAV() {
                           <div className="font-medium text-slate-800">{cav.commune || '—'}</div>
                           <div className="text-xs text-gray-400 truncate max-w-[200px]">{cav.address || '—'}</div>
                         </td>
-                        <td className="px-4 py-3 text-gray-500 text-xs">{cav.commune || '—'}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {cav.code_insee_commune ? (
+                            <span className="inline-flex items-center gap-1.5 text-gray-600" title={`Rattaché — INSEE ${cav.code_insee_commune}`}>
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                              {communeByInsee[cav.code_insee_commune]?.nom || cav.commune || '—'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-amber-600" title="CAV non rattaché à une commune du référentiel">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                              {cav.commune ? `${cav.commune} · non rattaché` : 'Non rattaché'}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-center">{cav.nb_containers || 1}</td>
                         <td className="px-4 py-3 text-center">
                           {cav.qr_code_data ? (
@@ -395,7 +459,7 @@ export default function AdminCAV() {
                         </td>
                       </tr>
                     ))}
-                    {cavList.length === 0 && (
+                    {displayedCav.length === 0 && (
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Aucun CAV trouvé</td></tr>
                     )}
                   </tbody>
@@ -499,6 +563,53 @@ export default function AdminCAV() {
                       Supprimer
                     </button>
                   )}
+                </div>
+              </div>
+
+              {/* Rattachement commune (Métropole / captation kg/hab) */}
+              <div className="card-modern overflow-hidden">
+                <div className="px-4 py-2 bg-gray-50 border-b">
+                  <h3 className="text-xs font-medium text-gray-500 uppercase">Rattachement commune (Métropole)</h3>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="flex gap-2 text-sm">
+                    <span className="text-gray-400 w-24 shrink-0">Commune INSEE</span>
+                    {detailCav.code_insee_commune ? (
+                      <span className="text-gray-700">
+                        {communeByInsee[detailCav.code_insee_commune]?.nom || detailCav.commune || '—'}
+                        <span className="text-gray-400 font-mono ml-1">({detailCav.code_insee_commune})</span>
+                      </span>
+                    ) : (
+                      <span className="text-amber-600 font-medium">Non rattaché</span>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Rattacher à une commune du référentiel
+                    </label>
+                    <select
+                      value={detailCav.code_insee_commune || ''}
+                      onChange={(e) => saveRattachement(e.target.value)}
+                      disabled={savingRattach || communesRef.length === 0}
+                      className="select-modern w-full disabled:opacity-50"
+                    >
+                      <option value="">— Non rattaché —</option>
+                      {communesRef.map((c) => (
+                        <option key={c.code_insee} value={c.code_insee}>
+                          {c.nom} ({c.code_insee}){c.population_insee ? ` — ${c.population_insee.toLocaleString('fr-FR')} hab` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {communesRef.length === 0 ? (
+                      <p className="text-xs text-amber-600 mt-1">
+                        {communesError || 'Référentiel communes vide.'} Chargez-le depuis « Référentiel communes » (Admin).
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-400 mt-1">
+                        Alimente la captation par commune (kg/habitant) du Reporting Métropole.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 

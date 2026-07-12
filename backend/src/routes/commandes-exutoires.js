@@ -57,6 +57,22 @@ const STATUTS_VALIDES = [
   'annulee'
 ];
 
+// ══════════════════════════════════════════
+// Item 38b — Garde stock sur le passage à « expediee ».
+// Seule la préparation d'expédition (preparations.js, passage de la préparation
+// à « expediee ») décrémente réellement le stock (INSERT stock_movements type
+// 'sortie', code_barre = 'EXU-'+reference). Le raccourci de statut de la fiche
+// commande (chargee → expediee) contournait ce chemin : la commande « avançait »
+// sans jamais sortir la marchandise du stock → dérive silencieuse de l'inventaire.
+// Ces deux helpers purs (testables sans DB) décident si une preuve de décrément
+// est requise pour l'état cible, et si cette preuve est satisfaite.
+function stockProofRequired(toState) {
+  return toState === 'expediee';
+}
+function hasStockProof({ prepExpediee, stockSortie }) {
+  return Boolean(prepExpediee) || Boolean(stockSortie);
+}
+
 // GET /api/commandes-exutoires
 router.get('/', async (req, res) => {
   try {
@@ -331,16 +347,16 @@ router.patch('/:id/statut', [
     const { statut, commentaire } = req.body;
 
     if (!statut || !STATUTS_VALIDES.includes(statut)) {
-      client.release();
+      // Release géré par le finally (pas de release manuel → évite le double release).
       return res.status(400).json({ error: `Statut invalide. Valeurs acceptees : ${STATUTS_VALIDES.join(', ')}` });
     }
 
     await client.query('BEGIN');
 
-    const current = await client.query('SELECT statut FROM commandes_exutoires WHERE id = $1 FOR UPDATE', [req.params.id]);
+    const current = await client.query('SELECT statut, reference FROM commandes_exutoires WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (current.rows.length === 0) {
       await client.query('ROLLBACK');
-      client.release();
+      // Release géré par le finally (pas de release manuel → évite le double release).
       return res.status(404).json({ error: 'Commande exutoire non trouvee' });
     }
 
@@ -358,8 +374,35 @@ router.patch('/:id/statut', [
     });
     if (!check.ok) {
       await client.query('ROLLBACK');
-      client.release();
+      // Release géré par le finally (pas de release manuel → évite le double release).
       return res.status(409).json({ error: check.reason, code: check.code });
+    }
+
+    // Item 38b — Garde stock : marquer « expediee » exige une preuve que la
+    // marchandise est réellement sortie du stock. La transition chargee→expediee
+    // est légale au niveau de la machine à états, mais le raccourci de la fiche
+    // commande ne crée aucun mouvement de stock. On n'accepte donc « expediee »
+    // que si une préparation liée est déjà « expediee » OU si un mouvement de
+    // stock de sortie lié existe. Sinon 409 : l'utilisateur doit passer par la
+    // préparation d'expédition (seul chemin qui décrémente le stock).
+    if (stockProofRequired(statut)) {
+      const preuve = await client.query(
+        `SELECT
+           EXISTS (SELECT 1 FROM preparations_expedition
+                   WHERE commande_id = $1 AND statut_preparation = 'expediee') AS prep_expediee,
+           EXISTS (SELECT 1 FROM stock_movements
+                   WHERE type = 'sortie' AND code_barre = $2) AS stock_sortie`,
+        [req.params.id, 'EXU-' + current.rows[0].reference]
+      );
+      const preuveRow = preuve.rows[0] || {};
+      if (!hasStockProof({ prepExpediee: preuveRow.prep_expediee, stockSortie: preuveRow.stock_sortie })) {
+        await client.query('ROLLBACK');
+        // Release géré par le finally (pas de release manuel → évite le double release).
+        return res.status(409).json({
+          error: "Passez par la préparation d'expédition — le stock n'a pas été décrémenté.",
+          code: 'STOCK_NON_DECREMENTE',
+        });
+      }
     }
 
     const result = await client.query(
@@ -406,7 +449,7 @@ router.patch('/:id/annuler', async (req, res) => {
     const current = await client.query('SELECT statut FROM commandes_exutoires WHERE id = $1', [req.params.id]);
     if (current.rows.length === 0) {
       await client.query('ROLLBACK');
-      client.release();
+      // Release géré par le finally (pas de release manuel → évite le double release).
       return res.status(404).json({ error: 'Commande exutoire non trouvee' });
     }
 
@@ -415,7 +458,7 @@ router.patch('/:id/annuler', async (req, res) => {
 
     if (statutsNonAnnulables.includes(ancienStatut)) {
       await client.query('ROLLBACK');
-      client.release();
+      // Release géré par le finally (pas de release manuel → évite le double release).
       return res.status(400).json({ error: `Impossible d'annuler une commande au statut "${ancienStatut}"` });
     }
 
@@ -442,3 +485,6 @@ router.patch('/:id/annuler', async (req, res) => {
 });
 
 module.exports = router;
+// Helpers purs exposés pour les tests unitaires (item 38b — garde stock « expediee »)
+module.exports.stockProofRequired = stockProofRequired;
+module.exports.hasStockProof = hasStockProof;

@@ -364,28 +364,55 @@ router.get('/service-cav', async (req, res) => {
 });
 
 // Tonnage captation par commune kg/hab — année
+//
+// Correctif audit 07/2026 (item 33) : l'ancienne requête joignait
+// tours × tour_weights × tour_cav dans le même GROUP BY. Comme tour_weights
+// (n pesées) et tour_cav (m CAV collectés) n'ont pas d'autre clé commune que
+// tour_id, le produit cartésien comptait CHAQUE pesée m fois et l'attribuait
+// en totalité à chaque commune → tonnage et kg/hab gonflés d'un facteur ≈ nb_cav.
+// On répartit désormais le poids net de chaque tournée AU PRORATA du nombre de
+// CAV collectés par commune (poids_net × nb_cav_commune / nb_cav_total), via des
+// CTE séparées (poids_tour + cav_par_tour), comme la vue vw_dpav_communes.
+//
+// Exemple chiffré (une tournée de 300 kg, 15 CAV collectés : 10 à ROUEN,
+// 3 à SOTTEVILLE, 2 à BOIS) :
+//   - AVANT (cartésien) : ROUEN 3000 kg, SOTTEVILLE 900, BOIS 600 → total 4500 (×15)
+//   - APRÈS (prorata)   : ROUEN  200 kg, SOTTEVILLE  60, BOIS  40 → total  300 (exact)
+// La spécification exécutable de ce calcul est distributeTonnageProrata()
+// ci-dessous, verrouillée par backend/tests/unit/routes/metropole.test.js.
 router.get('/captation-par-commune', async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const { rows } = await pool.query(`
+      WITH poids_tour AS (
+        SELECT tour_id, SUM(weight_kg) AS poids_total_kg
+        FROM tour_weights GROUP BY tour_id
+      ), cav_par_tour AS (
+        SELECT tour_id, COUNT(*) AS nb_cav_collectes
+        FROM tour_cav WHERE status = 'collected' GROUP BY tour_id
+      )
       SELECT
         COALESCE(rc.nom, c.commune, '(non rattaché)') AS commune,
         rc.code_insee,
         rc.epci_nom,
         COALESCE(rc.population_insee, c.population_commune) AS population,
-        COALESCE(SUM(tw.weight_kg), 0)::int AS poids_kg,
+        COALESCE(ROUND(SUM(pt.poids_total_kg::numeric / NULLIF(cpt.nb_cav_collectes, 0))), 0)::int AS poids_kg,
         COUNT(DISTINCT t.id)::int AS nb_tournees,
+        COUNT(DISTINCT c.id)::int AS nb_cav,
         CASE
           WHEN COALESCE(rc.population_insee, c.population_commune) > 0
-          THEN ROUND(SUM(tw.weight_kg)::numeric / NULLIF(COALESCE(rc.population_insee, c.population_commune), 0), 3)
+          THEN ROUND(
+            (SUM(pt.poids_total_kg::numeric / NULLIF(cpt.nb_cav_collectes, 0)))
+            / NULLIF(COALESCE(rc.population_insee, c.population_commune), 0), 3)
           ELSE NULL
         END AS kg_par_hab
       FROM tours t
-      JOIN tour_weights tw ON tw.tour_id = t.id
       JOIN tour_cav tc ON tc.tour_id = t.id AND tc.status = 'collected'
       JOIN cav c ON tc.cav_id = c.id
+      JOIN poids_tour pt ON pt.tour_id = t.id
+      JOIN cav_par_tour cpt ON cpt.tour_id = t.id
       LEFT JOIN referentiel_communes rc ON c.code_insee_commune = rc.code_insee
-      WHERE EXTRACT(YEAR FROM t.date) = $1
+      WHERE t.status = 'completed' AND EXTRACT(YEAR FROM t.date) = $1
       GROUP BY COALESCE(rc.nom, c.commune, '(non rattaché)'), rc.code_insee, rc.epci_nom,
                COALESCE(rc.population_insee, c.population_commune)
       ORDER BY poids_kg DESC
@@ -396,5 +423,38 @@ router.get('/captation-par-commune', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+/**
+ * Oracle de calcul (spécification exécutable, verrouillée par metropole.test.js).
+ *
+ * Répartit le poids net de CHAQUE tournée au prorata du nombre de CAV collectés
+ * par commune : part_commune = poids_net × (nb_cav_commune / nb_cav_total).
+ * La route /captation-par-commune calcule EXACTEMENT ceci en SQL (CTE poids_tour
+ * + cav_par_tour) ; cette fonction n'est pas appelée en production (le SQL est
+ * plus efficace) mais fige la formule pour empêcher toute régression vers
+ * l'ancien produit cartésien (tonnage ≈ ×nb_cav).
+ *
+ * @param {Array<{poids_net:number, communes:string[]}>} tournees
+ *   communes = liste des communes des CAV COLLECTÉS (un élément par CAV collecté,
+ *   doublons attendus quand plusieurs CAV appartiennent à la même commune).
+ * @returns {Object<string, number>} tonnage réparti par commune (Σ = Σ poids_net
+ *   des tournées ayant au moins un CAV collecté).
+ */
+function distributeTonnageProrata(tournees) {
+  const parCommune = {};
+  for (const t of tournees || []) {
+    const communes = Array.isArray(t.communes) ? t.communes : [];
+    const nbTotal = communes.length;
+    if (nbTotal === 0) continue; // tournée sans CAV collecté : poids non attribuable
+    const part = (Number(t.poids_net) || 0) / nbTotal;
+    for (const commune of communes) {
+      const key = commune || '(non rattaché)';
+      parCommune[key] = (parCommune[key] || 0) + part;
+    }
+  }
+  return parCommune;
+}
+
+router.distributeTonnageProrata = distributeTonnageProrata;
 
 module.exports = router;

@@ -5,24 +5,39 @@ import { LoadingSpinner, DataTable, Modal, PageHeader } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
+// Item 38a — Nomenclature alignée sur le backend (tarifs-exutoires.js
+// TYPES_PRODUIT_VALIDES) et sur le CHECK SQL de tarifs_exutoires (init-db.js).
+// TYPES_PRODUIT = libellés de TOUS les types (affichage/lecture, y compris les
+// types historiques effilo_*). TYPES_PRODUIT_CREABLES = gammes actives proposées
+// à la création/édition (les effilo_* restent lisibles/éditables mais ne sont
+// plus proposés à la création, comme côté backend).
 const TYPES_PRODUIT = {
   original: 'Original',
   csr: 'CSR',
-  effilo_blanc: 'Effilo Blanc',
-  effilo_couleur: 'Effilo Couleur',
+  essuyage: 'Essuyage',
+  tricot: 'Tricot',
+  merinos: 'Mérinos',
   jean: 'Jean',
   coton_blanc: 'Coton Blanc',
-  coton_couleur: 'Coton Couleur'
+  coton_couleur: 'Coton Couleur',
+  // Types historiques — affichage/édition uniquement (plus proposés à la création)
+  effilo_blanc: 'Effilo Blanc (obsolète)',
+  effilo_couleur: 'Effilo Couleur (obsolète)'
 };
+
+const TYPES_PRODUIT_CREABLES = ['original', 'csr', 'essuyage', 'tricot', 'merinos', 'jean', 'coton_blanc', 'coton_couleur'];
 
 const TYPE_COLORS = {
   original: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-800' },
   csr: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', badge: 'bg-red-100 text-red-800' },
-  effilo_blanc: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', badge: 'bg-blue-100 text-blue-800' },
-  effilo_couleur: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', badge: 'bg-purple-100 text-purple-800' },
+  essuyage: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-100 text-orange-800' },
+  tricot: { bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700', badge: 'bg-cyan-100 text-cyan-800' },
+  merinos: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-800' },
   jean: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-100 text-indigo-800' },
   coton_blanc: { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', badge: 'bg-teal-100 text-teal-800' },
-  coton_couleur: { bg: 'bg-pink-50', border: 'border-pink-200', text: 'text-pink-700', badge: 'bg-pink-100 text-pink-800' }
+  coton_couleur: { bg: 'bg-pink-50', border: 'border-pink-200', text: 'text-pink-700', badge: 'bg-pink-100 text-pink-800' },
+  effilo_blanc: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', badge: 'bg-blue-100 text-blue-800' },
+  effilo_couleur: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', badge: 'bg-purple-100 text-purple-800' }
 };
 
 export default function ExutoiresTarifs() {
@@ -32,6 +47,7 @@ export default function ExutoiresTarifs() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
     type_produit: '',
     prix_reference_tonne: '',
@@ -57,6 +73,7 @@ export default function ExutoiresTarifs() {
   const resetForm = () => {
     setForm({ type_produit: '', prix_reference_tonne: '', client_id: '', date_debut: '', date_fin: '' });
     setEditing(null);
+    setFormError('');
   };
 
   const openCreate = () => {
@@ -66,6 +83,7 @@ export default function ExutoiresTarifs() {
 
   const openEdit = (tarif) => {
     setEditing(tarif);
+    setFormError('');
     setForm({
       type_produit: tarif.type_produit || '',
       prix_reference_tonne: tarif.prix_reference_tonne || '',
@@ -78,6 +96,7 @@ export default function ExutoiresTarifs() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError('');
     const payload = {
       ...form,
       client_id: form.client_id || null,
@@ -92,7 +111,10 @@ export default function ExutoiresTarifs() {
       setShowModal(false);
       resetForm();
       loadData();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      setFormError(err.response?.data?.error || 'Enregistrement du tarif impossible. Vérifiez les champs et réessayez.');
+    }
   };
 
   const handleDelete = async (id) => {
@@ -111,6 +133,21 @@ export default function ExutoiresTarifs() {
 
   const prixReference = tarifs.filter(t => !t.client_id);
   const prixNegocies = tarifs.filter(t => t.client_id);
+
+  // Cartes de prix de référence : gammes actives + tout type historique qui a
+  // déjà un tarif de référence (ne pas masquer les anciens tarifs effilo_*).
+  const referenceCardTypes = [
+    ...TYPES_PRODUIT_CREABLES,
+    ...prixReference.map(t => t.type_produit).filter(t => !TYPES_PRODUIT_CREABLES.includes(t)),
+  ].filter((t, i, arr) => arr.indexOf(t) === i);
+
+  // Options du menu déroulant : gammes actives + (si on édite un tarif d'un type
+  // historique) ce type, pour permettre sa relecture/édition sans le reproposer
+  // aux nouveaux tarifs.
+  const typeOptions = [
+    ...TYPES_PRODUIT_CREABLES,
+    ...(form.type_produit && !TYPES_PRODUIT_CREABLES.includes(form.type_produit) ? [form.type_produit] : []),
+  ];
 
   const getClientName = (clientId) => {
     const c = clients.find(cl => cl.id === clientId);
@@ -140,7 +177,7 @@ export default function ExutoiresTarifs() {
         <div className="mb-8">
           <h2 className="text-lg font-semibold text-slate-800 mb-4">Prix de référence</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {Object.keys(TYPES_PRODUIT).map(type => {
+            {referenceCardTypes.map(type => {
               const tarif = prixReference.find(t => t.type_produit === type);
               const colors = TYPE_COLORS[type] || {};
               return (
@@ -215,6 +252,11 @@ export default function ExutoiresTarifs() {
         {/* Modal */}
         <Modal isOpen={showModal} onClose={() => { setShowModal(false); resetForm(); }} title={editing ? 'Modifier le tarif' : 'Nouveau tarif'} size="sm">
           <form onSubmit={handleSubmit} className="space-y-4">
+            {formError && (
+              <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                {formError}
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Type de produit</label>
               <select
@@ -224,8 +266,8 @@ export default function ExutoiresTarifs() {
                 className="input-modern"
               >
                 <option value="">Sélectionner...</option>
-                {Object.entries(TYPES_PRODUIT).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
+                {typeOptions.map((key) => (
+                  <option key={key} value={key}>{TYPES_PRODUIT[key] || key}</option>
                 ))}
               </select>
             </div>

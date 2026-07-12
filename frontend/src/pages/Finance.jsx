@@ -36,6 +36,23 @@ const fmtPct = (v) => {
   return `${Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}%`;
 };
 
+// Écart signé (item 36) : + / - devant la magnitude formatée
+const fmtSigned = (v) => {
+  if (v == null) return '—';
+  const n = Number(v);
+  if (n === 0) return '0';
+  return `${n > 0 ? '+' : '-'}${fmtK(Math.abs(n))}`;
+};
+
+// Couleur d'un écart selon son ampleur (% du CA comptable)
+const ecartColor = (pct) => {
+  if (pct == null) return 'text-slate-500';
+  const a = Math.abs(Number(pct));
+  if (a < 2) return 'text-emerald-600';
+  if (a < 10) return 'text-amber-600';
+  return 'text-red-600';
+};
+
 const SUB_PAGES = [
   { path: '/pennylane', title: 'Pennylane', description: 'Synchroniser GL, transactions, balances', icon: Upload, color: 'blue' },
   { path: '/finance/operations', title: 'Donnees Operationnelles', description: 'Volumes, couts, marges par centre', icon: Calculator, color: 'emerald' },
@@ -49,6 +66,7 @@ const SUB_PAGES = [
 export default function Finance() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [kpis, setKpis] = useState(null);
+  const [rappro, setRappro] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
@@ -60,6 +78,15 @@ export default function Finance() {
       setKpis(res.data);
     } catch (err) {
       console.error('Erreur chargement KPI finance:', err);
+    }
+    // Rapprochement CA opérationnel vs comptable (item 36) — résilient : un
+    // échec ici ne doit pas vider les KPIs dirigeant ci-dessus.
+    try {
+      const r = await api.get(`/finance/rapprochement-ca/${year}`);
+      setRappro(r.data);
+    } catch (err) {
+      console.error('Erreur chargement rapprochement CA:', err);
+      setRappro(null);
     }
     setLoading(false);
   }, [year]);
@@ -85,6 +112,14 @@ export default function Finance() {
     mois: m,
     solde: treasuryData[i]?.solde || 0,
   }));
+
+  // Sources manquantes pour le rapprochement CA (item 36)
+  const rapproMissing = [];
+  if (rappro && !rappro.sources.gl) rapproMissing.push('Grand Livre');
+  if (rappro && !rappro.sources.exutoires) rapproMissing.push('exutoires');
+  if (rappro && !rappro.sources.boutiques) rapproMissing.push('boutiques');
+  if (rappro && !rappro.sources.vak) rapproMissing.push('VAK');
+  if (rappro && !rappro.sources.subventions) rapproMissing.push('subventions');
 
   return (
     <Layout>
@@ -241,6 +276,61 @@ export default function Finance() {
             )}
           </Section>
         </div>
+
+        {/* Rapprochement CA opérationnel vs comptable (item 36, Vague 1) */}
+        {rappro && (
+          <Section
+            title="Rapprochement CA opérationnel vs comptable"
+            icon={ShieldCheck}
+            subtitle="Contrôle : le CA généré sur le terrain est-il bien comptabilisé ? (le P&L reste dérivé du seul Grand Livre)"
+          >
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                    <th className="text-left px-4 py-2 font-semibold">Activité</th>
+                    <th className="text-right px-4 py-2 font-semibold">CA opérationnel (terrain)</th>
+                    <th className="text-right px-4 py-2 font-semibold">CA comptable (GL)</th>
+                    <th className="text-right px-4 py-2 font-semibold">Écart</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(rappro.ventes?.activites || []).map((a) => (
+                    <tr key={a.cle} className="border-b border-slate-100">
+                      <td className="px-4 py-2 text-slate-700">{a.libelle}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{fmtK(a.annuel)} €</td>
+                      <td className="px-4 py-2 text-right text-slate-300">—</td>
+                      <td className="px-4 py-2 text-right text-slate-300">—</td>
+                    </tr>
+                  ))}
+                  <tr className="border-b border-slate-200 font-semibold bg-slate-50/60">
+                    <td className="px-4 py-2">Total CA ventes</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{fmtK(rappro.ventes?.operationnel_annuel)} €</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{fmtK(rappro.ventes?.comptable_annuel)} € <span className="text-xs font-normal text-slate-400">(compte 70)</span></td>
+                    <td className={`px-4 py-2 text-right tabular-nums font-bold ${ecartColor(rappro.ventes?.ecart_pct)}`}>
+                      {fmtSigned(rappro.ventes?.ecart_annuel)} €{rappro.ventes?.ecart_pct != null ? ` (${fmtPct(rappro.ventes.ecart_pct)})` : ''}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 text-slate-700">Subventions Refashion</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{fmtK(rappro.subventions?.operationnel_annuel)} €</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{fmtK(rappro.subventions?.comptable_annuel)} € <span className="text-xs text-slate-400">(compte 74)</span></td>
+                    <td className={`px-4 py-2 text-right tabular-nums font-bold ${ecartColor(rappro.subventions?.ecart_pct)}`}>
+                      {fmtSigned(rappro.subventions?.ecart_annuel)} €{rappro.subventions?.ecart_pct != null ? ` (${fmtPct(rappro.subventions.ecart_pct)})` : ''}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-slate-400 mt-3 px-1 leading-relaxed">
+              CA opérationnel = commandes exutoires clôturées (montant facturé rapproché, sinon pesée × prix) + ventes boutiques HT + ventes VAK HT.
+              CA comptable = comptes 70 (ventes) et 74 (subventions) du Grand Livre Pennylane. Un écart positif signale un CA terrain non (encore) comptabilisé.
+              {rapproMissing.length > 0 && (
+                <span className="text-amber-600"> Sources indisponibles : {rapproMissing.join(', ')}.</span>
+              )}
+            </p>
+          </Section>
+        )}
 
         {/* Liens sous-pages */}
         <div>

@@ -160,12 +160,16 @@ router.get('/:id/public', async (req, res) => {
 // POST /api/tours/:id/checklist-public — Sauvegarder checklist (mobile sans auth)
 router.post('/:id/checklist-public', async (req, res) => {
   try {
-    const { vehicle_id, exterior_ok, fuel_level, km_start } = req.body;
+    // Vague 1 (item 45) : `notes` (remarques/anomalies saisies par le chauffeur
+    // dans Checklist.jsx) était ignoré → l'anomalie disparaissait silencieusement.
+    // Désormais persisté et consultable côté web (fiche véhicule).
+    const { vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes } = req.body;
     await pool.query(
-      `INSERT INTO vehicle_checklists (tour_id, vehicle_id, exterior_ok, fuel_level, km_start)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO vehicle_checklists (tour_id, vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT DO NOTHING`,
-      [req.params.id, vehicle_id, exterior_ok, fuel_level || '1/2', km_start || 0]
+      [req.params.id, vehicle_id, employee_id || null, exterior_ok, fuel_level || '1/2', km_start || 0,
+       (notes && String(notes).trim()) ? String(notes).trim() : null]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -197,38 +201,55 @@ router.put('/:id/start-public', async (req, res) => {
   }
 });
 
-// PUT /api/tours/:id/cav/:cavId/collect-public — Marquer un point comme collecté (mobile sans auth)
+// PUT /api/tours/:id/cav/:cavId/collect-public — Marquer un point (mobile sans auth)
+// Vague 1 (item 46a) : gère la collecte ET le « saut » d'un CAV (status='skipped'
+// + skip_reason) — le chauffeur peut déclarer un point impossible à collecter
+// (inaccessible, bouché, vide…) sans forcer une saisie de niveau. skip_reason
+// est aligné sur le CHECK de tour_cav et sur la route web execution.js.
+const VALID_SKIP_REASON = ['cav_fermee', 'bouchee', 'acces_impossible', 'proprietaire_absent', 'vide', 'autre'];
 router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
   try {
     const { fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes } = req.body;
+    const status = req.body.status === 'skipped' ? 'skipped' : 'collected';
+    const skip_reason = req.body.skip_reason || null;
+
+    if (status === 'skipped' && skip_reason && !VALID_SKIP_REASON.includes(skip_reason)) {
+      return res.status(400).json({ error: 'skip_reason invalide', allowed: VALID_SKIP_REASON });
+    }
 
     // Vérifier si c'est une tournée association
     const tourCheck = await pool.query('SELECT collection_type FROM tours WHERE id = $1', [req.params.id]);
     const collectionType = tourCheck.rows[0]?.collection_type || 'pav';
 
     if (collectionType === 'association') {
-      // Mettre à jour dans tour_association_point
+      // tour_association_point n'a pas de colonne skip_reason : le motif de saut
+      // est conservé dans notes. collected_at reste null si le point est sauté.
       const result = await pool.query(
-        `UPDATE tour_association_point SET status = 'collected',
-         fill_level = $1,
-         notes = $2,
-         collected_at = NOW()
-         WHERE tour_id = $3 AND association_point_id = $4 RETURNING *`,
-        [fill_level, notes || null, req.params.id, req.params.cavId]
+        `UPDATE tour_association_point SET status = $1,
+         fill_level = $2,
+         notes = $3,
+         collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
+         WHERE tour_id = $4 AND association_point_id = $5 RETURNING *`,
+        [status,
+         status === 'skipped' ? null : fill_level,
+         status === 'skipped' ? (notes || (skip_reason ? `Non collecté : ${skip_reason}` : 'Non collecté')) : (notes || null),
+         req.params.id, req.params.cavId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
       res.json(result.rows[0]);
     } else {
       const result = await pool.query(
-        `UPDATE tour_cav SET status = 'collected',
-         fill_level = $1,
-         qr_scanned = $2,
-         qr_unavailable = $3,
-         qr_unavailable_reason = $4,
-         notes = $5,
-         collected_at = NOW()
-         WHERE tour_id = $6 AND cav_id = $7 RETURNING *`,
-        [fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null, notes || null, req.params.id, req.params.cavId]
+        `UPDATE tour_cav SET status = $1,
+         fill_level = CASE WHEN $1 = 'skipped' THEN NULL ELSE $2 END,
+         qr_scanned = $3,
+         qr_unavailable = $4,
+         qr_unavailable_reason = $5,
+         skip_reason = CASE WHEN $1 = 'skipped' THEN $6 ELSE NULL END,
+         notes = $7,
+         collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
+         WHERE tour_id = $8 AND cav_id = $9 RETURNING *`,
+        [status, fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null,
+         skip_reason, notes || null, req.params.id, req.params.cavId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
       res.json(result.rows[0]);
@@ -328,23 +349,45 @@ router.post('/:id/weigh-public', async (req, res) => {
   }
 });
 
-// POST /api/tours/:id/incident-public — Signaler un incident (mobile sans auth, sans photo)
-router.post('/:id/incident-public', async (req, res) => {
+// POST /api/tours/:id/incident-public — Signaler un incident (mobile, JWT chauffeur)
+// Vague 1 (item 46b) : accepte une photo en multipart quand l'appareil est en
+// ligne (upload.single('photo')). Hors ligne, le mobile poste du JSON via la
+// file de sync (sans photo) — multer laisse passer les requêtes non-multipart.
+// Vague 1 (item 44) : types mobiles hors du CHECK SQL (cav_overflow, security)
+// normalisés vers un type valide, le libellé d'origine préservé en description
+// (avant : violation de contrainte → 500 en boucle dans la file de sync).
+const INCIDENT_TYPE_MAP = { cav_overflow: 'environment', security: 'other' };
+const INCIDENT_TYPE_ORIG_LABELS = { cav_overflow: 'Débordement', security: 'Sécurité' };
+const VALID_INCIDENT_TYPES = ['cav_problem', 'environment', 'vehicle_breakdown', 'accident', 'other'];
+router.post('/:id/incident-public', upload.single('photo'), async (req, res) => {
   try {
     const { type, description, cav_id, vehicle_id, current_lat, current_lng } = req.body;
     if (!type) {
       return res.status(400).json({ error: 'Type d\'incident requis' });
     }
+    const dbType = INCIDENT_TYPE_MAP[type] || type;
+    if (!VALID_INCIDENT_TYPES.includes(dbType)) {
+      return res.status(400).json({ error: 'Type d\'incident invalide', allowed: VALID_INCIDENT_TYPES });
+    }
+    // Conserve le libellé mobile d'origine dans la description si le type a été
+    // remappé (ex. « Débordement » → environment).
+    let finalDescription = description || null;
+    if (INCIDENT_TYPE_MAP[type]) {
+      const lbl = INCIDENT_TYPE_ORIG_LABELS[type] || type;
+      finalDescription = finalDescription ? `[${lbl}] ${finalDescription}` : lbl;
+    }
+    const photo_path = req.file ? `/uploads/incidents/${req.file.filename}` : null;
+
     const result = await pool.query(
-      `INSERT INTO incidents (tour_id, type, description, cav_id, vehicle_id, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
-      [req.params.id, type, description, cav_id || null, vehicle_id || null]
+      `INSERT INTO incidents (tour_id, type, description, cav_id, vehicle_id, photo_path, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *`,
+      [req.params.id, dbType, finalDescription, cav_id || null, vehicle_id || null, photo_path]
     );
 
     // Si l'incident bloque un CAV, déclenche une proposition de ré-optim
     // en arrière-plan (non bloquant) — ordonne les CAV restants depuis la
     // position GPS actuelle si fournie.
-    if (type === 'cav_problem' || type === 'environment') {
+    if (dbType === 'cav_problem' || dbType === 'environment') {
       const io = req.app.get('io');
       proposeReoptimization({
         tourId: parseInt(req.params.id, 10),
@@ -356,12 +399,13 @@ router.post('/:id/incident-public', async (req, res) => {
       }).catch(err => console.warn('[TOURS] auto-reoptim (incident) échec :', err.message));
     }
 
-    // Push aux managers : nouvel incident sur tournée en cours
+    // Push aux managers : nouvel incident sur tournée en cours. Le lien pointe
+    // vers la page Incidents (cycle de vie / clôture), pas seulement la carte.
     sendPushToRoles(['ADMIN', 'MANAGER'], {
       title: 'Incident signalé',
-      body: `Tournée #${req.params.id} — ${type}${description ? ` : ${description.slice(0, 80)}` : ''}`,
+      body: `Tournée #${req.params.id} — ${dbType}${finalDescription ? ` : ${finalDescription.slice(0, 80)}` : ''}`,
       tag: `incident-${req.params.id}`,
-      data: { url: '/collections-live', tourId: parseInt(req.params.id, 10) },
+      data: { url: `/incidents?tourId=${parseInt(req.params.id, 10)}`, tourId: parseInt(req.params.id, 10) },
     }).catch(() => {});
 
     res.status(201).json(result.rows[0]);
@@ -451,11 +495,25 @@ router.put('/:id/status-public', async (req, res) => {
       'in_progress': ['returning', 'completed'],
       'returning': ['completed']
     };
-    const current = await pool.query('SELECT status FROM tours WHERE id = $1', [req.params.id]);
+    const current = await pool.query('SELECT * FROM tours WHERE id = $1', [req.params.id]);
     if (current.rows.length === 0) {
       return res.status(404).json({ error: 'Tournée non trouvée' });
     }
     const currentStatus = current.rows[0].status;
+
+    // Résidu 2 (vague 0) — Idempotence du chemin MOBILE de clôture.
+    // Le chemin web execution.js a été rendu idempotent en vague 0
+    // (garde AND status <> 'completed' + réponse 200 sans effet de bord).
+    // On réplique ici : un rejeu offline demandant le statut déjà courant est
+    // un no-op qui répond 200 avec la tournée telle quelle, SANS ré-émettre de
+    // push aux managers ni recalculer les horaires. Indispensable car la file
+    // de sync peut renvoyer « completed » plusieurs fois (finalisation de
+    // pesée) — sans cette garde le mobile recevait un 400 « transition non
+    // autorisée » trompeur.
+    if (status === currentStatus) {
+      return res.json(current.rows[0]);
+    }
+
     const allowed = allowedTransitions[currentStatus];
     if (!allowed || !allowed.includes(status)) {
       return res.status(400).json({ error: `Transition ${currentStatus} → ${status} non autorisée` });
@@ -488,12 +546,24 @@ router.put('/:id/status-public', async (req, res) => {
     }
 
     params.push(req.params.id);
+    // Garde d'idempotence défensive contre une course (deux requêtes « completed »
+    // lisant toutes deux « in_progress ») : seule la première ligne bascule et
+    // déclenche le push. Aligné sur execution.js (vague 0).
+    let whereClause = `id = $${params.length}`;
+    if (status === 'completed') whereClause += " AND status <> 'completed'";
     const result = await pool.query(
-      `UPDATE tours SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      `UPDATE tours SET ${updates.join(', ')} WHERE ${whereClause} RETURNING *`,
       params
     );
 
-    // Push notification aux managers sur fin / annulation déclenchée côté mobile
+    if (result.rows.length === 0) {
+      // 0 ligne sur une clôture = déjà terminée entre-temps (course) → no-op
+      // idempotent : on renvoie la tournée existante sans ré-émettre de push.
+      return res.json(current.rows[0]);
+    }
+
+    // Push notification aux managers sur fin / annulation déclenchée côté mobile.
+    // Lien vers la page Incidents non pertinent ici : on garde la vue collecte.
     if (status === 'completed' || status === 'cancelled') {
       const label = status === 'completed' ? 'terminée' : 'annulée';
       const tour = result.rows[0];

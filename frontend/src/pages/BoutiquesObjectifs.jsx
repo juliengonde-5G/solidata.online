@@ -74,7 +74,7 @@ export default function BoutiquesObjectifs() {
     return {
       mois: m,
       objectif: parseFloat(obj?.ca_objectif_ht) || 0,
-      realise: v?.ca_ttc || 0,
+      realise: v?.ca_ht || 0,
     };
   });
 
@@ -113,8 +113,8 @@ export default function BoutiquesObjectifs() {
                   <YAxis fontSize={11} />
                   <Tooltip formatter={(v) => `${v.toLocaleString('fr-FR')} €`} />
                   <Legend />
-                  <Bar dataKey="objectif" fill="#FBCFE8" name="Objectif" />
-                  <Bar dataKey="realise" fill="#EC4899" name="Réalisé" />
+                  <Bar dataKey="objectif" fill="#FBCFE8" name="Objectif HT" />
+                  <Bar dataKey="realise" fill="#EC4899" name="Réalisé HT" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -137,14 +137,14 @@ export default function BoutiquesObjectifs() {
                       <tr>
                         <th className="text-left py-2 px-2">Mois</th>
                         <th className="text-right py-2 px-2">CA objectif HT (€)</th>
-                        <th className="text-right py-2 px-2">CA réalisé</th>
+                        <th className="text-right py-2 px-2">CA réalisé HT</th>
                         <th className="text-right py-2 px-2">% atteinte</th>
                       </tr>
                     </thead>
                     <tbody>
                       {objectifs.map((o, i) => {
                         const v = ventes.find(x => x.mois === o.mois);
-                        const realise = v?.ca_ttc || 0;
+                        const realise = v?.ca_ht || 0;
                         const objNum = parseFloat(o.ca_objectif_ht) || 0;
                         const pct = objNum > 0 ? (realise / objNum) * 100 : null;
                         return (

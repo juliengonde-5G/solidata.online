@@ -4,9 +4,28 @@ const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
-const { predictFillRate, getSeasonalFactors, setSeasonalFactors, getDayOfWeekFactors, setDayOfWeekFactors, getHolidays, setHolidays, getSchoolVacations, setSchoolVacations, getScoringConfig, setScoringConfig } = require('./predictions');
+const { predictFillRate, getSeasonalFactors, setSeasonalFactors, getDayOfWeekFactors, setDayOfWeekFactors, getHolidays, setHolidays, getSchoolVacations, setSchoolVacations, getScoringConfig, setScoringConfig, reloadPersistedConfig, ensureConfigLoaded } = require('./predictions');
+const fillFactors = require('../../utils/fill-factors');
 const { generateIntelligentTour } = require('./smart-tour');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
+
+// Vague 1 (item 47a) — Double affectation véhicule.
+// Refuse d'affecter un véhicule déjà engagé sur une autre tournée non terminée
+// le même jour. Renvoie la tournée en conflit (id/status) ou null.
+async function findVehicleConflict(vehicleId, date, excludeTourId = null) {
+  if (!vehicleId || !date) return null;
+  const params = [vehicleId, date];
+  let sql = `SELECT id, status FROM tours
+             WHERE vehicle_id = $1 AND date = $2
+               AND status NOT IN ('completed', 'cancelled')`;
+  if (excludeTourId) { params.push(excludeTourId); sql += ` AND id <> $${params.length}`; }
+  const r = await pool.query(sql + ' ORDER BY id LIMIT 1', params);
+  return r.rows[0] || null;
+}
+function vehicleConflictMessage(conflict) {
+  return `Ce véhicule est déjà affecté à la tournée #${conflict.id} ce jour-là (statut : ${conflict.status}). `
+    + 'Terminez ou annulez cette tournée, ou choisissez un autre véhicule.';
+}
 
 // GET /api/tours — Liste des tournées
 router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
@@ -50,11 +69,20 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // GET /api/tours/predictive-config — Lire les variables du moteur
+// Renvoie les facteurs EFFECTIFS (appris > manuel > défaut) + la source de
+// chacun (item 49). Les tableaux `seasonalFactors`/`dayOfWeekFactors` reflètent
+// donc ce que le moteur applique réellement ; `*Sources` documente l'origine.
 router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
   try {
+    await ensureConfigLoaded();
+    const resolved = await fillFactors.getResolvedFactors();
     res.json({
-      seasonalFactors: getSeasonalFactors(),
-      dayOfWeekFactors: getDayOfWeekFactors(),
+      seasonalFactors: resolved.seasonal,
+      dayOfWeekFactors: resolved.dayOfWeek,
+      seasonalSources: resolved.seasonalSources,
+      dayOfWeekSources: resolved.dayOfWeekSources,
+      learnedMonthlyCount: resolved.learnedMonthlyCount,
+      learnedDowCount: resolved.learnedDowCount,
       holidays: getHolidays(),
       schoolVacations: getSchoolVacations(),
       scoring: getScoringConfig(),
@@ -67,6 +95,9 @@ router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
 });
 
 // PUT /api/tours/predictive-config — Mettre à jour les variables
+// Persiste la config dans `settings` (via fill-factors) ET met à jour la copie
+// en mémoire (getters historiques). Les facteurs saisis alimentent la couche
+// MANUELLE ; ils restent supplantés par les facteurs APPRIS là où ils existent.
 router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
   try {
     const { seasonalFactors, dayOfWeekFactors, holidays, schoolVacations, scoring } = req.body;
@@ -87,13 +118,31 @@ router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
       setScoringConfig({ ...getScoringConfig(), ...scoring });
     }
 
-    res.json({
-      message: 'Configuration mise à jour',
+    // Persistance en base (survit aux redéploiements) + invalidation du cache
+    // fill-factors pour que la résolution reprenne les nouvelles valeurs manuelles.
+    await fillFactors.persistConfig({
       seasonalFactors: getSeasonalFactors(),
       dayOfWeekFactors: getDayOfWeekFactors(),
       holidays: getHolidays(),
       schoolVacations: getSchoolVacations(),
       scoring: getScoringConfig(),
+    });
+    // Recharge la copie mémoire depuis la source persistée (idempotent).
+    await reloadPersistedConfig();
+
+    const resolved = await fillFactors.getResolvedFactors();
+    res.json({
+      message: 'Configuration mise à jour',
+      seasonalFactors: resolved.seasonal,
+      dayOfWeekFactors: resolved.dayOfWeek,
+      seasonalSources: resolved.seasonalSources,
+      dayOfWeekSources: resolved.dayOfWeekSources,
+      learnedMonthlyCount: resolved.learnedMonthlyCount,
+      learnedDowCount: resolved.learnedDowCount,
+      holidays: getHolidays(),
+      schoolVacations: getSchoolVacations(),
+      scoring: getScoringConfig(),
+      centreTri: { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
     });
   } catch (err) {
     console.error('[TOURS] Erreur update config :', err);
@@ -176,6 +225,10 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), [
     const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
     if (isNaN(vid)) return res.status(400).json({ error: 'vehicle_id invalide' });
 
+    // Vague 1 (item 47a) — bloque la double affectation avant la génération.
+    const conflict = await findVehicleConflict(vid, date);
+    if (conflict) return res.status(409).json({ error: vehicleConflictMessage(conflict) });
+
     const result = await generateIntelligentTour(vid, date);
 
     // Créer la tournée en BDD (avec distance, durée, nb_cav)
@@ -219,6 +272,10 @@ router.post('/standard', authorize('ADMIN', 'MANAGER'), [
     const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
     const srid = parseInt(standard_route_id, 10);
 
+    // Vague 1 (item 47a) — bloque la double affectation véhicule.
+    const conflict = await findVehicleConflict(vid, date);
+    if (conflict) return res.status(409).json({ error: vehicleConflictMessage(conflict) });
+
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status)
        VALUES ($1, $2, $3, $4, 'standard', 'planned') RETURNING *`,
@@ -257,6 +314,10 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), [
     const vid = parseInt(vehicle_id, 10);
     const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
 
+    // Vague 1 (item 47a) — bloque la double affectation véhicule.
+    const conflict = await findVehicleConflict(vid, date);
+    if (conflict) return res.status(409).json({ error: vehicleConflictMessage(conflict) });
+
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status)
        VALUES ($1, $2, $3, 'manual', 'planned') RETURNING *`,
@@ -290,6 +351,10 @@ router.post('/association', authorize('ADMIN', 'MANAGER'), [
     const vid = parseInt(vehicle_id, 10);
     const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
     const srid = standard_route_id ? parseInt(standard_route_id, 10) : null;
+
+    // Vague 1 (item 47a) — bloque la double affectation véhicule.
+    const conflict = await findVehicleConflict(vid, date);
+    if (conflict) return res.status(409).json({ error: vehicleConflictMessage(conflict) });
 
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status, collection_type)

@@ -221,23 +221,27 @@ function toCsv(rows) {
   return [cols.join(';'), ...rows.map(r => cols.map(c => escape(r[c])).join(';'))].join('\n');
 }
 
+// `trimestre: true` = la vue porte une colonne trimestre (filtre applicable).
+// Les vues mensuelles (annee + mois) ne l'ont pas : appliquer un filtre trimestre
+// dessus provoquait un 500 « column "trimestre" does not exist » dès qu'un
+// trimestre était sélectionné dans l'écran d'export (audit item 26).
 const EXPORT_VIEWS = {
-  'tonnage-annuel-tournee': 'vw_tonnage_annuel_tournee',
-  'dpav-sortants': 'vw_dpav_sortants',
-  'dpav-communes': 'vw_dpav_communes',
-  'subvention-mensuelle': 'vw_subvention_refashion_mensuelle',
-  'coherence-tri-filiere': 'vw_coherence_tri_filiere',
+  'tonnage-annuel-tournee': { view: 'vw_tonnage_annuel_tournee', trimestre: false },
+  'dpav-sortants': { view: 'vw_dpav_sortants', trimestre: true },
+  'dpav-communes': { view: 'vw_dpav_communes', trimestre: true },
+  'subvention-mensuelle': { view: 'vw_subvention_refashion_mensuelle', trimestre: false },
+  'coherence-tri-filiere': { view: 'vw_coherence_tri_filiere', trimestre: false },
 };
 
 router.get('/exports/:slug', async (req, res) => {
-  const view = EXPORT_VIEWS[req.params.slug];
-  if (!view) return res.status(404).json({ error: 'Export inconnu' });
+  const meta = EXPORT_VIEWS[req.params.slug];
+  if (!meta) return res.status(404).json({ error: 'Export inconnu' });
   try {
     const { annee, trimestre, format } = req.query;
-    let sql = `SELECT * FROM ${view}`;
+    let sql = `SELECT * FROM ${meta.view}`;
     const params = []; const filters = [];
     if (annee) { params.push(parseInt(annee)); filters.push(`annee = $${params.length}`); }
-    if (trimestre && /^[1-4]$/.test(trimestre)) {
+    if (meta.trimestre && trimestre && /^[1-4]$/.test(trimestre)) {
       params.push(parseInt(trimestre)); filters.push(`trimestre = $${params.length}`);
     }
     if (filters.length) sql += ' WHERE ' + filters.join(' AND ');
@@ -255,7 +259,8 @@ router.get('/exports/:slug', async (req, res) => {
 router.get('/exports', async (req, res) => {
   res.json(Object.keys(EXPORT_VIEWS).map(slug => ({
     slug,
-    view: EXPORT_VIEWS[slug],
+    view: EXPORT_VIEWS[slug].view,
+    trimestre_filtrable: EXPORT_VIEWS[slug].trimestre,
     csv_url: `/api/refashion/exports/${slug}?format=csv`,
     json_url: `/api/refashion/exports/${slug}`,
   })));

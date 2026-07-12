@@ -9,6 +9,90 @@ router.use(authenticate);
 const BTQ_ACTIVE_STATUTS = ['envoyee', 'ajustee', 'en_preparation'];
 const VAK_ACTIVE_STATUTS = ['confirmee', 'en_preparation', 'chargee'];
 
+// ══════════════════════════════════════════
+// Générateur de produit fini — SOURCE UNIQUE (item 32)
+// Réutilisé par la voie « étiquette » (/generer) ET la voie « manuel »
+// (routes/produits-finis.js) pour garantir des champs et un code-barres
+// GÉNÉRÉ identiques (base24 + compteur de poste), avec created_by et source
+// systématiques. Doit être appelé à l'intérieur d'une transaction (client).
+// Lève une erreur enrichie { pfStatus, pfCode } que l'appelant traduit en HTTP.
+// L'ordre des requêtes est stable (poste → [lot] → catalogue → insert → compteur)
+// et couvert par les tests existants d'etiquettes.
+// ══════════════════════════════════════════
+async function generateProduitFini(client, {
+  poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg,
+  batch_id, created_by, source = 'etiquette',
+}) {
+  const poste = await client.query(
+    `SELECT id, numero_poste, compteur_actuel FROM postes_etiquetage WHERE id = $1 AND is_active = true FOR UPDATE`,
+    [poste_id]
+  );
+  if (poste.rowCount === 0) {
+    const e = new Error('Poste introuvable ou inactif'); e.pfStatus = 404; throw e;
+  }
+
+  // Traçabilité carton → lot (optionnel) : uniquement un lot ouvert.
+  let linkedBatchId = null;
+  if (batch_id !== undefined && batch_id !== null && batch_id !== '') {
+    const batch = await client.query(
+      `SELECT id FROM batch_tracking WHERE id = $1 AND status IN ('en_attente', 'en_cours')`,
+      [batch_id]
+    );
+    if (batch.rowCount === 0) {
+      const e = new Error('Lot introuvable ou déjà clôturé (batch_id)'); e.pfStatus = 400; throw e;
+    }
+    linkedBatchId = batch.rows[0].id;
+  }
+
+  let catRow = await client.query(
+    `SELECT id FROM produits_catalogue
+     WHERE nom = $1 AND categorie_eco_org = $2 AND genre = $3 AND saison = $4 AND gamme = $5
+     LIMIT 1`,
+    [produit, categorie_eco_org, genre, saison, gamme]
+  );
+  let catalogue_id;
+  if (catRow.rowCount > 0) {
+    catalogue_id = catRow.rows[0].id;
+  } else {
+    const ins = await client.query(
+      `INSERT INTO produits_catalogue (nom, categorie_eco_org, genre, saison, gamme, is_active)
+       VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
+      [produit, categorie_eco_org, genre, saison, gamme]
+    );
+    catalogue_id = ins.rows[0].id;
+  }
+
+  const newCounter = poste.rows[0].compteur_actuel + 1;
+  let code_barre;
+  try {
+    code_barre = formatId(newCounter, poste.rows[0].numero_poste);
+  } catch (e2) {
+    const e = new Error(`Compteur poste saturé : ${e2.message}`); e.pfStatus = 409; throw e;
+  }
+
+  const dateFab = new Date();
+  const insert = await client.query(
+    `INSERT INTO produits_finis
+       (code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
+        poids_kg, date_fabrication, poste_etiquetage_id, status, batch_id, created_by, source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'en_stock', $11, $12, $13)
+     RETURNING id, code_barre, poids_kg, date_fabrication, produit, categorie_eco_org, genre, saison, gamme, batch_id, source`,
+    [code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
+      Number(poids_kg), dateFab, poste_id, linkedBatchId, created_by, source]
+  );
+
+  await client.query(
+    `UPDATE postes_etiquetage SET compteur_actuel = $1, derniere_etiquette_at = NOW() WHERE id = $2`,
+    [newCounter, poste_id]
+  );
+
+  return {
+    row: insert.rows[0],
+    poste_label: `Poste ${poste.rows[0].numero_poste}`,
+    numero_poste: poste.rows[0].numero_poste,
+  };
+}
+
 router.get('/postes', async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -76,82 +160,17 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const poste = await client.query(
-      `SELECT id, numero_poste, compteur_actuel FROM postes_etiquetage WHERE id = $1 AND is_active = true FOR UPDATE`,
-      [poste_id]
-    );
-    if (poste.rowCount === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Poste introuvable ou inactif' });
-    }
-
-    // Traçabilité carton → lot (R6) : si un lot est fourni, on le rattache au
-    // carton étiqueté. Validé pour éviter d'écrire une FK morte ; on n'accepte
-    // qu'un lot ouvert (en_attente/en_cours), pas un lot terminé ou annulé.
-    let linkedBatchId = null;
-    if (batch_id !== undefined && batch_id !== null && batch_id !== '') {
-      const batch = await client.query(
-        `SELECT id FROM batch_tracking WHERE id = $1 AND status IN ('en_attente', 'en_cours')`,
-        [batch_id]
-      );
-      if (batch.rowCount === 0) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Lot introuvable ou déjà clôturé (batch_id)' });
-      }
-      linkedBatchId = batch.rows[0].id;
-    }
-
-    let catRow = await client.query(
-      `SELECT id FROM produits_catalogue
-       WHERE nom = $1 AND categorie_eco_org = $2 AND genre = $3 AND saison = $4 AND gamme = $5
-       LIMIT 1`,
-      [produit, categorie_eco_org, genre, saison, gamme]
-    );
-    let catalogue_id;
-    if (catRow.rowCount > 0) {
-      catalogue_id = catRow.rows[0].id;
-    } else {
-      const ins = await client.query(
-        `INSERT INTO produits_catalogue (nom, categorie_eco_org, genre, saison, gamme, is_active)
-         VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
-        [produit, categorie_eco_org, genre, saison, gamme]
-      );
-      catalogue_id = ins.rows[0].id;
-    }
-
-    const newCounter = poste.rows[0].compteur_actuel + 1;
-    let code_barre;
-    try {
-      code_barre = formatId(newCounter, poste.rows[0].numero_poste);
-    } catch (e) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Compteur poste saturé : ${e.message}` });
-    }
-
-    const dateFab = new Date();
-    const insert = await client.query(
-      `INSERT INTO produits_finis
-         (code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
-          poids_kg, date_fabrication, poste_etiquetage_id, status, batch_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'en_stock', $11, $12)
-       RETURNING id, code_barre, poids_kg, date_fabrication, produit, categorie_eco_org, genre, saison, gamme, batch_id`,
-      [code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
-        Number(poids_kg), dateFab, poste_id, linkedBatchId, req.user.id]
-    );
-
-    await client.query(
-      `UPDATE postes_etiquetage SET compteur_actuel = $1, derniere_etiquette_at = NOW() WHERE id = $2`,
-      [newCounter, poste_id]
-    );
-
-    await client.query('COMMIT');
-    res.status(201).json({
-      ...insert.rows[0],
-      poste_label: `Poste ${poste.rows[0].numero_poste}`,
-      poste_etiquetage_id: poste_id,
+    const { row, poste_label } = await generateProduitFini(client, {
+      poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg,
+      batch_id, created_by: req.user.id, source: 'etiquette',
     });
+    await client.query('COMMIT');
+    res.status(201).json({ ...row, poste_label, poste_etiquetage_id: poste_id });
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err.pfStatus) {
+      return res.status(err.pfStatus).json({ error: err.message, ...(err.pfCode ? { code: err.pfCode } : {}) });
+    }
     if (err.code === '23505') {
       return res.status(409).json({ error: 'code_barre déjà existant', code: 'DUPLICATE' });
     }
@@ -310,6 +329,24 @@ router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), asyn
       [commande_type, commande_type === 'libre' ? null : commande_id, req.user.id, c.id]
     );
 
+    // Item 31a : la sortie carton DÉCRÉMENTE le stock moderne (auparavant le
+    // stock trié gonflait indéfiniment, jamais décrémenté au départ des cartons).
+    // Catégorie best-effort : appariement par nom categorie_eco_org ↔
+    // categories_sortantes (taxonomies distinctes, pas de FK) ; sinon NULL
+    // (« Non classé »), ce qui corrige au moins le total global.
+    const catMatch = await client.query(
+      `SELECT id FROM categories_sortantes WHERE lower(nom) = lower($1) AND is_active = true LIMIT 1`,
+      [c.categorie_eco_org]
+    );
+    const matiereId = catMatch.rows[0]?.id || null;
+    await client.query(
+      `INSERT INTO stock_movements
+         (type, date, poids_kg, matiere_id, code_barre, origine, notes, produit_fini_id, created_by)
+       VALUES ('sortie', CURRENT_DATE, $1, $2, $3, 'sortie_carton', $4, $5, $6)`,
+      [c.poids_kg, matiereId, c.code_barre,
+       `Sortie carton ${c.code_barre} (${commande_type})`, c.id, req.user.id]
+    );
+
     await client.query('COMMIT');
     res.json({
       carton: updated.rows[0],
@@ -351,8 +388,10 @@ router.post('/sortie-session/:type/:commande_id/annuler-scan', authorize('ADMIN'
   if (!['btq', 'vak'].includes(type)) {
     return res.status(400).json({ error: 'type doit être btq ou vak' });
   }
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE produits_finis SET
          date_sortie = NULL, status = 'en_stock',
          sortie_commande_type = NULL, sortie_commande_id = NULL, scanned_by = NULL
@@ -361,11 +400,22 @@ router.post('/sortie-session/:type/:commande_id/annuler-scan', authorize('ADMIN'
       [code_barre, type, commande_id]
     );
     if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Scan introuvable pour cette commande' });
     }
+    // Item 31a : annuler le scan retire aussi le mouvement de sortie de stock
+    // généré lors du scan (cohérence du ledger tant que la commande est ouverte).
+    await client.query(
+      `DELETE FROM stock_movements WHERE produit_fini_id = $1 AND origine = 'sortie_carton'`,
+      [result.rows[0].id]
+    );
+    await client.query('COMMIT');
     res.json({ ok: true, carton: result.rows[0] });
   } catch (err) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -400,3 +450,5 @@ router.get('/commandes-actives/:type', async (req, res) => {
 });
 
 module.exports = router;
+// Générateur partagé (voie manuelle produits-finis.js) — item 32
+module.exports.generateProduitFini = generateProduitFini;

@@ -446,23 +446,27 @@ async function purgeExpiredCandidates() {
       [cutoff.toISOString()]
     );
 
+    const { anonymizeCandidate } = require('./anonymization');
     for (const candidate of expired.rows) {
-      await pool.query(
-        `UPDATE candidates SET
-         first_name = 'ANONYME', last_name = CONCAT('CANDIDAT-', id),
-         email = NULL, phone = NULL, cv_file_path = NULL, cv_raw_text = NULL,
-         comment = NULL, interviewer_name = NULL, interview_comment = NULL,
-         practical_test_comment = NULL, appointment_location = NULL,
-         updated_at = NOW()
-         WHERE id = $1`, [candidate.id]
-      );
-      await pool.query('DELETE FROM candidate_skills WHERE candidate_id = $1', [candidate.id]);
-      // Log RGPD audit
-      await pool.query(
-        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
-         VALUES (NULL, 'AUTO_PURGE_24M', 'candidate', $1, $2)`,
-        [candidate.id, JSON.stringify({ reason: 'Purge automatique RGPD 24 mois', original_name: `${candidate.first_name} ${candidate.last_name}` })]
-      );
+      // Transaction par candidat + service mutualisé : couvre désormais le MÊME
+      // périmètre que la route manuelle (PCM, entretiens, mises en situation,
+      // documents) — la purge auto n'est plus moins complète que le manuel.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await anonymizeCandidate(client, candidate.id);
+        await client.query(
+          `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
+           VALUES (NULL, 'AUTO_PURGE_24M', 'candidate', $1, $2)`,
+          [candidate.id, JSON.stringify({ reason: 'Purge automatique RGPD 24 mois', original_name: `${candidate.first_name} ${candidate.last_name}` })]
+        );
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        console.error(`[SCHEDULER] purge candidat #${candidate.id} :`, e.message);
+      } finally {
+        client.release();
+      }
     }
 
     if (expired.rows.length > 0) {
@@ -591,6 +595,34 @@ async function syncPennylaneDaily() {
   }
 }
 
+/**
+ * Sync quotidienne des factures clients Pennylane (contrôle facturation, item 37).
+ * La sync manuelle existait déjà (POST /pennylane/sync/customer-invoices) mais
+ * dépendait d'un clic. Ce job l'automatise, avec les mêmes garde-fous
+ * (incrémental, log dans pennylane_sync_log, idempotent sur pennylane_invoice_id).
+ * S'exécute uniquement si Pennylane est configuré et actif.
+ */
+async function syncPennylaneInvoicesDaily() {
+  try {
+    const config = await pool.query(
+      'SELECT is_active FROM pennylane_config WHERE is_active = true LIMIT 1'
+    );
+    if (config.rows.length === 0) {
+      console.log('[SCHEDULER] Pennylane non configuré ou inactif, skip sync factures');
+      return;
+    }
+    const { syncCustomerInvoicesAuto } = require('../routes/pennylane');
+    // Fenêtre glissante de 35 jours (idempotente) : capte une facture datée dans
+    // le passé récent mais apparue tardivement sur Pennylane, sans dépendre de
+    // last_sync_at (partagé avec la sync GL de 2h qui l'aurait déjà avancé).
+    const since = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const r = await syncCustomerInvoicesAuto({ since });
+    console.log(`[SCHEDULER] Pennylane factures clients : ${r.imported} importée(s), ${r.matched} rapprochée(s) auto, ${r.unmatched} à rapprocher`);
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur sync Pennylane factures clients :', err.message);
+  }
+}
+
 // ══════════════════════════════════════════
 // ORCHESTRATEUR
 // ══════════════════════════════════════════
@@ -617,6 +649,24 @@ function startScheduler() {
     if (now.getHours() === 2) {
       console.log('[SCHEDULER] Lancement sync Pennylane quotidienne...');
       await syncPennylaneDaily();
+    }
+    // Import factures clients Pennylane à 4h (contrôle facturation, item 37)
+    if (now.getHours() === 4) {
+      console.log('[SCHEDULER] Lancement sync factures clients Pennylane...');
+      await syncPennylaneInvoicesDaily();
+    }
+    // Génération quotidienne des prédictions de remplissage J..J+7 à 5h (résidu 8).
+    // Calcul LOCAL (heuristique, sans appel LLM). Alimente ml_fill_predictions pour
+    // que la boucle de feedback capteur (liveobjects-processor) puisse se refermer.
+    if (now.getHours() === 5) {
+      console.log('[SCHEDULER] Génération quotidienne des prédictions de remplissage...');
+      try {
+        const { generateDailyPredictions } = require('../routes/tours/predictions');
+        const r = await generateDailyPredictions({ horizonDays: 7 });
+        console.log(`[SCHEDULER] Prédictions générées : ${r.generated} lignes / ${r.cavs} CAV actifs (${r.errors} erreurs, ${r.durationMs}ms)`);
+      } catch (err) {
+        console.error('[SCHEDULER] Génération prédictions error :', err.message);
+      }
     }
     // Niveau 3.1 — Dispatch auto J-1 chaque soir à 18h
     if (now.getHours() === 18 && now.getMinutes() < 30) {

@@ -1,19 +1,25 @@
 const pool = require('../../config/database');
 const { getContextForDate, getLocalEventsForDate, isEventNearCav } = require('./context');
 const { haversineDistance } = require('./geo');
+const fillFactors = require('../../utils/fill-factors');
 
 // ══════════════════════════════════════════════════════════════
 // MOTEUR DE PRÉDICTION DE REMPLISSAGE (IA)
 // ══════════════════════════════════════════════════════════════
+//
+// Les facteurs saisonniers / jour-de-semaine ont UNE SEULE source de vérité :
+// `utils/fill-factors.js` (item 50). Les tableaux ci-dessous ne sont plus que
+// la couche "MANUEL" en mémoire (miroir de la config persistée dans settings)
+// exposée via les getters/setters historiques (proposals.js, stats.js…).
+// Le moteur lui-même (predictFillRate) consomme les facteurs EFFECTIFS résolus
+// (appris > manuel > défaut) via fillFactors.getResolvedFactors().
 
-// Facteurs saisonniers mensuels (jan→déc) — calibrés sur données réelles 2025-2026
-// Pic en août (1.27), creux en décembre (0.75). Juin proche de la moyenne (0.99).
-let SEASONAL_FACTORS = [0.88, 0.82, 0.94, 1.05, 1.12, 0.99, 1.19, 1.27, 1.13, 1.02, 0.84, 0.75];
+// Facteurs saisonniers mensuels (jan→déc) — défaut codé (source unique fill-factors).
+let SEASONAL_FACTORS = [...fillFactors.SEASONAL_DEFAULT];
 
-// Facteurs jour de la semaine (lun→dim) — calibrés sur données réelles
-// Lundi le plus lourd (accumulation weekend), jeudi bas (~50%), pas de collecte sam/dim
-// Note : sam/dim = facteur d'accumulation dans les conteneurs (pas de collecte)
-let DAY_OF_WEEK_FACTORS = [1.25, 1.09, 1.05, 0.49, 1.11, 1.15, 1.1];
+// Facteurs jour de la semaine (lun→dim) — défaut codé (source unique fill-factors).
+// Lundi le plus lourd (accumulation weekend), jeudi bas (~50%), pas de collecte sam/dim.
+let DAY_OF_WEEK_FACTORS = [...fillFactors.DOW_DEFAULT];
 
 // Jours fériés français (approximation)
 // Jours fériés français — source : service-public.gouv.fr
@@ -94,8 +100,70 @@ let SCORING_CONFIG = {
   cavProximityRadius: 100,       // rayon en mètres pour détecter arrivée/départ GPS d'un CAV
 };
 
+// ──────────────────────────────────────────────────────────────
+// Persistance de la config prédictive (item 49)
+// La config (facteurs manuels, jours fériés, vacances, scoring) était mutée
+// EN MÉMOIRE par PUT /predictive-config → perdue à chaque redéploiement.
+// Elle est désormais persistée dans `settings` (via fill-factors) et rechargée
+// paresseusement au démarrage dans les variables de module ci-dessus.
+// ──────────────────────────────────────────────────────────────
+let _configLoaded = null;
+
+async function loadPersistedConfig() {
+  const cfg = await fillFactors.getPersistedConfig();
+  if (!cfg || typeof cfg !== 'object') return;
+  if (Array.isArray(cfg.seasonalFactors) && cfg.seasonalFactors.length === 12) {
+    SEASONAL_FACTORS = cfg.seasonalFactors.map(Number);
+  }
+  if (Array.isArray(cfg.dayOfWeekFactors) && cfg.dayOfWeekFactors.length === 7) {
+    DAY_OF_WEEK_FACTORS = cfg.dayOfWeekFactors.map(Number);
+  }
+  if (Array.isArray(cfg.holidays)) FRENCH_HOLIDAYS_2026 = cfg.holidays;
+  if (Array.isArray(cfg.schoolVacations)) {
+    SCHOOL_VACATIONS = cfg.schoolVacations.filter((v) => v && v.name && v.start && v.end);
+  }
+  if (cfg.scoring && typeof cfg.scoring === 'object') {
+    SCORING_CONFIG = { ...SCORING_CONFIG, ...cfg.scoring };
+  }
+}
+
+// Idempotent : charge la config persistée une seule fois (mémoïsé).
+function ensureConfigLoaded() {
+  if (!_configLoaded) {
+    _configLoaded = loadPersistedConfig().catch((err) => {
+      console.warn('[PREDICTIONS] Config persistée non chargée :', err.message);
+    });
+  }
+  return _configLoaded;
+}
+
+// Recharge forcée après un PUT /predictive-config.
+function reloadPersistedConfig() {
+  _configLoaded = loadPersistedConfig().catch((err) => {
+    console.warn('[PREDICTIONS] Rechargement config échoué :', err.message);
+  });
+  return _configLoaded;
+}
+
+// Déclenche le chargement au require du module (fire-and-forget) pour que les
+// getters synchrones (proposals.js, stats.js) voient rapidement la config.
+ensureConfigLoaded();
+
 function isHoliday(dateStr) {
   return FRENCH_HOLIDAYS_2026.includes(dateStr);
+}
+
+// Petit utilitaire : convertit une ligne de feedback en % observé (0-120),
+// en préférant la vérité terrain capteur (observed_fill_rate, DOUBLE 0-120)
+// puis la saisie chauffeur (observed_fill_level, INTEGER 0-5 ×20). null si aucune.
+function observedPercentFromRow(row) {
+  if (row.observed_fill_rate != null && Number.isFinite(parseFloat(row.observed_fill_rate))) {
+    return Math.max(0, Math.min(120, parseFloat(row.observed_fill_rate)));
+  }
+  if (row.observed_fill_level != null && Number.isFinite(parseInt(row.observed_fill_level, 10))) {
+    return Math.max(0, Math.min(120, parseInt(row.observed_fill_level, 10) * 20));
+  }
+  return null;
 }
 
 // Détection vacances scolaires : pendant, semaine avant, semaine après
@@ -123,10 +191,16 @@ function getSchoolVacationStatus(dateStr) {
 }
 
 async function predictFillRate(cavId, targetDate) {
+  await ensureConfigLoaded();
+  const resolved = await fillFactors.getResolvedFactors();
   const now = new Date(targetDate || Date.now());
   const monthIndex = now.getMonth();
   const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1; // 0=lun, 6=dim
   const dateStr = now.toISOString().split('T')[0];
+
+  // Facteurs EFFECTIFS (appris > manuel > défaut), source unique fill-factors.
+  const seasonalFactor = fillFactors.seasonalFactorFor(resolved, monthIndex);
+  const dayFactor = fillFactors.dayFactorFor(resolved, now.getDay());
 
   // Récupérer l'historique de ce CAV
   const histResult = await pool.query(
@@ -158,15 +232,33 @@ async function predictFillRate(cavId, targetDate) {
   const lastCollection = history[0].date;
   const daysSince = Math.floor((now - new Date(lastCollection)) / 86400000);
 
-  // Accumulation journalière estimée
-  const dailyAccumulation = avgWeight / 7; // Hypothèse : collecte hebdomadaire moyenne
+  // Cadence moyenne RÉELLE entre collectes (fallback 7 j) — cohérent avec
+  // cav.js /fill-rate. L'ancienne hypothèse « collecte hebdomadaire » (avgWeight/7)
+  // surestimait l'accumulation des CAV collectés moins souvent.
+  let avgDaysBetween = 7;
+  if (history.length >= 2) {
+    const times = history.map((h) => new Date(h.date).getTime()).sort((a, b) => b - a);
+    let gapSum = 0, gaps = 0;
+    for (let i = 0; i < times.length - 1; i++) {
+      const g = (times[i] - times[i + 1]) / 86400000;
+      if (g > 0) { gapSum += g; gaps++; }
+    }
+    if (gaps > 0) avgDaysBetween = gapSum / gaps;
+  }
 
-  // Calcul du remplissage brut
-  let rawFill = (daysSince * dailyAccumulation / (cav.nb_containers || 1)) * 100;
-
-  // Appliquer les facteurs
-  rawFill *= SEASONAL_FACTORS[monthIndex];
-  rawFill *= DAY_OF_WEEK_FACTORS[dayOfWeek];
+  // ── Calcul du remplissage NORMALISÉ PAR LA CAPACITÉ (item 48) ──
+  // kg accumulés ÷ (nb conteneurs × 150 kg) × 100, saisonnier + jour inclus.
+  // Remplace l'ancienne formule dimensionnellement incohérente (kg traités
+  // comme des %) qui saturait systématiquement à 100-120 %.
+  let rawFill = fillFactors.computeBaseFillPercent({
+    daysSinceCollection: daysSince,
+    avgWeightKg: avgWeight,
+    avgDaysBetween,
+    nbContainers: cav.nb_containers,
+    seasonalFactor,
+    dayFactor,
+    maxFill: SCORING_CONFIG.maxFillCap || 120,
+  });
 
   // Facteur jours fériés : +10% pendant les jours fériés
   if (isHoliday(dateStr)) rawFill *= SCORING_CONFIG.holidayBonus || 1.1;
@@ -230,18 +322,25 @@ async function predictFillRate(cavId, targetDate) {
 
   // ── Apprentissage continu V2 : correction par CAV + par période ──
   // 1. Correction spécifique à ce CAV (feedback récent, pondéré par récence)
+  // NB (item 51) : on lit `observed_fill_rate` (vérité terrain capteur, 0-120 %)
+  // ET `observed_fill_level` (saisie chauffeur 0-5 ×20), coalescés via
+  // observedPercentFromRow. Avant, seul observed_fill_level était lu, si bien
+  // que les lignes capteur (observed_fill_level = NULL) étaient comptées à 0 %
+  // et écrasaient la calibration. Les lignes sans aucune observation sont ignorées.
   const feedbackResult = await pool.query(
-    `SELECT predicted_fill_rate, observed_fill_level, created_at FROM collection_learning_feedback
+    `SELECT predicted_fill_rate, observed_fill_level, observed_fill_rate, created_at
+     FROM collection_learning_feedback
      WHERE cav_id = $1 ORDER BY created_at DESC LIMIT 60`,
     [cavId]
   );
 
   let cavCorrection = 1;
-  if (feedbackResult.rows.length >= 3) {
+  const usableCav = feedbackResult.rows.filter((r) => observedPercentFromRow(r) != null);
+  if (usableCav.length >= 3) {
     let weightedSum = 0, weightTotal = 0;
-    for (let i = 0; i < feedbackResult.rows.length; i++) {
-      const row = feedbackResult.rows[i];
-      const observedPct = (row.observed_fill_level ?? 0) * 20;
+    for (let i = 0; i < usableCav.length; i++) {
+      const row = usableCav[i];
+      const observedPct = observedPercentFromRow(row);
       const pred = parseFloat(row.predicted_fill_rate) || 50;
       if (pred > 0) {
         // Pondération exponentielle : les feedbacks récents comptent plus
@@ -256,29 +355,33 @@ async function predictFillRate(cavId, targetDate) {
 
   // 2. Correction saisonnière par période (même mois des données passées)
   const periodFeedback = await pool.query(
-    `SELECT predicted_fill_rate, observed_fill_level FROM collection_learning_feedback
+    `SELECT predicted_fill_rate, observed_fill_level, observed_fill_rate
+     FROM collection_learning_feedback
      WHERE cav_id = $1 AND EXTRACT(MONTH FROM created_at) = $2
      ORDER BY created_at DESC LIMIT 20`,
     [cavId, monthIndex + 1]
   );
 
   let periodCorrection = 1;
-  if (periodFeedback.rows.length >= 3) {
+  {
     let sumRatio = 0, count = 0;
     for (const row of periodFeedback.rows) {
-      const observedPct = (row.observed_fill_level ?? 0) * 20;
+      const observedPct = observedPercentFromRow(row);
+      if (observedPct == null) continue;
       const pred = parseFloat(row.predicted_fill_rate) || 50;
       if (pred > 0) { sumRatio += observedPct / pred; count++; }
     }
-    periodCorrection = count > 0 ? sumRatio / count : 1;
-    periodCorrection = Math.max(0.7, Math.min(1.3, periodCorrection));
+    if (count >= 3) {
+      periodCorrection = sumRatio / count;
+      periodCorrection = Math.max(0.7, Math.min(1.3, periodCorrection));
+    }
   }
 
   // 3. Correction de zone : CAV proches géographiquement ont des patterns similaires
   let zoneCorrection = 1;
   if (cav.latitude && cav.longitude) {
     const zoneFeedback = await pool.query(
-      `SELECT clf.predicted_fill_rate, clf.observed_fill_level
+      `SELECT clf.predicted_fill_rate, clf.observed_fill_level, clf.observed_fill_rate
        FROM collection_learning_feedback clf
        JOIN cav c ON clf.cav_id = c.id
        WHERE clf.cav_id != $1
@@ -288,14 +391,15 @@ async function predictFillRate(cavId, targetDate) {
        ORDER BY clf.created_at DESC LIMIT 30`,
       [cavId, parseFloat(cav.latitude), parseFloat(cav.longitude)]
     );
-    if (zoneFeedback.rows.length >= 5) {
-      let sumRatio = 0, count = 0;
-      for (const row of zoneFeedback.rows) {
-        const observedPct = (row.observed_fill_level ?? 0) * 20;
-        const pred = parseFloat(row.predicted_fill_rate) || 50;
-        if (pred > 0) { sumRatio += observedPct / pred; count++; }
-      }
-      zoneCorrection = count > 0 ? sumRatio / count : 1;
+    let sumRatio = 0, count = 0;
+    for (const row of zoneFeedback.rows) {
+      const observedPct = observedPercentFromRow(row);
+      if (observedPct == null) continue;
+      const pred = parseFloat(row.predicted_fill_rate) || 50;
+      if (pred > 0) { sumRatio += observedPct / pred; count++; }
+    }
+    if (count >= 5) {
+      zoneCorrection = sumRatio / count;
       zoneCorrection = Math.max(0.8, Math.min(1.2, zoneCorrection));
     }
   }
@@ -310,7 +414,7 @@ async function predictFillRate(cavId, targetDate) {
   // ── Confiance bayésienne V2 ──
   // Base sur : quantité de données, cohérence du feedback, fraîcheur des données
   const dataScore = Math.min(1, history.length / 30); // 0-1, saturé à 30 entrées
-  const feedbackCount = feedbackResult.rows.length;
+  const feedbackCount = usableCav.length; // feedbacks réellement exploitables (capteur ∪ chauffeur)
   const feedbackScore = Math.min(1, feedbackCount / 15); // 0-1, saturé à 15 feedbacks
   // Cohérence : si cavCorrection est proche de 1, le modèle est bien calibré
   const coherenceScore = 1 - Math.min(1, Math.abs(cavCorrection - 1) * 2);
@@ -334,18 +438,22 @@ async function predictFillRate(cavId, targetDate) {
       vacationFactor: vacationFactor !== 1 ? vacationFactor : null,
     },
     factors: {
-      seasonal: SEASONAL_FACTORS[monthIndex],
-      dayOfWeek: DAY_OF_WEEK_FACTORS[dayOfWeek],
+      seasonal: seasonalFactor,
+      seasonalSource: resolved.seasonalSources[monthIndex],
+      dayOfWeek: dayFactor,
+      dayOfWeekSource: resolved.dayOfWeekSources[dayOfWeek],
       daysSinceCollection: daysSince,
+      avgDaysBetween: Math.round(avgDaysBetween * 10) / 10,
+      capacityKg: fillFactors.getCapacityKg(cav.nb_containers),
       avgWeight: Math.round(avgWeight * 10) / 10,
-      dailyAccumulation: Math.round(dailyAccumulation * 10) / 10,
+      dailyAccumulation: Math.round((avgWeight / Math.max(avgDaysBetween, 1)) * 10) / 10,
     },
     learning: {
       cavCorrection: Math.round(cavCorrection * 1000) / 1000,
       periodCorrection: Math.round(periodCorrection * 1000) / 1000,
       zoneCorrection: Math.round(zoneCorrection * 1000) / 1000,
       combinedCorrection: Math.round(combinedCorrection * 1000) / 1000,
-      feedbackSamples: feedbackResult.rows.length,
+      feedbackSamples: usableCav.length,
       confidenceBreakdown: {
         data: Math.round(dataScore * 100) / 100,
         feedback: Math.round(feedbackScore * 100) / 100,
@@ -360,6 +468,8 @@ async function predictFillRate(cavId, targetDate) {
 // PRÉDICTION REMPLISSAGE ASSOCIATION (isolé des PAV)
 // ══════════════════════════════════════════════════════════════
 async function predictAssociationFillRate(associationPointId, targetDate) {
+  await ensureConfigLoaded();
+  const resolved = await fillFactors.getResolvedFactors();
   const now = new Date(targetDate || Date.now());
   const monthIndex = now.getMonth();
   const dateStr = now.toISOString().split('T')[0];
@@ -385,12 +495,32 @@ async function predictAssociationFillRate(associationPointId, targetDate) {
   const lastCollection = history[0].date;
   const daysSince = Math.floor((now - new Date(lastCollection)) / 86400000);
 
-  // Accumulation hebdomadaire (collecte association = 1x/semaine en moyenne)
-  const dailyAccumulation = avgWeight / 7;
-  let rawFill = (daysSince * dailyAccumulation) * 100;
+  // Cadence moyenne réelle entre collectes (fallback 7 j).
+  let avgDaysBetween = 7;
+  if (history.length >= 2) {
+    const times = history.map((h) => new Date(h.date).getTime()).sort((a, b) => b - a);
+    let gapSum = 0, gaps = 0;
+    for (let i = 0; i < times.length - 1; i++) {
+      const g = (times[i] - times[i + 1]) / 86400000;
+      if (g > 0) { gapSum += g; gaps++; }
+    }
+    if (gaps > 0) avgDaysBetween = gapSum / gaps;
+  }
 
-  // Appliquer facteurs saisonniers (même que PAV)
-  rawFill *= SEASONAL_FACTORS[monthIndex];
+  // ── Remplissage NORMALISÉ PAR LA CAPACITÉ (item 48) ──
+  // Les points association sont des points de dépôt uniques : capacité assimilée
+  // à un conteneur (getCapacityKg(1) = 150 kg). Avant, la formule multipliait des
+  // kg par 100 (kg traités comme %), saturant systématiquement à 120.
+  const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
+  let rawFill = fillFactors.computeBaseFillPercent({
+    daysSinceCollection: daysSince,
+    avgWeightKg: avgWeight,
+    avgDaysBetween,
+    nbContainers: 1,
+    seasonalFactor: fillFactors.seasonalFactorFor(resolved, monthIndex),
+    maxFill: SCORING_CONFIG.maxFillCap || 120,
+  });
+
   if (isHoliday(dateStr)) rawFill *= SCORING_CONFIG.holidayBonus || 1.1;
 
   const vacationStatus = getSchoolVacationStatus(dateStr);
@@ -423,8 +553,71 @@ async function predictAssociationFillRate(associationPointId, targetDate) {
     fill: Math.round(fill * 10) / 10,
     confidence: Math.round(confidence * 100) / 100,
     method: feedbackResult.rows.length >= 3 ? 'ml_corrected' : 'historical',
-    factors: { daysSinceCollection: daysSince, avgWeight, mlCorrection },
+    factors: {
+      daysSinceCollection: daysSince,
+      avgDaysBetween: Math.round(avgDaysBetween * 10) / 10,
+      avgWeight,
+      dailyAccumulation: Math.round(dailyAccumulation * 10) / 10,
+      mlCorrection,
+    },
   };
+}
+
+// ══════════════════════════════════════════════════════════════
+// GÉNÉRATION QUOTIDIENNE DES PRÉDICTIONS (résidu 8)
+// ──────────────────────────────────────────────────────────────
+// Le feedback capteur (liveobjects-processor) ne peut se refermer que s'il
+// existe une prédiction datée à comparer à la mesure. Ce job calcule LOCALEMENT
+// (heuristique predictFillRate, sans appel LLM) les prédictions J..J+N pour les
+// CAV actifs et les upserte dans ml_fill_predictions (en %, cohérent avec la
+// vérité terrain capteur 0-120 %). Appelé quotidiennement par le scheduler.
+// ══════════════════════════════════════════════════════════════
+async function generateDailyPredictions({ horizonDays = 7 } = {}) {
+  const started = Date.now();
+  await ensureConfigLoaded();
+
+  let cavs = [];
+  try {
+    const r = await pool.query("SELECT id FROM cav WHERE status = 'active' ORDER BY id");
+    cavs = r.rows;
+  } catch (err) {
+    console.error('[PREDICTIONS] generateDailyPredictions — lecture CAV échouée :', err.message);
+    return { generated: 0, cavs: 0, errors: 1, durationMs: Date.now() - started };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let generated = 0, errors = 0;
+
+  for (const cav of cavs) {
+    for (let d = 0; d <= horizonDays; d++) {
+      const target = new Date(today.getTime() + d * 86400000);
+      const dateStr = target.toISOString().split('T')[0];
+      try {
+        const pred = await predictFillRate(cav.id, target);
+        if (!pred || pred.fill == null) continue;
+        await pool.query(
+          `INSERT INTO ml_fill_predictions (cav_id, predicted_date, predicted_fill_rate, confidence, model_version, features)
+           VALUES ($1, $2, $3, $4, 'heuristic_v2', $5)
+           ON CONFLICT (cav_id, predicted_date)
+           DO UPDATE SET predicted_fill_rate = EXCLUDED.predicted_fill_rate,
+                         confidence = EXCLUDED.confidence,
+                         model_version = EXCLUDED.model_version,
+                         features = EXCLUDED.features,
+                         created_at = NOW()`,
+          [cav.id, dateStr, pred.fill, pred.confidence ?? 0,
+           JSON.stringify({ method: pred.method, factors: pred.factors || null })]
+        );
+        generated++;
+      } catch (err) {
+        errors++;
+        if (errors <= 3) console.error(`[PREDICTIONS] generateDailyPredictions CAV ${cav.id} ${dateStr} :`, err.message);
+      }
+    }
+  }
+
+  console.log(`[PREDICTIONS] Prédictions heuristiques générées : ${generated} lignes (J..J+${horizonDays}) / ${cavs.length} CAV actifs, ${errors} erreurs, ${Date.now() - started}ms`);
+  return { generated, cavs: cavs.length, errors, durationMs: Date.now() - started };
 }
 
 // Getters and setters for mutable config (used by predictive-config routes)
@@ -454,4 +647,8 @@ module.exports = {
   getScoringConfig,
   setScoringConfig,
   predictAssociationFillRate,
+  generateDailyPredictions,
+  loadPersistedConfig,
+  reloadPersistedConfig,
+  ensureConfigLoaded,
 };

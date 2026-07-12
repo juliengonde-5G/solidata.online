@@ -2,7 +2,15 @@ import { useState, useEffect, useCallback } from 'react';
 import { BadgeCheck, BarChart3, Euro, Factory, Target, Truck } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner, Section } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, Section, ErrorState } from '../components';
+
+// Libellés de la source du CA par qualité (item 35, Vague 1) — pour la
+// transparence méthodologique et distinguer un vrai « pas de données » d'un bug.
+const SOURCE_CA_LABELS = {
+  commandes_factures: 'Commandes exutoires clôturées — montant réellement facturé (facture Pennylane rapprochée) sinon pesée client x prix commande.',
+  expeditions: 'Expéditions physiques — valeur € par catégorie sortante.',
+  stock_movements: 'Mouvements de stock sortants — tonnage uniquement, CA non disponible pour cette source.',
+};
 
 // ══════════════════════════════════════════
 // FINANCE RENTABILITE MATIERE
@@ -24,16 +32,19 @@ export default function FinanceRentabilite() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.get(`/finance/rentabilite/${year}`);
       setData(res.data);
     } catch (err) {
       console.error('Erreur chargement rentabilite:', err);
+      setError(err.response?.data?.error || 'Le chargement de la rentabilité a échoué.');
     }
     setLoading(false);
   }, [year]);
@@ -68,6 +79,8 @@ export default function FinanceRentabilite() {
 
         {loading ? (
           <div className="flex items-center justify-center py-32"><LoadingSpinner /></div>
+        ) : error ? (
+          <ErrorState variant="card" title="Rentabilité indisponible" message={error} onRetry={loadData} />
         ) : !data ? (
           <div className="card-modern p-16 text-center text-slate-400">Aucune donnee disponible</div>
         ) : (
@@ -135,8 +148,20 @@ export default function FinanceRentabilite() {
 
             {/* Rentabilité par qualité */}
             <Section title="Rentabilite par qualite de matiere" subtitle="Cout complet tri applique a chaque qualite, compare au prix de vente moyen" icon={BadgeCheck}>
+              {data.qualites_source && qualites.length > 0 && (
+                <div className="mb-4 flex items-start gap-2 rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-xs text-teal-800">
+                  <BadgeCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span><strong>Source du CA :</strong> {SOURCE_CA_LABELS[data.qualites_source] || data.qualites_source}</span>
+                </div>
+              )}
               {qualites.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-8">Aucune donnee d'expedition disponible. Renseignez les expeditions pour voir la marge par qualite.</p>
+                <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                  <BadgeCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Donnees indisponibles pour {year}.</strong> Aucune commande exutoire cloturee, expedition ou sortie de stock n'a ete trouvee sur la periode.
+                    Cloturez des commandes exutoires (rapprochement facturation) ou saisissez des expeditions pour alimenter la marge par qualite.
+                  </span>
+                </div>
               ) : (
                 <div className="overflow-x-auto rounded-xl border border-slate-200">
                   <table className="w-full text-sm">
@@ -177,6 +202,7 @@ export default function FinanceRentabilite() {
                 <p><strong>Transfert interne</strong> = Cout / tonne collecte x Tonnes entrees au tri (valorisation de la matiere brute livree par la collecte au tri)</p>
                 <p><strong>Cout complet tri</strong> = Charges directes tri + Quote-part frais generaux + Transfert interne collecte</p>
                 <p><strong>Marge par qualite</strong> = Prix de vente moyen / tonne - Cout complet tri / tonne</p>
+                <p><strong>Source du CA par qualite</strong> = commandes exutoires cloturees/facturees, valorisees au montant reellement facture (facture Pennylane rapprochee) sinon pesee client x prix commande sinon tonnage prevu x prix. A defaut, valeur des expeditions physiques par categorie sortante. Aucune donnee : la marge affiche « donnees indisponibles » (plus de zeros silencieux).</p>
               </div>
             </div>
           </>

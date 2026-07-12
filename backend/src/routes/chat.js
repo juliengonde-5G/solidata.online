@@ -13,7 +13,8 @@ const { authenticate, authorize } = require('../middleware/auth');
 // ── Config ──────────────────────────────────────────────────────────────
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
+// Modèle par défaut à jour (claude-sonnet-4-20250514 était déprécié → 404).
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
 const MAX_MSG_LENGTH = 500;
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 min
 const RATE_LIMIT_MAX = 20;

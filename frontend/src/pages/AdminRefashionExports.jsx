@@ -6,9 +6,11 @@ import api from '../services/api';
 const EXPORTS = [
   { slug: 'tonnage-annuel-tournee', label: 'Tonnage annuel par tournée', desc: 'Volume collecté mensuel par tournée (Annuel du Dashboard 2026)' },
   { slug: 'dpav-communes', label: 'DPAV — Tonnages par commune', desc: 'Tonnages par code postal & commune (CSV Refashion)' },
-  { slug: 'dpav-sortants', label: 'DPAV — Sortants par exutoire', desc: 'Tonnages sortants par section DPAV (I à VII) et exutoire' },
+  { slug: 'dpav-sortants', label: 'DPAV — Sortants par exutoire', desc: 'Tonnages sortants par famille Refashion et exutoire',
+    note: "Source : produits finis expédiés (étiquetage / balance). Les flux vrac CSR, effilochage et refus de tri ne deviennent pas des produits finis et n'apparaissent donc pas ici." },
   { slug: 'subvention-mensuelle', label: 'Subvention Refashion mensuelle', desc: 'Calcul mensuel basé sur le taux €/t entrant en vigueur' },
-  { slug: 'coherence-tri-filiere', label: 'Cohérence entrées / sorties', desc: 'Balance mensuelle entre entrée chaîne de tri et sorties scellées' },
+  { slug: 'coherence-tri-filiere', label: 'Cohérence entrées / sorties', desc: 'Balance mensuelle entre entrée chaîne de tri et sorties (produits finis fabriqués)',
+    note: "Source des sorties : produits finis fabriqués (les flux vrac non conditionnés en produits finis ne sont pas comptés ; l'écart reste donc structurellement positif)." },
 ];
 
 export default function AdminRefashionExports() {
@@ -110,6 +112,9 @@ export default function AdminRefashionExports() {
                     </span>
                   }
                 </div>
+                {e.note && (
+                  <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{e.note}</p>
+                )}
               </div>
             );
           })}

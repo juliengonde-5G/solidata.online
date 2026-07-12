@@ -477,6 +477,7 @@ router.get('/analytics/rayons', async (req, res) => {
     const result = await pool.query(`
       SELECT rayon, segment,
              COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_ttc,
+             COALESCE(SUM(total_ht), 0)::FLOAT AS ca_ht,
              COUNT(*)::INT AS nb_lignes,
              COALESCE(SUM(quantite), 0)::INT AS nb_articles
       FROM boutique_ventes
@@ -486,7 +487,7 @@ router.get('/analytics/rayons', async (req, res) => {
         AND ($4::TEXT IS NULL OR segment = $4)
         AND ($5::TEXT IS NULL OR rayon = $5)
       GROUP BY rayon, segment
-      ORDER BY ca_ttc DESC
+      ORDER BY ca_ht DESC
     `, [boutique_id, date_from || null, date_to || null, segment || null, rayon || null]);
     res.json(result.rows);
   } catch (err) {

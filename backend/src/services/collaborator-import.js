@@ -25,6 +25,7 @@
  */
 
 const ExcelJS = require('exceljs');
+const { resyncMilestones } = require('../routes/insertion/engine');
 
 // ── Référentiels de mapping ────────────────────────────────────────────────
 
@@ -139,6 +140,52 @@ function resolveTeamType(position, equipeText) {
 function normalizeContractType(raw) {
   if (!raw) return null;
   return CONTRACT_TYPE_MAP[String(raw).trim()] || String(raw).trim();
+}
+
+// ── Visite médicale (item 43) ───────────────────────────────────────────────
+
+/**
+ * Convertit une périodicité de visite médicale texte en nombre de mois.
+ * Ex. « 24 mois » → 24, « 2 ans » → 24, « 5 ans » → 60, « 60 » → 60.
+ */
+function parseMedicalFrequencyMonths(freq) {
+  if (!freq) return null;
+  const s = stripAccents(String(freq)).toLowerCase().trim();
+  let m = s.match(/(\d+)\s*(mois|ans?|annees?|an)/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (isNaN(n)) return null;
+    return /an/.test(m[2]) ? n * 12 : n;
+  }
+  m = s.match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : null; // nombre nu → interprété en mois
+}
+
+function addMonthsISO(iso, months) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  // UTC pour rester déterministe quel que soit le fuseau du conteneur.
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Calcule l'échéance de la prochaine visite médicale (item 43) :
+ *  - si une visite (post-embauche ou périodique) est connue ET la périodicité
+ *    est renseignée → dernière visite connue + périodicité ;
+ *  - si une visite est connue mais sans périodicité → pas d'échéance calculable
+ *    (null, on n'invente pas de date en retard) ;
+ *  - si aucune visite → échéance de la visite d'information et de prévention :
+ *    dans les 3 mois suivant le début de contrat.
+ */
+function computeMedicalDueDate({ contractStart, hireVisit, lastVisit, frequency }) {
+  const freqM = parseMedicalFrequencyMonths(frequency);
+  const known = [hireVisit, lastVisit].filter(Boolean).sort();
+  const lastKnown = known.length ? known[known.length - 1] : null;
+  if (lastKnown) return freqM ? addMonthsISO(lastKnown, freqM) : null;
+  if (contractStart) return addMonthsISO(contractStart, 3);
+  return null;
 }
 
 // ── Lecture du classeur .xlsx Malibou ──────────────────────────────────────
@@ -278,7 +325,15 @@ async function parseWorkbookBuffer(buffer) {
       residence_permit_type: cleanStr(pick(r, 'Titre de séjour', 'Titre de sejour')),
       residence_permit_number: cleanStr(pick(r, 'N° de titre de séjour', 'N° de titre de sejour')),
       residence_permit_renewal: cleanStr(pick(r, 'Renouvellement titre de séjour', 'Renouvellement titre de sejour')),
+      // Item 43 : deux dates distinctes si l'export les fournit —
+      //  • « Dernière visite médicale » = visite périodique la plus récente
+      //  • « Visite médicale d'embauche / d'information et de prévention » =
+      //    visite post-embauche (celle qui alimente visite_medicale_date).
       last_medical_visit: toISODate(pick(r, 'Dernière visite médicale', 'Derniere visite medicale')),
+      medical_visit_hire_date: toISODate(pick(r,
+        "Visite médicale d'embauche", "Visite medicale d'embauche",
+        "Visite d'information et de prévention", "Visite d'information et de prevention",
+        'Visite post-embauche', 'Visite post embauche', "Visite d'embauche")),
       medical_visit_frequency: cleanStr(pick(r, 'Fréquence visite médicale', 'Frequence visite medicale')),
       seniority_date: toISODate(pick(r, 'Ancienneté', 'Anciennete')),
       manager_malibou_id: cleanStr(pick(r, 'Matricule du responsable')),
@@ -409,7 +464,7 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
             c.address, c.city, c.postal_code, c.country, c.civility, c.gender,
             c.birth_date, c.birth_city, c.birth_country, c.birth_department, c.nationality,
             c.disability_status, c.residence_permit_type, c.residence_permit_number, c.residence_permit_renewal,
-            c.last_medical_visit, c.medical_visit_frequency, c.seniority_date,
+            c.medical_visit_hire_date, c.medical_visit_frequency, c.seniority_date,
             c.manager_malibou_id, c.manager_name,
             c.position, c.qualification, contractType, c.contract_start, c.contract_end,
             c.weekly_hours, c.work_time_type, c.gross_salary, c.siret, c.establishment,
@@ -417,6 +472,19 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
           ]
         );
         await upsertCurrentContract(db, existing.id, { contractType, teamId, c });
+        await applyMedicalVisit(db, existing.id, c);
+        // Item 41 : si l'échéance de contrat a été prolongée, recaler les jalons
+        // d'insertion non réalisés (no-op si parcours non initialisé/terminé).
+        // Savepoint imbriqué : un échec de recalage ne doit PAS annuler l'import
+        // du collaborateur (ni avorter la transaction pour les suivants).
+        await db.query('SAVEPOINT resync_sp');
+        try {
+          await resyncMilestones(db, existing.id, { userId });
+          await db.query('RELEASE SAVEPOINT resync_sp');
+        } catch (e) {
+          try { await db.query('ROLLBACK TO SAVEPOINT resync_sp'); } catch (_) { /* tx close */ }
+          console.warn('[IMPORT] resyncMilestones ignoré :', e.message);
+        }
         updated.push({ id: existing.id, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
       } else {
         // ── INSERT nouveau collaborateur ──
@@ -447,7 +515,7 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
             c.address, c.city, c.postal_code, c.country, c.civility, c.gender,
             c.birth_date, c.birth_city, c.birth_country, c.birth_department, c.nationality,
             c.disability_status, c.residence_permit_type, c.residence_permit_number, c.residence_permit_renewal,
-            c.last_medical_visit, c.medical_visit_frequency, c.seniority_date,
+            c.medical_visit_hire_date, c.medical_visit_frequency, c.seniority_date,
             c.manager_malibou_id, c.manager_name,
             c.position, c.qualification, contractType, c.contract_start, c.contract_end,
             c.weekly_hours, c.work_time_type, c.gross_salary, c.siret, c.establishment,
@@ -456,6 +524,7 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
         );
         const newId = ins.rows[0].id;
         await upsertCurrentContract(db, newId, { contractType, teamId, c });
+        await applyMedicalVisit(db, newId, c);
         created.push({ id: newId, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
       }
       await db.query('RELEASE SAVEPOINT collab_sp');
@@ -490,9 +559,37 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
 // hors liste (ex. « CDDI », libellé exotique) est ramené à 'CDD' pour la ligne
 // de contrat — la colonne employees.contract_type, elle, conserve la valeur
 // exacte de l'export.
-const EC_CONTRACT_TYPES = ['CDI', 'CDD', 'interim', 'stage', 'apprentissage'];
+// Item 41 : 'CDDI' est désormais admis par le CHECK de employee_contracts
+// (migration init-db) → on cesse de le rabattre sur 'CDD' pour ne plus perdre
+// l'objet métier central (le CDDI) dans la table de contrats normalisée.
+const EC_CONTRACT_TYPES = ['CDI', 'CDD', 'CDDI', 'interim', 'stage', 'apprentissage'];
 function safeContractType(t) {
   return EC_CONTRACT_TYPES.includes(t) ? t : 'CDD';
+}
+
+/**
+ * Item 43 — Renseigne les champs de visite médicale de façon NON destructive :
+ *  - visite_medicale_date (post-embauche) : fill-if-empty depuis l'export ;
+ *  - last_medical_visit_date (visite périodique la plus récente) : fill-if-empty ;
+ *  - visite_medicale_due_date : recalculée à la CRÉATION selon la périodicité,
+ *    mais on ne l'écrase jamais si une échéance a déjà été posée à la main
+ *    (COALESCE(existant, calculé)).
+ */
+async function applyMedicalVisit(db, employeeId, c) {
+  const due = computeMedicalDueDate({
+    contractStart: c.contract_start,
+    hireVisit: c.medical_visit_hire_date,
+    lastVisit: c.last_medical_visit,
+    frequency: c.medical_visit_frequency,
+  });
+  await db.query(
+    `UPDATE employees SET
+       visite_medicale_date = COALESCE($2, visite_medicale_date),
+       last_medical_visit_date = COALESCE($3, last_medical_visit_date),
+       visite_medicale_due_date = COALESCE(visite_medicale_due_date, $4)
+     WHERE id = $1`,
+    [employeeId, c.medical_visit_hire_date || null, c.last_medical_visit || null, due]
+  );
 }
 
 async function upsertCurrentContract(db, employeeId, { contractType, teamId, c }) {
@@ -529,5 +626,7 @@ module.exports = {
   normalizeGender,
   resolveTeamType,
   normalizeContractType,
+  parseMedicalFrequencyMonths,
+  computeMedicalDueDate,
   POSITION_TO_TEAM,
 };

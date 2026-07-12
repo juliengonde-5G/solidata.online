@@ -13,7 +13,8 @@ router.use(autoLogActivity('stock'));
 router.get('/', async (req, res) => {
   try {
     const { type, date_from, date_to, limit: lim } = req.query;
-    // matiere_id référence categories_sortantes (cf. A1, migration init-db)
+    // matiere_id référence categories_sortantes (cf. A1, migration init-db).
+    // sm.reversed_of_id / reversal_movement_id : chaîne de contre-écriture (item 30).
     let query = `SELECT sm.*, m.nom as matiere_categorie, m.famille as matiere_famille
        FROM stock_movements sm LEFT JOIN categories_sortantes m ON sm.matiere_id = m.id WHERE 1=1`;
     const params = [];
@@ -79,7 +80,7 @@ router.post('/', [
     const { type, date, poids_kg, matiere_id, destination, notes, code_barre,
       origine, categorie_collecte, poids_brut_kg, tare_kg, vehicle_id, tour_id, origine_type } = req.body;
 
-    if (!type || !date || !poids_kg) {
+    if (!type || !date || poids_kg == null) {
       return res.status(400).json({ error: 'type, date et poids_kg requis' });
     }
 
@@ -95,6 +96,69 @@ router.post('/', [
   } catch (err) {
     console.error('[STOCK] Erreur création :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// CORRECTION AUDITÉE DES MOUVEMENTS (item 30)
+// Pattern comptable : on ne supprime jamais un mouvement, on crée une
+// contre-écriture liée qui l'annule. L'historique reste intact.
+// ══════════════════════════════════════════
+
+// POST /api/stock/movements/:id/cancel — Annuler un mouvement (contre-écriture)
+router.post('/movements/:id/cancel', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const motif = (req.body?.motif || '').trim();
+  if (!motif) {
+    return res.status(400).json({ error: 'Un motif d\'annulation est obligatoire' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query('SELECT * FROM stock_movements WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Mouvement introuvable' });
+    }
+    const orig = existing.rows[0];
+
+    if (orig.reversed_of_id) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Une contre-écriture ne peut pas être annulée' });
+    }
+    if (orig.reversal_movement_id) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Ce mouvement a déjà été annulé', reversal_id: orig.reversal_movement_id });
+    }
+
+    const oppositeType = orig.type === 'entree' ? 'sortie' : 'entree';
+
+    // Contre-écriture : type opposé, même poids/catégorie/date → solde net = 0
+    // sur la date d'origine (stock historique corrigé). Le « quand/qui/pourquoi »
+    // est porté par created_at / created_by / reversal_reason.
+    const reversal = await client.query(
+      `INSERT INTO stock_movements
+         (type, date, poids_kg, matiere_id, destination, code_barre, origine, notes,
+          reversed_of_id, reversal_reason, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, 'annulation', $7, $8, $9, $10) RETURNING *`,
+      [oppositeType, orig.date, orig.poids_kg, orig.matiere_id, orig.destination, orig.code_barre,
+       `Annulation du mouvement #${orig.id} — ${motif}`, orig.id, motif, req.user.id]
+    );
+
+    await client.query(
+      `UPDATE stock_movements SET reversal_movement_id = $1, reversed_at = NOW(), updated_at = NOW() WHERE id = $2`,
+      [reversal.rows[0].id, orig.id]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ original_id: orig.id, reversal: reversal.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[STOCK] Erreur annulation mouvement :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
@@ -206,11 +270,13 @@ router.post('/inventories', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       [code, type || 'partiel', notes, totalTheorique, req.user.id]
     );
 
-    // Créer les lignes d'inventaire pré-remplies avec le stock théorique
+    // Lignes d'inventaire pré-remplies avec le théorique. stock_physique_kg reste
+    // NULL = « non compté » (distinct de 0 = « compté, rien trouvé »), pour ne
+    // régulariser que ce qui a réellement été compté (item 29).
     for (const cat of stockRes.rows) {
       await client.query(
-        `INSERT INTO inventory_items (batch_id, categorie_sortante_id, categorie_nom, stock_theorique_kg)
-         VALUES ($1, $2, $3, $4)`,
+        `INSERT INTO inventory_items (batch_id, categorie_sortante_id, categorie_nom, stock_theorique_kg, stock_physique_kg, ecart_kg, ecart_percent)
+         VALUES ($1, $2, $3, $4, NULL, NULL, NULL)`,
         [batch.rows[0].id, cat.categorie_id, cat.categorie_nom, cat.stock_theorique_kg]
       );
     }
@@ -237,7 +303,17 @@ router.get('/inventories/:id', async (req, res) => {
       [req.params.id]
     );
 
-    res.json({ ...batch.rows[0], items: items.rows });
+    // Régularisations générées à la validation (item 29) — pour audit / re-consultation
+    const reguls = await pool.query(
+      `SELECT sm.id, sm.type, sm.date, sm.poids_kg, sm.notes, m.nom as categorie_nom
+       FROM stock_movements sm
+       LEFT JOIN categories_sortantes m ON sm.matiere_id = m.id
+       WHERE sm.inventory_batch_id = $1
+       ORDER BY sm.id`,
+      [req.params.id]
+    );
+
+    res.json({ ...batch.rows[0], items: items.rows, regularisations: reguls.rows });
   } catch (err) {
     console.error('[STOCK] Erreur détail inventaire :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -253,20 +329,44 @@ router.put('/inventories/:id/items', authorize('ADMIN', 'MANAGER'), async (req, 
 
     await client.query('BEGIN');
 
+    // Garde : un inventaire validé n'est plus modifiable (fige les écarts régularisés)
+    const batchState = await client.query('SELECT status FROM inventory_batches WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (batchState.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Inventaire non trouvé' });
+    }
+    if (batchState.rows[0].status !== 'en_cours') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Inventaire déjà validé — saisie impossible' });
+    }
+
     let totalPhysique = 0;
     let totalTheorique = 0;
 
     for (const item of items) {
-      const physique = parseFloat(item.stock_physique_kg) || 0;
       const existing = await client.query('SELECT stock_theorique_kg FROM inventory_items WHERE id = $1 AND batch_id = $2', [item.id, req.params.id]);
       if (existing.rows.length === 0) continue;
-
       const theorique = parseFloat(existing.rows[0].stock_theorique_kg) || 0;
+
+      // NULL / '' / undefined = non compté → on n'écrit ni physique ni écart
+      const raw = item.stock_physique_kg;
+      const counted = !(raw === null || raw === undefined || raw === '');
+      const physique = counted ? parseFloat(raw) : null;
+
+      if (physique === null || isNaN(physique)) {
+        await client.query(
+          `UPDATE inventory_items SET stock_physique_kg = NULL, ecart_kg = NULL, ecart_percent = NULL, counted = false, notes = $1
+           WHERE id = $2 AND batch_id = $3`,
+          [item.notes || null, item.id, req.params.id]
+        );
+        continue;
+      }
+
       const ecart = physique - theorique;
       const ecartPct = theorique > 0 ? Math.round((ecart / theorique) * 10000) / 100 : 0;
 
       await client.query(
-        `UPDATE inventory_items SET stock_physique_kg = $1, ecart_kg = $2, ecart_percent = $3, notes = $4
+        `UPDATE inventory_items SET stock_physique_kg = $1, ecart_kg = $2, ecart_percent = $3, counted = true, notes = $4
          WHERE id = $5 AND batch_id = $6`,
         [physique, ecart, ecartPct, item.notes || null, item.id, req.params.id]
       );
@@ -296,18 +396,64 @@ router.put('/inventories/:id/items', authorize('ADMIN', 'MANAGER'), async (req, 
 });
 
 // POST /api/stock/inventories/:id/validate — Valider un inventaire
+// Item 29 : la validation POSE des écritures de régularisation (une par
+// catégorie comptée dont l'écart ≠ 0) pour recaler le stock théorique sur le
+// comptage physique. Sans cela, le théorique diverge indéfiniment après chaque
+// inventaire. Idempotent : la garde WHERE status='en_cours' empêche le doublon.
 router.post('/inventories/:id/validate', authorize('ADMIN'), async (req, res) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+
+    const upd = await client.query(
       `UPDATE inventory_batches SET status = 'valide', validated_by = $1, validated_at = NOW(), updated_at = NOW()
        WHERE id = $2 AND status = 'en_cours' RETURNING *`,
       [req.user.id, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Inventaire non trouvé ou déjà validé' });
-    res.json(result.rows[0]);
+    if (upd.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Inventaire non trouvé ou déjà validé' });
+    }
+    const batch = upd.rows[0];
+
+    // Régularisations : uniquement les lignes réellement comptées (physique non NULL)
+    // avec un écart significatif (> 10 g pour éviter le bruit flottant).
+    const items = await client.query(
+      `SELECT id, categorie_sortante_id, categorie_nom, stock_theorique_kg, stock_physique_kg, ecart_kg
+       FROM inventory_items
+       WHERE batch_id = $1 AND counted = true AND stock_physique_kg IS NOT NULL`,
+      [req.params.id]
+    );
+
+    const regularisations = [];
+    const today = new Date().toISOString().slice(0, 10);
+    for (const it of items.rows) {
+      const theorique = parseFloat(it.stock_theorique_kg) || 0;
+      const physique = parseFloat(it.stock_physique_kg);
+      const ecart = physique - theorique;
+      if (Math.abs(ecart) < 0.01) continue;
+
+      // écart > 0 → il manque du stock au théorique → 'entree' ; sinon 'sortie'.
+      const mvType = ecart > 0 ? 'entree' : 'sortie';
+      const notes = `Régularisation inventaire ${batch.code} — ${it.categorie_nom || 'catégorie'} : théorique ${theorique.toFixed(1)} → compté ${physique.toFixed(1)} kg`;
+      const ins = await client.query(
+        `INSERT INTO stock_movements
+           (type, date, poids_kg, matiere_id, origine, notes, inventory_batch_id, created_by)
+         VALUES ($1, $2, $3, $4, 'regularisation_inventaire', $5, $6, $7)
+         RETURNING id, type, date, poids_kg, matiere_id, notes`,
+        [mvType, today, Math.abs(ecart), it.categorie_sortante_id, notes, batch.id, req.user.id]
+      );
+      regularisations.push({ ...ins.rows[0], categorie_nom: it.categorie_nom, ecart_kg: ecart });
+    }
+
+    await client.query('COMMIT');
+    res.json({ ...batch, regularisations });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[STOCK] Erreur validation inventaire :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

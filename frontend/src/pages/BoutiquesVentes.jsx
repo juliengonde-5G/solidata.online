@@ -67,7 +67,7 @@ export default function BoutiquesVentes() {
   const clearFilters = () => { setActiveSegment(null); setActiveRayon(null); };
 
   const kpis = useMemo(() => {
-    const total = daily.reduce((s, r) => s + (r.ca_ttc || 0), 0);
+    const total = daily.reduce((s, r) => s + (r.ca_ht || 0), 0);
     const nbTickets = daily.reduce((s, r) => s + (r.nb_tickets || 0), 0);
     const nbArticles = daily.reduce((s, r) => s + (r.nb_articles || 0), 0);
     const panier = nbTickets > 0 ? total / nbTickets : 0;
@@ -76,12 +76,12 @@ export default function BoutiquesVentes() {
 
   const dailyChart = useMemo(() => daily.map(d => ({
     jour: d.jour ? new Date(d.jour).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '',
-    ca: Math.round((d.ca_ttc || 0) * 100) / 100,
+    ca: Math.round((d.ca_ht || 0) * 100) / 100,
   })), [daily]);
 
   const rayonChart = useMemo(() => rayons.map(r => ({
     name: r.rayon,
-    value: Math.round((r.ca_ttc || 0) * 100) / 100,
+    value: Math.round((r.ca_ht || 0) * 100) / 100,
   })), [rayons]);
 
   return (
@@ -199,7 +199,7 @@ export default function BoutiquesVentes() {
                             <span className={isActive ? 'font-semibold text-pink-700' : ''}>{SEGMENT_LABELS[s.segment] || s.segment}</span>
                           </td>
                           <td className="py-2 text-right">{s.nb_articles}</td>
-                          <td className="py-2 text-right font-medium">{Number(s.ca_ttc).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
+                          <td className="py-2 text-right font-medium">{Number(s.ca_ht).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
                         </tr>
                       );
                     })}
@@ -212,7 +212,7 @@ export default function BoutiquesVentes() {
                 <div className="max-h-[360px] overflow-y-auto">
                   <table className="w-full text-sm">
                     <thead className="text-xs uppercase text-slate-500 border-b border-slate-200 sticky top-0 bg-white">
-                      <tr><th className="text-left py-2">Article</th><th className="text-right py-2">Qté</th><th className="text-right py-2">Prix moy.</th><th className="text-right py-2">CA</th></tr>
+                      <tr><th className="text-left py-2">Article</th><th className="text-right py-2">Qté</th><th className="text-right py-2">Prix moy.</th><th className="text-right py-2">CA HT</th></tr>
                     </thead>
                     <tbody>
                       {articles.map((a, i) => (
@@ -220,7 +220,7 @@ export default function BoutiquesVentes() {
                           <td className="py-2"><span className="block truncate max-w-[180px]" title={a.article}>{a.article}</span><span className="text-xs text-slate-400">{a.rayon}</span></td>
                           <td className="py-2 text-right">{a.nb_articles}</td>
                           <td className="py-2 text-right">{Number(a.prix_moyen).toFixed(2)} €</td>
-                          <td className="py-2 text-right font-medium">{Number(a.ca_ttc).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
+                          <td className="py-2 text-right font-medium">{Number(a.ca_ht).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
                         </tr>
                       ))}
                     </tbody>

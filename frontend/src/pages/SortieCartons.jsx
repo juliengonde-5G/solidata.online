@@ -5,12 +5,13 @@ import useScannerInput from '../hooks/useScannerInput';
 import { beepSuccess, beepError, beepAlreadyOut, unlockAudio } from '../utils/beep';
 import api from '../services/api';
 
+// Gammes vivantes depuis la refonte 10/05/2026 (init-db) : EXTRA/STANDARD/VAK/EXPORT.
+// Les anciennes valeurs (BTQ STAND/EXTRA, CHIF, Pvak) sont supprimées.
 const GAMME_COLORS = {
-  'BTQ STAND': 'bg-emerald-600',
-  'BTQ EXTRA': 'bg-violet-600',
+  'EXTRA': 'bg-violet-600',
+  'STANDARD': 'bg-emerald-600',
   'VAK': 'bg-blue-600',
-  'CHIF': 'bg-slate-500',
-  'Pvak': 'bg-cyan-600',
+  'EXPORT': 'bg-amber-600',
 };
 
 export default function SortieCartons() {

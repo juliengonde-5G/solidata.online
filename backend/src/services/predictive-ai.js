@@ -16,7 +16,9 @@ function getClient() {
   return client;
 }
 
-const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
+// Modèle par défaut à jour (claude-sonnet-4-20250514 était déprécié → 404).
+// Surchargeable sans redéploiement via la variable d'env CLAUDE_MODEL.
+const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
 
 // ──────────────────────────────────────────────────────────────
 // Collecte des données pour analyse
@@ -332,9 +334,10 @@ async function predictionEnrichie(cavId, targetDate) {
   const anthropic = getClient();
   if (!anthropic) throw new Error('ANTHROPIC_API_KEY non configurée');
 
-  // Historique spécifique à ce CAV
+  // Historique spécifique à ce CAV — on coalesce la vérité terrain capteur
+  // (observed_fill_rate, 0-120 %) avec la saisie chauffeur (observed_fill_level ×20).
   const cavHistory = await pool.query(`
-    SELECT clf.predicted_fill_rate, clf.observed_fill_level,
+    SELECT clf.predicted_fill_rate, clf.observed_fill_level, clf.observed_fill_rate,
            clf.created_at::date as date,
            EXTRACT(DOW FROM clf.created_at) as dow
     FROM collection_learning_feedback clf
@@ -346,11 +349,23 @@ async function predictionEnrichie(cavId, targetDate) {
 
   const cavInfo = await pool.query(`
     SELECT id, name, commune, nb_containers, address, latitude, longitude,
-           estimated_fill_rate, last_collected_at
+           sensor_last_reading, sensor_last_reading_at, last_collected_at
     FROM cav WHERE id = $1
   `, [cavId]);
 
   if (!cavInfo.rows[0]) throw new Error('CAV non trouvé');
+
+  // Donnée réelle de niveau (résidu 7) — on n'injecte plus `estimated_fill_rate`
+  // (colonne jamais alimentée, figée à 0, qui trompait le LLM). On fournit à la
+  // place la dernière lecture capteur ET la dernière prédiction heuristique datée.
+  const lastPredRes = await pool.query(`
+    SELECT predicted_fill_rate, predicted_date, model_version
+    FROM ml_fill_predictions
+    WHERE cav_id = $1 AND predicted_fill_rate IS NOT NULL
+    ORDER BY predicted_date DESC, created_at DESC
+    LIMIT 1
+  `, [cavId]).catch(() => ({ rows: [] }));
+  const lastPrediction = lastPredRes.rows[0] || null;
 
   // Météo prévue
   const weather = await pool.query(`
@@ -364,12 +379,28 @@ async function predictionEnrichie(cavId, targetDate) {
     WHERE $1 BETWEEN date_debut AND date_fin AND is_active = true
   `, [targetDate]);
 
+  const observePct = (r) => {
+    if (r.observed_fill_rate != null) return Math.round(parseFloat(r.observed_fill_rate));
+    if (r.observed_fill_level != null) return parseInt(r.observed_fill_level, 10) * 20;
+    return null;
+  };
+  const cav = cavInfo.rows[0];
   const context = {
-    cav: cavInfo.rows[0],
+    cav,
+    dernier_niveau_capteur_percent: cav.sensor_last_reading != null
+      ? Math.round(parseFloat(cav.sensor_last_reading)) : null,
+    dernier_niveau_capteur_at: cav.sensor_last_reading_at || null,
+    derniere_prediction: lastPrediction
+      ? {
+          percent: Math.round(parseFloat(lastPrediction.predicted_fill_rate)),
+          date: lastPrediction.predicted_date,
+          source: lastPrediction.model_version,
+        }
+      : null,
     historique: cavHistory.rows.map(r => ({
       date: r.date,
       predit: Math.round(parseFloat(r.predicted_fill_rate)),
-      observe: parseInt(r.observed_fill_level) * 20,
+      observe: observePct(r),
       jour: parseInt(r.dow),
     })),
     date_cible: targetDate,

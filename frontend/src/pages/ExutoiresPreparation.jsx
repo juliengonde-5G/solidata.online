@@ -34,6 +34,49 @@ const EMPTY_FORM = {
   notes_preparation: '',
 };
 
+// Réconciliation triple pesée (item 31b) — confronte cartons scannés / pesée
+// interne / pesée client, avec badge de niveau (seuils 2 % / 5 % du module).
+const NIVEAU_STYLE = {
+  conforme: 'bg-green-100 text-green-700',
+  acceptable: 'bg-amber-100 text-amber-700',
+  litige: 'bg-red-100 text-red-700',
+};
+const NIVEAU_LABEL = { conforme: 'Conforme', acceptable: 'Écart acceptable', litige: 'Litige' };
+
+function PeseeReconciliation({ controle }) {
+  const r = controle?.reconciliation;
+  if (!r) return null;
+  const fmt = (t) => (t == null ? '—' : `${Number(t).toFixed(3)} t`);
+  const pair = (label, p) => p ? (
+    <div key={label} className="flex items-center justify-between text-xs">
+      <span className="text-slate-500">{label}</span>
+      <span className="font-medium text-slate-700">{p.ecart_t > 0 ? '+' : ''}{p.ecart_t} t · {p.ecart_pct}%</span>
+    </div>
+  ) : null;
+  return (
+    <div className="border rounded-lg p-3 bg-slate-50 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Réconciliation pesées</span>
+        {r.niveau_global && (
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${NIVEAU_STYLE[r.niveau_global] || 'bg-slate-100 text-slate-600'}`}>
+            {NIVEAU_LABEL[r.niveau_global] || r.niveau_global}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div><p className="text-[10px] text-slate-400">Cartons</p><p className="text-sm font-bold text-slate-700">{fmt(r.pesee_cartons_t)}</p></div>
+        <div><p className="text-[10px] text-slate-400">Interne</p><p className="text-sm font-bold text-slate-700">{fmt(r.pesee_interne_t)}</p></div>
+        <div><p className="text-[10px] text-slate-400">Client</p><p className="text-sm font-bold text-slate-700">{fmt(r.pesee_client_t)}</p></div>
+      </div>
+      <div className="space-y-0.5">
+        {pair('Interne / client', r.interne_client)}
+        {pair('Cartons / client', r.cartons_client)}
+        {pair('Cartons / interne', r.cartons_interne)}
+      </div>
+    </div>
+  );
+}
+
 export default function ExutoiresPreparation() {
   const { confirm, ConfirmDialogElement } = useConfirm();
   const [preparations, setPreparations] = useState([]);
@@ -43,6 +86,7 @@ export default function ExutoiresPreparation() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [commandes, setCommandes] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [controles, setControles] = useState({}); // commande_id → contrôle pesée (item 31b)
   const [conflitWarning, setConflitWarning] = useState('');
 
   // Filters
@@ -63,14 +107,18 @@ export default function ExutoiresPreparation() {
 
   const loadData = async () => {
     try {
-      const [prepRes, cmdRes, empRes] = await Promise.all([
+      const [prepRes, cmdRes, empRes, ctrlRes] = await Promise.all([
         api.get('/preparations'),
         api.get('/commandes-exutoires', { params: { statut: 'confirmee' } }),
         api.get('/employees'),
+        api.get('/controles-pesee').catch(() => ({ data: [] })),
       ]);
       setPreparations(prepRes.data);
       setCommandes(cmdRes.data);
       setEmployees(empRes.data);
+      const map = {};
+      for (const c of (ctrlRes.data || [])) map[c.commande_id] = c;
+      setControles(map);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -343,6 +391,9 @@ export default function ExutoiresPreparation() {
                     <span className="font-semibold text-slate-800">{prep.pesee_interne} t</span>
                   </div>
                 )}
+
+                {/* Réconciliation triple pesée (item 31b) — si un contrôle pesée existe */}
+                {controles[prep.commande_id] && <PeseeReconciliation controle={controles[prep.commande_id]} />}
 
                 {/* Timeline */}
                 <div className="border-t pt-3 mt-1">

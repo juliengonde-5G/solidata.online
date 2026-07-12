@@ -22,6 +22,67 @@ const upload = multer({ storage, fileFilter: (req, file, cb) => {
   cb(null, file.mimetype === 'application/pdf');
 }, limits: { fileSize: 10 * 1024 * 1024 } });
 
+// ══════════════════════════════════════════
+// RÉCONCILIATION TRIPLE PESÉE (item 31b)
+// Confronte les 3 masses d'une expédition qui n'étaient jamais rapprochées :
+//   . cartons scannés (Σ produits_finis sortis vers la commande VAK)
+//   . pesée interne (preparations_expedition, ressaisie)
+//   . pesée client (controles_pesee, ressaisie depuis le ticket)
+// Seuils réutilisés du module (POST /) : conforme ≤ 2 %, acceptable ≤ 5 %, litige > 5 %.
+// Pas de blocage — pure visibilité (badge d'écart côté écran).
+// ══════════════════════════════════════════
+const PESEE_SEUIL_CONFORME = 2;
+const PESEE_SEUIL_ACCEPTABLE = 5;
+
+function niveauEcart(pct) {
+  const a = Math.abs(pct);
+  if (a <= PESEE_SEUIL_CONFORME) return 'conforme';
+  if (a <= PESEE_SEUIL_ACCEPTABLE) return 'acceptable';
+  return 'litige';
+}
+
+// Toutes les masses en tonnes. Une paire n'est calculée que si les deux masses
+// existent (sinon null). Retourne aussi le niveau global (pire paire disponible).
+function computePeseeReconciliation({ pesee_interne, pesee_client, pesee_cartons }) {
+  const toNum = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = parseFloat(v);
+    return isNaN(n) ? null : n;
+  };
+  const interne = toNum(pesee_interne);
+  const client = toNum(pesee_client);
+  const cartons = toNum(pesee_cartons);
+
+  const pair = (a, b) => {
+    if (a === null || b === null) return null;
+    const ecart_t = Math.round((a - b) * 1000) / 1000;
+    const base = Math.abs(b) > 0 ? Math.abs(b) : (Math.abs(a) > 0 ? Math.abs(a) : 0);
+    const ecart_pct = base > 0 ? Math.round((Math.abs(ecart_t) / base) * 10000) / 100 : 0;
+    return { ecart_t, ecart_kg: Math.round(ecart_t * 1000), ecart_pct, niveau: niveauEcart(ecart_pct) };
+  };
+
+  const interne_client = pair(interne, client);
+  const cartons_interne = pair(cartons, interne);
+  const cartons_client = pair(cartons, client);
+
+  const ordre = { conforme: 0, acceptable: 1, litige: 2 };
+  const niveaux = [interne_client, cartons_interne, cartons_client].filter(Boolean).map((p) => p.niveau);
+  const niveau_global = niveaux.length
+    ? niveaux.reduce((w, n) => (ordre[n] > ordre[w] ? n : w), 'conforme')
+    : null;
+
+  return {
+    pesee_interne_t: interne,
+    pesee_client_t: client,
+    pesee_cartons_t: cartons,
+    interne_client,
+    cartons_interne,
+    cartons_client,
+    niveau_global,
+    alerte: niveau_global === 'litige' || niveau_global === 'acceptable',
+  };
+}
+
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
 // GET /api/controles-pesee — List all controles
@@ -29,13 +90,22 @@ router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT cp.*, cp.statut_controle as statut, cp.ecart_pesee as ecart, cp.ecart_pourcentage as ecart_pct,
-              c.reference as commande_reference, c.type_produit, cl.raison_sociale as client_nom
+              c.reference as commande_reference, c.type_produit, cl.raison_sociale as client_nom,
+              COALESCE((SELECT SUM(pf.poids_kg) FROM produits_finis pf
+                        WHERE pf.sortie_commande_type = 'vak' AND pf.sortie_commande_id = cp.commande_id), 0) AS pesee_cartons_kg
        FROM controles_pesee cp
        JOIN commandes_exutoires c ON cp.commande_id = c.id
        JOIN clients_exutoires cl ON c.client_id = cl.id
        ORDER BY cp.created_at DESC`
     );
-    res.json(result.rows);
+    res.json(result.rows.map((r) => ({
+      ...r,
+      reconciliation: computePeseeReconciliation({
+        pesee_interne: r.pesee_interne,
+        pesee_client: r.pesee_client,
+        pesee_cartons: Number(r.pesee_cartons_kg || 0) > 0 ? Number(r.pesee_cartons_kg) / 1000 : null,
+      }),
+    })));
   } catch (err) {
     console.error('[CONTROLES-PESEE] Erreur liste :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -175,7 +245,9 @@ router.patch('/:id/valider', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT cp.*, c.reference, c.type_produit, cl.raison_sociale
+      `SELECT cp.*, c.reference, c.type_produit, cl.raison_sociale,
+              COALESCE((SELECT SUM(pf.poids_kg) FROM produits_finis pf
+                        WHERE pf.sortie_commande_type = 'vak' AND pf.sortie_commande_id = cp.commande_id), 0) AS pesee_cartons_kg
        FROM controles_pesee cp
        JOIN commandes_exutoires c ON cp.commande_id = c.id
        JOIN clients_exutoires cl ON c.client_id = cl.id
@@ -187,7 +259,15 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Controle non trouve' });
     }
 
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    res.json({
+      ...row,
+      reconciliation: computePeseeReconciliation({
+        pesee_interne: row.pesee_interne,
+        pesee_client: row.pesee_client,
+        pesee_cartons: Number(row.pesee_cartons_kg || 0) > 0 ? Number(row.pesee_cartons_kg) / 1000 : null,
+      }),
+    });
   } catch (err) {
     console.error('[CONTROLES-PESEE] Erreur detail :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -195,3 +275,5 @@ router.get('/:id', async (req, res) => {
 });
 
 module.exports = router;
+// Helper pur exposé pour les tests unitaires (item 31b)
+module.exports.computePeseeReconciliation = computePeseeReconciliation;

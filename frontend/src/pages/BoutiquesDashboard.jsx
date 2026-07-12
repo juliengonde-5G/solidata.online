@@ -324,7 +324,7 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
         ) : (
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
-              <tr><th className="text-left py-2">Rayon</th><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA TTC</th></tr>
+              <tr><th className="text-left py-2">Rayon</th><th className="text-left py-2">Segment</th><th className="text-right py-2">Articles</th><th className="text-right py-2">CA HT</th></tr>
             </thead>
             <tbody>
               {rayons.map((r, i) => (
@@ -332,7 +332,7 @@ function DayView({ date, setDate, ventes, meteo, rayons, tickets, kpis, evolutio
                   <td className="py-2 font-medium">{r.rayon}</td>
                   <td className="py-2 text-xs"><span className="px-2 py-0.5 rounded" style={{ backgroundColor: SEGMENT_COLORS[r.segment] + '33', color: SEGMENT_COLORS[r.segment] }}>{SEGMENT_LABELS[r.segment]}</span></td>
                   <td className="py-2 text-right">{r.nb_articles}</td>
-                  <td className="py-2 text-right font-medium">{Number(r.ca_ttc).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
+                  <td className="py-2 text-right font-medium">{Number(r.ca_ht || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</td>
                 </tr>
               ))}
             </tbody>

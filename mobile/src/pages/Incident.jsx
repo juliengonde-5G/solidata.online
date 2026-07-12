@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { vibrateTap, vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
@@ -7,7 +7,7 @@ import StepConfirmScreen from '../components/StepConfirmScreen';
 import {
   addPendingIncident, updatePendingIncident, deleteItem, newClientId, STORES,
 } from '../services/db';
-import { sendIncident, getPendingCount } from '../services/sync';
+import { sendIncident, sendIncidentWithPhoto, getPendingCount } from '../services/sync';
 
 const INCIDENT_TYPES = [
   { value: 'cav_problem',       label: 'CAV dégradée',      sub: 'cassée, tag, dépôt sauvage', icon: '🗑' },
@@ -54,10 +54,31 @@ export default function Incident() {
   const [freeOpen, setFreeOpen] = useState(false);
   const [savingDetail, setSavingDetail] = useState(false);
   const [error, setError] = useState('');
+  // Photo d'incident (item 46b) : jointe en multipart quand l'appareil est en
+  // ligne. Hors ligne, l'incident part en JSON via la file et la photo est
+  // abandonnée avec un message clair (pas de blob dans la file de sync).
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [photoInfo, setPhotoInfo] = useState(null); // message d'état de la photo
+  const photoInputRef = useRef(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const vehicleId = localStorage.getItem('selected_vehicle_id');
   const cavId = localStorage.getItem('selected_cav_id');
+
+  const onPhotoChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (photoPreview) { try { URL.revokeObjectURL(photoPreview); } catch { /* noop */ } }
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+  const clearPhoto = () => {
+    if (photoPreview) { try { URL.revokeObjectURL(photoPreview); } catch { /* noop */ } }
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
 
   const backToMap = () => navigate('/tour-map');
 
@@ -89,10 +110,16 @@ export default function Incident() {
     vibrateSuccess();
     setPhase('confirm');
 
+    const hasPhoto = !!photoFile;
     // Tentative d'envoi immédiat si online (non bloquante pour l'UI).
     if (navigator.onLine) {
       try {
-        await sendIncident(record);
+        if (hasPhoto) {
+          await sendIncidentWithPhoto(record, photoFile);
+          setPhotoInfo('Photo jointe');
+        } else {
+          await sendIncident(record);
+        }
         if (localId) {
           try { await deleteItem(STORES.pendingIncidents, localId); } catch {}
         }
@@ -106,11 +133,16 @@ export default function Incident() {
           }
           setSendStatus('retry');
         } else {
+          // 5xx / réseau : la file JSON (sans photo) sera rejouée plus tard.
+          if (hasPhoto) setPhotoInfo('Photo non envoyée (réseau) — incident enregistré');
           setSendStatus('pending');
         }
       } finally {
         await getPendingCount();
       }
+    } else if (hasPhoto) {
+      // Hors ligne : l'incident part en file (JSON), la photo n'est pas jointe.
+      setPhotoInfo('Photo non jointe hors réseau — incident enregistré');
     }
   };
 
@@ -179,7 +211,10 @@ export default function Incident() {
         title="Incident signalé"
         cavName={type ? TYPE_LABELS[type.value] : null}
         status={sendStatus}
-        summaryLines={[{ label: 'Type', value: TYPE_LABELS[type?.value] || '—' }]}
+        summaryLines={[
+          { label: 'Type', value: TYPE_LABELS[type?.value] || '—' },
+          ...(photoInfo ? [{ label: 'Photo', value: photoInfo }] : []),
+        ]}
         primaryLabel="Terminer"
         onPrimary={async () => { await cleanupIfSent(); backToMap(); }}
         secondaryLabel="Ajouter un détail"
@@ -320,6 +355,40 @@ export default function Incident() {
         <p className="text-sm text-gray-600 leading-snug">
           Un seul tap suffit. Les détails sont optionnels et pourront être ajoutés juste après.
         </p>
+
+        {/* Photo (optionnelle) — jointe si réseau, sinon incident enregistré sans photo */}
+        <div>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={onPhotoChange}
+            className="hidden"
+            aria-label="Prendre une photo de l'incident"
+          />
+          {!photoPreview ? (
+            <button
+              type="button"
+              onClick={() => photoInputRef.current && photoInputRef.current.click()}
+              className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+              style={{ minHeight: 56, padding: '12px 14px', borderRadius: 14, border: '2px solid #E2E8F0', color: '#334155' }}
+            >
+              <span className="text-xl" aria-hidden="true">📷</span>
+              <span className="flex-1 font-bold text-[15px]">Ajouter une photo</span>
+              <span className="text-xs text-gray-400">optionnel</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-3 bg-white p-2" style={{ borderRadius: 14, border: '2px solid #BBF7D0' }}>
+              <img src={photoPreview} alt="Aperçu incident" className="rounded-lg object-cover" style={{ width: 56, height: 56 }} />
+              <span className="flex-1 text-sm font-semibold text-green-800">Photo prête à envoyer</span>
+              <button type="button" onClick={clearPhoto} className="text-sm text-gray-500 underline px-2 py-1">Retirer</button>
+            </div>
+          )}
+          {!navigator.onLine && photoPreview && (
+            <p className="mt-1 text-xs text-amber-600 font-medium">Hors réseau : la photo ne sera pas jointe, l'incident sera bien enregistré.</p>
+          )}
+        </div>
 
         {/* Type grid 2x3 */}
         <div>

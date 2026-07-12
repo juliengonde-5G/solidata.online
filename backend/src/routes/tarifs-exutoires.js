@@ -7,8 +7,16 @@ const { validate } = require('../middleware/validate');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
-// Aligné sur le CHECK de commandes_exutoires (refonte gammes P1) ; les types
-// effilo_* historiques restent acceptés pour la lecture des anciens tarifs.
+// Item 38a — Nomenclature UNIQUE des types produit tarifables.
+// Source de vérité côté backend : utilisée à la fois par le validateur
+// express-validator (isIn), la double-vérification manuelle POST/PUT, et
+// alignée sur le CHECK SQL de `tarifs_exutoires` (init-db.js, migration 38a).
+// Les 8 premiers types sont la nomenclature active (identique au CHECK de
+// commandes_exutoires) ; effilo_blanc/effilo_couleur sont conservés pour la
+// LECTURE et l'ÉDITION des anciens tarifs (pas de suppression), même si le
+// formulaire ne les propose plus à la création.
+// NB : le frontend (ExutoiresTarifs.jsx) maintient sa propre copie de cette
+// liste (build séparé) — garder les deux alignées.
 const TYPES_PRODUIT_VALIDES = ['original', 'csr', 'essuyage', 'tricot', 'merinos', 'jean', 'coton_blanc', 'coton_couleur', 'effilo_blanc', 'effilo_couleur'];
 
 // GET /api/tarifs-exutoires/prix — Résolution de prix
@@ -77,7 +85,7 @@ router.get('/', async (req, res) => {
 
 // POST /api/tarifs-exutoires — Créer un tarif
 router.post('/', [
-  body('type_produit').isIn(['original', 'csr', 'effilo_blanc', 'effilo_couleur', 'jean', 'coton_blanc', 'coton_couleur']).withMessage('Type de produit invalide'),
+  body('type_produit').isIn(TYPES_PRODUIT_VALIDES).withMessage('Type de produit invalide'),
   body('prix_reference_tonne').isFloat().withMessage('Prix par tonne requis (valeur numérique)'),
   body('date_debut').notEmpty().withMessage('Date de début requise'),
 ], validate, async (req, res) => {
@@ -149,3 +157,5 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+// Nomenclature exposée pour les tests unitaires et l'alignement front/back (item 38a).
+module.exports.TYPES_PRODUIT_VALIDES = TYPES_PRODUIT_VALIDES;

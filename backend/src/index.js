@@ -179,6 +179,7 @@ app.use('/api/prescripteurs', require('./routes/prescripteurs'));
 app.use('/api/cav', require('./routes/cav'));
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/tours', require('./routes/tours'));
+app.use('/api/incidents', require('./routes/incidents'));
 app.use('/api/association-points', require('./routes/association-points'));
 // Lot 4 : Tri + Stock + Production + Facturation + Reporting + Refashion
 app.use('/api/stock', require('./routes/stock'));

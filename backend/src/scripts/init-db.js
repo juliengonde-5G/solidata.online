@@ -1019,9 +1019,17 @@ async function initDatabase() {
         trained_at TIMESTAMP DEFAULT NOW(),
         training_samples INTEGER,
         is_active BOOLEAN DEFAULT true,
-        model_path VARCHAR(500),
+        model_path TEXT,
         UNIQUE(model_name, version)
       );
+    `);
+    // Migration idempotente : le modèle sérialisé (JSON complet) dépasse 500 car.
+    // → passer model_path en TEXT sur les bases existantes (VARCHAR(500) faisait
+    // échouer POST /api/ml/train à l'insertion). No-op si déjà TEXT.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE ml_model_metadata ALTER COLUMN model_path TYPE TEXT;
+      EXCEPTION WHEN others THEN NULL; END $$;
     `);
     console.log('[INIT-DB] Module IA (ML Prédictif) ✓');
 
@@ -1166,10 +1174,18 @@ async function initDatabase() {
         cav_id INTEGER REFERENCES cav(id) ON DELETE CASCADE,
         predicted_fill_rate DOUBLE PRECISION NOT NULL,
         observed_fill_level INTEGER CHECK (observed_fill_level BETWEEN 0 AND 5),
+        observed_fill_rate DOUBLE PRECISION,
+        source VARCHAR(20) DEFAULT 'manual',
         predicted_weight_kg DOUBLE PRECISION,
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    // Colonnes canoniques (item 51) : `observed_fill_rate` (vérité terrain capteur
+    // 0-120 %) et `source` (manual/sensor) — historiquement ajoutées seulement par
+    // migrate-cav-sensors.js. On les garantit ici aussi (idempotent) pour que la
+    // boucle de feedback capteur ait toujours ses colonnes.
+    await client.query(`DO $$ BEGIN ALTER TABLE collection_learning_feedback ADD COLUMN observed_fill_rate DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
+    await client.query(`DO $$ BEGIN ALTER TABLE collection_learning_feedback ADD COLUMN source VARCHAR(20) DEFAULT 'manual'; EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
     console.log('[INIT-DB] Tables contexte & apprentissage collecte ✓');
 
     // ══════════════════════════════════════════
@@ -1674,6 +1690,24 @@ async function initDatabase() {
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
 
+    // Vague 1 (item 45) — checklist véhicule : persister les remarques/anomalies
+    // saisies par le chauffeur au départ. Le champ `notes` était envoyé par le
+    // mobile (Checklist.jsx) mais jamais déstructuré ni stocké → perdu.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE vehicle_checklists ADD COLUMN notes TEXT;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // Vague 1 (item 44) — cycle de vie des incidents : commentaire de résolution
+    // (obligatoire pour les statuts resolved/closed via PATCH /api/incidents/:id).
+    // Les colonnes status/resolved_at/resolved_by existent déjà (schéma incidents).
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE incidents ADD COLUMN resolution_notes TEXT;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
     // V2.3 — 5 vues SQL Dashboard 2026 (P1-C : QHSE permanent)
     await client.query(`
       CREATE OR REPLACE VIEW vw_tonnage_annuel_tournee AS
@@ -1691,28 +1725,72 @@ async function initDatabase() {
     `);
 
     await client.query(`
-      -- NOTE audit 07/2026 : cette vue (et vw_coherence_tri_filiere plus bas)
-      -- s'appuient sur la table colisages, une couche de conditionnement aujourd'hui
-      -- NON adoptée (la sortie carton réelle passe par produits_finis / scan
-      -- douchette). Elles restent donc vides. Les rendre fiables = soit adopter
-      -- le workflow de colisage, soit les repointer sur produits_finis avec un
-      -- mapping vers famille_refashion — décision métier (voir chantier
-      -- traçabilité, rapport 04 §1.5 et 10-chantier-tracabilite-carton-balle.md).
+      -- REPOINTAGE audit 2026-07-12 (item 26, vague 1 — arbitrage A1).
+      -- AVANT : cette vue (et vw_coherence_tri_filiere plus bas) s'appuyaient sur
+      -- la table \`colisages\`, une couche de conditionnement JAMAIS adoptée en
+      -- exploitation (0 UI de création de colisage — vérifié) → vues vides →
+      -- audit Refashion impossible (persona auditeur 2/10, vue « sortants par
+      -- famille » sans aucune source).
+      -- APRÈS : on les repointe sur \`produits_finis\`, la table RÉELLEMENT
+      -- alimentée (étiquetage douchette / balance / saisie manuelle — plusieurs
+      -- pages front actives). Décision A1 : PAS d'UI colisage en vague 1, on
+      -- repointe les preuves d'audit sur les données réelles. Re-basculable sur
+      -- \`colisages\` si le workflow de conditionnement est un jour adopté.
+      --
+      -- Mapping produit → catégorie → famille_refashion :
+      --   produits_finis.categorie_eco_org (Textiles / Chaussures / Maroquinerie /
+      --   Linge / Chiffons…) est mappé sur les 5 familles Refashion via un CASE
+      --   documenté. Un produit non mappable sort en famille 'non_classe' (jamais
+      --   perdu). LIMITE CONNUE : produits_finis capture surtout la réutilisation
+      --   et les chiffons (recyclage) ; les tonnages CSR / effilochage / refus de
+      --   tri partent en VRAC et ne deviennent pas des produits finis catalogués —
+      --   ils n'apparaissent donc pas ici (à documenter côté écran).
+      -- Un « sortant » = un produit fini expédié vers un exutoire (date_sortie
+      -- renseignée).
+      -- DROP préalable : la nouvelle définition renomme une colonne
+      -- (nb_colisages → nb_produits) et change des types (section_dpav) —
+      -- CREATE OR REPLACE seul échouerait sur une base existante. Aucune autre
+      -- vue ne dépend de celle-ci (consommée uniquement au runtime par
+      -- /refashion/exports), donc pas de CASCADE.
+      DROP VIEW IF EXISTS vw_dpav_sortants;
       CREATE OR REPLACE VIEW vw_dpav_sortants AS
-      SELECT EXTRACT(YEAR FROM c.scelle_at)::int AS annee,
-             EXTRACT(QUARTER FROM c.scelle_at)::int AS trimestre,
-             cs.famille AS section_dpav,
-             cs.famille_refashion,
-             cs.nom AS categorie,
-             e.nom AS exutoire,
-             (SUM(c.poids_kg) / 1000.0)::numeric(10,3) AS tonnage_t,
-             COUNT(*)::int AS nb_colisages
-      FROM colisages c
-      JOIN categories_sortantes cs ON c.categorie_sortante_id = cs.id
-      LEFT JOIN exutoires e ON c.exutoire_id = e.id
-      WHERE c.status IN ('scelle','expedie','livre') AND c.scelle_at IS NOT NULL
-      GROUP BY annee, trimestre, cs.famille, cs.famille_refashion, cs.nom, e.nom
-      ORDER BY annee, trimestre, cs.famille, exutoire;
+      WITH pf_classe AS (
+        SELECT
+          EXTRACT(YEAR FROM pf.date_sortie)::int    AS annee,
+          EXTRACT(QUARTER FROM pf.date_sortie)::int AS trimestre,
+          COALESCE(NULLIF(pf.categorie_eco_org, ''), '(non renseigné)') AS categorie,
+          COALESCE(e.nom, '(sans exutoire)')        AS exutoire,
+          pf.poids_kg,
+          CASE
+            WHEN pf.categorie_eco_org ILIKE '%chiffon%'                 THEN 'recyclage'
+            WHEN pf.categorie_eco_org ILIKE '%csr%'                     THEN 'csr'
+            WHEN pf.categorie_eco_org ILIKE '%refus%'
+              OR pf.gamme ILIKE '%refus%'                               THEN 'elimination'
+            WHEN pf.categorie_eco_org IS NOT NULL
+             AND pf.categorie_eco_org <> ''                            THEN 'reutilisation'
+            ELSE 'non_classe'
+          END AS famille_refashion
+        FROM produits_finis pf
+        LEFT JOIN exutoires e ON pf.exutoire_id = e.id
+        WHERE pf.date_sortie IS NOT NULL
+      )
+      SELECT annee, trimestre,
+             CASE famille_refashion
+               WHEN 'reutilisation' THEN 'Réutilisation'
+               WHEN 'recyclage'     THEN 'Recyclage'
+               WHEN 'csr'           THEN 'CSR'
+               WHEN 'elimination'   THEN 'Élimination'
+               WHEN 'retour'        THEN 'Retour'
+               ELSE 'Non classé'
+             END                                     AS section_dpav,
+             famille_refashion,
+             categorie,
+             exutoire,
+             ROUND((SUM(poids_kg) / 1000.0)::numeric, 3) AS tonnage_t,
+             COUNT(*)::int                           AS nb_produits
+      FROM pf_classe
+      GROUP BY annee, trimestre, famille_refashion, categorie, exutoire
+      ORDER BY annee, trimestre, section_dpav, exutoire;
     `);
 
     await client.query(`
@@ -1770,6 +1848,18 @@ async function initDatabase() {
     `);
 
     await client.query(`
+      -- REPOINTAGE audit 2026-07-12 (item 26, vague 1 — arbitrage A1).
+      -- AVANT : le sortant reposait sur \`colisages\` (jamais alimenté) → vue vide.
+      -- APRÈS : sortant = poids des \`produits_finis\` fabriqués dans le mois
+      -- (table réellement alimentée) ; entrant inchangé (production_daily.
+      -- entree_ligne_kg). L'écart mesure la part de l'entrée tri retrouvée en
+      -- produits finis conditionnés — il reste STRUCTURELLEMENT positif tant que
+      -- les flux vrac (CSR / effilochage / refus de tri) ne transitent pas par
+      -- produits_finis. FULL OUTER JOIN pour ne perdre aucun mois (entrée seule
+      -- OU sortie seule). Re-basculable sur colisages si adopté.
+      -- DROP préalable par cohérence avec vw_dpav_sortants (change de structure
+      -- interne) ; aucune vue dépendante → pas de CASCADE.
+      DROP VIEW IF EXISTS vw_coherence_tri_filiere;
       CREATE OR REPLACE VIEW vw_coherence_tri_filiere AS
       WITH entrant AS (
         SELECT EXTRACT(YEAR FROM date)::int AS annee,
@@ -1778,22 +1868,22 @@ async function initDatabase() {
         FROM production_daily
         GROUP BY annee, mois
       ), sortant AS (
-        SELECT EXTRACT(YEAR FROM c.scelle_at)::int AS annee,
-               EXTRACT(MONTH FROM c.scelle_at)::int AS mois,
-               SUM(c.poids_kg)::int AS sortie_kg
-        FROM colisages c
-        WHERE c.status IN ('scelle','expedie','livre') AND c.scelle_at IS NOT NULL
+        SELECT EXTRACT(YEAR FROM pf.date_fabrication)::int AS annee,
+               EXTRACT(MONTH FROM pf.date_fabrication)::int AS mois,
+               SUM(pf.poids_kg)::int AS sortie_kg
+        FROM produits_finis pf
+        WHERE pf.date_fabrication IS NOT NULL
         GROUP BY annee, mois
       )
-      SELECT e.annee, e.mois,
-             e.entree_kg,
+      SELECT annee, mois,
+             COALESCE(e.entree_kg, 0) AS entree_kg,
              COALESCE(s.sortie_kg, 0) AS sortie_kg,
-             (e.entree_kg - COALESCE(s.sortie_kg, 0)) AS ecart_kg,
-             ROUND(100.0 * (e.entree_kg - COALESCE(s.sortie_kg, 0))::numeric
-                   / NULLIF(e.entree_kg, 0), 2) AS ecart_pct
+             (COALESCE(e.entree_kg, 0) - COALESCE(s.sortie_kg, 0)) AS ecart_kg,
+             ROUND(100.0 * (COALESCE(e.entree_kg, 0) - COALESCE(s.sortie_kg, 0))::numeric
+                   / NULLIF(COALESCE(e.entree_kg, 0), 0), 2) AS ecart_pct
       FROM entrant e
-      LEFT JOIN sortant s USING (annee, mois)
-      ORDER BY e.annee, e.mois;
+      FULL OUTER JOIN sortant s USING (annee, mois)
+      ORDER BY annee, mois;
     `);
 
     console.log('[INIT-DB] Migrations P1 (categories_sortantes refonte + audit-trail + 5 vues SQL) ✓');
@@ -2545,6 +2635,43 @@ async function initDatabase() {
         AND visite_medicale_due_date IS NULL
         AND visite_medicale_date IS NULL;
     `);
+
+    // ── Item 43 — Dernière visite médicale PÉRIODIQUE (distincte de la visite
+    // post-embauche portée par visite_medicale_date) → fin de la conflation
+    // à l'import (collaborator-import.applyMedicalVisit).
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE employees ADD COLUMN last_medical_visit_date DATE;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
+    // ── Item 41 — Réconciliation du CDDI dans la table de contrats normalisée.
+    // Le CHECK d'origine de employee_contracts.contract_type excluait 'CDDI',
+    // ce qui forçait la coercition CDDI→CDD à l'import (perte silencieuse de
+    // l'objet métier central du suivi d'insertion). On élargit le CHECK pour
+    // accueillir 'CDDI' (superset : aucune ligne existante ne viole la nouvelle
+    // contrainte). Idempotent (drop-then-add, comme les autres CHECK du fichier).
+    await client.query('ALTER TABLE employee_contracts DROP CONSTRAINT IF EXISTS employee_contracts_contract_type_check');
+    await client.query(`ALTER TABLE employee_contracts ADD CONSTRAINT employee_contracts_contract_type_check
+      CHECK (contract_type IN ('CDI', 'CDD', 'CDDI', 'interim', 'stage', 'apprentissage'))`);
+
+    // ── Item 40 — Recopie des compétences opérationnelles (permis B / CACES)
+    // depuis la fiche candidat liée. Ces booléens conditionnent l'affectation
+    // « chauffeur » / « cariste » du planning hebdo (planning-hebdo.js) mais
+    // n'étaient éditables que sur le candidat et jamais recopiés à la liaison.
+    // Backfill idempotent : ne remonte que false→true (ne dégrade jamais une
+    // valeur saisie côté RH).
+    await client.query(`
+      UPDATE employees e SET has_permis_b = true
+      FROM candidates c
+      WHERE e.candidate_id = c.id AND c.has_permis_b = true AND e.has_permis_b IS DISTINCT FROM true
+    `);
+    await client.query(`
+      UPDATE employees e SET has_caces = true
+      FROM candidates c
+      WHERE e.candidate_id = c.id AND c.has_caces = true AND e.has_caces IS DISTINCT FROM true
+    `);
+
     // Purge expired refresh tokens (cleanup)
     await client.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
 
@@ -3568,6 +3695,81 @@ async function initDatabase() {
     console.log('[INIT-DB] Migration balance (contenant, source) ✓');
 
     // ══════════════════════════════════════════
+    // VAGUE 1 — Lot Stock & produits finis (items 29-32)
+    //   . Poste balance (jeton kiosque) + traçabilité poste
+    //   . Régularisation d'inventaire (lien mouvement → inventaire)
+    //   . Correction auditée des mouvements (contre-écriture liée)
+    //   . Sortie carton → stock (lien mouvement → produit fini)
+    //   . Source de création des produits finis (3 voies)
+    // Placé ici car toutes les tables référencées existent déjà
+    // (stock_movements, produits_finis, inventory_batches, stock_original_movements).
+    // ══════════════════════════════════════════
+    // pgcrypto requis pour gen_random_bytes (jeton de poste) — idempotent, la
+    // création « officielle » plus loin reste sans effet (IF NOT EXISTS).
+    await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+
+    // Poste de balance : jeton d'accès au kiosque public /balance/:token
+    // (même logique que vehicles.qr_token — 1 URL = 1 poste, révocable).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS postes_balance (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(80) NOT NULL,
+        token VARCHAR(64) NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(16), 'hex'),
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    const posteBalExist = await client.query('SELECT id FROM postes_balance LIMIT 1');
+    if (posteBalExist.rows.length === 0) {
+      const seedToken = require('crypto').randomBytes(16).toString('hex');
+      await client.query(
+        `INSERT INTO postes_balance (nom, token) VALUES ('Balance principale', $1)`,
+        [seedToken]
+      );
+      // Log unique (à la création seulement) pour que l'ops récupère l'URL kiosque.
+      console.log(`[INIT-DB] Poste balance créé — URL kiosque à paramétrer une fois : /balance/${seedToken}`);
+    }
+
+    // produits_finis : source de création (etiquette / manuel / balance) + poste balance
+    await client.query(`ALTER TABLE produits_finis ADD COLUMN IF NOT EXISTS source VARCHAR(20)`);
+    await client.query(`ALTER TABLE produits_finis ADD COLUMN IF NOT EXISTS poste_balance_id INTEGER REFERENCES postes_balance(id) ON DELETE SET NULL`);
+
+    // stock_movements : updated_at (manquait — utilisé par controles-pesee),
+    // lien inventaire (régularisation) + lien produit fini (sortie carton) +
+    // contre-écriture (correction auditée, pattern comptable).
+    await client.query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+    await client.query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS inventory_batch_id INTEGER REFERENCES inventory_batches(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS produit_fini_id INTEGER REFERENCES produits_finis(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS reversed_of_id INTEGER REFERENCES stock_movements(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS reversal_movement_id INTEGER REFERENCES stock_movements(id) ON DELETE SET NULL`);
+    await client.query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS reversal_reason TEXT`);
+    await client.query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS reversed_at TIMESTAMP`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_inventory ON stock_movements(inventory_batch_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_produit_fini ON stock_movements(produit_fini_id)`);
+
+    // stock_original_movements : identité du poste balance sur les écritures kiosque
+    await client.query(`ALTER TABLE stock_original_movements ADD COLUMN IF NOT EXISTS poste_balance_id INTEGER REFERENCES postes_balance(id) ON DELETE SET NULL`);
+
+    // inventory_items : drapeau « compté » explicite (item 29). Distingue sans
+    // ambiguïté une ligne réellement saisie (compté, y compris 0) d'une ligne non
+    // comptée → seules les lignes comptées avec écart sont régularisées à la
+    // validation, jamais les non-comptées (évite d'effacer du stock à tort).
+    await client.query(`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS counted BOOLEAN DEFAULT false`);
+    // Sécurité rétro : les inventaires EN COURS d'avant cette vague avaient
+    // stock_physique_kg=0 par défaut (indistinct de « compté zéro »). Ces lignes
+    // (0 + non comptées) repassent à NULL pour s'afficher « non compté » et ne pas
+    // être régularisées. Ciblé (counted=false) → sans effet sur les 0 réellement
+    // comptés (counted=true) ni sur les rejeux de déploiement.
+    await client.query(`
+      UPDATE inventory_items ii SET stock_physique_kg = NULL, ecart_kg = NULL, ecart_percent = NULL
+      FROM inventory_batches ib
+      WHERE ii.batch_id = ib.id AND ib.status = 'en_cours'
+        AND ii.stock_physique_kg = 0 AND ii.counted = false
+    `);
+
+    console.log('[INIT-DB] Migration Vague 1 — Stock & produits finis ✓');
+
+    // ══════════════════════════════════════════
     // MODULE BOUTIQUES : performance retail 2nde main
     // ══════════════════════════════════════════
 
@@ -4295,6 +4497,31 @@ async function initDatabase() {
       console.log(`[INIT-DB] commandes_exutoires.type_produit étendu (mode ${isArray ? 'ARRAY' : 'scalaire'}) ✓`);
     } catch (e) {
       console.error('[INIT-DB] Erreur migration type_produit :', e.message);
+    }
+
+    // (a bis) Item 38a — tarifs_exutoires.type_produit : aligner le CHECK sur la
+    // nomenclature actuelle (essuyage/tricot/merinos) TOUT EN conservant les
+    // types historiques (effilo_blanc/effilo_couleur) pour la lecture et
+    // l'édition des anciens tarifs. Sans ce realignement, aucun tarif de
+    // référence ni négocié ne peut être enregistré pour les gammes actuelles.
+    // Idempotent : DROP CONSTRAINT IF EXISTS puis ADD (même nom).
+    // Table créée par migrate-exutoires.js — en prod elle existe déjà ; sur une
+    // base neuve où elle n'existe pas encore, l'ALTER échoue et est journalisé
+    // (le CHECK sera réaligné au prochain init-db, comportement identique au
+    // bloc commandes_exutoires ci-dessus).
+    try {
+      await client.query(`
+        ALTER TABLE tarifs_exutoires
+        DROP CONSTRAINT IF EXISTS tarifs_exutoires_type_produit_check
+      `);
+      await client.query(`
+        ALTER TABLE tarifs_exutoires
+        ADD CONSTRAINT tarifs_exutoires_type_produit_check
+        CHECK (type_produit IN ('original', 'csr', 'essuyage', 'tricot', 'merinos', 'jean', 'coton_blanc', 'coton_couleur', 'effilo_blanc', 'effilo_couleur'))
+      `);
+      console.log('[INIT-DB] tarifs_exutoires.type_produit aligné (essuyage/tricot/merinos + legacy effilo_*) ✓');
+    } catch (e) {
+      console.error('[INIT-DB] Erreur migration tarifs_exutoires.type_produit :', e.message);
     }
 
     // (b) Catégories sortantes — soft-delete via is_active

@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { anonymizeCandidate, anonymizeEmployee } = require('../services/anonymization');
 
 router.use(authenticate);
 
@@ -113,40 +114,18 @@ router.post('/anonymize/:type/:id', authorize('ADMIN'), [
       if (type === 'candidate') {
         const candidate = await client.query('SELECT first_name, last_name FROM candidates WHERE id = $1', [id]);
         if (candidate.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Candidat non trouvé' }); }
-
-        await client.query(
-          `UPDATE candidates SET
-           first_name = 'ANONYME', last_name = CONCAT('CANDIDAT-', id),
-           email = NULL, phone = NULL, cv_file_path = NULL, cv_raw_text = NULL,
-           comment = NULL, interviewer_name = NULL, interview_comment = NULL,
-           practical_test_comment = NULL, appointment_location = NULL,
-           updated_at = NOW()
-           WHERE id = $1`, [id]
-        );
-        await client.query('DELETE FROM candidate_skills WHERE candidate_id = $1', [id]);
-        // Supprimer les données PCM (sensibles) — sessions (cascade answers +
-        // reports liés) puis reports rattachés directement au candidat
-        await client.query('DELETE FROM pcm_sessions WHERE candidate_id = $1', [id]);
-        await client.query('DELETE FROM pcm_reports WHERE candidate_id = $1', [id]);
+        // Service mutualisé : couvre identité + verbatims + PCM/entretiens/
+        // mises en situation/documents (même périmètre que la purge auto).
+        await anonymizeCandidate(client, id);
 
       } else if (type === 'employee') {
         const employee = await client.query('SELECT first_name, last_name FROM employees WHERE id = $1', [id]);
         if (employee.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Employé non trouvé' }); }
+        // Service mutualisé : identité + santé/RQTH + naissance + titres de
+        // séjour + salaire + verbatims d'insertion (diagnostics/jalons/actions),
+        // en préservant les agrégats non nominatifs (KPI, cohortes).
+        await anonymizeEmployee(client, id);
 
-        await client.query(
-          `UPDATE employees SET
-           first_name = 'ANONYME', last_name = CONCAT('EMPLOYE-', id),
-           email = NULL, phone = NULL, photo_path = NULL,
-           skills = '{}', is_active = false,
-           updated_at = NOW()
-           WHERE id = $1`, [id]
-        );
-        // Anonymiser le user associé s'il existe
-        await client.query(
-          `UPDATE users SET first_name = 'ANONYME', last_name = CONCAT('USER-', id),
-           email = CONCAT('anonyme-', id, '@supprime.local'), is_active = false
-           WHERE id = (SELECT user_id FROM employees WHERE id = $1)`, [id]
-        );
       } else {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Type invalide' });
@@ -264,16 +243,20 @@ router.post('/purge-expired', authorize('ADMIN'), async (req, res) => {
 
     let count = 0;
     for (const c of expired.rows) {
-      await pool.query(
-        `UPDATE candidates SET
-         first_name = 'ANONYME', last_name = CONCAT('CANDIDAT-', id),
-         email = NULL, phone = NULL, cv_file_path = NULL, cv_raw_text = NULL,
-         comment = NULL, updated_at = NOW() WHERE id = $1`, [c.id]
-      );
-      await pool.query('DELETE FROM candidate_skills WHERE candidate_id = $1', [c.id]);
-      await pool.query('DELETE FROM pcm_sessions WHERE candidate_id = $1', [c.id]);
-      await pool.query('DELETE FROM pcm_reports WHERE candidate_id = $1', [c.id]);
-      count++;
+      // Une transaction par candidat : isole les échecs et couvre le MÊME
+      // périmètre que l'anonymisation manuelle (entretiens, mises en situation…).
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await anonymizeCandidate(client, c.id);
+        await client.query('COMMIT');
+        count++;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        console.error(`[RGPD] purge candidat #${c.id} :`, e.message);
+      } finally {
+        client.release();
+      }
     }
 
     await pool.query(

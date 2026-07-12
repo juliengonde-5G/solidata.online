@@ -225,10 +225,13 @@ async function processUplink(rawUplink, io) {
       [fillPercent, uplink.readingAt, uplink.battery, uplink.rssi, newStatus, cav.id]
     );
 
-    // Feedback loop : compare la DERNIÈRE PRÉDICTION RÉELLE (ml_fill_predictions) à la
-    // vérité terrain capteur. On n'utilise plus cav.estimated_fill_rate (colonne jamais
-    // alimentée, figée à 0) qui polluait les métriques d'exactitude. Sans prédiction réelle
-    // disponible pour cette date, on n'écrit rien (mieux vaut pas de donnée qu'une fausse).
+    // Feedback loop (item 51) : compare la DERNIÈRE PRÉDICTION RÉELLE
+    // (ml_fill_predictions, en %, alimentée quotidiennement par le job
+    // generateDailyPredictions) à la VÉRITÉ TERRAIN capteur `fillPercent` (0-120 %).
+    // Écriture alignée colonnes/valeurs : predicted_fill_rate ← prédiction,
+    // observed_fill_rate ← mesure capteur, source = 'sensor'. On n'utilise plus
+    // cav.estimated_fill_rate (colonne figée à 0). Sans prédiction datée disponible,
+    // on n'écrit rien (mieux vaut pas de donnée qu'une fausse) et on le LOGUE.
     // SAVEPOINT : une table/colonne absente (vieux schéma) ne doit pas avorter tout l'uplink.
     try {
       await client.query('SAVEPOINT feedback_loop');
@@ -247,13 +250,31 @@ async function processUplink(rawUplink, io) {
            VALUES ($1, $2, $3, 'sensor', NOW())`,
           [cav.id, predicted, fillPercent]
         );
+        logger.info('[SENSOR-FEEDBACK] feedback capteur enregistré', {
+          cavId: cav.id,
+          predicted: Math.round(parseFloat(predicted)),
+          observed: Math.round(fillPercent),
+          ecart: Math.round(fillPercent - parseFloat(predicted)),
+        });
+      } else {
+        // Pas de prédiction datée à comparer → boucle non refermée pour cet uplink.
+        // Attendu tant que le job quotidien de génération n'a pas tourné (résidu 8).
+        logger.info('[SENSOR-FEEDBACK] aucune prédiction datée disponible, feedback non écrit', {
+          cavId: cav.id,
+          observed: Math.round(fillPercent),
+        });
       }
       await client.query('RELEASE SAVEPOINT feedback_loop');
     } catch (err) {
       // Table ml_fill_predictions absente ou schéma feedback ancien (sans source /
-      // observed_fill_rate) : on ignore sans casser l'ingestion (lecture + alertes commitées).
+      // observed_fill_rate) : on ignore sans casser l'ingestion (lecture + alertes commitées),
+      // mais on LOGUE explicitement (plus de catch muet).
       await client.query('ROLLBACK TO SAVEPOINT feedback_loop').catch(() => {});
-      logger.debug('Feedback loop non alimentée (table/colonnes absentes ?)', { error: err.message });
+      logger.warn('[SENSOR-FEEDBACK] écriture du feedback échouée (schéma/colonnes ?)', {
+        cavId: cav.id,
+        code: err.code,
+        error: err.message,
+      });
     }
 
     // Alertes

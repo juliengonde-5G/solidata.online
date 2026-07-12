@@ -277,16 +277,27 @@ export async function syncPendingIncidents() {
  * depuis FillLevel avant d'ouvrir StepConfirmScreen).
  */
 export async function sendCollect(collect) {
+  // action='skip' : le point n'a pas pu être collecté (inaccessible, bouché,
+  // vide…) → status='skipped' + skip_reason. Sinon collecte normale.
+  const isSkip = collect.action === 'skip';
+  const body = isSkip
+    ? {
+        status: 'skipped',
+        skip_reason: collect.skipReason || 'autre',
+        notes: collect.notes || null,
+        client_id: collect.clientId || null,
+      }
+    : {
+        status: 'collected',
+        fill_level: collect.fillLevel,
+        qr_scanned: !!collect.qrScanned,
+        notes: collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''),
+        client_id: collect.clientId || null,
+      };
   const res = await authedFetch(`/api/tours/${collect.tourId}/cav/${collect.cavId}/collect-public`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      status: 'collected',
-      fill_level: collect.fillLevel,
-      qr_scanned: !!collect.qrScanned,
-      notes: collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''),
-      client_id: collect.clientId || null,
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
@@ -294,6 +305,32 @@ export async function sendCollect(collect) {
     throw err;
   }
   return res.json().catch(() => ({}));
+}
+
+/**
+ * Envoie un incident AVEC photo en multipart (uniquement quand l'appareil est
+ * en ligne — la file de sync offline reste en JSON sans photo). Le backend
+ * accepte upload.single('photo') sur /incident-public. On NE fixe PAS de
+ * Content-Type : le navigateur pose lui-même le boundary multipart.
+ */
+export async function sendIncidentWithPhoto(incident, photoFile) {
+  const fd = new FormData();
+  fd.append('type', incident.type);
+  if (incident.description) fd.append('description', incident.description);
+  if (incident.cavId != null) fd.append('cav_id', String(incident.cavId));
+  if (incident.vehicleId != null) fd.append('vehicle_id', String(incident.vehicleId));
+  if (incident.clientId) fd.append('client_id', incident.clientId);
+  fd.append('photo', photoFile);
+  const res = await authedFetch(`/api/tours/${incident.tourId}/incident-public`, {
+    method: 'POST',
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status };
+    throw err;
+  }
+  return res.json();
 }
 
 export async function syncPendingCollects() {

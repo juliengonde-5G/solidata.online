@@ -75,6 +75,9 @@ export default function Vehicles() {
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [generatedPlan, setGeneratedPlan] = useState(null);
 
+  // Checklists de départ (item 45) — consultation web des rondes chauffeur.
+  const [checklists, setChecklists] = useState([]);
+
   // useEffect loadVehicles déplacé après includeArchived (voir plus bas)
   useEffect(() => { if (activeTab === 'maintenance') loadMaintenance(); }, [activeTab]);
 
@@ -168,6 +171,13 @@ export default function Vehicles() {
     } catch (err) { console.error(err); setDocuments([]); }
   }, []);
 
+  const loadChecklists = useCallback(async (vehicleId) => {
+    try {
+      const res = await api.get(`/vehicles/${vehicleId}/checklists`);
+      setChecklists(res.data || []);
+    } catch (err) { console.error(err); setChecklists([]); }
+  }, []);
+
   const addDocument = async (e) => {
     e.preventDefault();
     if (!selectedVehicle || !docFile) return;
@@ -201,6 +211,7 @@ export default function Vehicles() {
     loadSchedule(v.id);
     loadEvents(v.id);
     loadDocuments(v.id);
+    loadChecklists(v.id);
     setActiveTab('detail');
   };
 
@@ -428,6 +439,41 @@ export default function Vehicles() {
               registration={selectedVehicle.registration}
               name={selectedVehicle.name}
             />
+
+            {/* Checklists de départ (item 45) — rondes de sécurité chauffeur */}
+            <div className="card-modern p-5">
+              <h3 className="font-bold mb-4">Checklists de départ</h3>
+              {checklists.length === 0 ? (
+                <p className="text-slate-400 text-sm">Aucune checklist enregistrée pour ce véhicule.</p>
+              ) : (
+                <div className="space-y-2">
+                  {checklists.map(cl => (
+                    <div key={cl.id} className={`p-3 rounded-lg border ${cl.notes ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${cl.exterior_ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {cl.exterior_ok ? 'Extérieur OK' : 'Extérieur KO'}
+                          </span>
+                          <span className="text-slate-500">Carburant : <b>{cl.fuel_level || '—'}</b></span>
+                          {cl.km_start != null && <span className="text-slate-500">{Number(cl.km_start).toLocaleString('fr-FR')} km</span>}
+                        </div>
+                        <div className="text-xs text-slate-400 text-right flex-shrink-0">
+                          <div>{cl.created_at ? new Date(cl.created_at).toLocaleDateString('fr-FR') : (cl.tour_date ? new Date(cl.tour_date).toLocaleDateString('fr-FR') : '—')}</div>
+                          {cl.employee_name && cl.employee_name.trim() && <div>{cl.employee_name}</div>}
+                          {cl.tour_id && <div>Tournée #{cl.tour_id}</div>}
+                        </div>
+                      </div>
+                      {cl.notes && (
+                        <div className="mt-2 flex items-start gap-2 text-sm text-amber-800">
+                          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" strokeWidth={1.8} />
+                          <span><span className="font-semibold">Anomalie signalée :</span> {cl.notes}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Grille d'entretien constructeur */}
             <div className="card-modern p-5">

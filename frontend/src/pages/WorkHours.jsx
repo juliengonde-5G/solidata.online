@@ -106,6 +106,9 @@ export default function WorkHours() {
             <SummaryCard label="Jours travaillés" value={summary.days_worked || 0} color="text-blue-600" />
             <SummaryCard label="Heures sup." value={`${summary.overtime_hours || 0}h`} color="text-orange-600" />
             <SummaryCard label="Absences" value={`${summary.absence_days || 0}j`} color="text-red-600" />
+            <SummaryCard label="Maladie" value={`${summary.sick_days || 0}j`} color="text-amber-600" />
+            <SummaryCard label="Congés" value={`${summary.holiday_days || 0}j`} color="text-teal-600" />
+            <SummaryCard label="Formation" value={`${summary.training_days || 0}j`} color="text-purple-600" />
           </div>
         )}
 

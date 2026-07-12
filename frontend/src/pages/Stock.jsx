@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Warehouse, Plus, ArrowDownUp } from 'lucide-react';
+import { Warehouse, Plus, ArrowDownUp, XCircle, RotateCcw } from 'lucide-react';
 import Layout from '../components/Layout';
 import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, ErrorState } from '../components';
 import useAsyncData from '../hooks/useAsyncData';
@@ -11,6 +11,11 @@ export default function Stock() {
   const [inventories, setInventories] = useState([]);
   const [selectedInv, setSelectedInv] = useState(null);
   const [invDetail, setInvDetail] = useState(null);
+  const [actionError, setActionError] = useState(null);
+  const [invMessage, setInvMessage] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null); // mouvement à annuler
+  const [cancelMotif, setCancelMotif] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const [form, setForm] = useState({
     categorie_sortante_id: '', type: 'entree', quantity_kg: '', source: '', notes: '',
   });
@@ -41,12 +46,13 @@ export default function Stock() {
       const res = await api.get('/stock/inventories');
       setInventories(res.data);
     } catch (err) {
-      console.error('[STOCK] inventories:', err);
+      setActionError(err.response?.data?.error || 'Impossible de charger les inventaires.');
     }
   };
 
   const createMovement = async (e) => {
     e.preventDefault();
+    setActionError(null);
     try {
       await api.post('/stock', {
         type: form.type,
@@ -57,28 +63,56 @@ export default function Stock() {
         notes: form.notes || null,
       });
       setShowForm(false);
+      setForm({ categorie_sortante_id: '', type: 'entree', quantity_kg: '', source: '', notes: '' });
       reload();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      setActionError(err.response?.data?.error || 'Erreur lors de l\'enregistrement du mouvement.');
+    }
+  };
+
+  const submitCancel = async () => {
+    if (!cancelTarget) return;
+    if (!cancelMotif.trim()) { setActionError('Un motif d\'annulation est obligatoire.'); return; }
+    setCancelling(true);
+    setActionError(null);
+    try {
+      await api.post(`/stock/movements/${cancelTarget.id}/cancel`, { motif: cancelMotif.trim() });
+      setCancelTarget(null);
+      setCancelMotif('');
+      reload();
+    } catch (err) {
+      setActionError(err.response?.data?.error || 'Erreur lors de l\'annulation du mouvement.');
+    } finally {
+      setCancelling(false);
+    }
   };
 
   const createInventory = async (type) => {
+    setActionError(null);
     try {
       const res = await api.post('/stock/inventories', { type });
       loadInventories();
       openInventory(res.data.id);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      setActionError(err.response?.data?.error || 'Erreur lors de la création de l\'inventaire.');
+    }
   };
 
   const openInventory = async (id) => {
+    setActionError(null);
+    setInvMessage(null);
     try {
       const res = await api.get(`/stock/inventories/${id}`);
       setSelectedInv(id);
       setInvDetail(res.data);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      setActionError(err.response?.data?.error || 'Impossible d\'ouvrir l\'inventaire.');
+    }
   };
 
   const saveInventoryItems = async () => {
     if (!invDetail) return;
+    setActionError(null);
     try {
       await api.put(`/stock/inventories/${selectedInv}/items`, {
         items: invDetail.items.map(it => ({
@@ -89,15 +123,26 @@ export default function Stock() {
       });
       openInventory(selectedInv);
       loadInventories();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      setActionError(err.response?.data?.error || 'Erreur lors de l\'enregistrement des saisies.');
+    }
   };
 
   const validateInventory = async () => {
+    setActionError(null);
+    setInvMessage(null);
     try {
-      await api.post(`/stock/inventories/${selectedInv}/validate`);
+      const res = await api.post(`/stock/inventories/${selectedInv}/validate`);
+      const nb = (res.data?.regularisations || []).length;
+      setInvMessage(nb > 0
+        ? `Inventaire validé — ${nb} régularisation${nb > 1 ? 's' : ''} de stock générée${nb > 1 ? 's' : ''} pour recaler le théorique sur le comptage.`
+        : 'Inventaire validé — aucun écart à régulariser.');
       openInventory(selectedInv);
       loadInventories();
-    } catch (err) { console.error(err); }
+      reload(); // le stock a bougé (régularisations)
+    } catch (err) {
+      setActionError(err.response?.data?.error || 'Erreur lors de la validation de l\'inventaire.');
+    }
   };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des stocks..." /></Layout>;
@@ -127,7 +172,31 @@ export default function Stock() {
     },
     { key: 'poids_kg', label: 'Quantité (kg)', sortable: true, render: (m) => <span className="font-medium">{m.poids_kg || m.quantity_kg}</span> },
     { key: 'source', label: 'Source', render: (m) => <span className="text-slate-500">{m.origine || m.destination || '—'}</span> },
-    { key: 'notes', label: 'Notes', render: (m) => <span className="text-slate-400 max-w-[200px] truncate block">{m.notes || '—'}</span> },
+    {
+      key: 'statut', label: 'Statut',
+      render: (m) => {
+        if (m.reversed_of_id) return <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Contre-écriture #{m.reversed_of_id}</span>;
+        if (m.reversal_movement_id) return <span className="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700">Annulé (#{m.reversal_movement_id})</span>;
+        return <span className="text-slate-300 text-xs">—</span>;
+      },
+    },
+    { key: 'notes', label: 'Notes', render: (m) => <span className="text-slate-400 max-w-[180px] truncate block">{m.notes || '—'}</span> },
+    {
+      key: 'actions', label: '',
+      render: (m) => (
+        (!m.reversed_of_id && !m.reversal_movement_id) ? (
+          <button
+            onClick={() => { setCancelTarget(m); setCancelMotif(''); setActionError(null); }}
+            className="text-slate-400 hover:text-red-600 inline-flex items-center gap-1 text-xs"
+            title="Annuler ce mouvement (contre-écriture)"
+          >
+            <XCircle className="w-4 h-4" /> Annuler
+          </button>
+        ) : m.reversed_of_id ? (
+          <span className="text-slate-300 inline-flex items-center gap-1 text-xs"><RotateCcw className="w-3.5 h-3.5" /></span>
+        ) : null
+      ),
+    },
   ];
 
   return (
@@ -152,6 +221,13 @@ export default function Stock() {
             </div>
           }
         />
+
+        {actionError && (
+          <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 flex items-center justify-between">
+            <span>{actionError}</span>
+            <button onClick={() => setActionError(null)} className="text-red-400 hover:text-red-600">✕</button>
+          </div>
+        )}
 
         {activeTab === 'stock' && (
           <>
@@ -182,6 +258,9 @@ export default function Stock() {
 
         {activeTab === 'inventaire' && (
           <div className="space-y-4">
+            {invMessage && (
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">{invMessage}</div>
+            )}
             <div className="flex gap-2 mb-4">
               <button onClick={() => createInventory('partiel')} className="btn-primary text-sm">
                 <Plus className="w-4 h-4 mr-2" strokeWidth={1.8} />
@@ -253,7 +332,8 @@ export default function Stock() {
                             <td className="p-2 text-sm text-right text-slate-500">{parseFloat(item.stock_theorique_kg || 0).toFixed(1)}</td>
                             <td className="p-2">
                               {invDetail.status === 'en_cours' ? (
-                                <input type="number" step="0.1" value={item.stock_physique_kg || ''}
+                                <input type="number" step="0.1" value={item.stock_physique_kg ?? ''}
+                                  placeholder="non compté"
                                   onChange={e => {
                                     const updated = invDetail.items.map(it =>
                                       it.id === item.id ? { ...it, stock_physique_kg: e.target.value } : it
@@ -262,11 +342,11 @@ export default function Stock() {
                                   }}
                                   className="input-modern w-24 text-right" />
                               ) : (
-                                <span className="text-right block">{parseFloat(item.stock_physique_kg || 0).toFixed(1)}</span>
+                                <span className="text-right block">{item.stock_physique_kg == null ? '—' : parseFloat(item.stock_physique_kg).toFixed(1)}</span>
                               )}
                             </td>
                             <td className={`p-2 text-sm text-right font-medium ${(item.ecart_kg || 0) > 0 ? 'text-green-600' : (item.ecart_kg || 0) < 0 ? 'text-red-600' : ''}`}>
-                              {item.ecart_kg ? `${item.ecart_kg > 0 ? '+' : ''}${parseFloat(item.ecart_kg).toFixed(1)}` : '—'}
+                              {item.ecart_kg != null && item.ecart_kg !== 0 ? `${item.ecart_kg > 0 ? '+' : ''}${parseFloat(item.ecart_kg).toFixed(1)}` : '—'}
                             </td>
                             <td className="p-2">
                               {invDetail.status === 'en_cours' ? (
@@ -297,6 +377,27 @@ export default function Stock() {
                         </button>
                       </div>
                     )}
+
+                    {/* Régularisations générées à la validation (item 29) */}
+                    {invDetail.status === 'valide' && (
+                      <div className="mt-4 border-t pt-3">
+                        <h4 className="text-xs font-semibold text-slate-500 mb-2">Régularisations de stock générées</h4>
+                        {(invDetail.regularisations && invDetail.regularisations.length > 0) ? (
+                          <ul className="space-y-1">
+                            {invDetail.regularisations.map(r => (
+                              <li key={r.id} className="flex items-center justify-between text-sm bg-slate-50 rounded px-3 py-1.5">
+                                <span className="text-slate-600">{r.categorie_nom || 'Catégorie'}</span>
+                                <span className={`font-medium ${r.type === 'entree' ? 'text-green-600' : 'text-red-600'}`}>
+                                  {r.type === 'entree' ? '+' : '-'}{parseFloat(r.poids_kg).toFixed(1)} kg
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-sm text-slate-400">Aucun écart n'a nécessité de régularisation.</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -304,7 +405,7 @@ export default function Stock() {
           </div>
         )}
 
-        {/* Form */}
+        {/* Form mouvement */}
         <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Mouvement de stock" size="sm"
           footer={<>
             <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-ghost">Annuler</button>
@@ -324,6 +425,29 @@ export default function Stock() {
             <input placeholder="Source" value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} className="input-modern" />
             <textarea placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="textarea-modern" rows="2" />
           </form>
+        </Modal>
+
+        {/* Annulation mouvement (contre-écriture) — item 30 */}
+        <Modal isOpen={!!cancelTarget} onClose={() => { setCancelTarget(null); setCancelMotif(''); }} title="Annuler ce mouvement" size="sm"
+          footer={<>
+            <button type="button" onClick={() => { setCancelTarget(null); setCancelMotif(''); }} className="flex-1 btn-ghost">Retour</button>
+            <button type="button" onClick={submitCancel} disabled={cancelling || !cancelMotif.trim()}
+              className="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400">
+              {cancelling ? '…' : 'Confirmer l\'annulation'}
+            </button>
+          </>}
+        >
+          {cancelTarget && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600">
+                Une <strong>contre-écriture</strong> sera créée pour annuler ce mouvement
+                ({cancelTarget.type} de {cancelTarget.poids_kg} kg du {new Date(cancelTarget.date).toLocaleDateString('fr-FR')}).
+                Le mouvement d'origine est conservé (historique intact).
+              </p>
+              <textarea value={cancelMotif} onChange={e => setCancelMotif(e.target.value)}
+                className="textarea-modern" rows="3" placeholder="Motif de l'annulation (obligatoire)" autoFocus />
+            </div>
+          )}
         </Modal>
       </div>
     </Layout>

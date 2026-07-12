@@ -11,6 +11,7 @@ const { monthBounds } = require('../utils/month-range');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const { imageFilter, spreadsheetFilter } = require('../utils/upload-filters');
 const { parseWorkbookBuffer, upsertCollaborators } = require('../services/collaborator-import');
+const { computeCddiCumulativeMonths, resyncMilestones } = require('./insertion/engine');
 
 // Upload photo
 const photoStorage = multer.diskStorage({
@@ -105,7 +106,8 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
     const allowed = ['first_name', 'last_name', 'phone', 'email', 'team_id', 'position',
       'contract_type', 'contract_start', 'contract_end', 'has_permis_b', 'has_caces',
       'weekly_hours', 'skills', 'is_active', 'user_id', 'candidate_id',
-      'insertion_status', 'insertion_start_date', 'insertion_end_date', 'prescripteur', 'visite_medicale_date',
+      'insertion_status', 'insertion_start_date', 'insertion_end_date',
+      'prescripteur', 'prescripteur_id', 'date_prescription', 'visite_medicale_date',
       // Champs étendus import Malibou (identité, coordonnées, naissance, IAE, contrat)
       'malibou_id', 'birth_name', 'gender', 'birth_date', 'nationality', 'qualification', 'personal_email',
       'address', 'city', 'postal_code', 'country', 'civility',
@@ -115,9 +117,9 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
       'work_time_type', 'gross_salary', 'siret', 'establishment'];
 
     // Nettoyer les types : strings vides → null pour les champs numériques/date/boolean
-    const intFields = ['team_id', 'user_id', 'candidate_id', 'manager_id'];
+    const intFields = ['team_id', 'user_id', 'candidate_id', 'manager_id', 'prescripteur_id'];
     const dateFields = ['contract_start', 'contract_end', 'insertion_start_date', 'insertion_end_date',
-      'visite_medicale_date', 'birth_date', 'seniority_date'];
+      'visite_medicale_date', 'birth_date', 'seniority_date', 'date_prescription'];
     for (const f of intFields) {
       if (fields[f] !== undefined && !fields[f] && fields[f] !== 0) fields[f] = null;
       else if (fields[f]) fields[f] = Number(fields[f]);
@@ -149,9 +151,62 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Employé non trouvé' });
+
+    // Si les dates de contrat ont changé, recaler les jalons d'insertion NON
+    // réalisés (repousse le Bilan Sortie, complète les jalons devenus
+    // applicables). Best-effort : ne fait jamais échouer l'enregistrement.
+    if (fields.contract_end !== undefined || fields.contract_start !== undefined || fields.insertion_start_date !== undefined) {
+      try { await resyncMilestones(pool, id, { userId: req.user?.id }); }
+      catch (e) { console.error('[EMPLOYEES] resyncMilestones (PUT) :', e.message); }
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[EMPLOYEES] Erreur modification :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/employees/:id/cddi-duration — Durée cumulée en CDDI (plafond légal
+// 24 mois). Somme les périodes des contrats CDDI de employee_contracts ; si
+// aucun (base pas encore réimportée après la levée de la coercition CDDI→CDD),
+// replie sur la période de contrat portée par la fiche employé.
+router.get('/:id/cddi-duration', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const empRes = await pool.query(
+      'SELECT contract_type, contract_start, contract_end FROM employees WHERE id = $1',
+      [req.params.id]
+    );
+    if (empRes.rows.length === 0) return res.status(404).json({ error: 'Employé non trouvé' });
+    const emp = empRes.rows[0];
+
+    const contractsRes = await pool.query(
+      'SELECT contract_type, start_date, end_date FROM employee_contracts WHERE employee_id = $1',
+      [req.params.id]
+    );
+    let periods = contractsRes.rows.filter((c) => String(c.contract_type || '').toUpperCase() === 'CDDI');
+    // Repli : la fiche employé est un CDDI mais aucune ligne de contrat n'a
+    // encore le type CDDI (données antérieures à la migration) → on prend la
+    // période portée par la fiche pour ne pas afficher un faux 0.
+    if (periods.length === 0 && String(emp.contract_type || '').toUpperCase() === 'CDDI' && emp.contract_start) {
+      periods = [{ contract_type: 'CDDI', start_date: emp.contract_start, end_date: emp.contract_end }];
+    }
+
+    const isCddi = String(emp.contract_type || '').toUpperCase() === 'CDDI' || periods.length > 0;
+    const d = computeCddiCumulativeMonths(periods);
+    const CAP = 24; // plafond légal (dérogeable à 60 mois pour RQTH / 50 ans+)
+    res.json({
+      is_cddi: isCddi,
+      cap_months: CAP,
+      months_total: d.months_total,
+      months_elapsed: d.months_elapsed,
+      contracts_count: d.count,
+      first_start: d.first_start,
+      last_end: d.last_end,
+      remaining_months: isCddi ? Math.round((CAP - d.months_total) * 10) / 10 : null,
+    });
+  } catch (err) {
+    console.error('[EMPLOYEES] cddi-duration :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -399,7 +454,8 @@ router.get('/:id/hours/summary', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORAT
          COUNT(CASE WHEN type = 'normal' THEN 1 END)::int AS days_worked,
          COUNT(CASE WHEN type = 'absence' THEN 1 END)::int AS absence_days,
          COUNT(CASE WHEN type = 'sick' THEN 1 END)::int AS sick_days,
-         COUNT(CASE WHEN type = 'holiday' THEN 1 END)::int AS holiday_days
+         COUNT(CASE WHEN type = 'holiday' THEN 1 END)::int AS holiday_days,
+         COUNT(CASE WHEN type = 'training' THEN 1 END)::int AS training_days
        FROM work_hours
        WHERE employee_id = $1 AND date BETWEEN $2 AND $3`,
       [req.params.id, ...monthBounds(month)]
@@ -729,6 +785,13 @@ router.post('/:id/contracts', authorize('ADMIN', 'RH'), [
       `UPDATE employees SET team_id = COALESCE($1, team_id), contract_type = $2, weekly_hours = $3, updated_at = NOW() WHERE id = $4`,
       [team_id, contract_type, weekly_hours || 35, empId]
     );
+
+    // Renouvellement → recaler les jalons d'insertion non réalisés sur la
+    // nouvelle échéance (best-effort, ne casse pas la création du contrat).
+    if (origin === 'renouvellement') {
+      try { await resyncMilestones(pool, empId, { userId: req.user?.id }); }
+      catch (e) { console.error('[EMPLOYEES] resyncMilestones (contrat) :', e.message); }
+    }
 
     res.status(201).json(result.rows[0]);
   } catch (err) {

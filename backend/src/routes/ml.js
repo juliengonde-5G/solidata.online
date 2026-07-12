@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const FillRateModel = require('../services/ml-model');
+const { getCapacityKg } = require('../utils/fill-factors');
 
 // Cache du modèle en mémoire pour éviter de le recharger à chaque prédiction
 let cachedModel = null;
@@ -186,10 +187,12 @@ router.post('/train', authenticate, authorize('ADMIN', 'MANAGER'), async (req, r
         ];
 
         X.push(features);
-        // Target: poids comme proxy du taux de remplissage
-        // Normaliser par nb_containers pour avoir un « taux » relatif
+        // Target = taux de remplissage en % de la CAPACITÉ (cohérent avec le reste
+        // du moteur et avec ml_fill_predictions). Avant, la cible était des kg/conteneur
+        // (unité incohérente avec le clamp 0-100 du modèle et la vérité terrain capteur).
         const nbContainers = parseInt(entry.nb_containers) || 1;
-        const fillProxy = parseFloat(entry.weight_kg) / nbContainers;
+        const capacityKg = getCapacityKg(nbContainers);
+        const fillProxy = Math.min(120, (parseFloat(entry.weight_kg) / capacityKg) * 100);
         y.push(fillProxy);
       }
     }

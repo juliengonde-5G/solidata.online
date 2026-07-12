@@ -1419,6 +1419,145 @@ function computeMilestoneSchedule(startDate, endDate) {
   return defs.map((d) => ({ type: d.type, due: iso(d.due) }));
 }
 
+// ══════════════════════════════════════════════════════════════
+// DURÉE CUMULÉE CDDI (plafond légal 24 mois, dérogeable à 60 mois)
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Calcule la durée cumulée en CDDI d'un salarié à partir de ses contrats.
+ * Somme les PÉRIODES des contrats de type CDDI (chevauchements fusionnés
+ * simplement pour ne pas compter deux fois un mois couvert par deux contrats).
+ *
+ * @param {Array<{contract_type?:string, start_date?:string|Date, end_date?:string|Date}>} contracts
+ * @param {Date} [asOf=now] date de référence pour un contrat en cours (fin nulle)
+ * @returns {{ months_total:number, months_elapsed:number, count:number,
+ *             first_start:string|null, last_end:string|null }}
+ *   months_total   = durée contractuelle cumulée (borne = fin contractuelle, sinon asOf)
+ *   months_elapsed = durée déjà écoulée (borne = min(fin, asOf))
+ */
+function computeCddiCumulativeMonths(contracts, asOf = new Date()) {
+  const ref = asOf instanceof Date ? asOf : new Date(asOf);
+  const DAY = 86400000;
+  const toDate = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+
+  const cddi = (contracts || [])
+    .filter((c) => String(c.contract_type || '').toUpperCase() === 'CDDI')
+    .map((c) => ({ start: toDate(c.start_date), end: toDate(c.end_date) }))
+    .filter((c) => c.start);
+
+  if (cddi.length === 0) {
+    return { months_total: 0, months_elapsed: 0, count: 0, first_start: null, last_end: null };
+  }
+
+  // Fusionne des intervalles [start, endBound] triés par début.
+  const mergeSum = (bound) => {
+    const intervals = cddi
+      .map((c) => [c.start.getTime(), Math.max(c.start.getTime(), bound(c))])
+      .sort((a, b) => a[0] - b[0]);
+    let total = 0, curStart = intervals[0][0], curEnd = intervals[0][1];
+    for (let i = 1; i < intervals.length; i++) {
+      const [s, e] = intervals[i];
+      if (s <= curEnd) { curEnd = Math.max(curEnd, e); }
+      else { total += curEnd - curStart; curStart = s; curEnd = e; }
+    }
+    total += curEnd - curStart;
+    return total / DAY / 30.44;
+  };
+
+  const totalDaysBound = (c) => (c.end ? c.end.getTime() : ref.getTime());
+  const elapsedDaysBound = (c) => Math.min(c.end ? c.end.getTime() : ref.getTime(), ref.getTime());
+
+  const round1 = (n) => Math.round(n * 10) / 10;
+  const starts = cddi.map((c) => c.start.getTime());
+  const ends = cddi.map((c) => (c.end ? c.end.getTime() : ref.getTime()));
+  const isoOrNull = (t) => (t ? new Date(t).toISOString().slice(0, 10) : null);
+
+  return {
+    months_total: round1(mergeSum(totalDaysBound)),
+    months_elapsed: round1(mergeSum(elapsedDaysBound)),
+    count: cddi.length,
+    first_start: isoOrNull(Math.min(...starts)),
+    last_end: isoOrNull(Math.max(...ends)),
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+// RECALAGE DES JALONS AU RENOUVELLEMENT DE CONTRAT
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Recale les jalons d'insertion NON réalisés sur la nouvelle échéance de
+ * contrat (typiquement après un avenant qui prolonge la date de fin).
+ *
+ *  - ne touche JAMAIS un jalon déjà « realise » ;
+ *  - repositionne le « Bilan Sortie » (et tout jalon futur non réalisé) sur la
+ *    nouvelle échéance calculée par computeMilestoneSchedule ;
+ *  - complète les jalons intermédiaires devenus applicables (ex. contrat
+ *    prolongé de 6 → 12 mois ⇒ ajoute Bilan M+6 / M+10) ;
+ *  - ne réactive PAS un parcours terminé/abandonné et n'initialise pas un
+ *    parcours vierge (le premier peuplement reste géré par /initialize).
+ *
+ * @param {import('pg').Pool|import('pg').PoolClient} db
+ * @param {number} employeeId
+ * @param {{ userId?: number }} [opts]
+ * @returns {Promise<{skipped?:string, updated:Array, created:Array}>}
+ */
+async function resyncMilestones(db, employeeId, { userId = null } = {}) {
+  const empRes = await db.query(
+    `SELECT e.insertion_status, e.insertion_start_date, e.contract_start, e.contract_end,
+            ec.start_date AS c_start, ec.end_date AS c_end
+     FROM employees e
+     LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+     WHERE e.id = $1`,
+    [employeeId]
+  );
+  if (empRes.rows.length === 0) return { skipped: 'employee_not_found', updated: [], created: [] };
+  const r = empRes.rows[0];
+
+  // On ne recale que les parcours en cours (pas de réactivation d'un terminé).
+  if (r.insertion_status !== 'en_parcours') return { skipped: 'not_en_parcours', updated: [], created: [] };
+
+  const existingRes = await db.query(
+    'SELECT id, milestone_type, due_date, status FROM insertion_milestones WHERE employee_id = $1',
+    [employeeId]
+  );
+  // Parcours non encore initialisé → laissé à /initialize (pas d'auto-création ici).
+  if (existingRes.rows.length === 0) return { skipped: 'not_initialized', updated: [], created: [] };
+
+  const byType = new Map(existingRes.rows.map((m) => [m.milestone_type, m]));
+  const start = r.insertion_start_date || r.c_start || r.contract_start || new Date();
+  const end = r.c_end || r.contract_end || null;
+  const schedule = computeMilestoneSchedule(start, end);
+
+  const updated = [];
+  const created = [];
+  const isoOf = (v) => (v ? new Date(v).toISOString().slice(0, 10) : null);
+
+  for (const d of schedule) {
+    const ex = byType.get(d.type);
+    if (ex) {
+      if (ex.status === 'realise') continue; // jamais toucher un jalon réalisé
+      if (isoOf(ex.due_date) !== d.due) {
+        await db.query(
+          'UPDATE insertion_milestones SET due_date = $1, updated_at = NOW() WHERE id = $2',
+          [d.due, ex.id]
+        );
+        updated.push({ id: ex.id, type: d.type, due: d.due });
+      }
+    } else {
+      const ins = await db.query(
+        `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (employee_id, milestone_type) DO NOTHING
+         RETURNING id`,
+        [employeeId, d.type, d.due, userId]
+      );
+      if (ins.rows.length) created.push({ id: ins.rows[0].id, type: d.type, due: d.due });
+    }
+  }
+  return { updated, created };
+}
+
 module.exports = {
   PCM_KNOWLEDGE,
   METIERS_CIBLES,
@@ -1428,4 +1567,6 @@ module.exports = {
   buildAIRecommendations,
   buildTimeline,
   computeMilestoneSchedule,
+  computeCddiCumulativeMonths,
+  resyncMilestones,
 };

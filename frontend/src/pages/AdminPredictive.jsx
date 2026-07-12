@@ -80,11 +80,13 @@ export default function AdminPredictive() {
   const appliquerAjustements = () => {
     if (!iaAjustements) return;
     const newConfig = { ...config };
+    // Bugfix : les inputs lisent seasonalFactors / dayOfWeekFactors (et non
+    // seasonal / dayOfWeek), le bouton n'avait donc aucun effet visible.
     if (iaAjustements.facteurs_saisonniers_proposes?.length === 12) {
-      newConfig.seasonal = iaAjustements.facteurs_saisonniers_proposes;
+      newConfig.seasonalFactors = iaAjustements.facteurs_saisonniers_proposes.map(Number);
     }
     if (iaAjustements.facteurs_jours_proposes?.length === 7) {
-      newConfig.dayOfWeek = iaAjustements.facteurs_jours_proposes;
+      newConfig.dayOfWeekFactors = iaAjustements.facteurs_jours_proposes.map(Number);
     }
     setConfig(newConfig);
   };
@@ -706,7 +708,8 @@ export default function AdminPredictive() {
         </Section>
 
         {/* Facteurs saisonniers */}
-        <Section title="Facteurs saisonniers" desc="Multiplicateur de remplissage par mois (1.0 = normal)">
+        <Section title="Facteurs saisonniers" desc="Multiplicateur de remplissage par mois (1.0 = normal). Valeurs EFFECTIVES appliquées par le moteur.">
+          <SourceLegend learnedCount={config.learnedMonthlyCount} />
           <div className="grid grid-cols-6 md:grid-cols-12 gap-2">
             {config.seasonalFactors.map((val, idx) => (
               <div key={idx} className="text-center">
@@ -718,13 +721,15 @@ export default function AdminPredictive() {
                   className="input-modern py-1.5 text-center"
                 />
                 <div className="mt-1 h-1 rounded-full" style={{ background: val >= 1 ? '#22c55e' : '#f59e0b', opacity: 0.5 + Math.abs(val - 1) }} />
+                <SourceBadge source={config.seasonalSources?.[idx]} />
               </div>
             ))}
           </div>
         </Section>
 
         {/* Facteurs jour de semaine */}
-        <Section title="Facteurs jour de semaine" desc="Multiplicateur par jour (lundi=1er)">
+        <Section title="Facteurs jour de semaine" desc="Multiplicateur par jour (lundi=1er). Valeurs EFFECTIVES appliquées par le moteur.">
+          <SourceLegend learnedCount={config.learnedDowCount} />
           <div className="grid grid-cols-7 gap-3">
             {config.dayOfWeekFactors.map((val, idx) => (
               <div key={idx} className="text-center">
@@ -735,6 +740,7 @@ export default function AdminPredictive() {
                   onChange={e => updateDayOfWeek(idx, e.target.value)}
                   className="input-modern text-center"
                 />
+                <SourceBadge source={config.dayOfWeekSources?.[idx]} />
               </div>
             ))}
           </div>
@@ -989,6 +995,40 @@ function Section({ title, desc, children }) {
       <h2 className="text-lg font-semibold text-slate-800 mb-1">{title}</h2>
       {desc && <p className="text-xs text-gray-400 mb-4">{desc}</p>}
       {children}
+    </div>
+  );
+}
+
+// Origine effective d'un facteur : appris (historique) > manuel (saisie) > défaut.
+const SOURCE_META = {
+  appris: { label: 'appris', cls: 'bg-emerald-100 text-emerald-700', title: 'Calculé sur l\'historique de tonnage (prioritaire)' },
+  manuel: { label: 'manuel', cls: 'bg-blue-100 text-blue-700', title: 'Votre saisie enregistrée' },
+  'défaut': { label: 'défaut', cls: 'bg-gray-100 text-gray-500', title: 'Valeur codée par défaut' },
+};
+
+function SourceBadge({ source }) {
+  const meta = SOURCE_META[source];
+  if (!meta) return null;
+  return (
+    <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-semibold ${meta.cls}`} title={meta.title}>
+      {meta.label}
+    </span>
+  );
+}
+
+function SourceLegend({ learnedCount }) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+      <span className="font-medium">Source du facteur :</span>
+      <SourceBadge source="appris" /> <span>historique (prioritaire)</span>
+      <SourceBadge source="manuel" /> <span>saisie</span>
+      <SourceBadge source="défaut" /> <span>codé</span>
+      {learnedCount > 0 && (
+        <span className="ml-1 text-emerald-600">— {learnedCount} facteur(s) appris supplantent la saisie manuelle.</span>
+      )}
+      <span className="w-full text-[10px] text-gray-400 italic">
+        Les facteurs « appris » (recalculés sur le tonnage réel) priment sur vos saisies ; une saisie sert de repli là où il n'y a pas encore de facteur appris.
+      </span>
     </div>
   );
 }

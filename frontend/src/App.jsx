@@ -12,10 +12,12 @@ const PersonalityMatrix = lazy(() => import('./pages/PersonalityMatrix'));
 const Employees = lazy(() => import('./pages/Employees'));
 const WorkHours = lazy(() => import('./pages/WorkHours'));
 const Skills = lazy(() => import('./pages/Skills'));
+const Prescripteurs = lazy(() => import('./pages/Prescripteurs'));
 const Tours = lazy(() => import('./pages/Tours'));
 const Vehicles = lazy(() => import('./pages/Vehicles'));
 const VehicleMaintenance = lazy(() => import('./pages/VehicleMaintenance'));
 const LiveVehicles = lazy(() => import('./pages/LiveVehicles'));
+const Incidents = lazy(() => import('./pages/Incidents'));
 const Production = lazy(() => import('./pages/Production'));
 const ChaineTri = lazy(() => import('./pages/ChaineTri'));
 const Stock = lazy(() => import('./pages/Stock'));
@@ -119,6 +121,7 @@ function App() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/balance" element={<BalancePage />} />
+              <Route path="/balance/:token" element={<BalancePage />} />
               <Route path="/pcm-test/:token" element={<PCMTest />} />
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
 
@@ -147,6 +150,7 @@ function App() {
               <Route path="/employees" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Employees /></ProtectedRoute>} />
               <Route path="/work-hours" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><WorkHours /></ProtectedRoute>} />
               <Route path="/skills" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Skills /></ProtectedRoute>} />
+              <Route path="/prescripteurs" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Prescripteurs /></ProtectedRoute>} />
               <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><InsertionParcours /></ProtectedRoute>} />
               <Route path="/insertion/audit" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><AuditInsertion /></ProtectedRoute>} />
               <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PlanningHebdo /></ProtectedRoute>} />
@@ -160,6 +164,7 @@ function App() {
               <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Vehicles /></ProtectedRoute>} />
               <Route path="/vehicle-maintenance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VehicleMaintenance /></ProtectedRoute>} />
               <Route path="/collections-live" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
+              <Route path="/incidents" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Incidents /></ProtectedRoute>} />
               <Route path="/planning-tournees" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PlanningTournees /></ProtectedRoute>} />
               <Route path="/dashboard-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><DashboardCollecte /></ProtectedRoute>} />
               <Route path="/live-vehicles" element={<Navigate to="/collections-live" replace />} />

@@ -38,6 +38,17 @@ const ANOMALY_LABELS = [...COMMON_ANOMALIES, ...OTHER_ANOMALIES].reduce((acc, a)
   return acc;
 }, {});
 
+// Raisons de saut d'un point (« impossible à collecter »). Libellés simples
+// (public FALC) mappés sur l'enum backend skip_reason (tour_cav).
+const SKIP_REASONS = [
+  { value: 'acces_impossible', label: 'Accès impossible', icon: '🚧' },
+  { value: 'bouchee',          label: 'Borne bouchée',    icon: '🔒' },
+  { value: 'vide',             label: 'Borne vide',       icon: '⬜' },
+  { value: 'cav_fermee',       label: 'Borne condamnée',  icon: '⛔' },
+  { value: 'autre',            label: 'Autre raison',     icon: '❓' },
+];
+const SKIP_LABELS = SKIP_REASONS.reduce((acc, r) => { acc[r.value] = r.label; return acc; }, {});
+
 export default function FillLevel() {
   const [fillLevel, setFillLevel] = useState(null);
   const [anomaly, setAnomaly] = useState('');
@@ -48,6 +59,8 @@ export default function FillLevel() {
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState(null); // { cavName, pendingId, status }
   const [cavName, setCavName] = useState(null);
+  const [skipOpen, setSkipOpen] = useState(false); // panneau « impossible à collecter »
+  const [skipping, setSkipping] = useState(false);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const scannedQR = localStorage.getItem('scanned_qr');
@@ -76,6 +89,81 @@ export default function FillLevel() {
     setAnomaly(prev => (prev === value ? '' : value));
   };
 
+  // Résout le CAV en cours à marquer (collecte ou saut) depuis la tournée.
+  // Retourne { cavId, displayName, tourIsAssociation } ou lève une erreur.
+  const resolveCurrentCav = async () => {
+    const tourRes = await authedFetch(`/api/tours/${tourId}/public`);
+    if (!tourRes.ok) throw new Error('Impossible de charger la tournée');
+    const tourData = await tourRes.json();
+    const cavs = tourData.cavs || [];
+    const tourIsAssociation = tourData.collection_type === 'association';
+
+    const selectedCavId = localStorage.getItem('selected_cav_id');
+    let cav = null;
+    if (selectedCavId) {
+      cav = cavs.find(c => String(c.cav_id) === String(selectedCavId) || String(c.id) === String(selectedCavId));
+    }
+    if (!cav) cav = cavs.find(c => c.status !== 'collected');
+    if (!cav) throw new Error('Aucun point à traiter dans cette tournée');
+
+    return {
+      cavId: cav.cav_id || cav.id,
+      displayName: cav.nom || cav.cav_name || 'CAV',
+      tourIsAssociation,
+    };
+  };
+
+  // Déclare le point en cours comme « impossible à collecter » (saut).
+  // Offline-first : écrit d'abord dans la file de sync, tente l'envoi immédiat.
+  const submitSkip = async (reason) => {
+    if (skipping) return;
+    setSkipping(true);
+    setError('');
+    try {
+      const { cavId, displayName } = await resolveCurrentCav();
+      setCavName(displayName);
+
+      const payload = {
+        clientId: newClientId(),
+        tourId,
+        cavId,
+        action: 'skip',
+        skipReason: reason,
+        notes: notes || null,
+      };
+      const pendingId = await addPendingCollect(payload);
+
+      let status = 'pending';
+      if (navigator.onLine) {
+        try {
+          await sendCollect(payload);
+          await deleteItem(STORES.pendingCollects, pendingId);
+          status = 'sent';
+        } catch (e) {
+          if (e?.response?.status >= 400 && e?.response?.status < 500) {
+            await deleteItem(STORES.pendingCollects, pendingId);
+            status = 'retry';
+          } else {
+            status = 'pending';
+          }
+        }
+      }
+
+      // Un point sauté n'a plus de draft de collecte à conserver.
+      try { await clearDraft(draftKey('collect', tourId, cavId)); } catch {}
+
+      await getPendingCount();
+      vibrateSuccess();
+      setSkipOpen(false);
+      setConfirm({ cavName: displayName, pendingId, status, cavId, skipped: true, skipReason: reason });
+    } catch (err) {
+      vibrateError();
+      setError(err.message || 'Erreur, réessayez');
+      console.error('[FillLevel] submitSkip', err);
+    }
+    setSkipping(false);
+  };
+
   const submit = async () => {
     if (fillLevel === null) return;
     // Résout la valeur à envoyer et l'anomalie implicite pour le niveau ++.
@@ -86,25 +174,7 @@ export default function FillLevel() {
     setError('');
     try {
       // 1) charger la tournée pour retrouver le CAV à marquer.
-      const tourRes = await authedFetch(`/api/tours/${tourId}/public`);
-      if (!tourRes.ok) throw new Error('Impossible de charger la tournée');
-      const tourData = await tourRes.json();
-      const cavs = tourData.cavs || [];
-      const tourIsAssociation = tourData.collection_type === 'association';
-
-      const selectedCavId = localStorage.getItem('selected_cav_id');
-      let cav = null;
-      if (selectedCavId) {
-        cav = cavs.find(c => String(c.cav_id) === String(selectedCavId) || String(c.id) === String(selectedCavId));
-      }
-      if (!cav) cav = cavs.find(c => c.status !== 'collected');
-
-      if (!cav) {
-        throw new Error('Aucun CAV à collecter dans cette tournée');
-      }
-
-      const cavId = cav.cav_id || cav.id;
-      const displayName = cav.nom || cav.cav_name || 'CAV';
+      const { cavId, displayName, tourIsAssociation } = await resolveCurrentCav();
       setCavName(displayName);
 
       // 2) Persiste un draft pour pouvoir re-pré-remplir le formulaire via
@@ -193,6 +263,21 @@ export default function FillLevel() {
   }, [selected, anomaly, notes]);
 
   if (confirm) {
+    // Écran de saut : pas de « Corriger » (rien à ré-éditer), résumé = motif.
+    if (confirm.skipped) {
+      return (
+        <StepConfirmScreen
+          title="Point non collecté"
+          cavName={confirm.cavName}
+          status={confirm.status}
+          summaryLines={[{ label: 'Motif', value: SKIP_LABELS[confirm.skipReason] || confirm.skipReason }]}
+          primaryLabel="Continuer"
+          onPrimary={finishAndReturn}
+          onAutoReturn={finishAndReturn}
+          autoReturnMs={8000}
+        />
+      );
+    }
     // "Corriger" n'est proposé que si l'action n'a pas encore quitté le
     // mobile. Le backend n'expose pas de endpoint uncollect-public, donc
     // un rollback serveur n'est pas possible aujourd'hui (cf. contrat
@@ -354,8 +439,55 @@ export default function FillLevel() {
           )}
         </div>
 
-        {/* 2bis. Actions secondaires — incident / camion plein */}
+        {/* 2bis. Actions secondaires — impossible à collecter / incident / camion plein */}
         <div className="flex flex-col gap-2">
+          {/* Saut de point : distinct de la saisie de niveau (item 46a) */}
+          <button
+            type="button"
+            onClick={() => { vibrateTap(); setSkipOpen(v => !v); }}
+            aria-expanded={skipOpen}
+            className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+            style={{
+              minHeight: 60,
+              padding: '12px 14px',
+              borderRadius: 14,
+              border: skipOpen ? '2px solid #F59E0B' : '2px solid #FDE68A',
+              color: '#92400E',
+            }}
+          >
+            <span className="text-xl" aria-hidden="true">🚫</span>
+            <span className="flex-1 font-bold text-[15px]">Impossible de collecter ce point</span>
+            <span aria-hidden="true" className="text-gray-400">{skipOpen ? '▾' : '→'}</span>
+          </button>
+          {skipOpen && (
+            <div className="card-mobile p-3">
+              <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">
+                Pourquoi ?
+              </p>
+              <div className="grid grid-cols-1 gap-2">
+                {SKIP_REASONS.map(r => (
+                  <button
+                    key={r.value}
+                    type="button"
+                    disabled={skipping}
+                    onClick={() => submitSkip(r.value)}
+                    className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform disabled:opacity-50"
+                    style={{
+                      minHeight: 56,
+                      padding: '10px 14px',
+                      borderRadius: 12,
+                      border: '2px solid #E2E8F0',
+                      color: '#1E293B',
+                    }}
+                  >
+                    <span className="text-xl" aria-hidden="true">{r.icon}</span>
+                    <span className="flex-1 font-bold text-[15px]">{r.label}</span>
+                  </button>
+                ))}
+              </div>
+              {skipping && <p className="mt-2 text-sm text-gray-500">Enregistrement…</p>}
+            </div>
+          )}
           <button
             type="button"
             onClick={() => navigate('/incident')}

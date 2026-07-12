@@ -161,7 +161,7 @@ router.use(autoLogActivity('vehicle'));
 // ?include_archived=true pour aussi inclure les archivés
 router.get('/', async (req, res) => {
   try {
-    const { status, team_id, include_archived } = req.query;
+    const { status, team_id, include_archived, available, date } = req.query;
     let query = `SELECT v.*, t.name as team_name,
        CONCAT(e.first_name, ' ', e.last_name) as assigned_driver_name
        FROM vehicles v LEFT JOIN teams t ON v.team_id = t.id
@@ -174,6 +174,21 @@ router.get('/', async (req, res) => {
     if (status) { params.push(status); query += ` AND v.status = $${params.length}`; }
     if (team_id) { params.push(team_id); query += ` AND v.team_id = $${params.length}`; }
 
+    // Vague 1 (item 47b) — filtre « disponible » désormais honoré (auparavant
+    // ignoré côté API : Tours.jsx demandait ?available=true et recevait TOUS les
+    // véhicules). Disponible = statut 'available' ET aucune tournée non terminée
+    // ce jour-là (date passée en paramètre, sinon aujourd'hui, fuseau Paris).
+    if (available === 'true') {
+      query += ` AND v.status = 'available'`;
+      params.push(date || null);
+      query += ` AND NOT EXISTS (
+        SELECT 1 FROM tours tconf
+         WHERE tconf.vehicle_id = v.id
+           AND tconf.date = COALESCE($${params.length}::date, (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Paris')::date)
+           AND tconf.status NOT IN ('completed', 'cancelled')
+      )`;
+    }
+
     query += ' ORDER BY COALESCE(v.is_archived, false), v.name';
     const result = await pool.query(query, params);
     // qr_token est une clé d'auth physique — jamais dans les listings.
@@ -181,6 +196,33 @@ router.get('/', async (req, res) => {
     res.json(result.rows.map((r) => { delete r.qr_token; return r; }));
   } catch (err) {
     console.error('[VEHICLES] Erreur liste :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/vehicles/:id/checklists — Dernières checklists de départ du véhicule
+// Vague 1 (item 45) : la checklist chauffeur (état extérieur, carburant, km,
+// remarques/anomalies) n'était consultable par aucun écran web. On expose ici
+// les dernières checklists avec date, chauffeur, état et NOTES (anomalies) mises
+// en évidence côté UI (fiche véhicule).
+router.get('/:id/checklists', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT vc.id, vc.tour_id, vc.exterior_ok, vc.fuel_level, vc.km_start, vc.km_end,
+              vc.notes, vc.created_at,
+              CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+              t.date AS tour_date, t.status AS tour_status
+         FROM vehicle_checklists vc
+         LEFT JOIN employees e ON e.id = vc.employee_id
+         LEFT JOIN tours t ON t.id = vc.tour_id
+        WHERE vc.vehicle_id = $1
+        ORDER BY vc.created_at DESC
+        LIMIT 20`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[VEHICLES] Erreur checklists :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

@@ -1220,7 +1220,9 @@ router.get('/kpis/:year', async (req, res) => {
     for (const r of ops.rows) opsMap[r.field_id] = parseFloat(r.total) || 0;
 
     const tonnesCollectees = opsMap.tonnes_collectees || 0;
-    const tonnesAuTri = opsMap.tonnes_au_tri || 0;
+    // Résidu 3 (Vague 1) : l'écran Opérations persiste désormais 'tonnes_triees'
+    // (l'ancienne clé 'tonnes_au_tri' n'est plus écrite). Rétro-compatible.
+    const tonnesAuTri = opsMap.tonnes_triees || opsMap.tonnes_au_tri || 0;
 
     // Find centre charges
     const centreMap = {};
@@ -1421,7 +1423,9 @@ router.get('/rentabilite/:year', async (req, res) => {
 
     // Fallback volumes depuis les tours si pas de données opérationnelles
     let tonnesCollectees = opsMap.tonnes_collectees || 0;
-    let tonnesAuTri = opsMap.tonnes_au_tri || 0;
+    // Résidu 3 (Vague 1) : lire 'tonnes_triees' (clé persistée par l'écran
+    // Opérations), avec repli sur l'ancienne 'tonnes_au_tri'.
+    let tonnesAuTri = opsMap.tonnes_triees || opsMap.tonnes_au_tri || 0;
 
     if (tonnesCollectees === 0) {
       const toursResult = await pool.query(`
@@ -1438,26 +1442,78 @@ router.get('/rentabilite/:year', async (req, res) => {
       tonnesAuTri = parseFloat(prodResult.rows[0]?.tonnes) || 0;
     }
 
-    // 4. Produits finis par qualité (expéditions)
-    const qualites = await pool.query(`
-      SELECT e.destination as qualite, SUM(e.poids_kg) / 1000.0 as tonnes,
-             SUM(e.montant_ht) as ca_ht
-      FROM expeditions e
-      WHERE EXTRACT(YEAR FROM e.date_expedition) = $1 AND e.status != 'cancelled'
-      GROUP BY e.destination
-    `, [year]).catch(() => ({ rows: [] }));
+    // 4. CA par qualité de matière (item 35, Vague 1).
+    //    L'ancienne requête lisait e.destination / e.montant_ht / e.date_expedition,
+    //    colonnes INEXISTANTES de la table expeditions → erreur avalée → CA toujours 0.
+    //    Nouvelle source, la plus fiable disponible (dans l'ordre) :
+    //    1) commandes_exutoires clôturées/facturées, valorisées au montant RÉELLEMENT
+    //       facturé (facture Pennylane rapprochée) sinon pesée client × prix commande
+    //       sinon tonnage prévu × prix. Tonnage = pesée client réelle si dispo.
+    //    2) repli : expeditions sur ses VRAIES colonnes (valeur_euros, catégorie).
+    //    3) dernier repli : mouvements de stock sortants (tonnage seul, sans CA).
+    //    Plus de catch avaleur silencieux : chaque source loggée, et un état
+    //    « données indisponibles » explicite est renvoyé si aucune ne donne rien.
+    let qualiteData = [];
+    let qualitesSource = null;
+    try {
+      const prim = await pool.query(`
+        SELECT array_to_string(c.type_produit, ' + ') AS qualite,
+               SUM(COALESCE(cp.pesee_client, c.tonnage_prevu, 0)) AS tonnes,
+               SUM(COALESCE(fx.montant_ht,
+                            cp.pesee_client * c.prix_tonne,
+                            c.tonnage_prevu * c.prix_tonne, 0)) AS ca_ht
+        FROM commandes_exutoires c
+        LEFT JOIN LATERAL (
+          SELECT pesee_client FROM controles_pesee
+          WHERE commande_id = c.id ORDER BY id DESC LIMIT 1
+        ) cp ON true
+        LEFT JOIN LATERAL (
+          SELECT montant_ht FROM factures_exutoires
+          WHERE commande_id = c.id AND source = 'pennylane' AND montant_ht IS NOT NULL
+          ORDER BY id DESC LIMIT 1
+        ) fx ON true
+        WHERE EXTRACT(YEAR FROM c.date_commande) = $1
+          AND c.statut IN ('facturee', 'cloturee')
+        GROUP BY array_to_string(c.type_produit, ' + ')
+        HAVING SUM(COALESCE(cp.pesee_client, c.tonnage_prevu, 0)) > 0
+      `, [year]);
+      if (prim.rows.length > 0) { qualiteData = prim.rows; qualitesSource = 'commandes_factures'; }
+    } catch (e) {
+      console.error('[FINANCE] rentabilité — source commandes/factures indisponible :', e.code || e.message);
+    }
 
-    // Fallback : flux sortants stock
-    let qualiteData = qualites.rows;
+    // Repli 1 : expéditions physiques (vraies colonnes : valeur_euros, catégorie)
     if (qualiteData.length === 0) {
-      const flux = await pool.query(`
-        SELECT m.nom as qualite, SUM(sm.poids_kg) / 1000.0 as tonnes
-        FROM stock_movements sm
-        JOIN categories_sortantes m ON sm.matiere_id = m.id
-        WHERE sm.type = 'sortie' AND EXTRACT(YEAR FROM sm.date) = $1
-        GROUP BY m.nom
-      `, [year]).catch(() => ({ rows: [] }));
-      qualiteData = flux.rows;
+      try {
+        const exp = await pool.query(`
+          SELECT cs.nom AS qualite, SUM(e.poids_kg) / 1000.0 AS tonnes,
+                 SUM(e.valeur_euros) AS ca_ht
+          FROM expeditions e
+          JOIN categories_sortantes cs ON e.categorie_sortante_id = cs.id
+          WHERE EXTRACT(YEAR FROM e.date) = $1
+          GROUP BY cs.nom
+          HAVING SUM(e.poids_kg) > 0
+        `, [year]);
+        if (exp.rows.length > 0) { qualiteData = exp.rows; qualitesSource = 'expeditions'; }
+      } catch (e) {
+        console.error('[FINANCE] rentabilité — source expéditions indisponible :', e.code || e.message);
+      }
+    }
+
+    // Repli 2 : mouvements de stock sortants (tonnage seul, aucun CA)
+    if (qualiteData.length === 0) {
+      try {
+        const flux = await pool.query(`
+          SELECT m.nom as qualite, SUM(sm.poids_kg) / 1000.0 as tonnes, NULL::numeric as ca_ht
+          FROM stock_movements sm
+          JOIN categories_sortantes m ON sm.matiere_id = m.id
+          WHERE sm.type = 'sortie' AND EXTRACT(YEAR FROM sm.date) = $1
+          GROUP BY m.nom
+        `, [year]);
+        if (flux.rows.length > 0) { qualiteData = flux.rows; qualitesSource = 'stock_movements'; }
+      } catch (e) {
+        console.error('[FINANCE] rentabilité — source stock indisponible :', e.code || e.message);
+      }
     }
 
     // 5. Calcul coût complet
@@ -1542,6 +1598,10 @@ router.get('/rentabilite/:year', async (req, res) => {
         ratio_tri: rd(ratioTri * 100),
       },
       qualites: qualiteAnalyse,
+      // Traçabilité de la source du CA par qualité (pour la note méthodo + bandeau
+      // « données indisponibles » côté frontend, plutôt que des zéros silencieux).
+      qualites_source: qualitesSource,
+      qualites_indisponible: qualiteData.length === 0,
       totaux: {
         tonnes_collectees: rd(tonnesCollectees),
         tonnes_au_tri: rd(tonnesAuTri),
@@ -1555,6 +1615,167 @@ router.get('/rentabilite/:year', async (req, res) => {
     });
   } catch (err) {
     console.error('[FINANCE] Erreur rentabilité :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// RAPPROCHEMENT CA OPÉRATIONNEL vs COMPTABLE (item 36, Vague 1)
+// ══════════════════════════════════════════
+// Vue de CONTRÔLE (jamais injectée dans le P&L, qui reste dérivé du seul GL).
+// Compare, par activité et par mois, le CA généré sur le terrain (commandes
+// exutoires clôturées, ventes boutiques HT, ventes VAK HT) au CA comptabilisé
+// (comptes 70 du Grand Livre Pennylane). Les subventions Refashion saisies sont
+// rapprochées des comptes 74. L'écart révèle un CA terrain non comptabilisé
+// (ex. caisse boutique/VAK non passée en compta) — absent de tout garde-fou avant.
+router.get('/rapprochement-ca/:year', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+    if (Number.isNaN(year)) return res.status(400).json({ error: 'Année invalide' });
+    const rd = (v) => Math.round((Number(v) || 0) * 100) / 100;
+    const toMonthly = (rows) => {
+      const arr = Array(12).fill(0);
+      for (const r of rows) {
+        const m = parseInt(r.mois) - 1;
+        if (m >= 0 && m < 12) arr[m] += parseFloat(r.ca) || 0;
+      }
+      return arr.map(rd);
+    };
+    const sources = { exutoires: false, boutiques: false, vak: false, gl: false, subventions: false };
+
+    // ── CA opérationnel : exutoires (commandes clôturées/facturées) ──
+    let exutoiresMensuel = Array(12).fill(0);
+    try {
+      const r = await pool.query(`
+        SELECT EXTRACT(MONTH FROM c.date_commande)::int AS mois,
+               SUM(COALESCE(fx.montant_ht,
+                            cp.pesee_client * c.prix_tonne,
+                            c.tonnage_prevu * c.prix_tonne, 0)) AS ca
+        FROM commandes_exutoires c
+        LEFT JOIN LATERAL (
+          SELECT pesee_client FROM controles_pesee
+          WHERE commande_id = c.id ORDER BY id DESC LIMIT 1
+        ) cp ON true
+        LEFT JOIN LATERAL (
+          SELECT montant_ht FROM factures_exutoires
+          WHERE commande_id = c.id AND source = 'pennylane' AND montant_ht IS NOT NULL
+          ORDER BY id DESC LIMIT 1
+        ) fx ON true
+        WHERE EXTRACT(YEAR FROM c.date_commande) = $1
+          AND c.statut IN ('facturee', 'cloturee')
+        GROUP BY EXTRACT(MONTH FROM c.date_commande)
+      `, [year]);
+      exutoiresMensuel = toMonthly(r.rows);
+      sources.exutoires = true;
+    } catch (e) {
+      console.error('[FINANCE] rapprochement — exutoires indisponible :', e.code || e.message);
+    }
+
+    // ── CA opérationnel : boutiques (caisse LogicS, base HT) ──
+    let boutiquesMensuel = Array(12).fill(0);
+    try {
+      const r = await pool.query(`
+        SELECT EXTRACT(MONTH FROM date_vente)::int AS mois, SUM(total_ht) AS ca
+        FROM boutique_ventes
+        WHERE EXTRACT(YEAR FROM date_vente) = $1
+        GROUP BY EXTRACT(MONTH FROM date_vente)
+      `, [year]);
+      boutiquesMensuel = toMonthly(r.rows);
+      sources.boutiques = true;
+    } catch (e) {
+      console.error('[FINANCE] rapprochement — boutiques indisponible :', e.code || e.message);
+    }
+
+    // ── CA opérationnel : VAK (caisse SumUp, base HT) ──
+    let vakMensuel = Array(12).fill(0);
+    try {
+      const r = await pool.query(`
+        SELECT EXTRACT(MONTH FROM date_vente)::int AS mois, SUM(total_ht) AS ca
+        FROM vak_ventes
+        WHERE EXTRACT(YEAR FROM date_vente) = $1
+        GROUP BY EXTRACT(MONTH FROM date_vente)
+      `, [year]);
+      vakMensuel = toMonthly(r.rows);
+      sources.vak = true;
+    } catch (e) {
+      console.error('[FINANCE] rapprochement — VAK indisponible :', e.code || e.message);
+    }
+
+    // ── CA comptable : comptes 70 (ventes) et 74 (subventions) du GL ──
+    let ventesComptaMensuel = Array(12).fill(0);
+    let subvComptaMensuel = Array(12).fill(0);
+    try {
+      const r70 = await pool.query(`
+        SELECT EXTRACT(MONTH FROM g.date)::int AS mois, SUM(g.credit - g.debit) AS ca
+        FROM financial_gl_entries g
+        JOIN financial_exercises e ON g.exercise_id = e.id
+        WHERE e.year = $1 AND g.account LIKE '70%'
+        GROUP BY EXTRACT(MONTH FROM g.date)
+      `, [year]);
+      ventesComptaMensuel = toMonthly(r70.rows);
+      const r74 = await pool.query(`
+        SELECT EXTRACT(MONTH FROM g.date)::int AS mois, SUM(g.credit - g.debit) AS ca
+        FROM financial_gl_entries g
+        JOIN financial_exercises e ON g.exercise_id = e.id
+        WHERE e.year = $1 AND g.account LIKE '74%'
+        GROUP BY EXTRACT(MONTH FROM g.date)
+      `, [year]);
+      subvComptaMensuel = toMonthly(r74.rows);
+      sources.gl = true;
+    } catch (e) {
+      console.error('[FINANCE] rapprochement — GL comptes 7 indisponible :', e.code || e.message);
+    }
+
+    // ── Subventions Refashion saisies (opérationnel) ──
+    let subvOperationnelAnnuel = 0;
+    try {
+      const r = await pool.query(
+        `SELECT COALESCE(SUM(montant_total), 0) AS montant FROM refashion_subventions WHERE annee = $1`,
+        [year]
+      );
+      subvOperationnelAnnuel = rd(r.rows[0]?.montant);
+      sources.subventions = true;
+    } catch (e) {
+      console.error('[FINANCE] rapprochement — subventions Refashion indisponible :', e.code || e.message);
+    }
+
+    // ── Agrégats ──
+    const sumArr = (a) => rd(a.reduce((s, v) => s + v, 0));
+    const operationnelMensuel = Array.from({ length: 12 }, (_, i) =>
+      rd(exutoiresMensuel[i] + boutiquesMensuel[i] + vakMensuel[i]));
+    const ventesOpAnnuel = sumArr(operationnelMensuel);
+    const ventesComptaAnnuel = sumArr(ventesComptaMensuel);
+    const subvComptaAnnuel = sumArr(subvComptaMensuel);
+    const pct = (ecart, base) => (base && base !== 0 ? rd((ecart / Math.abs(base)) * 100) : null);
+    const ventesEcart = rd(ventesOpAnnuel - ventesComptaAnnuel);
+    const subvEcart = rd(subvOperationnelAnnuel - subvComptaAnnuel);
+
+    res.json({
+      year,
+      sources,
+      ventes: {
+        activites: [
+          { cle: 'exutoires', libelle: 'Exutoires (commandes clôturées)', mensuel: exutoiresMensuel, annuel: sumArr(exutoiresMensuel) },
+          { cle: 'boutiques', libelle: 'Boutiques (caisse, HT)', mensuel: boutiquesMensuel, annuel: sumArr(boutiquesMensuel) },
+          { cle: 'vak', libelle: 'Vente au Kilo (caisse, HT)', mensuel: vakMensuel, annuel: sumArr(vakMensuel) },
+        ],
+        operationnel_mensuel: operationnelMensuel,
+        operationnel_annuel: ventesOpAnnuel,
+        comptable_mensuel: ventesComptaMensuel,
+        comptable_annuel: ventesComptaAnnuel,
+        ecart_annuel: ventesEcart,
+        ecart_pct: pct(ventesEcart, ventesComptaAnnuel),
+      },
+      subventions: {
+        operationnel_annuel: subvOperationnelAnnuel,
+        comptable_mensuel: subvComptaMensuel,
+        comptable_annuel: subvComptaAnnuel,
+        ecart_annuel: subvEcart,
+        ecart_pct: pct(subvEcart, subvComptaAnnuel),
+      },
+    });
+  } catch (err) {
+    console.error('[FINANCE] Erreur rapprochement-ca :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

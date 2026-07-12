@@ -215,15 +215,23 @@ export async function updatePendingIncident(id, patch) {
 }
 
 /**
- * Ajoute une collecte en attente.
- * @param {object} data - { tourId, cavId, fillLevel, anomaly?, notes?, qrScanned }
+ * Ajoute une collecte OU un saut de point en attente.
+ * @param {object} data - {
+ *   tourId, cavId, action?='collect'|'skip', fillLevel?, skipReason?,
+ *   anomaly?, notes?, qrScanned?
+ * }
+ * - action='skip' : le CAV est marqué « impossible à collecter » (skipReason
+ *   inaccessible/bouché/vide/…), sans niveau de remplissage.
  */
 export async function addPendingCollect(data) {
+  const action = data.action === 'skip' ? 'skip' : 'collect';
   return putItem(STORES.pendingCollects, {
     clientId: data.clientId || newClientId(),
     tourId: data.tourId,
     cavId: data.cavId,
-    fillLevel: data.fillLevel,
+    action,
+    fillLevel: action === 'skip' ? null : data.fillLevel,
+    skipReason: action === 'skip' ? (data.skipReason || null) : null,
     anomaly: data.anomaly || null,
     notes: data.notes || null,
     qrScanned: !!data.qrScanned,

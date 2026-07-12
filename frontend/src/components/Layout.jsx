@@ -11,7 +11,7 @@ import {
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
-  TrendingUp,
+  TrendingUp, AlertTriangle,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -49,6 +49,7 @@ const NAV_TREE = [
             ],
           },
           { label: 'Collecte en direct', path: '/collections-live', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Incidents', path: '/incidents', icon: AlertTriangle, roles: ['ADMIN', 'MANAGER'] },
           { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['ADMIN', 'MANAGER'] },
           {
             label: 'Réglages',
@@ -166,6 +167,7 @@ const NAV_TREE = [
           { label: "Parcours d'insertion", path: '/insertion', icon: Heart, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Audit insertion', path: '/insertion/audit', icon: ClipboardList, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Compétences', path: '/skills', icon: Star, roles: ['ADMIN', 'RH'] },
+          { label: 'Prescripteurs', path: '/prescripteurs', icon: Building2, roles: ['ADMIN', 'RH'] },
         ],
       },
     ],
