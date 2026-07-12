@@ -8,6 +8,9 @@ import { useAuth } from '../contexts/AuthContext';
 export default function Pennylane() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
+  // FINANCE = consultation seule (vague 2) : test/imports (POST) refusés par
+  // l'API (403) → boutons masqués. Balances (GET) et lien Pennylane restent.
+  const canEdit = ['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
   const [status, setStatus] = useState(null);
   const [config, setConfig] = useState(null);
   const [history, setHistory] = useState([]);
@@ -188,6 +191,7 @@ export default function Pennylane() {
         <Section title="Actions de synchronisation">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Test connexion */}
+            {canEdit && (
             <button
               onClick={testConnection}
               disabled={testing || !status?.configured}
@@ -201,8 +205,10 @@ export default function Pennylane() {
                 <p className="text-xs text-slate-400">Verifier l'API Pennylane</p>
               </div>
             </button>
+            )}
 
             {/* Pull factures clients (contrôle facturation) */}
+            {canEdit && (
             <button
               onClick={syncInvoices}
               disabled={syncing || !status?.active}
@@ -216,8 +222,10 @@ export default function Pennylane() {
                 <p className="text-xs text-slate-400">Depuis Pennylane (contrôle facturation)</p>
               </div>
             </button>
+            )}
 
             {/* Pull GL analytique */}
+            {canEdit && (
             <button
               onClick={syncGL}
               disabled={syncingGL || !status?.active}
@@ -231,8 +239,10 @@ export default function Pennylane() {
                 <p className="text-xs text-slate-400">Grand livre + catégories analytiques</p>
               </div>
             </button>
+            )}
 
             {/* Pull transactions */}
+            {canEdit && (
             <button
               onClick={syncTransactions}
               disabled={syncingTx || !status?.active}
@@ -246,6 +256,7 @@ export default function Pennylane() {
                 <p className="text-xs text-slate-400">Importer les transactions</p>
               </div>
             </button>
+            )}
 
             {/* Balances comptables */}
             <button

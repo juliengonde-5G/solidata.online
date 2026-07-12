@@ -6,6 +6,7 @@ import {
 const IconPL = BarChart3;
 import Layout from '../components/Layout';
 import api from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import { PageHeader, KPICard, LoadingSpinner, EmptyState, Section } from '../components';
 
 // ══════════════════════════════════════════
@@ -49,6 +50,10 @@ const CATEGORIES = [
 ];
 
 export default function FinanceOperations() {
+  const { user } = useAuth();
+  // FINANCE = consultation seule (vague 2) : le backend refuse déjà les
+  // écritures (403 méthode-based), on masque donc la saisie côté UI.
+  const canEdit = ['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
   const [year, setYear] = useState(new Date().getFullYear());
   const [autoData, setAutoData] = useState(null);
   const [overrides, setOverrides] = useState({});
@@ -134,13 +139,15 @@ export default function FinanceOperations() {
                   <option key={y} value={y}>{y}</option>
                 ))}
               </select>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="btn-primary text-sm"
-              >
-                {saving ? 'Sauvegarde...' : saved ? 'Sauvegarde !' : 'Sauvegarder'}
-              </button>
+              {canEdit && (
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="btn-primary text-sm"
+                >
+                  {saving ? 'Sauvegarde...' : saved ? 'Sauvegarde !' : 'Sauvegarder'}
+                </button>
+              )}
             </div>
           }
         />
@@ -186,7 +193,9 @@ export default function FinanceOperations() {
                             value={overrides[field.key] ?? ''}
                             onChange={(e) => handleOverride(field.key, e.target.value)}
                             placeholder="—"
-                            className="w-32 ml-auto text-right px-2 py-1 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                            disabled={!canEdit}
+                            title={canEdit ? undefined : 'Consultation seule'}
+                            className="w-32 ml-auto text-right px-2 py-1 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
                           />
                         </td>
                         <td className="px-4 py-3 text-right font-semibold text-slate-800">

@@ -83,7 +83,15 @@ function computePeseeReconciliation({ pesee_interne, pesee_client, pesee_cartons
   };
 }
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate);
+// Vague 2 (item 54/58) — le rôle QHSE consulte les contrôles de pesée
+// (réconciliation triple pesée = mission qualité) en LECTURE : GET ouvert à
+// ADMIN/MANAGER/QHSE, écritures (POST/PUT upload ticket, validation) réservées
+// à ADMIN/MANAGER. Filtrage par méthode → fail-safe pour toute nouvelle route.
+router.use((req, res, next) => {
+  const roles = req.method === 'GET' ? ['ADMIN', 'MANAGER', 'QHSE'] : ['ADMIN', 'MANAGER'];
+  return authorize(...roles)(req, res, next);
+});
 
 // GET /api/controles-pesee — List all controles
 router.get('/', async (req, res) => {

@@ -51,6 +51,11 @@ const MODULE_CATALOG = [
   { key: 'vak', label: 'Vente au Kilo' },
   { key: 'rh', label: 'RH et Insertion' },
   { key: 'equipe', label: "Gestion d'équipe" },
+  // Vague 2 : nouvelles sections de 1er niveau (Layout.jsx filtre sur section.id).
+  // Présentes ici pour que la matrice d'habilitations puisse aussi les masquer
+  // (DENY-overlay : absence de ligne = autorisé, donc aucun impact par défaut).
+  { key: 'qhse', label: 'QHSE' },
+  { key: 'audit', label: 'Audit & conformité (auditeur AUTORITE)' },
   { key: 'analyse', label: 'Analyse & Finances' },
   { key: 'admin', label: 'Administration' },
 ];

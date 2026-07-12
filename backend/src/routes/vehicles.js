@@ -205,7 +205,7 @@ router.get('/', async (req, res) => {
 // remarques/anomalies) n'était consultable par aucun écran web. On expose ici
 // les dernières checklists avec date, chauffeur, état et NOTES (anomalies) mises
 // en évidence côté UI (fiche véhicule).
-router.get('/:id/checklists', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/checklists', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT vc.id, vc.tour_id, vc.exterior_ok, vc.fuel_level, vc.km_start, vc.km_end,
@@ -819,7 +819,7 @@ router.get('/maintenance/profiles-db/:id', async (req, res) => {
 });
 
 // GET /api/vehicles/maintenance/overview — Vue d'ensemble maintenance flotte
-router.get('/maintenance/overview', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/maintenance/overview', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT v.id, v.name, v.registration, v.current_km, v.status,
@@ -1134,7 +1134,7 @@ const DOC_TYPES = [
 ];
 
 // GET /api/vehicles/:id/documents — Liste des documents d'un véhicule
-router.get('/:id/documents', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/documents', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT vd.*, COALESCE(u.first_name || ' ' || u.last_name, 'Système') as created_by_name
@@ -1205,7 +1205,7 @@ router.post('/:id/documents', authorize('ADMIN', 'MANAGER'), uploadVehicleDoc.si
 });
 
 // GET /api/vehicles/:id/documents/:docId/download — Télécharger un document
-router.get('/:id/documents/:docId/download', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/documents/:docId/download', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT filename, original_name, mime_type FROM vehicle_documents WHERE id = $1 AND vehicle_id = $2',

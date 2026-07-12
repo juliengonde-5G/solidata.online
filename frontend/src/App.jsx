@@ -128,7 +128,7 @@ function HomeRedirect() {
     AUTORITE: '/reporting-metropole',
     DPO: '/rgpd',
     FINANCE: '/finance',
-    QHSE: '/incidents',
+    QHSE: '/qhse/accidents', // module QHSE (item 58) = espace principal du rôle ; /incidents reste au menu
   }[base];
   if (landing) return <Navigate to={landing} replace />;
   return <Dashboard />;

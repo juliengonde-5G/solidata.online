@@ -1320,28 +1320,9 @@ async function initDatabase() {
       ALTER TABLE tour_weights ADD COLUMN IF NOT EXISTS notes TEXT;
     `);
 
-    // ── Vague 2 (item 62) — Canal manager → chauffeur ─────────────────────
-    // Le responsable logistique n'avait aucun moyen de joindre un chauffeur en
-    // tournée (consigne, CAV ajouté, danger signalé). Le manager écrit un message
-    // ciblant un VÉHICULE (le camion physique que le chauffeur conduit), avec
-    // éventuellement la tournée du jour en contexte. Le mobile poll les messages
-    // non lus (read_at NULL) et affiche une bannière ; « J'ai compris » pose
-    // read_at → le manager voit l'accusé de lecture.
-    // CREATE TABLE IF NOT EXISTS : idempotent + sûr sur base neuve (tours,
-    // vehicles, users existent déjà — module 5 plus haut). Pas d'ALTER ici.
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS driver_messages (
-        id SERIAL PRIMARY KEY,
-        tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
-        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
-        message TEXT NOT NULL,
-        created_by INTEGER REFERENCES users(id),
-        created_at TIMESTAMP DEFAULT NOW(),
-        read_at TIMESTAMP
-      );
-    `);
-    await client.query('CREATE INDEX IF NOT EXISTS idx_driver_messages_vehicle ON driver_messages(vehicle_id, read_at);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_driver_messages_tour ON driver_messages(tour_id);');
+    // NB : la table driver_messages (canal manager → chauffeur, item 62) est
+    // créée au Module 5 (Collecte), après vehicle_checklists — un second CREATE
+    // dupliqué ici a été retiré au debug vague 2 (divergence sur ON DELETE).
 
     // Tables pour exécution tri et colisages
     await client.query(`

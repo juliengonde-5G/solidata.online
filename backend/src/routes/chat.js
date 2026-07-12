@@ -397,8 +397,8 @@ async function queryPlanning({ employee_id }, userCtx) {
   }
   if (!empId) return JSON.stringify({ error: "Impossible de déterminer l'employé." });
 
-  // RGPD : COLLABORATEUR ne voit que son propre planning
-  if (userCtx.role === 'COLLABORATEUR') {
+  // RGPD : COLLABORATEUR (y compris rôle personnalisé dérivé) ne voit que son propre planning
+  if (resolveBaseRole(userCtx.role) === 'COLLABORATEUR') {
     const own = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userCtx.userId]);
     if (!own.rows[0] || own.rows[0].id !== empId) {
       return JSON.stringify({ error: 'Tu ne peux consulter que ton propre planning.' });
@@ -467,7 +467,7 @@ async function queryHeures({ employee_id, periode = 'semaine' }, userCtx) {
   }
   if (!empId) return JSON.stringify({ error: "Impossible de déterminer l'employé." });
 
-  if (userCtx.role === 'COLLABORATEUR') {
+  if (resolveBaseRole(userCtx.role) === 'COLLABORATEUR') {
     const own = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userCtx.userId]);
     if (!own.rows[0] || own.rows[0].id !== empId) {
       return JSON.stringify({ error: 'Tu ne peux consulter que tes propres heures.' });
