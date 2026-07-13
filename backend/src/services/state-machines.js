@@ -116,7 +116,11 @@ const BOUTIQUE_COMMANDE = {
   terminal: ['expediee', 'annulee'],
   states: ['brouillon', 'envoyee', 'ajustee', 'en_preparation', 'expediee', 'annulee'],
   transitions: {
-    brouillon: { envoyee: { roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] }, annulee: { roles: ['ADMIN', 'MANAGER'] } },
+    // Vague 3 — un RESP_BTQ peut annuler SA commande tant qu'elle est en
+    // brouillon (symétrie avec l'envoi). Le cloisonnement « sa boutique » est
+    // garanti au niveau de la route (enforceBoutiqueForEntity) ; ici on n'ouvre
+    // l'annulation qu'AU STATUT brouillon (les statuts avancés restent ADMIN/MANAGER).
+    brouillon: { envoyee: { roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] }, annulee: { roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] } },
     envoyee: { ajustee: { roles: ['ADMIN', 'MANAGER'] }, annulee: { roles: ['ADMIN', 'MANAGER'] } },
     ajustee: { en_preparation: { roles: ['ADMIN', 'MANAGER'] }, annulee: { roles: ['ADMIN', 'MANAGER'] } },
     en_preparation: { expediee: { roles: ['ADMIN', 'MANAGER'] }, annulee: { roles: ['ADMIN', 'MANAGER'] } },

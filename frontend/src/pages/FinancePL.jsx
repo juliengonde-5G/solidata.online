@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner, Section } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, Section, ErrorState } from '../components';
 
 // ══════════════════════════════════════════
 // FINANCE P&L — Compte de Resultat
@@ -26,6 +26,7 @@ export default function FinancePL() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [error, setError] = useState(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
@@ -36,8 +37,10 @@ export default function FinancePL() {
       if (centre !== 'all') params.centre = centre;
       const res = await api.get(`/finance/gl/${year}/pl`, { params });
       setData(res.data);
+      setError(null);
     } catch (err) {
       console.error('Erreur chargement P&L:', err);
+      setError('Impossible de charger le compte de résultat. Vérifiez votre connexion puis réessayez.');
     }
     setLoading(false);
   }, [year, centre]);
@@ -90,6 +93,10 @@ export default function FinancePL() {
             </div>
           }
         />
+
+        {error && (
+          <ErrorState variant="card" title="Compte de résultat indisponible" message={error} onRetry={loadData} />
+        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

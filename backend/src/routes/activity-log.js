@@ -133,6 +133,20 @@ router.delete('/sessions/:id', authorize('ADMIN'), async (req, res) => {
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Session non trouvée' });
+
+    // Révocation EFFECTIVE (audit vague 3, item 3.C-1) : fermer la ligne de
+    // session ne suffisait pas (le JWT d'accès restait valide jusqu'à 8 h — le
+    // « forcer la déconnexion » était cosmétique). On incrémente token_version
+    // (invalide les access tokens du compte) ET on purge ses refresh tokens
+    // (empêche le renouvellement). NB : granularité PAR UTILISATEUR — une seule
+    // token_version par compte, donc toutes les sessions de l'utilisateur sont
+    // coupées, pas uniquement celle-ci. Amélioration majeure vs l'existant.
+    const uid = result.rows[0].user_id;
+    if (uid != null) {
+      await pool.query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [uid]);
+      await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [uid]);
+    }
+
     res.json({ message: 'Session fermée', session: result.rows[0] });
   } catch (err) {
     console.error('[ACTIVITY-LOG] Erreur delete session :', err);

@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const pool = require('../config/database');
+const { createPseudonymizer, redactContactInfo, ageBracket } = require('../utils/pii-pseudonymize');
 
 // ══════════════════════════════════════════════════════════════
 // SERVICE IA INSERTION — Analyse Claude des profils PCM
@@ -153,13 +154,26 @@ async function analyseProfilComplet(employeeId) {
   const emp = data.employee;
   const diag = data.diagnostic;
 
+  // RGPD (item 3.C-5) : pseudonymisation AVANT envoi à Anthropic. Le prénom/nom
+  // (et le nom du candidat lié, même personne) sont remplacés par un jeton stable
+  // « Salarié A » ; ils sont aussi retirés des textes libres via scrubText. Le
+  // patronyme réel ne quitte pas le serveur ; il est ré-injecté à l'affichage via
+  // rehydrate() (donnée déjà chez nous → confort CIP préservé, RGPD respecté).
+  const pseudo = createPseudonymizer();
+  const ref = pseudo.person({
+    key: `emp-${employeeId}`,
+    first: emp.first_name,
+    last: emp.last_name,
+    names: data.candidate ? [{ first: data.candidate.first_name, last: data.candidate.last_name }] : [],
+  });
+
   const profil = {
     salarie: {
-      prenom: emp.first_name,
-      nom: emp.last_name,
+      reference: ref,
       poste: emp.position_name || 'Non affecté',
       equipe: emp.team_name || 'Non affecté',
       filiere: emp.team_name || emp.position_name || 'Non précisé',
+      tranche_age: ageBracket(emp.birth_date),
       insertion_status: emp.insertion_status,
       date_debut: emp.insertion_start_date || emp.contract_start,
     },
@@ -170,36 +184,36 @@ async function analyseProfilComplet(employeeId) {
       alerte_risque: data.pcm.risk_alert || false,
     } : null,
     freins: diag ? {
-      mobilite: { score: diag.frein_mobilite || diag.mobilite, detail: diag.frein_mobilite_detail },
-      sante: { score: diag.frein_sante || diag.sante, detail: diag.frein_sante_detail },
-      finances: { score: diag.frein_finances || diag.finances, detail: diag.frein_finances_detail },
-      famille: { score: diag.frein_famille || diag.famille, detail: diag.frein_famille_detail },
-      linguistique: { score: diag.frein_linguistique || diag.linguistique, detail: diag.frein_linguistique_detail },
-      administratif: { score: diag.frein_administratif || diag.administratif, detail: diag.frein_administratif_detail },
-      numerique: { score: diag.frein_numerique || diag.numerique, detail: diag.frein_numerique_detail },
+      mobilite: { score: diag.frein_mobilite || diag.mobilite, detail: pseudo.scrubText(diag.frein_mobilite_detail) },
+      sante: { score: diag.frein_sante || diag.sante, detail: pseudo.scrubText(diag.frein_sante_detail) },
+      finances: { score: diag.frein_finances || diag.finances, detail: pseudo.scrubText(diag.frein_finances_detail) },
+      famille: { score: diag.frein_famille || diag.famille, detail: pseudo.scrubText(diag.frein_famille_detail) },
+      linguistique: { score: diag.frein_linguistique || diag.linguistique, detail: pseudo.scrubText(diag.frein_linguistique_detail) },
+      administratif: { score: diag.frein_administratif || diag.administratif, detail: pseudo.scrubText(diag.frein_administratif_detail) },
+      numerique: { score: diag.frein_numerique || diag.numerique, detail: pseudo.scrubText(diag.frein_numerique_detail) },
     } : null,
     observations: diag ? {
-      points_forts: diag.obs_points_forts,
-      difficultes: diag.obs_difficultes,
-      comportement_equipe: diag.obs_comportement_equipe,
-      parcours_anterieur: diag.parcours_anterieur,
+      points_forts: pseudo.scrubText(diag.obs_points_forts),
+      difficultes: pseudo.scrubText(diag.obs_difficultes),
+      comportement_equipe: pseudo.scrubText(diag.obs_comportement_equipe),
+      parcours_anterieur: pseudo.scrubText(diag.parcours_anterieur),
     } : null,
     jalons: data.milestones.map(m => ({
       type: m.milestone_type,
       statut: m.status,
       date_prevue: m.due_date,
       date_realise: m.completed_date,
-      avis_global: m.avis_global,
-      bilan: m.bilan_professionnel,
+      avis_global: pseudo.scrubText(m.avis_global),
+      bilan: pseudo.scrubText(m.bilan_professionnel),
     })),
     actions_en_cours: data.actionPlans.filter(a => a.status !== 'realise' && a.status !== 'abandonne').map(a => ({
-      label: a.action_label,
+      label: pseudo.scrubText(a.action_label),
       categorie: a.category,
       priorite: a.priority,
       statut: a.status,
       echeance: a.echeance,
     })),
-    entretien_recrutement: data.candidate?.interview_comment || null,
+    entretien_recrutement: pseudo.scrubText(data.candidate?.interview_comment || null),
   };
 
   const response = await anthropic.messages.create({
@@ -224,7 +238,9 @@ Réponds en JSON avec les clés :
   });
 
   const text = extractText(response);
-  return parseJsonLoose(text) || { synthese: text || 'Aucun contenu renvoyé par le modèle.' };
+  const parsed = parseJsonLoose(text) || { synthese: text || 'Aucun contenu renvoyé par le modèle.' };
+  // Ré-hydratation : le jeton « Salarié A » redevient le nom réel pour le CIP.
+  return pseudo.rehydrate(parsed);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -239,8 +255,17 @@ async function preparerEntretien(employeeId, milestoneType) {
   const emp = data.employee;
   const diag = data.diagnostic;
 
+  // RGPD (item 3.C-5) : pseudonymisation avant Anthropic (cf. analyseProfilComplet).
+  const pseudo = createPseudonymizer();
+  const ref = pseudo.person({
+    key: `emp-${employeeId}`,
+    first: emp.first_name,
+    last: emp.last_name,
+    names: data.candidate ? [{ first: data.candidate.first_name, last: data.candidate.last_name }] : [],
+  });
+
   const context = {
-    salarie: { prenom: emp.first_name, poste: emp.position_name, equipe: emp.team_name },
+    salarie: { reference: ref, poste: emp.position_name, equipe: emp.team_name, tranche_age: ageBracket(emp.birth_date) },
     type_entretien: milestoneType,
     pcm_type: data.pcm?.base?.type || data.pcm?.base_type || null,
     freins_actuels: diag ? {
@@ -253,9 +278,9 @@ async function preparerEntretien(employeeId, milestoneType) {
       numerique: diag.frein_numerique || diag.numerique,
     } : null,
     jalons_precedents: data.milestones.filter(m => m.status === 'realise').map(m => ({
-      type: m.milestone_type, avis: m.avis_global, bilan: m.bilan_professionnel,
+      type: m.milestone_type, avis: pseudo.scrubText(m.avis_global), bilan: pseudo.scrubText(m.bilan_professionnel),
     })),
-    actions_en_cours: data.actionPlans.filter(a => a.status === 'en_cours').map(a => a.action_label),
+    actions_en_cours: data.actionPlans.filter(a => a.status === 'en_cours').map(a => pseudo.scrubText(a.action_label)),
   };
 
   const response = await anthropic.messages.create({
@@ -279,7 +304,8 @@ Réponds en JSON :
   });
 
   const text = extractText(response);
-  return parseJsonLoose(text) || { intro_conseillee: text || 'Aucun contenu renvoyé par le modèle.' };
+  const parsed = parseJsonLoose(text) || { intro_conseillee: text || 'Aucun contenu renvoyé par le modèle.' };
+  return pseudo.rehydrate(parsed);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -327,10 +353,14 @@ async function bilanCohorte() {
       AND e.is_active = true
   `).catch((e) => { console.error(`[INSERTION-AI] cohorte/actions ignoré (${e.code || '?'}) : ${e.message}`); return { rows: [] }; });
 
+  // RGPD (item 3.C-5) : chaque salarié de la cohorte reçoit un jeton stable par id
+  // (« Salarié A »…), partagé entre profils / jalons en retard / actions en retard.
+  // Anthropic ne voit que les jetons ; rehydrate() restitue les noms au CIP.
+  const pseudo = createPseudonymizer();
   const cohorteData = {
     nb_salaries_actifs: actifs.rows.length,
     profils: actifs.rows.map(e => ({
-      nom: `${e.first_name} ${e.last_name}`,
+      reference: pseudo.person({ key: `emp-${e.id}`, first: e.first_name, last: e.last_name }),
       poste: e.position_name,
       equipe: e.team_name,
       anciennete_mois: e.insertion_start_date
@@ -347,13 +377,13 @@ async function bilanCohorte() {
       },
     })),
     jalons_en_retard: retards.rows.map(r => ({
-      salarie: `${r.first_name} ${r.last_name}`,
+      salarie: pseudo.person({ key: `emp-${r.employee_id}`, first: r.first_name, last: r.last_name }),
       jalon: r.milestone_type,
       date_prevue: r.due_date,
     })),
     actions_en_retard: actionsRetard.rows.map(a => ({
-      salarie: `${a.first_name} ${a.last_name}`,
-      action: a.action_label,
+      salarie: pseudo.person({ key: `emp-${a.employee_id}`, first: a.first_name, last: a.last_name }),
+      action: pseudo.scrubText(a.action_label),
       echeance: a.echeance,
       priorite: a.priority,
     })),
@@ -380,7 +410,9 @@ Réponds en JSON :
   });
 
   const text = extractText(response);
-  return parseJsonLoose(text) || { synthese: text || 'Aucun contenu renvoyé par le modèle.' };
+  const parsed = parseJsonLoose(text) || { synthese: text || 'Aucun contenu renvoyé par le modèle.' };
+  // Ré-hydratation des jetons « Salarié X » → noms réels dans les alertes de cohorte.
+  return pseudo.rehydrate(parsed);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -393,7 +425,17 @@ async function auditGlobalReport({ kpis, verbatims }) {
   const anthropic = getClient();
   if (!anthropic) throw new Error('ANTHROPIC_API_KEY non configurée');
 
-  const payload = { indicateurs_chiffres: kpis, verbatims_anonymises: verbatims };
+  // RGPD (item 3.C-5) : les verbatims sont déjà agrégés/anonymisés en amont
+  // (gatherAuditVerbatims + consigne système « ne cite AUCUN nom »). Défense en
+  // profondeur : on masque en plus toute coordonnée résiduelle (email, téléphone,
+  // NIR, titre de séjour…) qu'un agent aurait pu saisir dans un texte libre.
+  const redactDeep = (v) => {
+    if (typeof v === 'string') return redactContactInfo(v);
+    if (Array.isArray(v)) return v.map(redactDeep);
+    if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v)) o[k] = redactDeep(v[k]); return o; }
+    return v;
+  };
+  const payload = { indicateurs_chiffres: kpis, verbatims_anonymises: redactDeep(verbatims) };
 
   const response = await anthropic.messages.create({
     model: MODEL,

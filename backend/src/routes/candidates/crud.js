@@ -85,28 +85,42 @@ router.post('/', authorize('ADMIN', 'RH'), [
   try {
     const { first_name, last_name, email, phone, gender, has_permis_b, has_caces, source_email, assigned_team_id } = req.body;
 
-    const result = await pool.query(
-      `INSERT INTO candidates (first_name, last_name, email, phone, gender, has_permis_b, has_caces, source_email, assigned_team_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [first_name, last_name, email, phone, gender, has_permis_b || false, has_caces || false, source_email, assigned_team_id]
-    );
-
-    // Historique
-    await pool.query(
-      'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
-      [result.rows[0].id, 'received', 'Candidature créée', req.user.id]
-    );
-
-    // Compétences initiales (hardcodés + DB)
+    // Compétences initiales à semer (lecture hors transaction)
     const patterns = await getSkillPatterns();
-    for (const skill of Object.keys(patterns)) {
-      await pool.query(
-        'INSERT INTO candidate_skills (candidate_id, skill_name, status, updated_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-        [result.rows[0].id, skill, 'not_mentioned', req.user.id]
-      );
-    }
 
-    res.status(201).json(result.rows[0]);
+    // Création ATOMIQUE : candidat + trace d'historique + compétences initiales.
+    // Auparavant ces 3 écritures étaient hors transaction — un échec après l'INSERT
+    // candidat laissait une fiche sans historique ni compétences.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `INSERT INTO candidates (first_name, last_name, email, phone, gender, has_permis_b, has_caces, source_email, assigned_team_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        [first_name, last_name, email, phone, gender, has_permis_b || false, has_caces || false, source_email, assigned_team_id]
+      );
+      const candidateId = result.rows[0].id;
+
+      await client.query(
+        'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
+        [candidateId, 'received', 'Candidature créée', req.user.id]
+      );
+
+      for (const skill of Object.keys(patterns)) {
+        await client.query(
+          'INSERT INTO candidate_skills (candidate_id, skill_name, status, updated_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+          [candidateId, skill, 'not_mentioned', req.user.id]
+        );
+      }
+
+      await client.query('COMMIT');
+      res.status(201).json(result.rows[0]);
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error('[CANDIDATES] Erreur création :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -163,32 +177,43 @@ router.post('/upload-cv-new', authorize('ADMIN', 'RH'), (req, res, next) => {
     const skillPatterns = await getSkillPatterns();
     const extracted = await extractFromCV(rawText, skillPatterns);
 
-    const result = await pool.query(
-      `INSERT INTO candidates (first_name, last_name, email, phone, cv_file_path, cv_raw_text,
-       has_permis_b, has_caces, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received') RETURNING *`,
-      [
-        extracted.firstName, extracted.lastName, extracted.email, extracted.phone,
-        filePath, rawText,
-        extracted.skills.permis_b === 'detected',
-        extracted.skills.caces === 'detected',
-      ]
-    );
-
-    const candidateId = result.rows[0].id;
-
-    // Historique
-    await pool.query(
-      'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
-      [candidateId, 'received', 'Candidature créée depuis upload CV', req.user.id]
-    );
-
-    // Compétences
-    for (const [skill, status] of Object.entries(extracted.skills)) {
-      await pool.query(
-        'INSERT INTO candidate_skills (candidate_id, skill_name, status, updated_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-        [candidateId, skill, status, req.user.id]
+    // Création ATOMIQUE : candidat (issu du CV) + historique + compétences détectées.
+    // Le parsing du CV ci-dessus reste hors transaction (I/O fichier, potentiellement lent).
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await client.query(
+        `INSERT INTO candidates (first_name, last_name, email, phone, cv_file_path, cv_raw_text,
+         has_permis_b, has_caces, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received') RETURNING *`,
+        [
+          extracted.firstName, extracted.lastName, extracted.email, extracted.phone,
+          filePath, rawText,
+          extracted.skills.permis_b === 'detected',
+          extracted.skills.caces === 'detected',
+        ]
       );
+      const candidateId = result.rows[0].id;
+
+      await client.query(
+        'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
+        [candidateId, 'received', 'Candidature créée depuis upload CV', req.user.id]
+      );
+
+      for (const [skill, status] of Object.entries(extracted.skills)) {
+        await client.query(
+          'INSERT INTO candidate_skills (candidate_id, skill_name, status, updated_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+          [candidateId, skill, status, req.user.id]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
     }
 
     res.status(201).json({

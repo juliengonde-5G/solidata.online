@@ -7,6 +7,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { generateKey, sha256 } = require('../middleware/api-key');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { logActivity } = require('../middleware/activity-logger');
 
 router.use(authenticate, authorize('ADMIN'));
 
@@ -50,6 +51,14 @@ router.post('/',
           req.user.id,
         ]
       );
+      // Journalisation (item 3.C-7) : création de clé API. On journalise UNIQUEMENT
+      // le préfixe (identifiant public) — JAMAIS la clé en clair (gen.full).
+      logActivity({
+        userId: req.user.id, username: req.user.username, action: 'api_key_create',
+        entityType: 'api_key', entityId: r.rows[0].id,
+        details: { name: r.rows[0].name, key_prefix: r.rows[0].key_prefix, scopes: r.rows[0].scopes },
+        ip: req.ip,
+      });
       res.status(201).json({
         key: gen.full, // à montrer une seule fois à l'admin
         ...r.rows[0],
@@ -81,6 +90,18 @@ router.put('/:id', async (req, res) => {
       params
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Clé non trouvée' });
+    // Journalisation (item 3.C-7) : modification de clé (dont activation/révocation).
+    // Détails = champs modifiés (jamais de secret) + nouvel état actif si fourni.
+    logActivity({
+      userId: req.user.id, username: req.user.username, action: 'api_key_update',
+      entityType: 'api_key', entityId: parseInt(req.params.id, 10) || null,
+      details: {
+        key_prefix: r.rows[0].key_prefix,
+        fields: updates.map((u) => u.split(' = ')[0]),
+        ...(req.body.active !== undefined ? { active: !!req.body.active } : {}),
+      },
+      ip: req.ip,
+    });
     res.json(r.rows[0]);
   } catch (err) {
     console.error('[API-KEYS] update :', err);
@@ -91,7 +112,16 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/admin/api-keys/:id
 router.delete('/:id', async (req, res) => {
   try {
+    // Récupère le préfixe AVANT suppression pour tracer QUELLE clé a été révoquée.
+    const before = await pool.query('SELECT key_prefix, name FROM api_keys WHERE id = $1', [req.params.id]);
     await pool.query('DELETE FROM api_keys WHERE id = $1', [req.params.id]);
+    // Journalisation (item 3.C-7) : révocation/suppression de clé API partenaire.
+    logActivity({
+      userId: req.user.id, username: req.user.username, action: 'api_key_delete',
+      entityType: 'api_key', entityId: parseInt(req.params.id, 10) || null,
+      details: before.rows[0] ? { name: before.rows[0].name, key_prefix: before.rows[0].key_prefix } : {},
+      ip: req.ip,
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error('[API-KEYS] delete :', err);

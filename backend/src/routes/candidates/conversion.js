@@ -202,44 +202,55 @@ router.post('/:id/interview-form', authorize('ADMIN', 'RH'), async (req, res) =>
     const candidate = await pool.query('SELECT id FROM candidates WHERE id = $1', [id]);
     if (candidate.rows.length === 0) return res.status(404).json({ error: 'Candidat non trouvé' });
 
-    // Upsert: supprimer l'ancien si existe, puis insérer
-    await pool.query('DELETE FROM recruitment_interviews WHERE candidate_id = $1', [id]);
+    // Upsert ATOMIQUE : supprimer l'ancien entretien puis réinsérer. Hors transaction,
+    // un échec de l'INSERT après le DELETE perdait irrémédiablement l'entretien précédent.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM recruitment_interviews WHERE candidate_id = $1', [id]);
 
-    const result = await pool.query(
-      `INSERT INTO recruitment_interviews (
-        candidate_id, interview_date, interviewer_id,
-        presentation_mots, parcours_professionnel, experiences_marquantes,
-        situation_actuelle, situation_actuelle_autre,
-        duree_sans_emploi, difficultes_recherche, difficultes_recherche_autre,
-        freins_emploi, freins_emploi_autre,
-        contraintes_horaires, contraintes_horaires_detail,
-        structure_accompagnement, structure_accompagnement_autre,
-        motivation_integration, motivation_reprise, attentes, attentes_autre,
-        experience_activite, comportement_equipe, reaction_consigne, travail_physique,
-        disponibilite_horaires, disponibilite_autre, organisation_ponctualite,
-        idee_metier, idee_metier_detail, amelioration_souhaitee, question_ouverte,
-        evaluation_globale, commentaire_evaluateur
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-        $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34
-      ) RETURNING *`,
-      [
-        id, f.interview_date || new Date(), req.user.id,
-        f.presentation_mots, f.parcours_professionnel, f.experiences_marquantes,
-        f.situation_actuelle || null, f.situation_actuelle_autre,
-        f.duree_sans_emploi || null, f.difficultes_recherche || [], f.difficultes_recherche_autre,
-        f.freins_emploi || [], f.freins_emploi_autre,
-        f.contraintes_horaires || null, f.contraintes_horaires_detail,
-        f.structure_accompagnement || [], f.structure_accompagnement_autre,
-        f.motivation_integration, f.motivation_reprise, f.attentes || [], f.attentes_autre,
-        f.experience_activite || [], f.comportement_equipe, f.reaction_consigne, f.travail_physique || null,
-        f.disponibilite_horaires || null, f.disponibilite_autre, f.organisation_ponctualite,
-        f.idee_metier || null, f.idee_metier_detail, f.amelioration_souhaitee, f.question_ouverte,
-        f.evaluation_globale || null, f.commentaire_evaluateur,
-      ]
-    );
+      const result = await client.query(
+        `INSERT INTO recruitment_interviews (
+          candidate_id, interview_date, interviewer_id,
+          presentation_mots, parcours_professionnel, experiences_marquantes,
+          situation_actuelle, situation_actuelle_autre,
+          duree_sans_emploi, difficultes_recherche, difficultes_recherche_autre,
+          freins_emploi, freins_emploi_autre,
+          contraintes_horaires, contraintes_horaires_detail,
+          structure_accompagnement, structure_accompagnement_autre,
+          motivation_integration, motivation_reprise, attentes, attentes_autre,
+          experience_activite, comportement_equipe, reaction_consigne, travail_physique,
+          disponibilite_horaires, disponibilite_autre, organisation_ponctualite,
+          idee_metier, idee_metier_detail, amelioration_souhaitee, question_ouverte,
+          evaluation_globale, commentaire_evaluateur
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+          $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34
+        ) RETURNING *`,
+        [
+          id, f.interview_date || new Date(), req.user.id,
+          f.presentation_mots, f.parcours_professionnel, f.experiences_marquantes,
+          f.situation_actuelle || null, f.situation_actuelle_autre,
+          f.duree_sans_emploi || null, f.difficultes_recherche || [], f.difficultes_recherche_autre,
+          f.freins_emploi || [], f.freins_emploi_autre,
+          f.contraintes_horaires || null, f.contraintes_horaires_detail,
+          f.structure_accompagnement || [], f.structure_accompagnement_autre,
+          f.motivation_integration, f.motivation_reprise, f.attentes || [], f.attentes_autre,
+          f.experience_activite || [], f.comportement_equipe, f.reaction_consigne, f.travail_physique || null,
+          f.disponibilite_horaires || null, f.disponibilite_autre, f.organisation_ponctualite,
+          f.idee_metier || null, f.idee_metier_detail, f.amelioration_souhaitee, f.question_ouverte,
+          f.evaluation_globale || null, f.commentaire_evaluateur,
+        ]
+      );
 
-    res.status(201).json(result.rows[0]);
+      await client.query('COMMIT');
+      res.status(201).json(result.rows[0]);
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error('[CANDIDATES] Erreur sauvegarde entretien :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -278,31 +289,43 @@ router.post('/:id/mise-en-situation', authorize('ADMIN', 'RH', 'MANAGER'), async
       return res.status(400).json({ error: 'Type invalide. Types valides : ' + validTypes.join(', ') });
     }
 
-    // Upsert par type : une seule évaluation par type par candidat
-    await pool.query('DELETE FROM mise_en_situation WHERE candidate_id = $1 AND type = $2', [id, f.type]);
+    // Upsert ATOMIQUE par type : une seule évaluation par type par candidat. Le DELETE,
+    // l'INSERT et la mise à jour du drapeau practical_test_done du candidat sont indivisibles
+    // (hors transaction, un échec après le DELETE perdait l'évaluation précédente).
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM mise_en_situation WHERE candidate_id = $1 AND type = $2', [id, f.type]);
 
-    const result = await pool.query(
-      `INSERT INTO mise_en_situation (
-        candidate_id, type, evaluator_id, evaluation_date,
-        respect_consignes, capacite_physique, endurance, comprehension,
-        qualite_travail, rapidite, securite, autonomie,
-        resultat, points_forts, points_amelioration, commentaire, duree_minutes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
-      [
-        id, f.type, req.user.id, f.evaluation_date || new Date(),
-        f.respect_consignes, f.capacite_physique, f.endurance, f.comprehension,
-        f.qualite_travail, f.rapidite, f.securite, f.autonomie,
-        f.resultat || null, f.points_forts, f.points_amelioration, f.commentaire, f.duree_minutes,
-      ]
-    );
+      const result = await client.query(
+        `INSERT INTO mise_en_situation (
+          candidate_id, type, evaluator_id, evaluation_date,
+          respect_consignes, capacite_physique, endurance, comprehension,
+          qualite_travail, rapidite, securite, autonomie,
+          resultat, points_forts, points_amelioration, commentaire, duree_minutes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
+        [
+          id, f.type, req.user.id, f.evaluation_date || new Date(),
+          f.respect_consignes, f.capacite_physique, f.endurance, f.comprehension,
+          f.qualite_travail, f.rapidite, f.securite, f.autonomie,
+          f.resultat || null, f.points_forts, f.points_amelioration, f.commentaire, f.duree_minutes,
+        ]
+      );
 
-    // Mettre à jour le test pratique du candidat si au moins une évaluation est faite
-    await pool.query(
-      `UPDATE candidates SET practical_test_done = true, updated_at = NOW() WHERE id = $1`,
-      [id]
-    );
+      // Mettre à jour le test pratique du candidat si au moins une évaluation est faite
+      await client.query(
+        `UPDATE candidates SET practical_test_done = true, updated_at = NOW() WHERE id = $1`,
+        [id]
+      );
 
-    res.status(201).json(result.rows[0]);
+      await client.query('COMMIT');
+      res.status(201).json(result.rows[0]);
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error('[CANDIDATES] Erreur sauvegarde mise en situation :', err);
     res.status(500).json({ error: 'Erreur serveur' });

@@ -1,11 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+// Vague 3 — GET /postes et GET / ouverts en LECTURE (filtrée filière boutique)
+// au rôle RESP_BTQ pour alimenter la page « Planning boutiques » (BoutiquesPlanning).
+// Toute écriture (affecter/supprimer/confirmer) et la recherche d'employés
+// disponibles restent réservées ADMIN/MANAGER (autorisation par route ci-dessous).
+router.use(authenticate);
+
+const READ_ROLES = ['ADMIN', 'MANAGER', 'RESP_BTQ'];
+const WRITE_ROLES = ['ADMIN', 'MANAGER'];
+const isRespBtq = (req) => resolveBaseRole(req.user && req.user.role) === 'RESP_BTQ';
 
 // ══════════════════════════════════════════
 // POSTES DE TRAVAIL PAR FILIERE
@@ -19,7 +27,7 @@ const FILIERES = [
 ];
 
 // GET /api/planning-hebdo/postes — Tous les postes groupes par filiere
-router.get('/postes', async (req, res) => {
+router.get('/postes', authorize(...READ_ROLES), async (req, res) => {
   try {
     const postes = [];
 
@@ -125,6 +133,13 @@ router.get('/postes', async (req, res) => {
       });
     }
 
+    // RESP_BTQ (page Planning boutiques) : périmètre restreint à la filière boutique.
+    if (isRespBtq(req)) {
+      return res.json({
+        filieres: FILIERES.filter(f => f.code === 'btq'),
+        postes: postes.filter(p => p.filiere === 'btq'),
+      });
+    }
     res.json({ filieres: FILIERES, postes });
   } catch (err) {
     console.error('[PLANNING-HEBDO] Erreur postes :', err);
@@ -133,7 +148,7 @@ router.get('/postes', async (req, res) => {
 });
 
 // GET /api/planning-hebdo — Planning de la semaine
-router.get('/', async (req, res) => {
+router.get('/', authorize(...READ_ROLES), async (req, res) => {
   try {
     const { week_start } = req.query;
     let monday;
@@ -200,20 +215,28 @@ router.get('/', async (req, res) => {
       absencesByEmpDate[key] = a.type;
     }
 
-    res.json({
-      week_start: dateFrom,
-      dates,
-      jours: ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'],
-      affectations: scheduleResult.rows.map(s => ({
-        ...s,
-        date: new Date(s.date).toISOString().slice(0, 10),
-      })),
-      employees: employeesResult.rows.map(e => ({
-        ...e,
-        jours_off: e.jours_off || [],
-      })),
-      absences: absencesByEmpDate,
-    });
+    const jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+    let affectations = scheduleResult.rows.map(s => ({
+      ...s,
+      date: new Date(s.date).toISOString().slice(0, 10),
+    }));
+    let employees = employeesResult.rows.map(e => ({
+      ...e,
+      jours_off: e.jours_off || [],
+    }));
+    let absences = absencesByEmpDate;
+
+    // RESP_BTQ : périmètre restreint à la filière boutique. On ne renvoie que
+    // les affectations boutique (poste_code BTQ_*) et on masque le reste du
+    // personnel (roster complet + absences) — inutile à la vue boutique et hors
+    // périmètre d'un responsable de boutique (cf. cloisonnement RESP_BTQ vague 2).
+    if (isRespBtq(req)) {
+      affectations = affectations.filter(a => String(a.poste_code || '').toUpperCase().startsWith('BTQ_'));
+      employees = [];
+      absences = {};
+    }
+
+    res.json({ week_start: dateFrom, dates, jours, affectations, employees, absences });
   } catch (err) {
     console.error('[PLANNING-HEBDO] Erreur planning :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -221,7 +244,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/planning-hebdo/affecter — Affecter un employe a un poste sur un jour
-router.post('/affecter', [
+router.post('/affecter', authorize(...WRITE_ROLES), [
   body('employee_id').isInt().withMessage('ID employé requis'),
   body('date').notEmpty().withMessage('Date requise'),
 ], validate, async (req, res) => {
@@ -277,39 +300,49 @@ router.post('/affecter', [
       }
     }
 
-    // Verifier conflit de periode: journee entiere bloque matin/apres_midi et vice-versa
-    if (per === 'journee') {
-      const existing = await pool.query(
-        "SELECT id, periode FROM schedule WHERE employee_id = $1 AND date = $2",
-        [employee_id, date]
-      );
-      if (existing.rows.length > 0) {
-        // Supprimer les demi-journées existantes avant d'insérer la journée
-        await pool.query("DELETE FROM schedule WHERE employee_id = $1 AND date = $2", [employee_id, date]);
-      }
-    } else {
-      // Si affectation demi-journée, supprimer une éventuelle journée entière
-      await pool.query(
-        "DELETE FROM schedule WHERE employee_id = $1 AND date = $2 AND periode = 'journee'",
-        [employee_id, date]
-      );
-    }
-
     let positionId = null;
     if (poste_id && poste_id.startsWith('pos_')) {
       positionId = parseInt(poste_id.replace('pos_', ''));
     }
 
-    const result = await pool.query(`
-      INSERT INTO schedule (employee_id, date, status, position_id, poste_code, periode, is_provisional)
-      VALUES ($1, $2, 'work', $3, $4, $5, true)
-      ON CONFLICT (employee_id, date, periode)
-      DO UPDATE SET position_id = EXCLUDED.position_id, poste_code = EXCLUDED.poste_code,
-                    status = 'work', is_provisional = true
-      RETURNING *
-    `, [employee_id, date, positionId, poste_code || null, per]);
+    // Écriture ATOMIQUE : la résolution du conflit de période (une journée entière
+    // supprime les demi-journées existantes, et une demi-journée supprime une journée
+    // entière) et l'upsert de l'affectation doivent être indivisibles. Hors transaction,
+    // un échec entre le DELETE et l'INSERT — ou deux requêtes concurrentes sur le même
+    // agent/jour — laissaient le planning partiellement effacé. Le SELECT-puis-DELETE
+    // conditionnel précédent (journée) est remplacé par un DELETE idempotent (no-op si
+    // rien à supprimer) → suppression du TOCTOU.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (per === 'journee') {
+        // Supprimer toute affectation existante du jour (demi-journées incluses)
+        await client.query('DELETE FROM schedule WHERE employee_id = $1 AND date = $2', [employee_id, date]);
+      } else {
+        // Affectation demi-journée : retirer une éventuelle journée entière
+        await client.query(
+          "DELETE FROM schedule WHERE employee_id = $1 AND date = $2 AND periode = 'journee'",
+          [employee_id, date]
+        );
+      }
 
-    res.json(result.rows[0]);
+      const result = await client.query(`
+        INSERT INTO schedule (employee_id, date, status, position_id, poste_code, periode, is_provisional)
+        VALUES ($1, $2, 'work', $3, $4, $5, true)
+        ON CONFLICT (employee_id, date, periode)
+        DO UPDATE SET position_id = EXCLUDED.position_id, poste_code = EXCLUDED.poste_code,
+                      status = 'work', is_provisional = true
+        RETURNING *
+      `, [employee_id, date, positionId, poste_code || null, per]);
+
+      await client.query('COMMIT');
+      res.json(result.rows[0]);
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error('[PLANNING-HEBDO] Erreur affectation :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -317,7 +350,7 @@ router.post('/affecter', [
 });
 
 // DELETE /api/planning-hebdo/affecter — Supprimer une affectation
-router.delete('/affecter', async (req, res) => {
+router.delete('/affecter', authorize(...WRITE_ROLES), async (req, res) => {
   try {
     const { employee_id, date, periode } = req.body;
     if (!employee_id || !date) {
@@ -344,7 +377,7 @@ router.delete('/affecter', async (req, res) => {
 });
 
 // POST /api/planning-hebdo/confirmer — Confirmer le planning de la semaine
-router.post('/confirmer', [
+router.post('/confirmer', authorize(...WRITE_ROLES), [
   body('week_start').notEmpty().withMessage('Date de début de semaine requise'),
 ], validate, async (req, res) => {
   try {
@@ -368,7 +401,8 @@ router.post('/confirmer', [
 });
 
 // GET /api/planning-hebdo/employes-disponibles — Employes disponibles pour un jour
-router.get('/employes-disponibles', async (req, res) => {
+// (recherche pour l'éditeur ADMIN/MANAGER — pas d'accès RESP_BTQ, écriture amont).
+router.get('/employes-disponibles', authorize(...WRITE_ROLES), async (req, res) => {
   try {
     const { date, require_permis, require_caces, periode } = req.query;
     if (!date) return res.status(400).json({ error: 'date requis' });

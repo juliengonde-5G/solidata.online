@@ -225,8 +225,11 @@ app.use('/api/alert-thresholds', require('./routes/alert-thresholds'));
 // Module Finances / Pennylane
 app.use('/api/pennylane', require('./routes/pennylane'));
 
-// Module ML : prédiction remplissage CAV
-app.use('/api/ml', require('./routes/ml'));
+// Module ML (routes/ml.js) : retiré du routage en Vague 3 (audit 2026-07).
+// C'était un second moteur prédictif (régression linéaire ml-model.js) jamais
+// appelé par aucune page ni cron — orphelin (0 consommateur front/back). La
+// génération quotidienne de prédictions (ml_fill_predictions) est assurée par
+// routes/tours/predictions.js (heuristique), indépendante de ce module.
 
 // Lot 6 : Pointage / Badgeage
 app.use('/api/pointage', require('./routes/pointage'));
@@ -265,6 +268,10 @@ const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 
 // Health check (router dédié : /api/health, /api/health/live, /api/health/ready)
 app.use('/api/health', require('./routes/health'));
+
+// Monitoring/observabilité (ADMIN) : /api/monitoring/jobs, /realtime — supervision
+// des jobs scheduler et des chaînes temps réel (GPS/capteurs/SumUp).
+app.use('/api/monitoring', require('./routes/monitoring'));
 
 // 404 + Global error handler (DOIT être après toutes les routes)
 app.use('/api', notFoundHandler);

@@ -3,208 +3,21 @@
  * Découpage du fichier monolithique insertion.js en sous-modules :
  *   - engine.js : base de connaissances, questionnaires, moteur d'analyse IA
  *   - routes.js : toutes les routes API (diagnostics, jalons, plans d'action)
+ *
+ * SCHÉMA — SOURCE UNIQUE : les tables insertion_diagnostics /
+ * insertion_milestones / cip_action_plans / insertion_interview_alerts
+ * (+ colonnes employees.insertion_*) sont créées et migrées UNIQUEMENT dans
+ * backend/src/scripts/init-db.js. L'ancienne IIFE d'auto-migration qui vivait
+ * ici a été retirée en Vague 3 (audit 2026-07) : elle dupliquait le schéma et
+ * divergeait d'init-db.js (colonnes pcm_q_* omises, un type de jalon vestige
+ * jamais utilisé, freins recréés sans CHECK…) — cause racine du bug de prod 2.3.2
+ * (« column ... does not exist »). Toutes ses colonnes/migrations sont
+ * désormais couvertes de façon idempotente par init-db.js (section « Module
+ * Parcours Insertion » + migrations de colonnes rapatriées).
  */
 const express = require('express');
 const router = express.Router();
-const pool = require('../../config/database');
 const { authenticate, authorize } = require('../../middleware/auth');
-
-// ══════════════════════════════════════════════════════════════
-// AUTO-MIGRATION — Tables insertion_diagnostics + milestones + action_plans
-// ══════════════════════════════════════════════════════════════
-(async () => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS insertion_diagnostics (
-        id SERIAL PRIMARY KEY,
-        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        created_by INTEGER REFERENCES users(id),
-        updated_by INTEGER REFERENCES users(id),
-        parcours_anterieur TEXT,
-        contraintes_sante TEXT, contraintes_mobilite TEXT, contraintes_familiales TEXT, autres_contraintes TEXT,
-        frein_mobilite INTEGER DEFAULT 1, frein_mobilite_detail TEXT,
-        frein_sante INTEGER DEFAULT 1, frein_sante_detail TEXT,
-        frein_finances INTEGER DEFAULT 1, frein_finances_detail TEXT,
-        frein_famille INTEGER DEFAULT 1, frein_famille_detail TEXT,
-        frein_linguistique INTEGER DEFAULT 1, frein_linguistique_detail TEXT,
-        frein_administratif INTEGER DEFAULT 1, frein_administratif_detail TEXT,
-        frein_numerique INTEGER DEFAULT 1, frein_numerique_detail TEXT,
-        frein_mobilite_causes TEXT, frein_sante_causes TEXT, frein_finances_causes TEXT,
-        frein_famille_causes TEXT, frein_linguistique_causes TEXT, frein_administratif_causes TEXT,
-        frein_numerique_causes TEXT,
-        obs_taches_realisees TEXT, obs_points_forts TEXT, obs_difficultes TEXT,
-        obs_comportement_equipe TEXT, obs_autonomie_ponctualite TEXT,
-        pref_aime_faire TEXT, pref_ne_veut_plus TEXT, pref_environnement_prefere TEXT,
-        pref_environnement_eviter TEXT, pref_objectifs TEXT,
-        explorama_interets TEXT, explorama_rejets TEXT,
-        explorama_gestes_positifs TEXT, explorama_gestes_negatifs TEXT,
-        explorama_environnements TEXT, explorama_rythme TEXT,
-        cip_hypotheses_metiers TEXT, cip_questions TEXT,
-        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(),
-        UNIQUE(employee_id)
-      )
-    `);
-    // Garde-fou : identifiants SQL uniquement (a-z, A-Z, 0-9, _) pour col,
-    // et liste blanche de motifs pour `type` (les migrations internes sont
-    // contrôlées, mais on valide par sécurité en profondeur).
-    const SAFE_IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-    const SAFE_TYPE = /^[A-Z0-9_() ,'=<>+-]+$/i;
-    const addCol = async (col, type) => {
-      if (!SAFE_IDENT.test(col) || !SAFE_TYPE.test(type)) {
-        console.error('[INSERTION] Migration rejetée (identifiant invalide):', col, type);
-        return;
-      }
-      try { await pool.query(`ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (err) { console.warn('[INSERTION] Migration col:', err.message); }
-    };
-    await addCol('frein_mobilite_causes', 'TEXT');
-    await addCol('frein_sante_causes', 'TEXT');
-    await addCol('frein_finances_causes', 'TEXT');
-    await addCol('frein_famille_causes', 'TEXT');
-    await addCol('frein_linguistique_causes', 'TEXT');
-    await addCol('frein_administratif_causes', 'TEXT');
-    await addCol('frein_numerique_causes', 'TEXT');
-    await addCol('explorama_gestes_positifs', 'TEXT');
-    await addCol('explorama_gestes_negatifs', 'TEXT');
-    await addCol('explorama_environnements', 'TEXT');
-    await addCol('explorama_rythme', 'TEXT');
-
-    // Garantit que TOUTES les colonnes écrites par PUT /diagnostic existent, quel
-    // que soit l'âge de la base (les deux définitions CREATE TABLE ont divergé et
-    // d'anciennes bases n'ont pas toutes les colonnes → « column ... does not
-    // exist » = « Erreur serveur » à l'enregistrement du diagnostic). Idempotent.
-    const DIAG_TEXT_COLS = [
-      'parcours_anterieur', 'contraintes_sante', 'contraintes_mobilite', 'contraintes_familiales', 'autres_contraintes',
-      'frein_mobilite_detail', 'frein_sante_detail', 'frein_finances_detail', 'frein_famille_detail',
-      'frein_linguistique_detail', 'frein_administratif_detail', 'frein_numerique_detail',
-      'obs_taches_realisees', 'obs_points_forts', 'obs_difficultes', 'obs_comportement_equipe', 'obs_autonomie_ponctualite',
-      'pref_aime_faire', 'pref_ne_veut_plus', 'pref_environnement_prefere', 'pref_environnement_eviter', 'pref_objectifs',
-      'explorama_interets', 'explorama_rejets',
-      'cip_hypotheses_metiers', 'cip_questions',
-    ];
-    for (const col of DIAG_TEXT_COLS) await addCol(col, 'TEXT');
-    // Freins (INTEGER, sans CHECK ici : une colonne recréée ne doit pas rejeter
-    // les valeurs existantes ; le PUT envoie 1-5 ou NULL, tous deux valides).
-    for (const f of ['mobilite', 'sante', 'finances', 'famille', 'linguistique', 'administratif', 'numerique']) {
-      await addCol(`frein_${f}`, 'INTEGER');
-    }
-    await addCol('created_by', 'INTEGER');
-    await addCol('updated_by', 'INTEGER');
-    await addCol('updated_at', 'TIMESTAMP DEFAULT NOW()');
-
-    try {
-      await pool.query(`
-        ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_status VARCHAR(30) DEFAULT 'none';
-        ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_start_date DATE;
-        ALTER TABLE employees ADD COLUMN IF NOT EXISTS insertion_end_date DATE;
-        ALTER TABLE employees ADD COLUMN IF NOT EXISTS prescripteur VARCHAR(100);
-        ALTER TABLE employees ADD COLUMN IF NOT EXISTS visite_medicale_date DATE;
-      `);
-    } catch (err) { console.warn('[INSERTION] Migration employees cols:', err.message); }
-    try {
-      await pool.query(`ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_insertion_status_check`);
-      await pool.query(`ALTER TABLE employees ADD CONSTRAINT employees_insertion_status_check CHECK (insertion_status IN ('none', 'en_parcours', 'termine', 'abandon'))`);
-    } catch (err) { console.warn('[INSERTION] Migration constraint:', err.message); }
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS insertion_milestones (
-        id SERIAL PRIMARY KEY,
-        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        milestone_type VARCHAR(30) NOT NULL CHECK (milestone_type IN ('Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie')),
-        due_date DATE NOT NULL,
-        completed_date DATE,
-        status VARCHAR(30) NOT NULL DEFAULT 'a_planifier'
-          CHECK (status IN ('a_planifier', 'planifie', 'realise', 'reporte')),
-        interview_date TIMESTAMP,
-        interviewer_id INTEGER REFERENCES users(id),
-        frein_mobilite INTEGER CHECK (frein_mobilite BETWEEN 1 AND 5),
-        frein_sante INTEGER CHECK (frein_sante BETWEEN 1 AND 5),
-        frein_finances INTEGER CHECK (frein_finances BETWEEN 1 AND 5),
-        frein_famille INTEGER CHECK (frein_famille BETWEEN 1 AND 5),
-        frein_linguistique INTEGER CHECK (frein_linguistique BETWEEN 1 AND 5),
-        frein_administratif INTEGER CHECK (frein_administratif BETWEEN 1 AND 5),
-        frein_numerique INTEGER CHECK (frein_numerique BETWEEN 1 AND 5),
-        cip_integration TEXT, cip_competences TEXT, cip_projet_pro TEXT, cip_socialisation TEXT,
-        bilan_professionnel TEXT, bilan_social TEXT,
-        objectifs_realises TEXT, objectifs_prochaine_periode TEXT,
-        observations TEXT, actions_a_mener TEXT,
-        avis_global VARCHAR(30) CHECK (avis_global IN ('tres_positif', 'positif', 'mitige', 'insuffisant')),
-        sortie_classification VARCHAR(20) CHECK (sortie_classification IN ('positive', 'negative')),
-        sortie_type VARCHAR(50), sortie_commentaires TEXT, sortie_employeur TEXT, sortie_formation TEXT,
-        ai_recommendations JSONB,
-        created_by INTEGER REFERENCES users(id),
-        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(),
-        UNIQUE(employee_id, milestone_type)
-      )
-    `);
-
-    const addMsCol = async (col, type) => {
-      if (!SAFE_IDENT.test(col) || !SAFE_TYPE.test(type)) {
-        console.error('[INSERTION] Migration ms rejetée (identifiant invalide):', col, type);
-        return;
-      }
-      try { await pool.query(`ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (err) { console.warn('[INSERTION] Migration ms col:', err.message); }
-    };
-    await addMsCol('frein_numerique', 'INTEGER CHECK (frein_numerique BETWEEN 1 AND 5)');
-    await addMsCol('cip_integration', 'TEXT');
-    await addMsCol('cip_competences', 'TEXT');
-    await addMsCol('cip_projet_pro', 'TEXT');
-    await addMsCol('cip_socialisation', 'TEXT');
-    await addMsCol('sortie_classification', "VARCHAR(20) CHECK (sortie_classification IN ('positive', 'negative'))");
-    await addMsCol('sortie_type', 'VARCHAR(50)');
-    await addMsCol('sortie_commentaires', 'TEXT');
-    await addMsCol('sortie_employeur', 'TEXT');
-    await addMsCol('sortie_formation', 'TEXT');
-    await addMsCol('ai_recommendations', 'JSONB');
-
-    try {
-      await pool.query(`ALTER TABLE insertion_milestones DROP CONSTRAINT IF EXISTS insertion_milestones_milestone_type_check`);
-      await pool.query(`ALTER TABLE insertion_milestones ADD CONSTRAINT insertion_milestones_milestone_type_check CHECK (milestone_type IN ('Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie', 'Bilan M+2'))`);
-    } catch (err) { console.warn('[INSERTION] Migration ms check:', err.message); }
-
-    // Ensure UNIQUE constraint on (employee_id, milestone_type) exists — needed for ON CONFLICT
-    try {
-      await pool.query(`
-        DELETE FROM insertion_milestones a USING insertion_milestones b
-        WHERE a.id < b.id AND a.employee_id = b.employee_id AND a.milestone_type = b.milestone_type
-      `);
-      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_milestones_emp_type_unique ON insertion_milestones(employee_id, milestone_type)`);
-    } catch (err) { console.warn('[INSERTION] Migration unique constraint:', err.message); }
-
-    try {
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS cip_action_plans (
-          id SERIAL PRIMARY KEY,
-          milestone_id INTEGER NOT NULL REFERENCES insertion_milestones(id) ON DELETE CASCADE,
-          employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          action_label TEXT NOT NULL,
-          category VARCHAR(30) NOT NULL CHECK (category IN ('competence', 'insertion', 'socialisation', 'frein')),
-          frein_type VARCHAR(30),
-          priority VARCHAR(20) DEFAULT 'moyenne' CHECK (priority IN ('haute', 'moyenne', 'basse')),
-          status VARCHAR(20) DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'en_cours', 'realise', 'abandonne')),
-          echeance DATE, notes TEXT,
-          created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `);
-    } catch (err) { console.warn('[INSERTION] Migration action_plans:', err.message); }
-
-    try {
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS insertion_interview_alerts (
-          id SERIAL PRIMARY KEY,
-          employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          milestone_type VARCHAR(30) NOT NULL,
-          alert_type VARCHAR(30) NOT NULL CHECK (alert_type IN ('planification', 'rappel_j7', 'rappel_j1', 'retard')),
-          sent_at TIMESTAMP, is_sent BOOLEAN DEFAULT false, target_date DATE NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `);
-    } catch (err) { console.warn('[INSERTION] Migration alerts:', err.message); }
-
-    console.log('[INSERTION] Tables insertion OK');
-  } catch (err) {
-    console.error('[INSERTION] Migration insertion :', err.message);
-  }
-})();
 
 // Auth middleware for all insertion routes
 router.use(authenticate, authorize('ADMIN', 'RH', 'MANAGER'));

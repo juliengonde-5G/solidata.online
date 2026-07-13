@@ -12,6 +12,105 @@ const pool = require('../config/database');
 const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
 // ══════════════════════════════════════════
+// INSTRUMENTATION DES JOBS (Vague 3 — item 3.D-1 a/b)
+// Wrapper générique qui OBSERVE un job sans changer son comportement :
+//  - journalise chaque run dans job_runs (début/fin/statut/erreur/volume) ;
+//  - borne la durée par un timeout (Promise.race ~5 min) pour qu'un job bloqué
+//    (fetch Brevo/Open-Meteo/SumUp/Pennylane sans timeout) ne gèle plus la
+//    chaîne séquentielle ni ne retienne le verrou indéfiniment.
+// Le timeout ne peut pas annuler le job sous-jacent (pas d'AbortController
+// propagé jusqu'aux appels externes), mais il débloque la séquence : le job
+// suivant s'exécute et runAllJobs se termine → le verrou est libéré.
+// ══════════════════════════════════════════
+
+// Délai max par job avant de considérer qu'il est bloqué et de rendre la main.
+const JOB_TIMEOUT_MS = Number(process.env.SCHEDULER_JOB_TIMEOUT_MS) || 5 * 60 * 1000;
+
+// Déduit un volume traité (items_processed) de la valeur de retour du job, sans
+// imposer de contrat aux jobs existants (la plupart renvoient undefined → null).
+function extractItemsProcessed(result) {
+  if (typeof result === 'number' && Number.isFinite(result)) return Math.trunc(result);
+  if (result && typeof result === 'object') {
+    for (const k of ['items', 'inserted', 'generated', 'synced', 'imported', 'processed', 'count', 'rowCount']) {
+      const v = result[k];
+      if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
+    }
+  }
+  return null;
+}
+
+// Écrit une ligne de journal. RÉSILIENT : un échec d'écriture (table absente sur
+// une base non encore migrée, DB indisponible) ne doit JAMAIS casser le job.
+async function recordJobRun(jobName, startedAt, finishedAt, status, errorMessage, itemsProcessed, durationMs) {
+  try {
+    await pool.query(
+      `INSERT INTO job_runs (job_name, started_at, finished_at, status, error_message, items_processed, duration_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [jobName, startedAt, finishedAt, status, errorMessage ? String(errorMessage).slice(0, 2000) : null,
+       itemsProcessed, durationMs]
+    );
+  } catch (err) {
+    console.error(`[SCHEDULER] Journalisation job_runs impossible pour ${jobName} :`, err.message);
+  }
+}
+
+/**
+ * Exécute `fn` en l'observant : timeout + journal job_runs.
+ * N'altère pas le comportement du job (retour de fn transmis). N'ARRÊTE PAS la
+ * chaîne en cas d'erreur/timeout (isolation par job) — cohérent avec le fait que
+ * les jobs existants absorbent déjà leurs propres erreurs en interne.
+ */
+async function runInstrumented(jobName, fn, timeoutMs = JOB_TIMEOUT_MS) {
+  const startedAt = new Date();
+  const t0 = Date.now();
+  let status = 'success';
+  let errorMessage = null;
+  let itemsProcessed = null;
+  let timer = null;
+  try {
+    const work = Promise.resolve().then(() => fn());
+    // Évite un unhandledRejection si le job rejette APRÈS le timeout.
+    work.catch(() => {});
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`__job_timeout__ ${timeoutMs}ms`)), timeoutMs);
+      if (timer && timer.unref) timer.unref();
+    });
+    const result = await Promise.race([work, timeout]);
+    itemsProcessed = extractItemsProcessed(result);
+  } catch (err) {
+    if (err && typeof err.message === 'string' && err.message.startsWith('__job_timeout__')) {
+      status = 'timeout';
+      errorMessage = `Dépassement du délai (${timeoutMs} ms) — le job continue en arrière-plan, la chaîne reprend et le verrou est libéré`;
+      console.error(`[SCHEDULER] ⏱ Job ${jobName} : ${errorMessage}`);
+    } else {
+      status = 'error';
+      errorMessage = err && err.message ? err.message : String(err);
+      console.error(`[SCHEDULER] Job ${jobName} en erreur :`, errorMessage);
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  await recordJobRun(jobName, startedAt, new Date(), status, errorMessage, itemsProcessed, Date.now() - t0);
+  return { status, itemsProcessed };
+}
+
+/**
+ * Purge du journal des jobs (rétention 30 j) — évite une croissance non bornée
+ * de job_runs. Instrumenté comme les autres jobs (via runAllJobs).
+ */
+async function purgeOldJobRuns() {
+  const days = Number(process.env.JOB_RUNS_RETENTION_DAYS) || 30;
+  const result = await pool.query(
+    `DELETE FROM job_runs WHERE started_at < NOW() - make_interval(days => $1)`,
+    [days]
+  );
+  if (result.rowCount > 0) {
+    console.log(`[SCHEDULER] job_runs : ${result.rowCount} ligne(s) purgée(s) (> ${days} j)`);
+  }
+  return { items: result.rowCount || 0 };
+}
+
+// ══════════════════════════════════════════
 // ENVOI via Brevo (email + SMS)
 // ══════════════════════════════════════════
 async function sendNotification(template, recipientEmail, recipientPhone, variables) {
@@ -554,22 +653,41 @@ async function purgeExpiredCandidates() {
 const SCHEDULER_LOCK_ID = 123456789; // ID unique pour le advisory lock
 
 /**
- * Acquiert un advisory lock PostgreSQL pour éviter les exécutions concurrentes
- * dans un environnement multi-instance
+ * Tente d'obtenir une connexion DÉDIÉE pour tenir le verrou pendant tout le run.
+ * `pg_try_advisory_lock` est un verrou de SESSION : l'acquisition et la libération
+ * doivent passer par la MÊME connexion, sinon `pg_advisory_unlock` est un no-op sur
+ * une autre connexion du pool et le verrou fuit (constat audit flux-temps-reel-jobs).
+ * Repli sûr : si `pool.connect` n'est pas disponible (ex. mock de test qui n'expose
+ * que `query`), on retourne null et l'appelant retombe sur `pool` (mono-instance).
  */
-async function acquireLock() {
+async function getLockClient() {
+  if (typeof pool.connect === 'function') {
+    try {
+      return await pool.connect();
+    } catch (err) {
+      console.error('[SCHEDULER] Connexion dédiée verrou indisponible, repli sur pool :', err.message);
+    }
+  }
+  return null;
+}
+
+/**
+ * Acquiert un advisory lock PostgreSQL pour éviter les exécutions concurrentes
+ * dans un environnement multi-instance. `conn` = client dédié (ou pool en repli).
+ */
+async function acquireLock(conn) {
   try {
-    const result = await pool.query('SELECT pg_try_advisory_lock($1) as acquired', [SCHEDULER_LOCK_ID]);
-    return result.rows[0].acquired;
+    const result = await conn.query('SELECT pg_try_advisory_lock($1) as acquired', [SCHEDULER_LOCK_ID]);
+    return result.rows[0] && result.rows[0].acquired;
   } catch (err) {
     console.error('[SCHEDULER] Erreur acquisition lock:', err.message);
     return false;
   }
 }
 
-async function releaseLock() {
+async function releaseLock(conn) {
   try {
-    await pool.query('SELECT pg_advisory_unlock($1)', [SCHEDULER_LOCK_ID]);
+    await conn.query('SELECT pg_advisory_unlock($1)', [SCHEDULER_LOCK_ID]);
   } catch (err) {
     console.error('[SCHEDULER] Erreur release lock:', err.message);
   }
@@ -595,6 +713,22 @@ async function purgeOldGpsPositions() {
     }
   } catch (err) {
     console.error('[SCHEDULER] Erreur purgeOldGpsPositions:', err.message);
+  }
+}
+
+/**
+ * Purge des refresh tokens expirés (audit vague 3, item 3.C-4).
+ * Jusqu'ici, les jetons expirés n'étaient supprimés qu'au démarrage (init-db) ;
+ * la table grossissait entre deux redémarrages. Purge quotidienne planifiée.
+ */
+async function purgeExpiredRefreshTokens() {
+  try {
+    const result = await pool.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
+    if (result.rowCount > 0) {
+      console.log(`[SCHEDULER] Refresh tokens: ${result.rowCount} jeton(s) expiré(s) supprimé(s)`);
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur purgeExpiredRefreshTokens:', err.message);
   }
 }
 
@@ -697,19 +831,36 @@ async function syncPennylaneInvoicesDaily() {
 // ORCHESTRATEUR
 // ══════════════════════════════════════════
 
-let schedulerInterval = null;
+let schedulerInterval = null;   // legacy (conservé pour compat, remplacé par schedulerTimeout)
+let schedulerTimeout = null;
+let tickRunning = false;
 
-function startScheduler() {
-  console.log('[SCHEDULER] Demarrage du scheduler (interval: 1h, avec distributed locking)');
+/**
+ * Délai jusqu'au prochain top d'heure (+ petit offset pour tomber à HH:00:xx et
+ * non HH:59:59 à cause de l'imprécision des timers). CORRIGE LA DÉRIVE « minute
+ * figée à la minute de boot » (constat audit item 3.D-1c) : chaque tick est
+ * réaligné sur l'horloge, donc getMinutes() ≈ 0 → les jobs autrefois gardés par
+ * getMinutes() < 30 s'exécutent quelle que soit l'heure de démarrage du conteneur.
+ */
+function msUntilNextHour(now = new Date()) {
+  const next = new Date(now);
+  next.setHours(now.getHours() + 1, 0, 20, 0); // HH+1:00:20 (offset 20 s)
+  return next.getTime() - now.getTime();
+}
 
-  // Executer immediatement au demarrage
-  setTimeout(async () => {
-    console.log('[SCHEDULER] Execution initiale...');
-    await runAllJobs();
-  }, 10000);
-
-  // Puis toutes les heures
-  schedulerInterval = setInterval(async () => {
+/**
+ * Corps horaire — un tick par top d'heure. Les gardes de MINUTE d'origine ont été
+ * retirées (la fenêtre = l'heure entière) car elles étaient la source de la panne
+ * silencieuse : avec un tick désormais aligné sur HH:00, chaque job gardé par une
+ * heure s'exécute une fois et une seule dans son heure.
+ */
+async function hourlyTick() {
+  if (tickRunning) {
+    console.warn('[SCHEDULER] tick précédent encore en cours, skip de ce tick');
+    return;
+  }
+  tickRunning = true;
+  try {
     const now = new Date();
     if ([7, 12, 18].includes(now.getHours())) {
       console.log(`[SCHEDULER] Execution planifiee a ${now.toLocaleTimeString('fr-FR')}`);
@@ -718,42 +869,37 @@ function startScheduler() {
     // Import Pennylane quotidien à 2h du matin (UTC)
     if (now.getHours() === 2) {
       console.log('[SCHEDULER] Lancement sync Pennylane quotidienne...');
-      await syncPennylaneDaily();
+      await runInstrumented('syncPennylaneDaily', syncPennylaneDaily);
     }
     // Import factures clients Pennylane à 4h (contrôle facturation, item 37)
     if (now.getHours() === 4) {
       console.log('[SCHEDULER] Lancement sync factures clients Pennylane...');
-      await syncPennylaneInvoicesDaily();
+      await runInstrumented('syncPennylaneInvoicesDaily', syncPennylaneInvoicesDaily);
     }
     // Génération quotidienne des prédictions de remplissage J..J+7 à 5h (résidu 8).
     // Calcul LOCAL (heuristique, sans appel LLM). Alimente ml_fill_predictions pour
     // que la boucle de feedback capteur (liveobjects-processor) puisse se refermer.
     if (now.getHours() === 5) {
       console.log('[SCHEDULER] Génération quotidienne des prédictions de remplissage...');
-      try {
+      await runInstrumented('generateDailyPredictions', async () => {
         const { generateDailyPredictions } = require('../routes/tours/predictions');
-        const r = await generateDailyPredictions({ horizonDays: 7 });
-        console.log(`[SCHEDULER] Prédictions générées : ${r.generated} lignes / ${r.cavs} CAV actifs (${r.errors} erreurs, ${r.durationMs}ms)`);
-      } catch (err) {
-        console.error('[SCHEDULER] Génération prédictions error :', err.message);
-      }
+        return generateDailyPredictions({ horizonDays: 7 });
+      });
     }
     // Niveau 3.1 — Dispatch auto J-1 chaque soir à 18h
-    if (now.getHours() === 18 && now.getMinutes() < 30) {
-      try {
+    if (now.getHours() === 18) {
+      await runInstrumented('generateNextDayDispatchProposals', async () => {
         const { generateNextDayDispatchProposals } = require('./dispatch-optimizer');
-        await generateNextDayDispatchProposals();
-      } catch (err) {
-        console.error('[SCHEDULER] Dispatch J-1 error :', err.message);
-      }
+        return generateNextDayDispatchProposals();
+      });
     }
     // Import quotidien Logic'S à 20h : scan du dossier CSV
     // (les CSV sont déposés en temps réel via le webhook Power Automate
     //  POST /api/boutique-ventes/webhook ; ce scan capture les fichiers
     //  qui auraient été déposés manuellement ou en cas de retry)
-    if (now.getHours() === 20 && now.getMinutes() < 30) {
+    if (now.getHours() === 20) {
       console.log('[SCHEDULER] Scan quotidien CSV boutiques 20h...');
-      await scanBoutiqueCSVFolders();
+      await runInstrumented('scanBoutiqueCSVFolders', scanBoutiqueCSVFolders);
     }
 
     // VAK SumUp — catch-up horaire pendant une VAK active (les webhooks
@@ -764,53 +910,76 @@ function startScheduler() {
         `SELECT 1 FROM vaks WHERE CURRENT_DATE BETWEEN date_debut AND date_fin LIMIT 1`,
       );
       if (inVak.rows.length > 0) {
-        await syncVakSumUp();
-      } else if (now.getHours() === 3 && now.getMinutes() < 30) {
-        await syncVakSumUp();
+        await runInstrumented('syncVakSumUp', syncVakSumUp);
+      } else if (now.getHours() === 3) {
+        await runInstrumented('syncVakSumUp', syncVakSumUp);
       }
     } catch (err) {
       console.error('[SCHEDULER] VAK SumUp scheduling:', err.message);
     }
 
     // QHSE — alerte hebdomadaire des habilitations à échéance (lundi 8h, item 58)
-    if (now.getDay() === 1 && now.getHours() === 8 && now.getMinutes() < 30) {
+    if (now.getDay() === 1 && now.getHours() === 8) {
       console.log('[SCHEDULER] Lundi 8h : contrôle des habilitations QHSE à échéance');
-      await checkQhseHabilitationExpiries();
+      await runInstrumented('checkQhseHabilitationExpiries', checkQhseHabilitationExpiries);
     }
 
     // ══ V1.8.4 — Auto-discovery événements + jours fériés ══
 
     // Mensuel : le 1er à 04h00 → découverte events + recalcul facteurs saisonniers
-    if (now.getDate() === 1 && now.getHours() === 4 && now.getMinutes() < 30) {
+    if (now.getDate() === 1 && now.getHours() === 4) {
       console.log('[SCHEDULER] Mensuel 1er 04h : découverte events + recalcul facteurs saisonniers');
-      try {
+      await runInstrumented('discoverEvents', async () => {
         const { discoverNearAllCAVs, discoverNearAllAssociations } = require('./event-discovery');
         await discoverNearAllCAVs({ triggeredBy: 'cron' });
         await discoverNearAllAssociations({ triggeredBy: 'cron' });
-      } catch (err) {
-        console.error('[SCHEDULER] Erreur découverte events mensuelle :', err.message);
-      }
-      try {
+      });
+      await runInstrumented('recalcSeasonalFactors', async () => {
         const { recalcSeasonalFactors } = require('./predictive-ai');
-        if (typeof recalcSeasonalFactors === 'function') {
-          await recalcSeasonalFactors();
-        }
-      } catch (err) {
-        console.error('[SCHEDULER] Erreur recalcul facteurs saisonniers :', err.message);
-      }
+        if (typeof recalcSeasonalFactors === 'function') return recalcSeasonalFactors();
+      });
     }
 
     // Annuel : 1er janvier à 02h00 → sync jours fériés + vacances scolaires
-    if (now.getMonth() === 0 && now.getDate() === 1 && now.getHours() === 2 && now.getMinutes() < 30) {
+    if (now.getMonth() === 0 && now.getDate() === 1 && now.getHours() === 2) {
       console.log('[SCHEDULER] 1er janvier 02h : sync jours fériés + vacances scolaires');
-      try {
+      await runInstrumented('syncAllHolidays', async () => {
         const { syncAllHolidays } = require('./holidays');
-        await syncAllHolidays();
-      } catch (err) {
-        console.error('[SCHEDULER] Erreur sync holidays :', err.message);
-      }
+        return syncAllHolidays();
+      });
     }
-  }, 60 * 60 * 1000);
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur hourlyTick:', err.message);
+  } finally {
+    tickRunning = false;
+  }
+}
+
+/**
+ * Ré-arme un timer aligné sur le prochain top d'heure. Le ré-armement se fait AU
+ * DÉBUT du handler (avant l'exécution des jobs) : le rythme reste calé sur
+ * l'horloge quelle que soit la durée du tick (pas de dérive cumulée), et le
+ * garde-fou `tickRunning` empêche tout chevauchement.
+ */
+function scheduleNextTick() {
+  schedulerTimeout = setTimeout(() => {
+    scheduleNextTick();
+    hourlyTick().catch((e) => console.error('[SCHEDULER] hourlyTick rejeté:', e.message));
+  }, msUntilNextHour());
+  if (schedulerTimeout && schedulerTimeout.unref) schedulerTimeout.unref();
+}
+
+function startScheduler() {
+  console.log('[SCHEDULER] Demarrage du scheduler (tick aligné sur le top d\'heure, verrou distribué + journal job_runs)');
+
+  // Executer immediatement au demarrage
+  setTimeout(async () => {
+    console.log('[SCHEDULER] Execution initiale...');
+    await runAllJobs();
+  }, 10000);
+
+  // Puis à chaque top d'heure (setTimeout ré-aligné → pas de dérive minute)
+  scheduleNextTick();
 }
 
 // ══════════════════════════════════════════
@@ -932,32 +1101,42 @@ async function captureVakWeather() {
 }
 
 async function runAllJobs() {
-  // Distributed locking: seule une instance exécute les jobs
-  const locked = await acquireLock();
+  // Verrou distribué tenu sur une connexion DÉDIÉE pour toute la durée du run
+  // (acquisition + libération sur la même session — cf. getLockClient).
+  const lockClient = await getLockClient();
+  const lockConn = lockClient || pool; // repli mono-instance si connect indisponible
+
+  const locked = await acquireLock(lockConn);
   if (!locked) {
+    if (lockClient) lockClient.release();
     console.log('[SCHEDULER] Une autre instance exécute déjà les jobs, skip');
     return;
   }
 
   try {
-    await checkAppointmentReminders();
-    await checkContractEndings();
-    await checkInsertionMilestones();
-    await checkInsertionInterviewAlerts();
-    await checkVehicleMaintenance();
-    await autoFeedNews();
-    await purgeExpiredCandidates();
-    await purgeOldGpsPositions();
-    await refreshMaterializedViews();
-    await scanBoutiqueCSVFolders();
-    await collectBoutiqueWeather();
-    await syncVakSumUp();
-    await captureVakWeather();
+    // Chaque job est instrumenté (journal job_runs + timeout ~5 min). Un job
+    // bloqué ne gèle plus la chaîne ni ne retient le verrou : le suivant reprend.
+    await runInstrumented('checkAppointmentReminders', checkAppointmentReminders);
+    await runInstrumented('checkContractEndings', checkContractEndings);
+    await runInstrumented('checkInsertionMilestones', checkInsertionMilestones);
+    await runInstrumented('checkInsertionInterviewAlerts', checkInsertionInterviewAlerts);
+    await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
+    await runInstrumented('autoFeedNews', autoFeedNews);
+    await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
+    await runInstrumented('purgeOldGpsPositions', purgeOldGpsPositions);
+    await runInstrumented('purgeExpiredRefreshTokens', purgeExpiredRefreshTokens);
+    await runInstrumented('refreshMaterializedViews', refreshMaterializedViews);
+    await runInstrumented('scanBoutiqueCSVFolders', scanBoutiqueCSVFolders);
+    await runInstrumented('collectBoutiqueWeather', collectBoutiqueWeather);
+    await runInstrumented('syncVakSumUp', syncVakSumUp);
+    await runInstrumented('captureVakWeather', captureVakWeather);
+    await runInstrumented('purgeOldJobRuns', purgeOldJobRuns);
     console.log('[SCHEDULER] Tous les jobs executes');
   } catch (err) {
     console.error('[SCHEDULER] Erreur globale:', err.message);
   } finally {
-    await releaseLock();
+    await releaseLock(lockConn);
+    if (lockClient) lockClient.release();
   }
 }
 
@@ -966,6 +1145,17 @@ function stopScheduler() {
     clearInterval(schedulerInterval);
     schedulerInterval = null;
   }
+  if (schedulerTimeout) {
+    clearTimeout(schedulerTimeout);
+    schedulerTimeout = null;
+  }
 }
 
-module.exports = { startScheduler, stopScheduler, runAllJobs };
+module.exports = {
+  startScheduler,
+  stopScheduler,
+  runAllJobs,
+  // Exposés pour l'observabilité (routes/monitoring.js) et les tests.
+  runInstrumented,
+  purgeOldJobRuns,
+};

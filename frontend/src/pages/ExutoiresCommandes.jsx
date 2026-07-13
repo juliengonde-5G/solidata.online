@@ -4,7 +4,7 @@ import {
   ArrowUpRight, Calendar, Building2,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal, KanbanBoard, StatusBadge } from '../components';
+import { LoadingSpinner, Modal, KanbanBoard, StatusBadge, ErrorState } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
@@ -134,6 +134,7 @@ export default function ExutoiresCommandes() {
   const [clients, setClients] = useState([]);
   const [stats, setStats] = useState({ actives: 0, tonnage_prevu: 0, ca_previsionnel: 0, en_attente: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
   const [actionError, setActionError] = useState('');
@@ -183,7 +184,11 @@ export default function ExutoiresCommandes() {
       if (filterSearch) params.search = filterSearch;
       const res = await api.get('/commandes-exutoires', { params });
       setCommandes(res.data);
-    } catch (err) { console.error(err); }
+      setLoadError(null);
+    } catch (err) {
+      console.error(err);
+      setLoadError('Impossible de charger les commandes exutoires. Vérifiez votre connexion puis réessayez.');
+    }
     setLoading(false);
   };
 
@@ -431,6 +436,11 @@ export default function ExutoiresCommandes() {
   return (
     <Layout>
       {ConfirmDialogElement}
+      {loadError && (
+        <div className="px-6 pt-4">
+          <ErrorState variant="card" title="Commandes indisponibles" message={loadError} onRetry={loadCommandes} />
+        </div>
+      )}
       <KanbanBoard
         title="Commandes Logistiques"
         subtitle="Pipeline des commandes clients → expéditions"

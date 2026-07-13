@@ -7,20 +7,61 @@ const { predictFillRate, getSchoolVacationStatus, getScoringConfig } = require('
 // ALGORITHME DE TOURNÉE INTELLIGENTE v2
 // ══════════════════════════════════════════════════════════════
 
-// Récupérer le temps moyen de collecte appris pour un CAV
-async function getLearnedTimePerCav(cavId, defaultTime) {
+// Perf (item 3.D-4) : la prédiction de remplissage est calculée pour ~200 CAV.
+// Elle était exécutée en ~200 `await` séquentiels (chemin HTTP synchrone : le
+// manager attend). On borne la concurrence pour paralléliser sans saturer le pool
+// PG (max 20). Le RÉSULTAT par CAV est inchangé (predictFillRate est déterministe
+// et ne mute pas les données lues par ses voisins) ; seul l'ordonnancement change.
+const PREDICT_CONCURRENCY = parseInt(process.env.TOUR_PREDICT_CONCURRENCY, 10) || 6;
+
+// map à concurrence bornée qui PRÉSERVE l'ordre (results[i] ↔ items[i]).
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const n = Math.max(1, Math.min(limit, items.length));
+  const workers = Array.from({ length: n }, async () => {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+// Précharge en UNE requête les temps de collecte appris (moyenne des durées
+// réelles) pour une liste de CAV — remplace l'appel getLearnedTimePerCav PAR CAV
+// dans la boucle de routage (N+1 → 1). Sémantique identique à l'ancienne fonction :
+// un temps n'est retenu que si ≥ 3 mesures valides (0 < durée < 3600 s), arrondi en
+// minutes ; sinon le défaut est appliqué à la lecture (learnedTimeFor).
+async function loadLearnedTimesPerCav(cavIds) {
+  const map = new Map();
+  const ids = [...new Set((cavIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite))];
+  if (ids.length === 0) return map;
   try {
     const result = await pool.query(
-      `SELECT AVG(duration_seconds) as avg_duration, COUNT(*) as count
+      `SELECT cav_id, AVG(duration_seconds) AS avg_duration, COUNT(*) AS count
        FROM cav_collection_times
-       WHERE cav_id = $1 AND duration_seconds > 0 AND duration_seconds < 3600`,
-      [cavId]
+       WHERE cav_id = ANY($1) AND duration_seconds > 0 AND duration_seconds < 3600
+       GROUP BY cav_id`,
+      [ids]
     );
-    if (result.rows[0] && parseInt(result.rows[0].count) >= 3) {
-      return Math.round(parseFloat(result.rows[0].avg_duration) / 60); // secondes → minutes
+    for (const row of result.rows) {
+      if (parseInt(row.count, 10) >= 3) {
+        map.set(Number(row.cav_id), Math.round(parseFloat(row.avg_duration) / 60)); // s → min
+      }
     }
-  } catch (_) { /* table pas encore créée, pas grave */ }
-  return defaultTime;
+  } catch (_) { /* table cav_collection_times absente (schéma ancien) → défauts partout */ }
+  return map;
+}
+
+// Résout le temps de collecte d'un CAV depuis la map préchargée (fallback défaut).
+// Retour identique à getLearnedTimePerCav(cavId, defaultTime).
+function learnedTimeFor(map, cavId, defaultTime) {
+  const v = map.get(Number(cavId));
+  return v != null ? v : defaultTime;
 }
 
 async function generateIntelligentTour(vehicleId, date) {
@@ -45,12 +86,17 @@ async function generateIntelligentTour(vehicleId, date) {
   const allCavs = cavResult.rows;
   if (allCavs.length === 0) throw new Error('Aucun CAV actif trouvé. Ajoutez des CAV avant de créer une tournée.');
 
-  // 3. Prédire le remplissage pour chaque CAV
-  const cavWithPredictions = [];
-  for (const cav of allCavs) {
-    const prediction = await predictFillRate(cav.id, date);
-    cavWithPredictions.push({ ...cav, prediction });
-  }
+  // 3. Prédire le remplissage pour chaque CAV.
+  //    Perf (item 3.D-4) : (a) pré-chauffe du contexte du jour UNE fois — la même
+  //    date sert à tous les CAV, donc getContextForDate n'appelle Open-Meteo qu'une
+  //    fois et écrit la ligne collection_context ; les predictFillRate suivants la
+  //    relisent (et voient tous la même météo → déterminisme). (b) prédictions à
+  //    concurrence bornée au lieu de ~200 await séquentiels. L'ordre est préservé
+  //    (predictions[i] ↔ allCavs[i]) → scores/tri/tournée strictement identiques.
+  const dateStr = typeof date === 'string' ? date : new Date(date).toISOString().split('T')[0];
+  await getContextForDate(dateStr).catch(() => {});
+  const predictions = await mapWithConcurrency(allCavs, PREDICT_CONCURRENCY, (cav) => predictFillRate(cav.id, date));
+  const cavWithPredictions = allCavs.map((cav, i) => ({ ...cav, prediction: predictions[i] }));
 
   // 4. Calculer le score de priorité
   const scoredCavs = cavWithPredictions.map(cav => {
@@ -101,6 +147,11 @@ async function generateIntelligentTour(vehicleId, date) {
 
   if (selectedCavs.length === 0) throw new Error('Aucun CAV sélectionné — vérifiez la capacité du véhicule et les données de remplissage.');
 
+  // Perf (item 3.D-4) : précharger EN UNE requête les temps de collecte appris des
+  // CAV retenus (au lieu d'1 requête cav_collection_times par CAV dans la boucle de
+  // routage ci-dessous). Résultat identique via learnedTimeFor (fallback défaut).
+  const learnedTimes = await loadLearnedTimesPerCav(selectedCavs.map((c) => c.id));
+
   // 7. Optimiser la route via OSRM (ou fallback TSP local)
   let optimizedRoute;
   let routingMethod = 'osrm_trip';
@@ -119,7 +170,7 @@ async function generateIntelligentTour(vehicleId, date) {
   //    - OSRM pour les segments (distances réelles par la route)
   //    - Retours intermédiaires au centre toutes les 2t
   //    - Pause déjeuner après 4h de travail
-  const dateStr = typeof date === 'string' ? date : new Date(date).toISOString().split('T')[0];
+  // dateStr est déjà résolu à l'étape 3 (pré-chauffe du contexte).
   const context = await getContextForDate(dateStr);
 
   let totalDistance = 0;
@@ -167,7 +218,7 @@ async function generateIntelligentTour(vehicleId, date) {
 
     // ── Aller au CAV (OSRM distance réelle) ──
     const segment = await osrmRouteSegment(lastLat, lastLng, cav.latitude, cav.longitude);
-    const timePerCav = await getLearnedTimePerCav(cav.id, SCORING_CONFIG.timePerCav || 10);
+    const timePerCav = learnedTimeFor(learnedTimes, cav.id, SCORING_CONFIG.timePerCav || 10);
 
     totalDistance += segment.distance_km;
     totalDuration += segment.duration_min + timePerCav;

@@ -57,9 +57,99 @@ const pool = require('../../config/database');
 // Les URLs « -public »/« /public »/« /today » sont conservées à l'identique
 // pour éviter une migration d'URL coordonnée — seule l'exigence d'auth change.
 const MOBILE_DRIVER_PATH = /(-public(\/|$))|(^\/[^/]+\/public$)|(^\/vehicle\/[^/]+\/today$)/;
+
+// ── Vague 3 — Contre-vérification JWT ↔ véhicule (durcissement) ─────────────
+// Résiduel vague 2 (point 4) : le JWT chauffeur était exigé, mais AUCUN contrôle
+// ne liait la requête au véhicule du token — un chauffeur (ou un raccourci
+// détourné) portant le token du véhicule A pouvait agir sur les tournées/pesées/
+// incidents/consignes du véhicule B (id de tournée/véhicule énumérable).
+// Le JWT de POST /auth/driver-start encode le véhicule dans son `username` :
+// « driver_<vehicleId> » (tous les chauffeurs partagent un user générique — seul
+// l'username distingue le véhicule). On en dérive le véhicule autorisé et on
+// refuse (403) toute cible d'un autre véhicule. Le flux légitime (le chauffeur
+// agit TOUJOURS sur son véhicule) est inchangé.
+function driverVehicleIdFromToken(user) {
+  const m = /^driver_(\d+)$/.exec(user && user.username ? String(user.username) : '');
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Refuse (403) si le token chauffeur cible un véhicule différent du sien.
+//   - tokenVehId null → token NON chauffeur (ADMIN/MANAGER en supervision, ou
+//     tout autre compte authentifié) : comportement historique inchangé, aucune
+//     restriction ajoutée (zéro régression pour les appelants non-mobile).
+//   - vehId null → cible inconnue (tournée/message introuvable) : on laisse le
+//     handler répondre 404 ; aucune donnée d'un autre véhicule n'est exposée.
+function driverVehicleMismatch(req, res, vehId) {
+  const tokenVehId = driverVehicleIdFromToken(req.user);
+  if (tokenVehId == null) return false;
+  if (vehId == null) return false;
+  if (Number(vehId) !== tokenVehId) {
+    res.status(403).json({ error: 'Ce véhicule ne correspond pas à votre session chauffeur' });
+    return true;
+  }
+  return false;
+}
+
+// Garde de périmètre véhicule appliquée aux routes mobiles « -public » après
+// authentification. read-public / history-public sont bornées dans leur handler
+// (elles chargent déjà leur entité → pas de requête supplémentaire ici).
+async function enforceDriverVehicleScope(req, res, next) {
+  try {
+    const tokenVehId = driverVehicleIdFromToken(req.user);
+    if (tokenVehId == null) return next(); // non-chauffeur : comportement inchangé
+
+    const p = req.path;
+
+    // Enforcées dans le handler (réutilisation de la requête existante).
+    if (/\/history-public$/.test(p) || /^\/messages\/\d+\/read-public$/.test(p)) {
+      return next();
+    }
+
+    // Flush GPS hors-ligne : chaque position doit porter le véhicule du chauffeur.
+    if (/^\/gps-batch-public(\/|$)/.test(p)) {
+      const positions = Array.isArray(req.body && req.body.positions) ? req.body.positions : [];
+      const foreign = positions.some((pos) =>
+        pos && pos.vehicle_id != null && parseInt(pos.vehicle_id, 10) !== tokenVehId);
+      if (foreign) {
+        return res.status(403).json({ error: 'Position GPS d\'un autre véhicule refusée' });
+      }
+      return next();
+    }
+
+    // Routes ciblant un véhicule par paramètre (/vehicle/:id/...) : compare sans requête.
+    let m;
+    if ((m = /^\/vehicle\/(\d+)(\/|$)/.exec(p))) {
+      if (parseInt(m[1], 10) !== tokenVehId) {
+        return res.status(403).json({ error: 'Ce véhicule ne correspond pas à votre session chauffeur' });
+      }
+      return next();
+    }
+
+    // Toutes les autres routes mobiles ciblent une tournée via /:tourId/... :
+    // le véhicule de la tournée doit être celui du chauffeur.
+    if ((m = /^\/(\d+)(\/|$)/.exec(p))) {
+      const r = await pool.query('SELECT vehicle_id FROM tours WHERE id = $1', [parseInt(m[1], 10)]);
+      const vehId = r.rows.length ? r.rows[0].vehicle_id : null;
+      if (vehId != null && Number(vehId) !== tokenVehId) {
+        return res.status(403).json({ error: 'Cette tournée ne correspond pas à votre véhicule' });
+      }
+      return next();
+    }
+
+    return next();
+  } catch (err) {
+    console.error('[TOURS] garde véhicule mobile:', err.message);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 router.use((req, res, next) => {
-  if (MOBILE_DRIVER_PATH.test(req.path)) return authenticate(req, res, next);
-  return next();
+  if (!MOBILE_DRIVER_PATH.test(req.path)) return next();
+  // 1. JWT chauffeur exigé, puis 2. le véhicule ciblé doit être celui du token.
+  authenticate(req, res, (err) => {
+    if (err) return next(err);
+    enforceDriverVehicleScope(req, res, next);
+  });
 });
 
 // GET /api/tours/vehicle/:vehicleId/today — Tournée du jour (JWT chauffeur requis)
@@ -724,15 +814,31 @@ router.post('/messages/:id/read-public', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: 'id invalide' });
-    const r = await pool.query(
-      `UPDATE driver_messages SET read_at = NOW()
-        WHERE id = $1 AND read_at IS NULL
-        RETURNING id, read_at`,
-      [id]
-    );
+    // Vague 3 — garde véhicule : un chauffeur n'accuse réception que d'une
+    // consigne destinée à SON véhicule. La clause `vehicle_id = $2` borne
+    // l'UPDATE (aucun effet de bord sur une consigne d'un autre véhicule) ; en
+    // cas de 0 ligne, on distingue « autre véhicule » (403) de « déjà lu ».
+    const tokenVehId = driverVehicleIdFromToken(req.user);
+    const r = tokenVehId != null
+      ? await pool.query(
+          `UPDATE driver_messages SET read_at = NOW()
+            WHERE id = $1 AND read_at IS NULL AND vehicle_id = $2
+            RETURNING id, read_at`,
+          [id, tokenVehId]
+        )
+      : await pool.query(
+          `UPDATE driver_messages SET read_at = NOW()
+            WHERE id = $1 AND read_at IS NULL
+            RETURNING id, read_at`,
+          [id]
+        );
     if (r.rows.length === 0) {
-      const existing = await pool.query('SELECT id, read_at FROM driver_messages WHERE id = $1', [id]);
+      const existing = await pool.query('SELECT id, read_at, vehicle_id FROM driver_messages WHERE id = $1', [id]);
       if (existing.rows.length === 0) return res.status(404).json({ error: 'Message non trouvé' });
+      if (tokenVehId != null && existing.rows[0].vehicle_id != null
+          && Number(existing.rows[0].vehicle_id) !== tokenVehId) {
+        return res.status(403).json({ error: 'Consigne destinée à un autre véhicule' });
+      }
       return res.json({ id: existing.rows[0].id, read_at: existing.rows[0].read_at, already: true });
     }
     res.json({ id: r.rows[0].id, read_at: r.rows[0].read_at });
@@ -750,8 +856,10 @@ router.get('/:id/history-public', async (req, res) => {
   try {
     const tourId = parseInt(req.params.id, 10);
     if (!tourId) return res.status(400).json({ error: 'id invalide' });
-    const tourCheck = await pool.query('SELECT id, collection_type FROM tours WHERE id = $1', [tourId]);
+    const tourCheck = await pool.query('SELECT id, collection_type, vehicle_id FROM tours WHERE id = $1', [tourId]);
     if (tourCheck.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
+    // Vague 3 — garde véhicule : historique borné à la tournée du véhicule du token.
+    if (driverVehicleMismatch(req, res, tourCheck.rows[0].vehicle_id)) return;
     const collectionType = tourCheck.rows[0].collection_type || 'pav';
 
     let cavs = [];

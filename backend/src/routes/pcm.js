@@ -905,15 +905,7 @@ router.post('/submit', authenticateSubmit, [
     for (const a of filteredAnswers) byNum.set(a.question_number, a);
     const uniqueAnswers = Array.from(byNum.values());
 
-    // Enregistrer les réponses
-    for (const answer of uniqueAnswers) {
-      await pool.query(
-        'INSERT INTO pcm_answers (session_id, question_number, answer_value, answer_voice_text) VALUES ($1, $2, $3, $4)',
-        [session.id, answer.question_number, answer.answer_value, answer.answer_voice_text || null]
-      );
-    }
-
-    // Calculer le profil
+    // Calculer le profil (fonctions pures, à partir des réponses en mémoire)
     const {
       baseType,
       phaseType,
@@ -925,20 +917,44 @@ router.post('/submit', authenticateSubmit, [
       phaseIndetermine,
     } = calculatePCMProfile(uniqueAnswers);
 
-    // Chiffrer et stocker le rapport
+    // Chiffrer le rapport avant l'écriture
     const encryptedReport = encryptReport(report);
 
-    await pool.query(
-      `INSERT INTO pcm_reports (session_id, candidate_id, base_type, phase_type, encrypted_report, risk_alert)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [session.id, session.candidate_id, baseType, phaseType, encryptedReport, riskAlert]
-    );
-
-    // Marquer la session comme terminée
-    await pool.query(
-      'UPDATE pcm_sessions SET status = $1, completed_at = NOW() WHERE id = $2',
-      ['completed', session.id]
-    );
+    // Écriture ATOMIQUE : réponses (UPSERT anti-doublon) + rapport + clôture de session.
+    // Auparavant ces écritures multi-tables étaient hors transaction : un échec en cours
+    // laissait des réponses partielles, et sans contrainte UNIQUE(session_id, question_number)
+    // une resoumission empilait des doublons. Transaction + ON CONFLICT rend l'opération
+    // idempotente (la contrainte est posée par init-db.js).
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const answer of uniqueAnswers) {
+        await client.query(
+          `INSERT INTO pcm_answers (session_id, question_number, answer_value, answer_voice_text)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (session_id, question_number)
+           DO UPDATE SET answer_value = EXCLUDED.answer_value,
+                         answer_voice_text = EXCLUDED.answer_voice_text,
+                         created_at = NOW()`,
+          [session.id, answer.question_number, answer.answer_value, answer.answer_voice_text || null]
+        );
+      }
+      await client.query(
+        `INSERT INTO pcm_reports (session_id, candidate_id, base_type, phase_type, encrypted_report, risk_alert)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [session.id, session.candidate_id, baseType, phaseType, encryptedReport, riskAlert]
+      );
+      await client.query(
+        'UPDATE pcm_sessions SET status = $1, completed_at = NOW() WHERE id = $2',
+        ['completed', session.id]
+      );
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     res.json({
       message: 'Profil PCM calculé avec succès',

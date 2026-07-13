@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Building2, Plus } from 'lucide-react';
 import Layout from '../components/Layout';
-import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
+import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, ErrorState } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
@@ -16,6 +16,7 @@ export default function ExutoiresClients() {
   const { confirm, ConfirmDialogElement } = useConfirm();
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -27,7 +28,11 @@ export default function ExutoiresClients() {
     try {
       const res = await api.get('/clients-exutoires');
       setClients(res.data);
-    } catch (err) { console.error(err); }
+      setError(null);
+    } catch (err) {
+      console.error(err);
+      setError('Impossible de charger les clients exutoires. Vérifiez votre connexion puis réessayez.');
+    }
     setLoading(false);
   };
 
@@ -113,6 +118,12 @@ export default function ExutoiresClients() {
             </button>
           }
         />
+
+        {error && (
+          <div className="mb-6">
+            <ErrorState variant="card" title="Clients indisponibles" message={error} onRetry={loadClients} />
+          </div>
+        )}
 
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="card-modern p-4"><p className="text-xs text-slate-500 font-medium">Total clients actifs</p><p className="text-2xl font-bold text-slate-800">{stats.total}</p></div>

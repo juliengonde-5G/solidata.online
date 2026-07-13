@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, validatePassword, MIN_PASSWORD_LENGTH } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
@@ -43,7 +43,7 @@ router.get('/', async (req, res) => {
 // POST /api/users
 router.post('/', [
   body('username').notEmpty().withMessage('Nom d\'utilisateur requis'),
-  body('password').isLength({ min: 6 }).withMessage('Mot de passe de 6 caractères minimum requis'),
+  body('password').isLength({ min: MIN_PASSWORD_LENGTH }).withMessage(`Mot de passe de ${MIN_PASSWORD_LENGTH} caractères minimum requis`),
   body('role').notEmpty().withMessage('Rôle requis'),
 ], validate, async (req, res) => {
   try {
@@ -51,6 +51,12 @@ router.post('/', [
 
     if (!username || !password || !role) {
       return res.status(400).json({ error: 'Nom d\'utilisateur, mot de passe et rôle requis' });
+    }
+
+    // Politique de mot de passe unifiée (item 3.C-2).
+    const pwdErr = validatePassword(password);
+    if (pwdErr) {
+      return res.status(400).json({ error: pwdErr });
     }
 
     if (!(await isValidRole(role))) {
@@ -62,10 +68,12 @@ router.post('/', [
       return res.status(409).json({ error: 'Ce nom d\'utilisateur existe déjà' });
     }
 
+    // must_change_password = true (item 3.C-2) : le mot de passe posé par l'admin
+    // est temporaire → l'écran bloquant de 1er login (vague 0) force son changement.
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      `INSERT INTO users (username, password_hash, email, role, first_name, last_name, phone, team_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO users (username, password_hash, email, role, first_name, last_name, phone, team_id, must_change_password)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
        RETURNING id, username, email, role, first_name, last_name, phone, team_id, is_active, created_at`,
       [username, hash, email, role, first_name, last_name, phone, team_id]
     );
@@ -126,10 +134,13 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Utilisateur non trouvé' });
     }
 
-    // Item 4 (audit) : un compte désactivé ne doit plus conserver de session
-    // renouvelable → on purge ses refresh tokens.
+    // Item 4 (audit) + révocation effective (item 3.C-1) : un compte désactivé ne
+    // doit plus conserver de session renouvelable (purge des refresh tokens) NI
+    // d'access token vivant (incrément token_version → jetons rejetés au prochain
+    // appel). Le passage is_active false → true n'a pas d'effet ici (pas de bump).
     if (result.rows[0].is_active === false) {
       await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+      await pool.query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [id]);
     }
 
     res.json(result.rows[0]);
@@ -141,19 +152,23 @@ router.put('/:id', async (req, res) => {
 
 // PUT /api/users/:id/reset-password
 router.put('/:id/reset-password', [
-  body('newPassword').isLength({ min: 6 }).withMessage('Mot de passe de 6 caractères minimum requis'),
+  body('newPassword').isLength({ min: MIN_PASSWORD_LENGTH }).withMessage(`Mot de passe de ${MIN_PASSWORD_LENGTH} caractères minimum requis`),
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Mot de passe de 6 caractères minimum requis' });
+    // Politique de mot de passe unifiée (item 3.C-2).
+    const pwdErr = validatePassword(newPassword);
+    if (pwdErr) {
+      return res.status(400).json({ error: pwdErr });
     }
 
+    // must_change_password = true (item 3.C-2) : le mot de passe réinitialisé par
+    // l'admin est temporaire → changement forcé au prochain login de l'utilisateur.
     const hash = await bcrypt.hash(newPassword, 10);
     const result = await pool.query(
-      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2 RETURNING id',
+      'UPDATE users SET password_hash = $1, must_change_password = true, updated_at = NOW() WHERE id = $2 RETURNING id',
       [hash, id]
     );
 
@@ -161,8 +176,10 @@ router.put('/:id/reset-password', [
       return res.status(404).json({ error: 'Utilisateur non trouvé' });
     }
 
-    // Invalider les refresh tokens
+    // Révocation effective (item 3.C-1) : purge des refresh tokens + incrément de
+    // token_version → les access tokens vivants sont rejetés immédiatement.
     await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+    await pool.query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [id]);
 
     res.json({ message: 'Mot de passe réinitialisé' });
   } catch (err) {
@@ -189,7 +206,10 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Utilisateur non trouvé' });
     }
 
+    // Révocation effective (item 3.C-1) : purge refresh tokens + incrément
+    // token_version (invalide les access tokens vivants du compte désactivé).
     await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+    await pool.query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [id]);
 
     res.json({ message: 'Utilisateur désactivé' });
   } catch (err) {

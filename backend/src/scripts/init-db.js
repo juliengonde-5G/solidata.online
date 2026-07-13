@@ -38,6 +38,22 @@ async function initDatabase() {
     // mot de passe au premier login (compte admin initial notamment). Idempotent.
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;`);
 
+    // Révocation de session effective (audit vague 3, item 3.C-1) — approche
+    // « token_version » sans Redis : le JWT d'accès embarque token_version au
+    // moment de l'émission ; authenticate compare à la valeur en base. Toute
+    // révocation (logout, reset mdp, désactivation, déconnexion forcée)
+    // incrémente token_version → les jetons portant l'ancienne valeur sont
+    // rejetés (code TOKEN_REVOKED). Idempotent.
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;`);
+
+    // Verrouillage léger anti-brute-force (audit vague 3, item 3.C-3) : compteur
+    // d'échecs récents (fenêtre glissante), horodatage du dernier échec et
+    // blocage temporaire (jamais définitif — pas de DoS possible sur un compte).
+    // Idempotent.
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0;`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP;`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP;`);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS refresh_tokens (
         id SERIAL PRIMARY KEY,
@@ -47,6 +63,11 @@ async function initDatabase() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    // Index (audit vague 3, item 3.C-4) : /refresh lit par `token` à chaque
+    // rafraîchissement (seq scan sinon), logout/reset/désactivation suppriment
+    // par `user_id`. Idempotents.
+    await client.query('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS settings (
@@ -227,6 +248,29 @@ async function initDatabase() {
         risk_alert BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
       );
+    `);
+    // ── Intégrité PCM (vague 3, item 3.B) : contrainte d'unicité anti-doublon ──
+    // pcm_answers n'avait aucune clé (session_id, question_number) → une resoumission
+    // du questionnaire empilait des réponses en double (cf. POST /pcm/submit, qui
+    // insérait ligne à ligne hors transaction). On dédoublonne l'existant (on conserve
+    // la DERNIÈRE réponse par question, id le plus élevé) PUIS on pose la contrainte, ce
+    // qui autorise un UPSERT idempotent `ON CONFLICT (session_id, question_number)`.
+    // Idempotent (garde par nom de contrainte) et tolérant base neuve (table vide).
+    await client.query(`
+      DO $$
+      BEGIN
+        DELETE FROM pcm_answers a
+         USING pcm_answers b
+         WHERE a.session_id = b.session_id
+           AND a.question_number = b.question_number
+           AND a.id < b.id;
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'pcm_answers_session_question_key'
+        ) THEN
+          ALTER TABLE pcm_answers
+            ADD CONSTRAINT pcm_answers_session_question_key UNIQUE (session_id, question_number);
+        END IF;
+      END $$;
     `);
     console.log('[INIT-DB] Module 3 (PCM) ✓');
 
@@ -3003,6 +3047,90 @@ async function initDatabase() {
       );
     `);
 
+    // ══════════════════════════════════════════════════════════════
+    // MIGRATIONS insertion — SOURCE UNIQUE (rapatriées de l'ancienne IIFE
+    // d'auto-migration de routes/insertion/index.js, retirée en Vague 3 pour
+    // supprimer la double définition du schéma — cause racine du bug 2.3.2
+    // « column ... does not exist ». Idempotent : ADD COLUMN IF NOT EXISTS.
+    // Sur une base NEUVE, les CREATE TABLE ci-dessus ont déjà toutes ces
+    // colonnes → no-op. Sur une base ANCIENNE (créée par un init-db antérieur
+    // dont la définition avait divergé), ceci garantit que TOUTES les colonnes
+    // écrites par PUT /diagnostic et PUT /milestones existent.
+    // Les freins de diagnostics sont rétro-ajoutés SANS CHECK : une colonne
+    // recréée ne doit pas rejeter d'anciennes valeurs (le PUT envoie 1-5 ou NULL).
+    // ══════════════════════════════════════════════════════════════
+    await client.query(`
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS created_by INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS updated_by INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS parcours_anterieur TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS contraintes_sante TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS contraintes_mobilite TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS contraintes_familiales TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS autres_contraintes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_mobilite INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_mobilite_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_mobilite_causes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_sante INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_sante_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_sante_causes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_finances INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_finances_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_finances_causes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_famille INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_famille_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_famille_causes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_linguistique INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_linguistique_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_linguistique_causes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_administratif INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_administratif_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_administratif_causes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_numerique INTEGER;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_numerique_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_numerique_causes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS obs_taches_realisees TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS obs_points_forts TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS obs_difficultes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS obs_comportement_equipe TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS obs_autonomie_ponctualite TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS pref_aime_faire TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS pref_ne_veut_plus TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS pref_environnement_prefere TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS pref_environnement_eviter TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS pref_objectifs TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS explorama_interets TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS explorama_rejets TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS explorama_gestes_positifs TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS explorama_gestes_negatifs TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS explorama_environnements TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS explorama_rythme TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS cip_hypotheses_metiers TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS cip_questions TEXT;
+    `);
+    await client.query(`
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS frein_numerique INTEGER CHECK (frein_numerique BETWEEN 1 AND 5);
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS cip_integration TEXT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS cip_competences TEXT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS cip_projet_pro TEXT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS cip_socialisation TEXT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS sortie_classification VARCHAR(20) CHECK (sortie_classification IN ('positive', 'negative'));
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS sortie_type VARCHAR(50);
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS sortie_commentaires TEXT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS sortie_employeur TEXT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS sortie_formation TEXT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ai_recommendations JSONB;
+    `);
+    // Anti-doublon (employee_id, milestone_type) requis pour les ON CONFLICT du
+    // module (POST /milestones, generateMilestones). Le CREATE TABLE porte déjà
+    // UNIQUE(employee_id, milestone_type) ; cet index garantit la clé sur les
+    // bases anciennes qui en seraient dépourvues. Idempotent.
+    await client.query(`
+      DELETE FROM insertion_milestones a USING insertion_milestones b
+      WHERE a.id < b.id AND a.employee_id = b.employee_id AND a.milestone_type = b.milestone_type
+    `);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_milestones_emp_type_unique ON insertion_milestones(employee_id, milestone_type)`);
+
     console.log('[INIT-DB] Module Parcours Insertion ✓');
 
     // ══════════════════════════════════════════
@@ -4261,7 +4389,7 @@ async function initDatabase() {
         id SERIAL PRIMARY KEY,
         vak_id INTEGER REFERENCES vaks(id) ON DELETE CASCADE,
         ticket_id INTEGER REFERENCES vak_tickets(id) ON DELETE CASCADE,
-        batch_id INTEGER REFERENCES vak_import_batches(id) ON DELETE CASCADE,
+        batch_id INTEGER REFERENCES vak_import_batches(id) ON DELETE SET NULL,
         date_vente TIMESTAMP NOT NULL,
         ref_transaction VARCHAR(64),
         moyen_paiement VARCHAR(64),
@@ -4284,6 +4412,30 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_vak_ventes_segment ON vak_ventes(segment)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_vak_ventes_paiement ON vak_ventes(moyen_paiement)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_vak_ventes_ticket ON vak_ventes(ticket_id)');
+    // ── Alignement FK batch (vague 3, item 3.B) ──
+    // vak_ventes.batch_id était ON DELETE CASCADE alors que vak_tickets.batch_id est
+    // ON DELETE SET NULL : supprimer un batch CSV effaçait les lignes de vente mais
+    // conservait les tickets → analyses par segment (issues de vak_ventes) à zéro tandis
+    // que les KPI ticket restaient (désynchronisation silencieuse). On réaligne sur
+    // SET NULL (détachement symétrique, aucune perte). Idempotent : ne s'exécute que si
+    // la contrainte est encore en CASCADE ('c') — rattrape les bases déjà créées.
+    await client.query(`
+      DO $$
+      DECLARE cname text; deltype "char";
+      BEGIN
+        SELECT c.conname, c.confdeltype INTO cname, deltype
+          FROM pg_constraint c
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+         WHERE c.conrelid = 'vak_ventes'::regclass AND c.contype = 'f' AND a.attname = 'batch_id'
+         LIMIT 1;
+        IF cname IS NOT NULL AND deltype = 'c' THEN
+          EXECUTE format('ALTER TABLE vak_ventes DROP CONSTRAINT %I', cname);
+          ALTER TABLE vak_ventes
+            ADD CONSTRAINT vak_ventes_batch_id_fkey
+            FOREIGN KEY (batch_id) REFERENCES vak_import_batches(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS vak_meteo_quotidien (
@@ -4322,6 +4474,30 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_vak_sumup_sync_started ON vak_sumup_sync_log(started_at DESC)');
 
     console.log('[INIT-DB] Module VAK (Vente au Kilo) ✓');
+
+    // ══════════════════════════════════════════
+    // OBSERVABILITÉ — Journal des exécutions de jobs (Vague 3 — item 3.D-1a)
+    // Trace chaque run du scheduler (début/fin/statut/erreur/volume) pour
+    // détecter les chaînes silencieusement cassées. Sans FK (jobs = système,
+    // pas d'utilisateur) → aucune dépendance d'ordre, tolérant à une base neuve.
+    // Alimenté par le wrapper runInstrumented() de services/scheduler.js ;
+    // lu par GET /api/monitoring/jobs.
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS job_runs (
+        id SERIAL PRIMARY KEY,
+        job_name VARCHAR(100) NOT NULL,
+        started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        finished_at TIMESTAMP,
+        status VARCHAR(16),               -- success | error | timeout
+        error_message TEXT,
+        items_processed INTEGER,
+        duration_ms INTEGER
+      )
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_job_runs_name_started ON job_runs(job_name, started_at DESC)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs(started_at DESC)');
+    console.log('[INIT-DB] Table job_runs (observabilité scheduler) ✓');
 
     // ══════════════════════════════════════════
     // V3 — Seuils d'alerte configurables (Direction D6 / action 11)
@@ -4931,6 +5107,28 @@ async function initDatabase() {
       );
     `);
     console.log('[INIT-DB] Module QHSE (accidents, habilitations, EPI) + registre RGPD ✓');
+
+    // Registre RGPD — sous-traitance IA (Anthropic) — Vague 3, item 3.C-6.
+    // Documente le recours au modèle Claude (Anthropic PBC, sous-traitant art. 28)
+    // pour l'aide à l'analyse insertion et l'assistant conversationnel. Les données
+    // transmises sont PSEUDONYMISÉES (utils/pii-pseudonymize.js). Idempotent.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Assistance IA — sous-traitance Anthropic (analyse insertion & assistant conversationnel)',
+        'Aide à l''analyse des parcours d''insertion (croisement profil PCM × freins périphériques, préparation d''entretiens CIP, bilan de cohorte, rapport d''audit de structure) et assistant conversationnel interne (SolidataBot). AUCUNE décision automatisée au sens de l''art. 22 RGPD : le CIP / l''utilisateur reste seul décideur, l''IA ne produit que des recommandations. Traitement confié à un sous-traitant (art. 28 RGPD) dont l''API commerciale ne réutilise pas les requêtes pour l''entraînement de ses modèles.',
+        'Intérêt légitime ; sous-traitance art. 28 RGPD (Anthropic PBC)',
+        'Salariés en parcours d''insertion (et candidats liés) ; utilisateurs de l''assistant conversationnel',
+        'Données PSEUDONYMISÉES avant transmission : jetons d''identité (« Salarié A », aucun nom réel), poste / filière, tranche d''âge (jamais la date de naissance exacte), scores des 7 freins périphériques (dont indication de santé sous forme de score), type PCM, verbatims CIP anonymisés. Coordonnées et identifiants directs (email, téléphone, matricule, titre de séjour, NIR) exclus ou masqués avant envoi. Pour le chatbot : données AGRÉGÉES ou données propres de l''utilisateur uniquement.',
+        'Anthropic PBC (fournisseur du modèle Claude, sous-traitant art. 28 RGPD) via son API',
+        'Analyses non stockées (générées à la demande) ; historique chatbot conservé pour supervision',
+        'Pseudonymisation systématique avant envoi (backend/src/utils/pii-pseudonymize.js) ; accès restreint (analyses insertion réservées aux rôles ADMIN/RH, chatbot filtré par rôle avec outils en lecture seule) ; transport chiffré TLS ; clé API en variable d''environnement (jamais en base ni en clair) ; journalisation applicative.'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Assistance IA — sous-traitance Anthropic (analyse insertion & assistant conversationnel)'
+      );
+    `);
+    console.log('[INIT-DB] Registre RGPD — sous-traitance IA Anthropic ✓');
 
     // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL

@@ -381,23 +381,37 @@ router.post('/batches', authorize('ADMIN', 'MANAGER'), [
       return res.status(400).json({ error: 'chaine_id et poids_initial_kg requis' });
     }
     const code = `LOT-${Date.now().toString(36).toUpperCase()}`;
-    const result = await pool.query(
-      `INSERT INTO batch_tracking (code, stock_movement_id, chaine_id, poids_initial_kg, poids_restant_kg, created_by)
-       VALUES ($1, $2, $3, $4, $4, $5) RETURNING *`,
-      [code, stock_movement_id || null, chaine_id, poids_initial_kg, req.user.id]
-    );
 
-    // Stock Original : sortie automatique quand lot entre en tri
-    if (poids_initial_kg > 0) {
-      await pool.query(
-        `INSERT INTO stock_original_movements (type, date, poids_kg, batch_id, origine, notes, created_by)
-         VALUES ('sortie', CURRENT_DATE, $1, $2, 'tri_batch', $3, $4)`,
-        [poids_initial_kg, result.rows[0].id,
-         `Auto: lot ${result.rows[0].code} en tri (${poids_initial_kg} kg)`, req.user.id]
+    // Écriture ATOMIQUE : création du lot + sortie de stock original associée.
+    // Hors transaction, un échec du mouvement de stock laissait un lot orphelin
+    // (entré en tri sans la sortie de stock correspondante, donc grand livre faussé).
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `INSERT INTO batch_tracking (code, stock_movement_id, chaine_id, poids_initial_kg, poids_restant_kg, created_by)
+         VALUES ($1, $2, $3, $4, $4, $5) RETURNING *`,
+        [code, stock_movement_id || null, chaine_id, poids_initial_kg, req.user.id]
       );
-    }
 
-    res.status(201).json(result.rows[0]);
+      // Stock Original : sortie automatique quand lot entre en tri
+      if (poids_initial_kg > 0) {
+        await client.query(
+          `INSERT INTO stock_original_movements (type, date, poids_kg, batch_id, origine, notes, created_by)
+           VALUES ('sortie', CURRENT_DATE, $1, $2, 'tri_batch', $3, $4)`,
+          [poids_initial_kg, result.rows[0].id,
+           `Auto: lot ${result.rows[0].code} en tri (${poids_initial_kg} kg)`, req.user.id]
+        );
+      }
+
+      await client.query('COMMIT');
+      res.status(201).json(result.rows[0]);
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error('[TRI] Erreur création lot :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -721,19 +735,31 @@ router.post('/colisages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { categorie_sortante_id, type_conteneur_id, exutoire_id } = req.body;
     const code = `COL-${Date.now().toString(36).toUpperCase()}`;
-    const result = await pool.query(
-      `INSERT INTO colisages (code, categorie_sortante_id, type_conteneur_id, exutoire_id, created_by)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [code, categorie_sortante_id || null, type_conteneur_id || null, exutoire_id || null, req.user.id]
-    );
 
-    // Logger la création
-    await pool.query(
-      'INSERT INTO colisage_history (colisage_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
-      [result.rows[0].id, 'ouvert', 'Colisage créé', req.user.id]
-    );
+    // Écriture ATOMIQUE : création du colisage + première ligne d'historique.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `INSERT INTO colisages (code, categorie_sortante_id, type_conteneur_id, exutoire_id, created_by)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [code, categorie_sortante_id || null, type_conteneur_id || null, exutoire_id || null, req.user.id]
+      );
 
-    res.status(201).json(result.rows[0]);
+      // Logger la création
+      await client.query(
+        'INSERT INTO colisage_history (colisage_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
+        [result.rows[0].id, 'ouvert', 'Colisage créé', req.user.id]
+      );
+
+      await client.query('COMMIT');
+      res.status(201).json(result.rows[0]);
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error('[TRI] Erreur création colisage :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -792,28 +818,48 @@ router.get('/colisages/:id', async (req, res) => {
 router.post('/colisages/:id/items', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { output_id, produit_fini_id, poids_kg, description } = req.body;
-    const colisage = await pool.query('SELECT status FROM colisages WHERE id = $1', [req.params.id]);
-    if (colisage.rows.length === 0) return res.status(404).json({ error: 'Colisage non trouvé' });
-    if (colisage.rows[0].status !== 'ouvert') {
-      return res.status(400).json({ error: 'Le colisage doit être ouvert pour ajouter des articles' });
+
+    // Écriture ATOMIQUE + verrou : contrôle du statut « ouvert », insertion de l'article
+    // et incrément des totaux (poids + nb_articles) indivisibles. Le FOR UPDATE sérialise
+    // les ajouts concurrents — auparavant `nb_articles = nb_articles + 1` sur lecture non
+    // verrouillée pouvait perdre des incréments (race), et le contrôle de statut était
+    // sujet au TOCTOU.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const colisage = await client.query('SELECT status FROM colisages WHERE id = $1 FOR UPDATE', [req.params.id]);
+      if (colisage.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Colisage non trouvé' });
+      }
+      if (colisage.rows[0].status !== 'ouvert') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Le colisage doit être ouvert pour ajouter des articles' });
+      }
+
+      const item = await client.query(
+        `INSERT INTO colisage_items (colisage_id, output_id, produit_fini_id, poids_kg, description)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [req.params.id, output_id || null, produit_fini_id || null, poids_kg || null, description]
+      );
+
+      // Mettre à jour les totaux du colisage
+      await client.query(
+        `UPDATE colisages SET
+         poids_kg = COALESCE(poids_kg, 0) + COALESCE($1, 0),
+         nb_articles = nb_articles + 1, updated_at = NOW()
+         WHERE id = $2`,
+        [poids_kg, req.params.id]
+      );
+
+      await client.query('COMMIT');
+      res.status(201).json(item.rows[0]);
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
     }
-
-    const item = await pool.query(
-      `INSERT INTO colisage_items (colisage_id, output_id, produit_fini_id, poids_kg, description)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [req.params.id, output_id || null, produit_fini_id || null, poids_kg || null, description]
-    );
-
-    // Mettre à jour les totaux du colisage
-    await pool.query(
-      `UPDATE colisages SET
-       poids_kg = COALESCE(poids_kg, 0) + COALESCE($1, 0),
-       nb_articles = nb_articles + 1, updated_at = NOW()
-       WHERE id = $2`,
-      [poids_kg, req.params.id]
-    );
-
-    res.status(201).json(item.rows[0]);
   } catch (err) {
     console.error('[TRI] Erreur ajout article :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -832,31 +878,48 @@ router.put('/colisages/:id/status', authorize('ADMIN', 'MANAGER'), [
       expedie: ['livre'],
     };
 
-    const current = await pool.query('SELECT status FROM colisages WHERE id = $1', [req.params.id]);
-    if (current.rows.length === 0) return res.status(404).json({ error: 'Colisage non trouvé' });
+    // Transition ATOMIQUE + verrou : lecture verrouillée du statut courant (FOR UPDATE),
+    // validation de la transition, UPDATE et trace d'historique indivisibles. Corrige le
+    // TOCTOU (SELECT puis UPDATE non verrouillés) et évite un historique orphelin.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const current = await client.query('SELECT status FROM colisages WHERE id = $1 FOR UPDATE', [req.params.id]);
+      if (current.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Colisage non trouvé' });
+      }
 
-    const allowed = validTransitions[current.rows[0].status];
-    if (!allowed || !allowed.includes(status)) {
-      return res.status(400).json({ error: `Transition ${current.rows[0].status} → ${status} non autorisée` });
+      const allowed = validTransitions[current.rows[0].status];
+      if (!allowed || !allowed.includes(status)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Transition ${current.rows[0].status} → ${status} non autorisée` });
+      }
+
+      const updates = ['status = $1', 'updated_at = NOW()'];
+      const params = [status];
+      if (status === 'scelle') {
+        updates.push(`scelle_at = NOW()`, `scelle_by = $${params.length + 1}`);
+        params.push(req.user.id);
+      }
+      params.push(req.params.id);
+
+      const result = await client.query(
+        `UPDATE colisages SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+
+      await client.query(
+        'INSERT INTO colisage_history (colisage_id, from_status, to_status, comment, changed_by) VALUES ($1, $2, $3, $4, $5)',
+        [req.params.id, current.rows[0].status, status, comment, req.user.id]
+      );
+
+      await client.query('COMMIT');
+      res.json(result.rows[0]);
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
     }
-
-    const updates = ['status = $1', 'updated_at = NOW()'];
-    const params = [status];
-    if (status === 'scelle') {
-      updates.push(`scelle_at = NOW()`, `scelle_by = $${params.length + 1}`);
-      params.push(req.user.id);
-    }
-    params.push(req.params.id);
-
-    const result = await pool.query(
-      `UPDATE colisages SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
-
-    await pool.query(
-      'INSERT INTO colisage_history (colisage_id, from_status, to_status, comment, changed_by) VALUES ($1, $2, $3, $4, $5)',
-      [req.params.id, current.rows[0].status, status, comment, req.user.id]
-    );
-
-    res.json(result.rows[0]);
   } catch (err) {
     console.error('[TRI] Erreur changement statut colisage :', err);
     res.status(500).json({ error: 'Erreur serveur' });

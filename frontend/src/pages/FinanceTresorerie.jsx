@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Landmark, List } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, DataTable, LoadingSpinner, Section } from '../components';
+import { PageHeader, KPICard, DataTable, LoadingSpinner, Section, ErrorState } from '../components';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine,
@@ -29,6 +29,7 @@ export default function FinanceTresorerie() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [error, setError] = useState(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
@@ -37,8 +38,10 @@ export default function FinanceTresorerie() {
     try {
       const res = await api.get(`/finance/gl/${year}/tresorerie`);
       setData(res.data);
+      setError(null);
     } catch (err) {
       console.error('Erreur chargement tresorerie:', err);
+      setError('Impossible de charger la trésorerie. Vérifiez votre connexion puis réessayez.');
     }
     setLoading(false);
   }, [year]);
@@ -87,6 +90,10 @@ export default function FinanceTresorerie() {
             </select>
           }
         />
+
+        {error && (
+          <ErrorState variant="card" title="Trésorerie indisponible" message={error} onRetry={loadData} />
+        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

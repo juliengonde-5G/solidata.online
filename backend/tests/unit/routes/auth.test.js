@@ -84,6 +84,59 @@ describe('POST /api/auth/login', () => {
     const decoded = jwt.verify(res.body.accessToken, JWT_SECRET);
     expect(decoded.id).toBe(1);
     expect(decoded.role).toBe('ADMIN');
+    // Le jeton embarque token_version (tv) pour la révocation de session (3.C-1)
+    expect(decoded.tv).toBe(0);
+  });
+
+  // Verrouillage léger + journalisation des échecs (audit vague 3, 3.C-3)
+  it('should return 429 when the account is temporarily locked', async () => {
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: 1, username: 'admin', password_hash: 'x', role: 'ADMIN', is_active: true, locked_until: new Date(Date.now() + 10 * 60 * 1000) }],
+    });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'admin', password: 'whatever' });
+    expect(res.status).toBe(429);
+  });
+
+  it('should log login_failed and increment counter on wrong password', async () => {
+    const passwordHash = await bcrypt.hash('correct_password', 10);
+    mockQuery.mockResolvedValue({ rows: [] }); // défaut pour les écritures secondaires
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: 1, username: 'admin', password_hash: passwordHash, role: 'ADMIN', is_active: true, failed_login_count: 0, last_failed_login_at: null }],
+    });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'admin', password: 'wrong_password' });
+    expect(res.status).toBe(401);
+    const sqls = mockQuery.mock.calls.map((c) => String(c[0]));
+    expect(sqls.some((s) => /user_activity_log/.test(s))).toBe(true); // login_failed journalisé
+    expect(sqls.some((s) => /failed_login_count/.test(s))).toBe(true); // compteur incrémenté
+  });
+
+  it('should reset the failed counter on successful login', async () => {
+    const passwordHash = await bcrypt.hash('correct_password', 10);
+    mockQuery.mockResolvedValue({ rows: [] });
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: 1, username: 'admin', password_hash: passwordHash, role: 'ADMIN', first_name: 'T', last_name: 'U', email: null, is_active: true, failed_login_count: 3, last_failed_login_at: new Date() }],
+    });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'admin', password: 'correct_password' });
+    expect(res.status).toBe(200);
+    const sqls = mockQuery.mock.calls.map((c) => String(c[0]));
+    expect(sqls.some((s) => /failed_login_count = 0/.test(s))).toBe(true);
+  });
+
+  it('should never log the attempted password in the activity log', async () => {
+    mockQuery.mockResolvedValue({ rows: [] });
+    mockQuery.mockResolvedValueOnce({ rows: [] }); // utilisateur inconnu
+    await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'ghost', password: 'super-secret-pw' });
+    const params = mockQuery.mock.calls.flatMap((c) => (Array.isArray(c[1]) ? c[1] : []));
+    const serialized = JSON.stringify(params);
+    expect(serialized).not.toContain('super-secret-pw');
   });
 });
 

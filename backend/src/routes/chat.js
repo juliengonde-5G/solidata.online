@@ -9,6 +9,7 @@ const router = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
 const pool = require('../config/database');
 const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
+const { createPseudonymizer, sanitizeToolResultJson } = require('../utils/pii-pseudonymize');
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -554,6 +555,12 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
   // Outils filtrés RGPD selon le rôle de base de l'utilisateur (les outils de
   // pilotage finance/insertion/ventes ne sont exposés qu'aux rôles autorisés).
   const tools = toolsForRole(userCtx.role);
+  // RGPD (item 3.C-5) — défense en profondeur : assainit les sorties d'outils
+  // avant de les transmettre à Anthropic. Les outils actuels ne renvoient que des
+  // données AGRÉGÉES ou les données PROPRES de l'utilisateur (aucun nom de tiers),
+  // mais si un outil venait à exposer un champ nominatif (first_name, email…), il
+  // serait pseudonymisé/masqué ici. Jeton stable pour la durée du message.
+  const pseudo = createPseudonymizer();
 
   for (let i = 0; i < maxIterations; i++) {
     const response = await client.messages.create({
@@ -580,7 +587,9 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
     const toolResults = [];
     for (const tu of toolUses) {
       const result = await executeTool(tu.name, tu.input, userCtx);
-      toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: result });
+      // Assainissement PII avant transmission au modèle (no-op sur les outils
+      // actuels, filet de sécurité pour tout futur outil renvoyant une identité).
+      toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: sanitizeToolResultJson(result, pseudo) });
     }
     messages.push({ role: 'user', content: toolResults });
   }

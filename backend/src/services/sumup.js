@@ -498,7 +498,16 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
   }
   const vak = vakRow.rows[0];
 
-  const batchRes = await pool.query(`
+  // ── Import ATOMIQUE (vague 3, item 3.B) ──
+  // INSERT batch → upsert tickets → reset+insert ventes → UPDATE batch : une seule
+  // transaction. Le file_hash n'est COMMITé qu'au succès complet → un échec en cours
+  // ROLLBACK le batch ET son hash, rendant le même fichier ré-importable (avant : un
+  // import partiel restait bloqué en 'duplicate', irrécupérable sans intervention DB).
+  const client = await pool.connect();
+  try {
+  await client.query('BEGIN');
+
+  const batchRes = await client.query(`
     INSERT INTO vak_import_batches (vak_id, filename, file_hash, statut, source, imported_by)
     VALUES ($1, $2, $3, 'en_cours', $4, $5) RETURNING id
   `, [vakId, filename, fileHash, source, userId]);
@@ -615,7 +624,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
     const totalHT = tk.lignes.reduce((s, l) => s + l.total_ht, 0);
     const totalTVA = tk.lignes.reduce((s, l) => s + l.total_tva, 0);
 
-    const tickRes = await pool.query(`
+    const tickRes = await client.query(`
       INSERT INTO vak_tickets
         (vak_id, ref_transaction, date_ticket, moyen_paiement, nb_articles,
          poids_kg, total_ttc, total_ht, total_tva, batch_id, source)
@@ -637,11 +646,11 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
     // batch n'est jamais supprimé et sa cascade ne joue pas : sans ce DELETE,
     // les lignes se cumulaient (segments/annuel double-comptés). Aligné sur le
     // chemin API qui fait déjà ce DELETE.
-    await pool.query('DELETE FROM vak_ventes WHERE ticket_id = $1', [ticketId]);
+    await client.query('DELETE FROM vak_ventes WHERE ticket_id = $1', [ticketId]);
 
     // INSERT lignes
     for (const l of tk.lignes) {
-      await pool.query(`
+      await client.query(`
         INSERT INTO vak_ventes
           (vak_id, ticket_id, batch_id, date_vente, ref_transaction, moyen_paiement,
            description, segment, unite, quantite, prix_unitaire_ttc, remise,
@@ -654,7 +663,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
   }
 
   const statutFinal = nbErreur > 0 && nbImport === 0 ? 'erreur' : 'termine';
-  await pool.query(`
+  await client.query(`
     UPDATE vak_import_batches SET
       date_debut = $1, date_fin = $2,
       nb_lignes_total = $3, nb_lignes_importees = $4, nb_lignes_erreur = $5,
@@ -666,6 +675,9 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       statutFinal, erreurs.length ? JSON.stringify(erreurs.slice(0, 100)) : null,
       batchId]);
 
+  await client.query('COMMIT');
+
+  // Météo best-effort APRÈS le commit (indépendante de l'atomicité de l'import).
   await captureWeatherForVak(vakId).catch((err) => logger.warn('VAK météo failed', { error: err.message }));
 
   return {
@@ -678,6 +690,12 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
     poids_total_kg: poidsTotal,
     duplicate: false,
   };
+  } catch (importErr) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw importErr;
+  } finally {
+    client.release();
+  }
 }
 
 // ── Météo VAK ──
@@ -820,39 +838,54 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
       totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes,
     } = mapSumUpTransaction(tx, detail);
 
-    const tickRes = await pool.query(`
-      INSERT INTO vak_tickets
-        (vak_id, sumup_transaction_id, ref_transaction, date_ticket, moyen_paiement,
-         entry_mode, nb_articles, poids_kg, total_ttc, total_ht, total_tva, source)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-      ON CONFLICT (vak_id, ref_transaction) DO UPDATE SET
-        sumup_transaction_id = COALESCE(EXCLUDED.sumup_transaction_id, vak_tickets.sumup_transaction_id),
-        moyen_paiement = EXCLUDED.moyen_paiement,
-        entry_mode = COALESCE(EXCLUDED.entry_mode, vak_tickets.entry_mode),
-        nb_articles = EXCLUDED.nb_articles,
-        poids_kg = EXCLUDED.poids_kg,
-        total_ttc = EXCLUDED.total_ttc,
-        total_ht = EXCLUDED.total_ht,
-        total_tva = EXCLUDED.total_tva,
-        source = EXCLUDED.source
-      RETURNING id, (xmax = 0) AS inserted
-    `, [vakId, txId || null, refTx, txDate.toISOString(), moyenPaiement, entryMode,
-        nbArticles, poidsTicket, totalTTC, totalHT, totalTVA, source]);
-    const ticketId = tickRes.rows[0].id;
-    const wasInserted = tickRes.rows[0].inserted;
+    // ── Écriture ATOMIQUE : upsert ticket + reset lignes + réinsertion (vague 3, item 3.B) ──
+    // Auparavant hors transaction : un échec entre le DELETE et les INSERT laissait un
+    // ticket SANS lignes (KPI ticket présents, mais segments vides). Le fetch du détail
+    // (HTTP, ci-dessus) et l'émission Socket.IO (ci-dessous) restent hors transaction.
+    const client = await pool.connect();
+    let ticketId; let wasInserted;
+    try {
+      await client.query('BEGIN');
+      const tickRes = await client.query(`
+        INSERT INTO vak_tickets
+          (vak_id, sumup_transaction_id, ref_transaction, date_ticket, moyen_paiement,
+           entry_mode, nb_articles, poids_kg, total_ttc, total_ht, total_tva, source)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        ON CONFLICT (vak_id, ref_transaction) DO UPDATE SET
+          sumup_transaction_id = COALESCE(EXCLUDED.sumup_transaction_id, vak_tickets.sumup_transaction_id),
+          moyen_paiement = EXCLUDED.moyen_paiement,
+          entry_mode = COALESCE(EXCLUDED.entry_mode, vak_tickets.entry_mode),
+          nb_articles = EXCLUDED.nb_articles,
+          poids_kg = EXCLUDED.poids_kg,
+          total_ttc = EXCLUDED.total_ttc,
+          total_ht = EXCLUDED.total_ht,
+          total_tva = EXCLUDED.total_tva,
+          source = EXCLUDED.source
+        RETURNING id, (xmax = 0) AS inserted
+      `, [vakId, txId || null, refTx, txDate.toISOString(), moyenPaiement, entryMode,
+          nbArticles, poidsTicket, totalTTC, totalHT, totalTVA, source]);
+      ticketId = tickRes.rows[0].id;
+      wasInserted = tickRes.rows[0].inserted;
 
-    // Reset lignes en cas d'update
-    await pool.query('DELETE FROM vak_ventes WHERE ticket_id = $1', [ticketId]);
-    for (const l of lignes) {
-      await pool.query(`
-        INSERT INTO vak_ventes
-          (vak_id, ticket_id, date_vente, ref_transaction, moyen_paiement,
-           description, segment, unite, quantite, prix_unitaire_ttc,
-           total_ht, total_ttc, total_tva, taux_tva, source)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-      `, [vakId, ticketId, txDate.toISOString(), refTx, moyenPaiement,
-          l.description, l.segment, l.unite, l.quantite, l.prix_unitaire_ttc,
-          l.total_ht, l.total_ttc, l.total_tva, l.taux_tva, source]);
+      // Reset lignes en cas d'update
+      await client.query('DELETE FROM vak_ventes WHERE ticket_id = $1', [ticketId]);
+      for (const l of lignes) {
+        await client.query(`
+          INSERT INTO vak_ventes
+            (vak_id, ticket_id, date_vente, ref_transaction, moyen_paiement,
+             description, segment, unite, quantite, prix_unitaire_ttc,
+             total_ht, total_ttc, total_tva, taux_tva, source)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        `, [vakId, ticketId, txDate.toISOString(), refTx, moyenPaiement,
+            l.description, l.segment, l.unite, l.quantite, l.prix_unitaire_ttc,
+            l.total_ht, l.total_ttc, l.total_tva, l.taux_tva, source]);
+      }
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
     }
 
     // Émission Socket.IO temps réel pour dashboard live

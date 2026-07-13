@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner, Section, ModuleCard } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, Section, ModuleCard, ErrorState } from '../components';
 import {
   ComposedChart, Bar, Line, LineChart, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -68,6 +68,7 @@ export default function Finance() {
   const [kpis, setKpis] = useState(null);
   const [rappro, setRappro] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
@@ -76,8 +77,10 @@ export default function Finance() {
     try {
       const res = await api.get(`/finance/kpis/${year}`);
       setKpis(res.data);
+      setError(null);
     } catch (err) {
       console.error('Erreur chargement KPI finance:', err);
+      setError('Impossible de charger les indicateurs financiers. Vérifiez votre connexion puis réessayez.');
     }
     // Rapprochement CA opérationnel vs comptable (item 36) — résilient : un
     // échec ici ne doit pas vider les KPIs dirigeant ci-dessus.
@@ -141,6 +144,10 @@ export default function Finance() {
             </select>
           }
         />
+
+        {error && (
+          <ErrorState variant="card" title="Indicateurs financiers indisponibles" message={error} onRetry={loadData} />
+        )}
 
         {/* Alertes */}
         {alerts.length > 0 && (

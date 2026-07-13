@@ -42,6 +42,10 @@ export default function Users() {
 
   const createUser = async (e) => {
     e.preventDefault();
+    if (!form.password || form.password.length < 10) {
+      alert('Le mot de passe doit contenir au moins 10 caractères.');
+      return;
+    }
     try {
       await api.post('/users', form);
       setShowForm(false);
@@ -86,7 +90,7 @@ export default function Users() {
 
   const resetPassword = async () => {
     if (!editUser) return;
-    if (!newPassword || newPassword.length < 6) { setEditError('Mot de passe de 6 caractères minimum.'); return; }
+    if (!newPassword || newPassword.length < 10) { setEditError('Mot de passe de 10 caractères minimum.'); return; }
     setBusy(true); setEditError(''); setEditMsg('');
     try {
       await api.put(`/users/${editUser.id}/reset-password`, { newPassword });
@@ -161,7 +165,7 @@ export default function Users() {
               </div>
               <input placeholder="Nom d'utilisateur *" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} className="input-modern" required />
               <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="input-modern" />
-              <input placeholder="Mot de passe *" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className="input-modern" required />
+              <input placeholder="Mot de passe * (min. 10 caractères)" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className="input-modern" minLength={10} required />
               <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="select-modern">
                 {roleOptions.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
               </select>
@@ -214,8 +218,8 @@ export default function Users() {
               <div className="border-t pt-3">
                 <label className="text-xs text-slate-500 font-medium flex items-center gap-1"><KeyRound className="w-3.5 h-3.5" /> Réinitialiser le mot de passe</label>
                 <div className="flex gap-2 mt-1">
-                  <input type="text" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Nouveau mot de passe (min. 6)" className="input-modern flex-1" />
-                  <button onClick={resetPassword} disabled={busy || newPassword.length < 6} className="px-3 py-2 rounded-lg bg-amber-100 text-amber-800 text-sm font-semibold hover:bg-amber-200 disabled:opacity-50 whitespace-nowrap">
+                  <input type="text" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Nouveau mot de passe (min. 10)" className="input-modern flex-1" />
+                  <button onClick={resetPassword} disabled={busy || newPassword.length < 10} className="px-3 py-2 rounded-lg bg-amber-100 text-amber-800 text-sm font-semibold hover:bg-amber-200 disabled:opacity-50 whitespace-nowrap">
                     Réinitialiser
                   </button>
                 </div>

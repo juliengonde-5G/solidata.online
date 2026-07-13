@@ -13,6 +13,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize, refreshCustomRoles, resolveBaseRole } = require('../middleware/auth');
+const { logActivity } = require('../middleware/activity-logger');
 
 // Rôles intégrés (labels affichés). ADMIN n'est jamais restreignable/duplicable.
 // DPO / FINANCE / QHSE : rôles intégrés « parties prenantes » ajoutés en vague 2.
@@ -134,6 +135,13 @@ router.post('/roles', authorize('ADMIN'), async (req, res) => {
       client.release();
     }
     await refreshCustomRoles(); // prise en compte immédiate par authorize
+    // Journalisation (item 3.C-7) : création/duplication de rôle = action sensible.
+    logActivity({
+      userId: req.user.id, username: req.user.username, action: 'role_create',
+      entityType: 'custom_role',
+      details: { role_key: roleKey, label: label.trim(), base_role: baseRole, source_role },
+      ip: req.ip,
+    });
     res.status(201).json({ key: roleKey, label: label.trim(), base_role: baseRole, builtin: false });
   } catch (err) {
     console.error('[PERMISSIONS] create role :', err.message);
@@ -166,6 +174,13 @@ router.delete('/roles/:key', authorize('ADMIN'), async (req, res) => {
       client.release();
     }
     await refreshCustomRoles();
+    // Journalisation (item 3.C-7) : suppression de rôle (+ réaffectation d'utilisateurs).
+    logActivity({
+      userId: req.user.id, username: req.user.username, action: 'role_delete',
+      entityType: 'custom_role',
+      details: { role_key: key, base_role: baseRole, reassigned },
+      ip: req.ip,
+    });
     res.json({ message: `Rôle supprimé.${reassigned ? ` ${reassigned} utilisateur(s) réaffecté(s) au rôle « ${BUILTIN_ROLES[baseRole] || baseRole} ».` : ''}`, reassigned });
   } catch (err) {
     console.error('[PERMISSIONS] delete role :', err.message);
@@ -193,6 +208,7 @@ router.put('/matrix', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const applied = [];
     for (const e of entries) {
       if (!validRoles.has(e.role) || !MODULE_KEYS.includes(e.module_key)) continue;
       await client.query(
@@ -200,8 +216,16 @@ router.put('/matrix', authorize('ADMIN'), async (req, res) => {
          ON CONFLICT (role, module_key) DO UPDATE SET allowed = $3, updated_at = NOW()`,
         [e.role, e.module_key, !!e.allowed]
       );
+      applied.push({ role: e.role, module_key: e.module_key, allowed: !!e.allowed });
     }
     await client.query('COMMIT');
+    // Journalisation (item 3.C-7) : modification de la matrice d'habilitations.
+    logActivity({
+      userId: req.user.id, username: req.user.username, action: 'permissions_matrix_update',
+      entityType: 'role_module_access',
+      details: { count: applied.length, roles: [...new Set(applied.map((a) => a.role))], changes: applied.slice(0, 100) },
+      ip: req.ip,
+    });
     res.json({ message: 'Habilitations mises à jour' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

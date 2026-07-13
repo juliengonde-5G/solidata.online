@@ -4,10 +4,34 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const pool = require('../config/database');
-const { authenticate, resolveBaseRole } = require('../middleware/auth');
+const { authenticate, resolveBaseRole, validatePassword, MIN_PASSWORD_LENGTH } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { logActivity } = require('../middleware/activity-logger');
+
+// Verrouillage léger anti-brute-force (audit vague 3, item 3.C-3).
+// ~8 échecs sur une fenêtre glissante de 15 min → blocage temporaire de 15 min.
+// Jamais de blocage définitif (pas de DoS possible sur un compte).
+const MAX_FAILED_LOGINS = 8;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOCKOUT_MS = 15 * 60 * 1000;
+
+// Enregistre un échec de connexion et applique le verrouillage temporaire au
+// franchissement du seuil. Fenêtre glissante : un échec isolé hors fenêtre
+// repart à 1. Au verrouillage, le compteur est remis à 0 → après expiration du
+// blocage, l'utilisateur repart sur une fenêtre neuve (aucun blocage définitif).
+async function registerFailedLogin(user) {
+  const now = Date.now();
+  const last = user.last_failed_login_at ? new Date(user.last_failed_login_at).getTime() : 0;
+  const withinWindow = last && (now - last) < LOGIN_WINDOW_MS;
+  const nextCount = withinWindow ? ((user.failed_login_count || 0) + 1) : 1;
+  const lock = nextCount >= MAX_FAILED_LOGINS;
+  const lockedUntil = lock ? new Date(now + LOCKOUT_MS) : null;
+  await pool.query(
+    'UPDATE users SET failed_login_count = $1, last_failed_login_at = NOW(), locked_until = $2 WHERE id = $3',
+    [lock ? 0 : nextCount, lockedUntil, user.id]
+  );
+}
 
 // Centralisé — fail-fast si non défini en production (cf. middleware/auth.js)
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
@@ -97,8 +121,17 @@ router.post('/driver-start', async (req, res) => {
       employeeId = null;
     }
 
+    // Le jeton chauffeur porte un userId réel (chauffeur assigné, compte
+    // « chauffeur » générique, ou repli). On y embarque `tv` pour qu'il soit
+    // révocable comme les autres (item 3.C-1). Défaut 0 si la lecture échoue.
+    let tv = 0;
+    try {
+      const tvRes = await pool.query('SELECT token_version FROM users WHERE id = $1', [userId]);
+      tv = tvRes.rows[0]?.token_version == null ? 0 : tvRes.rows[0].token_version;
+    } catch (_) { /* défaut 0 */ }
+
     const token = jwt.sign(
-      { id: userId, userId, role: 'COLLABORATEUR', username: `driver_${vehicle.id}` },
+      { id: userId, userId, role: 'COLLABORATEUR', username: `driver_${vehicle.id}`, tv },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
@@ -133,19 +166,49 @@ router.post('/login', [
       return res.status(400).json({ error: 'Nom d\'utilisateur et mot de passe requis' });
     }
 
-    const result = await pool.query(
-      'SELECT * FROM users WHERE username = $1 AND is_active = true',
-      [username]
-    );
+    // On récupère le compte SANS filtrer is_active afin de pouvoir gérer le
+    // verrouillage anti-brute-force et journaliser les échecs (item 3.C-3). Un
+    // compte inexistant ou désactivé renvoie le même 401 « Identifiants invalides »
+    // (pas d'énumération).
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    const user = result.rows[0] || null;
 
-    if (result.rows.length === 0) {
+    // Verrouillage temporaire actif ? (jamais définitif)
+    if (user && user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
+      logActivity({ userId: user.id, username, action: 'login_failed', ip: req.ip, details: { reason: 'locked' } });
+      return res.status(429).json({ error: 'Trop de tentatives de connexion. Réessayez dans quelques minutes.' });
+    }
+
+    // Le mot de passe n'est vérifié que sur un compte existant ET actif.
+    let validPassword = false;
+    if (user && user.is_active) {
+      validPassword = await bcrypt.compare(password, user.password_hash);
+    }
+
+    if (!validPassword) {
+      // Journaliser l'échec — identifiant tenté + IP UNIQUEMENT, jamais le mot de passe.
+      logActivity({
+        userId: user ? user.id : null,
+        username,
+        action: 'login_failed',
+        ip: req.ip,
+        details: { reason: user ? (user.is_active ? 'bad_password' : 'inactive') : 'unknown_user' },
+      });
+      if (user) {
+        try { await registerFailedLogin(user); }
+        catch (e) { console.error('[AUTH] registerFailedLogin :', e.message); }
+      }
       return res.status(401).json({ error: 'Identifiants invalides' });
     }
 
-    const user = result.rows[0];
-    const validPassword = await bcrypt.compare(password, user.password_hash);
-    if (!validPassword) {
-      return res.status(401).json({ error: 'Identifiants invalides' });
+    // Succès : réinitialiser le compteur d'échecs / le verrou s'ils étaient posés.
+    if ((user.failed_login_count && user.failed_login_count > 0) || user.locked_until) {
+      try {
+        await pool.query(
+          'UPDATE users SET failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = $1',
+          [user.id]
+        );
+      } catch (e) { console.error('[AUTH] reset compteur échecs :', e.message); }
     }
 
     // Item 1 (audit) : filet de rattrapage pour les installations existantes —
@@ -167,6 +230,8 @@ router.post('/login', [
       role: user.role,
       first_name: user.first_name,
       last_name: user.last_name,
+      // Révocation de session (item 3.C-1) : version au moment de l'émission.
+      tv: user.token_version == null ? 0 : user.token_version,
     };
 
     const accessToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
@@ -256,6 +321,8 @@ router.post('/refresh', async (req, res) => {
       role: row.role,
       first_name: row.first_name,
       last_name: row.last_name,
+      // Révocation de session (item 3.C-1) : version courante en base (jointe u.*).
+      tv: row.token_version == null ? 0 : row.token_version,
     };
 
     const newAccessToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
@@ -295,6 +362,14 @@ router.post('/refresh', async (req, res) => {
 router.post('/logout', authenticate, async (req, res) => {
   try {
     await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [req.user.id]);
+
+    // Révocation effective (item 3.C-1) : invalider immédiatement les access
+    // tokens vivants du compte (et pas seulement supprimer le refresh token).
+    // NB : la granularité est par compte → une déconnexion invalide les jetons
+    // d'accès de tous les appareils de cet utilisateur (accepté pour cet ERP).
+    if (req.user.id != null) {
+      await pool.query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [req.user.id]);
+    }
 
     // Fermer les sessions actives
     await pool.query(
@@ -343,15 +418,17 @@ router.get('/me', authenticate, async (req, res) => {
 // drapeau et révoque les refresh tokens pour un re-login propre (audit item 1).
 router.put('/password', authenticate, [
   body('currentPassword').notEmpty().withMessage('Mot de passe actuel requis'),
-  body('newPassword').isLength({ min: 10 }).withMessage('Le nouveau mot de passe doit contenir au moins 10 caractères'),
+  body('newPassword').isLength({ min: MIN_PASSWORD_LENGTH }).withMessage(`Le nouveau mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères`),
 ], validate, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Mot de passe actuel et nouveau requis' });
     }
-    if (newPassword.length < 10) {
-      return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 10 caractères' });
+    // Politique de mot de passe unifiée (item 3.C-2).
+    const pwdErr = validatePassword(newPassword);
+    if (pwdErr) {
+      return res.status(400).json({ error: pwdErr });
     }
 
     const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);

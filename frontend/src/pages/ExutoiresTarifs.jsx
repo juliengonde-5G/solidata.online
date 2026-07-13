@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Tag } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, DataTable, Modal, PageHeader } from '../components';
+import { LoadingSpinner, DataTable, Modal, PageHeader, ErrorState } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
@@ -45,6 +45,7 @@ export default function ExutoiresTarifs() {
   const [tarifs, setTarifs] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [formError, setFormError] = useState('');
@@ -66,7 +67,11 @@ export default function ExutoiresTarifs() {
       ]);
       setTarifs(tarifRes.data);
       setClients(clientRes.data);
-    } catch (err) { console.error(err); }
+      setError(null);
+    } catch (err) {
+      console.error(err);
+      setError('Impossible de charger les tarifs exutoires. Vérifiez votre connexion puis réessayez.');
+    }
     setLoading(false);
   };
 
@@ -172,6 +177,12 @@ export default function ExutoiresTarifs() {
             </button>
           }
         />
+
+        {error && (
+          <div className="mb-6">
+            <ErrorState variant="card" title="Tarifs indisponibles" message={error} onRetry={loadData} />
+          </div>
+        )}
 
         {/* Prix de référence */}
         <div className="mb-8">

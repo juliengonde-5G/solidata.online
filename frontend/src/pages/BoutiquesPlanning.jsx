@@ -43,14 +43,17 @@ export default function BoutiquesPlanning() {
       // Filtrer uniquement les postes boutique
       const btqPostes = (p.data?.postes || []).filter(po => po.filiere === 'btq');
       setPostes(btqPostes);
-      // Filtrer uniquement les affectations BTQ
-      setAffectations((a.data || []).filter(af => String(af.poste_code || '').toUpperCase().startsWith('BTQ_')));
+      // GET /planning-hebdo renvoie un objet { affectations, employees, ... } :
+      // on lit `affectations` (bug corrigé — l'ancien code appelait .filter sur
+      // la réponse entière). Côté RESP_BTQ, l'API filtre déjà la filière boutique ;
+      // le filtre client BTQ_ reste valable pour ADMIN/MANAGER.
+      setAffectations((a.data?.affectations || []).filter(af => String(af.poste_code || '').toUpperCase().startsWith('BTQ_')));
     } catch (e) {
-      // Le planning hebdo est aujourd'hui réservé à ADMIN/MANAGER côté API :
-      // un responsable de boutique reçoit un 403. On l'affiche clairement plutôt
-      // qu'une erreur générique tant que l'accès lecture RESP_BTQ n'est pas ouvert.
+      // GET /planning-hebdo est ouvert en lecture (filière boutique) à RESP_BTQ
+      // depuis la vague 3. Un 403 résiduel (rôle sans accès, RESP_BTQ non affecté)
+      // est affiché clairement plutôt qu'une erreur générique.
       if (e.response?.status === 403) {
-        setAccessError("Le planning hebdomadaire n'est pas encore accessible pour votre rôle. Contactez un administrateur pour consulter le planning de votre boutique.");
+        setAccessError("Le planning hebdomadaire n'est pas accessible pour votre rôle. Contactez un administrateur pour consulter le planning de votre boutique.");
       } else {
         toast.error('Erreur chargement planning');
       }

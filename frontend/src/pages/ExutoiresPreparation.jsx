@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Truck } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal, PageHeader } from '../components';
+import { LoadingSpinner, Modal, PageHeader, ErrorState } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 
@@ -81,6 +81,7 @@ export default function ExutoiresPreparation() {
   const { confirm, ConfirmDialogElement } = useConfirm();
   const [preparations, setPreparations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -119,7 +120,11 @@ export default function ExutoiresPreparation() {
       const map = {};
       for (const c of (ctrlRes.data || [])) map[c.commande_id] = c;
       setControles(map);
-    } catch (err) { console.error(err); }
+      setError(null);
+    } catch (err) {
+      console.error(err);
+      setError('Impossible de charger les préparations. Vérifiez votre connexion puis réessayez.');
+    }
     setLoading(false);
   };
 
@@ -273,6 +278,12 @@ export default function ExutoiresPreparation() {
             </button>
           }
         />
+
+        {error && (
+          <div className="mb-6">
+            <ErrorState variant="card" title="Préparations indisponibles" message={error} onRetry={loadData} />
+          </div>
+        )}
 
         {/* Filters */}
         <div className="card-modern p-4 mb-6">

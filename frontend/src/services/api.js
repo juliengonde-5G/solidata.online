@@ -32,6 +32,19 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // Session révoquée côté serveur (déconnexion, reset de mot de passe,
+    // désactivation du compte, « forcer la déconnexion ») : le refresh token a
+    // été purgé, inutile de tenter un rafraîchissement. On nettoie et on renvoie
+    // vers la connexion. (Audit vague 3, item 3.C-1 — code TOKEN_REVOKED.)
+    if (error.response?.status === 401 && error.response?.data?.code === 'TOKEN_REVOKED') {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && error.response?.data?.code === 'TOKEN_EXPIRED' && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {

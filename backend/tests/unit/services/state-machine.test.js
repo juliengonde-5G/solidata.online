@@ -91,6 +91,27 @@ describe('state-machine — canTransition', () => {
     expect(r.ok).toBe(true);
   });
 
+  test('RESP_BTQ peut annuler SA commande en brouillon (vague 3)', () => {
+    const r = canTransition({
+      machine: 'boutique_commande',
+      fromState: 'brouillon',
+      toState: 'annulee',
+      userRole: 'RESP_BTQ',
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  test('RESP_BTQ ne peut PAS annuler une commande déjà envoyée (statut avancé)', () => {
+    const r = canTransition({
+      machine: 'boutique_commande',
+      fromState: 'envoyee',
+      toState: 'annulee',
+      userRole: 'RESP_BTQ',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe('ROLE_FORBIDDEN');
+  });
+
   test('jette une erreur si machine inconnue', () => {
     expect(() => canTransition({
       machine: 'machine_inconnue',
@@ -133,11 +154,16 @@ describe('state-machine — getAvailableTransitions', () => {
   });
 
   test('filtre par rôle utilisateur', () => {
-    const adminList = getAvailableTransitions('boutique_commande', 'brouillon', 'ADMIN');
-    const respList = getAvailableTransitions('boutique_commande', 'brouillon', 'RESP_BTQ');
-    expect(adminList).toContain('annulee');     // ADMIN seulement
-    expect(respList).toContain('envoyee');       // RESP_BTQ ok
-    expect(respList).not.toContain('annulee');   // RESP_BTQ pas autorisé
+    // Vague 3 — RESP_BTQ peut envoyer ET annuler SA commande en brouillon…
+    const respBrouillon = getAvailableTransitions('boutique_commande', 'brouillon', 'RESP_BTQ');
+    expect(respBrouillon).toContain('envoyee');
+    expect(respBrouillon).toContain('annulee');
+    // …mais pas annuler une commande déjà avancée (réservé ADMIN/MANAGER).
+    const respEnvoyee = getAvailableTransitions('boutique_commande', 'envoyee', 'RESP_BTQ');
+    expect(respEnvoyee).not.toContain('annulee');
+    // ADMIN conserve l'annulation à tous les stades.
+    const adminEnvoyee = getAvailableTransitions('boutique_commande', 'envoyee', 'ADMIN');
+    expect(adminEnvoyee).toContain('annulee');
   });
 
   test('retourne toutes les transitions si pas de userRole fourni', () => {

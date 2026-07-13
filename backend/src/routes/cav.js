@@ -9,6 +9,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const { cacheMiddleware } = require('../middleware/cache');
 // Source unique des facteurs saisonniers / jour + capacité (item 50).
 // Remplace les 3 jeux de facteurs codés en dur qui divergeaient dans /map,
 // /fill-rate et /:id/activity.
@@ -39,6 +40,14 @@ const uploadCavPhoto = multer({
 router.use(authenticate);
 router.use(autoLogActivity('cav'));
 
+// Perf (item 3.D-4) — Cache Redis court sur les lectures pures pollées.
+// Clé par tranche de minute (invalidation naturelle au changement de minute),
+// alignée sur le pattern de dashboard.js. Ces réponses ne sont PAS spécifiques à
+// l'utilisateur (mêmes données pour tout rôle autorisé) : aucun scoping par user
+// requis. Le middleware est un no-op gracieux si Redis est indisponible.
+const minuteBucket = () => new Date().toISOString().slice(0, 16);
+const cavCacheKey = (suffix) => () => `cav:${suffix}:${minuteBucket()}`;
+
 // GET /api/cav — Liste avec filtres
 router.get('/', async (req, res) => {
   try {
@@ -60,19 +69,30 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/cav/map — Données carte avec remplissage unifié (capteur si frais, sinon heuristique)
-router.get('/map', async (req, res) => {
+router.get('/map', cacheMiddleware(cavCacheKey('map'), 60), async (req, res) => {
   try {
+    // Perf (item 3.D-4) : agrégats groupés en UNE passe sur tonnage_history au
+    // lieu de 2 sous-requêtes corrélées PAR CAV (~200 CAV → ~400 sous-requêtes).
+    // Valeurs strictement identiques : MAX(date) sur tout l'historique, AVG filtré
+    // à 90 j. LEFT JOIN → NULL pour un CAV sans historique (comme la sous-requête).
     const result = await pool.query(`
+      WITH agg AS (
+        SELECT cav_id,
+          MAX(date) AS last_collection,
+          AVG(weight_kg) FILTER (WHERE date >= NOW() - INTERVAL '90 days') AS avg_weight_90d
+        FROM tonnage_history
+        GROUP BY cav_id
+      )
       SELECT c.id, c.name, c.address, c.commune, c.latitude, c.longitude,
         c.nb_containers, c.avg_fill_rate, c.status, c.unavailable_reason,
         c.route_count,
         c.lora_deveui, c.sensor_reference,
         c.sensor_last_reading, c.sensor_last_reading_at,
         c.sensor_battery_level, c.sensor_last_rssi, c.sensor_status,
-        (SELECT MAX(th.date) FROM tonnage_history th WHERE th.cav_id = c.id) as last_collection,
-        (SELECT AVG(th.weight_kg) FROM tonnage_history th WHERE th.cav_id = c.id
-         AND th.date >= NOW() - INTERVAL '90 days') as avg_weight_90d
+        agg.last_collection,
+        agg.avg_weight_90d
       FROM cav c
+      LEFT JOIN agg ON agg.cav_id = c.id
       WHERE c.status = 'active'
       ORDER BY c.name
     `);
@@ -120,26 +140,52 @@ router.get('/map', async (req, res) => {
 });
 
 // GET /api/cav/fill-rate — Taux de remplissage en temps réel avec prévision
-router.get('/fill-rate', async (req, res) => {
+router.get('/fill-rate', cacheMiddleware(cavCacheKey('fill-rate'), 60), async (req, res) => {
   try {
+    // Perf (item 3.D-4) : agrégats groupés au lieu de 4 sous-requêtes corrélées
+    // PAR CAV (dont une auto-jointure à double ROW_NUMBER pour l'écart moyen).
+    // Sur ~200 CAV actifs on passe de ~800 sous-requêtes corrélées à 2 passes
+    // groupées sur tonnage_history (agg + gaps). Valeurs strictement identiques :
+    //  • last_collection = MAX(date) sur tout l'historique ;
+    //  • avg_weight_90d / nb_collectes_90d = AVG/COUNT filtrés à 90 j ;
+    //  • avg_days_between_collections = moyenne des écarts entre collectes
+    //    consécutives sur 180 j. L'ancienne version appariait les rangs
+    //    ROW_NUMBER() DESC (th2.rn = th1.rn-1) ; LAG(date) OVER (ORDER BY date)
+    //    produit exactement le même multiensemble d'écarts (prouvé par test —
+    //    cav-fillrate-perf.test.js).
     const result = await pool.query(`
+      WITH agg AS (
+        SELECT cav_id,
+          MAX(date) AS last_collection,
+          AVG(weight_kg) FILTER (WHERE date >= NOW() - INTERVAL '90 days') AS avg_weight_90d,
+          COUNT(*) FILTER (WHERE date >= NOW() - INTERVAL '90 days') AS nb_collectes_90d
+        FROM tonnage_history
+        GROUP BY cav_id
+      ),
+      gaps AS (
+        SELECT cav_id, AVG(gap_days) AS avg_days_between_collections
+        FROM (
+          SELECT cav_id,
+                 date - LAG(date) OVER (PARTITION BY cav_id ORDER BY date) AS gap_days
+          FROM tonnage_history
+          WHERE date >= NOW() - INTERVAL '180 days'
+        ) g
+        WHERE gap_days IS NOT NULL
+        GROUP BY cav_id
+      )
       SELECT c.id, c.name, c.address, c.commune, c.latitude, c.longitude,
         c.nb_containers, c.status, c.tournee, c.jours_collecte, c.freq_passage,
         c.avg_fill_rate, c.route_count,
         c.lora_deveui, c.sensor_reference,
         c.sensor_last_reading, c.sensor_last_reading_at,
         c.sensor_battery_level, c.sensor_last_rssi, c.sensor_status,
-        (SELECT MAX(th.date) FROM tonnage_history th WHERE th.cav_id = c.id) as last_collection,
-        (SELECT AVG(th.weight_kg) FROM tonnage_history th WHERE th.cav_id = c.id
-         AND th.date >= NOW() - INTERVAL '90 days') as avg_weight_90d,
-        (SELECT COUNT(*) FROM tonnage_history th WHERE th.cav_id = c.id
-         AND th.date >= NOW() - INTERVAL '90 days') as nb_collectes_90d,
-        (SELECT AVG(th2.date - th1.date)
-         FROM (SELECT date, ROW_NUMBER() OVER (ORDER BY date DESC) as rn FROM tonnage_history WHERE cav_id = c.id AND date >= NOW() - INTERVAL '180 days') th1
-         JOIN (SELECT date, ROW_NUMBER() OVER (ORDER BY date DESC) as rn FROM tonnage_history WHERE cav_id = c.id AND date >= NOW() - INTERVAL '180 days') th2
-         ON th2.rn = th1.rn - 1
-        ) as avg_days_between_collections
+        agg.last_collection,
+        agg.avg_weight_90d,
+        agg.nb_collectes_90d,
+        gaps.avg_days_between_collections
       FROM cav c
+      LEFT JOIN agg ON agg.cav_id = c.id
+      LEFT JOIN gaps ON gaps.cav_id = c.id
       WHERE c.status = 'active' AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
       ORDER BY c.name
     `);
@@ -630,7 +676,9 @@ router.get('/:id/activity', async (req, res) => {
 // ══════════════════════════════════════════
 
 // GET /api/cav/sensors — Liste de la flotte capteurs (+ statut online/offline calculé)
-router.get('/sensors', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+// Perf (item 3.D-4) : lecture pure (statut agrégé + sous-requête open_alerts par
+// capteur) — cache court 30 s (data peu volatile, uplinks capteur espacés).
+router.get('/sensors', authorize('ADMIN', 'MANAGER'), cacheMiddleware(cavCacheKey('sensors'), 30), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -1027,7 +1075,9 @@ router.post('/sensor-reading', [
 });
 
 // GET /api/cav/:id/sensor-history — Historique lectures capteur
-router.get('/:id/sensor-history', async (req, res) => {
+// Perf (item 3.D-4) : lecture pure d'historique (jusqu'à 30 j de relevés) — cache
+// court 60 s clé par CAV + fenêtre (données passées, peu volatiles).
+router.get('/:id/sensor-history', cacheMiddleware((req) => `cav:sensor-history:${req.params.id}:${req.query.days || 30}:${minuteBucket()}`, 60), async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
     const result = await pool.query(
@@ -1045,7 +1095,9 @@ router.get('/:id/sensor-history', async (req, res) => {
 });
 
 // GET /api/cav/:id/sensor-readings-raw — Historique brut (toutes colonnes + payload JSON)
-router.get('/:id/sensor-readings-raw', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+// Perf (item 3.D-4) : lecture pure lourde (jusqu'à 500 lignes brutes + payload) —
+// cache court 60 s clé par CAV + limite (historique brut, peu volatile).
+router.get('/:id/sensor-readings-raw', authorize('ADMIN', 'MANAGER'), cacheMiddleware((req) => `cav:sensor-raw:${req.params.id}:${req.query.limit || 100}:${minuteBucket()}`, 60), async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
     const result = await pool.query(

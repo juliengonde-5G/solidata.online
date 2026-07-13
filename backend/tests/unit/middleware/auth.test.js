@@ -5,7 +5,8 @@ jest.mock('../../../src/config/database', () => ({
   query: jest.fn(),
 }));
 
-const { authenticate, authorize } = require('../../../src/middleware/auth');
+const db = require('../../../src/config/database');
+const { authenticate, authorize, validatePassword } = require('../../../src/middleware/auth');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
 
@@ -106,5 +107,98 @@ describe('authorize middleware', () => {
     const middleware = authorize('ADMIN', 'RH', 'MANAGER');
     middleware(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
+  });
+});
+
+// Révocation de session effective — approche token_version (audit vague 3, 3.C-1)
+describe('authenticate — révocation par token_version', () => {
+  let res, next;
+
+  beforeEach(() => {
+    db.query.mockReset();
+    res = { status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() };
+    next = jest.fn();
+  });
+
+  function reqWith(payload) {
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+    return { headers: { authorization: `Bearer ${token}` } };
+  }
+
+  it('accepte un token dont tv correspond à users.token_version', async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ token_version: 3 }] });
+    const req = reqWith({ id: 5, role: 'ADMIN', tv: 3 });
+    await authenticate(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+    expect(db.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejette (401 TOKEN_REVOKED) un token dont tv est périmé', async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ token_version: 4 }] });
+    const req = reqWith({ id: 5, role: 'ADMIN', tv: 3 });
+    await authenticate(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'TOKEN_REVOKED' }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('coerce token_version NULL en 0 (tv=0 accepté)', async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ token_version: null }] });
+    const req = reqWith({ id: 5, role: 'ADMIN', tv: 0 });
+    await authenticate(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('ne bloque pas si l\'utilisateur est introuvable (rows vide)', async () => {
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const req = reqWith({ id: 999, role: 'ADMIN', tv: 1 });
+    await authenticate(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('dégrade en accès autorisé si la base est indisponible (non-régression)', async () => {
+    db.query.mockRejectedValueOnce(new Error('db down'));
+    const req = reqWith({ id: 5, role: 'ADMIN', tv: 2 });
+    await authenticate(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('ne consulte pas la base pour un token hérité sans tv (transitoire)', async () => {
+    const req = reqWith({ id: 5, role: 'ADMIN' }); // pas de claim tv
+    await authenticate(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  it('supporte les tokens chauffeur (userId au lieu de id)', async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ token_version: 0 }] });
+    const req = reqWith({ userId: 7, role: 'COLLABORATEUR', tv: 0 });
+    await authenticate(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(db.query).toHaveBeenCalledWith(expect.stringContaining('token_version'), [7]);
+  });
+});
+
+// Politique de mot de passe unifiée (audit vague 3, 3.C-2)
+describe('validatePassword', () => {
+  it('refuse un mot de passe de moins de 10 caractères', () => {
+    expect(validatePassword('court')).toBeTruthy();
+    expect(validatePassword('123456789')).toBeTruthy(); // 9 caractères
+  });
+
+  it('accepte un mot de passe de 10 caractères ou plus', () => {
+    expect(validatePassword('1234567890')).toBeNull();
+    expect(validatePassword('un-mot-de-passe-assez-long')).toBeNull();
+  });
+
+  it('refuse une valeur vide ou non-chaîne', () => {
+    expect(validatePassword('')).toBeTruthy();
+    expect(validatePassword(null)).toBeTruthy();
+    expect(validatePassword(undefined)).toBeTruthy();
+    expect(validatePassword(12345678901)).toBeTruthy();
   });
 });

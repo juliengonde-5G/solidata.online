@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, ArrowRight, BarChart3, Scale, ShieldCheck, Target, TrendingUp } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
-import { PageHeader, KPICard, LoadingSpinner, Section } from '../components';
+import { PageHeader, KPICard, LoadingSpinner, Section, ErrorState } from '../components';
 
 // ══════════════════════════════════════════
 // FINANCE BILAN — Bilan & SIG
@@ -23,6 +23,7 @@ export default function FinanceBilan() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
@@ -31,8 +32,10 @@ export default function FinanceBilan() {
     try {
       const res = await api.get(`/finance/gl/${year}/bilan`);
       setData(res.data);
+      setError(null);
     } catch (err) {
       console.error('Erreur chargement bilan:', err);
+      setError('Impossible de charger le bilan. Vérifiez votre connexion puis réessayez.');
     }
     setLoading(false);
   }, [year]);
@@ -72,6 +75,10 @@ export default function FinanceBilan() {
             </select>
           }
         />
+
+        {error && (
+          <ErrorState variant="card" title="Bilan indisponible" message={error} onRetry={loadData} />
+        )}
 
         {/* KPI Cards avec comparatif N-1 */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

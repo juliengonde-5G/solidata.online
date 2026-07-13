@@ -145,7 +145,16 @@ async function importCSVContent(boutiqueId, content, filename, userId = null, so
     }
   }
 
-  const batchRes = await pool.query(
+  // ── Import ATOMIQUE (vague 3, item 3.B) ──
+  // INSERT batch → upsert tickets → insert ventes → UPDATE batch : tout dans une seule
+  // transaction. Le file_hash (porté par le batch) n'est donc COMMITé qu'au succès complet.
+  // Un échec en cours ROLLBACK le batch ET son hash → le même fichier redevient
+  // ré-importable (auparavant un import partiel restait bloqué en 'duplicate').
+  const client = await pool.connect();
+  try {
+  await client.query('BEGIN');
+
+  const batchRes = await client.query(
     `INSERT INTO boutique_import_batches
      (boutique_id, filename, file_hash, statut, source, imported_by)
      VALUES ($1, $2, $3, 'en_cours', $4, $5) RETURNING id`,
@@ -248,7 +257,7 @@ async function importCSVContent(boutiqueId, content, filename, userId = null, so
   // UPSERT tickets puis mapping clé → ticket_id
   const ticketIdByKey = new Map();
   for (const [mk, tk] of ticketsMap.entries()) {
-    const r = await pool.query(`
+    const r = await client.query(`
       INSERT INTO boutique_tickets (boutique_id, date_ticket, minute_key, num_ticket, nb_articles, total_ttc, total_ht, batch_id)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       ON CONFLICT (boutique_id, minute_key) DO UPDATE SET
@@ -277,7 +286,7 @@ async function importCSVContent(boutiqueId, content, filename, userId = null, so
         v.numTicket
       );
     }
-    await pool.query(`
+    await client.query(`
       INSERT INTO boutique_ventes
         (boutique_id, batch_id, ticket_id, date_vente, rayon, segment, id_article, article,
          quantite, prix_unitaire_ttc, total_ht, total_ttc, montant_tva, taux_tva, num_ticket)
@@ -286,7 +295,7 @@ async function importCSVContent(boutiqueId, content, filename, userId = null, so
   }
 
   const statutFinal = nbErreur > 0 && nbImport === 0 ? 'erreur' : 'termine';
-  await pool.query(`
+  await client.query(`
     UPDATE boutique_import_batches SET
       date_debut = $1, date_fin = $2,
       nb_lignes_total = $3, nb_lignes_importees = $4, nb_lignes_erreur = $5,
@@ -299,6 +308,8 @@ async function importCSVContent(boutiqueId, content, filename, userId = null, so
     batchId
   ]);
 
+  await client.query('COMMIT');
+
   return {
     batch_id: batchId,
     nb_lignes_total: nbTotal,
@@ -308,6 +319,12 @@ async function importCSVContent(boutiqueId, content, filename, userId = null, so
     ca_total_ttc: caTotal,
     duplicate: false,
   };
+  } catch (importErr) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw importErr;
+  } finally {
+    client.release();
+  }
 }
 
 // POST /api/boutique-ventes/import — upload CSV manuel

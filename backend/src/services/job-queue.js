@@ -122,4 +122,16 @@ async function closeQueues() {
   if (pdfQueue) await pdfQueue.close();
 }
 
-module.exports = { initQueues, addOCRJob, addPDFJob, closeQueues };
+/**
+ * État des files pour l'observabilité (routes/monitoring.js). Best-effort et
+ * résilient : si Redis est absent (mode dégradé in-process) ou si un getJobCounts
+ * échoue, on renvoie null pour la file concernée sans jamais lever d'erreur.
+ */
+async function getQueueStatus() {
+  const status = { redis: isRedisAvailable(), mode: ocrQueue ? 'bullmq' : 'in-process', ocr: null, pdf: null };
+  try { if (ocrQueue) status.ocr = await ocrQueue.getJobCounts(); } catch (_) { /* best effort */ }
+  try { if (pdfQueue) status.pdf = await pdfQueue.getJobCounts(); } catch (_) { /* best effort */ }
+  return status;
+}
+
+module.exports = { initQueues, addOCRJob, addPDFJob, closeQueues, getQueueStatus };
