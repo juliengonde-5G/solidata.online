@@ -101,17 +101,25 @@ describe('GET /api/candidates/:id', () => {
 
 describe('POST /api/candidates', () => {
   it('should create a candidate', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ id: 1, first_name: 'Jean', last_name: 'Dupont', status: 'received' }] }) // INSERT
-      .mockResolvedValueOnce({ rows: [] }) // history INSERT
-      .mockResolvedValueOnce({ rows: [] }) // getSkillPatterns query
-      .mockResolvedValue({ rows: [] }); // skill inserts
+    // Vague 3 : la création (candidat + historique + compétences) est désormais
+    // transactionnelle. getSkillPatterns lit via pool.query AVANT la transaction ;
+    // les 3 écritures passent par le client dédié (BEGIN → … → COMMIT).
+    mockQuery.mockResolvedValue({ rows: [] }); // getSkillPatterns (pool.query)
+    const clientQuery = jest.fn().mockImplementation((sql) =>
+      /INSERT INTO candidates/.test(sql)
+        ? Promise.resolve({ rows: [{ id: 1, first_name: 'Jean', last_name: 'Dupont', status: 'received' }] })
+        : Promise.resolve({ rows: [] }));
+    mockConnect.mockResolvedValue({ query: clientQuery, release: jest.fn() });
     const res = await request(app)
       .post('/api/candidates')
       .set('Authorization', `Bearer ${rhToken}`)
       .send({ first_name: 'Jean', last_name: 'Dupont', phone: '0612345678' });
     expect(res.status).toBe(201);
     expect(res.body.first_name).toBe('Jean');
+    // la transaction a bien été ouverte et commitée
+    const calls = clientQuery.mock.calls.map((c) => String(c[0]));
+    expect(calls[0]).toMatch(/BEGIN/);
+    expect(calls.at(-1)).toMatch(/COMMIT/);
   });
 });
 
