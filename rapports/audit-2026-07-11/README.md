@@ -18,6 +18,12 @@ Audit multi-agents (43 agents, 4 volets) de l'ensemble de l'application, réalis
 - `00-synthese-executive.md` — verdict global, notes, 7 constats transverses, forces, risques
 - `01-plan-action.md` — 5 arbitrages métier + 4 vagues d'action priorisées (P0/P1/P2, efforts S/M/L)
 
+### Réalisation (le plan a été exécuté en entier)
+- `02-vague0-realisation.md` — 26 correctifs P0 (sécurité, chiffres faux, écrans morts)
+- `03-vague1-realisation.md` — 38 chantiers (chaînes matière/finance/personne/terrain/IA)
+- `04-vague2-realisation.md` — 36 chantiers (parties prenantes, rôles, QHSE, tri, mobile)
+- `05-vague3-realisation.md` — 8 lots de socle (sécurité sessions, RGPD-IA, transactions, observabilité, hygiène, perf, tests de contrat)
+
 ### Audits fonctionnels (`fonctionnel/`) et techniques (`technique/`)
 Mêmes 14 périmètres dans les deux volets : `auth-securite-admin`, `recrutement-pcm`, `rh-personnel`, `insertion`, `collecte-cav-capteurs`, `tournees-vehicules-mobile`, `tri-production`, `stock-inventaires`, `logistique-exutoires`, `finance-facturation`, `refashion-metropole-reporting`, `boutiques`, `vak-sumup`, `plateforme-transverse`.
 

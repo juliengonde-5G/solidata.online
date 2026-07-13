@@ -98,6 +98,7 @@ const JOB_SCHEDULE = {
   autoFeedNews:                   { label: 'Veille sectorielle (fil actu)',     cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredCandidates:         { label: 'Purge RGPD candidats > 24 mois',    cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeOldGpsPositions:           { label: 'Purge RGPD GPS > 90 jours',         cadence: '3×/jour',            maxAgeHours: DAILY },
+  purgeExpiredRefreshTokens:      { label: 'Purge refresh tokens expirés',      cadence: '3×/jour',            maxAgeHours: DAILY },
   refreshMaterializedViews:       { label: 'Refresh vues matérialisées',        cadence: '3×/jour',            maxAgeHours: DAILY },
   scanBoutiqueCSVFolders:         { label: 'Scan CSV caisse boutiques',         cadence: '3×/jour + 20h',      maxAgeHours: DAILY },
   collectBoutiqueWeather:         { label: 'Collecte météo boutiques',          cadence: '3×/jour',            maxAgeHours: DAILY },
