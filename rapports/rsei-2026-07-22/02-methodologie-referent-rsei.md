@@ -381,4 +381,282 @@ Transposition directe de l'exigence de confidentialité du critère 3.1 (et du d
 4. Le jour de l'évaluation AFNOR : mêmes règles — l'évaluateur consulte les dossiers **accompagné de la CIP**, dans l'outil ; la structure peut s'appuyer sur son dispositif existant (habilitations par rôle, pseudonymisation avant IA, journal d'audit — étude 01 § 4.1.4) pour démontrer que la confidentialité n'est pas déclarative.
 5. Le DPO est informé du protocole d'audit interne et de l'évaluation in situ (registre des traitements : finalité « pilotage et évaluation de la démarche RSE », données agrégées).
 
-<!-- SUITE-SECTIONS-5-8 -->
+---
+
+## 5. Application dans SOLIDATA — où le référent trouve et dépose ses preuves
+
+> Cette section est le mode d'emploi ERP du référent. Elle reprend, famille par famille (les 5 chapitres du référentiel), la cartographie de l'étude 01 (§ 3.1 à 3.5) et la traduit en gestes concrets : **quel écran/export ouvrir**, **quoi archiver au registre**, **quoi construire à côté de l'ERP** en attendant les évolutions logicielles (« évolution prévue » = rapport 03, non détaillé ici).
+
+### 5.0 Trois usages de l'ERP par le référent — et leurs limites
+
+1. **SOLIDATA comme *source* de preuve** (l'usage principal) : les écrans et exports sont des preuves **système** — datées, re-générables en séance devant un évaluateur (haut de la hiérarchie des preuves, § 4.3). Le référent ne duplique pas ces données au registre : il enregistre dans l'index (§ 6.4) le **mode de re-génération** (« SOLIDATA > module > écran/export > filtre > rôle requis ») et n'archive un instantané daté (PDF/CSV) qu'en photographie de fin d'exercice (§ 6.5).
+2. **SOLIDATA comme *lieu de dépôt*** (usage limité mais réel) : le fil d'actualités (`/news`) est le canal officiel de **communication interne datée** — publication du bilan annuel RSE, annonce de la nomination du référent, restitutions FALC du comité participatif, annonces de sensibilisation : chaque publication horodatée est une preuve de diffusion (1.5 N2, 2.2 N2, 4.4). Les autres dépôts passent par les pilotes : justificatifs attachés aux taux Refashion (upload ADMIN, v2.8.0), objectif conventionné de sorties dynamiques dans les settings (direction), saisies QHSE (pilote QHSE). Tout le reste se dépose au **registre** (§ 6).
+3. **SOLIDATA comme *outil d'audit*** : tirage d'échantillons (§ 4.4), tests de cohérence en entretien (« montrez-moi dans l'outil »), consultation de dossiers **en binôme avec le pilote, sans extraction** (§ 4.7).
+
+**Garde-fous** : le référent travaille sous le rôle `REF_RSE` (§ 1.5) — agrégats non nominatifs uniquement ; les exports nominatifs (`GET /api/exports/insertion`, export FSE+ `GET /api/exports/fse-plus` — tous deux ADMIN/RH) sont des outils des **pilotes** (CIP/RH), référencés dans l'index mais jamais archivés au registre.
+
+### 5.1 Chapitre 01 — Projet d'entreprise, gouvernance et stratégie
+
+L'ERP fournit ici la **matière première chiffrée** (finance, insertion, territoire) et des preuves de transparence numérique ; l'essentiel des preuves du chapitre reste documentaire (projet d'entreprise, PV d'instances, plan d'action RSE) — statuts détaillés : étude 01 § 3.1.
+
+| Critère | Source de preuve dans SOLIDATA (aujourd'hui) | Preuve complémentaire hors ERP (registre) |
+|---|---|---|
+| **1.1** Projet d'entreprise | Données des 3 dimensions pour nourrir le diagnostic : Finance (P&L analytique, bilan, rentabilité matière), page Audit Insertion (`/insertion/audit`), dashboard Métropole (tonnages, CO2 évité) | **Projet d'entreprise à 3 dimensions** rédigé et daté ; CR d'atelier SWOT/PESTEL ; preuve de communication interne (publication fil d'actualités + affichage) |
+| **1.2** Parties prenantes | Référentiels PP outillés : clients exutoires, prescripteurs, communes (`referentiel_communes`), exutoires, points associatifs, partenaires ; comptes AUTORITE lecture seule (auditeurs Refashion/Métropole) = dialogue outillé démontrable | **Cartographie + matrice d'impact des PP** (quick win n°7, étude 01 § 4.5) ; CR des dialogues (COPIL, rencontres prescripteurs/financeurs) centralisés au registre |
+| **1.3** Gouvernance | Matrice d'habilitations (`/admin/permissions`, `role_module_access`, rôles custom), journal d'activité (`activity-log`), journalisation permissions/clés API, monitoring (`/monitoring/jobs`) = transparence et loyauté **numériques** | PV d'AG/CA (régularité des instances — manque identifié étude 01), relevés de décisions affichés, note « loyauté des pratiques » (anticorruption, conflits d'intérêts — nourrit VSME B11), statuts et déclarations à jour |
+| **1.4** Ancrage territorial | Module Reporting Métropole complet : `/metropole/captation-par-commune`, `/service-cav`, `/delai-intervention-incidents`, `/kpi-insertion`, export CSV + revue de convention PDF | Note d'analyse forces/faiblesses du territoire ; recensement des participations aux réseaux (Chantier école, CRESS, inter-SIAE…) ; conventions de partenariat locales |
+| **1.5** Pilotage / plan d'action RSE | Briques réutilisables (pattern `cip_action_plans`, `periodic_objectives`, seuils d'alerte) ; fil d'actualités = preuve de communication du rôle du référent. **Évolution prévue** (module plan d'action RSE — rapport 03) | **Lettre de mission signée** (§ 1.7) ; **plan d'action RSE** en tableur (objectif, responsable, indicateur, échéance, statut) avec pointage mensuel daté ; CR de revues |
+| **1.6** Veille | **Fil d'actualités** (`/news`) : veille sectorielle automatisée (`autoFeedNews`, 22 thèmes textile/ESS/insertion), publications manuelles avec source, épinglage — l'historique horodaté prouve la **régularité** | Procédure de veille 1 page : responsables, destinataires, canaux, traitement en revue trimestrielle ; traçage de la veille réglementaire (REP, IAE, RSE) |
+| **1.7** Achats durables | Grand Livre classe 60 via Pennylane (pull, lecture FINANCE) = base de sondage fournisseurs. **Évolution prévue** (référentiel fournisseurs/achats responsables — rapport 03) | Liste fournisseurs + **critères d'achats** formalisés ; FDS classées (attendu N1) ; engagements RSE demandés aux principaux fournisseurs |
+| **1.8** Indicateurs économiques | Module Finance : P&L, bilan, trésorerie, contrôles, rentabilité matière, `GET /finance/rapprochement-ca/:year` ; sync Pennylane quotidienne | Comptes annuels approuvés + preuve de transmission aux financeurs (dialogue de gestion) ; **fiche VSME B1/B2/B11** (documentaire) ; support de présentation des résultats aux salariés (N3) |
+
+### 5.2 Chapitre 02 — Management des ressources humaines
+
+Le couple QHSE + KPI RH de l'ERP donne un socle de preuve fort (2.4, 2.6) ; les manques sont documentaires (DUERP, plan de formation, charte égalité) ou d'enquête (2.5) — étude 01 § 3.2.
+
+| Critère | Source de preuve dans SOLIDATA (aujourd'hui) | Preuve complémentaire hors ERP (registre) |
+|---|---|---|
+| **2.1** Emplois et compétences | `employees` (contrats, ancienneté), compétences/permis/CACES (Skills), heures de formation (`work_hours` type `training` + `GET /employees/kpi/formation`, page `/reporting-rh`), planning hebdo, pointage | **Plan de formation formalisé et suivi** (attendu N2 — évolution prévue pour son suivi outillé, rapport 03) ; entretiens professionnels des **permanents** (trames + réalisés) ; convention collective IDCC 3016 appliquée |
+| **2.2** Égalité et diversité | Données civilité/genre en base ; module Recrutement (kanban, entretiens structurés, mise en situation) = process de recrutement objectivé, preuve indirecte de non-discrimination | **Charte égalité-diversité** signée et diffusée (N2) ; traces de sensibilisation ; indicateurs F/H par poste/filière — calculables des données existantes, restitution dédiée en **évolution prévue** (quick win n°8) : d'ici là, extraction annuelle manuelle par RH |
+| **2.3** Dialogue social | Rien (normal — hors périmètre logiciel) ; le fil d'actualités peut héberger l'affichage des CR de CSE | **À vérifier d'urgence** (étude 01 § 4.2.3) : PV d'élections CSE, calendrier et CR des réunions, accords ; registre des consultations obligatoires |
+| **2.4** Santé et sécurité | **Module QHSE** : registre AT/presqu'accidents (`qhse_events`), stats `GET /api/qhse/events/stats` (TF1/TG **sur heures réelles** du pointage), habilitations + échéances (`/habilitations/echeances`, alertes hebdo), dotations EPI ; module Incidents (cycle open→closed, délai de résolution) ; checklists et maintenance véhicules ; visites médicales suivies | **DUERP à jour + preuve de consultation des IRP** (attendu N1 ; rattachement documentaire au QHSE = évolution prévue, quick win n°9) ; politique SST formalisée incluant **RPS** (N2) ; plan de prévention ; mise en récit de la boucle incident→action corrective (quick win n°4) |
+| **2.5** Organisation du travail | Planning hebdo 4 filières, pointage, canal manager→chauffeur (`driver_messages`, FALC « J'ai compris ») = adaptations concrètes aux publics | **Enquête conditions de travail** de tous les salariés en poste (N2) : questionnaire, taux de réponse, synthèse, actions tracées — papier/tableur d'abord, numérisation en évolution prévue |
+| **2.6** Indicateurs RH | `GET /employees/kpi/etp` (base 1607 h), `/kpi/absenteisme`, `/kpi/formation` (page `/reporting-rh`) ; distinction native permanents/parcours ; stats AT QHSE ; `/metropole/kpi-insertion` (agrégats non nominatifs) | **Pack annuel VSME B8/B9/B10** : assemblage tableur en janvier à partir des KPI + données paie (export dédié = évolution prévue, quick win n°2) ; états ASP mensuels archivés |
+
+### 5.3 Chapitre 03 — Mission d'inclusion
+
+Le chapitre le mieux outillé (étude 01 § 4.1.1) : la preuve est **dans** l'ERP, le rôle du référent est surtout de la **mettre en scène** (agrégats, PDF) et de respecter strictement la confidentialité (§ 4.7). Le chantier CDC en cours sur le module Insertion (frise, journal d'actions partenaires) est l'évolution prévue majeure de ce chapitre.
+
+| Critère | Source de preuve dans SOLIDATA (aujourd'hui) | Preuve complémentaire hors ERP (registre) |
+|---|---|---|
+| **3.1** Mission d'inclusion | **Page Audit Insertion** (`/insertion/audit`) : en parcours, taux de réalisation des jalons échus, radar consolidé des 7 freins, taux de sorties dynamiques vs **objectif conventionné paramétré** (settings), export PDF ; `/insertion/cohorte/stats` ; dispositif de confidentialité démontrable (habilitations par rôle, pseudonymisation avant IA, anonymisation, module RGPD) | Projet social / DUI ; fiches de poste CIP-ASP et encadrants (moyens dédiés) ; CR de la **revue à fréquence définie des objectifs de la mission** (N3 — l'adosser à la revue annuelle RSE) |
+| **3.2** Accueil, recrutement, intégration | Module Recrutement (kanban, entretiens structurés, mise en situation, CV parsing), PCM, liaison candidat→collaborateur (`link-employee`), auto-initialisation des jalons au passage en parcours | Livret d'accueil + RI **remis contre émargement** ; procédure de recrutement (4 rôles) en vigueur ; **questionnaire d'intégration à 1 mois** (quick win n°6 — papier d'abord, numérisation en évolution prévue) |
+| **3.3** Accompagnement durant le parcours | Diagnostic 7 freins (+ causes/détails, radar), jalons calés sur le contrat réel et resynchronisés au renouvellement, plans d'action CIP (catégorie/priorité/échéance), alertes J-7/J-1/retard, CIP référent, badge durée CDDI, préparation d'entretien par IA — consultation **en binôme uniquement** (§ 4.7) ; exports nominatifs réservés aux pilotes | Les 4 procédures du processus d'insertion ; trames signées (bilan à double signature, renouvellement à triple signature) ; conventions PMSMP ; **traçage de la mobilisation des partenaires** (CAF, France Travail, SOLIHA…) — tableur CIP en attendant le journal d'actions du CDC (évolution prévue) |
+| **3.4** Préparation à la sortie | Jalon « Bilan Sortie » (clôt le parcours), `sortie_classification` unifiée, SIRET employeur + durée de contrat (DREETS), taux de sorties dynamiques (Audit Insertion) ; export FSE+ (pilotes) | **Bilan de parcours remis avec attestations de compétences** ; questionnaire de satisfaction de sortie (papier — consolidation tableur par la CIP, transmission d'agrégats au référent ; numérisation = quick win n°1, évolution prévue) ; **suivi post-sortie 3-6 mois** tracé (tableur CIP ; outillage = quick win n°10, évolution prévue) ; partenariats employeurs formalisés (conventions) |
+
+### 5.4 Chapitre 04 — Management des enjeux environnementaux
+
+Grand écart caractéristique (étude 01 § 3.4) : le 4.3 est le critère le plus fort de la structure (cœur de métier de l'ERP), le 4.2 est vide. Le référent exploite l'un et construit l'autre à la main.
+
+| Critère | Source de preuve dans SOLIDATA (aujourd'hui) | Preuve complémentaire hors ERP (registre) |
+|---|---|---|
+| **4.1** Démarche environnementale | Impacts **positifs** instrumentés : tonnages par filière, taux de valorisation, CO2 évité (dashboard Métropole) | Note d'identification et de hiérarchisation des **impacts propres** (énergie du site, carburant flotte, eau, déchets internes) ; puis plan d'action environnemental (objectif, responsable, indicateur — format 1.5) |
+| **4.2** Énergies et GES | Rien en consommations ; bases exploitables : km tracés (GPS/checklists), factures en classe 60 (Pennylane) ; facteurs ADEME déjà codés (`metropole.js`). **Évolution prévue** (module énergie/GES — rapport 03) | **Tableur énergie mensuel** tenu par le référent : kWh électricité (factures), litres carburant (factures/cartes), conversion GES méthode ADEME — c'est LA preuve à construire de zéro (N1-N2 du 4.2), démarrage immédiat sans attendre l'outil |
+| **4.3** Économie circulaire | **Cœur de l'ERP** : chaîne collecte→tri→valorisation, familles Refashion (réutilisation/recyclage/CSR/élimination), analyse **poste par poste** (opérations/postes/sorties), stock et grand livre, **DPAV verrouillée trimestriellement** + attestation « stock verrouillé le … », page `/admin/refashion-exports` — 5 exports CSV re-générables (`tonnage-annuel-tournee`, `dpav-sortants`, `dpav-communes`, `subvention-mensuelle`, `coherence-tri-filiere`), CO2 évité sur mix observé | Rapport d'audit externe Refashion annuel ; note « achats intégrant le réemploi » (mobilier, consommables — probablement déjà vrai, à documenter) ; plan d'action « déchets propres » du site |
+| **4.4** Sensibilisation | Fil d'actualités (thèmes tri optique, recyclage chimique, CSR, éco-conception…) = sensibilisation interne outillée et datée ; publications d'annonce et de restitution des actions | Programme annuel de sensibilisation ; **feuilles d'émargement** et supports ; **mesure de portée** (taux de participation, évolution des pratiques — attendu N3) ; supports bénévoles VAK (sensibilisation de PP externes) |
+| **4.5** Indicateurs environnementaux | Tonnages par filière, taux réemploi/recyclage/CSR, CO2 évité (dashboard Métropole) ; DPAV trimestrielles = reporting externe régulier et audité ; **VSME B7 quasi couvert** par la traçabilité existante | **Bilan environnemental annuel publié** (quick win n°5 : assemblage, pas de collecte nouvelle) ; B3/B6 depuis le tableur énergie/eau ; **note de justification écrite** des enjeux non pertinents (B4 pollutions réglementées, B5 biodiversité) — le référentiel l'exige |
+
+### 5.5 Chapitre 05 — Mesure, analyse et amélioration
+
+Le chapitre du référent lui-même : presque tout est à créer (étude 01 § 3.5), mais la structure a déjà la **culture** (audits internes du SI en 4 vagues, rapports datés) — il s'agit de transposer la mécanique à l'objet « démarche RSE ». Les preuves naissent de l'application des § 2, 3 et 4 du présent document.
+
+| Critère | Source de preuve dans SOLIDATA (aujourd'hui) | Preuve complémentaire hors ERP (registre) |
+|---|---|---|
+| **5.1** Évaluations internes | L'ERP est le **terrain** de l'audit interne (échantillonnage § 4.4, tests de cohérence, consultation en binôme) — pas sa preuve ; la culture d'évaluation du SI (`rapports/audit-2026-07-11/`) est présentable en contexte | **Plan d'audit interne annuel** ; attestations de formation des évaluateurs ; fiches de constat `AI-AAAA-NN` (annexe A) ; rapport d'audit + preuve de restitution (CR revue T3) — « comptes rendus conservés » est un attendu littéral |
+| **5.2** Analyse des résultats | `historique_mensuel`, dashboards comparatifs N-1, Audit Insertion annuel, rapprochement CA, bilan Refashion — l'analyse d'écarts **par domaine** existe | **Analyse annuelle consolidée RSE** (chapitre du bilan annuel, annexe C) : indicateurs vs objectifs, écarts commentés, décisions ; CR de la revue annuelle (partage gouvernance = N2) |
+| **5.3** Satisfaction des PP | Rien dans l'ERP (vérifié — étude 01 § 3.5) ; les référentiels PP servent à constituer les listes de diffusion des enquêtes | Questionnaires de satisfaction de sortie **consolidés** (tableur CIP → agrégats au registre) ; enquêtes PP externes alternées (prescripteurs/financeurs ↔ clients/communes) ; **cahier des demandes et réclamations des PP** (N2) tenu par le référent ; numérisation = évolution prévue |
+| **5.4** Bilan et pilotage du plan | Briques (`periodic_objectives`, monitoring) prêtes à porter le suivi — **évolution prévue** (rapport 03) ; publication interne du bilan via le fil d'actualités | **Bilan annuel RSE** (annexe C) validé en revue annuelle et présenté au CA ; plan d'action N+1 actualisé ; preuve de communication interne des résultats économiques, sociaux et environnementaux (N2) |
+
+### 5.6 Synthèse : la journée type de preuve
+
+En pratique, 80 % des preuves du dossier RSEi se répartissent en trois gestes : **re-générer** un écran/export SOLIDATA devant l'évaluateur (chapitres 2, 3, 4.3 — ne rien copier, savoir naviguer) ; **classer sous 5 jours** au registre tout document produit par la gouvernance et les pilotes (§ 6) ; **construire à la main** les quelques preuves sans outil ni document aujourd'hui — tableur énergie (4.2), plan d'action RSE (1.5), enquêtes (5.3, 2.5), chartes et notes (2.2, 1.3, 4.5). Les évolutions prévues du rapport 03 réduiront le troisième geste ; elles ne conditionnent aucune étape de la démarche.
+
+---
+
+## 6. Registre de preuves
+
+### 6.1 Principes
+
+1. **Un seul registre**, tenu par le référent, sur l'espace documentaire partagé de la structure (droits restreints, sauvegardé) — jamais sur un poste local (anti-pattern § 4.3).
+2. **Référencer plutôt que dupliquer** : les preuves système restent dans SOLIDATA (§ 6.5) ; le registre contient les documents, comptes rendus et instantanés de fin d'exercice.
+3. **Minimisation RGPD** : aucune donnée nominative de salarié en parcours dans le registre (§ 4.7) — agrégats uniquement ; le DPO valide la structure du registre à l'ouverture.
+4. **Classement au fil de l'eau** : toute preuve produite est classée **sous 5 jours ouvrés** (règle du cycle annuel, § 3.3) — c'est ce qui rend l'audit AFNOR préparable en semaines et non en mois.
+5. **Le registre est lui-même une preuve** : sa tenue démontre 5.1 (« comptes rendus conservés ») et la maturité générale de la démarche.
+
+### 6.2 Arborescence recommandée
+
+```
+REGISTRE-RSEI/
+├── 00-PILOTAGE/                    lettre de mission, plan d'action RSE, tableau de bord,
+│                                   grilles d'auto-évaluation annuelles, index-registre.xlsx
+├── 01-GOUVERNANCE-STRATEGIE/       un sous-dossier par critère : 1.1/ … 1.8/
+├── 02-RESSOURCES-HUMAINES/         2.1/ … 2.6/ (dont 2.3-CSE/, 2.4-DUERP-SST/)
+├── 03-MISSION-INCLUSION/           3.1/ … 3.4/ — AGRÉGATS UNIQUEMENT (jamais de nominatif)
+├── 04-ENVIRONNEMENT/               4.1/ … 4.5/ (dont 4.2-energie-ges/ : tableur mensuel)
+├── 05-MESURE-AMELIORATION/         5.1/ … 5.4/
+├── 06-INSTANCES/                   revues RSE, comité participatif, CA-AG, COPIL, CSE
+│                                   (CR classés par instance puis par date)
+├── 07-AUDITS/                      07a-internes/ (plans, fiches AI-*, rapports)
+│                                   07b-afnor/ (plans d'évaluation, rapports, réponses phase 3)
+├── 08-LABEL-AFNOR/                 dossier de candidature, devis, attestation, charte marque
+└── 99-ARCHIVES/                    versions périmées, cycle de labellisation précédent
+```
+
+Une preuve servant plusieurs critères est classée dans le dossier de son critère **principal** ; l'index (§ 6.4) porte les rattachements multiples — pas de copies croisées.
+
+### 6.3 Nommage
+
+Format : `AAAA-MM-JJ_<critère>_<type>_<objet>_v<NN>[-statut].<ext>`
+
+- **Date** : date du document (pas du classement) ; **critère** : `1.5`, `2.4`… (ou `multi`, `gouv` pour les instances) ; **type** : `lettre`, `plan`, `cr`, `pv`, `charte`, `note`, `export`, `enquete`, `rapport`, `emargement`, `attestation` ; **objet** : kebab-case sans accents ; **statut** : `projet`, `valide`, `signee` (l'absence de statut = document de travail).
+- Exemples : `2026-11-15_1.5_lettre_mission-referent-rsei_v01-signee.pdf` · `2027-02-28_multi_rapport_auto-evaluation-27-criteres_v02-valide.xlsx` · `2027-09-20_5.1_cr_fiche-constat-AI-2027-04_v01.pdf` · `2027-01-31_4.2_export_tableur-energie-2026_v01.xlsx`.
+
+### 6.4 Index du registre (la clé de voûte)
+
+Tableur `00-PILOTAGE/index-registre.xlsx`, une ligne par preuve — c'est **l'ID d'index que la grille d'auto-évaluation référence** (§ 4.2) :
+
+| Colonne | Contenu |
+|---|---|
+| **ID** | `P-AAAA-NNN` (séquentiel par année), jamais réattribué |
+| Critère(s) | principal + secondaires |
+| Type / objet | cf. nommage |
+| Date de la preuve | date certaine portée par le document |
+| **Source** | `registre` (chemin du fichier) ou `SOLIDATA` (module > écran/export > filtre > rôle requis, § 6.5) |
+| Statut | projet / validé / signé / instantané |
+| **Péremption** | date à laquelle la preuve cessera d'être « fraîche » (< 12 mois pour les preuves d'activité, § 4.3) — l'index trié par péremption est la liste de courses du référent |
+| Responsable | pilote qui produit/renouvelle la preuve |
+
+À chaque revue trimestrielle : filtre sur les péremptions < 3 mois → relances aux pilotes. Avant l'audit AFNOR : l'index, trié par critère, **devient le sommaire du dossier de preuve** remis en phase 1.
+
+### 6.5 Articulation avec SOLIDATA : référencer, re-générer, photographier
+
+- **Preuve vivante** (dashboard, KPI, page Audit Insertion) : l'index enregistre le chemin de re-génération ; la preuve se **démontre en séance**. Aucun fichier au registre.
+- **Photographie de fin d'exercice** : au 31 décembre (pack indicateurs de janvier, § 3.3), le référent archive un instantané daté (PDF/CSV) des indicateurs qui alimentent le bilan annuel — parce que les données vivantes continueront de bouger et que le bilan doit rester vérifiable tel qu'arrêté.
+- **Preuve inaltérable par construction** : la DPAV verrouillée trimestriellement et ses exports (`/admin/refashion-exports`) n'ont **pas besoin** d'instantané — le verrouillage horodaté est précisément ce qui les rend recevables (§ 4.3) ; l'index pointe l'écran.
+- **Évolution prévue** (rapport 03) : un espace « registre de preuves RSE » dans SOLIDATA reprendrait l'index tel quel — la discipline de nommage et d'indexation décrite ici est conçue pour être **migrable sans retraitement**.
+
+### 6.6 Versionnage, conservation, accès
+
+- **Versionnage** : `v01`, `v02`… ; un document **signé est gelé** (toute modification = nouvelle version, l'ancienne part en `99-ARCHIVES/` avec son nom d'origine) ; l'index trace la version en vigueur.
+- **Conservation** : durée du cycle de labellisation + le cycle précédent complet (soit 6 ans glissants) — l'évaluateur de renouvellement compare avec le cycle antérieur ; aucune suppression en cours de cycle.
+- **Accès** : écriture = référent + direction (+ chaque pilote sur le dossier de son chapitre) ; lecture = pilotes et direction sur tout le registre ; les bilans annuels et CR du comité participatif sont en outre publiés en interne (fil d'actualités). Le dossier `03-MISSION-INCLUSION/` est vérifié 1×/an par le DPO (absence de nominatif).
+
+---
+
+## 7. Indicateurs du tableau de bord RSE du référent
+
+### 7.1 Règles du tableau de bord
+
+- **Un onglet unique** (tableur, dans `00-PILOTAGE/`), mis à jour avant chaque revue trimestrielle, annexé au CR — évolution prévue : page dédiée dans SOLIDATA (rapport 03).
+- Chaque indicateur porte : valeur, cible (quand elle existe — les cibles naissent du plan d'action 1.5), tendance vs N-1, source, date de relevé. Pas d'indicateur sans usage : chacun sert un critère cité.
+- **Priorité P1** = prouve le niveau 2 visé et les socles réglementaires ; **P2** = prépare le niveau 3 (VSME, portée des actions) ; **P3** = confort de pilotage.
+
+### 7.2 Indicateurs sociaux
+
+| P | Indicateur | Critère(s) | Source | Fréquence |
+|---|---|---|---|---|
+| P1 | Effectifs et ETP, **permanents / salariés en parcours** (base 1607 h) | 2.6 | SOLIDATA `GET /employees/kpi/etp` (page `/reporting-rh`) | Trimestrielle |
+| P1 | **Taux de sorties dynamiques** vs objectif conventionné | 3.1, 3.4 | SOLIDATA — page Audit Insertion (objectif en settings) | Trimestrielle |
+| P1 | Taux de réalisation des **jalons d'accompagnement échus** | 3.3 | SOLIDATA — page Audit Insertion | Trimestrielle |
+| P1 | **AT : nombre, TF1, TG** (heures réelles) + presqu'accidents avec action corrective | 2.4 (VSME B9) | SOLIDATA `GET /api/qhse/events/stats` | Trimestrielle |
+| P1 | Habilitations arrivant à échéance (< 60 j) | 2.4 | SOLIDATA `GET /api/qhse/habilitations/echeances` | Mensuelle |
+| P1 | Taux d'absentéisme | 2.6 | SOLIDATA `GET /employees/kpi/absenteisme` | Trimestrielle |
+| P2 | Heures de formation / salarié (permanents vs parcours ; par sexe pour B10) | 2.1, 2.6 | SOLIDATA `GET /employees/kpi/formation` + plan de formation (manuel) | Trimestrielle |
+| P2 | Répartition **F/H** par filière/poste ; accès formation F/H | 2.2 | Collecte manuelle RH (données `employees`) — évolution prévue | Annuelle |
+| P2 | Satisfaction de sortie : taux de retour + score global + par rubrique | 5.3, 3.4 | Collecte manuelle (papier → tableur CIP, agrégats) — évolution prévue | Semestrielle |
+| P2 | Questionnaire d'intégration à 1 mois : taux + score | 3.2 | Collecte manuelle CIP — évolution prévue | Semestrielle |
+| P3 | Situation à 3-6 mois post-sortie (contacts réalisés / réussis) | 3.4 | Tableur CIP — évolution prévue | Semestrielle |
+
+### 7.3 Indicateurs environnementaux
+
+| P | Indicateur | Critère(s) | Source | Fréquence |
+|---|---|---|---|---|
+| P1 | Tonnage collecté / trié ; **répartition par famille Refashion** (réemploi, recyclage, CSR, élimination) et taux de valorisation | 4.3, 4.5 (VSME B7) | SOLIDATA — dashboards production + exports `/admin/refashion-exports` (DPAV verrouillée) | Trimestrielle (au verrouillage) |
+| P1 | **CO2 évité** (facteurs ADEME, mix observé) | 4.5 | SOLIDATA — dashboard Métropole | Trimestrielle |
+| P1 | **Consommations d'énergie par type** : kWh électricité, litres carburant (→ tCO2e méthode ADEME) | 4.2 (VSME B3) | Collecte manuelle (tableur énergie ; factures + classe 60 Pennylane en appui) — évolution prévue | Mensuelle |
+| P2 | Part de refus de tri | 4.3 | SOLIDATA — production/tri | Trimestrielle |
+| P2 | Eau : m³ consommés | 4.5 (VSME B6) | Collecte manuelle (factures) | Annuelle |
+| P2 | Sensibilisation : actions réalisées, **taux de participation** | 4.4 (N3) | Collecte manuelle (émargements) + fil d'actualités (publications) | Par action |
+| P3 | Km parcourus flotte / tonne collectée | 4.2, 4.3 | SOLIDATA — GPS/checklists (à consolider manuellement) | Trimestrielle |
+
+### 7.4 Indicateurs de gouvernance et économiques
+
+| P | Indicateur | Critère(s) | Source | Fréquence |
+|---|---|---|---|---|
+| P1 | **Avancement du plan d'action RSE** : % actions échues réalisées ; actions en retard | 1.5 | Tableur plan d'action — évolution prévue | Mensuelle |
+| P1 | Tenue des instances : revues/comités/COPIL/CA tenus vs prévus, CR classés | 1.3, 5.1 | Registre (index) | Trimestrielle |
+| P1 | Écarts d'audit ouverts / clos (dont majeurs) et délai de clôture | 5.1 | Fiches `AI-*` (registre) | Trimestrielle |
+| P1 | **Part de commercialisation vs plafond 30 %** (convention art. 9) | 1.3, 1.8 | SOLIDATA — Finance (P&L, rapprochement CA) via pilote FINANCE | Trimestrielle |
+| P2 | Résultat, produits par nature (ventes, subventions) — synthèse commentée | 1.8 | SOLIDATA — Finance (`/finance/rapprochement-ca/:year`) | Trimestrielle |
+| P2 | Demandes et réclamations des PP : reçues / traitées / délai | 5.3 (N2) | Cahier des demandes (manuel) | Trimestrielle |
+| P2 | **Fraîcheur du registre** : % de preuves périmées sur critères actifs | méthode (§ 6.4) | Index du registre | Trimestrielle |
+| P3 | Veille : publications partagées, sujets traités en revue | 1.6 | SOLIDATA — fil d'actualités (historique) | Trimestrielle |
+
+**Pack annuel VSME** (janvier, § 3.3) : B1/B2 (documentaire), B3 (tableur énergie), B6 (eau), B7 (exports Refashion), B8/B9/B10 (KPI RH + QHSE + paie), B11 (note loyauté) — chaque métrique indisponible est listée avec sa date de disponibilité prévue ; chaque métrique non pertinente avec sa **justification écrite** (exigence 4.5 N3).
+
+---
+
+## 8. Annexes outillées
+
+### Annexe A — Modèle de fiche de constat d'audit interne
+
+> **FICHE DE CONSTAT — AUDIT INTERNE RSE** — n° `AI-AAAA-NN`
+>
+> | | |
+> |---|---|
+> | **Date du constat** | |
+> | **Évaluateur(s)** | (binôme ; rappel : n'évalue pas son propre travail — 5.1) |
+> | **Critère / niveau examiné** | ex. 2.4 — attendu N2 (politique SST incluant les RPS) |
+> | **Périmètre / site** | ex. centre de tri Le Houlme, filière collecte |
+> | **Personnes rencontrées** | fonctions uniquement (jamais de verbatim nominatif de salarié en parcours) |
+> | **Preuves examinées** | ID d'index `P-…` et/ou écran SOLIDATA consulté (module > écran > filtre) ; dossiers échantillonnés en codes `D1…Dn` |
+>
+> **Constat (factuel, observable, daté)** :
+> *Ce qui a été vu/entendu/vérifié — sans interprétation ni recommandation à ce stade.*
+>
+> **Type de constat** : ☐ Point fort ☐ Conforme ☐ Point sensible ☐ **Écart mineur** ☐ **Écart majeur** ☐ Opportunité
+> **Exigence de référence** : critère + niveau + attendu précis du référentiel (citer la formulation).
+>
+> **Analyse de cause** (écarts uniquement) :
+> *Pourquoi l'attendu n'est pas satisfait (organisation, moyens, formalisation, outil…).*
+>
+> | Suite donnée | |
+> |---|---|
+> | Action corrective / préventive proposée | |
+> | Responsable (pilote) | |
+> | Échéance | ≤ 3 mois (majeur) / ≤ 6 mois (mineur) |
+> | Inscription au plan d'action RSE | réf. action n° |
+> | **Vérification d'efficacité** | date + preuve (ID d'index) + décision de clôture par le référent |
+>
+> *Visas : évaluateur(s) — pilote concerné — référent RSEi. Fiche conservée en `07-AUDITS/07a-internes/` (registre).*
+
+### Annexe B — Ordre du jour type de la revue de direction RSE (trimestrielle, 1 h 30)
+
+> **REVUE DE DIRECTION RSE — T_ AAAA** — date, lieu, participants (direction, référent, pilotes)
+> *Diffusé à J-7 par le référent avec le tableau de bord à jour (§ 7).*
+>
+> 1. **Approbation du CR précédent et suivi des décisions** (10 min) — décisions échues : faites / non faites, pourquoi.
+> 2. **Tableau de bord RSE** (20 min) — indicateurs P1 commentés ; alertes (AT, habilitations, jalons en retard, plan d'action) ; part commercialisation vs 30 %.
+> 3. **Avancement du plan d'action RSE** (20 min) — actions échues du trimestre ; blocages ; arbitrages de moyens demandés.
+> 4. **Écarts et audits** (15 min) — fiches `AI-*` ouvertes ; socles réglementaires (DUERP, CSE, plan de formation) ; suites des évaluations AFNOR le cas échéant.
+> 5. **Écoute des parties prenantes** (10 min) — remontées du comité participatif (et boucle de retour), enquêtes, cahier des demandes/réclamations, points COPIL/CA/CSE à venir.
+> 6. **Veille et actualités** (5 min) — faits réglementaires ou sectoriels appelant une action.
+> 7. **Décisions et communication** (10 min) — relevé de décisions (responsable + échéance) ; ce qui est publié en interne (fil d'actualités / affichage / FALC).
+>
+> *Variante « revue annuelle » (T1, 2 h 30) : ajouter — présentation de l'auto-évaluation des 27 critères ; analyse annuelle des résultats (5.2) ; **bilan annuel du plan d'action RSE** (5.4, annexe C) ; actualisation du plan N et, à échéance, du projet d'entreprise ; préparation de la présentation au CA ; invitation d'un membre du comité participatif.*
+>
+> *CR conservé au registre (`06-INSTANCES/`) avec relevé de décisions — preuve 1.5 / 5.2 / 5.4.*
+
+### Annexe C — Trame du rapport annuel RSE (bilan annuel du plan d'action RSE — 5.4)
+
+> **RAPPORT ANNUEL RSE — ANNÉE N** — Solidarité Textiles — rédigé par le référent RSEi, validé en revue annuelle, présenté au CA — *~10-15 pages, une version FALC de 2 pages pour l'affichage interne.*
+>
+> 1. **L'essentiel en une page** — 5 chiffres clés (sorties dynamiques, tonnage valorisé, CO2 évité, AT/TF1, avancement du plan), 3 réussites, 3 priorités N+1.
+> 2. **La démarche** — rappel du projet d'entreprise (3 dimensions), gouvernance (instances tenues : dates), rôle du référent, périmètre.
+> 3. **Bilan du plan d'action RSE** (5.4) — tableau intégral des actions : statut, preuve (ID d'index), commentaire ; taux de réalisation ; actions reportées et pourquoi.
+> 4. **Résultats sociaux** (ch. 2) — indicateurs § 7.2 sur 3 ans glissants ; commentaire des écarts ; focus SST (AT, boucle incident→action).
+> 5. **Résultats de la mission d'inclusion** (ch. 3) — agrégats de la page Audit Insertion (parcours, jalons, freins, sorties) ; écoute des salariés (satisfaction de sortie, intégration, comité participatif — et boucle « vous avez dit → nous avons fait »).
+> 6. **Résultats environnementaux** (ch. 4) — tonnages et valorisation par famille, CO2 évité, énergie/GES (tableur 4.2), sensibilisation (participation).
+> 7. **Résultats économiques et gouvernance** (ch. 1) — synthèse financière commentée, part de commercialisation, achats responsables, veille.
+> 8. **Évaluations de l'année** (ch. 5) — auto-évaluation : niveaux par critère (grille en annexe du rapport), tendances ; audit interne : constats, écarts clos/ouverts ; suites AFNOR le cas échéant.
+> 9. **Pack VSME** — métriques B1-B11 disponibles ; indisponibilités datées ; non-pertinences justifiées.
+> 10. **Plan d'action N+1** — actions nouvelles/reconduites (objectif, responsable, indicateur, échéance, moyens) ; trajectoire vers le niveau visé du label.
+>
+> *Diffusion : direction + CA (validation), COPIL (information), interne (fil d'actualités + affichage FALC). Archivage : `05-MESURE-AMELIORATION/5.4/` — le rapport et sa preuve de diffusion sont les pièces maîtresses du 5.4 N2.*
+
+---
+
+## 9. Articulation avec le rapport 03
+
+Le présent document définit **qui fait quoi, quand et avec quelles preuves**, à outillage constant. Le rapport 03 (plan d'action d'évolution de SOLIDATA) traite les « évolutions prévues » signalées ici — notamment : module plan d'action RSE (1.5/5.4), numérisation des enquêtes de satisfaction et d'intégration (5.3, 3.2, 2.5), export VSME (2.6/1.8), module énergie/GES (4.2), rattachement documentaire DUERP au QHSE (2.4), indicateurs F/H (2.2), suivi post-sortie (3.4), registre de preuves intégré (§ 6.5). Aucune de ces évolutions n'est un prérequis : la méthodologie démarre **dès la signature de la lettre de mission**.
+
