@@ -1,7 +1,7 @@
 # Guide CIP — Le module Insertion au quotidien
 
-> **Module livré (parcours d'insertion étendu) — dernière mise à jour 23/07/2026.**
-> Ce guide décrit le module Insertion tel qu'il fonctionne après les deux livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs). Quelques capacités de l'espace encadrant technique (grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche) sont **prévues en phase 2** et signalées comme telles dans ce guide. Les copies d'écran seront ajoutées après la première recette avec la CIP.
+> **Module livré (parcours d'insertion étendu) — dernière mise à jour 23/07/2026 (lot 8 inclus).**
+> Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Seul le **volet RSE de l'insertion (RSEi)** fait l'objet d'une mission séparée et n'est pas traité ici. Les copies d'écran seront ajoutées après la première recette avec la CIP.
 
 - **Public** : conseillère/conseiller en insertion professionnelle (CIP) de Solidarité Textiles ; certains passages concernent les encadrants techniques (ETI) et la direction.
 - **Principe du module** : chaque salarié en insertion a un **dossier unique de parcours** — une frise chronologique, des entretiens historisés, des objectifs, un journal d'actions. Tout ce que vous saisissez sert trois fois : votre suivi quotidien, le document remis au salarié, la preuve pour les contrôles (DDETS, CD76). **Vous ne saisissez jamais deux fois la même chose.**
@@ -14,18 +14,22 @@
 1. [Mon espace du lundi matin](#1-mon-espace-du-lundi-matin)
 2. [Un nouveau salarié arrive](#2-un-nouveau-salarié-arrive)
 3. [Je conduis le diagnostic d'accueil](#3-je-conduis-le-diagnostic-daccueil)
-4. [Je prépare un entretien en 10 minutes](#4-je-prépare-un-entretien-en-10-minutes)
-5. [Je mène et je clôture un bilan](#5-je-mène-et-je-clôture-un-bilan)
-6. [Je saisis une action au vol](#6-je-saisis-une-action-au-vol)
-7. [Le renouvellement de contrat](#7-le-renouvellement-de-contrat)
-8. [La PMSMP (immersion en entreprise)](#8-la-pmsmp-immersion-en-entreprise)
-9. [La sortie](#9-la-sortie)
-10. [Pass IAE et prolongation](#10-pass-iae-et-prolongation)
-11. [Mes tableaux](#11-mes-tableaux)
-12. [Ce que je remets au salarié](#12-ce-que-je-remets-au-salarié)
-13. [FAQ — 10 questions fréquentes](#13-faq--10-questions-fréquentes)
-14. [Lexique](#14-lexique)
-15. [Ce qui arrive en phase 2](#15-ce-qui-arrive-en-phase-2)
+4. [Je complète le portefeuille et le style d'apprentissage au diagnostic](#4-je-complète-le-portefeuille-et-le-style-dapprentissage-au-diagnostic)
+5. [La check-list d'embauche](#5-la-check-list-dembauche)
+6. [L'entretien de période d'essai](#6-lentretien-de-période-dessai)
+7. [L'encadrant technique évalue les compétences](#7-lencadrant-technique-évalue-les-compétences)
+8. [Je prépare un entretien en 10 minutes](#8-je-prépare-un-entretien-en-10-minutes)
+9. [Je mène et je clôture un bilan](#9-je-mène-et-je-clôture-un-bilan)
+10. [Je saisis une action au vol](#10-je-saisis-une-action-au-vol)
+11. [Le renouvellement de contrat](#11-le-renouvellement-de-contrat)
+12. [La PMSMP (immersion en entreprise)](#12-la-pmsmp-immersion-en-entreprise)
+13. [La sortie](#13-la-sortie)
+14. [Pass IAE et prolongation](#14-pass-iae-et-prolongation)
+15. [Mes tableaux](#15-mes-tableaux)
+16. [Ce que je remets au salarié](#16-ce-que-je-remets-au-salarié)
+17. [FAQ — 10 questions fréquentes](#17-faq--10-questions-fréquentes)
+18. [Lexique](#18-lexique)
+19. [Le volet RSE de l'insertion (mission séparée)](#19-le-volet-rse-de-linsertion-mission-séparée)
 
 ---
 
@@ -35,7 +39,7 @@
 
 **Pas à pas**
 
-1. Ouvrez **Espace CIP**. En tête de page, le bloc **« Aujourd'hui / Cette semaine »** liste vos entretiens planifiés, avec l'heure et un badge **« préparation prête »** quand la note de préparation a déjà été générée (voir cas 4). Un clic ouvre directement la fiche du salarié sur le bon entretien.
+1. Ouvrez **Espace CIP**. En tête de page, le bloc **« Aujourd'hui / Cette semaine »** liste vos entretiens planifiés, avec l'heure et un badge **« préparation prête »** quand la note de préparation a déjà été générée (voir cas 8). Un clic ouvre directement la fiche du salarié sur le bon entretien.
 2. En dessous, le bloc **Alertes** regroupe ce qui demande une action, **une ligne par salarié** (les badges se cumulent sur la ligne). Trois couleurs seulement :
    - **rouge** = réglementaire ou contractuel (Pass IAE arrivant à échéance, cumul CDDI ≥ 22 mois, diagnostic non réalisé à 30 jours) ;
    - **ambre** = organisation du suivi (bilan en retard, prochain rendez-vous non planifié, action critique en retard, renouvellement à préparer) ;
@@ -80,7 +84,7 @@
 2. Chaque rubrique se conclut par votre **commentaire CIP** et, quand la rubrique nourrit un frein, par la **valorisation du frein** : une rangée de six boutons **[Non évalué | 1 | 2 | 3 | 4 | 5]**. Le bouton suggéré par les réponses est mis en évidence (la suggestion est **calculée par le serveur** à partir de vos réponses structurées) — **vous confirmez ou corrigez d'un clic, c'est toujours vous qui décidez**.
 3. La rubrique **« expression du salarié »** (attentes, difficultés, objectifs, aide souhaitée — les mots du salarié) alimente directement les **objectifs du parcours**, marqués « origine : salarié ». C'est la trace de la co-construction.
 4. Vous pouvez **vous arrêter à tout moment** : le diagnostic reste « en cours » et, à la réouverture, reprend là où vous étiez. Faire le diagnostic en **deux séances** (par exemple garder Santé et Budget pour un second rendez-vous, quand la confiance est là) est prévu — l'essentiel est de terminer dans la fenêtre des 30 jours.
-5. À la fin : le radar des freins (la **toile d'araignée**, 9 axes) s'affiche, avec les « non évalué » réellement absents du tracé. Clôturez, puis générez le **PDF** (exemplaire salarié / exemplaire dossier — voir cas 12).
+5. À la fin : le radar des freins (la **toile d'araignée**, 9 axes) s'affiche, avec les « non évalué » réellement absents du tracé. Clôturez, puis générez le **PDF** (exemplaire salarié / exemplaire dossier — voir cas 16).
 
 **Ce qui est automatique** : la **sauvegarde continue** (bandeau « Brouillon enregistré à HH:MM » — une coupure de courant ou un onglet fermé ne fait rien perdre), la suggestion des niveaux de freins depuis les réponses, la création des objectifs « origine salarié » depuis la rubrique d'expression, le report du statut « diagnostic en cours » dans vos alertes.
 
@@ -91,7 +95,88 @@
 
 ---
 
-## 4. Je prépare un entretien en 10 minutes
+## 4. Je complète le portefeuille et le style d'apprentissage au diagnostic
+
+**Objectif** : construire avec le salarié, à l'intérieur même du diagnostic, ce qu'il aime, ce qu'il sait faire et sa façon d'apprendre — pour outiller l'encadrant et préparer le projet, sans nouvel entretien à part.
+
+**Pas à pas**
+
+1. Ces éléments sont **deux rubriques du diagnostic d'accueil** (cas 3), pas un formulaire séparé : dans le stepper, après « Projet professionnel », vous trouvez **« Portefeuille & AFOM »** puis **« Style d'apprentissage »**. La sauvegarde automatique s'applique comme au reste du diagnostic.
+2. **Portefeuille & AFOM** — à remplir **avec** le salarié, avec ses mots :
+   - **Centres d'intérêt** et **compétences par domaine** (communication, relations, initiative, apprentissage, autonomie, réflexion) : de simples cases à cocher, vocabulaire courant.
+   - **Savoir-faire** (ce qu'il sait faire) et **savoir-être** (qualités, comportement) en texte libre.
+   - **Analyse AFOM / SWOT** : Atouts et Faiblesses (internes), Opportunités et Menaces (extérieures).
+   - **Besoins exprimés** et **COA** (choix d'orientation / d'action) : la ou les pistes retenues à l'issue du diagnostic.
+3. **Style d'apprentissage** — un questionnaire de **24 phrases** (choix A/B, « il n'y a pas de bonne réponse »). Une fois les 24 renseignées, le module affiche le **profil** (Adaptateur, Divergeur, Assimilateur ou Convergeur) avec, surtout, **« Comment l'accompagner »** : des repères concrets pour l'encadrant (par ex. « confier des tâches réelles rapidement » pour un Adaptateur). Tant que le questionnaire est incomplet, le profil n'est pas fabriqué.
+4. Le **niveau de français (CECRL)** reste, lui, dans la rubrique « Français & langues » du diagnostic (auto-évaluation A1→C2 + votre observation).
+
+**Ce qui est automatique** : le calcul du profil d'apprentissage à partir des 24 réponses (jamais un profil partiel), la reprise de ces éléments dans les bilans et leur visibilité par l'encadrant technique, la sauvegarde continue du diagnostic.
+
+> **Points de vigilance**
+> - Le portefeuille et l'AFOM ne sont **pas** un test : ce sont des supports de **co-construction**. Remplissez-les en dialogue, pas en interrogatoire.
+> - Le style d'apprentissage **complète le PCM, il ne le remplace pas** : c'est un repère pédagogique pour adapter la façon de former, pas une étiquette.
+
+---
+
+## 5. La check-list d'embauche
+
+**Objectif** : suivre, d'un coup d'œil, que les pièces et étapes des premiers jours sont bien faites — sans tableur parallèle.
+
+**Pas à pas**
+
+1. Sur la fiche du salarié, onglet **Synthèse**, dépliez le bloc **« Accueil / intégration »**. Sept étapes y figurent : **promesse d'embauche, contrat signé, mutuelle / prévoyance, charte d'insertion, livret d'accueil remis, règlement intérieur, formation au poste**.
+2. Pour chaque étape : cochez **« fait »**, la **date** se met au jour du jour (modifiable), et renseignez le **responsable**. Une **barre de complétude** (« 4/7 ») résume l'avancement en tête de bloc.
+3. Si la personne vient du module Recrutement, certaines étapes (charte d'insertion, livret d'accueil) sont **déjà cochées** à la liaison, reprises des documents remis au recrutement — vous n'y revenez pas.
+
+**Ce qui est automatique** : la date du jour à la coche, le pré-remplissage depuis le recrutement à la liaison, le calcul de la complétude, la fusion des saisies (cocher une étape ne touche pas les autres).
+
+> **Points de vigilance**
+> - La saisie de la check-list est réservée aux profils **ADMIN/RH** ; les autres la consultent. C'est un suivi administratif d'intégration, distinct de l'accompagnement social.
+> - Une case « fait » sans responsable ni date reste imprécise en cas de contrôle : prenez le réflexe de renseigner les trois.
+
+---
+
+## 6. L'entretien de période d'essai
+
+**Objectif** : formaliser le point à un mois — la période d'essai est-elle confirmée ? — dans le dossier de parcours, sans le confondre avec un bilan de suivi.
+
+**Pas à pas**
+
+1. Cet entretien est **créé automatiquement** quand la fiche de recrutement est liée au collaborateur (cas 2) : son échéance est calée sur **le début du contrat + la durée de période d'essai** (30 jours par défaut, réglable par l'administrateur). Vous le retrouvez dans les entretiens planifiés de la fiche.
+2. Ouvrez-le : c'est un **formulaire court et focalisé**, en deux étapes (le point de période d'essai, puis la clôture) — **sans** freins, objectifs ni actions (ce n'est pas un bilan de suivi). Renseignez l'avis de l'encadrant / de la CIP.
+3. Prenez la **décision**, obligatoire pour clôturer : **Période d'essai confirmée**, **À revoir**, ou **Période d'essai rompue**.
+4. Clôturez comme un entretien normal (verrouillage, trace).
+
+**Ce qui est automatique** : la création de l'entretien à la liaison recrutement, le calcul de l'échéance, et **l'effet de la décision sur le parcours** — « confirmée » ou « à revoir » : le parcours d'accompagnement continue normalement ; **« rompue » : le parcours est clos proprement** (statut « abandon » + date de sortie), au lieu de rester ouvert à vide.
+
+> **Points de vigilance**
+> - Cet entretien **précède** le diagnostic social approfondi : il ne le remplace pas. Le diagnostic d'accueil reste à réaliser dans les 30 jours (cas 3).
+> - L'entretien est créé une fois à la liaison ; rien n'empêche techniquement d'en ajouter un manuellement, mais en règle générale **un seul point de période d'essai par parcours** suffit — ne le dupliquez pas.
+
+---
+
+## 7. L'encadrant technique évalue les compétences
+
+**Objectif** : donner à l'encadrant technique un support simple pour noter la montée en compétences au poste, période après période, et co-valider avec le salarié et la CIP.
+
+**Pas à pas**
+
+1. Sur la fiche du salarié, onglet **« Compétences »**. L'encadrant crée une évaluation avec **« + Nouvelle évaluation »** : il choisit la **filière** (tri, collecte, logistique, boutique, ou transverse), une **période** repère (ex. « M+3 ») et la date.
+2. La grille se remplit **une ligne par compétence**, groupée par rubrique (Comportement, Accompagnement social et professionnel en transverse ; Activités métier par filière). Pour chaque item, de **gros boutons de note 0 à 10** ou **« N/E »** (non évalué). Deux champs repliés — **observation** et **objectif de progression** — restent facultatifs.
+3. La **moyenne** s'affiche en direct, les « N/E » **exclus** (jamais comptés comme des zéros). Une **synthèse** de l'encadrant conclut la grille.
+4. **Trois validations horodatées** — « Vu avec le salarié », « Encadrant technique », « CIP » — permettent de faire passer l'évaluation de **brouillon** à **validée**. Tant que les trois ne sont pas cochées, elle reste en brouillon.
+5. Les évaluations successives s'empilent dans l'historique, avec le **delta de moyenne** (↗/↘) d'une évaluation à l'autre : la progression se lit d'un coup d'œil.
+
+**Ce qui est automatique** : la moyenne (N/E exclu), le delta entre évaluations, la conservation du libellé de l'item même s'il est retiré du référentiel ensuite (l'historique reste lisible).
+
+> **Points de vigilance**
+> - Le **référentiel de compétences** (les items par filière) est **administrable** : un administrateur l'ajuste dans Réglages insertion (écran AdminInsertion, réservé à l'administrateur). Un item renommé ou désactivé n'écrase jamais les évaluations passées.
+> - Ces grilles ne contiennent **aucune donnée santé/judiciaire/budget** ; elles sont donc accessibles à l'encadrant technique (saisie) comme à la CIP. À l'inverse, **l'accès n'est pas cloisonné par équipe** : un encadrant ou un manager peut voir les évaluations d'un salarié qui n'est pas dans son atelier — c'est assumé pour ce volet non sensible, mais restez-en aux salariés que vous suivez.
+> - « N/E » est la bonne réponse pour une compétence pas encore travaillée : ne mettez pas 0, cela fausserait la moyenne et la progression.
+
+---
+
+## 8. Je prépare un entretien en 10 minutes
 
 **Objectif** : arriver au rendez-vous de 14 h en sachant ce qui s'est dit, ce qui était prévu, ce qui est en retard — même si l'IA est indisponible.
 
@@ -110,7 +195,7 @@
 
 ---
 
-## 5. Je mène et je clôture un bilan
+## 9. Je mène et je clôture un bilan
 
 **Objectif** : faire un bilan de suivi plus vite que sur le formulaire Word actuel, et ne jamais laisser un bilan « ni fait ni planifié ».
 
@@ -125,7 +210,7 @@
 2. À tout moment, **« Enregistrer le brouillon »** : un bilan peut rester incomplet et être repris plus tard. La sauvegarde automatique tourne de toute façon en continu.
 3. Le rail latéral affiche en permanence **« Prêt à clôturer : 3/4 »** avec le détail de ce qui manque.
 4. **« Clôturer le bilan… »** ouvre la fenêtre de clôture : récapitulatif des contrôles, **date du prochain entretien proposée d'office** (calée sur le rythme des bilans paramétré, modifiable), durée de l'entretien (valeur proposée, ajustable), case **« Relu avec le salarié (validation en présence) »**. Validez : le bilan est clos et **verrouillé**, le prochain rendez-vous est créé et apparaît dans votre agenda.
-5. Générez le **PDF** et faites signer l'exemplaire papier (voir cas 12).
+5. Générez le **PDF** et faites signer l'exemplaire papier (voir cas 16).
 
 **Ce qui est automatique** : la reprise du bilan précédent (objectifs, actions, freins), le calcul du respect des échéances, le report des objectifs non atteints, la proposition de date du prochain rendez-vous, le recalage des échéances du parcours après clôture, la sauvegarde continue, l'**historisation par instantané** (chaque clôture, mise à jour et réouverture est tracée dans `insertion_milestones_history`).
 
@@ -137,7 +222,7 @@
 
 ---
 
-## 6. Je saisis une action au vol
+## 10. Je saisis une action au vol
 
 **Objectif** : noter « il a eu la CAF » ou « prendre RDV CPAM » en moins de 30 secondes, où que vous soyez dans le module.
 
@@ -158,7 +243,7 @@
 
 ---
 
-## 7. Le renouvellement de contrat
+## 11. Le renouvellement de contrat
 
 **Objectif** : instruire les renouvellements sans double saisie, dans le circuit réel : encadrant → CIP → directeur.
 
@@ -176,11 +261,11 @@
 > - Le salarié **ne doit pas découvrir la décision au dernier moment** (procédure interne) : le module trace l'instruction, mais l'annonce reste un entretien humain, à vous de le planifier.
 > - **Au-delà de 24 mois de CDDI cumulés**, le module exige un **motif de dérogation** (formation en cours, 50 ans et plus, RQTH, CDI inclusion) et la date de décision. Pour un contrat arrivé par l'import de paie, le module ne bloque pas la paie : il ouvre une alerte **« dérogation à régulariser »** qui reste visible tant que le motif n'est pas saisi.
 > - Si l'encadrant a rempli un formulaire papier (situation transitoire), c'est vous qui le retranscrivez : indiquez alors l'origine « saisi par la CIP d'après le formulaire papier de l'encadrant ».
-> - Les **grilles de compétences métier** de l'encadrant (évaluation détaillée poste par poste) arrivent en **phase 2** (voir § 15) ; l'écran de renouvellement, lui, est disponible dès maintenant.
+> - Les **grilles de compétences métier** de l'encadrant (évaluation détaillée poste par poste) sont désormais disponibles (voir cas 7) : au moment de préparer un renouvellement, la dernière évaluation de compétences et sa progression sont un appui utile pour votre avis.
 
 ---
 
-## 8. La PMSMP (immersion en entreprise)
+## 12. La PMSMP (immersion en entreprise)
 
 **Objectif** : enregistrer une période d'immersion, avec les règles légales vérifiées automatiquement, sans oublier l'outil officiel.
 
@@ -199,7 +284,7 @@
 
 ---
 
-## 9. La sortie
+## 13. La sortie
 
 **Objectif** : clore le parcours proprement — bilan, classement officiel de la sortie, documents remis, satisfaction — et préparer le suivi à 3 mois.
 
@@ -226,7 +311,7 @@
 
 ---
 
-## 10. Pass IAE et prolongation
+## 14. Pass IAE et prolongation
 
 **Objectif** : ne jamais découvrir trop tard qu'un Pass expire, et produire le bilan de prolongation sans le rédiger from scratch.
 
@@ -246,7 +331,7 @@
 
 ---
 
-## 11. Mes tableaux
+## 15. Mes tableaux
 
 **Objectif** : retrouver les vues transversales — pour vous, pour la direction, pour les partenaires.
 
@@ -267,7 +352,7 @@
 
 ---
 
-## 12. Ce que je remets au salarié
+## 16. Ce que je remets au salarié
 
 **Objectif** : remettre un document que le salarié peut lire et comprendre, sans exposer vos notes internes, et en respectant ses droits.
 
@@ -285,7 +370,7 @@
 - **Accès** : il peut demander tout ce qui le concerne ; le PDF « exemplaire dossier » remis via la RH en est le vecteur naturel.
 - **Rectification** : une erreur factuelle se corrige (sur un bilan clôturé, par la procédure de réouverture motivée).
 - **Effacement / durées** : le dossier est conservé pendant le parcours puis 2 ans après le dernier contact, ensuite anonymisé automatiquement (les données FSE+ font exception : conservées en piste d'audit ≥ 5 ans).
-- **Opposition** : notamment au contact post-sortie (voir cas 9).
+- **Opposition** : notamment au contact post-sortie (voir cas 13).
 - **IA** : il est informé qu'une assistance IA prépare les entretiens, qu'elle ne reçoit pas son identité et qu'elle ne décide de rien.
 - **Contact** : le délégué à la protection des données (dpo@solidarite-textiles.fr).
 
@@ -295,7 +380,7 @@
 
 ---
 
-## 13. FAQ — 10 questions fréquentes
+## 17. FAQ — 10 questions fréquentes
 
 **1. L'ordinateur s'éteint (ou je ferme l'onglet) en plein diagnostic : ai-je tout perdu ?**
 Non. La sauvegarde est continue (bandeau « Brouillon enregistré à HH:MM »). À la réouverture, le diagnostic « en cours » reprend là où vous étiez, rubrique comprise.
@@ -322,18 +407,19 @@ Oui. SOLIDATA **prépare et contrôle** (il produit les pièces, vérifie les d�
 Santé : uniquement l'impact professionnel (contre-indications, RQTH + échéance, suivi oui/non). Judiciaire : uniquement le niveau de frein et l'impact organisationnel — **jamais la nature des faits**. Règle simple : n'écrivez que ce dont vous avez besoin pour accompagner ; le chiffrement protège la donnée, pas la collecte excessive.
 
 **9. Qui voit quoi dans le dossier ?**
-Vous (CIP/RH) et l'administrateur : tout. L'encadrant technique : ses équipes seulement — renouvellement, objectifs professionnels (les grilles de compétences métier arrivent en phase 2) ; **jamais** les détails santé, judiciaire ou budget, ni les textes du diagnostic social. La direction : la fiche en lecture. L'auditeur externe (rôle dédié) : uniquement des agrégats non nominatifs. Ces règles sont testées automatiquement à chaque livraison.
+Vous (CIP/RH) et l'administrateur : tout. L'encadrant technique : le volet professionnel — renouvellement, **grilles de compétences métier**, entretien de période d'essai, objectifs et éléments professionnels du diagnostic (portefeuille, style d'apprentissage) ; **jamais** les détails santé, judiciaire ou budget, ni les textes du diagnostic social (masquage testé automatiquement à chaque livraison). À noter : les grilles de compétences, non sensibles, ne sont pas cloisonnées par atelier (un encadrant peut voir celles d'un autre atelier — voir cas 7). La direction : la fiche en lecture. L'auditeur externe (rôle dédié) : uniquement des agrégats non nominatifs.
 
 **10. Les alertes s'accumulent et je ne m'y retrouve plus : que faire ?**
 D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappeler dans 7 jours » sur ce qui peut attendre (le report est tracé et partagé). Si le volume reste ingérable, demandez l'ajustement des seuils dans les réglages : des alertes que plus personne ne lit ne protègent personne.
 
 ---
 
-## 14. Lexique
+## 18. Lexique
 
 | Terme | Définition |
 |---|---|
 | **ACI** | Atelier et Chantier d'Insertion — le cadre conventionnel de Solidarité Textiles. |
+| **AFOM / SWOT** | Analyse Atouts-Faiblesses-Opportunités-Menaces : atouts et faiblesses internes au salarié, opportunités et menaces extérieures. Volet de co-construction du diagnostic (cas 4). |
 | **ASP** | Agence de Services et de Paiement — verse l'aide au poste sur la base des états mensuels de présence (saisie officielle, hors ERP). |
 | **Bilan de suivi** | Entretien intermédiaire à fréquence libre (souvent bimestrielle), numéroté (« Bilan n° 3 »), qui commence toujours par l'évaluation du précédent. |
 | **CDDI** | Contrat à Durée Déterminée d'Insertion — 4 mois minimum, renouvelable dans la limite de 24 mois (dérogations possibles : formation en cours, 50 ans et plus, RQTH, CDI inclusion). |
@@ -341,34 +427,29 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 | **Criticité** | Niveau d'urgence d'une action CIP (haute / moyenne / basse) ; une action critique en retard déclenche une alerte. |
 | **Diagnostic d'accueil** | Premier entretien approfondi du parcours (trame 12 rubriques), à réaliser dans les 30 jours suivant l'entrée. |
 | **Échéances du parcours** | Les rendez-vous obligatoires posés automatiquement (diagnostic, renouvellements, bilan de sortie) — appelés « jalons » dans les documents techniques. |
-| **ETI** | Encadrant·e Technique d'Insertion — remplit le volet renouvellement sur son écran dédié ; les grilles de compétences métier arrivent en phase 2. |
+| **ETI** | Encadrant·e Technique d'Insertion — remplit le volet renouvellement sur son écran dédié et **note les grilles de compétences métier** (onglet Compétences) ; n'accède jamais aux volets santé, judiciaire ou budget. |
 | **File active** | L'ensemble des salariés en parcours dont vous êtes référente. |
 | **Frein** | Difficulté périphérique à l'emploi, évaluée de 1 (très bloquant) à 5 (résolu) ou « non évalué ». Neuf axes : mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire. |
 | **Jalon** | Terme technique pour une échéance du parcours (voir ci-dessus). |
 | **Pass IAE** | Agrément individuel délivré via la plateforme des emplois de l'inclusion, valable 24 mois, prolongeable par un prescripteur habilité sur présentation d'un bilan du parcours. |
+| **Période d'essai (entretien de)** | Point formalisé à environ un mois : décision « confirmée / à revoir / rompue ». Auto-créé à la liaison recrutement (cas 6). |
 | **PMSMP** | Période de Mise en Situation en Milieu Professionnel — immersion en entreprise (1 mois max par convention, 60 jours max sur 12 mois chez un même organisme d'accueil). |
+| **Portefeuille de compétences** | Recueil, construit avec le salarié au diagnostic, de ses centres d'intérêt, compétences par domaine, savoir-faire et savoir-être (cas 4). À ne pas confondre avec les grilles de compétences notées par l'encadrant (cas 7). |
 | **Prescripteur** | Organisme qui a orienté le salarié vers l'ACI (France Travail, mission locale, CD76…) ; en auto-prescription, c'est la structure elle-même qui a validé l'éligibilité. |
 | **RQTH** | Reconnaissance de la Qualité de Travailleur Handicapé (avec date d'échéance). |
 | **Sortie dynamique** | Somme des trois catégories officielles de sorties : emploi durable + emploi de transition + sortie positive. C'est le taux phare du dialogue de gestion. |
 | **STC** | Solde de tout compte — l'un des trois documents obligatoires remis à la sortie (avec le certificat de travail et l'attestation France Travail). |
+| **Style d'apprentissage (Kolb)** | Profil pédagogique (Adaptateur / Divergeur / Assimilateur / Convergeur) issu d'un questionnaire de 24 items, pour adapter la façon de former. Complète le PCM, ne le remplace pas (cas 4). |
 | **Toile d'araignée** | Le radar des freins : une forme par évaluation ; leur superposition montre l'évolution du parcours d'un coup d'œil. |
 
 ---
 
-## 15. Ce qui arrive en phase 2
+## 19. Le volet RSE de l'insertion (mission séparée)
 
-Le module couvre aujourd'hui l'ensemble du parcours d'accompagnement, de l'entrée au suivi post-sortie. Une **phase 2**, cadrée après vos premiers retours d'usage, ajoutera un **espace encadrant technique complet** :
+Le module couvre désormais **l'ensemble du parcours d'accompagnement**, de l'entrée au suivi post-sortie, **espace encadrant technique compris** : les grilles de compétences métier (cas 7), le portefeuille de compétences et le style d'apprentissage au diagnostic (cas 4), l'entretien de période d'essai (cas 6) et la check-list d'embauche (cas 5) sont tous **livrés**. Il n'y a plus de « phase 2 » de l'accompagnement en attente.
 
-- **Grilles de compétences métier** — évaluation détaillée poste par poste (tri, collecte, logistique, boutique), remplie par l'encadrant.
-- **Portefeuille de compétences** du salarié et **auto-évaluation CECRL** structurée (au-delà de l'observation linguistique du diagnostic déjà en place).
-- **Style d'apprentissage** — repère pédagogique pour adapter la montée en compétences.
-- **Entretien de période d'essai** — le point à un mois, formalisé.
-- **Check-list d'embauche** — le suivi des pièces et étapes des premiers jours.
-
-Dans l'intervalle, ces éléments restent gérés sur vos supports habituels ; le formulaire de renouvellement (écran encadrant), lui, est **déjà disponible** (cas 7).
-
-Un **volet RSE de l'insertion (RSEi)** fait par ailleurs l'objet d'une **mission séparée** et n'est pas couvert par ce guide.
+Reste, hors de ce guide, un seul chantier : le **volet RSE de l'insertion (RSEi)** — pilotage de la responsabilité sociale de la structure (module Pilotage RSE) — qui fait l'objet d'une **mission dédiée séparée**. Il ne fait pas partie du module Insertion décrit ici et sera documenté à part le moment venu.
 
 ---
 
-*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les deux livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0). Les copies d'écran seront ajoutées lors de la première recette avec la CIP.*
+*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). Les copies d'écran seront ajoutées lors de la première recette avec la CIP.*

@@ -1,7 +1,7 @@
 # Référentiel d'analyse de la performance de la pratique d'accompagnement
 
 > **Module livré — dernière mise à jour 23/07/2026.**
-> Les indicateurs décrits s'appuient sur les écrans et exports du module Insertion effectivement livrés (« Espace CIP », « Pilotage & indicateurs » = `/insertion/audit`, « Actions CIP » = `/insertion/actions`) et sur les endpoints qui les alimentent (audit conventionnel `/insertion/audit` + cibles `/insertion/cibles`, cohorte `/insertion/cohorte/stats`, actions `/insertion/actions-overview`, satisfaction `/insertion/satisfaction-stats`, PMSMP `/insertion/pmsmp`). Les seuils indicatifs restent à confirmer lors de la première revue d'équipe après mise en production.
+> Les indicateurs décrits s'appuient sur les écrans et exports du module Insertion effectivement livrés (« Espace CIP », « Pilotage & indicateurs » = `/insertion/audit`, « Actions CIP » = `/insertion/actions`) et sur les endpoints qui les alimentent (audit conventionnel `/insertion/audit` + cibles `/insertion/cibles`, cohorte `/insertion/cohorte/stats`, actions `/insertion/actions-overview`, satisfaction `/insertion/satisfaction-stats`, PMSMP `/insertion/pmsmp`). Depuis la livraison de l'**espace encadrant technique** (lot 8 : grilles de compétences métier, entretien de période d'essai), les **évaluations de compétences** saisies par l'encadrant constituent une **source complémentaire** (progression au poste), mobilisable uniquement en lecture agrégée et anonyme — jamais comme une notation individuelle (voir C6). Les seuils indicatifs restent à confirmer lors de la première revue d'équipe après mise en production.
 
 ---
 
@@ -164,6 +164,14 @@ Quatre familles. Pour chaque indicateur : définition, formule, source dans le m
 - **Seuil indicatif** : cible ≥ 60 % de situations connues. À confirmer en équipe.
 - **Limites** : « injoignable » n'est pas un échec d'accompagnement (changement de numéro, mobilité) et l'opposition est un droit : l'indicateur mesure d'abord la **capacité de la structure à garder le lien**, et la durabilité des sorties ensuite. Interpréter la répartition avec prudence sur de petits effectifs.
 
+**C6. Progression des compétences au poste (source complémentaire — encadrant technique)**
+- **Définition** : évolution, en agrégat de cohorte, des notes de compétences métier saisies par l'encadrant technique entre la première et la dernière évaluation validée, pour les salariés présents depuis au moins 6 mois. Complète C1 (freins) et C3 (sorties) par un signal « montée en compétences au poste ».
+- **Formule** : moyenne des deltas de note (dernière évaluation validée − première), items « non évalué » exclus ; part des salariés avec au moins une compétence en progression. **Jamais** restituée par salarié nommé.
+- **Source** : onglet Compétences des fiches (`/insertion/competences/:employeeId`) ; à ce jour, **pas d'écran de pilotage agrégé dédié** — la lecture de cohorte se fait manuellement en revue à partir des évaluations validées (un tableau de bord consolidé pourra être ajouté ultérieurement).
+- **Fréquence** : semestrielle et annuelle.
+- **Seuil indicatif** : aucun — indicateur de **description**, pas de performance.
+- **Limites** : la note /10 est un **jugement professionnel de l'encadrant**, pas une mesure, et elle porte sur la progression **au poste** — elle ne mesure pas la pratique de la CIP (c'est l'ETI qui évalue) et n'entre dans aucun classement. À ne **jamais** transformer en objectif chiffré ni en notation individuelle de salarié ; à lire en tendance de cohorte. Sa valeur tient au **binôme CIP-encadrant** : un écart entre progression des compétences et évolution des freins est un point de discussion en revue, jamais un verdict. La triple validation (salarié/encadrant/CIP) fiabilise la donnée mais ne la rend pas comparable d'un encadrant à l'autre sans harmoniser les usages de cotation.
+
 ### Famille D — Charge et soutenabilité
 
 *Question : la charge de la fonction accompagnement est-elle tenable — et sinon, comment le démontrer ?*
@@ -247,7 +255,7 @@ Pour chaque item, trois réponses possibles — « ça va » / « sous tension �
 | 4 | La co-construction est réelle : les salariés portent des objectifs qui viennent d'eux | C2 |
 | 5 | Je parviens à solder mes actions (résultats saisis) au fil de l'eau | B3/D2 |
 | 6 | Les partenaires répondent dans des délais compatibles avec les situations | B4 |
-| 7 | Le binôme avec les encadrants techniques fonctionne (renouvellements, signaux terrain) | A3 |
+| 7 | Le binôme avec les encadrants techniques fonctionne (renouvellements, évaluations de compétences, signaux terrain) | A3 |
 | 8 | J'ai encore de la marge pour les urgences et les imprévus | D3 |
 | 9 | La saisie dans le module reste une aide, pas une charge | transversal |
 | 10 | Situations qui me préoccupent particulièrement ce mois-ci (sans détail nominatif écrit) | qualitatif |
@@ -257,4 +265,4 @@ Pour chaque item, trois réponses possibles — « ça va » / « sous tension �
 
 ---
 
-*Référentiel établi le 22/07/2026 dans le cadre de la mission Insertion, finalisé le 23/07/2026 après livraison du module. À présenter au CSE avec le module, à confirmer en première revue d'équipe après mise en production, puis à réviser annuellement.*
+*Référentiel établi le 22/07/2026 dans le cadre de la mission Insertion, finalisé le 23/07/2026 après livraison du module (lots 1-8, espace encadrant technique compris). À présenter au CSE avec le module, à confirmer en première revue d'équipe après mise en production, puis à réviser annuellement.*
