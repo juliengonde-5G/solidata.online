@@ -19,6 +19,8 @@ const { SENSITIVE_DIAG_FIELDS, encryptField, decryptField } = require('../../uti
 const { maskInsertionRow, maskInsertionRows, MANAGER_HIDDEN_FIELDS } = require('./masking');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
 const { autoLogActivity } = require('../../middleware/activity-logger');
+const { PMSMP_MAX_JOURS_CONVENTION, PMSMP_MAX_CUMUL_12M, pmsmpDays, computeCumul12MoisGlissants } = require('./pmsmp-rules');
+const { ageBracket } = require('../../utils/pii-pseudonymize');
 
 const PCM_KEY = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
 if (!PCM_KEY) {
@@ -408,6 +410,16 @@ router.post('/milestones', [
 ], validate, async (req, res) => {
   try {
     const { employee_id, milestone_type, due_date, contract_id, previous_milestone_id } = req.body;
+
+    // Garde ETI (RES-10, PR 2) : un MANAGER (encadrant technique) ne crée que
+    // des entretiens de RENOUVELLEMENT (son volet — écran ETI phase B) ; tout
+    // autre type reste réservé ADMIN/RH.
+    if (baseRoleOf(req) === 'MANAGER' && milestone_type !== 'renouvellement') {
+      return res.status(403).json({
+        error: "Un encadrant (MANAGER) ne peut créer que des entretiens de renouvellement.",
+      });
+    }
+
     const due = due_date || new Date().toISOString().split('T')[0];
     const pn = await currentParcoursNum(pool, employee_id);
 
@@ -505,6 +517,18 @@ router.put('/milestones/:id', [
 ], validate, async (req, res) => {
   try {
     const d = req.body;
+
+    // Garde ETI (RES-10, PR 2) : le PUT générique écrit TOUS les champs (dont
+    // freins art. 9/10, bilans, sortie) → interdit à un MANAGER. Son écriture
+    // passe EXCLUSIVEMENT par la route limitée
+    // PUT /renouvellements/:milestoneId/formulaire (renouvellement_form + avis).
+    if (baseRoleOf(req) === 'MANAGER') {
+      return res.status(403).json({
+        error: "Modification réservée ADMIN/RH.",
+        hint: "Encadrant : utilisez le formulaire de renouvellement (PUT /api/insertion/renouvellements/:id/formulaire).",
+      });
+    }
+
     const before = await pool.query('SELECT * FROM insertion_milestones WHERE id = $1', [req.params.id]);
     if (before.rows.length === 0) return res.status(404).json({ error: 'Entretien non trouvé' });
     const prev = before.rows[0];
@@ -1301,7 +1325,8 @@ router.get('/alertes/:employeeId', [
     const empId = parseInt(req.params.employeeId, 10);
     const empRes = await pool.query(
       `SELECT e.id, e.first_name, e.last_name, e.insertion_status, e.insertion_start_date,
-              e.pass_iae_number, e.pass_iae_end, COALESCE(e.parcours_num, 1) AS parcours_num
+              e.pass_iae_number, e.pass_iae_end, e.cddi_derogation_motif,
+              COALESCE(e.parcours_num, 1) AS parcours_num
        FROM employees e WHERE e.id = $1`,
       [empId]
     );
@@ -1367,6 +1392,17 @@ router.get('/alertes/:employeeId', [
         type: 'cddi_plafond', niveau: cddi.months_total >= 23 ? 'critique' : 'attention',
         message: `Durée cumulée en CDDI : ${cddi.months_total} mois sur 24 (plafond légal, dérogations possibles).`,
         months_total: cddi.months_total, months_elapsed: cddi.months_elapsed,
+      });
+    }
+    // 4bis. Dérogation à régulariser (EXG-03 / RES-08, PR 2) : cumul > 24 mois
+    // SANS motif de dérogation saisi — l'import paie ne bloque jamais (voie
+    // Malibou), la régularisation se pilote donc ici (file visible tant que le
+    // motif + la date de décision ne sont pas renseignés sur la fiche).
+    if (cddi.months_total > 24 && !emp.cddi_derogation_motif) {
+      alertes.push({
+        type: 'cddi_derogation_requise', niveau: 'critique',
+        message: `Cumul CDDI ${cddi.months_total} mois > 24 sans motif de dérogation (L.5132-15-1) — saisir le motif (formation en cours, 50 ans et plus, RQTH, CDI inclusion) et la date de décision sur la fiche.`,
+        months_total: cddi.months_total,
       });
     }
 
@@ -1467,6 +1503,733 @@ router.post('/alertes/:employeeId/ack', [
     res.status(201).json(r.rows[0]);
   } catch (err) {
     console.error('[INSERTION] Erreur alertes ack :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// PMSMP (EXG-05, PR 2) — périodes de mise en situation en milieu professionnel
+// Écriture ADMIN/RH ; lecture module (MANAGER inclus). Bornes réglementaires :
+// ≤ 31 j par convention (non forçable) ; cumul ≤ 60 j / 12 mois glissants
+// (forçable avec motif tracé — assiette prudente, cf. pmsmp-rules.js RES-07).
+// Chemins à ≥ 2 segments → sûrs vis-à-vis de GET /:employeeId.
+// ══════════════════════════════════════════════════════════════
+
+const PMSMP_OBJETS = ['decouvrir_metier', 'confirmer_projet', 'initier_recrutement'];
+const PMSMP_RAPPEL_OUTIL = "Saisie officielle : Immersion Facilitée (art. 3.3 de la convention) — cette fiche est un suivi interne de contrôle, elle ne remplace pas la convention Cerfa ni la saisie dans l'outil officiel.";
+
+// Contrôles communs POST/PUT. Retourne { refus:{status,body} } si blocage,
+// sinon { forced, motif, cumul, jours } (forced=true quand le dépassement 60 j
+// est explicitement assumé — motif obligatoire, tracé dans `bilan`).
+async function checkPmsmpRules(db, { employeeId, dateDebut, dateFin, excludeId = null, autresJoursConnus = 0, force = false, motifDepassement = null }) {
+  const jours = pmsmpDays(dateDebut, dateFin);
+  if (jours == null) {
+    return { refus: { status: 400, body: { error: 'date_fin doit être postérieure ou égale à date_debut.' } } };
+  }
+  if (jours > PMSMP_MAX_JOURS_CONVENTION) {
+    return { refus: { status: 409, body: {
+      error: `Une convention PMSMP ne peut pas dépasser ${PMSMP_MAX_JOURS_CONVENTION} jours calendaires (1 mois maximum par convention — L.5135-1 s.).`,
+      code: 'pmsmp_duree', jours,
+    } } };
+  }
+  const params = [employeeId];
+  let excl = '';
+  if (excludeId != null) { params.push(excludeId); excl = ' AND id <> $2'; }
+  const existantes = await db.query(
+    `SELECT date_debut, date_fin FROM insertion_pmsmp WHERE employee_id = $1${excl}`, params
+  );
+  const cumul = computeCumul12MoisGlissants(
+    { date_debut: dateDebut, date_fin: dateFin }, existantes.rows, autresJoursConnus
+  );
+  if (cumul && cumul.depassement) {
+    if (force !== true) {
+      return { refus: { status: 409, body: {
+        error: `Cumul PMSMP de ${cumul.total} jours sur 12 mois glissants (${cumul.fenetre_du} → ${cumul.fenetre_au}) — plafond ${PMSMP_MAX_CUMUL_12M} j.`,
+        code: 'pmsmp_cumul',
+        detail: `Assiette prudente toutes entreprises confondues : ${cumul.jours_enregistres} j déjà enregistrés + ${cumul.jours_nouvelle} j de cette période + ${cumul.autres_jours_connus} j déclarés hors ERP (autres employeurs). Le plafond réglementaire s'apprécie pour un même bénéficiaire chez un MÊME organisme d'accueil (Q/R DGEFP) : si le dépassement est licite (organismes différents), enregistrez avec { force: true, motif_depassement }.`,
+        cumul,
+      } } };
+    }
+    const motif = typeof motifDepassement === 'string' ? motifDepassement.trim() : '';
+    if (!motif) {
+      return { refus: { status: 400, body: {
+        error: 'motif_depassement obligatoire pour forcer un enregistrement au-delà du cumul de 60 j / 12 mois.',
+        code: 'pmsmp_motif_requis',
+      } } };
+    }
+    return { forced: true, motif, cumul, jours };
+  }
+  return { forced: false, cumul, jours };
+}
+
+// Trace du forçage, ajoutée au champ `bilan` (journal probant de la fiche).
+function pmsmpForceTrace(motif, cumul) {
+  const stamp = new Date().toISOString().slice(0, 10);
+  return `[${stamp}] Dépassement du cumul PMSMP (${cumul.total} j / plafond ${PMSMP_MAX_CUMUL_12M} j sur 12 mois) assumé : ${motif}`;
+}
+
+// GET /api/insertion/pmsmp/:employeeId — liste + cumul courant (lecture module)
+router.get('/pmsmp/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const rows = await pool.query(
+      `SELECT p.*, u.first_name AS created_by_first, u.last_name AS created_by_last
+       FROM insertion_pmsmp p
+       LEFT JOIN users u ON u.id = p.created_by
+       WHERE p.employee_id = $1
+       ORDER BY p.date_debut DESC, p.id DESC`,
+      [empId]
+    );
+    // Cumul observé sur la fenêtre de 12 mois se terminant aujourd'hui
+    // (jours_enregistres seulement — la « nouvelle » période sonde est vide).
+    const today = new Date().toISOString().slice(0, 10);
+    const sonde = computeCumul12MoisGlissants({ date_debut: today, date_fin: today }, rows.rows, 0);
+    res.json({
+      employee_id: empId,
+      total: rows.rows.length,
+      cumul_12mois_jours: sonde ? sonde.jours_enregistres : 0,
+      regles: { max_jours_convention: PMSMP_MAX_JOURS_CONVENTION, max_cumul_12mois: PMSMP_MAX_CUMUL_12M },
+      pmsmp: maskInsertionRows(rows.rows.map((r) => ({ ...r, jours: pmsmpDays(r.date_debut, r.date_fin) })), baseRoleOf(req)),
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur pmsmp GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/pmsmp — créer (ADMIN/RH)
+router.post('/pmsmp', authorize('ADMIN', 'RH'), [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('entreprise').isString().trim().notEmpty().isLength({ max: 200 }).withMessage('Entreprise requise (200 car. max)'),
+  body('siret').optional({ nullable: true, checkFalsy: true }).matches(/^\d{14}$/).withMessage('SIRET invalide (14 chiffres)'),
+  body('objet').isIn(PMSMP_OBJETS).withMessage(`Objet invalide (${PMSMP_OBJETS.join(', ')})`),
+  body('date_debut').isISO8601().withMessage('date_debut invalide (AAAA-MM-JJ)'),
+  body('date_fin').isISO8601().withMessage('date_fin invalide (AAAA-MM-JJ)'),
+  body('tuteur').optional({ nullable: true }).isLength({ max: 120 }).withMessage('tuteur trop long (120 max)'),
+  body('convention_ref').optional({ nullable: true }).isLength({ max: 60 }).withMessage('convention_ref trop longue (60 max)'),
+  body('saisie_outil_officiel').optional({ nullable: true }).isBoolean().withMessage('saisie_outil_officiel invalide'),
+  body('autres_jours_connus').optional({ nullable: true }).isInt({ min: 0, max: 366 }).withMessage('autres_jours_connus invalide (0-366)'),
+  body('force').optional().isBoolean().withMessage('force invalide'),
+  body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const emp = await pool.query('SELECT id FROM employees WHERE id = $1', [d.employee_id]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+
+    const check = await checkPmsmpRules(pool, {
+      employeeId: d.employee_id, dateDebut: d.date_debut, dateFin: d.date_fin,
+      autresJoursConnus: d.autres_jours_connus, force: d.force === true, motifDepassement: d.motif_depassement,
+    });
+    if (check.refus) return res.status(check.refus.status).json(check.refus.body);
+
+    let bilan = (d.bilan != null && d.bilan !== '') ? String(d.bilan) : null;
+    if (check.forced) bilan = `${bilan ? bilan + '\n' : ''}${pmsmpForceTrace(check.motif, check.cumul)}`;
+
+    const r = await pool.query(
+      `INSERT INTO insertion_pmsmp
+         (employee_id, entreprise, siret, objet, date_debut, date_fin, tuteur, bilan, saisie_outil_officiel, convention_ref, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false), $10, $11)
+       RETURNING *`,
+      [d.employee_id, d.entreprise.trim(), d.siret || null, d.objet, d.date_debut, d.date_fin,
+        d.tuteur || null, bilan, typeof d.saisie_outil_officiel === 'boolean' ? d.saisie_outil_officiel : null,
+        d.convention_ref || null, req.user.id]
+    );
+    const row = r.rows[0];
+    const out = { ...row, jours: pmsmpDays(row.date_debut, row.date_fin) };
+    if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
+    res.status(201).json(out);
+  } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié inexistant).' });
+    console.error('[INSERTION] Erreur pmsmp POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/pmsmp/:id — modifier (ADMIN/RH ; champs présents, null accepté)
+router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('entreprise').optional().isString().trim().notEmpty().isLength({ max: 200 }).withMessage('Entreprise invalide'),
+  body('siret').optional({ nullable: true, checkFalsy: true }).matches(/^\d{14}$/).withMessage('SIRET invalide (14 chiffres)'),
+  body('objet').optional().isIn(PMSMP_OBJETS).withMessage(`Objet invalide (${PMSMP_OBJETS.join(', ')})`),
+  body('date_debut').optional().isISO8601().withMessage('date_debut invalide'),
+  body('date_fin').optional().isISO8601().withMessage('date_fin invalide'),
+  body('autres_jours_connus').optional({ nullable: true }).isInt({ min: 0, max: 366 }).withMessage('autres_jours_connus invalide (0-366)'),
+  body('force').optional().isBoolean().withMessage('force invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const cur = await pool.query('SELECT * FROM insertion_pmsmp WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'PMSMP non trouvée' });
+    const ex = cur.rows[0];
+
+    // Contrôles sur les dates EFFECTIVES (fusion body + existant).
+    const dateDebut = 'date_debut' in d ? d.date_debut : ex.date_debut;
+    const dateFin = 'date_fin' in d ? d.date_fin : ex.date_fin;
+    const check = await checkPmsmpRules(pool, {
+      employeeId: ex.employee_id, dateDebut, dateFin, excludeId: ex.id,
+      autresJoursConnus: d.autres_jours_connus, force: d.force === true, motifDepassement: d.motif_depassement,
+    });
+    if (check.refus) return res.status(check.refus.status).json(check.refus.body);
+
+    const editable = ['entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan', 'saisie_outil_officiel', 'convention_ref'];
+    const sets = [];
+    const vals = [];
+    for (const field of editable) {
+      if (!(field in d)) continue;
+      vals.push(d[field] === '' ? null : d[field]);
+      sets.push(`${field} = $${vals.length}`);
+    }
+    if (check.forced) {
+      // Trace du dépassement assumé dans le bilan (même si `bilan` absent du body).
+      const base = ('bilan' in d ? d.bilan : ex.bilan) || '';
+      const traced = `${base ? base + '\n' : ''}${pmsmpForceTrace(check.motif, check.cumul)}`;
+      const idx = sets.findIndex((s) => s.startsWith('bilan ='));
+      if (idx >= 0) vals[parseInt(sets[idx].split('$')[1], 10) - 1] = traced;
+      else { vals.push(traced); sets.push(`bilan = $${vals.length}`); }
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+    vals.push(req.params.id);
+    const r = await pool.query(
+      `UPDATE insertion_pmsmp SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    const row = r.rows[0];
+    const out = { ...row, jours: pmsmpDays(row.date_debut, row.date_fin) };
+    if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
+    res.json(out);
+  } catch (err) {
+    if (err.code === '23514') return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code });
+    console.error('[INSERTION] Erreur pmsmp PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/insertion/pmsmp/:id — supprimer (ADMIN/RH)
+router.delete('/pmsmp/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM insertion_pmsmp WHERE id = $1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'PMSMP non trouvée' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[INSERTION] Erreur pmsmp DELETE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// SATISFACTION DE SORTIE (EXG-09, PR 2) — questionnaire qualité
+// Saisie ADMIN/RH (upsert par employee_id + parcours_num — RES-05) ;
+// restitution agrégée ANONYME ouverte au module (ADMIN/RH/MANAGER).
+// ══════════════════════════════════════════════════════════════
+
+// POST /api/insertion/satisfaction/:employeeId — saisir/ressaisir (ADMIN/RH).
+// Le POST porte l'INTÉGRALITÉ du questionnaire (une ressaisie remplace la
+// précédente — le questionnaire est rempli en une fois à la sortie).
+router.post('/satisfaction/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+  body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
+  body('date_reponse').optional({ nullable: true }).isISO8601().withMessage('date_reponse invalide'),
+  body('satisfaction_globale').optional({ nullable: true }).isInt({ min: 1, max: 4 }).withMessage('satisfaction_globale : échelle 1-4'),
+  body('situation_sortie').optional({ nullable: true }).isLength({ max: 30 }).withMessage('situation_sortie trop longue (30 max)'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const emp = await pool.query('SELECT id FROM employees WHERE id = $1', [empId]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    const pn = await currentParcoursNum(pool, empId);
+    const d = req.body;
+    const reponses = (d.reponses != null && typeof d.reponses === 'object') ? d.reponses : {};
+    const r = await pool.query(
+      `INSERT INTO insertion_satisfaction_sortie
+         (employee_id, parcours_num, milestone_id, date_reponse, reponses, situation_sortie, satisfaction_globale, suggestions, avis_transmis, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (employee_id, parcours_num) DO UPDATE SET
+         milestone_id = EXCLUDED.milestone_id,
+         date_reponse = EXCLUDED.date_reponse,
+         reponses = EXCLUDED.reponses,
+         situation_sortie = EXCLUDED.situation_sortie,
+         satisfaction_globale = EXCLUDED.satisfaction_globale,
+         suggestions = EXCLUDED.suggestions,
+         avis_transmis = EXCLUDED.avis_transmis,
+         created_by = EXCLUDED.created_by
+       RETURNING *`,
+      [empId, pn, d.milestone_id || null, d.date_reponse || null, JSON.stringify(reponses),
+        d.situation_sortie || null, d.satisfaction_globale != null && d.satisfaction_globale !== '' ? d.satisfaction_globale : null,
+        d.suggestions || null, d.avis_transmis || null, req.user.id]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (entretien inexistant).' });
+    console.error('[INSERTION] Erreur satisfaction POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/satisfaction/:employeeId — réponse du parcours courant
+// (?parcours=N pour un parcours antérieur). Lecture module.
+router.get('/satisfaction/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const pn = req.query.parcours ? parseInt(req.query.parcours, 10) : await currentParcoursNum(pool, empId);
+    const r = await pool.query(
+      'SELECT * FROM insertion_satisfaction_sortie WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2',
+      [empId, pn || 1]
+    );
+    res.json(r.rows[0] ? maskInsertionRow(r.rows[0], baseRoleOf(req)) : null);
+  } catch (err) {
+    console.error('[INSERTION] Erreur satisfaction GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Agrégats ANONYMES du questionnaire (aucune donnée nominative, aucun verbatim).
+// `reponses` JSONB : sections de la trame — valeur numérique 1-4 directe ou
+// objet { question: note } (moyenne des notes 1-4 ; textes ignorés).
+function computeSatisfactionAgregats(rows) {
+  const repartition = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  const situations = {};
+  const sections = {}; // clé → { somme, nb }
+  let sommeGlobale = 0;
+  let nbGlobale = 0;
+  const collect = (sectionKey, v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 1 || n > 4) return;
+    if (!sections[sectionKey]) sections[sectionKey] = { somme: 0, nb: 0 };
+    sections[sectionKey].somme += n;
+    sections[sectionKey].nb += 1;
+  };
+  for (const r of rows) {
+    const g = Number(r.satisfaction_globale);
+    if (Number.isFinite(g) && g >= 1 && g <= 4) {
+      repartition[g] += 1;
+      sommeGlobale += g;
+      nbGlobale += 1;
+    }
+    if (r.situation_sortie) situations[r.situation_sortie] = (situations[r.situation_sortie] || 0) + 1;
+    const rep = (r.reponses && typeof r.reponses === 'object') ? r.reponses : {};
+    for (const [k, v] of Object.entries(rep)) {
+      if (v != null && typeof v === 'object' && !Array.isArray(v)) {
+        for (const sub of Object.values(v)) collect(k, sub);
+      } else {
+        collect(k, v);
+      }
+    }
+  }
+  const sectionsOut = {};
+  for (const [k, s] of Object.entries(sections)) {
+    sectionsOut[k] = { moyenne: +(s.somme / s.nb).toFixed(2), nb: s.nb };
+  }
+  return {
+    nb_reponses: rows.length,
+    satisfaction_globale: {
+      moyenne: nbGlobale ? +(sommeGlobale / nbGlobale).toFixed(2) : null,
+      repartition,
+    },
+    situations_sortie: situations,
+    sections: sectionsOut,
+  };
+}
+
+// GET /api/insertion/satisfaction-stats?year= — agrégats anonymes (module).
+router.get('/satisfaction-stats', [
+  query('year').optional().isInt({ min: 2000, max: 2100 }).withMessage('year invalide'),
+], validate, async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const rows = await pool.query(
+      `SELECT reponses, situation_sortie, satisfaction_globale
+       FROM insertion_satisfaction_sortie
+       WHERE EXTRACT(YEAR FROM COALESCE(date_reponse, created_at::date)) = $1`,
+      [year]
+    );
+    res.json({ annee: year, ...computeSatisfactionAgregats(rows.rows) });
+  } catch (err) {
+    console.error('[INSERTION] Erreur satisfaction-stats :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// RENOUVELLEMENTS (EXG-04 reste, PR 2) — file des CDDI à préparer + volet ETI
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/insertion/renouvellements — contrats CDDI courants finissant dans la
+// fenêtre d'anticipation (settings insertion.renouvellement_anticipation_jours,
+// défaut 42 j), avec l'état de l'entretien de renouvellement (existant : id,
+// statut, avis, formulaire rempli — sinon `a_creer`). Lecture module (A/RH/M).
+router.get('/renouvellements', async (req, res) => {
+  try {
+    const jours = Math.round(Number(await readInsertionSetting('insertion.renouvellement_anticipation_jours')) || 42);
+    const rows = await pool.query(
+      `SELECT e.id AS employee_id, e.first_name, e.last_name,
+              ec.id AS contract_id, ec.end_date AS contract_end,
+              (ec.end_date - CURRENT_DATE) AS jours_restants,
+              m.id AS milestone_id, m.status AS milestone_status, m.titre AS milestone_titre,
+              m.due_date AS milestone_due_date, m.renouvellement_avis, m.renouvellement_duree_mois,
+              (m.renouvellement_form IS NOT NULL) AS formulaire_rempli,
+              (m.locked_at IS NOT NULL) AS verrouille
+       FROM employees e
+       JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+       LEFT JOIN LATERAL (
+         SELECT im.* FROM insertion_milestones im
+         WHERE im.employee_id = e.id AND im.milestone_type = 'renouvellement'
+           AND (im.contract_id = ec.id OR im.status <> 'realise')
+         ORDER BY (im.contract_id = ec.id) DESC, im.due_date DESC
+         LIMIT 1
+       ) m ON true
+       WHERE e.is_active = true AND e.insertion_status = 'en_parcours'
+         AND UPPER(ec.contract_type) = 'CDDI'
+         AND ec.end_date IS NOT NULL
+         AND ec.end_date >= CURRENT_DATE
+         AND ec.end_date < CURRENT_DATE + make_interval(days => $1)
+       ORDER BY ec.end_date, e.last_name`,
+      [jours]
+    );
+    const renouvellements = rows.rows.map((r) => ({
+      employee_id: r.employee_id,
+      first_name: r.first_name,
+      last_name: r.last_name,
+      contract_id: r.contract_id,
+      contract_end: r.contract_end,
+      jours_restants: r.jours_restants,
+      a_creer: r.milestone_id == null,
+      entretien: r.milestone_id == null ? null : {
+        id: r.milestone_id,
+        status: r.milestone_status,
+        titre: r.milestone_titre,
+        due_date: r.milestone_due_date,
+        renouvellement_avis: r.renouvellement_avis,
+        renouvellement_duree_mois: r.renouvellement_duree_mois,
+        formulaire_rempli: r.formulaire_rempli === true,
+        verrouille: r.verrouille === true,
+      },
+    }));
+    res.json({ anticipation_jours: jours, total: renouvellements.length, renouvellements });
+  } catch (err) {
+    console.error('[INSERTION] Erreur renouvellements :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Champs — et SEULS champs — inscriptibles par la route « formulaire ETI ».
+const RENOUVELLEMENT_FORM_FIELDS = ['renouvellement_form', 'renouvellement_avis', 'renouvellement_duree_mois'];
+
+// PUT /api/insertion/renouvellements/:milestoneId/formulaire — volet ETI
+// (ADMIN/RH/MANAGER — c'est LA voie d'écriture du MANAGER, cf. garde RES-10 du
+// PUT /milestones/:id). N'écrit QUE renouvellement_form / renouvellement_avis /
+// renouvellement_duree_mois + une validation « eti » horodatée (validations) ;
+// tout autre champ transmis → 400. Un MANAGER ne voit jamais les champs
+// masqués dans la réponse (maskInsertionRow).
+router.put('/renouvellements/:milestoneId/formulaire', [
+  param('milestoneId').isInt().withMessage('ID invalide'),
+  body('renouvellement_avis').optional({ nullable: true }).isIn(['favorable', 'favorable_reserves', 'defavorable']).withMessage('renouvellement_avis invalide (favorable, favorable_reserves, defavorable)'),
+  body('renouvellement_duree_mois').optional({ nullable: true }).isInt({ min: 1, max: 24 }).withMessage('renouvellement_duree_mois invalide (1-24)'),
+], validate, async (req, res) => {
+  try {
+    const refuses = Object.keys(req.body).filter((k) => !RENOUVELLEMENT_FORM_FIELDS.includes(k));
+    if (refuses.length > 0) {
+      return res.status(400).json({
+        error: 'Champs refusés sur cette route (formulaire ETI limité au bloc renouvellement).',
+        champs_refuses: refuses,
+        champs_acceptes: RENOUVELLEMENT_FORM_FIELDS,
+      });
+    }
+    const present = RENOUVELLEMENT_FORM_FIELDS.filter((f) => f in req.body);
+    if (present.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+
+    const cur = await pool.query('SELECT * FROM insertion_milestones WHERE id = $1', [req.params.milestoneId]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Entretien non trouvé' });
+    const prev = cur.rows[0];
+    if (prev.milestone_type !== 'renouvellement') {
+      return res.status(400).json({ error: "Cette route ne s'applique qu'aux entretiens de type renouvellement." });
+    }
+    if (prev.locked_at) {
+      return res.status(409).json({
+        error: 'Entretien clôturé et verrouillé — modification refusée.',
+        hint: "Réouvrir d'abord l'entretien (POST /milestones/:id/reopen, ADMIN/RH, motif obligatoire).",
+        locked_at: prev.locked_at,
+      });
+    }
+
+    // Historisation d'une modification sur un entretien déjà réalisé (RES-02).
+    if (prev.status === 'realise') {
+      await snapshotMilestone(pool, prev, 'update', req.user.id);
+    }
+
+    // Validation ETI horodatée (D7) : remplace une éventuelle validation « eti »
+    // antérieure (le formulaire re-signé remplace la signature précédente ; la
+    // trace historique vit dans insertion_milestones_history).
+    let validations = prev.validations;
+    if (typeof validations === 'string') { try { validations = JSON.parse(validations); } catch (_) { validations = null; } }
+    if (!Array.isArray(validations)) validations = [];
+    validations = validations.filter((v) => v && v.role !== 'eti');
+    validations.push({ role: 'eti', user_id: req.user.id, at: new Date().toISOString(), mode: 'compte' });
+
+    const sets = [];
+    const vals = [];
+    for (const field of present) {
+      let v = req.body[field] === '' ? null : req.body[field];
+      if (field === 'renouvellement_form' && v != null) v = JSON.stringify(v);
+      vals.push(v);
+      sets.push(`${field} = $${vals.length}`);
+    }
+    vals.push(JSON.stringify(validations));
+    sets.push(`validations = $${vals.length}`);
+    vals.push(req.params.milestoneId);
+    const r = await pool.query(
+      `UPDATE insertion_milestones SET ${sets.join(', ')}, updated_at = NOW()
+       WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    res.json(maskInsertionRow(r.rows[0], baseRoleOf(req)));
+  } catch (err) {
+    if (err.code === '23514') return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code });
+    console.error('[INSERTION] Erreur renouvellement formulaire :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// BILAN DE PROLONGATION PASS IAE (EXG-02, PR 2) — JSON structuré pour le PDF
+// (phase B). Destinataire externe (prescripteur habilité) → SANS axe judiciaire
+// (art. 10, EXG-38) et SANS détail santé (art. 9) ; niveaux de freins seuls.
+// ADMIN/RH uniquement.
+// ══════════════════════════════════════════════════════════════
+router.get('/pass-iae/bilan/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const empRes = await pool.query(
+      `SELECT e.id, e.first_name, e.last_name, e.position, e.insertion_status,
+              e.insertion_start_date, e.insertion_end_date,
+              e.pass_iae_number, e.pass_iae_start, e.pass_iae_end,
+              COALESCE(e.parcours_num, 1) AS parcours_num,
+              po.nom AS prescripteur_nom, po.type AS prescripteur_type
+       FROM employees e
+       LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
+       WHERE e.id = $1`,
+      [empId]
+    );
+    if (empRes.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    const emp = empRes.rows[0];
+    const pn = Number(emp.parcours_num) || 1;
+
+    const soft = async (label, text, params = []) => {
+      try { return (await pool.query(text, params)).rows; }
+      catch (err) { console.error(`[INSERTION][PASS-IAE] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); return []; }
+    };
+
+    // Contrats → cumul CDDI (support du bilan de prolongation).
+    const contrats = await soft('contrats', 'SELECT contract_type, start_date, end_date FROM employee_contracts WHERE employee_id = $1 ORDER BY start_date', [empId]);
+    const cddi = computeCddiCumulativeMonths(contrats);
+
+    // Entretiens du parcours courant (tous statuts — la phase B distingue).
+    const entretiens = await soft('entretiens', `
+      SELECT id, milestone_type, titre, status, due_date, completed_date, avis_global,
+             renouvellement_avis, renouvellement_duree_mois
+      FROM insertion_milestones
+      WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2
+      ORDER BY due_date`, [empId, pn]);
+
+    // Freins : premier vs dernier snapshot — axes du registre SANS judiciaire
+    // (destinataire externe). Diagnostic = point de départ ; dernier entretien
+    // réalisé portant au moins un frein = point courant.
+    const axesExternes = FREINS.filter((f) => f.key !== 'judiciaire');
+    const axeCols = axesExternes.map((f) => f.column);
+    const diag = await soft('diagnostic', `
+      SELECT ${axeCols.join(', ')}, projet_formation, emploi_vise, niveau_formation
+      FROM insertion_diagnostics
+      WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2`, [empId, pn]);
+    const msFreins = await soft('freins_ms', `
+      SELECT ${axeCols.join(', ')}, completed_date, due_date
+      FROM insertion_milestones
+      WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2
+        AND status = 'realise' AND COALESCE(${axeCols.join(', ')}) IS NOT NULL
+      ORDER BY COALESCE(completed_date, due_date)`, [empId, pn]);
+    const premierSrc = diag[0] || msFreins[0] || {};
+    const dernierSrc = msFreins.length > 0 ? msFreins[msFreins.length - 1] : (diag[0] || {});
+    const freins = axesExternes.map((f) => {
+      const premier = premierSrc[f.column] == null ? null : Number(premierSrc[f.column]);
+      const dernier = dernierSrc[f.column] == null ? null : Number(dernierSrc[f.column]);
+      return {
+        key: f.key, label: f.label,
+        premier, dernier,
+        delta: premier != null && dernier != null ? dernier - premier : null,
+      };
+    });
+
+    // Objectifs (statuts) — nominatifs par nature (bilan destiné au prescripteur).
+    const objectifs = await soft('objectifs', `
+      SELECT titre, statut, origine, echeance, date_butoir, parent_id
+      FROM insertion_objectifs WHERE employee_id = $1
+      ORDER BY parent_id NULLS FIRST, ordre, id`, [empId]);
+    const objectifsParStatut = {};
+    for (const o of objectifs) objectifsParStatut[o.statut] = (objectifsParStatut[o.statut] || 0) + 1;
+
+    // Actions avec partenaires (art. 5 : nature/objet/date/partenaire/résultat).
+    // Minimisation destinataire externe : les actions liées au frein judiciaire
+    // sont EXCLUES ; celles liées au frein santé sont comptées mais leur
+    // libellé/résultat est masqué (art. 9).
+    const actionsRaw = await soft('actions', `
+      SELECT a.action_label, a.category, a.frein_type, a.status, a.echeance,
+             a.resultat, a.duree_minutes, p.nom AS partenaire_nom
+      FROM cip_action_plans a
+      LEFT JOIN insertion_partenaires p ON p.id = a.partenaire_id
+      WHERE a.employee_id = $1
+      ORDER BY a.echeance NULLS LAST, a.created_at`, [empId]);
+    const actions = [];
+    const actionsParCategorie = {};
+    for (const a of actionsRaw) {
+      const ft = String(a.frein_type || '').toLowerCase();
+      if (ft.includes('judiciaire')) continue; // jamais transmis (art. 10)
+      actionsParCategorie[a.category] = (actionsParCategorie[a.category] || 0) + 1;
+      if (ft.includes('sante')) {
+        actions.push({ category: a.category, status: a.status, echeance: a.echeance, partenaire_nom: a.partenaire_nom, action_label: null, resultat: null, detail_masque: true });
+      } else {
+        actions.push({ action_label: a.action_label, category: a.category, status: a.status, echeance: a.echeance, partenaire_nom: a.partenaire_nom, resultat: a.resultat, duree_minutes: a.duree_minutes });
+      }
+    }
+
+    // PMSMP réalisées / en cours.
+    const pmsmp = (await soft('pmsmp', `
+      SELECT entreprise, objet, date_debut, date_fin, saisie_outil_officiel
+      FROM insertion_pmsmp WHERE employee_id = $1 ORDER BY date_debut`, [empId]))
+      .map((p) => ({ ...p, jours: pmsmpDays(p.date_debut, p.date_fin) }));
+
+    // Formations repérables : projet exprimé (diagnostic) + actions de montée en
+    // compétences / libellés « formation ».
+    const formations = {
+      projet_formation: diag[0]?.projet_formation || null,
+      emploi_vise: diag[0]?.emploi_vise || null,
+      niveau_formation: diag[0]?.niveau_formation || null,
+      actions_formation: actions.filter((a) => a.category === 'competence' || /formation/i.test(a.action_label || '')),
+    };
+
+    res.json({
+      genere_le: new Date().toISOString(),
+      usage: 'Bilan du parcours en appui de la demande de prolongation du Pass IAE (destinataire : prescripteur habilité).',
+      mention: "Document de travail ERP — la demande officielle de prolongation se fait sur les emplois de l'inclusion, qui fait foi.",
+      salarie: {
+        id: emp.id, first_name: emp.first_name, last_name: emp.last_name,
+        poste: emp.position, parcours_num: pn,
+      },
+      pass_iae: { number: emp.pass_iae_number, start: emp.pass_iae_start, end: emp.pass_iae_end },
+      prescripteur: { nom: emp.prescripteur_nom, type: emp.prescripteur_type },
+      parcours: {
+        insertion_status: emp.insertion_status,
+        insertion_start_date: emp.insertion_start_date,
+        insertion_end_date: emp.insertion_end_date,
+      },
+      cddi,
+      entretiens,
+      freins,
+      objectifs: { total: objectifs.length, par_statut: objectifsParStatut, liste: objectifs },
+      actions: { total: actions.length, par_categorie: actionsParCategorie, liste: actions },
+      pmsmp,
+      formations,
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur bilan Pass IAE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// CIBLES CONVENTIONNELLES (EXG-47/D12, PR 2) — settings NULLABLES
+// null = « objectif non paramétré » (JAMAIS de valeur inventée — doctrine KPI
+// honnêtes). Lecture module ; écriture ADMIN/RH après confirmation direction
+// sur le PDF original de l'annexe financière (R-04).
+// ══════════════════════════════════════════════════════════════
+
+const INSERTION_CIBLE_KEYS = {
+  cible_etp_conventionnes: 'insertion.cible_etp_conventionnes',   // ETP (ex. 24,76)
+  cible_taux_dynamiques: 'insertion.cible_taux_dynamiques',       // % 0-100
+  cible_taux_durable: 'insertion.cible_taux_durable',             // % 0-100
+  cible_taux_transition: 'insertion.cible_taux_transition',       // % 0-100
+  cible_taux_positive: 'insertion.cible_taux_positive',           // % 0-100
+  effectif_reference: 'insertion.effectif_reference',             // effectif (ex. 46)
+};
+
+// Lit les 6 cibles (null si absentes / invalides). Résilient.
+async function readCibles() {
+  const out = {};
+  for (const k of Object.keys(INSERTION_CIBLE_KEYS)) out[k] = null;
+  try {
+    const r = await pool.query(
+      'SELECT key, value FROM settings WHERE key = ANY($1)',
+      [Object.values(INSERTION_CIBLE_KEYS)]
+    );
+    const byKey = new Map(r.rows.map((row) => [row.key, row.value]));
+    for (const [name, key] of Object.entries(INSERTION_CIBLE_KEYS)) {
+      const v = byKey.get(key);
+      if (v == null || v === '') continue;
+      const n = parseFloat(v);
+      out[name] = Number.isNaN(n) ? null : n;
+    }
+    // Repli : la cible « dynamiques » historique (objectif-sorties, éditée dans
+    // le CohortePanel) reste honorée tant que la nouvelle clé n'est pas posée.
+    if (out.cible_taux_dynamiques == null) {
+      out.cible_taux_dynamiques = await readObjectifSorties();
+    }
+  } catch (_) { /* défauts null */ }
+  return out;
+}
+
+// GET /api/insertion/cibles — lecture (tous rôles du module)
+router.get('/cibles', async (req, res) => {
+  try {
+    res.json({
+      ...(await readCibles()),
+      note: "null = objectif non paramétré — saisir les valeurs conventionnelles confirmées par la direction (annexe financière), jamais de valeur estimée.",
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur cibles GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/cibles — édition (ADMIN/RH). Champs présents uniquement ;
+// null / '' efface (retour à « objectif non paramétré »).
+router.put('/cibles', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const d = req.body || {};
+    const updates = [];
+    for (const [name, key] of Object.entries(INSERTION_CIBLE_KEYS)) {
+      if (!(name in d)) continue;
+      const raw = d[name];
+      let num = null;
+      if (raw !== null && raw !== undefined && raw !== '') {
+        num = parseFloat(raw);
+        if (Number.isNaN(num)) return res.status(400).json({ error: `${name} : nombre attendu (ou null pour effacer).` });
+        if (name.startsWith('cible_taux') && (num < 0 || num > 100)) {
+          return res.status(400).json({ error: `${name} : pourcentage attendu entre 0 et 100.` });
+        }
+        if (!name.startsWith('cible_taux') && num < 0) {
+          return res.status(400).json({ error: `${name} : valeur positive attendue.` });
+        }
+      }
+      updates.push({ key, value: num == null ? null : String(num) });
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'Aucune cible à modifier' });
+    for (const u of updates) {
+      await pool.query(
+        `INSERT INTO settings (key, value, category, updated_at)
+         VALUES ($1, $2, 'insertion', NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+        [u.key, u.value]
+      );
+    }
+    res.json(await readCibles());
+  } catch (err) {
+    console.error('[INSERTION] Erreur cibles PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

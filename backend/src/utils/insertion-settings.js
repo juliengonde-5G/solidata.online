@@ -16,8 +16,20 @@
  *    la création d'une action CIP, en jours (défaut 14 — REC-UX-18) ;
  *  - insertion.rythme_bilans_mois          : rythme usuel des bilans, en mois —
  *    sert à proposer la date du prochain entretien à la clôture (défaut 2 —
- *    REC-UX-18).
- * Les clés sont exposées au frontend par GET /api/insertion/parametres.
+ *    REC-UX-18) ;
+ *  - insertion.renouvellement_anticipation_jours : fenêtre d'anticipation des
+ *    renouvellements de CDDI (GET /insertion/renouvellements — défaut 42 j =
+ *    6 semaines, EXG-04 / PR 2) ;
+ *  - insertion.retention_months            : rétention RGPD des dossiers
+ *    d'insertion sortis avant anonymisation (défaut 24 mois après la fin du
+ *    parcours + dernier contact — référentiel CNIL 2023, EXG-40 / PR 2).
+ * Les clés sont exposées au frontend par GET /api/insertion/parametres
+ * (à l'exception des clés de purge/scheduler, consommées côté serveur).
+ *
+ * Cibles conventionnelles (EXG-47/D12, PR 2) — clés insertion.cible_* et
+ * insertion.effectif_reference : NULLABLES SANS DÉFAUT (null = « objectif non
+ * paramétré », jamais de valeur inventée) ; gérées par GET/PUT
+ * /api/insertion/cibles (routes.js), donc absentes du dictionnaire ci-dessous.
  */
 const pool = require('../config/database');
 
@@ -27,6 +39,8 @@ const INSERTION_SETTING_DEFAULTS = {
   'insertion.ia_preparation_auto': false,
   'insertion.echeance_action_defaut_jours': 14,
   'insertion.rythme_bilans_mois': 2,
+  'insertion.renouvellement_anticipation_jours': 42,
+  'insertion.retention_months': 24,
 };
 
 /**
