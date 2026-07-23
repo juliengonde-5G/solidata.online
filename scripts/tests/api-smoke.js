@@ -240,6 +240,10 @@ async function run() {
     await checkEndpoint('T-RH-07', '/api/insertion',                     'Parcours insertion', { authH });
     await checkEndpoint('T-RH-08', '/api/insertion/milestones-overview', 'Jalons insertion', { authH });
     await checkEndpoint('T-RH-09', '/api/teams',                         'Équipes', { authH });
+    // Extension insertion 2026-07 (PR1 phase B) — lots 1-3
+    await checkEndpoint('T-RH-10', '/api/insertion/actions-overview',    'Insertion — actions transversales', { authH });
+    await checkEndpoint('T-RH-11', '/api/insertion/partenaires',         'Insertion — partenaires', { authH });
+    await checkEndpoint('T-RH-12', '/api/insertion/cohorte/stats',       'Insertion — tableau de bord CIP', { authH });
   }
 
   // ═══ §10 Finance ═══
