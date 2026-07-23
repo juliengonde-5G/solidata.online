@@ -224,6 +224,19 @@ async function anonymizeEmployee(client, id) {
     'sortie_documents', 'remise_salarie', 'post_sortie_commentaire',
   ]);
 
+  // Snapshots probants (insertion_milestones_history) : ils contiennent la
+  // ligne complète AVANT anonymisation (verbatims inclus) → purge intégrale
+  // pour ce salarié (revue Codex PR#73). Le RGPD prime sur l'audit interne ;
+  // les données FSE+ survivent sur les lignes vivantes (fse_entree/fse_sortie
+  // conservés ci-dessus), jamais via l'historique.
+  if (await tableExists(client, 'insertion_milestones_history')) {
+    await client.query(
+      `DELETE FROM insertion_milestones_history
+       WHERE milestone_id IN (SELECT id FROM insertion_milestones WHERE employee_id = $1)`,
+      [id]
+    );
+  }
+
   // Plans d'action — action_label est NOT NULL → placeholder ; notes/resultat → NULL.
   if (await tableExists(client, 'cip_action_plans')) {
     const cols = await existingColumns(client, 'cip_action_plans');

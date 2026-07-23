@@ -2841,19 +2841,20 @@ async function initDatabase() {
         autres_contraintes TEXT,
 
         -- DIAGNOSTIC FREINS SOCIAUX (1-5 : 1=pas de frein, 5=frein majeur)
-        frein_mobilite INTEGER DEFAULT 1 CHECK (frein_mobilite BETWEEN 1 AND 5),
+        -- NULL = non évalué (pas de DEFAULT : un axe jamais évalué ne vaut pas 1)
+        frein_mobilite INTEGER CHECK (frein_mobilite BETWEEN 1 AND 5),
         frein_mobilite_detail TEXT,
-        frein_sante INTEGER DEFAULT 1 CHECK (frein_sante BETWEEN 1 AND 5),
+        frein_sante INTEGER CHECK (frein_sante BETWEEN 1 AND 5),
         frein_sante_detail TEXT,
-        frein_finances INTEGER DEFAULT 1 CHECK (frein_finances BETWEEN 1 AND 5),
+        frein_finances INTEGER CHECK (frein_finances BETWEEN 1 AND 5),
         frein_finances_detail TEXT,
-        frein_famille INTEGER DEFAULT 1 CHECK (frein_famille BETWEEN 1 AND 5),
+        frein_famille INTEGER CHECK (frein_famille BETWEEN 1 AND 5),
         frein_famille_detail TEXT,
-        frein_linguistique INTEGER DEFAULT 1 CHECK (frein_linguistique BETWEEN 1 AND 5),
+        frein_linguistique INTEGER CHECK (frein_linguistique BETWEEN 1 AND 5),
         frein_linguistique_detail TEXT,
-        frein_administratif INTEGER DEFAULT 1 CHECK (frein_administratif BETWEEN 1 AND 5),
+        frein_administratif INTEGER CHECK (frein_administratif BETWEEN 1 AND 5),
         frein_administratif_detail TEXT,
-        frein_numerique INTEGER DEFAULT 1 CHECK (frein_numerique BETWEEN 1 AND 5),
+        frein_numerique INTEGER CHECK (frein_numerique BETWEEN 1 AND 5),
         frein_numerique_detail TEXT,
 
         -- QUESTIONNAIRE PCM SIMPLIFIÉ (réponses brutes)
@@ -3358,6 +3359,29 @@ async function initDatabase() {
       ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS questionnaire_detail JSONB;
       ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS fse_entree JSONB;
       ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS statut_saisie VARCHAR(15) NOT NULL DEFAULT 'complet' CHECK (statut_saisie IN ('en_cours', 'complet'));
+
+      -- Fin des DEFAULT 1 hérités sur les 7 freins historiques : « non évalué »
+      -- se stocke NULL, jamais 1 (revue Codex PR#73). Idempotent.
+      ALTER TABLE insertion_diagnostics ALTER COLUMN frein_mobilite DROP DEFAULT;
+      ALTER TABLE insertion_diagnostics ALTER COLUMN frein_sante DROP DEFAULT;
+      ALTER TABLE insertion_diagnostics ALTER COLUMN frein_finances DROP DEFAULT;
+      ALTER TABLE insertion_diagnostics ALTER COLUMN frein_famille DROP DEFAULT;
+      ALTER TABLE insertion_diagnostics ALTER COLUMN frein_linguistique DROP DEFAULT;
+      ALTER TABLE insertion_diagnostics ALTER COLUMN frein_administratif DROP DEFAULT;
+      ALTER TABLE insertion_diagnostics ALTER COLUMN frein_numerique DROP DEFAULT;
+
+      -- Réparation des squelettes pollués par ces DEFAULT (diagnostic créé au
+      -- link-employee sans passage CIP : updated_by NULL et les 7 axes à 1).
+      -- Ces « 1 » ne sont pas des évaluations → remis à NULL. Une fiche
+      -- réellement évaluée porte updated_by (posé par le PUT) et est exclue.
+      UPDATE insertion_diagnostics
+      SET frein_mobilite = NULL, frein_sante = NULL, frein_finances = NULL,
+          frein_famille = NULL, frein_linguistique = NULL,
+          frein_administratif = NULL, frein_numerique = NULL
+      WHERE updated_by IS NULL
+        AND frein_mobilite = 1 AND frein_sante = 1 AND frein_finances = 1
+        AND frein_famille = 1 AND frein_linguistique = 1
+        AND frein_administratif = 1 AND frein_numerique = 1;
     `);
     // Un diagnostic PAR PARCOURS : UNIQUE(employee_id) → UNIQUE(employee_id,
     // parcours_num). ⚠ Phase B : le PUT /diagnostic fait ON CONFLICT

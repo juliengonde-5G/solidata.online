@@ -279,3 +279,22 @@ describe('schéma v2 — seeds idempotents', () => {
     expect(seed).toContain('field-crypto');
   });
 });
+
+describe('schéma v2 — freins « non évalué » = NULL (revue Codex PR#73)', () => {
+  const LEGACY_FREINS = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille',
+    'frein_linguistique', 'frein_administratif', 'frein_numerique'];
+
+  it('le CREATE TABLE ne pose plus de DEFAULT 1 sur les freins', () => {
+    expect(src).not.toMatch(/frein_\w+ INTEGER DEFAULT 1/);
+  });
+
+  it('la migration retire les DEFAULT hérités des 7 freins historiques', () => {
+    for (const c of LEGACY_FREINS) {
+      expect(src).toContain(`ALTER TABLE insertion_diagnostics ALTER COLUMN ${c} DROP DEFAULT;`);
+    }
+  });
+
+  it('répare les squelettes pollués (7 axes à 1, jamais édités) en NULL', () => {
+    expect(src).toMatch(/UPDATE insertion_diagnostics\s+SET frein_mobilite = NULL[\s\S]{0,400}?WHERE updated_by IS NULL[\s\S]{0,400}?frein_numerique = 1;/);
+  });
+});

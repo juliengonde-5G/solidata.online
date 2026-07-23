@@ -306,8 +306,12 @@ router.put('/diagnostic/:employeeId', [
       vals.push(normalize(field, d[field]));
     }
 
-    const insertCols = ['employee_id', 'parcours_num', 'created_by', 'updated_by', ...cols];
-    const params = [empId, pn, req.user.id, req.user.id, ...vals];
+    // Axes de freins ABSENTS de la requête : insérés explicitement à NULL à la
+    // CRÉATION de la ligne uniquement (jamais réécrits à l'update) — neutralise
+    // les DEFAULT 1 hérités du schéma historique (« non évalué » = NULL, pas 1).
+    const freinNullCols = FREINS.map((f) => f.column).filter((c) => !cols.includes(c));
+    const insertCols = ['employee_id', 'parcours_num', 'created_by', 'updated_by', ...cols, ...freinNullCols];
+    const params = [empId, pn, req.user.id, req.user.id, ...vals, ...freinNullCols.map(() => null)];
     const placeholders = insertCols.map((_, i) => `$${i + 1}`);
     const updateSets = ['updated_by = $4', 'updated_at = NOW()',
       ...cols.map((c, i) => `${c} = $${i + 5}`)];
@@ -800,6 +804,7 @@ router.get('/milestones-overview', async (req, res) => {
       JOIN employees e ON im.employee_id = e.id
       LEFT JOIN users u ON im.interviewer_id = u.id
       WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+        AND COALESCE(im.parcours_num, 1) = COALESCE(e.parcours_num, 1)
       ORDER BY im.due_date
     `);
     res.json(maskInsertionRows(result.rows, baseRoleOf(req)));
@@ -1507,6 +1512,7 @@ router.get('/cohorte/stats', async (req, res) => {
       FROM insertion_milestones im
       JOIN employees e ON im.employee_id = e.id
       WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+        AND COALESCE(im.parcours_num, 1) = COALESCE(e.parcours_num, 1)
         AND im.status <> 'realise'${jalonsFilter}
       ORDER BY im.due_date
     `, jalonsParams);
@@ -1539,6 +1545,7 @@ router.get('/cohorte/stats', async (req, res) => {
         FROM insertion_milestones im
         JOIN employees e ON e.id = im.employee_id
         WHERE e.insertion_status='en_parcours' AND e.is_active=true
+          AND COALESCE(im.parcours_num, 1) = COALESCE(e.parcours_num, 1)
           AND im.status='realise' AND COALESCE(${msCols}) IS NOT NULL${freinsFilter}
         ORDER BY im.employee_id, im.due_date DESC
       ),
@@ -1546,7 +1553,8 @@ router.get('/cohorte/stats', async (req, res) => {
         SELECT d.employee_id, ${dgCols}
         FROM insertion_diagnostics d
         JOIN employees e ON e.id=d.employee_id
-        WHERE e.insertion_status='en_parcours' AND e.is_active=true${freinsFilter}
+        WHERE e.insertion_status='en_parcours' AND e.is_active=true
+          AND COALESCE(d.parcours_num, 1) = COALESCE(e.parcours_num, 1)${freinsFilter}
       )
       SELECT COALESCE(lm.employee_id, dg.employee_id) AS employee_id,
         ${coalesced}
@@ -1734,6 +1742,7 @@ async function gatherAuditKpis(year) {
     FROM insertion_milestones im
     JOIN employees e ON e.id = im.employee_id
     WHERE e.is_active = true
+      AND COALESCE(im.parcours_num, 1) = COALESCE(e.parcours_num, 1)
     GROUP BY im.milestone_type`);
   const msByType = {};
   for (const r of msRows) msByType[r.type] = r;
@@ -1763,6 +1772,7 @@ async function gatherAuditKpis(year) {
       FROM insertion_milestones im
       JOIN employees e ON e.id = im.employee_id
       WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+        AND COALESCE(im.parcours_num, 1) = COALESCE(e.parcours_num, 1)
         AND im.status = 'realise' AND COALESCE(${auditMsCols}) IS NOT NULL
       ORDER BY im.employee_id, im.due_date DESC
     ),
@@ -1771,6 +1781,7 @@ async function gatherAuditKpis(year) {
       FROM insertion_diagnostics d
       JOIN employees e ON e.id = d.employee_id
       WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
+        AND COALESCE(d.parcours_num, 1) = COALESCE(e.parcours_num, 1)
     )
     SELECT ${auditCoalesced}
     FROM diag dg FULL OUTER JOIN last_ms lm ON lm.employee_id = dg.employee_id`);

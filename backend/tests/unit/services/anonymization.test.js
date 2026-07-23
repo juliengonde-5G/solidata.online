@@ -27,6 +27,7 @@ const TABLE_COLUMNS = {
     'titre', 'parcours_num', 'previous_review', 'validations', 'ia_preparation', 'renouvellement_form',
     'renouvellement_avis', 'renouvellement_duree_mois', 'sortie_documents', 'remise_salarie',
     'post_sortie_situation', 'post_sortie_commentaire', 'fse_sortie', 'locked_at'],
+  insertion_milestones_history: ['id', 'milestone_id', 'snapshot', 'action', 'changed_by', 'motif'],
   cip_action_plans: ['id', 'employee_id', 'action_label', 'notes', 'category', 'priority', 'status', 'resultat', 'duree_minutes', 'partenaire_id', 'objectif_id'],
   insertion_objectifs: ['id', 'employee_id', 'titre', 'description', 'statut', 'echeance', 'date_butoir', 'origine', 'parent_id'],
   insertion_pmsmp: ['id', 'employee_id', 'entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan', 'convention_ref'],
@@ -187,5 +188,15 @@ describe('anonymization — anonymizeCandidate (item 42)', () => {
     }
     // candidate_history : commentaire nettoyé (pas de suppression de la ligne d'audit)
     expect(sqls.some((s) => /^UPDATE candidate_history SET comment = NULL/i.test(s))).toBe(true);
+  });
+});
+
+describe('anonymization — snapshots probants (revue Codex PR#73)', () => {
+  it('purge insertion_milestones_history pour les entretiens du salarié anonymisé', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const del = dataSql(client.calls).find((s) => /DELETE FROM insertion_milestones_history/i.test(s));
+    expect(del).toBeDefined();
+    expect(del).toMatch(/WHERE milestone_id IN \(SELECT id FROM insertion_milestones WHERE employee_id = \$1\)/);
   });
 });
