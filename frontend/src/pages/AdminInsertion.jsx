@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
-import { Settings, Handshake, Target } from 'lucide-react';
+import { Settings, Handshake, Target, Award } from 'lucide-react';
 import api from '../services/api';
 import { resetInsertionParametresCache } from '../components/insertion/parametres';
+import { COMPETENCE_FILIERES, COMPETENCE_FILIERE_LABELS } from '../components/insertion/freins';
 
 /**
  * Réglages du module Insertion (/admin/insertion — ADMIN).
@@ -47,6 +48,13 @@ export default function AdminInsertion() {
   const [partLoading, setPartLoading] = useState(true);
   const [editPart, setEditPart] = useState(null); // { id?, form }
 
+  // ── Grilles de compétences (Lot 8) ──
+  const [refFiliere, setRefFiliere] = useState('tri');
+  const [referentiels, setReferentiels] = useState([]);
+  const [refLoading, setRefLoading] = useState(true);
+  const [refError, setRefError] = useState(null);
+  const [editRef, setEditRef] = useState(null); // { id?, error, form:{filiere,rubrique,item,ordre,actif} }
+
   const loadParams = useCallback(async () => {
     try {
       // Les 5 clés exposées au module + les clés serveur via /settings (ADMIN).
@@ -81,7 +89,51 @@ export default function AdminInsertion() {
       .finally(() => setPartLoading(false));
   }, []);
 
+  const loadReferentiels = useCallback((filiere) => {
+    setRefLoading(true);
+    api.get(`/insertion/competence-referentiels?filiere=${filiere}`)
+      .then((r) => { setReferentiels(Array.isArray(r.data) ? r.data : []); setRefError(null); })
+      .catch((err) => setRefError(err.response?.data?.error || err.message))
+      .finally(() => setRefLoading(false));
+  }, []);
+
   useEffect(() => { loadParams(); loadPartenaires(); }, [loadParams, loadPartenaires]);
+  useEffect(() => { loadReferentiels(refFiliere); }, [loadReferentiels, refFiliere]);
+
+  const openRef = (it = null) => setEditRef({
+    id: it?.id || null, error: null,
+    form: { filiere: it?.filiere || refFiliere, rubrique: it?.rubrique || '', item: it?.item || '', ordre: it?.ordre ?? '', actif: it ? it.actif !== false : true },
+  });
+
+  const saveRef = async () => {
+    const { id, form } = editRef;
+    if (!form.rubrique.trim() || !form.item.trim()) { setEditRef({ ...editRef, error: 'Rubrique et item sont obligatoires.' }); return; }
+    try {
+      const body = {
+        filiere: form.filiere, rubrique: form.rubrique.trim(), item: form.item.trim(),
+        ordre: form.ordre === '' ? 0 : (parseInt(form.ordre, 10) || 0), actif: form.actif,
+      };
+      if (id) await api.put(`/insertion/competence-referentiels/${id}`, body);
+      else await api.post('/insertion/competence-referentiels', body);
+      setEditRef(null);
+      loadReferentiels(refFiliere);
+    } catch (err) {
+      setEditRef({ ...editRef, error: err.response?.data?.error || err.message });
+    }
+  };
+
+  const toggleRefActif = async (it) => {
+    setRefError(null);
+    try { await api.put(`/insertion/competence-referentiels/${it.id}`, { actif: it.actif === false }); loadReferentiels(refFiliere); }
+    catch (err) { setRefError(err.response?.data?.error || err.message); }
+  };
+
+  const deleteRef = async (it) => {
+    if (!window.confirm(`Supprimer « ${it.item} » du référentiel ? Les évaluations déjà saisies conservent une copie de l'intitulé.`)) return;
+    setRefError(null);
+    try { await api.delete(`/insertion/competence-referentiels/${it.id}`); loadReferentiels(refFiliere); }
+    catch (err) { setRefError(err.response?.data?.error || err.message); }
+  };
 
   const saveParam = async (p) => {
     setSavingKey(p.name); setParamError(null); setSavedKey(null);
@@ -265,6 +317,66 @@ export default function AdminInsertion() {
               </div>
             )}
           </div>
+
+          {/* ── Grilles de compétences par filière (Lot 8) ── */}
+          <div className="bg-white rounded-xl border p-5">
+            <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
+              <h3 className="font-semibold text-gray-800 flex items-center gap-2"><Award className="w-4 h-4 text-teal-600" /> Grilles de compétences</h3>
+              <div className="flex items-center gap-2">
+                <select value={refFiliere} onChange={(e) => setRefFiliere(e.target.value)} className="input-modern py-1.5 text-sm">
+                  {COMPETENCE_FILIERES.map((f) => <option key={f} value={f}>{COMPETENCE_FILIERE_LABELS[f]}</option>)}
+                </select>
+                <button type="button" onClick={() => openRef()}
+                  className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 whitespace-nowrap">
+                  + Item
+                </button>
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400 mb-3">
+              Items évalués par l'encadrant technique (notes /10). La désactivation retire l'item des nouvelles grilles sans toucher aux évaluations passées.
+            </p>
+            {refError && <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{refError}</div>}
+            {refLoading ? <LoadingSpinner size="md" message="Chargement du référentiel…" /> : referentiels.length === 0 ? (
+              <p className="text-sm text-gray-400 border border-dashed rounded-lg p-3 text-center">
+                Aucun item pour la filière « {COMPETENCE_FILIERE_LABELS[refFiliere]} » — ajoutez les compétences métier avec « + Item ».
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-gray-500 border-b">
+                      <th className="py-1.5 pr-2">Rubrique</th>
+                      <th className="py-1.5 pr-2">Item</th>
+                      <th className="py-1.5 pr-2">Ordre</th>
+                      <th className="py-1.5 pr-2">Statut</th>
+                      <th className="py-1.5" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {referentiels.map((it) => (
+                      <tr key={it.id} className={`border-b border-gray-50 ${it.actif === false ? 'opacity-50' : ''}`}>
+                        <td className="py-1.5 pr-2 text-gray-600">{it.rubrique}</td>
+                        <td className="py-1.5 pr-2 font-medium text-gray-700">{it.item}</td>
+                        <td className="py-1.5 pr-2 text-gray-400">{it.ordre ?? 0}</td>
+                        <td className="py-1.5 pr-2">
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${it.actif === false ? 'bg-gray-100 text-gray-500' : 'bg-green-50 text-green-700'}`}>
+                            {it.actif === false ? 'Désactivé' : 'Actif'}
+                          </span>
+                        </td>
+                        <td className="py-1.5 text-right whitespace-nowrap">
+                          <button type="button" onClick={() => openRef(it)} className="text-xs text-teal-700 hover:underline mr-2">Modifier</button>
+                          <button type="button" onClick={() => toggleRefActif(it)} className="text-xs text-gray-500 hover:underline mr-2">
+                            {it.actif === false ? 'Réactiver' : 'Désactiver'}
+                          </button>
+                          <button type="button" onClick={() => deleteRef(it)} className="text-xs text-red-500 hover:underline">Supprimer</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Modale partenaire */}
@@ -309,6 +421,44 @@ export default function AdminInsertion() {
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={() => setEditPart(null)} className="px-3 py-1.5 text-sm text-gray-500">Annuler</button>
                 <button type="button" onClick={savePartenaire} className="px-4 py-1.5 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700">Enregistrer</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modale item de référentiel de compétences */}
+        {editRef && (
+          <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center px-4" onClick={() => setEditRef(null)}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+              <h3 className="font-semibold text-gray-800">{editRef.id ? 'Modifier l\'item' : 'Nouvel item de compétence'}</h3>
+              {editRef.error && <div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{editRef.error}</div>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-0.5">Filière</label>
+                  <select value={editRef.form.filiere} onChange={(e) => setEditRef({ ...editRef, form: { ...editRef.form, filiere: e.target.value } })} className="input-modern py-1.5 w-full">
+                    {COMPETENCE_FILIERES.map((f) => <option key={f} value={f}>{COMPETENCE_FILIERE_LABELS[f]}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-0.5">Ordre d'affichage</label>
+                  <input type="number" value={editRef.form.ordre} onChange={(e) => setEditRef({ ...editRef, form: { ...editRef.form, ordre: e.target.value } })} className="input-modern py-1.5 w-full" placeholder="0" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-gray-500 mb-0.5">Rubrique <span className="text-red-500">*</span></label>
+                  <input value={editRef.form.rubrique} maxLength={120} onChange={(e) => setEditRef({ ...editRef, form: { ...editRef.form, rubrique: e.target.value } })} className="input-modern py-1.5 w-full" placeholder="ex. Savoir-faire techniques" autoFocus />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-gray-500 mb-0.5">Item évalué <span className="text-red-500">*</span></label>
+                  <input value={editRef.form.item} maxLength={200} onChange={(e) => setEditRef({ ...editRef, form: { ...editRef.form, item: e.target.value } })} className="input-modern py-1.5 w-full" placeholder="ex. Utiliser la presse à balles en sécurité" />
+                </div>
+                <label className="sm:col-span-2 flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={editRef.form.actif} onChange={(e) => setEditRef({ ...editRef, form: { ...editRef.form, actif: e.target.checked } })} className="rounded border-gray-300" />
+                  Item actif (proposé dans les nouvelles grilles)
+                </label>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setEditRef(null)} className="px-3 py-1.5 text-sm text-gray-500">Annuler</button>
+                <button type="button" onClick={saveRef} className="px-4 py-1.5 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700">Enregistrer</button>
               </div>
             </div>
           </div>

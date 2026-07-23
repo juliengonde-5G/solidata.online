@@ -9,6 +9,8 @@ import AlertesBloc from '../components/insertion/AlertesBloc';
 import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
 import ActionsPanel from '../components/insertion/ActionsPanel';
 import FriseParcours from '../components/insertion/FriseParcours';
+import CompetencesETI from '../components/insertion/CompetencesETI';
+import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
 import {
   ENTRETIEN_STATUS_LABELS, ENTRETIEN_STATUS_COLORS, frDate as frDateIns,
 } from '../components/insertion/freins';
@@ -968,6 +970,8 @@ function InsertionReadOnlyTab({ employee }) {
 
       <AlertesBloc employeeId={employee.id} />
 
+      <ChecklistEmbauche employeeId={employee.id} canEdit={false} />
+
       {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">Parcours indisponible : {error}</div>}
       {loading && <p className="text-xs text-gray-400">Chargement du parcours…</p>}
 
@@ -1025,6 +1029,9 @@ function InsertionReadOnlyTab({ employee }) {
       </div>
       <div className="border-t pt-3">
         <ActionsPanel employeeId={employee.id} readOnly compact />
+      </div>
+      <div className="border-t pt-3">
+        <CompetencesETI employeeId={employee.id} employee={employee} canEdit={false} />
       </div>
     </div>
   );

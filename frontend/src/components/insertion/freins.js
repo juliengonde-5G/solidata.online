@@ -70,7 +70,19 @@ export const ENTRETIEN_TYPE_LABELS = {
   renouvellement: 'Renouvellement',
   bilan_sortie: 'Bilan de sortie',
   suivi_post_sortie: 'Suivi post-sortie',
+  // Lot 8 (PR3) — entretien de période d'essai (EXG-30) : bascule officielle
+  // vers l'accompagnement. Créé automatiquement à la liaison ; créable
+  // manuellement en repli depuis « Nouvel entretien » (le serveur refuse un
+  // doublon par parcours en 409).
+  periode_essai: "Entretien de période d'essai",
 };
+
+// ── Compétences ETI (Lot 8) — filières métier Solidarité Textiles ──
+export const COMPETENCE_FILIERES = ['tri', 'collecte', 'logistique', 'boutique', 'transverse'];
+export const COMPETENCE_FILIERE_LABELS = {
+  tri: 'Tri', collecte: 'Collecte', logistique: 'Logistique', boutique: 'Boutique', transverse: 'Transverse',
+};
+export const COMPETENCE_STATUT_LABELS = { brouillon: 'Brouillon', valide: 'Validée' };
 
 /** Libellé d'affichage d'un entretien : titre saisi > libellé du type > type brut. */
 export function entretienLabel(ms) {

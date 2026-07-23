@@ -4,6 +4,8 @@ import {
   visibleFreins, canSeeField, FREIN_LEVEL_COLORS, JUDICIAIRE_LEGAL_NOTICE,
 } from './freins';
 import { exportDiagnosticPDF } from './pdf-insertion';
+import PortefeuilleCompetences from './PortefeuilleCompetences';
+import StyleApprentissage from './StyleApprentissage';
 
 /**
  * Diagnostic d'accueil — STEPPER une rubrique à la fois (REC-UX-01) :
@@ -144,6 +146,8 @@ const STEPS = [
   { id: 'linguistique', label: 'Français & langues', fields: ['cecrl_niveau', 'commentaire_linguistique'] },
   { id: 'situation_pro', label: 'Situation professionnelle', fields: ['autre_employeur', 'autre_employeur_heures', 'souhait_complement_heures'] },
   { id: 'projet', label: 'Projet professionnel', fields: ['niveau_formation', 'metiers_souhaites', 'pret_a_se_former', 'cpf_accessible', 'projet_formation', 'emploi_vise', 'commentaire_projet'] },
+  { id: 'portefeuille', label: 'Portefeuille & AFOM', fields: ['portefeuille_interets', 'portefeuille_competences', 'savoir_faire', 'savoir_etre', 'swot_atouts', 'swot_faiblesses', 'swot_opportunites', 'swot_menaces', 'besoins_exprimes', 'coa_texte'] },
+  { id: 'style', label: "Style d'apprentissage", fields: ['style_apprentissage_reponses', 'style_apprentissage'] },
   { id: 'expression', label: 'Expression du salarié', fields: ['attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee'] },
   { id: 'fse', label: 'Données FSE+ (entrée)', fields: ['fse_entree'] },
   { id: 'freins', label: 'Freins & synthèse', fields: [] }, // complétude calculée sur les scores
@@ -496,6 +500,14 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
                 <textarea value={draft.commentaire_projet || ''} onChange={(e) => setField('commentaire_projet', e.target.value)} rows={2} className="input-modern py-1 w-full" />
               </FieldRow>
             </div>
+          )}
+
+          {cur.id === 'portefeuille' && (
+            <PortefeuilleCompetences draft={draft} setField={setField} />
+          )}
+
+          {cur.id === 'style' && (
+            <StyleApprentissage draft={draft} setField={setField} relecture={relecture} />
           )}
 
           {cur.id === 'expression' && (

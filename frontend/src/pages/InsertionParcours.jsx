@@ -19,6 +19,8 @@ import AlertesBloc from '../components/insertion/AlertesBloc';
 import FriseParcours from '../components/insertion/FriseParcours';
 import PmsmpPanel from '../components/insertion/PmsmpPanel';
 import SatisfactionForm from '../components/insertion/SatisfactionForm';
+import CompetencesETI from '../components/insertion/CompetencesETI';
+import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
 import QuickActionButton, { pushRecent } from '../components/insertion/QuickActionButton';
 import { exportFicheParcoursPDF, exportBilanProlongationPassIae } from '../components/insertion/pdf-insertion';
 
@@ -776,6 +778,7 @@ export default function InsertionParcours() {
   const [radarData, setRadarData] = useState(null);
   const [cddi, setCddi] = useState(null);
   const [contracts, setContracts] = useState([]);
+  const [competences, setCompetences] = useState([]);
   const [passBilanLoading, setPassBilanLoading] = useState(false);
 
   const [loadError, setLoadError] = useState(null);
@@ -858,6 +861,10 @@ export default function InsertionParcours() {
       api.get(`/employees/${emp.id}/contracts`)
         .then((r) => setContracts(Array.isArray(r.data) ? r.data : []))
         .catch(() => setContracts([]));
+      // Compétences ETI (Lot 8) — best effort, pour l'export PDF dossier.
+      api.get(`/insertion/competences/${emp.id}`)
+        .then((r) => setCompetences(Array.isArray(r.data) ? r.data : []))
+        .catch(() => setCompetences([]));
     } catch (err) {
       setPanelError(err.response?.data?.error || err.message || 'Erreur de chargement du parcours');
     }
@@ -955,6 +962,7 @@ export default function InsertionParcours() {
     { id: 'synthese', label: 'Synthèse' },
     { id: 'diagnostic', label: 'Diagnostic' },
     { id: 'entretiens', label: 'Entretiens & bilans' },
+    { id: 'competences', label: 'Compétences' },
     { id: 'objectifs', label: 'Objectifs & actions' },
     { id: 'freins', label: 'Freins' },
     { id: 'ia', label: 'Assistant IA' },
@@ -1098,7 +1106,7 @@ export default function InsertionParcours() {
                             Mettre à jour les échéances
                           </button>
                         )}
-                        <button onClick={() => exportFicheParcoursPDF(analysis, diagnostic)}
+                        <button onClick={() => exportFicheParcoursPDF(analysis, diagnostic, competences)}
                           className="px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 text-xs font-medium hover:bg-teal-50 whitespace-nowrap">
                           Fiche PDF
                         </button>
@@ -1154,6 +1162,10 @@ export default function InsertionParcours() {
                 {/* Tab: Synthèse (frise + timeline + fiche synthèse) */}
                 {activeTab === 'synthese' && (
                   <div className="space-y-4">
+                    {/* Accueil / intégration — check-list d'embauche (Lot 8) */}
+                    <div className="bg-white rounded-lg border p-3">
+                      <ChecklistEmbauche employeeId={selectedEmployee.id} canEdit={adminRh} />
+                    </div>
                     {!analysis.has_diagnostic && (
                       <div className="bg-teal-50 border border-teal-200 rounded-lg p-4 text-center">
                         <p className="text-sm font-medium text-teal-800">
@@ -1298,6 +1310,14 @@ export default function InsertionParcours() {
                         )}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Tab: Compétences (grille ETI, Lot 8) — saisissable ADMIN/RH/MANAGER */}
+                {activeTab === 'competences' && (
+                  <div className="bg-white rounded-lg border p-4">
+                    <CompetencesETI employeeId={selectedEmployee.id} employee={emp}
+                      canEdit={['ADMIN', 'RH', 'MANAGER'].includes(user?.base_role || user?.role)} />
                   </div>
                 )}
 

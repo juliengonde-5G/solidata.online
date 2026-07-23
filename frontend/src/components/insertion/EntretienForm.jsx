@@ -36,6 +36,13 @@ const IA_TIMEOUT = 120000;
 
 const VERDICTS = [['ok', 'Fait'], ['partiel', 'En partie'], ['non_ok', 'Non fait']];
 const VERDICT_COLORS = { ok: 'bg-green-600 border-green-600 text-white', partiel: 'bg-amber-500 border-amber-500 text-white', non_ok: 'bg-red-600 border-red-600 text-white' };
+// Lot 8 — décision de fin de période d'essai (periode_essai_decision).
+const PE_DECISIONS = [
+  ['confirme', 'Période d\'essai confirmée', 'bg-green-600 border-green-600'],
+  ['a_revoir', 'À revoir', 'bg-amber-500 border-amber-500'],
+  ['rompu', 'Période d\'essai rompue', 'bg-red-600 border-red-600'],
+];
+const PE_DECISION_LABELS = { confirme: 'Période d\'essai confirmée', rompu: 'Période d\'essai rompue', a_revoir: 'À revoir' };
 
 export default function EntretienForm({
   milestone, employeeId, employee = {}, allMilestones = [], onSaved, onClosed, onCloseForm, onDirtyChange,
@@ -182,6 +189,11 @@ export default function EntretienForm({
 
   // ── Étapes (ordre de la trame papier, blocs conditionnels par type) ──
   const steps = useMemo(() => {
+    // Période d'essai (Lot 8) : formulaire court et focalisé (décision + avis),
+    // précède le diagnostic social — pas de freins/objectifs/actions.
+    if (type === 'periode_essai') {
+      return [{ id: 'periode_essai', label: "Période d'essai" }, { id: 'cloture', label: 'Clôture' }];
+    }
     const s = [{ id: 'situation', label: 'Situation' }];
     if (prevMilestone) s.push({ id: 'precedent', label: 'Depuis le dernier bilan' });
     s.push({ id: 'freins', label: 'Freins (toile)' });
@@ -202,6 +214,14 @@ export default function EntretienForm({
   const missingFreins = freins.filter((f) => form[f.column] == null);
   const nextPlanned = allMilestones.find((m) => m.id !== milestone.id && m.status === 'planifie');
   const checklist = useMemo(() => {
+    // Période d'essai (Lot 8) : seule la décision est requise pour clôturer.
+    if (type === 'periode_essai') {
+      return [{
+        id: 'decision',
+        label: form.periode_essai_decision ? `Décision : ${PE_DECISION_LABELS[form.periode_essai_decision]}` : "Décision de période d'essai à prendre",
+        ok: !!form.periode_essai_decision, step: 'periode_essai',
+      }];
+    }
     const items = [
       { id: 'situation', label: 'Situation renseignée', ok: !!(form.bilan_professionnel || form.bilan_social || form.post_sortie_situation), step: 'situation' },
     ];
@@ -256,7 +276,7 @@ export default function EntretienForm({
       // 2. Clôture contrôlée.
       const body = { completed_date: form.completed_date || new Date().toISOString().slice(0, 10) };
       if (assumeFreins) body.assume_freins_non_evalues = true;
-      if (!nextPlanned && !['bilan_sortie', 'suivi_post_sortie'].includes(type) && nextForm.milestone_type && nextForm.due_date) {
+      if (!nextPlanned && !['bilan_sortie', 'suivi_post_sortie', 'periode_essai'].includes(type) && nextForm.milestone_type && nextForm.due_date) {
         body.next = { milestone_type: nextForm.milestone_type, due_date: nextForm.due_date };
         if (nextForm.interview_date) body.next.interview_date = nextForm.interview_date;
       }
@@ -334,6 +354,9 @@ export default function EntretienForm({
   const setDoc = (k, v) => setField('sortie_documents', { ...docs, [k]: v });
   const renou = form.renouvellement_form || {};
   const setRenou = (k, v) => setField('renouvellement_form', { ...renou, [k]: v });
+  // Lot 8 — entretien de période d'essai : avis encadrant / CIP (periode_essai_form).
+  const pef = form.periode_essai_form || {};
+  const setPef = (k, v) => setField('periode_essai_form', { ...pef, [k]: v });
 
   return (
     <div className={`bg-white border rounded-lg ${relecture ? 'text-lg' : ''}`}>
@@ -633,6 +656,57 @@ export default function EntretienForm({
               onChanged={() => api.get(`/insertion/action-plans/${employeeId}`).then((r) => setActions(Array.isArray(r.data) ? r.data : [])).catch(() => {})} />
           )}
 
+          {cur.id === 'periode_essai' && (
+            <div className="space-y-4">
+              <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-2">
+                Entretien de fin de période d'essai — point de bascule officiel vers l'accompagnement. La décision est
+                obligatoire pour clôturer. « Rompue » clôt le parcours ; « confirmée » ou « à revoir » le poursuit.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1.5">Décision de fin de période d'essai</label>
+                <div className="flex flex-wrap gap-2">
+                  {PE_DECISIONS.map(([v, l, color]) => (
+                    <button key={v} type="button" disabled={readOnly}
+                      onClick={() => setField('periode_essai_decision', form.periode_essai_decision === v ? null : v)}
+                      className={`px-4 py-2.5 rounded-lg border text-sm font-medium transition ${
+                        form.periode_essai_decision === v ? `${color} text-white` : 'bg-white border-gray-300 text-gray-600 hover:border-gray-400'
+                      } disabled:opacity-60`}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white border rounded-lg p-3">
+                {[['integration', 'Intégration dans l\'équipe'], ['consignes', 'Compréhension des consignes'], ['assiduite', 'Assiduité / ponctualité']].map(([k, label]) => (
+                  <div key={k}>
+                    <p className="text-xs font-medium text-gray-500 mb-1">{label}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[['bonne', 'Bonne'], ['moyenne', 'Moyenne'], ['insuffisante', 'Insuffisante']].map(([v, l]) => (
+                        <button key={v} type="button" disabled={readOnly} onClick={() => setPef(k, pef[k] === v ? null : v)}
+                          className={`px-2.5 py-1 rounded-lg border text-xs ${pef[k] === v ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-teal-400'} disabled:opacity-60`}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Avis de l'encadrant technique</label>
+                  <textarea value={pef.avis_encadrant || ''} onChange={(e) => setPef('avis_encadrant', e.target.value)} disabled={readOnly} rows={3} className="input-modern py-1 w-full" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Avis de la CIP</label>
+                  <textarea value={pef.avis_cip || ''} onChange={(e) => setPef('avis_cip', e.target.value)} disabled={readOnly} rows={3} className="input-modern py-1 w-full" />
+                </div>
+              </div>
+            </div>
+          )}
+
           {cur.id === 'renouvellement' && (
             <div className="space-y-3 bg-amber-50/40 border border-amber-200 rounded-lg p-3">
               <p className="text-xs text-amber-800">Trame interne de renouvellement — remplie avec l'encadrant technique, transmise à la CIP.</p>
@@ -781,7 +855,7 @@ export default function EntretienForm({
                     {!c.ok && <button type="button" onClick={() => goToStepId(c.step)} className="text-xs text-teal-700 underline">compléter</button>}
                   </div>
                 ))}
-                {missingFreins.length > 0 && (
+                {type !== 'periode_essai' && missingFreins.length > 0 && (
                   <label className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 cursor-pointer">
                     <input type="checkbox" checked={assumeFreins} onChange={(e) => setAssumeFreins(e.target.checked)} disabled={readOnly} className="rounded border-gray-300" />
                     J'assume la non-évaluation de : {missingFreins.map((f) => f.label).join(', ')} (non abordés ce jour).
@@ -853,7 +927,7 @@ export default function EntretienForm({
               <input type="date" value={form.completed_date ? String(form.completed_date).slice(0, 10) : new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setField('completed_date', e.target.value)} className="input-modern py-1" />
             </div>
-            {!nextPlanned && !['bilan_sortie', 'suivi_post_sortie'].includes(type) && (
+            {!nextPlanned && !['bilan_sortie', 'suivi_post_sortie', 'periode_essai'].includes(type) && (
               <div className="border rounded-lg p-3 space-y-2 bg-teal-50/40">
                 <p className="text-xs font-semibold text-teal-800">Prochain entretien (obligatoire pour clôturer)</p>
                 <div className="grid grid-cols-2 gap-2">

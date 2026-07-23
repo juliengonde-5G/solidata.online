@@ -14,7 +14,7 @@
 
 import {
   FREINS, ENTRETIEN_STATUS_LABELS, ENTRETIEN_TYPE_LABELS, SORTIE_CLASS_LABELS,
-  ACTION_STATUS_LABELS, ACTION_CATEGORY_LABELS, entretienLabel,
+  ACTION_STATUS_LABELS, ACTION_CATEGORY_LABELS, COMPETENCE_FILIERE_LABELS, entretienLabel,
 } from './freins';
 
 export const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -433,7 +433,38 @@ export function exportBilanProlongationPassIae(data) {
 // FICHE PARCOURS (synthèse dossier — conservée de l'existant, registre 9 axes)
 // ═══════════════════════════════════════════
 
-export function exportFicheParcoursPDF(analysis, diagnostic) {
+// Section « Compétences métier » (dernière évaluation ETI) — dossier uniquement.
+function competencesSection(competences) {
+  const list = Array.isArray(competences) ? competences : [];
+  if (list.length === 0) return '';
+  const ev = list[0]; // la plus récente (backend trie date DESC)
+  const scores = Array.isArray(ev.scores) ? ev.scores : [];
+  // Regroupe par rubrique.
+  const byRub = new Map();
+  for (const s of scores) {
+    const rub = s.rubrique || 'Autres';
+    if (!byRub.has(rub)) byRub.set(rub, []);
+    byRub.get(rub).push(s);
+  }
+  const rows = [...byRub.entries()].map(([rub, items]) => {
+    const cells = items.map((s) => {
+      const ne = s.non_evalue === true || s.note == null || s.note === '';
+      return '<tr><td style="padding-left:14px">' + esc(s.item || '') + '</td><td>' + (ne ? '<em>non évalué</em>' : esc(s.note) + '/10') + '</td></tr>';
+    }).join('');
+    return '<tr><td colspan="2" style="font-weight:600;background:#f9fafb">' + esc(rub) + '</td></tr>' + cells;
+  }).join('');
+  const moy = ev.moyenne != null ? ev.moyenne + '/10' : '—';
+  const meta = (COMPETENCE_FILIERE_LABELS[ev.filiere] || ev.filiere || '—')
+    + (ev.periode ? ' · ' + esc(ev.periode) : '') + ' · ' + frDate(ev.date_evaluation)
+    + ' · <strong>moyenne ' + esc(moy) + '</strong> (N/E exclu)';
+  return '<div class="section"><div class="section-title">Compétences métier (dernière évaluation)</div>'
+    + '<div class="card" style="margin-bottom:6px">' + meta + '</div>'
+    + '<table><thead><tr><th>Rubrique / item</th><th>Note</th></tr></thead><tbody>' + rows + '</tbody></table>'
+    + (ev.synthese ? '<div class="card" style="margin-top:6px"><strong>Synthèse encadrant :</strong> ' + esc(ev.synthese) + '</div>' : '')
+    + '</div>';
+}
+
+export function exportFicheParcoursPDF(analysis, diagnostic, competences = []) {
   const e = analysis.employee || {};
   const nom = (e.first_name || '') + ' ' + (e.last_name || '');
   const today = new Date().toLocaleDateString('fr-FR');
@@ -484,6 +515,7 @@ export function exportFicheParcoursPDF(analysis, diagnostic) {
     + '<div class="section"><div class="section-title">Diagnostic — parcours antérieur</div><div class="card">' + esc(d.parcours_anterieur || '—') + '</div></div>'
     + '<div class="section"><div class="section-title">Freins périphériques</div><table><thead><tr><th>Frein</th><th>Niveau</th><th>Observations</th></tr></thead><tbody>' + freinsRows + '</tbody></table></div>'
     + '<div class="section"><div class="section-title">Entretiens du parcours</div><table><thead><tr><th>Entretien</th><th>Statut</th><th>Échéance</th><th>Réalisé le</th></tr></thead><tbody>' + jalonsRows + '</tbody></table></div>'
+    + competencesSection(competences)
     + actionsSection
     + RGPD_FOOTER('dossier');
 
