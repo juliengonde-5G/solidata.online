@@ -188,16 +188,22 @@ Le dashboard centralise les indicateurs clés :
 - Matrice compétences × collaborateurs
 
 #### 2.3.4 Parcours Insertion
-**Route** : `/insertion` | **Rôles** : ADMIN, RH, MANAGER
-**API** : `backend/src/routes/insertion.js` (98 Ko)
+**Routes** : `/insertion`, `/insertion/actions`, `/insertion/audit` | **Rôles** : ADMIN, RH, MANAGER (masquage des données sensibles pour MANAGER)
+**API** : `backend/src/routes/insertion/` (routes.js, engine.js, freins-registry.js, masking.js)
 
-- Création de parcours CDDI avec diagnostic initial
-- **3 jalons obligatoires** : M1 (1 mois), M6 (6 mois), M12 (12 mois) — évaluations planifiées automatiquement
-- **Radar 7 freins périphériques** : logement, mobilité, santé, administratif, financier, familial, justice — notation 1 à 5 par frein, visualisation radar
-- **Plans d'action CIP** : le Conseiller en Insertion Professionnelle définit des actions correctives par frein identifié
-- **Alertes entretien** : rappels automatiques avant chaque jalon
-- Suivi de progression (graphiques d'évolution)
-- Clôture de parcours avec bilan exportable
+- **Entretiens historisés** (table unique `insertion_milestones` élargie) : 5 types techniques — diagnostic d'accueil, bilans intermédiaires illimités (« Bilan n° N », créables à toute date), renouvellement de contrat (lié au contrat, avis + durée), bilan de sortie (nomenclature à 4 catégories : emploi durable / emploi de transition / sortie positive / autre + check-list des documents remis), suivi post-sortie. Numéro de parcours (`parcours_num`) pour les personnes revenues en parcours.
+- **Enregistrer ≠ Clôturer** : le brouillon se sauvegarde librement (PUT partiel, autosave) ; la clôture (`POST /milestones/:id/close`) contrôle la trame (freins évalués ou non-évaluation assumée, évaluation du bilan précédent, prochain entretien planifié, catégorie + documents de sortie), verrouille l'entretien (état probant, `locked_at`) et l'historise (`insertion_milestones_history`) ; réouverture ADMIN/RH avec motif obligatoire (validations rendues caduques, trace conservée).
+- **Diagnostic d'accueil refondu** : stepper 12 rubriques (parcours/famille, logement, droits, santé, budget, mobilité, linguistique CECRL, situation pro, projet pro, expression du salarié, FSE+ entrée, freins) avec sauvegarde automatique (brouillon repris en 2 séances), mode relecture avec le salarié, suggestions de niveau de frein calculées côté serveur depuis les réponses structurées (jamais imposées).
+- **9 freins périphériques** (registre unique `freins-registry.js`) : mobilité, santé (art. 9 — commentaires chiffrés AES-256), finances, famille, linguistique, administratif, numérique, **logement**, **judiciaire** (art. 10 — niveau + impact organisationnel factuel uniquement, chiffré, jamais visible d'un MANAGER, jamais suggéré automatiquement) — « non évalué » honnête (jamais compté à 1), radar 9 axes.
+- **Objectifs individualisés** (`insertion_objectifs`) : objectifs + sous-objectifs (1 niveau), origine salarié/CIP, échéance + date butoir, 6 statuts.
+- **Actions CIP** : rattachables à un entretien, un objectif et/ou un **partenaire** (référentiel `insertion_partenaires`, 16 seedés : CAF, France Travail, SPIP…), criticité, durée passée ; bouton « + Action » global (saisie ≤ 30 s, échéance par défaut paramétrée) ; tableau transversal `/insertion/actions` (filtres, retards, export).
+- **Pass IAE** : n° + période sur la fiche salarié (recopiés depuis le recrutement à la liaison candidat→collaborateur), alertes à l'approche de l'échéance (seuil paramétrable + 2 mois), jobs scheduler dédiés.
+- **Alertes de la fiche** (`GET /alertes/:employeeId`) : jalons en retard, entretien à planifier, Pass IAE, cumul CDDI ≥ 22/24 mois, diagnostic en retard, actions critiques — acquittement « Vu » **journalisé en base** (`insertion_alert_acks`, partagé entre CIP, 7 jours).
+- **Tableau de bord CIP** : bloc « Aujourd'hui / Cette semaine » (heure de rendez-vous, badge « Préparation IA prête »), agenda 30 j, retards groupés par salarié, fins de contrat < 60 j, freins moyens, taux de sorties dynamiques vs objectif conventionné DREETS (settings) ; filtre « mes salariés » (CIP référent).
+- **Audit insertion** (`/insertion/audit`) : indicateurs structure (réalisation des jalons par échéance, cartographie 9 freins, sorties par catégorie, plans d'action) + rapport IA direction (verbatims anonymisés), export PDF A4.
+- **Préparation IA d'entretien** : par entretien (`?milestoneId=`), note persistée et historisée (`ia_preparation`), pseudonymisation systématique avant appel Anthropic.
+- **Exports** : Excel 5 feuilles / CSV par jeu (ADMIN/RH), export FSE+ trimestriel (bénéficiaires CDDI).
+- **Réglages** (`GET /insertion/parametres`, préfixe `insertion.*` dans settings) : délai diagnostic (30 j), seuil Pass IAE (7 mois), échéance d'action par défaut (14 j), rythme des bilans (2 mois), IA automatique J-7 (off).
 
 #### 2.3.5 Planning Hebdomadaire
 **Route** : `/planning-hebdo` | **Rôles** : ADMIN, MANAGER

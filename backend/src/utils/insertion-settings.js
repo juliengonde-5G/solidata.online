@@ -11,7 +11,13 @@
  *  - insertion.alerte_pass_iae_mois        : 1er seuil d'alerte avant la fin
  *    du Pass IAE, en mois (défaut 7 ; le 2e seuil est fixé à 2 mois) ;
  *  - insertion.ia_preparation_auto         : génération automatique de la note
- *    de préparation IA à J-7 d'un entretien planifié (défaut 'false').
+ *    de préparation IA à J-7 d'un entretien planifié (défaut 'false') ;
+ *  - insertion.echeance_action_defaut_jours : échéance proposée par défaut à
+ *    la création d'une action CIP, en jours (défaut 14 — REC-UX-18) ;
+ *  - insertion.rythme_bilans_mois          : rythme usuel des bilans, en mois —
+ *    sert à proposer la date du prochain entretien à la clôture (défaut 2 —
+ *    REC-UX-18).
+ * Les clés sont exposées au frontend par GET /api/insertion/parametres.
  */
 const pool = require('../config/database');
 
@@ -19,6 +25,8 @@ const INSERTION_SETTING_DEFAULTS = {
   'insertion.delai_diagnostic_jours': 30,
   'insertion.alerte_pass_iae_mois': 7,
   'insertion.ia_preparation_auto': false,
+  'insertion.echeance_action_defaut_jours': 14,
+  'insertion.rythme_bilans_mois': 2,
 };
 
 /**

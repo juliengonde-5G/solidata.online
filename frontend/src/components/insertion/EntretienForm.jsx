@@ -9,6 +9,7 @@ import RadarFreins from './RadarFreins';
 import ActionsPanel from './ActionsPanel';
 import ObjectifsPanel from './ObjectifsPanel';
 import { exportEntretienPDF } from './pdf-insertion';
+import { getInsertionParametres, PARAMETRES_DEFAUTS, plusMois } from './parametres';
 import { useAuth } from '../../contexts/AuthContext';
 
 /**
@@ -34,8 +35,6 @@ const IA_TIMEOUT = 120000;
 
 const VERDICTS = [['ok', 'Fait'], ['partiel', 'En partie'], ['non_ok', 'Non fait']];
 const VERDICT_COLORS = { ok: 'bg-green-600 border-green-600 text-white', partiel: 'bg-amber-500 border-amber-500 text-white', non_ok: 'bg-red-600 border-red-600 text-white' };
-
-const plusMonths = (m) => { const d = new Date(); d.setMonth(d.getMonth() + m); return d.toISOString().slice(0, 10); };
 
 export default function EntretienForm({
   milestone, employeeId, employee = {}, allMilestones = [], onSaved, onClosed, onCloseForm, onDirtyChange,
@@ -225,7 +224,18 @@ export default function EntretienForm({
   const checklistOk = checklist.filter((c) => c.ok).length;
 
   // ── Clôture contrôlée ──
-  const [nextForm, setNextForm] = useState({ milestone_type: 'bilan_intermediaire', due_date: plusMonths(2), interview_date: '' });
+  // Date du prochain entretien proposée = aujourd'hui + rythme de bilans
+  // paramétré (insertion.rythme_bilans_mois, défaut 2 — REC-UX-18).
+  const [rythmeMois, setRythmeMois] = useState(PARAMETRES_DEFAUTS.rythme_bilans_mois);
+  const [nextForm, setNextForm] = useState({ milestone_type: 'bilan_intermediaire', due_date: plusMois(PARAMETRES_DEFAUTS.rythme_bilans_mois), interview_date: '' });
+  useEffect(() => {
+    getInsertionParametres().then((p) => {
+      const m = Number(p.rythme_bilans_mois) || PARAMETRES_DEFAUTS.rythme_bilans_mois;
+      setRythmeMois(m);
+      // N'écrase la proposition que si l'utilisateur n'y a pas touché.
+      setNextForm((f) => (f.due_date === plusMois(PARAMETRES_DEFAUTS.rythme_bilans_mois) ? { ...f, due_date: plusMois(m) } : f));
+    });
+  }, []);
   const [presence, setPresence] = useState(Array.isArray(milestone.validations) && milestone.validations.some((v) => v.mode === 'presence'));
 
   const doClose = async () => {
@@ -831,7 +841,7 @@ export default function EntretienForm({
                   </select>
                   <input type="date" value={nextForm.due_date} onChange={(e) => setNextForm({ ...nextForm, due_date: e.target.value })} className="input-modern py-1 text-sm" />
                 </div>
-                <p className="text-[11px] text-gray-400">Proposé : dans 2 mois (rythme de suivi usuel — ajustez librement).</p>
+                <p className="text-[11px] text-gray-400">Proposé : dans {rythmeMois} mois (rythme de suivi usuel — ajustez librement).</p>
               </div>
             )}
             {nextPlanned && (

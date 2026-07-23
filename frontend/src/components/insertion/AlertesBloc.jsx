@@ -3,11 +3,14 @@ import api from '../../services/api';
 
 /**
  * Points d'attention de la fiche salarié (GET /insertion/alertes/:employeeId).
- * Contrat : { employee_id, generated_at, total, alertes:[{type,niveau,message,...}], alertes_scheduler:[] }.
+ * Contrat : { employee_id, generated_at, total, alertes:[{type,niveau,message,...}],
+ *             acquittees:[{...alerte, acked_until}], alertes_scheduler:[] }.
  *
  * REC-UX-08 : 3 niveaux visuels seulement (rouge = réglementaire/contractuel,
- * ambre = process, gris = information), acquittement local « Vu — me le
- * rappeler dans 7 j » (stocké côté navigateur), plafond d'affichage + « voir tout ».
+ * ambre = process, gris = information), plafond d'affichage + « voir tout ».
+ * Acquittement « Vu — me le rappeler dans 7 j » JOURNALISÉ CÔTÉ SERVEUR
+ * (POST /insertion/alertes/:employeeId/ack, table insertion_alert_acks —
+ * phase D écart 1c) : partagé entre les CIP, fini le localStorage navigateur.
  */
 
 const NIVEAU_STYLES = {
@@ -17,23 +20,13 @@ const NIVEAU_STYLES = {
 };
 const NIVEAU_DOT = { critique: 'bg-red-500', attention: 'bg-amber-500', info: 'bg-slate-400' };
 const MAX_VISIBLE = 4;
-const ACK_KEY = 'solidata_insertion_alertes_ack';
-
-function loadAcks() {
-  try { return JSON.parse(localStorage.getItem(ACK_KEY) || '{}'); } catch { return {}; }
-}
-function saveAcks(acks) {
-  try { localStorage.setItem(ACK_KEY, JSON.stringify(acks)); } catch { /* stockage local indisponible */ }
-}
-function alerteKey(employeeId, a) {
-  return `${employeeId}:${a.type}:${a.milestone_id || a.action_id || a.pass_iae_end || a.due_date || ''}`;
-}
+const SNOOZE_DAYS = 7;
 
 export default function AlertesBloc({ employeeId, compact = false, onCountChange }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [showAll, setShowAll] = useState(false);
-  const [acks, setAcks] = useState(loadAcks);
+  const [acking, setAcking] = useState(null); // type en cours d'acquittement
 
   const load = useCallback(() => {
     let alive = true;
@@ -45,20 +38,25 @@ export default function AlertesBloc({ employeeId, compact = false, onCountChange
 
   useEffect(() => load(), [load]);
 
-  const now = Date.now();
-  const alertes = (data?.alertes || []).map((a) => ({ ...a, _key: alerteKey(employeeId, a) }));
-  const active = alertes.filter((a) => !(acks[a._key] && acks[a._key] > now));
-  const snoozed = alertes.length - active.length;
+  const active = data?.alertes || [];
+  const snoozed = (data?.acquittees || []).length;
 
   useEffect(() => {
     if (onCountChange && data) onCountChange(active.length, active.filter((a) => a.niveau === 'critique').length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, acks]);
+  }, [data]);
 
-  const snooze = (a) => {
-    const next = { ...acks, [a._key]: now + 7 * 86400000 };
-    setAcks(next);
-    saveAcks(next);
+  const snooze = async (a) => {
+    setAcking(a.type);
+    try {
+      const jusquAu = new Date(Date.now() + SNOOZE_DAYS * 86400000).toISOString();
+      await api.post(`/insertion/alertes/${employeeId}/ack`, { type: a.type, jusqu_au: jusquAu });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setAcking(null);
+    }
   };
 
   if (error) return <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">Points d'attention indisponibles : {error}</div>;
@@ -69,7 +67,7 @@ export default function AlertesBloc({ employeeId, compact = false, onCountChange
     return (
       <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg p-2 flex items-center gap-2">
         <span className="w-2 h-2 rounded-full bg-green-500" /> Aucun point d'attention sur ce parcours.
-        {snoozed > 0 && <span className="text-gray-400">({snoozed} mis en veille 7 j)</span>}
+        {snoozed > 0 && <span className="text-gray-400">({snoozed} type(s) en veille)</span>}
       </div>
     );
   }
@@ -95,16 +93,16 @@ export default function AlertesBloc({ employeeId, compact = false, onCountChange
         <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
           Points d'attention ({active.length})
         </h4>
-        {snoozed > 0 && <span className="text-[11px] text-gray-400">{snoozed} en veille (7 j)</span>}
+        {snoozed > 0 && <span className="text-[11px] text-gray-400">{snoozed} type(s) en veille</span>}
       </div>
-      {visible.map((a) => (
-        <div key={a._key} className={`flex items-start gap-2 text-xs border rounded-lg p-2 ${NIVEAU_STYLES[a.niveau] || NIVEAU_STYLES.info}`}>
+      {visible.map((a, i) => (
+        <div key={`${a.type}:${a.milestone_id || a.action_id || i}`} className={`flex items-start gap-2 text-xs border rounded-lg p-2 ${NIVEAU_STYLES[a.niveau] || NIVEAU_STYLES.info}`}>
           <span className={`w-2 h-2 rounded-full mt-1 flex-shrink-0 ${NIVEAU_DOT[a.niveau] || NIVEAU_DOT.info}`} />
           <span className="flex-1">{a.message}</span>
-          <button type="button" onClick={() => snooze(a)}
-            title="Vu — me le rappeler dans 7 jours"
-            className="text-[11px] opacity-60 hover:opacity-100 underline flex-shrink-0">
-            Vu · 7 j
+          <button type="button" onClick={() => snooze(a)} disabled={acking === a.type}
+            title={`Vu — mettre en veille ce type d'alerte ${SNOOZE_DAYS} jours (visible de toute l'équipe)`}
+            className="text-[11px] opacity-60 hover:opacity-100 underline flex-shrink-0 disabled:opacity-30">
+            {acking === a.type ? '…' : `Vu · ${SNOOZE_DAYS} j`}
           </button>
         </div>
       ))}

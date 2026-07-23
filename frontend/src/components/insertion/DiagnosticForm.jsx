@@ -107,8 +107,11 @@ export function FreinPicker({ value, onChange, suggestion = null, compact = fals
   );
 }
 
-// ── Suggestions de niveau (pré-calcul local d'après les réponses structurées ;
-// jamais imposé — la CIP décide) ──
+// ── Suggestions de niveau — REPLI LOCAL uniquement (phase D écart 1b : la
+// source de vérité est le serveur, qui renvoie `suggestions_freins` dans la
+// réponse du PUT /insertion/diagnostic ; ce pré-calcul ne sert qu'avant la
+// première sauvegarde ou si le serveur ne renvoie rien). Jamais imposé — la
+// CIP décide. ──
 function computeSuggestions(d) {
   const s = {};
   if (d.logement_statut === 'sans_abri') s.logement = 5;
@@ -156,6 +159,9 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [relecture, setRelecture] = useState(false);
+  // Suggestions calculées par le SERVEUR (renvoyées par le PUT — écart 1b) ;
+  // prioritaires sur le pré-calcul local.
+  const [serverSuggestions, setServerSuggestions] = useState(() => diagnostic?.suggestions_freins || null);
   const pendingRef = useRef({});
   const timerRef = useRef(null);
   const freins = visibleFreins(baseRole);
@@ -164,6 +170,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
   useEffect(() => {
     const d = diagnostic || {};
     setDraft({ ...d });
+    setServerSuggestions(d.suggestions_freins || null);
     pendingRef.current = {};
     let resume = 0;
     for (let i = 0; i < STEPS.length - 1; i++) {
@@ -187,6 +194,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
       setSavedAt(new Date());
       markDirty(false);
       if (res.data?.statut_saisie) setDraft((f) => ({ ...f, statut_saisie: res.data.statut_saisie }));
+      if (res.data?.suggestions_freins) setServerSuggestions(res.data.suggestions_freins);
       if (onSaved) onSaved(res.data);
       setSaving(false);
       return true;
@@ -215,7 +223,12 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
     if (ok) setDraft((f) => ({ ...f, statut_saisie: 'complet' }));
   };
 
-  const suggestions = useMemo(() => computeSuggestions(draft), [draft]);
+  // Suggestions serveur si présentes, complétées par le pré-calcul local en
+  // repli (avant la première sauvegarde, ou serveur muet).
+  const suggestions = useMemo(
+    () => ({ ...computeSuggestions(draft), ...(serverSuggestions || {}) }),
+    [draft, serverSuggestions]
+  );
 
   const filledCount = (st) => st.id === 'freins'
     ? freins.filter((f) => draft[f.column] != null).length

@@ -211,6 +211,20 @@ function ObjectifBar({ realise, objectif }) {
 
 // Bloc « Aujourd'hui / Cette semaine » (REC-UX-07/08) : entretiens du jour et
 // de la semaine + retards réglementaires REGROUPÉS PAR SALARIÉ, rouges d'abord.
+// Phase D (écart 1a) : libellé réel (titre), heure du rendez-vous quand
+// interview_date est posée, badge « Préparation IA prête » (ia_preparation_ready).
+const heureRdv = (d) => (d ? new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null);
+
+function IaPretBadge({ ready }) {
+  if (!ready) return null;
+  return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-200 whitespace-nowrap"
+      title="Une note de préparation IA a déjà été générée pour cet entretien">
+      Préparation IA prête
+    </span>
+  );
+}
+
 function AgendaBloc({ stats, onSelect }) {
   const today = (stats.agenda_30j || []).filter((j) => j.days_until === 0);
   const week = (stats.agenda_30j || []).filter((j) => j.days_until > 0 && j.days_until <= 7);
@@ -253,9 +267,12 @@ function AgendaBloc({ stats, onSelect }) {
           <p className="text-xs font-semibold text-teal-700 mb-1">Aujourd'hui ({today.length})</p>
           {today.length ? today.map((j) => (
             <button key={j.id} onClick={() => onSelect(j.employee_id)}
-              className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-teal-50 text-sm">
-              <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
-              <span className="text-xs text-teal-700 font-medium">aujourd'hui</span>
+              className="w-full text-left flex items-center justify-between gap-2 p-2 rounded hover:bg-teal-50 text-sm">
+              <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+              <span className="flex items-center gap-1.5 flex-shrink-0">
+                <IaPretBadge ready={j.ia_preparation_ready} />
+                <span className="text-xs text-teal-700 font-medium">{heureRdv(j.interview_date) || "aujourd'hui"}</span>
+              </span>
             </button>
           )) : <p className="text-xs text-gray-400 py-1">Aucun entretien aujourd'hui.</p>}
         </div>
@@ -263,9 +280,14 @@ function AgendaBloc({ stats, onSelect }) {
           <p className="text-xs font-semibold text-slate-600 mb-1">Cette semaine ({week.length})</p>
           {week.length ? week.map((j) => (
             <button key={j.id} onClick={() => onSelect(j.employee_id)}
-              className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-slate-50 text-sm">
-              <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
-              <span className="text-xs text-slate-500 font-medium">J-{j.days_until} · {frDate(j.due_date)}</span>
+              className="w-full text-left flex items-center justify-between gap-2 p-2 rounded hover:bg-slate-50 text-sm">
+              <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+              <span className="flex items-center gap-1.5 flex-shrink-0">
+                <IaPretBadge ready={j.ia_preparation_ready} />
+                <span className="text-xs text-slate-500 font-medium">
+                  J-{j.days_until} · {frDate(j.due_date)}{heureRdv(j.interview_date) ? ` · ${heureRdv(j.interview_date)}` : ''}
+                </span>
+              </span>
             </button>
           )) : <p className="text-xs text-gray-400 py-1">Rien de planifié cette semaine.</p>}
         </div>

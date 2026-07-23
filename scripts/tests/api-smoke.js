@@ -244,6 +244,7 @@ async function run() {
     await checkEndpoint('T-RH-10', '/api/insertion/actions-overview',    'Insertion — actions transversales', { authH });
     await checkEndpoint('T-RH-11', '/api/insertion/partenaires',         'Insertion — partenaires', { authH });
     await checkEndpoint('T-RH-12', '/api/insertion/cohorte/stats',       'Insertion — tableau de bord CIP', { authH });
+    await checkEndpoint('T-RH-13', '/api/insertion/parametres',          'Insertion — réglages module (phase D)', { authH });
   }
 
   // ═══ §10 Finance ═══

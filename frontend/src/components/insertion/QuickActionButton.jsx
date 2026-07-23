@@ -2,13 +2,16 @@ import { useState, useEffect, useRef } from 'react';
 import api from '../../services/api';
 import { useToast } from '../Toast';
 import { ACTION_CATEGORY_LABELS, ACTION_PRIORITY_LABELS, entretienLabel } from './freins';
+import { getInsertionParametres, PARAMETRES_DEFAUTS, plusJours } from './parametres';
 
 /**
  * « + Action » global (REC-UX-04) — saisie d'une action au vol en ≤ 30 s.
  * 2 champs obligatoires : salarié (pré-rempli si contexte, récents d'abord)
  * et libellé. Le reste a des valeurs par défaut (catégorie insertion,
- * criticité moyenne, échéance +14 j) ; partenaire et rattachement facultatifs,
- * repliés. Entrée = valider. Toast de confirmation, aucune navigation.
+ * criticité moyenne, échéance +N j — N lu dans les réglages
+ * insertion.echeance_action_defaut_jours, défaut 14, REC-UX-18) ; partenaire
+ * et rattachement facultatifs, repliés. Entrée = valider. Toast de
+ * confirmation, aucune navigation.
  */
 
 const RECENTS_KEY = 'solidata_insertion_recents';
@@ -21,11 +24,6 @@ export function pushRecent(employeeId) {
     localStorage.setItem(RECENTS_KEY, JSON.stringify(r));
   } catch { /* stockage local indisponible */ }
 }
-
-const plus14 = () => {
-  const d = new Date(); d.setDate(d.getDate() + 14);
-  return d.toISOString().slice(0, 10);
-};
 
 export default function QuickActionButton({ defaultEmployeeId = null, defaultEmployeeName = '', defaultMilestoneId = null, onCreated, className = '' }) {
   const [open, setOpen] = useState(false);
@@ -67,7 +65,7 @@ function QuickActionModal({ defaultEmployeeId, defaultEmployeeName, defaultMiles
     action_label: '',
     category: 'insertion',
     priority: 'moyenne',
-    echeance: plus14(),
+    echeance: plusJours(PARAMETRES_DEFAUTS.echeance_action_defaut_jours),
     partenaire_id: '',
     milestone_id: defaultMilestoneId || '',
     objectif_id: '',
@@ -76,6 +74,13 @@ function QuickActionModal({ defaultEmployeeId, defaultEmployeeName, defaultMiles
   useEffect(() => {
     api.get('/insertion').then((r) => setEmployees(Array.isArray(r.data) ? r.data : [])).catch(() => setEmployees([]));
     api.get('/insertion/partenaires?actifs=1').then((r) => setPartenaires(Array.isArray(r.data) ? r.data : [])).catch(() => setPartenaires([]));
+    // Échéance par défaut paramétrée (REC-UX-18) — appliquée seulement si
+    // l'utilisateur n'a pas déjà modifié le champ.
+    getInsertionParametres().then((p) => {
+      const jours = Number(p.echeance_action_defaut_jours) || PARAMETRES_DEFAUTS.echeance_action_defaut_jours;
+      setForm((f) => (f.echeance === plusJours(PARAMETRES_DEFAUTS.echeance_action_defaut_jours)
+        ? { ...f, echeance: plusJours(jours) } : f));
+    });
   }, []);
 
   // Rattachements (facultatifs) chargés quand un salarié est choisi ET que le

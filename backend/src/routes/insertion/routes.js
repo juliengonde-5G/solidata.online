@@ -208,6 +208,59 @@ const ALL_DIAG_FIELDS = [
   ...DIAG_BOOL_FIELDS, ...DIAG_DATE_FIELDS, ...DIAG_NUM_FIELDS, ...DIAG_ARRAY_FIELDS, ...DIAG_JSONB_FIELDS,
 ];
 
+/**
+ * Suggestions de niveau de frein calculées CÔTÉ SERVEUR depuis les réponses
+ * structurées du diagnostic (phase D — écart 1b). Source de vérité unique :
+ * le pré-calcul local du frontend (DiagnosticForm) n'est plus qu'un repli.
+ * Règles simples et documentées — la CIP confirme ou corrige TOUJOURS d'un
+ * clic, une suggestion n'est jamais imposée ni enregistrée d'office :
+ *  - logement    : sans_abri → 5 ; heberge → 4 ; insatisfaction → 3 ; statut stable → 1
+ *  - mobilite    : ni permis ni véhicule ni transports en commun → 4 ;
+ *                  ni permis ni véhicule → 3 ; permis en cours (code/conduite) → 3 ;
+ *                  permis + véhicule → 1
+ *  - finances    : difficultés + crédits en cours (risque surendettement) → 4 ;
+ *                  difficultés seules → 3 ; pas de difficulté déclarée → 1
+ *  - administratif : pièce d'identité expirée → 4
+ *  - linguistique : CECRL A1 → 4 ; A2 → 3 ; B1 → 2 ; B2 et + → 1
+ *  - sante       : contre-indications au poste → 3
+ *  - famille     : enfant(s) à charge en foyer monoparental → 3
+ * Aucune suggestion sur l'axe judiciaire (art. 10 — évaluation exclusivement
+ * humaine) ni sur l'axe numérique (pas de réponse structurée support).
+ * @param {object} d ligne de diagnostic (valeurs structurées en clair)
+ * @returns {object} { axe: niveau_suggéré } — uniquement les axes suggérables
+ */
+function computeSuggestionsFreins(d) {
+  if (!d || typeof d !== 'object') return {};
+  const s = {};
+  // Logement
+  if (d.logement_statut === 'sans_abri') s.logement = 5;
+  else if (d.logement_statut === 'heberge') s.logement = 4;
+  else if (d.logement_satisfaction === false) s.logement = 3;
+  else if (d.logement_statut) s.logement = 1;
+  // Mobilité
+  const transports = Array.isArray(d.moyen_transport) ? d.moyen_transport : [];
+  if (d.permis_b_statut === 'non' && d.vehicule === false) {
+    s.mobilite = transports.includes('transports_commun') ? 3 : 4;
+  } else if (['code_en_cours', 'conduite_en_cours'].includes(d.permis_b_statut)) s.mobilite = 3;
+  else if (d.permis_b_statut === 'oui' && d.vehicule) s.mobilite = 1;
+  // Finances
+  if (d.difficultes_financieres && d.credits_en_cours) s.finances = 4;
+  else if (d.difficultes_financieres) s.finances = 3;
+  else if (d.difficultes_financieres === false) s.finances = 1;
+  // Administratif
+  if (d.piece_identite_validite && new Date(d.piece_identite_validite) < new Date()) s.administratif = 4;
+  // Linguistique
+  if (d.cecrl_niveau === 'A1') s.linguistique = 4;
+  else if (d.cecrl_niveau === 'A2') s.linguistique = 3;
+  else if (d.cecrl_niveau === 'B1') s.linguistique = 2;
+  else if (['B2', 'C1', 'C2'].includes(d.cecrl_niveau)) s.linguistique = 1;
+  // Santé
+  if (d.contre_indications) s.sante = 3;
+  // Famille
+  if (d.enfants_a_charge && ['celibataire', 'divorce', 'veuf'].includes(d.situation_familiale)) s.famille = 3;
+  return s;
+}
+
 // PUT /api/insertion/diagnostic/:employeeId — Sauvegarder/mettre a jour le diagnostic
 // Upsert par (employee_id, parcours_num) — contrainte insertion_diagnostics_employee_parcours_key.
 router.put('/diagnostic/:employeeId', [
@@ -269,7 +322,10 @@ router.put('/diagnostic/:employeeId', [
     const row = result.rows[0];
     if (baseRole === 'MANAGER') maskInsertionRow(row, baseRole);
     else decryptDiagRow(row);
-    res.json(row);
+    // Suggestions de freins recalculées sur la ligne COMPLÈTE après upsert
+    // (toutes les réponses stockées, pas seulement celles du body) — le
+    // frontend les surligne, la CIP décide (écart 1b).
+    res.json({ ...row, suggestions_freins: computeSuggestionsFreins(row) });
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic PUT :', err.message, err.detail || '');
     // On expose le code SQLSTATE (sans détail sensible) pour rendre l'erreur
@@ -1346,15 +1402,66 @@ router.get('/alertes/:employeeId', [
       WHERE employee_id = $1 AND created_at > NOW() - INTERVAL '30 days'
       ORDER BY created_at DESC LIMIT 20`, [empId]);
 
+    // 8. Acquittements journalisés (phase D — écart 1c) : une alerte dont le
+    // type est acquitté (acked_until non expiré) sort de la liste active et
+    // part dans `acquittees` — l'acquittement est PARTAGÉ entre utilisateurs
+    // (fin du localStorage navigateur).
+    const acks = await soft('acks', `
+      SELECT alert_type, MAX(acked_until) AS acked_until
+      FROM insertion_alert_acks
+      WHERE employee_id = $1 AND acked_until > NOW()
+      GROUP BY alert_type`, [empId]);
+    const ackByType = new Map(acks.map((a) => [a.alert_type, a.acked_until]));
+    const actives = [];
+    const acquittees = [];
+    for (const a of alertes) {
+      const until = ackByType.get(a.type);
+      if (until) acquittees.push({ ...a, acked_until: until });
+      else actives.push(a);
+    }
+
     res.json({
       employee_id: empId,
       generated_at: new Date().toISOString(),
-      total: alertes.length,
-      alertes,
+      total: actives.length,
+      alertes: actives,
+      acquittees,
       alertes_scheduler: schedulerAlerts,
     });
   } catch (err) {
     console.error('[INSERTION] Erreur alertes :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/alertes/:employeeId/ack — Acquitter un TYPE d'alerte
+// (« Vu — me le rappeler le … », phase D écart 1c). Body : { type, jusqu_au }.
+// Journalisé en base (insertion_alert_acks : qui, quand, jusqu'à quand) et
+// partagé entre les CIP — remplace l'acquittement localStorage du navigateur.
+// Rôles : ceux du module (ADMIN/RH/MANAGER — router.use d'index.js).
+// Chemin à 3 segments → non capturé par GET /:employeeId.
+router.post('/alertes/:employeeId/ack', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+  body('type').isString().trim().notEmpty().isLength({ max: 40 }).withMessage("Type d'alerte requis (40 car. max)"),
+  body('jusqu_au').isISO8601().withMessage('jusqu_au invalide (date ISO attendue)'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const until = new Date(req.body.jusqu_au);
+    if (!(until > new Date())) {
+      return res.status(400).json({ error: "jusqu_au doit être une date future (fin de la mise en veille)." });
+    }
+    const emp = await pool.query('SELECT id FROM employees WHERE id = $1', [empId]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    const r = await pool.query(
+      `INSERT INTO insertion_alert_acks (employee_id, alert_type, acked_by, acked_until)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, employee_id, alert_type, acked_by, acked_until, created_at`,
+      [empId, req.body.type.trim(), req.user.id, until.toISOString()]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    console.error('[INSERTION] Erreur alertes ack :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -1388,8 +1495,13 @@ router.get('/cohorte/stats', async (req, res) => {
     const jalonsParams = [];
     let jalonsFilter = '';
     if (mine) { jalonsParams.push(refId); jalonsFilter = ` AND e.cip_referent_user_id = $${jalonsParams.length}`; }
+    // titre / interview_date / ia_preparation_ready (phase D — écart 1a) :
+    // l'agenda affiche le libellé réel de l'entretien, l'heure du rendez-vous
+    // quand elle est posée, et signale qu'une note de préparation IA existe.
     const jalons = await pool.query(`
-      SELECT im.id, im.employee_id, im.milestone_type, im.due_date, im.status,
+      SELECT im.id, im.employee_id, im.milestone_type, im.titre, im.due_date,
+             im.interview_date, im.status,
+             (im.ia_preparation IS NOT NULL) AS ia_preparation_ready,
              e.first_name, e.last_name,
              (im.due_date - CURRENT_DATE) AS days_until
       FROM insertion_milestones im
@@ -1496,10 +1608,6 @@ router.get('/cohorte/stats', async (req, res) => {
         total: totalSorties,
         dynamiques: nbDynamiques,
         autres: nbAutres,
-        // Alias de compatibilité (ancien binaire positive/negative) — le
-        // frontend actuel lit positives/negatives ; retirés en phase C.
-        positives: nbDynamiques,
-        negatives: nbAutres,
         taux_dynamiques: totalSorties > 0 ? Math.round((nbDynamiques / totalSorties) * 100) : null,
         par_classification: parClassification,
         taux_par_classification: tauxParClassification,
@@ -1547,6 +1655,32 @@ router.put('/objectif-sorties', authorize('ADMIN', 'RH'), async (req, res) => {
     res.json({ objectif: num });
   } catch (err) {
     console.error('[INSERTION] Erreur objectif-sorties PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/parametres — Réglages du module lus avec leurs DÉFAUTS
+// (REC-UX-18 : aucune valeur métier en dur côté frontend). Tous rôles du
+// module (lecture seule) ; l'édition passe par la table settings (ADMIN).
+// IMPORTANT: avant /:employeeId.
+router.get('/parametres', async (req, res) => {
+  try {
+    const [echeanceActionJours, rythmeBilansMois, delaiDiagnosticJours, alertePassIaeMois, iaPreparationAuto] = await Promise.all([
+      readInsertionSetting('insertion.echeance_action_defaut_jours'),
+      readInsertionSetting('insertion.rythme_bilans_mois'),
+      readInsertionSetting('insertion.delai_diagnostic_jours'),
+      readInsertionSetting('insertion.alerte_pass_iae_mois'),
+      readInsertionSetting('insertion.ia_preparation_auto'),
+    ]);
+    res.json({
+      echeance_action_defaut_jours: echeanceActionJours,
+      rythme_bilans_mois: rythmeBilansMois,
+      delai_diagnostic_jours: delaiDiagnosticJours,
+      alerte_pass_iae_mois: alertePassIaeMois,
+      ia_preparation_auto: iaPreparationAuto,
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur parametres :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -1700,9 +1834,6 @@ async function gatherAuditKpis(year) {
       total: totalSorties,
       dynamiques: nbDynamiques,
       autres: nbAutres,
-      // Alias de compatibilité (ancien binaire) — retirés en phase C.
-      positives: nbDynamiques,
-      negatives: nbAutres,
       taux_dynamiques: totalSorties > 0 ? Math.round((nbDynamiques / totalSorties) * 100) : null,
       par_classification: parClassification,
       taux_par_classification: tauxParClassification,

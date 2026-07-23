@@ -12,7 +12,14 @@
 //   - CRUD /insertion/objectifs                (sous-objectifs 1 niveau, écriture A/RH)
 //   - GET/POST /insertion/partenaires          (lecture module, écriture A/RH)
 //   - GET  /insertion/actions-overview         (filtres + pagination)
-//   - GET  /insertion/alertes/:employeeId      (alertes consolidées)
+//   - GET  /insertion/alertes/:employeeId      (alertes consolidées + acquittées)
+// Phase D (écarts contractuels 1a-1d + REC-UX-18) :
+//   - GET  /insertion/cohorte/stats            (jalons : titre/interview_date/
+//                                               ia_preparation_ready ; sorties
+//                                               SANS alias positives/negatives)
+//   - PUT  /insertion/diagnostic/:id           (suggestions_freins serveur)
+//   - POST /insertion/alertes/:employeeId/ack  (acquittement journalisé)
+//   - GET  /insertion/parametres               (réglages avec défauts)
 //
 // Auth réelle (JWT sans `tv` → pas de contrôle token_version), DB mockée,
 // activity-logger mocké.
@@ -607,6 +614,238 @@ describe('CONTRAT GET /insertion/alertes/:employeeId (Lot 1)', () => {
   it('salarié inconnu → 404', async () => {
     const res = await get('/api/insertion/alertes/999', 'RH');
     expect(res.status).toBe(404);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// PHASE D — écart 1c : acquittement d'alertes journalisé
+// ───────────────────────────────────────────────────────────────────────────
+describe('CONTRAT POST /insertion/alertes/:employeeId/ack (phase D)', () => {
+  const future = new Date(Date.now() + 7 * 86400000).toISOString();
+
+  it('type manquant → 400 ; jusqu_au non ISO → 400', async () => {
+    expect((await post('/api/insertion/alertes/5/ack', 'RH', { jusqu_au: future })).status).toBe(400);
+    expect((await post('/api/insertion/alertes/5/ack', 'RH', { type: 'cddi_plafond', jusqu_au: 'demain' })).status).toBe(400);
+  });
+
+  it('jusqu_au dans le passé → 400 (message explicite)', async () => {
+    const res = await post('/api/insertion/alertes/5/ack', 'RH', { type: 'cddi_plafond', jusqu_au: '2020-01-01' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/future/i);
+  });
+
+  it('salarié inconnu → 404', async () => {
+    mockQuery.mockImplementation((sql) => {
+      if (/SELECT id FROM employees WHERE id = \$1/.test(String(sql))) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await post('/api/insertion/alertes/999/ack', 'RH', { type: 'cddi_plafond', jusqu_au: future });
+    expect(res.status).toBe(404);
+  });
+
+  it('acquittement OK (MANAGER inclus) → 201 { employee_id, alert_type, acked_by, acked_until }', async () => {
+    const calls = [];
+    mockQuery.mockImplementation((sql, params) => {
+      calls.push({ sql: String(sql), params });
+      const s = String(sql);
+      if (/SELECT id FROM employees WHERE id = \$1/.test(s)) return Promise.resolve({ rows: [{ id: 5 }] });
+      if (/INSERT INTO insertion_alert_acks/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 1, employee_id: params[0], alert_type: params[1], acked_by: params[2], acked_until: params[3], created_at: '2026-07-23T08:00:00Z' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await post('/api/insertion/alertes/5/ack', 'MANAGER', { type: 'pass_iae_a_surveiller', jusqu_au: future });
+    expect(res.status).toBe(201);
+    expect(res.body.employee_id).toBe(5);
+    expect(res.body.alert_type).toBe('pass_iae_a_surveiller');
+    expect(res.body.acked_by).toBe(1); // l'utilisateur du JWT est journalisé
+    expect(typeof res.body.acked_until).toBe('string');
+  });
+});
+
+describe('CONTRAT GET /insertion/alertes/:employeeId — filtrage des acquittées (phase D)', () => {
+  it("une alerte dont le type est acquitté sort d'`alertes` et part dans `acquittees` ; total = actives", async () => {
+    const ackedUntil = new Date(Date.now() + 5 * 86400000).toISOString();
+    mockQuery.mockImplementation((sql) => {
+      const s = String(sql);
+      if (/FROM employees e WHERE e.id = \$1/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 5, first_name: 'A', last_name: 'B', insertion_status: 'en_parcours', insertion_start_date: null, pass_iae_number: null, pass_iae_end: null, parcours_num: 1 }] });
+      }
+      if (/jours_retard/.test(s)) return Promise.resolve({ rows: [{ id: 1, milestone_type: 'bilan_intermediaire', titre: 'Bilan n° 1', due_date: '2026-06-01', jours_retard: 45 }] });
+      if (/FROM employee_contracts/.test(s)) {
+        return Promise.resolve({ rows: [{ contract_type: 'CDDI', start_date: '2024-08-01', end_date: '2026-08-01' }] });
+      }
+      if (/FROM insertion_alert_acks/.test(s)) {
+        return Promise.resolve({ rows: [{ alert_type: 'cddi_plafond', acked_until: ackedUntil }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await get('/api/insertion/alertes/5', 'RH');
+    expect(res.status).toBe(200);
+    const typesActifs = res.body.alertes.map((a) => a.type);
+    expect(typesActifs).toContain('jalon_en_retard');       // non acquittée → active
+    expect(typesActifs).not.toContain('cddi_plafond');       // acquittée → retirée
+    expect(res.body.acquittees).toHaveLength(1);
+    expect(res.body.acquittees[0].type).toBe('cddi_plafond');
+    expect(res.body.acquittees[0].acked_until).toBe(ackedUntil);
+    expect(res.body.total).toBe(res.body.alertes.length);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// PHASE D — écarts 1a/1d : cohorte/stats enrichie, alias retirés
+// ───────────────────────────────────────────────────────────────────────────
+describe('CONTRAT GET /insertion/cohorte/stats (phase D)', () => {
+  const wire = (sql) => {
+    const s = String(sql);
+    if (/im\.status <> 'realise'/.test(s)) {
+      return Promise.resolve({ rows: [
+        { id: 1, employee_id: 5, milestone_type: 'bilan_intermediaire', titre: 'Bilan n° 2', due_date: '2026-07-23', interview_date: '2026-07-23T14:30:00Z', status: 'planifie', ia_preparation_ready: true, first_name: 'A', last_name: 'B', days_until: 0 },
+        { id: 2, employee_id: 6, milestone_type: 'renouvellement', titre: null, due_date: '2026-07-01', interview_date: null, status: 'a_planifier', ia_preparation_ready: false, first_name: 'C', last_name: 'D', days_until: -22 },
+      ] });
+    }
+    if (/milestone_type = 'bilan_sortie'/.test(s)) {
+      return Promise.resolve({ rows: [
+        { sortie_classification: 'emploi_durable', sortie_type: 'CDI', n: 2 },
+        { sortie_classification: 'autre', sortie_type: null, n: 1 },
+      ] });
+    }
+    return Promise.resolve({ rows: [] });
+  };
+
+  it('jalons (agenda/retards) portent titre, interview_date et ia_preparation_ready', async () => {
+    mockQuery.mockImplementation(wire);
+    const res = await get('/api/insertion/cohorte/stats', 'RH');
+    expect(res.status).toBe(200);
+    const auj = res.body.agenda_30j.find((j) => j.id === 1);
+    expect(auj.titre).toBe('Bilan n° 2');
+    expect(auj.interview_date).toBe('2026-07-23T14:30:00Z');
+    expect(auj.ia_preparation_ready).toBe(true);
+    const retard = res.body.jalons_en_retard.find((j) => j.id === 2);
+    expect(retard.ia_preparation_ready).toBe(false);
+    expect('titre' in retard).toBe(true);
+  });
+
+  it('sorties : dynamiques/autres SANS les alias positives/negatives (retirés)', async () => {
+    mockQuery.mockImplementation(wire);
+    const res = await get('/api/insertion/cohorte/stats', 'RH');
+    expect(res.status).toBe(200);
+    expect(res.body.sorties.total).toBe(3);
+    expect(res.body.sorties.dynamiques).toBe(2);
+    expect(res.body.sorties.autres).toBe(1);
+    expect(res.body.sorties.taux_dynamiques).toBe(67);
+    expect('positives' in res.body.sorties).toBe(false);
+    expect('negatives' in res.body.sorties).toBe(false);
+  });
+
+  it("GET /insertion/audit : alias positives/negatives également retirés", async () => {
+    mockQuery.mockImplementation(wire);
+    const res = await get('/api/insertion/audit?year=2026', 'RH');
+    expect(res.status).toBe(200);
+    expect(res.body.sorties.dynamiques).toBe(2);
+    expect(res.body.sorties.autres).toBe(1);
+    expect('positives' in res.body.sorties).toBe(false);
+    expect('negatives' in res.body.sorties).toBe(false);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// PHASE D — écart 1b : suggestions de freins calculées côté serveur
+// ───────────────────────────────────────────────────────────────────────────
+describe('CONTRAT PUT /insertion/diagnostic/:id — suggestions_freins (phase D)', () => {
+  const wireUpsert = () => {
+    mockQuery.mockImplementation((sql, params) => {
+      const s = String(sql);
+      if (/SELECT COALESCE\(parcours_num, 1\) AS pn FROM employees/.test(s)) return Promise.resolve({ rows: [{ pn: 1 }] });
+      if (/INSERT INTO insertion_diagnostics/.test(s)) {
+        const cols = s.match(/INSERT INTO insertion_diagnostics \(([^)]+)\)/)[1].split(',').map((c) => c.trim());
+        const row = { id: 1 };
+        cols.forEach((c, i) => { row[c] = params[i]; });
+        return Promise.resolve({ rows: [row] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+  };
+
+  it('règles documentées : sans_abri→logement 5, difficultés+crédits→finances 4, ni permis/véhicule/TC→mobilité 4, A1→linguistique 4, contre-indications→santé 3', async () => {
+    wireUpsert();
+    const res = await put('/api/insertion/diagnostic/5', 'RH', {
+      logement_statut: 'sans_abri',
+      difficultes_financieres: true,
+      credits_en_cours: true,
+      permis_b_statut: 'non',
+      vehicule: false,
+      moyen_transport: ['a_pied'],
+      cecrl_niveau: 'A1',
+      contre_indications: true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.suggestions_freins).toEqual(expect.objectContaining({
+      logement: 5, finances: 4, mobilite: 4, linguistique: 4, sante: 3,
+    }));
+    expect('judiciaire' in res.body.suggestions_freins).toBe(false); // jamais de suggestion art. 10
+  });
+
+  it('transports en commun disponibles → mobilité suggérée 3 (au lieu de 4)', async () => {
+    wireUpsert();
+    const res = await put('/api/insertion/diagnostic/5', 'RH', {
+      permis_b_statut: 'non', vehicule: false, moyen_transport: ['transports_commun'],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.suggestions_freins.mobilite).toBe(3);
+  });
+
+  it('situation stable → suggestions basses ; aucune réponse → objet vide', async () => {
+    wireUpsert();
+    const ok = await put('/api/insertion/diagnostic/5', 'RH', {
+      logement_statut: 'locataire_social', difficultes_financieres: false,
+      permis_b_statut: 'oui', vehicule: true, cecrl_niveau: 'C1',
+    });
+    expect(ok.body.suggestions_freins).toEqual(expect.objectContaining({ logement: 1, finances: 1, mobilite: 1, linguistique: 1 }));
+
+    wireUpsert();
+    const vide = await put('/api/insertion/diagnostic/5', 'RH', { statut_saisie: 'en_cours' });
+    expect(vide.status).toBe(200);
+    expect(vide.body.suggestions_freins).toEqual({});
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// PHASE D — REC-UX-18 : GET /insertion/parametres
+// ───────────────────────────────────────────────────────────────────────────
+describe('CONTRAT GET /insertion/parametres (REC-UX-18)', () => {
+  it('sans réglage en base → défauts documentés (14 j / 2 mois / 30 j / 7 mois / IA off)', async () => {
+    mockQuery.mockResolvedValue({ rows: [] });
+    const res = await get('/api/insertion/parametres', 'MANAGER'); // tous rôles du module
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      echeance_action_defaut_jours: 14,
+      rythme_bilans_mois: 2,
+      delai_diagnostic_jours: 30,
+      alerte_pass_iae_mois: 7,
+      ia_preparation_auto: false,
+    });
+  });
+
+  it('réglages présents en settings → valeurs lues (nombre parsé)', async () => {
+    mockQuery.mockImplementation((sql, params) => {
+      if (/SELECT value FROM settings WHERE key = \$1/.test(String(sql))) {
+        const byKey = {
+          'insertion.echeance_action_defaut_jours': '21',
+          'insertion.rythme_bilans_mois': '3',
+          'insertion.ia_preparation_auto': 'true',
+        };
+        const v = byKey[params[0]];
+        return Promise.resolve({ rows: v ? [{ value: v }] : [] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await get('/api/insertion/parametres', 'RH');
+    expect(res.status).toBe(200);
+    expect(res.body.echeance_action_defaut_jours).toBe(21);
+    expect(res.body.rythme_bilans_mois).toBe(3);
+    expect(res.body.ia_preparation_auto).toBe(true);
+    expect(res.body.delai_diagnostic_jours).toBe(30); // défaut conservé
   });
 });
 

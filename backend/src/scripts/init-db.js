@@ -3590,6 +3590,23 @@ async function initDatabase() {
       END $$;
     `);
 
+    // (n — phase D) Acquittements d'alertes de la fiche salarié (« Vu — me le
+    // rappeler dans N jours ») : journalisés en base au lieu du localStorage
+    // navigateur — partagés entre CIP et audités. Une ligne = un type d'alerte
+    // mis en veille jusqu'à acked_until pour un salarié ; GET /insertion/
+    // alertes/:employeeId filtre les acquittements non expirés.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_alert_acks (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        alert_type VARCHAR(40) NOT NULL,
+        acked_by INTEGER REFERENCES users(id),
+        acked_until TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_alert_acks_emp ON insertion_alert_acks(employee_id, alert_type, acked_until DESC);');
+
     console.log('[INIT-DB] Migration extension entretiens 2026-07 (PR1) ✓');
 
     console.log('[INIT-DB] Module Parcours Insertion ✓');
