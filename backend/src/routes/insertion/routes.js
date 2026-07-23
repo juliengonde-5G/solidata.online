@@ -1657,7 +1657,11 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
   body('date_debut').optional().isISO8601().withMessage('date_debut invalide'),
   body('date_fin').optional().isISO8601().withMessage('date_fin invalide'),
   body('autres_jours_connus').optional({ nullable: true }).isInt({ min: 0, max: 366 }).withMessage('autres_jours_connus invalide (0-366)'),
+  body('tuteur').optional({ nullable: true }).isLength({ max: 120 }).withMessage('tuteur trop long (120 max)'),
+  body('convention_ref').optional({ nullable: true }).isLength({ max: 60 }).withMessage('convention_ref trop longue (60 max)'),
+  body('saisie_outil_officiel').optional({ nullable: true }).isBoolean().withMessage('saisie_outil_officiel invalide'),
   body('force').optional().isBoolean().withMessage('force invalide'),
+  body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
 ], validate, async (req, res) => {
   try {
     const d = req.body;
@@ -2197,8 +2201,16 @@ router.get('/cibles', async (req, res) => {
 });
 
 // PUT /api/insertion/cibles — édition (ADMIN/RH). Champs présents uniquement ;
-// null / '' efface (retour à « objectif non paramétré »).
-router.put('/cibles', authorize('ADMIN', 'RH'), async (req, res) => {
+// null / '' efface (retour à « objectif non paramétré »). Express-validator en
+// première ligne (bornes), garde applicative conservée en défense (types).
+router.put('/cibles', authorize('ADMIN', 'RH'), [
+  body('cible_etp_conventionnes').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }).withMessage('cible_etp_conventionnes : nombre positif attendu (ou null pour effacer)'),
+  body('cible_taux_dynamiques').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100 }).withMessage('cible_taux_dynamiques : pourcentage 0-100 attendu'),
+  body('cible_taux_durable').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100 }).withMessage('cible_taux_durable : pourcentage 0-100 attendu'),
+  body('cible_taux_transition').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100 }).withMessage('cible_taux_transition : pourcentage 0-100 attendu'),
+  body('cible_taux_positive').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100 }).withMessage('cible_taux_positive : pourcentage 0-100 attendu'),
+  body('effectif_reference').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }).withMessage('effectif_reference : nombre positif attendu'),
+], validate, async (req, res) => {
   try {
     const d = req.body || {};
     const updates = [];
@@ -2595,6 +2607,117 @@ async function gatherAuditKpis(year) {
   for (const c of SORTIE_CLASSES) {
     tauxParClassification[c] = totalSorties > 0 ? Math.round(((parClassification[c] || 0) / totalSorties) * 100) : null;
   }
+  const tauxDynamiques = totalSorties > 0 ? Math.round((nbDynamiques / totalSorties) * 100) : null;
+
+  // ── Extension PR 2 (EXG-10/14/24/47, §6bis-2) ──────────────────────────────
+
+  // Typologies des publics — parcours COURANT (en_parcours actifs) : RQTH
+  // (booléen structuré du diagnostic, repli sur le texte disability_status de
+  // l'import paie), ressources perçues, niveaux de formation (nomenclature
+  // officielle du diagnostic), tranches d'âge NON nominatives (ageBracket de
+  // pii-pseudonymize — jamais la date de naissance en restitution).
+  const typoRows = await soft('typologies', `
+    SELECT e.birth_date, e.disability_status, d.rqth, d.ressources, d.niveau_formation
+    FROM employees e
+    LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
+      AND COALESCE(d.parcours_num, 1) = COALESCE(e.parcours_num, 1)
+    WHERE e.insertion_status = 'en_parcours' AND e.is_active = true`);
+  const typologies = { effectif: typoRows.length, rqth: 0, ressources: {}, niveaux_formation: {}, tranches_age: {} };
+  for (const r of typoRows) {
+    const rqth = r.rqth === true
+      || (r.rqth == null && r.disability_status != null && String(r.disability_status).trim() !== '');
+    if (rqth) typologies.rqth += 1;
+    if (Array.isArray(r.ressources)) {
+      for (const src of r.ressources) {
+        if (src) typologies.ressources[src] = (typologies.ressources[src] || 0) + 1;
+      }
+    }
+    if (r.niveau_formation) {
+      typologies.niveaux_formation[r.niveau_formation] = (typologies.niveaux_formation[r.niveau_formation] || 0) + 1;
+    }
+    const tranche = ageBracket(r.birth_date);
+    if (tranche) typologies.tranches_age[tranche] = (typologies.tranches_age[tranche] || 0) + 1;
+  }
+
+  // Délai moyen de réalisation du diagnostic d'accueil (jours entre l'entrée en
+  // parcours et la réalisation) — diagnostics réalisés dans l'année.
+  const delaiRows = await soft('delai_diagnostic', `
+    SELECT AVG(im.completed_date - e.insertion_start_date)::numeric AS delai_jours,
+           COUNT(*)::int AS nb
+    FROM insertion_milestones im
+    JOIN employees e ON e.id = im.employee_id
+    WHERE im.milestone_type = 'diagnostic_accueil' AND im.status = 'realise'
+      AND im.completed_date IS NOT NULL AND e.insertion_start_date IS NOT NULL
+      AND im.completed_date >= e.insertion_start_date
+      AND im.completed_date BETWEEN $1 AND $2`, [`${year}-01-01`, `${year}-12-31`]);
+  const delaiMoyenDiagnostic = delaiRows[0] && delaiRows[0].delai_jours != null
+    ? Math.round(Number(delaiRows[0].delai_jours)) : null;
+
+  // ETP réalisés APPROCHÉS — contrôle ERP uniquement (EXG-10) : somme des
+  // weekly_hours/35 des CDDI actifs (contrat courant, repli fiche). La valeur
+  // OFFICIELLE reste celle des états mensuels de présence ASP (base 1 820 h).
+  const etpRows = await soft('etp_realises', `
+    SELECT COALESCE(SUM(COALESCE(ec.weekly_hours, e.weekly_hours, 35)::numeric / 35), 0) AS etp,
+           COUNT(*)::int AS nb
+    FROM employees e
+    LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+    WHERE e.is_active = true
+      AND UPPER(COALESCE(ec.contract_type, e.contract_type, '')) = 'CDDI'`);
+  const etpRealisesApprox = {
+    valeur: etpRows[0] ? Math.round(Number(etpRows[0].etp) * 100) / 100 : null,
+    nb_cddi_actifs: etpRows[0] ? etpRows[0].nb : 0,
+    source: 'controle_erp',
+    note: "Approximation ERP (somme heures hebdo / 35 des CDDI actifs) — saisie officielle : ASP (états mensuels de présence).",
+  };
+
+  // Compteurs PMSMP de l'année (EXG-05/10) : conventions démarrées dans l'année
+  // + volume de jours calendaires.
+  const pmsmpRows = await soft('pmsmp_annee', `
+    SELECT COUNT(*)::int AS nb,
+           COALESCE(SUM(p.date_fin - p.date_debut + 1), 0)::int AS jours,
+           COUNT(DISTINCT p.employee_id)::int AS nb_salaries
+    FROM insertion_pmsmp p
+    WHERE p.date_debut BETWEEN $1 AND $2`, [`${year}-01-01`, `${year}-12-31`]);
+  const pmsmp = pmsmpRows[0]
+    ? { nb: pmsmpRows[0].nb, jours: pmsmpRows[0].jours, nb_salaries: pmsmpRows[0].nb_salaries }
+    : { nb: 0, jours: 0, nb_salaries: 0 };
+
+  // Satisfaction de sortie de l'année (EXG-09) — agrégat anonyme.
+  const satRows = await soft('satisfaction_annee', `
+    SELECT COUNT(*)::int AS nb,
+           ROUND(AVG(satisfaction_globale)::numeric, 2) AS moyenne
+    FROM insertion_satisfaction_sortie
+    WHERE EXTRACT(YEAR FROM COALESCE(date_reponse, created_at::date)) = $1`, [year]);
+  const satisfaction = {
+    nb_reponses: satRows[0] ? satRows[0].nb : 0,
+    moyenne_globale: satRows[0] && satRows[0].moyenne != null ? Number(satRows[0].moyenne) : null,
+  };
+
+  // Bloc conventionnel (EXG-47/D12) : taux réalisés vs cibles paramétrées.
+  // Cible absente → null = « objectif non paramétré » (JAMAIS de valeur
+  // inventée). Dénominateur documenté (RES-09) : sorties CONSTATÉES de l'année
+  // = bilans de sortie réalisés portant une classification (année civile).
+  const cibles = await readCibles();
+  const tauxRealises = {
+    dynamiques: tauxDynamiques,
+    emploi_durable: tauxParClassification.emploi_durable,
+    emploi_transition: tauxParClassification.emploi_transition,
+    sortie_positive: tauxParClassification.sortie_positive,
+  };
+  const ecart = (realise, cible) => (realise != null && cible != null
+    ? Math.round((realise - cible) * 10) / 10 : null);
+  const conventionnel = {
+    cibles,
+    taux_realises: tauxRealises,
+    ecarts: {
+      dynamiques: ecart(tauxRealises.dynamiques, cibles.cible_taux_dynamiques),
+      emploi_durable: ecart(tauxRealises.emploi_durable, cibles.cible_taux_durable),
+      emploi_transition: ecart(tauxRealises.emploi_transition, cibles.cible_taux_transition),
+      sortie_positive: ecart(tauxRealises.sortie_positive, cibles.cible_taux_positive),
+      etp: ecart(etpRealisesApprox.valeur, cibles.cible_etp_conventionnes),
+    },
+    methode: "Taux calculés sur les sorties constatées de l'année civile (dénominateur = bilans de sortie réalisés portant une classification — changement de méthode 2026). Cible null = objectif non paramétré.",
+  };
 
   return {
     annee: year,
@@ -2608,11 +2731,22 @@ async function gatherAuditKpis(year) {
       total: totalSorties,
       dynamiques: nbDynamiques,
       autres: nbAutres,
-      taux_dynamiques: totalSorties > 0 ? Math.round((nbDynamiques / totalSorties) * 100) : null,
+      taux_dynamiques: tauxDynamiques,
       par_classification: parClassification,
       taux_par_classification: tauxParClassification,
       par_type: parType,
     },
+    // ── Blocs PR 2 (EXG-10/14/24/47) ──
+    conventionnel,
+    typologies,
+    delai_moyen_diagnostic_jours: delaiMoyenDiagnostic,
+    etp_realises_approx: etpRealisesApprox,
+    pmsmp,
+    satisfaction,
+    // Convergence (CVG, §6bis-2) : bloc réservé — le paramétrage précis attend
+    // la trame de reporting CVG demandée à la direction ; les indicateurs
+    // génériques (freins, sorties, actions) sont déjà couverts ci-dessus.
+    cvg: { statut: 'trame_en_attente', note: 'Indicateurs CVG à paramétrer à réception de la trame de reporting Convergence (décision direction du 23/07/2026).' },
   };
 }
 
@@ -2835,6 +2969,27 @@ router.get('/:employeeId', async (req, res) => {
       objectifs = objRes.rows;
     } catch (err) { /* table might not exist yet */ }
 
+    // 9ter. PMSMP + satisfaction de sortie (PR 2 — EXG-05/09, plan 05 §2.1) :
+    // agrégées à la fiche (onglet Synthèse) ; le détail/CRUD vit sur
+    // /pmsmp/:employeeId et /satisfaction/:employeeId.
+    let pmsmp = [];
+    try {
+      const pmRes = await pool.query(
+        'SELECT * FROM insertion_pmsmp WHERE employee_id = $1 ORDER BY date_debut DESC, id DESC', [empId]
+      );
+      pmsmp = maskInsertionRows(
+        pmRes.rows.map((r) => ({ ...r, jours: pmsmpDays(r.date_debut, r.date_fin) })), baseRole
+      );
+    } catch (err) { /* table might not exist yet */ }
+    let satisfaction = null;
+    try {
+      const stRes = await pool.query(
+        'SELECT * FROM insertion_satisfaction_sortie WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2',
+        [empId, employee.parcours_num || 1]
+      );
+      satisfaction = stRes.rows[0] ? maskInsertionRow(stRes.rows[0], baseRole) : null;
+    } catch (err) { /* table might not exist yet */ }
+
     // 10. Analyse complete (le diagnostic est déjà masqué pour un MANAGER →
     // l'axe judiciaire est absent de ses freins_sociaux)
     const analysis = analyzeInsertion(
@@ -2878,6 +3033,8 @@ router.get('/:employeeId', async (req, res) => {
       milestones,
       action_plans: actionPlans,
       objectifs,
+      pmsmp,
+      satisfaction,
       timeline,
       ...analysis,
     });
@@ -3011,3 +3168,8 @@ router.get('/ia/cohorte', authorize('ADMIN', 'RH'), async (req, res) => {
 });
 
 module.exports = router;
+// Réutilisé par routes/exports.js (GET /api/exports/insertion-synthese —
+// EXG-14) : mêmes agrégats NON nominatifs que GET /insertion/audit, sans
+// dupliquer ~150 lignes de SQL. Un router Express est une fonction : on peut
+// lui attacher des propriétés sans changer son contrat.
+module.exports.gatherAuditKpis = gatherAuditKpis;

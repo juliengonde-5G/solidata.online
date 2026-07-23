@@ -767,6 +767,37 @@ router.post('/:id/contracts', authorize('ADMIN', 'RH'), [
     const { contract_type, duration_months, start_date, end_date, weekly_hours, team_id, position_id } = req.body;
     const empId = req.params.id;
 
+    // EXG-03 (PR 2) — garde de dérogation CDDI sur la voie MANUELLE (RES-08 :
+    // l'import paie signale sans bloquer, la saisie manuelle BLOQUE) : un
+    // contrat CDDI portant le cumul projeté au-delà du plafond légal de
+    // 24 mois (L.5132-15-1) exige un motif de dérogation déjà saisi sur la
+    // fiche (formation en cours, 50 ans et plus, RQTH, CDI inclusion).
+    if (String(contract_type || '').toUpperCase() === 'CDDI') {
+      try {
+        const [empRow, contractRows] = await Promise.all([
+          pool.query('SELECT cddi_derogation_motif FROM employees WHERE id = $1', [empId]),
+          pool.query('SELECT contract_type, start_date, end_date FROM employee_contracts WHERE employee_id = $1', [empId]),
+        ]);
+        const projete = computeCddiCumulativeMonths([
+          ...contractRows.rows,
+          { contract_type: 'CDDI', start_date, end_date: end_date || null },
+        ]);
+        const motif = empRow.rows[0] ? empRow.rows[0].cddi_derogation_motif : null;
+        if (projete.months_total > 24 && !motif) {
+          return res.status(409).json({
+            error: `Cumul CDDI projeté de ${projete.months_total} mois au-delà du plafond légal de 24 mois (L.5132-15-1).`,
+            code: 'cddi_derogation_requise',
+            months_total: projete.months_total,
+            hint: 'Saisir d’abord le motif de dérogation (formation en cours, 50 ans et plus, RQTH, CDI inclusion) et la date de décision sur la fiche du salarié, puis réenregistrer le contrat.',
+          });
+        }
+      } catch (e) {
+        // Base ancienne sans la colonne cddi_derogation_motif : la garde
+        // dégrade (la création passe), le contrôle vit alors dans les alertes.
+        console.warn('[EMPLOYEES] Garde dérogation CDDI ignorée :', e.message);
+      }
+    }
+
     // Déterminer l'origine : embauche si c'est le premier contrat
     const existing = await pool.query('SELECT id FROM employee_contracts WHERE employee_id = $1', [empId]);
     const origin = existing.rows.length === 0 ? 'embauche' : 'renouvellement';
@@ -862,14 +893,15 @@ router.post('/import/csv', authorize('ADMIN', 'RH'), async (req, res) => {
     }
 
     await client.query('BEGIN');
-    const { created, updated, errors } = await upsertCollaborators(client, collaborators, { userId: req.user.id });
+    const { created, updated, errors, warnings } = await upsertCollaborators(client, collaborators, { userId: req.user.id });
     await client.query('COMMIT');
 
     res.json({
-      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''}`,
+      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''}${warnings && warnings.length ? `, ${warnings.length} avertissement(s)` : ''}`,
       created,
       updated,
       errors,
+      warnings: warnings || [],
       total: created.length + updated.length + errors.length,
     });
   } catch (err) {
@@ -899,14 +931,15 @@ router.post('/import/xlsx', authorize('ADMIN', 'RH'), runUpload(uploadSpreadshee
     }
 
     await client.query('BEGIN');
-    const { created, updated, errors } = await upsertCollaborators(client, collaborators, { userId: req.user.id });
+    const { created, updated, errors, warnings } = await upsertCollaborators(client, collaborators, { userId: req.user.id });
     await client.query('COMMIT');
 
     res.json({
-      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''} — ${collaborators.length} ligne(s) lue(s)`,
+      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''}${warnings && warnings.length ? `, ${warnings.length} avertissement(s)` : ''} — ${collaborators.length} ligne(s) lue(s)`,
       created,
       updated,
       errors,
+      warnings: warnings || [],
       total: created.length + updated.length + errors.length,
     });
   } catch (err) {

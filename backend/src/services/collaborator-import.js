@@ -25,7 +25,7 @@
  */
 
 const ExcelJS = require('exceljs');
-const { resyncMilestones, generateMilestones } = require('../routes/insertion/engine');
+const { resyncMilestones, generateMilestones, computeCddiCumulativeMonths } = require('../routes/insertion/engine');
 
 // ── Référentiels de mapping ────────────────────────────────────────────────
 
@@ -365,16 +365,64 @@ async function parseWorkbookBuffer(buffer) {
 // ── Upsert idempotent en base ──────────────────────────────────────────────
 
 /**
+ * Garde de dérogation CDDI à l'import (EXG-03 / RES-08, PR 2) — NON bloquante.
+ *
+ * La voie d'import paie ne doit JAMAIS échouer sur un dépassement du plafond
+ * légal de 24 mois (bloquer casserait la chaîne RH — réserve auditeur RES-08) :
+ * on signale un AVERTISSEMENT « dérogation à régulariser » dans le canal de
+ * retour de l'import quand le cumul CDDI dépasse 24 mois SANS motif de
+ * dérogation saisi (employees.cddi_derogation_motif — L.5132-15-1 : formation
+ * en cours, 50 ans et plus, RQTH, CDI inclusion). La saisie MANUELLE d'un
+ * contrat (POST /employees/:id/contracts) reste, elle, bloquante (409).
+ *
+ * Savepoint dédié : une base ancienne sans la colonne cddi_derogation_motif ne
+ * doit ni casser l'import ni avorter la transaction.
+ */
+async function checkCddiDerogationWarning(db, employeeId, label, warnings) {
+  await db.query('SAVEPOINT cddi_warn_sp');
+  try {
+    const r = await db.query(
+      `SELECT e.cddi_derogation_motif,
+              (SELECT json_agg(json_build_object(
+                 'contract_type', ec.contract_type,
+                 'start_date', ec.start_date,
+                 'end_date', ec.end_date))
+               FROM employee_contracts ec WHERE ec.employee_id = e.id) AS contrats
+       FROM employees e WHERE e.id = $1`,
+      [employeeId]
+    );
+    await db.query('RELEASE SAVEPOINT cddi_warn_sp');
+    const row = r.rows[0];
+    if (!row) return;
+    const cumul = computeCddiCumulativeMonths(row.contrats || []);
+    if (cumul.months_total > 24 && !row.cddi_derogation_motif) {
+      warnings.push({
+        collaborator: label,
+        employee_id: employeeId,
+        code: 'cddi_derogation_requise',
+        months_total: cumul.months_total,
+        warning: `Cumul CDDI ${cumul.months_total} mois > plafond légal de 24 mois (L.5132-15-1) sans motif de dérogation — import NON bloqué : régulariser sur la fiche (motif + date de décision).`,
+      });
+    }
+  } catch (e) {
+    try { await db.query('ROLLBACK TO SAVEPOINT cddi_warn_sp'); } catch (_) { /* tx close */ }
+    console.warn('[IMPORT] garde dérogation CDDI ignorée :', e.message);
+  }
+}
+
+/**
  * Applique une liste de collaborateurs normalisés.
  * @param {import('pg').PoolClient|import('pg').Pool} db  client OU pool
  * @param {Array<object>} collaborators
  * @param {{ userId?: number }} opts
- * @returns {{ created: [], updated: [], errors: [] }}
+ * @returns {{ created: [], updated: [], errors: [], warnings: [] }}
+ *   warnings = signalements non bloquants (ex. dérogation CDDI à régulariser)
  */
 async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
   const created = [];
   const updated = [];
   const errors = [];
+  const warnings = [];
 
   // Cache des équipes (type → id)
   const teamRows = await db.query('SELECT id, type FROM teams');
@@ -485,6 +533,11 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
           try { await db.query('ROLLBACK TO SAVEPOINT resync_sp'); } catch (_) { /* tx close */ }
           console.warn('[IMPORT] resyncMilestones ignoré :', e.message);
         }
+        // EXG-03 / RES-08 : signaler (sans bloquer) un cumul CDDI > 24 mois
+        // sans motif de dérogation saisi sur la fiche.
+        if (String(contractType).toUpperCase() === 'CDDI') {
+          await checkCddiDerogationWarning(db, existing.id, `${c.first_name} ${c.last_name}`, warnings);
+        }
         updated.push({ id: existing.id, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
       } else {
         // ── INSERT nouveau collaborateur ──
@@ -540,6 +593,11 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
             console.warn('[IMPORT] generateMilestones ignoré :', e.message);
           }
         }
+        // EXG-03 / RES-08 : même signalement sur une fiche créée (cas d'un
+        // historique de contrats CDDI repris par l'export paie).
+        if (String(contractType).toUpperCase() === 'CDDI') {
+          await checkCddiDerogationWarning(db, newId, `${c.first_name} ${c.last_name}`, warnings);
+        }
         created.push({ id: newId, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
       }
       await db.query('RELEASE SAVEPOINT collab_sp');
@@ -563,7 +621,7 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
     `);
   } catch (err) { /* colonne éventuellement absente sur ancienne base — non bloquant */ }
 
-  return { created, updated, errors };
+  return { created, updated, errors, warnings };
 }
 
 /**
