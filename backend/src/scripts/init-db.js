@@ -3121,15 +3121,450 @@ async function initDatabase() {
       ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS sortie_formation TEXT;
       ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ai_recommendations JSONB;
     `);
-    // Anti-doublon (employee_id, milestone_type) requis pour les ON CONFLICT du
-    // module (POST /milestones, generateMilestones). Le CREATE TABLE porte déjà
-    // UNIQUE(employee_id, milestone_type) ; cet index garantit la clé sur les
-    // bases anciennes qui en seraient dépourvues. Idempotent.
+    // NB : l'ancien anti-doublon (employee_id, milestone_type) — DELETE des
+    // doublons + index unique idx_milestones_emp_type_unique — est RETIRÉ ici :
+    // le modèle « entretiens » (migration ci-dessous) autorise volontairement
+    // N occurrences d'un même type (bilans intermédiaires, renouvellements,
+    // suivis post-sortie). Le DELETE aurait détruit ces occurrences légitimes
+    // à chaque démarrage. L'unicité résiduelle (un diagnostic d'accueil et un
+    // bilan de sortie par salarié ET par parcours) est garantie par les index
+    // uniques PARTIELS créés ci-dessous.
+
+    // ══════════════════════════════════════════════════════════════
+    // -- Migration extension entretiens 2026-07 (PR1) --
+    // insertion_milestones devient la table des ENTRETIENS du parcours
+    // (types requalifiés + occurrences multiples + n° de parcours), le
+    // diagnostic est versionné par parcours, et 5 tables satellites sont
+    // créées (objectifs, partenaires, PMSMP, satisfaction de sortie,
+    // historique probant des entretiens). Tout est idempotent (ADD COLUMN
+    // IF NOT EXISTS, DO blocks avec scan pg_constraint — pattern users.role,
+    // CREATE TABLE IF NOT EXISTS, seeds gardés).
+    // Réf. : rapports/insertion-2026-07-22/05-plan-codage.md §1 + §6bis.
+    // ══════════════════════════════════════════════════════════════
+
+    // (a) Nouvelles colonnes insertion_milestones (modèle entretien élargi).
+    // Les 2 nouveaux freins (logement / judiciaire) : SANS défaut, CHECK 1-5
+    // porté par l'ADD COLUMN (appliqué uniquement si la colonne vient d'être
+    // créée — colonnes neuves, aucune ancienne valeur à rejeter).
     await client.query(`
-      DELETE FROM insertion_milestones a USING insertion_milestones b
-      WHERE a.id < b.id AND a.employee_id = b.employee_id AND a.milestone_type = b.milestone_type
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS titre VARCHAR(120);
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS parcours_num SMALLINT NOT NULL DEFAULT 1;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS previous_milestone_id INTEGER REFERENCES insertion_milestones(id) ON DELETE SET NULL;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS previous_review JSONB;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS validations JSONB;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ia_preparation JSONB;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS ia_preparation_at TIMESTAMP;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS contract_id INTEGER REFERENCES employee_contracts(id) ON DELETE SET NULL;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS renouvellement_form JSONB;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS renouvellement_avis VARCHAR(30) CHECK (renouvellement_avis IN ('favorable', 'favorable_reserves', 'defavorable'));
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS renouvellement_duree_mois SMALLINT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS sortie_documents JSONB;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS post_sortie_situation VARCHAR(30) CHECK (post_sortie_situation IN ('emploi_durable', 'emploi_transition', 'formation', 'recherche_emploi', 'autre', 'injoignable'));
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS post_sortie_commentaire TEXT;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS remise_salarie JSONB;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS fse_sortie JSONB;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS locked_at TIMESTAMP;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS frein_logement INTEGER CHECK (frein_logement BETWEEN 1 AND 5);
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS frein_judiciaire INTEGER CHECK (frein_judiciaire BETWEEN 1 AND 5);
     `);
-    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_milestones_emp_type_unique ON insertion_milestones(employee_id, milestone_type)`);
+
+    // (b+c+d) Requalification de milestone_type (5 libellés français figés →
+    // 5 types techniques) + fin de l'unicité (employee_id, milestone_type).
+    // ORDRE CRITIQUE (prouvé sur base legacy peuplée) :
+    //   1. DROP de l'ancien CHECK (nom auto, scan pg_constraint) — sinon les
+    //      UPDATE de migration seraient rejetés par la contrainte en place ;
+    //   2. DROP de la contrainte UNIQUE(employee_id, milestone_type) et de
+    //      l'index idx_milestones_emp_type_unique AVANT les UPDATE : le
+    //      renommage FUSIONNE 'Bilan M+3'/'M+6'/'M+10' en un même type
+    //      'bilan_intermediaire' → plusieurs lignes (employé, type) identiques,
+    //      la clé encore en place ferait échouer l'UPDATE (duplicate key) ;
+    //   3. UPDATE de données idempotents (backfill titre AVANT le renommage,
+    //      pour conserver le libellé d'origine) ;
+    //   4. ADD du nouveau CHECK (gardé par existence) ;
+    //   5. index uniques PARTIELS de remplacement (un diagnostic d'accueil et
+    //      un bilan de sortie par salarié ET par parcours — bilans
+    //      intermédiaires / renouvellements / post-sortie multiples) + index
+    //      de consultation.
+    // ⚠ Phase B : reprendre les ON CONFLICT (employee_id, milestone_type) de
+    // routes.js:267 et engine.js:1551 (la clé n'existe plus).
+    // NB filtre du CHECK : marqueur « bilan_intermediaire » choisi sans
+    // collision LIKE — dans '%diagnostic_accueil%' le « _ » est un joker
+    // 1-caractère qui matcherait AUSSI l'ancien libellé « Diagnostic accueil »
+    // (espace), alors que « bilan_intermediaire » n'a aucun équivalent dans
+    // l'ancienne contrainte. Le nouveau CHECK est ainsi épargné aux exécutions
+    // suivantes (aucun drop/re-add inutile).
+    await client.query(`
+      DO $$
+      DECLARE cname text;
+      BEGIN
+        FOR cname IN
+          SELECT conname FROM pg_constraint
+          WHERE conrelid = 'insertion_milestones'::regclass AND contype = 'c'
+            AND pg_get_constraintdef(oid) ILIKE '%milestone_type%'
+            AND pg_get_constraintdef(oid) NOT ILIKE '%bilan_intermediaire%'
+        LOOP
+          EXECUTE 'ALTER TABLE insertion_milestones DROP CONSTRAINT ' || quote_ident(cname);
+        END LOOP;
+      END $$;
+    `);
+    await client.query(`
+      DO $$
+      DECLARE cname text;
+      BEGIN
+        FOR cname IN
+          SELECT conname FROM pg_constraint
+          WHERE conrelid = 'insertion_milestones'::regclass AND contype = 'u'
+            AND pg_get_constraintdef(oid) ILIKE '%milestone_type%'
+        LOOP
+          EXECUTE 'ALTER TABLE insertion_milestones DROP CONSTRAINT ' || quote_ident(cname);
+        END LOOP;
+      END $$;
+    `);
+    await client.query('DROP INDEX IF EXISTS idx_milestones_emp_type_unique;');
+    await client.query(`
+      UPDATE insertion_milestones SET titre = 'Diagnostic d''accueil' WHERE titre IS NULL AND milestone_type = 'Diagnostic accueil';
+      UPDATE insertion_milestones SET titre = milestone_type WHERE titre IS NULL AND milestone_type IN ('Bilan M+3', 'Bilan M+6', 'Bilan M+10');
+      UPDATE insertion_milestones SET titre = 'Bilan de sortie' WHERE titre IS NULL AND milestone_type = 'Bilan Sortie';
+      UPDATE insertion_milestones SET milestone_type = 'diagnostic_accueil' WHERE milestone_type = 'Diagnostic accueil';
+      UPDATE insertion_milestones SET milestone_type = 'bilan_intermediaire' WHERE milestone_type IN ('Bilan M+3', 'Bilan M+6', 'Bilan M+10');
+      UPDATE insertion_milestones SET milestone_type = 'bilan_sortie' WHERE milestone_type = 'Bilan Sortie';
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'insertion_milestones'::regclass AND conname = 'insertion_milestones_milestone_type_check'
+        ) THEN
+          ALTER TABLE insertion_milestones ADD CONSTRAINT insertion_milestones_milestone_type_check
+            CHECK (milestone_type IN ('diagnostic_accueil', 'bilan_intermediaire', 'renouvellement', 'bilan_sortie', 'suivi_post_sortie'));
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_milestones_accueil_unique
+        ON insertion_milestones(employee_id, parcours_num) WHERE milestone_type = 'diagnostic_accueil';
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_milestones_sortie_unique
+        ON insertion_milestones(employee_id, parcours_num) WHERE milestone_type = 'bilan_sortie';
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_milestones_emp_due ON insertion_milestones(employee_id, due_date);');
+
+    // (e) Nomenclature des sorties (D8, EXG-06) : le binaire positive/negative
+    // devient 4 catégories. L'ancienne valeur est CONSERVÉE dans
+    // sortie_classification_legacy, le mapping s'appuie sur sortie_type.
+    // Même ordre critique que (b+c) : DROP CHECK → UPDATE → ADD CHECK.
+    // L'UPDATE ne touche que les lignes encore en ancien référentiel
+    // (WHERE IN positive/negative) → idempotent, legacy jamais écrasé.
+    await client.query(`
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS sortie_classification_legacy VARCHAR(20);
+    `);
+    await client.query(`
+      DO $$
+      DECLARE cname text;
+      BEGIN
+        FOR cname IN
+          SELECT conname FROM pg_constraint
+          WHERE conrelid = 'insertion_milestones'::regclass AND contype = 'c'
+            AND pg_get_constraintdef(oid) ILIKE '%sortie_classification%'
+            AND pg_get_constraintdef(oid) NOT ILIKE '%emploi_durable%'
+        LOOP
+          EXECUTE 'ALTER TABLE insertion_milestones DROP CONSTRAINT ' || quote_ident(cname);
+        END LOOP;
+      END $$;
+    `);
+    await client.query(`
+      UPDATE insertion_milestones SET
+        sortie_classification_legacy = sortie_classification,
+        sortie_classification = CASE
+          WHEN sortie_type IN ('CDI', 'CDD', 'creation_activite') THEN 'emploi_durable'
+          WHEN sortie_type IN ('CDD_court', 'interim') THEN 'emploi_transition'
+          WHEN sortie_type IN ('formation', 'autre_IAE') THEN 'sortie_positive'
+          WHEN sortie_classification = 'negative' THEN 'autre'
+          ELSE 'sortie_positive'
+        END
+      WHERE sortie_classification IN ('positive', 'negative');
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'insertion_milestones'::regclass AND conname = 'insertion_milestones_sortie_classification_check'
+        ) THEN
+          ALTER TABLE insertion_milestones ADD CONSTRAINT insertion_milestones_sortie_classification_check
+            CHECK (sortie_classification IN ('emploi_durable', 'emploi_transition', 'sortie_positive', 'autre'));
+        END IF;
+      END $$;
+    `);
+
+    // (f) Diagnostic refondu (Lot 2) : n° de parcours + rubriques structurées
+    // de la trame officielle (logement, droits, santé, budget, mobilité,
+    // situation pro, projet pro, expression du salarié, linguistique,
+    // situation familiale), 2 nouveaux freins, détail à cases multiples en
+    // JSONB (D5), données FSE+ d'entrée (§6bis-1) et statut de saisie du
+    // stepper (brouillon repris / complet — §6bis-4).
+    // commentaire_sante / frein_sante_detail / frein_sante_causes /
+    // frein_judiciaire_detail sont CHIFFRÉS applicativement en couche route
+    // (utils/field-crypto.js) — colonnes TEXT ordinaires côté schéma.
+    await client.query(`
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS parcours_num SMALLINT NOT NULL DEFAULT 1;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS logement_statut VARCHAR(30) CHECK (logement_statut IN ('locataire_social', 'locataire_prive', 'proprietaire', 'heberge', 'sans_abri'));
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS logement_satisfaction BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS commentaire_logement TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS piece_identite_validite DATE;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS allocataire_caf BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS ressources TEXT[];
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS commentaire_droits TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS mutuelle_statut VARCHAR(30);
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS rqth BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS rqth_fin DATE;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS contre_indications BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS suivi_sante BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS commentaire_sante TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS difficultes_financieres BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS credits_en_cours BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS commentaire_budget TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS permis_b_statut VARCHAR(20) CHECK (permis_b_statut IN ('oui', 'non', 'code_en_cours', 'conduite_en_cours'));
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS vehicule BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS moyen_transport TEXT[];
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS commentaire_mobilite TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS autre_employeur BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS autre_employeur_heures NUMERIC(4,1);
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS souhait_complement_heures BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS niveau_formation VARCHAR(10);
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS metiers_souhaites TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS pret_a_se_former VARCHAR(20);
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS cpf_accessible BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS projet_formation TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS emploi_vise TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS emploi_vise_rome VARCHAR(8);
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS commentaire_projet TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS attentes_parcours TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS difficultes_exprimees TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS objectifs_exprimes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS aide_souhaitee TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS cecrl_niveau VARCHAR(2);
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS commentaire_linguistique TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS situation_familiale VARCHAR(20) CHECK (situation_familiale IN ('marie', 'celibataire', 'en_couple', 'divorce', 'veuf'));
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS nb_enfants SMALLINT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS enfants_a_charge BOOLEAN;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_logement INTEGER CHECK (frein_logement BETWEEN 1 AND 5);
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_logement_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_logement_causes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_judiciaire INTEGER CHECK (frein_judiciaire BETWEEN 1 AND 5);
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS frein_judiciaire_detail TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS questionnaire_detail JSONB;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS fse_entree JSONB;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS statut_saisie VARCHAR(15) NOT NULL DEFAULT 'complet' CHECK (statut_saisie IN ('en_cours', 'complet'));
+    `);
+    // Un diagnostic PAR PARCOURS : UNIQUE(employee_id) → UNIQUE(employee_id,
+    // parcours_num). ⚠ Phase B : le PUT /diagnostic fait ON CONFLICT
+    // (employee_id) (routes.js:175) et le squelette de link-employee aussi
+    // (conversion.js:128-133) — à reprendre en ON CONFLICT (employee_id, parcours_num).
+    await client.query(`
+      DO $$
+      DECLARE cname text;
+      BEGIN
+        FOR cname IN
+          SELECT conname FROM pg_constraint
+          WHERE conrelid = 'insertion_diagnostics'::regclass AND contype = 'u'
+            AND pg_get_constraintdef(oid) NOT ILIKE '%parcours_num%'
+        LOOP
+          EXECUTE 'ALTER TABLE insertion_diagnostics DROP CONSTRAINT ' || quote_ident(cname);
+        END LOOP;
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'insertion_diagnostics'::regclass AND conname = 'insertion_diagnostics_employee_parcours_key'
+        ) THEN
+          ALTER TABLE insertion_diagnostics
+            ADD CONSTRAINT insertion_diagnostics_employee_parcours_key UNIQUE (employee_id, parcours_num);
+        END IF;
+      END $$;
+    `);
+
+    // (g) employees — conformité IAE : Pass IAE (n°, période), dérogation de
+    // prolongation CDDI (motifs légaux), critères d'éligibilité (texte +
+    // LOCALISATION des justificatifs, jamais les pièces), identifiant France
+    // Travail, n° de parcours courant.
+    await client.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS pass_iae_number VARCHAR(30);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS pass_iae_start DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS pass_iae_end DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS cddi_derogation_motif VARCHAR(30) CHECK (cddi_derogation_motif IN ('formation_en_cours', 'senior_50', 'rqth', 'cdi_inclusion'));
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS cddi_derogation_date DATE;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS eligibilite_criteres TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS eligibilite_justificatifs_ref TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS france_travail_id VARCHAR(30);
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS parcours_num SMALLINT NOT NULL DEFAULT 1;
+    `);
+
+    // (h) candidates — PROP-02 : prescripteur structuré + Pass IAE +
+    // éligibilité saisis dès le recrutement, recopiés vers employees au
+    // link-employee (phase B). prescripteur_orgas est créée plus haut → FK sûre.
+    await client.query(`
+      ALTER TABLE candidates ADD COLUMN IF NOT EXISTS prescripteur_id INTEGER REFERENCES prescripteur_orgas(id) ON DELETE SET NULL;
+      ALTER TABLE candidates ADD COLUMN IF NOT EXISTS pass_iae_number VARCHAR(30);
+      ALTER TABLE candidates ADD COLUMN IF NOT EXISTS pass_iae_start DATE;
+      ALTER TABLE candidates ADD COLUMN IF NOT EXISTS pass_iae_end DATE;
+      ALTER TABLE candidates ADD COLUMN IF NOT EXISTS eligibilite_criteres TEXT;
+    `);
+
+    // (j) Tables satellites du parcours (Lots 3-4 + §6bis-4).
+    // Objectifs individualisés (avec sous-objectifs via parent_id).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_objectifs (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        parent_id INTEGER REFERENCES insertion_objectifs(id) ON DELETE CASCADE,
+        milestone_id INTEGER REFERENCES insertion_milestones(id) ON DELETE SET NULL,
+        titre VARCHAR(200) NOT NULL,
+        description TEXT,
+        origine VARCHAR(10) NOT NULL DEFAULT 'cip' CHECK (origine IN ('salarie', 'cip')),
+        echeance DATE,
+        date_butoir DATE,
+        statut VARCHAR(25) NOT NULL DEFAULT 'en_cours'
+          CHECK (statut IN ('a_venir', 'en_cours', 'atteint', 'partiellement_atteint', 'abandonne', 'reporte')),
+        ordre SMALLINT NOT NULL DEFAULT 0,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_objectifs_employee ON insertion_objectifs(employee_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_objectifs_parent ON insertion_objectifs(parent_id);');
+
+    // Référentiel des partenaires mobilisables par les actions CIP.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_partenaires (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(150) NOT NULL UNIQUE,
+        categorie VARCHAR(30),
+        contact_nom VARCHAR(120),
+        contact_tel VARCHAR(30),
+        contact_email VARCHAR(150),
+        actif BOOLEAN NOT NULL DEFAULT true,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // PMSMP — périodes de mise en situation en milieu professionnel (EXG-05).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_pmsmp (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        entreprise VARCHAR(200) NOT NULL,
+        siret VARCHAR(14),
+        objet VARCHAR(30) NOT NULL CHECK (objet IN ('decouvrir_metier', 'confirmer_projet', 'initier_recrutement')),
+        date_debut DATE NOT NULL,
+        date_fin DATE NOT NULL,
+        tuteur VARCHAR(120),
+        bilan TEXT,
+        saisie_outil_officiel BOOLEAN NOT NULL DEFAULT false,
+        convention_ref VARCHAR(60),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_pmsmp_employee ON insertion_pmsmp(employee_id);');
+
+    // Questionnaire de satisfaction de sortie — UNE réponse par salarié ET
+    // par parcours (§6bis-4 : parcours_num remplace l'unicité simple du plan).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_satisfaction_sortie (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        parcours_num SMALLINT NOT NULL DEFAULT 1,
+        milestone_id INTEGER REFERENCES insertion_milestones(id) ON DELETE SET NULL,
+        date_reponse DATE,
+        reponses JSONB NOT NULL DEFAULT '{}'::jsonb,
+        situation_sortie VARCHAR(30),
+        satisfaction_globale SMALLINT CHECK (satisfaction_globale BETWEEN 1 AND 4),
+        suggestions TEXT,
+        avis_transmis TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id, parcours_num)
+      );
+    `);
+
+    // Historique probant des entretiens (verrouillage/réouverture tracés —
+    // §6bis-4, pattern refashion_dpav_history : snapshot JSONB par action).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_milestones_history (
+        id SERIAL PRIMARY KEY,
+        milestone_id INTEGER NOT NULL REFERENCES insertion_milestones(id) ON DELETE CASCADE,
+        snapshot JSONB NOT NULL,
+        action VARCHAR(20) NOT NULL CHECK (action IN ('update', 'close', 'reopen')),
+        changed_by INTEGER REFERENCES users(id),
+        changed_at TIMESTAMP DEFAULT NOW(),
+        motif TEXT
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_ms_history_milestone ON insertion_milestones_history(milestone_id, changed_at DESC);');
+
+    // (i) cip_action_plans : action possible HORS entretien (milestone_id
+    // devient nullable — DROP NOT NULL est nativement idempotent), rattachable
+    // à un objectif et à un partenaire (FK déclarées APRÈS la création des
+    // tables ci-dessus), résultat, durée passée (§6bis-4), auteur.
+    await client.query('ALTER TABLE cip_action_plans ALTER COLUMN milestone_id DROP NOT NULL;');
+    await client.query(`
+      ALTER TABLE cip_action_plans ADD COLUMN IF NOT EXISTS objectif_id INTEGER REFERENCES insertion_objectifs(id) ON DELETE SET NULL;
+      ALTER TABLE cip_action_plans ADD COLUMN IF NOT EXISTS partenaire_id INTEGER REFERENCES insertion_partenaires(id) ON DELETE SET NULL;
+      ALTER TABLE cip_action_plans ADD COLUMN IF NOT EXISTS resultat TEXT;
+      ALTER TABLE cip_action_plans ADD COLUMN IF NOT EXISTS duree_minutes INTEGER;
+      ALTER TABLE cip_action_plans ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id);
+    `);
+
+    // (k) Seed idempotent du référentiel partenaires (ON CONFLICT (nom) DO
+    // NOTHING — un partenaire renommé/complété par l'utilisateur n'est jamais
+    // écrasé). Catégories : administratif, emploi, logement, sante, justice,
+    // formation, mobilite, autre.
+    await client.query(`
+      INSERT INTO insertion_partenaires (nom, categorie) VALUES
+        ('CAF', 'administratif'),
+        ('France Travail', 'emploi'),
+        ('CPAM', 'sante'),
+        ('ANTS', 'administratif'),
+        ('SOLIHA', 'logement'),
+        ('Action Logement', 'logement'),
+        ('Bailleur social', 'logement'),
+        ('OPCO', 'formation'),
+        ('Mission locale', 'emploi'),
+        ('Département 76', 'administratif'),
+        ('Centre des finances publiques', 'administratif'),
+        ('Banque de France', 'autre'),
+        ('Organisme de formation', 'formation'),
+        ('Auto-école sociale', 'mobilite'),
+        ('SPIP', 'justice'),
+        ('Avocat / aide juridictionnelle', 'justice')
+      ON CONFLICT (nom) DO NOTHING;
+    `);
+
+    // (l) Registre RGPD (art. 30) — traitement « accompagnement
+    // socio-professionnel » : couvre les données art. 9 (santé) et art. 10
+    // (judiciaire) du diagnostic/des entretiens. Idempotent (WHERE NOT EXISTS,
+    // même pattern que les seeds QHSE / sous-traitance IA plus bas).
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Accompagnement socio-professionnel des salariés en insertion',
+        'Suivi individualisé du parcours d''insertion (conventionnement IAE) : diagnostic socio-professionnel d''accueil, entretiens et bilans périodiques, évaluation des freins périphériques (9 axes), objectifs et plans d''action d''accompagnement, périodes d''immersion (PMSMP), renouvellements de contrat, bilan et suivi post-sortie, questionnaire de satisfaction ; reporting réglementaire agrégé (DREETS/ASP, FSE+, financeurs).',
+        'Obligation légale et mission d''intérêt public (IAE, art. L5132-1 s. Code du travail)',
+        'Salariés en parcours d''insertion (CDDI) et candidats liés',
+        'Identité et situation socio-professionnelle, freins périphériques (scores 1-5 et observations), dont : données de SANTÉ (art. 9 RGPD — commentaires chiffrés applicativement, aucun diagnostic médical) et données JUDICIAIRES (art. 10 RGPD — niveau de frein et impact organisationnel factuel uniquement, détail chiffré), logement, ressources/budget, mobilité, situation familiale, formation et projet professionnel, Pass IAE, données FSE+ (entrée/sortie)',
+        'CIP et service RH (nominatif), direction ; agrégats NON nominatifs uniquement : financeurs et comités de pilotage (DREETS, FSE+, convention)',
+        'Parcours + 24 mois après dernier contact (anonymisation) ; FSE+ : piste d''audit séparée >= 5 ans',
+        'Chiffrement applicatif AES-256 des champs santé/judiciaire (utils/field-crypto.js), masquage par rôle (MANAGER sans accès aux données sensibles), accès restreint ADMIN/RH pour l''écriture, pseudonymisation systématique avant tout appel IA (utils/pii-pseudonymize.js), journalisation applicative des consultations et exports ; champs FSE+ exclus de l''anonymisation à 2 ans (piste d''audit >= 5 ans après dernier paiement, archivage à accès restreint — à inscrire à l''AIPD)'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Accompagnement socio-professionnel des salariés en insertion'
+      );
+    `);
+
+    console.log('[INIT-DB] Migration extension entretiens 2026-07 (PR1) ✓');
 
     console.log('[INIT-DB] Module Parcours Insertion ✓');
 
