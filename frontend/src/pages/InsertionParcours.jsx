@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
 import { Heart } from 'lucide-react';
@@ -16,8 +16,11 @@ import EntretienForm from '../components/insertion/EntretienForm';
 import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
 import ActionsPanel from '../components/insertion/ActionsPanel';
 import AlertesBloc from '../components/insertion/AlertesBloc';
+import FriseParcours from '../components/insertion/FriseParcours';
+import PmsmpPanel from '../components/insertion/PmsmpPanel';
+import SatisfactionForm from '../components/insertion/SatisfactionForm';
 import QuickActionButton, { pushRecent } from '../components/insertion/QuickActionButton';
-import { exportFicheParcoursPDF } from '../components/insertion/pdf-insertion';
+import { exportFicheParcoursPDF, exportBilanProlongationPassIae } from '../components/insertion/pdf-insertion';
 
 // Les endpoints IA (Claude) génèrent 1500-2500 tokens et peuvent dépasser le
 // timeout axios global de 30 s. Délai dédié de 2 min (nginx autorise 300 s).
@@ -296,6 +299,133 @@ function AgendaBloc({ stats, onSelect }) {
   );
 }
 
+// Bloc « Renouvellements à préparer » (EXG-04/REC-UX-06) — file des CDDI dont le
+// contrat finit dans la fenêtre d'anticipation. « Créer l'entretien » pose
+// l'entretien de renouvellement lié au contrat ; le lien direct vers l'écran ETI
+// (/insertion/renouvellement/:id) se copie pour être envoyé à l'encadrant.
+function RenouvellementsBloc({ onSelect }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [busyId, setBusyId] = useState(null); // employee_id en cours de création
+  const [copiedId, setCopiedId] = useState(null);
+
+  const load = useCallback(() => {
+    let alive = true;
+    api.get('/insertion/renouvellements')
+      .then((r) => { if (alive) { setData(r.data); setError(null); } })
+      .catch((err) => { if (alive) setError(err.response?.data?.error || err.message); });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => load(), [load]);
+
+  const createEntretien = async (r) => {
+    setBusyId(r.employee_id); setError(null);
+    try {
+      // Échéance proposée : 14 j avant la fin du contrat, jamais dans le passé.
+      const fin = r.contract_end ? new Date(r.contract_end) : new Date();
+      fin.setDate(fin.getDate() - 14);
+      const due = (fin > new Date() ? fin : new Date()).toISOString().slice(0, 10);
+      await api.post('/insertion/milestones', {
+        employee_id: r.employee_id,
+        milestone_type: 'renouvellement',
+        due_date: due,
+        contract_id: r.contract_id,
+      });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+    setBusyId(null);
+  };
+
+  const copyLink = async (r) => {
+    const url = `${window.location.origin}/insertion/renouvellement/${r.entretien.id}?salarie=${r.employee_id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(r.entretien.id);
+      setTimeout(() => setCopiedId((c) => (c === r.entretien.id ? null : c)), 2500);
+    } catch {
+      window.prompt("Copiez le lien du formulaire encadrant :", url);
+    }
+  };
+
+  if (error && !data) {
+    return (
+      <div className="bg-white rounded-lg border p-4">
+        <h4 className="font-semibold text-gray-700 mb-2">Renouvellements à préparer</h4>
+        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">Liste indisponible : {error}</div>
+      </div>
+    );
+  }
+  if (!data) return null;
+  const rows = data.renouvellements || [];
+
+  return (
+    <div className="bg-white rounded-lg border p-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+        <h4 className="font-semibold text-gray-700 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-500" /> Renouvellements à préparer ({data.total || 0})
+        </h4>
+        <span className="text-[11px] text-gray-400">Fins de CDDI sous {data.anticipation_jours} jours</span>
+      </div>
+      {error && <div className="mb-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">{error}</div>}
+      {rows.length === 0 ? (
+        <p className="text-sm text-gray-400 py-2">Aucun renouvellement à préparer dans la fenêtre d'anticipation.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.map((r) => {
+            const e = r.entretien;
+            return (
+              <div key={`${r.employee_id}-${r.contract_id}`} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-100 hover:bg-amber-50/40 flex-wrap">
+                <button onClick={() => onSelect(r.employee_id)} className="text-left text-sm min-w-0">
+                  <span className="font-medium text-gray-800">{r.first_name} {r.last_name}</span>
+                  <span className="text-xs text-gray-500 ml-2">
+                    fin de contrat {frDate(r.contract_end)}
+                    {r.jours_restants != null && <span className={r.jours_restants <= 15 ? 'text-red-600 font-medium' : 'text-amber-700'}> · J-{r.jours_restants}</span>}
+                  </span>
+                </button>
+                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                  {r.a_creer ? (
+                    <button onClick={() => createEntretien(r)} disabled={busyId === r.employee_id}
+                      className="px-2.5 py-1 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 disabled:opacity-50">
+                      {busyId === r.employee_id ? 'Création…' : "Créer l'entretien"}
+                    </button>
+                  ) : (
+                    <>
+                      {e.verrouille ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-white" title="Renouvellement clôturé et verrouillé">🔒 clôturé</span>
+                      ) : e.formulaire_rempli ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 border border-green-200"
+                          title={`Avis encadrant : ${e.renouvellement_avis || '—'}${e.renouvellement_duree_mois ? ` · ${e.renouvellement_duree_mois} mois` : ''}`}>
+                          Avis encadrant reçu{e.renouvellement_avis ? ` — ${String(e.renouvellement_avis).replace('_', ' ')}` : ''}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">Formulaire encadrant à remplir</span>
+                      )}
+                      <Link to={`/insertion/renouvellement/${e.id}?salarie=${r.employee_id}`}
+                        className="px-2 py-1 rounded-lg border border-gray-300 text-gray-600 text-xs hover:bg-gray-50 whitespace-nowrap">
+                        Formulaire
+                      </Link>
+                      {!e.verrouille && (
+                        <button onClick={() => copyLink(r)}
+                          title="Copier le lien direct à envoyer à l'encadrant technique (un écran, un salarié)"
+                          className="px-2 py-1 rounded-lg border border-teal-300 text-teal-700 text-xs hover:bg-teal-50 whitespace-nowrap">
+                          {copiedId === e.id ? '✓ Copié' : 'Copier le lien'}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CohortePanel({ onSelect }) {
   const { user } = useAuth();
   const canExport = isAdminRh(user);
@@ -418,6 +548,9 @@ function CohortePanel({ onSelect }) {
     <div className="space-y-4">
       {/* Aujourd'hui / Cette semaine — point d'entrée du lundi matin (REC-UX-07) */}
       <AgendaBloc stats={stats} onSelect={onSelect} />
+
+      {/* Renouvellements à préparer (EXG-04 — « il y en a toujours ») */}
+      <RenouvellementsBloc onSelect={onSelect} />
 
       <div className="bg-white rounded-lg border p-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -642,6 +775,8 @@ export default function InsertionParcours() {
   const [freinsDefinitions, setFreinsDefinitions] = useState(null);
   const [radarData, setRadarData] = useState(null);
   const [cddi, setCddi] = useState(null);
+  const [contracts, setContracts] = useState([]);
+  const [passBilanLoading, setPassBilanLoading] = useState(false);
 
   const [loadError, setLoadError] = useState(null);
   const [panelError, setPanelError] = useState(null);
@@ -718,6 +853,11 @@ export default function InsertionParcours() {
         setActiveEntretien(null);
       }
       api.get(`/employees/${emp.id}/cddi-duration`).then((r) => setCddi(r.data)).catch(() => setCddi(null));
+      // Contrats pour la frise (couloir Contrats) — best-effort, repli sur les
+      // dates de la fiche si l'appel échoue.
+      api.get(`/employees/${emp.id}/contracts`)
+        .then((r) => setContracts(Array.isArray(r.data) ? r.data : []))
+        .catch(() => setContracts([]));
     } catch (err) {
       setPanelError(err.response?.data?.error || err.message || 'Erreur de chargement du parcours');
     }
@@ -779,6 +919,36 @@ export default function InsertionParcours() {
     } catch (err) {
       setPanelError(err.response?.data?.error || err.message);
     }
+  };
+
+  // Bilan de prolongation du Pass IAE (EXG-02/REC-UX-15) — PDF à 1 clic depuis
+  // la fiche : le backend renvoie le JSON minimisé (sans judiciaire ni détail
+  // santé), la fenêtre d'impression fait le reste.
+  const exportPassIaeBilan = async () => {
+    if (!selectedEmployee) return;
+    setPassBilanLoading(true); setPanelError(null);
+    try {
+      const r = await api.get(`/insertion/pass-iae/bilan/${selectedEmployee.id}`, { timeout: IA_TIMEOUT });
+      exportBilanProlongationPassIae(r.data);
+    } catch (err) {
+      setPanelError((err.response?.data?.error || err.message) + ' (bilan Pass IAE)');
+    }
+    setPassBilanLoading(false);
+  };
+
+  // Clic sur un élément de la frise → ouvre le bon onglet / le bon détail.
+  const handleFriseSelect = ({ type, data }) => {
+    if (!confirmLeave()) return;
+    if (type === 'entretien' && data?.id) {
+      const ms = milestones.find((m) => m.id === data.id) || data;
+      setActiveTab('entretiens');
+      setActiveEntretien(ms);
+      setBilanDirty(false);
+    } else if (type === 'objectif') {
+      setActiveTab('objectifs');
+      setActiveEntretien(null);
+    }
+    // contrat / pmsmp : le détail est déjà sous les yeux (Synthèse).
   };
 
   const tabs = [
@@ -932,6 +1102,13 @@ export default function InsertionParcours() {
                           className="px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 text-xs font-medium hover:bg-teal-50 whitespace-nowrap">
                           Fiche PDF
                         </button>
+                        {adminRh && emp.pass_iae_number && (
+                          <button onClick={exportPassIaeBilan} disabled={passBilanLoading}
+                            title="Bilan du parcours en appui de la demande de prolongation du Pass IAE (destinataire : prescripteur habilité — sans données art. 9/10)"
+                            className="px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 text-xs font-medium hover:bg-emerald-50 whitespace-nowrap disabled:opacity-50">
+                            {passBilanLoading ? 'Génération…' : 'Bilan de prolongation (PDF)'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -974,7 +1151,7 @@ export default function InsertionParcours() {
                   ))}
                 </div>
 
-                {/* Tab: Synthèse (timeline + fiche synthèse) */}
+                {/* Tab: Synthèse (frise + timeline + fiche synthèse) */}
                 {activeTab === 'synthese' && (
                   <div className="space-y-4">
                     {!analysis.has_diagnostic && (
@@ -990,10 +1167,38 @@ export default function InsertionParcours() {
                         </button>
                       </div>
                     )}
+                    {/* Frise du parcours en couloirs (REC-UX-05) — la liste
+                        chronologique verticale reste la vue de référence dessous. */}
+                    <div className="bg-white rounded-lg border p-4">
+                      <h3 className="font-semibold text-gray-800 mb-3">Frise du parcours</h3>
+                      <FriseParcours
+                        employee={emp}
+                        contracts={contracts}
+                        milestones={milestones}
+                        objectifs={analysis.objectifs || []}
+                        pmsmp={analysis.pmsmp || []}
+                        hasCandidate={!!analysis.has_candidate_data}
+                        hasPcm={!!analysis.has_pcm}
+                        onSelect={handleFriseSelect}
+                      />
+                    </div>
                     {analysis.timeline && (
                       <div className="bg-white rounded-lg border p-4">
                         <h3 className="font-semibold text-gray-800 mb-4">Historique du parcours</h3>
                         <TimelineView timeline={analysis.timeline} />
+                      </div>
+                    )}
+                    {/* PMSMP — immersions professionnelles (EXG-05) */}
+                    <div className="bg-white rounded-lg border p-4">
+                      <PmsmpPanel employeeId={selectedEmployee.id} canEdit={adminRh} />
+                    </div>
+                    {/* Questionnaire de satisfaction — visible dès qu'une sortie
+                        existe ou que le questionnaire a été rempli. */}
+                    {(analysis.satisfaction || emp.insertion_status === 'termine'
+                      || milestones.some((m) => m.milestone_type === 'bilan_sortie' && m.status === 'realise')) && (
+                      <div className="bg-white rounded-lg border p-4">
+                        <SatisfactionForm employeeId={selectedEmployee.id} canEdit={adminRh}
+                          onSaved={() => reloadSelected()} />
                       </div>
                     )}
                     {analysis.fiche_synthese && (

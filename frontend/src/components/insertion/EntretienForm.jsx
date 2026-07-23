@@ -8,6 +8,7 @@ import { FreinPicker } from './DiagnosticForm';
 import RadarFreins from './RadarFreins';
 import ActionsPanel from './ActionsPanel';
 import ObjectifsPanel from './ObjectifsPanel';
+import { SatisfactionModal } from './SatisfactionForm';
 import { exportEntretienPDF } from './pdf-insertion';
 import { getInsertionParametres, PARAMETRES_DEFAUTS, plusMois } from './parametres';
 import { useAuth } from '../../contexts/AuthContext';
@@ -59,6 +60,7 @@ export default function EntretienForm({
   const [closeModal, setCloseModal] = useState(false);
   const [closing, setClosing] = useState(false);
   const [relecture, setRelecture] = useState(false);
+  const [satisfactionOpen, setSatisfactionOpen] = useState(false);
   const [reopenMotif, setReopenMotif] = useState('');
   const [reopenAsking, setReopenAsking] = useState(false);
   const [ia, setIa] = useState(milestone.ia_preparation || null);
@@ -744,6 +746,17 @@ export default function EntretienForm({
                 <label className="block text-xs text-gray-500 mb-1">Commentaires de sortie</label>
                 <textarea value={form.sortie_commentaires || ''} onChange={(e) => setField('sortie_commentaires', e.target.value)} disabled={readOnly} rows={2} className="input-modern py-1 w-full" />
               </div>
+              {/* Questionnaire de satisfaction de sortie (EXG-09) — rempli AVEC le
+                  salarié pendant le bilan ; consultable même une fois verrouillé. */}
+              <div className="border-t border-purple-200 pt-2 flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-xs text-purple-800">
+                  Questionnaire de satisfaction de sortie — à remplir avec le salarié (smileys).
+                </p>
+                <button type="button" onClick={() => setSatisfactionOpen(true)}
+                  className="px-3 py-1.5 rounded-lg border border-purple-300 text-purple-700 text-xs font-medium hover:bg-purple-50">
+                  {adminRh && !locked ? 'Remplir le questionnaire…' : 'Voir le questionnaire…'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -812,6 +825,16 @@ export default function EntretienForm({
           </div>
         </div>
       </div>
+
+      {/* ── Questionnaire de satisfaction de sortie (modale) ── */}
+      {satisfactionOpen && (
+        <SatisfactionModal
+          employeeId={employeeId}
+          milestoneId={milestone.id}
+          canEdit={adminRh && !locked}
+          onClose={() => setSatisfactionOpen(false)}
+        />
+      )}
 
       {/* ── Modale de clôture (REC-UX-02) ── */}
       {closeModal && (

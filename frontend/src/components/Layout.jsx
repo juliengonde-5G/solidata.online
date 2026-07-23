@@ -172,6 +172,13 @@ const NAV_TREE = [
           { label: 'Pilotage & indicateurs', path: '/insertion/audit', icon: ClipboardList, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Compétences', path: '/skills', icon: Star, roles: ['ADMIN', 'RH'] },
           { label: 'Prescripteurs', path: '/prescripteurs', icon: Building2, roles: ['ADMIN', 'RH'] },
+          {
+            label: 'Réglages',
+            icon: Settings,
+            children: [
+              { label: 'Réglages insertion', path: '/admin/insertion', icon: Settings, roles: ['ADMIN'] },
+            ],
+          },
         ],
       },
     ],

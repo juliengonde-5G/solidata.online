@@ -13,7 +13,7 @@
  */
 
 import {
-  FREINS, ENTRETIEN_STATUS_LABELS, SORTIE_CLASS_LABELS,
+  FREINS, ENTRETIEN_STATUS_LABELS, ENTRETIEN_TYPE_LABELS, SORTIE_CLASS_LABELS,
   ACTION_STATUS_LABELS, ACTION_CATEGORY_LABELS, entretienLabel,
 } from './freins';
 
@@ -294,6 +294,139 @@ export function exportEntretienPDF({ employee = {}, milestone = {}, previousFrei
     + validations
     + RGPD_FOOTER('dossier');
   openPrintWindow('Bilan_dossier_' + (employee.last_name || ''), body);
+}
+
+// ═══════════════════════════════════════════
+// BILAN DE PROLONGATION PASS IAE (EXG-02, PR 2)
+// Gabarit A4 SOBRE destiné au PRESCRIPTEUR habilité, alimenté par
+// GET /insertion/pass-iae/bilan/:employeeId. Le backend EXCLUT déjà l'axe
+// judiciaire (art. 10) et masque les détails santé (art. 9) — ce gabarit
+// restitue les données telles quelles, sans jamais les réintroduire.
+// ═══════════════════════════════════════════
+
+const AVIS_RENOU_LABELS = { favorable: 'Favorable', favorable_reserves: 'Favorable avec réserves', defavorable: 'Défavorable' };
+const OBJ_STATUT_LABELS = { a_venir: 'À venir', en_cours: 'En cours', atteint: 'Atteint', partiellement_atteint: 'En partie', abandonne: 'Abandonné', reporte: 'Reporté' };
+const PMSMP_OBJET_LABELS = { decouvrir_metier: 'Découvrir un métier', confirmer_projet: 'Confirmer un projet', initier_recrutement: 'Initier un recrutement' };
+
+/**
+ * Bilan du parcours en appui de la demande de prolongation du Pass IAE.
+ * @param {object} data réponse de GET /insertion/pass-iae/bilan/:employeeId
+ */
+export function exportBilanProlongationPassIae(data) {
+  const d = data || {};
+  const sal = d.salarie || {};
+  const nom = `${sal.first_name || ''} ${sal.last_name || ''}`.trim();
+  const pass = d.pass_iae || {};
+  const presc = d.prescripteur || {};
+  const parcours = d.parcours || {};
+  const cddi = d.cddi || {};
+
+  // Synthèse du parcours (identité, Pass, contrat, prescripteur).
+  const synthese =
+    '<div class="section"><div class="section-title">Synthèse du parcours</div><div class="card">'
+    + '<strong>Salarié :</strong> ' + esc(nom) + '   <strong>Poste :</strong> ' + esc(sal.poste || '—')
+    + '   <strong>Parcours n° :</strong> ' + (sal.parcours_num || 1) + '\n'
+    + '<strong>Pass IAE :</strong> ' + esc(pass.number || '—')
+    + (pass.start ? '   <strong>Début :</strong> ' + frDate(pass.start) : '')
+    + (pass.end ? '   <strong>Fin :</strong> ' + frDate(pass.end) : '') + '\n'
+    + '<strong>Entrée en parcours :</strong> ' + frDate(parcours.insertion_start_date)
+    + (parcours.insertion_end_date ? '   <strong>Fin de parcours :</strong> ' + frDate(parcours.insertion_end_date) : '')
+    + (cddi.months_total != null ? '\n<strong>CDDI cumulé :</strong> ' + cddi.months_total + ' mois' + (cddi.count ? ' (' + cddi.count + ' contrat' + (cddi.count > 1 ? 's' : '') + ')' : '') + ' — plafond légal 24 mois' : '')
+    + '\n<strong>Prescripteur :</strong> ' + esc(presc.nom || '—') + (presc.type ? ' (' + esc(presc.type) + ')' : '')
+    + '</div></div>';
+
+  // Entretiens du parcours.
+  const entretiensRows = (d.entretiens || []).map((m) =>
+    '<tr><td>' + esc(m.titre || ENTRETIEN_TYPE_LABELS[m.milestone_type] || m.milestone_type) + '</td>'
+    + '<td>' + esc(ENTRETIEN_STATUS_LABELS[m.status] || m.status || '—') + '</td>'
+    + '<td>' + frDate(m.completed_date || m.due_date) + '</td>'
+    + '<td>' + esc(m.avis_global ? String(m.avis_global).replace('_', ' ') : (m.renouvellement_avis ? AVIS_RENOU_LABELS[m.renouvellement_avis] || m.renouvellement_avis : '—'))
+    + (m.renouvellement_duree_mois ? ' · ' + m.renouvellement_duree_mois + ' mois' : '') + '</td></tr>'
+  ).join('');
+
+  // Évolution des freins premier / dernier / delta — le backend fournit les
+  // axes SANS judiciaire ; on restitue la liste telle quelle.
+  const freinsRows = (d.freins || []).map((f) => {
+    const delta = f.delta == null ? '<span class="picto eq">·</span>'
+      : f.delta < 0 ? '<span class="picto down">↘ ' + f.delta + '</span>'
+        : f.delta > 0 ? '<span class="picto up">↗ +' + f.delta + '</span>'
+          : '<span class="picto eq">=</span>';
+    return '<tr><td>' + esc(f.label) + '</td>'
+      + '<td>' + (f.premier == null ? '<em>non évalué</em>' : f.premier + '/5') + '</td>'
+      + '<td>' + (f.dernier == null ? '<em>non évalué</em>' : f.dernier + '/5') + '</td>'
+      + '<td>' + delta + '</td></tr>';
+  }).join('');
+
+  // Objectifs agrégés + liste.
+  const obj = d.objectifs || {};
+  const objAgg = Object.entries(obj.par_statut || {})
+    .map(([k, n]) => (OBJ_STATUT_LABELS[k] || k) + ' : ' + n).join('   ');
+  const objRows = (obj.liste || []).map((o) =>
+    '<tr><td>' + (o.parent_id ? '&nbsp;&nbsp;↳ ' : '') + esc(o.titre) + '</td>'
+    + '<td>' + esc(o.origine === 'salarie' ? 'Salarié' : 'CIP') + '</td>'
+    + '<td>' + esc(OBJ_STATUT_LABELS[o.statut] || o.statut || '—') + '</td>'
+    + '<td>' + frDate(o.echeance) + '</td></tr>'
+  ).join('');
+
+  // Actions agrégées + liste (les actions liées à la santé arrivent masquées).
+  const act = d.actions || {};
+  const actAgg = Object.entries(act.par_categorie || {})
+    .map(([k, n]) => (ACTION_CATEGORY_LABELS[k] || k) + ' : ' + n).join('   ');
+  const actRows = (act.liste || []).map((a) =>
+    '<tr><td>' + (a.detail_masque ? '<em>Action d\'accompagnement (détail confidentiel — art. 9 RGPD)</em>' : esc(a.action_label || '—')) + '</td>'
+    + '<td>' + esc(ACTION_CATEGORY_LABELS[a.category] || a.category || '—') + '</td>'
+    + '<td>' + esc(ACTION_STATUS_LABELS[a.status] || a.status || '—') + '</td>'
+    + '<td>' + frDate(a.echeance) + '</td>'
+    + '<td>' + esc(a.partenaire_nom || '—') + '</td>'
+    + '<td>' + (a.detail_masque ? '—' : esc(a.resultat || '')) + '</td></tr>'
+  ).join('');
+
+  // PMSMP.
+  const pmsmpRows = (d.pmsmp || []).map((p) =>
+    '<tr><td>' + esc(p.entreprise || '—') + '</td>'
+    + '<td>' + esc(PMSMP_OBJET_LABELS[p.objet] || p.objet || '—') + '</td>'
+    + '<td>' + frDate(p.date_debut) + ' → ' + frDate(p.date_fin) + '</td>'
+    + '<td>' + (p.jours != null ? p.jours + ' j' : '—') + '</td></tr>'
+  ).join('');
+
+  // Formations / projet.
+  const fo = d.formations || {};
+  const formationsCard = (fo.projet_formation || fo.emploi_vise || fo.niveau_formation)
+    ? '<div class="section"><div class="section-title">Projet professionnel et formation</div><div class="card">'
+      + (fo.niveau_formation ? '<strong>Niveau de formation :</strong> ' + esc(fo.niveau_formation) + '\n' : '')
+      + (fo.emploi_vise ? '<strong>Emploi visé :</strong> ' + esc(fo.emploi_vise) + '\n' : '')
+      + (fo.projet_formation ? '<strong>Projet de formation :</strong> ' + esc(fo.projet_formation) : '')
+      + '</div></div>'
+    : '';
+
+  const body =
+    '<div class="header"><div><h1>Bilan de parcours — prolongation du Pass IAE</h1>'
+    + '<div class="sub">' + esc(nom) + ' — généré le ' + frDate(d.genere_le || new Date()) + '</div></div>'
+    + '<div class="sub" style="text-align:right">Solidarité Textiles<br/>Structure d\'insertion (ACI)</div></div>'
+    + (d.mention ? '<div class="section"><div class="card" style="background:#FFFBEB;border-color:#FDE68A;">' + esc(d.mention) + '</div></div>' : '')
+    + (d.usage ? '<div class="section"><div class="card">' + esc(d.usage) + '</div></div>' : '')
+    + synthese
+    + (entretiensRows ? '<div class="section"><div class="section-title">Entretiens et bilans du parcours</div>'
+      + '<table><thead><tr><th>Entretien</th><th>Statut</th><th>Date</th><th>Avis</th></tr></thead><tbody>' + entretiensRows + '</tbody></table></div>' : '')
+    + (freinsRows ? '<div class="section"><div class="section-title">Évolution des freins périphériques</div>'
+      + '<table><thead><tr><th>Frein</th><th>Première évaluation</th><th>Dernière évaluation</th><th>Évolution</th></tr></thead><tbody>' + freinsRows + '</tbody></table>'
+      + '<p style="margin-top:4px;color:#64748b;font-size:9px;">↘ = amélioration · ↗ = dégradation · 1 = pas de difficulté, 5 = frein bloquant. Les niveaux seuls sont transmis (aucun détail médical ou judiciaire — art. 9/10 RGPD).</p></div>' : '')
+    + '<div class="section"><div class="section-title">Objectifs du parcours (' + (obj.total || 0) + ')</div>'
+    + (objAgg ? '<div class="card">' + objAgg + '</div>' : '')
+    + (objRows ? '<table><thead><tr><th>Objectif</th><th>Origine</th><th>Statut</th><th>Échéance</th></tr></thead><tbody>' + objRows + '</tbody></table>' : '<div class="card">Aucun objectif structuré enregistré.</div>')
+    + '</div>'
+    + '<div class="section"><div class="section-title">Actions d\'accompagnement (' + (act.total || 0) + ')</div>'
+    + (actAgg ? '<div class="card">' + actAgg + '</div>' : '')
+    + (actRows ? '<table><thead><tr><th>Action</th><th>Catégorie</th><th>Statut</th><th>Échéance</th><th>Partenaire</th><th>Résultat</th></tr></thead><tbody>' + actRows + '</tbody></table>' : '<div class="card">Aucune action enregistrée.</div>')
+    + '</div>'
+    + (pmsmpRows ? '<div class="section"><div class="section-title">Immersions professionnelles (PMSMP)</div>'
+      + '<table><thead><tr><th>Entreprise</th><th>Objet</th><th>Période</th><th>Durée</th></tr></thead><tbody>' + pmsmpRows + '</tbody></table></div>' : '')
+    + formationsCard
+    + '<div class="sign"><div>La conseillère en insertion professionnelle (CIP) :<br/>Date et signature<br/><br/></div>'
+    + '<div>La direction de la structure :<br/>Date et signature<br/><br/></div></div>'
+    + RGPD_FOOTER('dossier');
+
+  openPrintWindow('Bilan_Pass_IAE_' + (sal.last_name || sal.id || ''), body);
 }
 
 // ═══════════════════════════════════════════
