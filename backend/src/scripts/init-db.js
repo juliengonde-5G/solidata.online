@@ -3564,6 +3564,32 @@ async function initDatabase() {
       );
     `);
 
+    // (m — phase B) Alertes Pass IAE : élargit le CHECK alert_type de
+    // insertion_interview_alerts (pass_iae_7m / pass_iae_2m — job scheduler
+    // checkPassIaeExpiring). Même pattern DROP-scan + ADD gardé ; le marqueur
+    // 'pass_iae_7m' épargne le nouveau CHECK aux exécutions suivantes.
+    await client.query(`
+      DO $$
+      DECLARE cname text;
+      BEGIN
+        FOR cname IN
+          SELECT conname FROM pg_constraint
+          WHERE conrelid = 'insertion_interview_alerts'::regclass AND contype = 'c'
+            AND pg_get_constraintdef(oid) ILIKE '%alert_type%'
+            AND pg_get_constraintdef(oid) NOT ILIKE '%pass_iae_7m%'
+        LOOP
+          EXECUTE 'ALTER TABLE insertion_interview_alerts DROP CONSTRAINT ' || quote_ident(cname);
+        END LOOP;
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'insertion_interview_alerts'::regclass AND conname = 'insertion_interview_alerts_alert_type_check'
+        ) THEN
+          ALTER TABLE insertion_interview_alerts ADD CONSTRAINT insertion_interview_alerts_alert_type_check
+            CHECK (alert_type IN ('planification', 'rappel_j7', 'rappel_j1', 'retard', 'pass_iae_7m', 'pass_iae_2m'));
+        END IF;
+      END $$;
+    `);
+
     console.log('[INIT-DB] Migration extension entretiens 2026-07 (PR1) ✓');
 
     console.log('[INIT-DB] Module Parcours Insertion ✓');

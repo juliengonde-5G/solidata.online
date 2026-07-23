@@ -3,6 +3,29 @@
  * Extrait de insertion.js monolithique pour maintenabilité
  */
 const CryptoJS = require('crypto-js');
+const { FREINS, FREIN_KEYS } = require('./freins-registry');
+
+// ══════════════════════════════════════════════════════════════
+// TYPES D'ENTRETIENS (extension 2026-07 PR1) — types TECHNIQUES
+// Le CHECK SQL n'accepte plus que ces 5 valeurs ; les libellés
+// d'affichage passent par la colonne `titre` (ou le label ci-dessous).
+// ══════════════════════════════════════════════════════════════
+
+const MILESTONE_TYPES = ['diagnostic_accueil', 'bilan_intermediaire', 'renouvellement', 'bilan_sortie', 'suivi_post_sortie'];
+
+const MILESTONE_TYPE_LABELS = {
+  diagnostic_accueil: "Diagnostic d'accueil",
+  bilan_intermediaire: 'Bilan intermédiaire',
+  renouvellement: 'Renouvellement de contrat',
+  bilan_sortie: 'Bilan de sortie',
+  suivi_post_sortie: 'Suivi post-sortie',
+};
+
+// Libellé d'affichage d'un entretien : titre saisi > label du type > type brut.
+function milestoneLabel(ms) {
+  if (!ms) return '';
+  return ms.titre || MILESTONE_TYPE_LABELS[ms.milestone_type] || ms.milestone_type;
+}
 
 // ══════════════════════════════════════════════════════════════
 // BASE DE CONNAISSANCES — PCM / Postes / Métiers
@@ -389,14 +412,68 @@ const FREINS_DEFINITIONS = {
       'Fiche reflexe avec les manipulations de base',
     ],
   },
+  logement: {
+    label: 'Logement',
+    icon: 'home',
+    questions_indirectes: [
+      { q: 'Comment vous sentez-vous dans votre logement actuel ? Vous y etes depuis longtemps ?', indicateurs: ['stabilite', 'statut_occupation'] },
+      { q: 'Est-ce que votre logement vous permet de bien vous reposer et de venir travailler dans de bonnes conditions ?', indicateurs: ['salubrite', 'impact_travail'] },
+      { q: 'Si vous deviez demenager, sauriez-vous vers qui vous tourner pour les demarches ?', indicateurs: ['autonomie_demarches', 'connaissance_dispositifs'] },
+    ],
+    niveaux: {
+      1: 'Logement stable et adapte',
+      2: 'Leger, logement stable mais point a surveiller (charges, taille...)',
+      3: 'Modere, logement precaire ou inadapte, demarche en cours',
+      4: 'Important, hebergement chez un tiers ou logement insalubre',
+      5: 'Bloquant, sans logement stable (urgence, rue)',
+    },
+    actions_levee: [
+      'Orientation vers un bailleur social (dossier demande de logement)',
+      'Mise en relation avec SOLIHA / Action Logement',
+      'Aide aux demarches DALO ou hebergement d\'urgence (115)',
+      'Accompagnement pour les aides au logement (APL, FSL)',
+      'Point regulier sur la stabilite du logement pendant le parcours',
+    ],
+  },
+  judiciaire: {
+    label: 'Judiciaire',
+    icon: 'scale',
+    // ⚠ Donnees relevant de l'art. 10 RGPD : consigner UNIQUEMENT le niveau
+    // du frein et son impact sur l'organisation du travail (disponibilites,
+    // pointages exterieurs, amenagements). NE JAMAIS saisir la nature des
+    // faits, la qualification penale ni le contenu d'une decision de justice.
+    aide_saisie: 'Consigner uniquement le niveau et l\'impact organisationnel (disponibilites, rendez-vous exterieurs, amenagements). Ne jamais mentionner la nature des faits.',
+    questions_indirectes: [
+      { q: 'Y a-t-il des rendez-vous ou des obligations exterieures dont on doit tenir compte pour organiser votre planning ?', indicateurs: ['contraintes_agenda', 'frequence'] },
+      { q: 'Ces demarches ont-elles deja eu un impact sur un emploi ou une formation par le passe ?', indicateurs: ['impact_passe'] },
+      { q: 'Etes-vous accompagne par un service ou un professionnel pour ces demarches ?', indicateurs: ['accompagnement_existant'] },
+    ],
+    niveaux: {
+      1: 'Aucune contrainte',
+      2: 'Leger, demarches ponctuelles sans impact sur le travail',
+      3: 'Modere, obligations regulieres a integrer au planning',
+      4: 'Important, contraintes fortes sur la disponibilite',
+      5: 'Bloquant, situation empechant une activite reguliere',
+    },
+    actions_levee: [
+      'Amenagement du planning pour les obligations exterieures',
+      'Mise en relation avec le SPIP si un suivi existe',
+      'Orientation vers l\'aide juridictionnelle / un point justice',
+      'Coordination avec le referent exterieur (avec accord du salarie)',
+      'Point discret et regulier sur l\'evolution des contraintes',
+    ],
+  },
 };
 
 // ══════════════════════════════════════════════════════════════
 // QUESTIONNAIRE CIP — Grilles d'entretien par jalon
 // ══════════════════════════════════════════════════════════════
 
+// Grilles indexées par TYPE TECHNIQUE d'entretien (extension 2026-07 PR1).
+// Un même questionnaire « bilan_intermediaire » sert tous les bilans (n° 1..N) :
+// la CIP adapte la profondeur selon l'avancement du parcours.
 const CIP_QUESTIONNAIRES = {
-  'Diagnostic accueil': {
+  diagnostic_accueil: {
     titre: 'Diagnostic d\'accueil — M+1 max',
     description: 'Premier entretien CIP. Evaluation initiale des freins, definition du plan d\'action et des priorites.',
     sections: [
@@ -438,9 +515,9 @@ const CIP_QUESTIONNAIRES = {
       },
     ],
   },
-  'Bilan M+3': {
-    titre: 'Bilan M+3 — Premier bilan de suivi',
-    description: 'Evaluation des progres depuis le diagnostic. Avancement du plan d\'action, evolution des freins.',
+  bilan_intermediaire: {
+    titre: 'Bilan intermédiaire',
+    description: 'Evaluation des progres depuis l\'entretien precedent. Avancement des objectifs et du plan d\'action, evolution des freins.',
     sections: [
       {
         titre: 'Evolution depuis le diagnostic',
@@ -480,94 +557,88 @@ const CIP_QUESTIONNAIRES = {
       },
     ],
   },
-  'Bilan M+6': {
-    titre: 'Bilan M+6 — Mi-parcours',
-    description: 'Bilan de mi-parcours. Point approfondi sur les competences, le projet pro et la levee des freins.',
+  renouvellement: {
+    titre: 'Renouvellement de contrat',
+    description: 'Entretien encadrant le renouvellement du CDDI : bilan de la periode ecoulee, avis motive, duree proposee.',
     sections: [
       {
-        titre: 'Bilan d\'integration',
+        titre: 'Bilan de la periode ecoulee',
         champ: 'cip_integration',
         questions: [
-          'Aujourd\'hui, comment vous sentez-vous dans votre travail au quotidien ?',
-          'Qu\'est-ce qui a le plus change depuis le debut du parcours ?',
-          'Si un nouveau collegue arrivait, que lui conseilleriez-vous ?',
+          'Comment s\'est passee cette periode de contrat pour vous ?',
+          'Assiduite et ponctualite : ou en etes-vous ? Qu\'est-ce qui a aide ou gene ?',
+          'Comment ca se passe avec l\'equipe et l\'encadrant ?',
         ],
       },
       {
         titre: 'Competences et autonomie',
         champ: 'cip_competences',
         questions: [
-          'Sur quelles taches etes-vous maintenant completement autonome ?',
-          'Pourriez-vous former quelqu\'un sur certains gestes ?',
-          'Quelles competences vous manquent encore pour etre a l\'aise ?',
+          'Sur quelles taches etes-vous maintenant autonome ?',
+          'Quelles competences restent a consolider pendant la prochaine periode ?',
+          'Y a-t-il une formation a prevoir pendant le renouvellement ?',
         ],
       },
       {
-        titre: 'Projet de sortie',
+        titre: 'Motivation et projet',
         champ: 'cip_projet_pro',
         questions: [
-          'Avez-vous une idee plus precise du metier que vous visez ?',
-          'Savez-vous comment on cherche un emploi dans ce secteur ?',
-          'Avez-vous besoin d\'une formation complementaire ? Laquelle ?',
-          'Votre CV est-il a jour ? Savez-vous rediger une lettre de motivation ?',
+          'Pourquoi souhaitez-vous poursuivre le parcours ?',
+          'Qu\'est-ce que la prochaine periode doit vous permettre d\'atteindre ?',
+          'Votre projet professionnel a-t-il evolue ?',
         ],
       },
       {
-        titre: 'Situation globale',
+        titre: 'Conditions de reussite',
         champ: 'cip_socialisation',
         questions: [
-          'Globalement, est-ce que votre situation personnelle s\'est amelioree ?',
-          'Quels freins avez-vous reussi a lever ? Lesquels persistent ?',
-          'De quel soutien avez-vous encore besoin pour la suite ?',
+          'Quels freins restent a lever pour reussir la prochaine periode ?',
+          'De quel accompagnement avez-vous besoin ?',
+          'Y a-t-il des changements dans votre situation personnelle a prendre en compte ?',
         ],
       },
     ],
   },
-  'Bilan M+10': {
-    titre: 'Bilan M+10 — Preparation sortie',
-    description: 'Derniere phase avant la sortie. Focus sur la preparation a l\'emploi perenne.',
+  suivi_post_sortie: {
+    titre: 'Suivi post-sortie (3 a 6 mois)',
+    description: 'Point de suivi apres la sortie du dispositif : situation actuelle, maintien dans l\'emploi ou la formation, besoin d\'appui.',
     sections: [
       {
-        titre: 'Bilan du parcours',
+        titre: 'Situation actuelle',
         champ: 'cip_integration',
         questions: [
-          'Quels sont les 3 progres dont vous etes le plus fier depuis le debut ?',
-          'Qu\'est-ce que ce parcours vous a apporte ?',
-          'Comment vous sentez-vous a l\'idee de quitter le dispositif ?',
+          'Quelle est votre situation aujourd\'hui (emploi, formation, recherche) ?',
+          'Si vous etes en poste : comment cela se passe-t-il ?',
+          'Votre situation a-t-elle change depuis la sortie ?',
         ],
       },
       {
-        titre: 'Competences finales',
+        titre: 'Acquis mobilises',
         champ: 'cip_competences',
         questions: [
-          'Quelles competences maitrisez-vous que vous ne connaissiez pas avant ?',
-          'Quels savoir-etre avez-vous developpes (ponctualite, travail en equipe...) ?',
-          'Etes-vous pret a occuper un poste similaire chez un autre employeur ?',
+          'Qu\'est-ce qui vous sert le plus de ce que vous avez appris pendant le parcours ?',
+          'Y a-t-il des difficultes nouvelles dans votre poste ou votre formation ?',
         ],
       },
       {
-        titre: 'Recherche d\'emploi',
+        titre: 'Perspectives',
         champ: 'cip_projet_pro',
         questions: [
-          'Quel type d\'emploi recherchez-vous concretement ?',
-          'Avez-vous deja postule quelque part ? Des entretiens en vue ?',
-          'Connaissez-vous les employeurs du secteur sur le territoire ?',
-          'Avez-vous besoin d\'aide pour preparer vos entretiens d\'embauche ?',
+          'Comment voyez-vous les prochains mois ?',
+          'Avez-vous besoin d\'un appui ponctuel (CV, demarche, mise en relation) ?',
         ],
       },
       {
-        titre: 'Stabilite personnelle',
+        titre: 'Situation personnelle',
         champ: 'cip_socialisation',
         questions: [
-          'Votre situation de logement est-elle stable ?',
-          'Toutes vos demarches administratives sont-elles reglees ?',
-          'Avez-vous un reseau de soutien (famille, amis, associations) ?',
-          'Y a-t-il encore des freins qui pourraient bloquer votre insertion ?',
+          'Les freins leves pendant le parcours restent-ils leves ?',
+          'Y a-t-il un point de vigilance dont on doit parler ?',
         ],
       },
     ],
   },
-  'Bilan Sortie': {
+  bilan_sortie: {
     titre: 'Bilan de sortie — Fin de parcours',
     description: 'Bilan final avec rapport de sortie. Classification positive/negative et recommandations CIP.',
     sections: [
@@ -1127,32 +1198,36 @@ function buildRecommandationsCIP(pcm, diagnostic, candidate) {
 
 function buildFreinsSociaux(diagnostic) {
   const freins = [];
-  const FREIN_FIELDS = ['mobilite', 'sante', 'finances', 'famille', 'linguistique', 'administratif', 'numerique'];
 
-  for (const key of FREIN_FIELDS) {
-    const niveau = diagnostic[`frein_${key}`] || 1;
+  // Les 9 axes viennent du registre unique (freins-registry) — null honnête :
+  // un frein non évalué reste à niveau null (plus jamais forcé à 1).
+  for (const key of FREIN_KEYS) {
+    const raw = diagnostic[`frein_${key}`];
+    const niveau = raw == null ? null : Number(raw);
     const detail = diagnostic[`frein_${key}_detail`] || '';
     const causes = (diagnostic[`frein_${key}_causes`] || '').split(',').filter(Boolean);
     const def = FREINS_DEFINITIONS[key];
+    if (!def) continue;
 
     freins.push({
       type: key,
       label: def.label,
       icon: def.icon,
       niveau,
-      niveau_label: def.niveaux[niveau],
+      evalue: niveau != null,
+      niveau_label: niveau != null ? def.niveaux[niveau] : 'Non évalué',
       detail,
       causes,
-      actions: niveau >= 3 ? def.actions_levee.slice(0, Math.min(3, niveau - 1)) : [],
+      actions: niveau != null && niveau >= 3 ? def.actions_levee.slice(0, Math.min(3, niveau - 1)) : [],
     });
   }
 
-  // Trier par niveau décroissant
-  freins.sort((a, b) => b.niveau - a.niveau);
+  // Trier par niveau décroissant (les non-évalués en dernier)
+  freins.sort((a, b) => (b.niveau || 0) - (a.niveau || 0));
 
-  // Plan d'actions prioritaires
+  // Plan d'actions prioritaires (uniquement les freins ÉVALUÉS ≥ 3)
   const plan_actions = freins
-    .filter(f => f.niveau >= 3)
+    .filter(f => f.niveau != null && f.niveau >= 3)
     .map(f => ({
       priorite: f.niveau >= 4 ? 'haute' : 'moyenne',
       action: `Lever le frein ${f.label}`,
@@ -1160,7 +1235,7 @@ function buildFreinsSociaux(diagnostic) {
       echeance: f.niveau >= 4 ? '2 semaines' : '1 mois',
     }));
 
-  return { freins, plan_actions, nb_freins_majeurs: freins.filter(f => f.niveau >= 4).length };
+  return { freins, plan_actions, nb_freins_majeurs: freins.filter(f => f.niveau != null && f.niveau >= 4).length };
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1193,21 +1268,24 @@ function buildAIRecommendations(employee, pcm, diagnostic, milestones, freinsSoc
     }
   }
 
-  // Analyse evolution freins entre bilans
+  // Analyse evolution freins entre bilans (9 axes du registre ; seuls les
+  // freins ÉVALUÉS aux deux bilans sont comparés — null honnête)
   if (ms.length >= 2) {
-    const sorted = [...ms].filter(m => m.status === 'realise' && m.frein_mobilite != null).sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+    const sorted = [...ms]
+      .filter(m => m.status === 'realise' && FREIN_KEYS.some(k => m[`frein_${k}`] != null))
+      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
     if (sorted.length >= 2) {
       const last = sorted[sorted.length - 1];
       const prev = sorted[sorted.length - 2];
-      const freinKeys = ['mobilite', 'sante', 'finances', 'famille', 'linguistique', 'administratif', 'numerique'];
-      for (const key of freinKeys) {
-        const lastVal = last[`frein_${key}`] || 0;
-        const prevVal = prev[`frein_${key}`] || 0;
+      for (const key of FREIN_KEYS) {
+        const lastVal = last[`frein_${key}`];
+        const prevVal = prev[`frein_${key}`];
+        if (lastVal == null || prevVal == null) continue;
         if (lastVal > prevVal) {
           recommandations.alertes.push({
             type: 'frein_regression',
             urgence: 'haute',
-            message: `Frein ${key} en regression (${prevVal} -> ${lastVal}) entre ${prev.milestone_type} et ${last.milestone_type}`,
+            message: `Frein ${key} en regression (${prevVal} -> ${lastVal}) entre ${milestoneLabel(prev)} et ${milestoneLabel(last)}`,
             actions_suggerees: ['Entretien urgent avec la CIP', 'Revoir le plan d\'action sur ce frein'],
           });
         } else if (lastVal < prevVal) {
@@ -1260,14 +1338,14 @@ function buildAIRecommendations(employee, pcm, diagnostic, milestones, freinsSoc
       recommandations.alertes.push({
         type: 'retard_jalon',
         urgence: 'haute',
-        message: `${m.milestone_type} en retard de ${Math.abs(daysUntil)} jours — planifier en urgence`,
+        message: `${milestoneLabel(m)} en retard de ${Math.abs(daysUntil)} jours — planifier en urgence`,
         actions_suggerees: ['Fixer une date d\'entretien immediatement'],
       });
     } else if (daysUntil <= 14) {
       recommandations.alertes.push({
         type: 'jalon_proche',
         urgence: 'moyenne',
-        message: `${m.milestone_type} prevu dans ${daysUntil} jours — penser a planifier`,
+        message: `${milestoneLabel(m)} prevu dans ${daysUntil} jours — penser a planifier`,
         actions_suggerees: ['Verifier la disponibilite du CIP', 'Preparer les documents'],
       });
     }
@@ -1316,43 +1394,28 @@ function buildTimeline(employee, contracts, milestones, diagnostic) {
     });
   }
 
-  // 2. Diagnostic d'accueil
-  const diagMilestone = milestones.find(m => m.milestone_type === 'Diagnostic accueil');
-  events.push({
-    type: 'milestone',
-    label: 'Diagnostic accueil',
-    date: diagMilestone?.completed_date || diagMilestone?.due_date || (startDate ? addMonths(startDate, 1) : null),
-    status: diagMilestone?.status || 'a_planifier',
-    milestone_id: diagMilestone?.id,
-    has_diagnostic: !!diagnostic,
-  });
+  // 2. Entretiens du parcours — occurrences RÉELLES (bilans intermédiaires
+  // multiples, renouvellements, post-sortie), triées par échéance. Si le
+  // parcours n'a encore aucun entretien, on affiche l'échéancier théorique.
+  const source = (milestones && milestones.length)
+    ? [...milestones].sort((a, b) => new Date(a.due_date || a.completed_date || 0) - new Date(b.due_date || b.completed_date || 0))
+    : (startDate ? computeMilestoneSchedule(startDate, endDate).map((d) => ({ milestone_type: d.type, titre: d.titre, due_date: d.due, status: 'a_planifier' })) : []);
 
-  // 3-5. Bilans M+3, M+6, M+10
-  for (const type of ['Bilan M+3', 'Bilan M+6', 'Bilan M+10']) {
-    const ms = milestones.find(m => m.milestone_type === type);
-    const monthOffset = type === 'Bilan M+3' ? 3 : type === 'Bilan M+6' ? 6 : 10;
+  for (const ms of source) {
     events.push({
       type: 'milestone',
-      label: type,
-      date: ms?.completed_date || ms?.due_date || (startDate ? addMonths(startDate, monthOffset) : null),
-      status: ms?.status || 'a_planifier',
-      milestone_id: ms?.id,
-      avis_global: ms?.avis_global,
+      milestone_type: ms.milestone_type,
+      label: milestoneLabel(ms),
+      date: ms.completed_date || ms.due_date || null,
+      status: ms.status || 'a_planifier',
+      milestone_id: ms.id,
+      avis_global: ms.avis_global,
+      sortie_classification: ms.milestone_type === 'bilan_sortie' ? ms.sortie_classification : undefined,
+      has_diagnostic: ms.milestone_type === 'diagnostic_accueil' ? !!diagnostic : undefined,
     });
   }
 
-  // 6. Bilan Sortie
-  const sortieMilestone = milestones.find(m => m.milestone_type === 'Bilan Sortie');
-  events.push({
-    type: 'milestone',
-    label: 'Bilan Sortie',
-    date: sortieMilestone?.completed_date || sortieMilestone?.due_date || endDate,
-    status: sortieMilestone?.status || 'a_planifier',
-    milestone_id: sortieMilestone?.id,
-    sortie_classification: sortieMilestone?.sortie_classification,
-  });
-
-  // 7. Fin de contrat
+  // 3. Fin de contrat
   if (endDate) {
     events.push({
       type: 'fin_contrat',
@@ -1389,13 +1452,17 @@ function calculateProgression(events) {
  * courts (source de « jalons fantômes » toujours en retard).
  *
  * Règles :
- *   • Diagnostic accueil : début + 1 mois
- *   • Bilans M+3 / M+6 / M+10 : uniquement ceux qui tombent AVANT la fin
- *   • Bilan Sortie : fin de contrat − 15 jours
+ *   • diagnostic_accueil : début + 1 mois
+ *   • bilan_intermediaire (titres « Bilan M+3 » / « M+6 » / « M+10 ») :
+ *     uniquement ceux qui tombent AVANT la fin — la CIP peut en créer
+ *     d'autres librement (POST /milestones)
+ *   • bilan_sortie : fin de contrat − 15 jours
+ *
+ * Types TECHNIQUES (CHECK SQL 2026-07) ; le libellé d'affichage est `titre`.
  *
  * @param {string|Date} startDate  début du parcours (insertion_start_date ou contrat)
  * @param {string|Date|null} endDate  fin de contrat (null → +12 mois par défaut)
- * @returns {Array<{type:string, due:string}>}  due au format 'YYYY-MM-DD'
+ * @returns {Array<{type:string, titre:string, due:string}>}  due au format 'YYYY-MM-DD'
  */
 function computeMilestoneSchedule(startDate, endDate) {
   const add = (d, m) => { const x = new Date(d); x.setMonth(x.getMonth() + m); return x; };
@@ -1407,16 +1474,16 @@ function computeMilestoneSchedule(startDate, endDate) {
   const durationMonths = Math.max(1, Math.round((end - start) / (30.44 * 86400000)));
   const sortieDue = addDays(end, -15);
 
-  const defs = [{ type: 'Diagnostic accueil', due: add(start, 1) }];
-  for (const [type, m] of [['Bilan M+3', 3], ['Bilan M+6', 6], ['Bilan M+10', 10]]) {
+  const defs = [{ type: 'diagnostic_accueil', titre: "Diagnostic d'accueil", due: add(start, 1) }];
+  for (const [titre, m] of [['Bilan M+3', 3], ['Bilan M+6', 6], ['Bilan M+10', 10]]) {
     if (m < durationMonths) {
       let due = add(start, m);
       if (due > sortieDue) due = addDays(sortieDue, -15);
-      defs.push({ type, due });
+      defs.push({ type: 'bilan_intermediaire', titre, due });
     }
   }
-  defs.push({ type: 'Bilan Sortie', due: sortieDue });
-  return defs.map((d) => ({ type: d.type, due: iso(d.due) }));
+  defs.push({ type: 'bilan_sortie', titre: 'Bilan de sortie', due: sortieDue });
+  return defs.map((d) => ({ type: d.type, titre: d.titre, due: iso(d.due) }));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1502,9 +1569,26 @@ function computeCddiCumulativeMonths(contracts, asOf = new Date()) {
  * @param {{ userId?: number }} [opts]
  * @returns {Promise<{skipped?:string, updated:Array, created:Array}>}
  */
+/**
+ * Apparie une entrée d'échéancier avec les entretiens existants du parcours :
+ *  - diagnostic_accueil / bilan_sortie : par TYPE (uniques par parcours —
+ *    index partiels idx_milestones_accueil_unique / idx_milestones_sortie_unique) ;
+ *  - bilan_intermediaire : par (type + titre) — les bilans étant multiples,
+ *    seul le titre (« Bilan M+3 »…) identifie l'occurrence de l'échéancier.
+ * Les renouvellements / suivis post-sortie ne sont jamais gérés par
+ * l'échéancier automatique.
+ */
+function findScheduleMatch(existingRows, def) {
+  if (def.type === 'bilan_intermediaire') {
+    return existingRows.find((m) => m.milestone_type === def.type && (m.titre || '') === def.titre) || null;
+  }
+  return existingRows.find((m) => m.milestone_type === def.type) || null;
+}
+
 async function resyncMilestones(db, employeeId, { userId = null } = {}) {
   const empRes = await db.query(
     `SELECT e.insertion_status, e.insertion_start_date, e.contract_start, e.contract_end,
+            COALESCE(e.parcours_num, 1) AS parcours_num,
             ec.start_date AS c_start, ec.end_date AS c_end
      FROM employees e
      LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
@@ -1517,14 +1601,16 @@ async function resyncMilestones(db, employeeId, { userId = null } = {}) {
   // On ne recale que les parcours en cours (pas de réactivation d'un terminé).
   if (r.insertion_status !== 'en_parcours') return { skipped: 'not_en_parcours', updated: [], created: [] };
 
+  // Recalage limité au PARCOURS COURANT (une réembauche ouvre le parcours n° 2
+  // sans toucher l'historique du n° 1 — RES-05).
   const existingRes = await db.query(
-    'SELECT id, milestone_type, due_date, status FROM insertion_milestones WHERE employee_id = $1',
-    [employeeId]
+    `SELECT id, milestone_type, titre, due_date, status, locked_at
+     FROM insertion_milestones WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2`,
+    [employeeId, r.parcours_num]
   );
   // Parcours non encore initialisé → laissé à /initialize (pas d'auto-création ici).
   if (existingRes.rows.length === 0) return { skipped: 'not_initialized', updated: [], created: [] };
 
-  const byType = new Map(existingRes.rows.map((m) => [m.milestone_type, m]));
   const start = r.insertion_start_date || r.c_start || r.contract_start || new Date();
   const end = r.c_end || r.contract_end || null;
   const schedule = computeMilestoneSchedule(start, end);
@@ -1534,28 +1620,87 @@ async function resyncMilestones(db, employeeId, { userId = null } = {}) {
   const isoOf = (v) => (v ? new Date(v).toISOString().slice(0, 10) : null);
 
   for (const d of schedule) {
-    const ex = byType.get(d.type);
+    const ex = findScheduleMatch(existingRes.rows, d);
     if (ex) {
-      if (ex.status === 'realise') continue; // jamais toucher un jalon réalisé
+      if (ex.status === 'realise' || ex.locked_at) continue; // jamais toucher un entretien réalisé/verrouillé
       if (isoOf(ex.due_date) !== d.due) {
         await db.query(
           'UPDATE insertion_milestones SET due_date = $1, updated_at = NOW() WHERE id = $2',
           [d.due, ex.id]
         );
-        updated.push({ id: ex.id, type: d.type, due: d.due });
+        updated.push({ id: ex.id, type: d.type, titre: d.titre, due: d.due });
       }
     } else {
-      const ins = await db.query(
-        `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (employee_id, milestone_type) DO NOTHING
-         RETURNING id`,
-        [employeeId, d.type, d.due, userId]
-      );
-      if (ins.rows.length) created.push({ id: ins.rows[0].id, type: d.type, due: d.due });
+      // Plus d'ON CONFLICT (employee_id, milestone_type) — la contrainte a été
+      // remplacée par des index uniques partiels (accueil/sortie par parcours).
+      // L'existence vient d'être vérifiée sur les lignes chargées ; en cas de
+      // course sur accueil/sortie, l'index partiel rejette le doublon (23505).
+      try {
+        const ins = await db.query(
+          `INSERT INTO insertion_milestones (employee_id, parcours_num, milestone_type, titre, due_date, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id`,
+          [employeeId, r.parcours_num, d.type, d.titre, d.due, userId]
+        );
+        if (ins.rows.length) created.push({ id: ins.rows[0].id, type: d.type, titre: d.titre, due: d.due });
+      } catch (e) {
+        if (e.code !== '23505') throw e; // course concurrente sur accueil/sortie : ignorée
+      }
     }
   }
   return { updated, created };
+}
+
+/**
+ * Crée (idempotent) les jalons du parcours COURANT d'un salarié, calés sur son
+ * contrat réel. Déclencheurs : /milestones/:employeeId/initialize, liaison
+ * candidat→collaborateur (conversion.js), import paie (collaborator-import.js),
+ * scheduler. L'auto-init paresseuse en GET a été supprimée (effet de bord en
+ * lecture — vigilance 03 §6.4).
+ *
+ * @param {import('pg').Pool|import('pg').PoolClient} db
+ * @param {number} employeeId
+ * @param {number|null} userId
+ * @returns {Promise<Array>} les jalons du parcours (existants + créés)
+ */
+async function generateMilestones(db, employeeId, userId) {
+  const empRes = await db.query(
+    `SELECT e.insertion_start_date, e.contract_start, e.contract_end,
+            COALESCE(e.parcours_num, 1) AS parcours_num,
+            ec.start_date AS c_start, ec.end_date AS c_end
+     FROM employees e
+     LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+     WHERE e.id = $1`,
+    [employeeId]
+  );
+  if (empRes.rows.length === 0) return [];
+  const r = empRes.rows[0];
+  const start = r.insertion_start_date || r.c_start || r.contract_start || new Date();
+  const end = r.c_end || r.contract_end || null;
+  const schedule = computeMilestoneSchedule(start, end);
+
+  const existingRes = await db.query(
+    `SELECT * FROM insertion_milestones WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2`,
+    [employeeId, r.parcours_num]
+  );
+
+  const results = [...existingRes.rows];
+  for (const d of schedule) {
+    const ex = findScheduleMatch(existingRes.rows, d);
+    if (ex) continue;
+    try {
+      const ins = await db.query(
+        `INSERT INTO insertion_milestones (employee_id, parcours_num, milestone_type, titre, due_date, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [employeeId, r.parcours_num, d.type, d.titre, d.due, userId || null]
+      );
+      results.push(ins.rows[0]);
+    } catch (e) {
+      if (e.code !== '23505') throw e; // course sur accueil/sortie (index partiel) : ignorée
+    }
+  }
+  results.sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+  return results;
 }
 
 module.exports = {
@@ -1563,10 +1708,15 @@ module.exports = {
   METIERS_CIBLES,
   FREINS_DEFINITIONS,
   CIP_QUESTIONNAIRES,
+  MILESTONE_TYPES,
+  MILESTONE_TYPE_LABELS,
+  milestoneLabel,
   analyzeInsertion,
   buildAIRecommendations,
   buildTimeline,
   computeMilestoneSchedule,
   computeCddiCumulativeMonths,
   resyncMilestones,
+  generateMilestones,
+  findScheduleMatch,
 };

@@ -571,13 +571,14 @@ router.get('/executive', authorize('ADMIN', 'MANAGER'), cacheMiddleware(dashboar
          FROM boutique_ventes WHERE date_vente >= $1 AND date_vente <= $2`,
         [n1MonthStart, n1Today]
       ).catch(() => ({ rows: [{ total: 0 }] })),
-      // 5. Sorties insertion 12 derniers mois
+      // 5. Sorties insertion 12 derniers mois — nomenclature 2026-07 :
+      // dynamique = emploi_durable + emploi_transition + sortie_positive.
       pool.query(`
         SELECT
-          COUNT(*) FILTER (WHERE sortie_classification = 'positive')::int AS positives,
+          COUNT(*) FILTER (WHERE sortie_classification IN ('emploi_durable', 'emploi_transition', 'sortie_positive'))::int AS positives,
           COUNT(*) FILTER (WHERE sortie_classification IS NOT NULL)::int AS total
         FROM insertion_milestones
-        WHERE milestone_type = 'Bilan Sortie'
+        WHERE milestone_type = 'bilan_sortie'
           AND completed_date >= NOW() - INTERVAL '12 months'
       `).catch(() => ({ rows: [{ positives: 0, total: 0 }] })),
       // 7. Subvention Refashion trimestre (en cours)

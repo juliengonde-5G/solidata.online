@@ -320,9 +320,12 @@ describe('61b — CIP référent', () => {
   });
 
   it('PUT /insertion/:id/cip-referent (RH, user valide) → 200', async () => {
+    // Extension 2026-07 : la validation du référent lit désormais aussi son
+    // rôle (résolution des rôles custom via resolveBaseRole) — le mock renvoie
+    // la colonne role comme le ferait la base.
     mockQuery.mockImplementation((sql) => {
       const s = String(sql);
-      if (/SELECT id FROM users WHERE id = \$1 AND COALESCE\(is_active/.test(s)) return Promise.resolve({ rows: [{ id: 3 }] });
+      if (/SELECT id, role FROM users WHERE id = \$1 AND COALESCE\(is_active/.test(s)) return Promise.resolve({ rows: [{ id: 3, role: 'RH' }] });
       if (/UPDATE employees SET cip_referent_user_id/.test(s)) return Promise.resolve({ rows: [{ id: 5, cip_referent_user_id: 3 }] });
       if (/SELECT first_name, last_name FROM users WHERE id = \$1/.test(s)) return Promise.resolve({ rows: [{ first_name: 'C', last_name: 'IP' }] });
       return Promise.resolve({ rows: [] });

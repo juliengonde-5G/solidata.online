@@ -309,10 +309,10 @@ async function queryKpisInsertion({ annee } = {}) {
     FROM insertion_milestones im JOIN employees e ON e.id = im.employee_id
     WHERE e.insertion_status = 'en_parcours' AND e.is_active = true`);
   const sorties = await soft(`
-    SELECT COUNT(*) FILTER (WHERE sortie_classification = 'positive')::int AS pos,
+    SELECT COUNT(*) FILTER (WHERE sortie_classification IN ('emploi_durable', 'emploi_transition', 'sortie_positive'))::int AS pos,
            COUNT(*) FILTER (WHERE sortie_classification IS NOT NULL)::int AS tot
     FROM insertion_milestones
-    WHERE milestone_type = 'Bilan Sortie' AND status = 'realise'
+    WHERE milestone_type = 'bilan_sortie' AND status = 'realise'
       AND COALESCE(completed_date, updated_at::date) BETWEEN $1 AND $2`, [`${year}-01-01`, `${year}-12-31`]);
 
   const tot = sorties?.[0]?.tot || 0;

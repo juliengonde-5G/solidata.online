@@ -25,7 +25,7 @@
  */
 
 const ExcelJS = require('exceljs');
-const { resyncMilestones } = require('../routes/insertion/engine');
+const { resyncMilestones, generateMilestones } = require('../routes/insertion/engine');
 
 // ── Référentiels de mapping ────────────────────────────────────────────────
 
@@ -489,9 +489,10 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
       } else {
         // ── INSERT nouveau collaborateur ──
         // Contrat d'insertion (poste « … Cddi ») → démarre le parcours pour
-        // qu'il apparaisse directement dans le suivi CIP (les jalons seront
-        // posés à la 1re ouverture de la fiche). Uniquement à la création :
-        // on ne réactive jamais un parcours clôturé au réimport.
+        // qu'il apparaisse directement dans le suivi CIP (les jalons sont posés
+        // juste après l'INSERT — l'auto-init en lecture a été supprimée).
+        // Uniquement à la création : on ne réactive jamais un parcours clôturé
+        // au réimport.
         const isInsertion = /cddi/i.test(c.position || '');
         const insertionStatus = isInsertion ? 'en_parcours' : 'none';
         const insertionStart = isInsertion ? (c.contract_start || null) : null;
@@ -525,6 +526,20 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
         const newId = ins.rows[0].id;
         await upsertCurrentContract(db, newId, { contractType, teamId, c });
         await applyMedicalVisit(db, newId, c);
+        // Extension 2026-07 (PR1) : l'initialisation des jalons se fait au
+        // DÉCLENCHEUR (import paie / liaison candidat), plus en lecture — les
+        // nouveaux CDDI en parcours reçoivent leurs entretiens dès l'import.
+        // Savepoint imbriqué : un échec de pose n'annule pas l'import.
+        if (insertionStatus === 'en_parcours') {
+          await db.query('SAVEPOINT genms_sp');
+          try {
+            await generateMilestones(db, newId, userId);
+            await db.query('RELEASE SAVEPOINT genms_sp');
+          } catch (e) {
+            try { await db.query('ROLLBACK TO SAVEPOINT genms_sp'); } catch (_) { /* tx close */ }
+            console.warn('[IMPORT] generateMilestones ignoré :', e.message);
+          }
+        }
         created.push({ id: newId, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
       }
       await db.query('RELEASE SAVEPOINT collab_sp');

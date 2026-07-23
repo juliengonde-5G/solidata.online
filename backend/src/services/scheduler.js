@@ -259,18 +259,20 @@ async function checkContractEndings() {
 }
 
 /**
- * Jalons insertion (Diagnostic M+1, Bilan M+3, M+6, M+10)
- * Cree automatiquement les jalons quand les echeances arrivent
+ * Jalons insertion — filet de sécurité : crée le jalon LE JOUR de son échéance
+ * s'il n'existe pas (types techniques 2026-07 ; l'appariement des bilans
+ * intermédiaires se fait par titre — findScheduleMatch, parcours courant).
  */
 async function checkInsertionMilestones() {
   try {
     // Échéancier calé sur le contrat réel (même logique que les routes) — évite
     // de créer un M+10 pour un contrat de 6 mois.
-    const { computeMilestoneSchedule } = require('../routes/insertion/engine');
+    const { computeMilestoneSchedule, findScheduleMatch } = require('../routes/insertion/engine');
     const today = new Date().toISOString().split('T')[0];
 
     const employees = await pool.query(
       `SELECT e.id, e.first_name, e.last_name, e.insertion_start_date, e.contract_end,
+              COALESCE(e.parcours_num, 1) AS parcours_num,
               ec.start_date AS c_start, ec.end_date AS c_end
        FROM employees e
        LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
@@ -284,20 +286,24 @@ async function checkInsertionMilestones() {
         emp.insertion_start_date || emp.c_start,
         emp.c_end || emp.contract_end
       );
-      for (const ms of schedule) {
-        if (ms.due === today) {
-          const existing = await pool.query(
-            `SELECT id FROM insertion_milestones WHERE employee_id = $1 AND milestone_type = $2`,
-            [emp.id, ms.type]
+      const due = schedule.filter((ms) => ms.due === today);
+      if (due.length === 0) continue;
+      const existing = await pool.query(
+        `SELECT id, milestone_type, titre FROM insertion_milestones
+         WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2`,
+        [emp.id, emp.parcours_num]
+      );
+      for (const ms of due) {
+        if (findScheduleMatch(existing.rows, ms)) continue;
+        try {
+          await pool.query(
+            `INSERT INTO insertion_milestones (employee_id, parcours_num, milestone_type, titre, due_date, status)
+             VALUES ($1, $2, $3, $4, $5, 'a_planifier')`,
+            [emp.id, emp.parcours_num, ms.type, ms.titre, today]
           );
-          if (existing.rows.length === 0) {
-            await pool.query(
-              `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, status)
-               VALUES ($1, $2, $3, 'a_planifier')`,
-              [emp.id, ms.type, today]
-            );
-            console.log(`[SCHEDULER] Jalon ${ms.type} cree pour ${emp.first_name} ${emp.last_name}`);
-          }
+          console.log(`[SCHEDULER] Entretien ${ms.titre} (${ms.type}) cree pour ${emp.first_name} ${emp.last_name}`);
+        } catch (e) {
+          if (e.code !== '23505') throw e; // course sur accueil/sortie (index partiel)
         }
       }
     }
@@ -327,9 +333,14 @@ async function checkInsertionInterviewAlerts() {
        AND e.is_active = true`
     );
 
+    const { milestoneLabel } = require('../routes/insertion/engine');
+    const { readInsertionSetting } = require('../utils/insertion-settings');
+    const iaPrepAuto = await readInsertionSetting('insertion.ia_preparation_auto');
+
     for (const ms of milestones.rows) {
       const dueDate = new Date(ms.due_date);
       const daysUntilDue = Math.round((dueDate - today) / 86400000);
+      const label = milestoneLabel(ms);
 
       // Jalon en retard (pas encore planifie et echeance depassee)
       if (ms.status === 'a_planifier' && daysUntilDue < 0) {
@@ -347,13 +358,29 @@ async function checkInsertionInterviewAlerts() {
 
         if (daysUntilInterview === 7) {
           await createInsertionAlert(ms, 'rappel_j7', todayStr);
+          // Option insertion.ia_preparation_auto (settings) : note de
+          // préparation IA générée à J-7, persistée sur l'entretien. Best
+          // effort — jamais bloquant pour la chaîne d'alertes.
+          if (iaPrepAuto && process.env.ANTHROPIC_API_KEY && !ms.ia_preparation) {
+            try {
+              const { preparerEntretien } = require('./insertion-ai');
+              const prep = await preparerEntretien(ms.employee_id, label);
+              await pool.query(
+                'UPDATE insertion_milestones SET ia_preparation = $1, ia_preparation_at = NOW() WHERE id = $2',
+                [JSON.stringify(prep), ms.id]
+              );
+              console.log(`[SCHEDULER] Préparation IA J-7 générée pour l'entretien #${ms.id} (${label})`);
+            } catch (err) {
+              console.error(`[SCHEDULER] Préparation IA J-7 échouée #${ms.id}:`, err.message);
+            }
+          }
         } else if (daysUntilInterview === 1) {
           await createInsertionAlert(ms, 'rappel_j1', todayStr);
           // Envoyer notification Brevo si possible
           if (ms.email || ms.phone) {
             try {
               await sendNotification(
-                { type: 'email', body: `Bonjour {prenom},\n\nRappel : votre entretien ${ms.milestone_type} est prevu demain.\n\nCordialement,\nSolidarite Textile`, subject: `Rappel entretien ${ms.milestone_type}` },
+                { type: 'email', body: `Bonjour {prenom},\n\nRappel : votre entretien « ${label} » est prevu demain.\n\nCordialement,\nSolidarite Textile`, subject: `Rappel entretien ${label}` },
                 ms.email, ms.phone,
                 { prenom: ms.first_name, nom: ms.last_name }
               );
@@ -366,6 +393,123 @@ async function checkInsertionInterviewAlerts() {
     }
   } catch (err) {
     console.error('[SCHEDULER] Erreur checkInsertionInterviewAlerts:', err.message);
+  }
+}
+
+/**
+ * Pass IAE proches de l'échéance (extension 2026-07 PR1) — alertes à J-7 mois
+ * (seuil paramétrable insertion.alerte_pass_iae_mois) et J-2 mois, consignées
+ * dans insertion_interview_alerts (alert_type pass_iae_7m / pass_iae_2m —
+ * CHECK élargi par init-db.js). Anti-doublon par (employé, type, alerte,
+ * target_date = fin du Pass) : une seule alerte par seuil et par Pass.
+ */
+async function checkPassIaeExpiring() {
+  try {
+    const { readInsertionSetting } = require('../utils/insertion-settings');
+    const moisSeuil1 = await readInsertionSetting('insertion.alerte_pass_iae_mois');
+
+    const rows = await pool.query(
+      `SELECT e.id, e.first_name, e.last_name, e.pass_iae_end
+       FROM employees e
+       WHERE e.is_active = true AND e.pass_iae_end IS NOT NULL
+         AND e.pass_iae_end >= CURRENT_DATE`
+    );
+    const now = Date.now();
+    for (const e of rows.rows) {
+      const moisRestants = (new Date(e.pass_iae_end) - now) / (30.44 * 86400000);
+      let alertType = null;
+      if (moisRestants <= 2) alertType = 'pass_iae_2m';
+      else if (moisRestants <= moisSeuil1) alertType = 'pass_iae_7m';
+      if (!alertType) continue;
+      const targetDate = new Date(e.pass_iae_end).toISOString().split('T')[0];
+      await createInsertionAlert(
+        { employee_id: e.id, first_name: e.first_name, last_name: e.last_name, milestone_type: 'pass_iae' },
+        alertType, targetDate
+      );
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur checkPassIaeExpiring:', err.message);
+  }
+}
+
+/**
+ * Renouvellements à préparer (extension 2026-07 PR1) — contrats CDDI courants
+ * finissant dans moins de 42 jours SANS entretien de renouvellement lié
+ * (contract_id) ni récent : alerte 'planification' (milestone_type
+ * 'renouvellement', target_date = fin de contrat, anti-doublon naturel).
+ */
+async function checkRenouvellementsAPreparer() {
+  try {
+    const rows = await pool.query(
+      `SELECT e.id, e.first_name, e.last_name, ec.id AS contract_id, ec.end_date
+       FROM employees e
+       JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+       WHERE e.is_active = true AND e.insertion_status = 'en_parcours'
+         AND UPPER(ec.contract_type) = 'CDDI'
+         AND ec.end_date IS NOT NULL
+         AND ec.end_date >= CURRENT_DATE
+         AND ec.end_date < CURRENT_DATE + INTERVAL '42 days'
+         AND NOT EXISTS (
+           SELECT 1 FROM insertion_milestones im
+           WHERE im.employee_id = e.id AND im.milestone_type = 'renouvellement'
+             AND (im.contract_id = ec.id OR im.due_date >= CURRENT_DATE - INTERVAL '60 days')
+         )`
+    );
+    for (const r of rows.rows) {
+      const targetDate = new Date(r.end_date).toISOString().split('T')[0];
+      await createInsertionAlert(
+        { employee_id: r.id, first_name: r.first_name, last_name: r.last_name, milestone_type: 'renouvellement' },
+        'planification', targetDate
+      );
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur checkRenouvellementsAPreparer:', err.message);
+  }
+}
+
+/**
+ * Suivis post-sortie (extension 2026-07 PR1, EXG-08) — un bilan de sortie
+ * réalisé il y a ~3 mois sans entretien suivi_post_sortie sur le même parcours
+ * → création de l'entretien (échéance = sortie + 3 mois, statut a_planifier
+ * pour entrer dans la chaîne d'alertes de planification). Fenêtre bornée à
+ * 7 mois pour ne pas ressusciter les anciens dossiers au déploiement.
+ * NB : pas de filtre is_active (les sortis sont généralement désactivés).
+ */
+async function createPostSortieFollowups() {
+  try {
+    const rows = await pool.query(
+      `SELECT im.id, im.employee_id, COALESCE(im.parcours_num, 1) AS parcours_num,
+              im.completed_date, e.first_name, e.last_name
+       FROM insertion_milestones im
+       JOIN employees e ON e.id = im.employee_id
+       WHERE im.milestone_type = 'bilan_sortie' AND im.status = 'realise'
+         AND im.completed_date IS NOT NULL
+         AND im.completed_date <= CURRENT_DATE - INTERVAL '80 days'
+         AND im.completed_date >= CURRENT_DATE - INTERVAL '7 months'
+         AND NOT EXISTS (
+           SELECT 1 FROM insertion_milestones s
+           WHERE s.employee_id = im.employee_id
+             AND COALESCE(s.parcours_num, 1) = COALESCE(im.parcours_num, 1)
+             AND s.milestone_type = 'suivi_post_sortie'
+         )`
+    );
+    for (const r of rows.rows) {
+      const due = new Date(r.completed_date);
+      due.setMonth(due.getMonth() + 3);
+      try {
+        await pool.query(
+          `INSERT INTO insertion_milestones
+             (employee_id, parcours_num, milestone_type, titre, due_date, status, previous_milestone_id)
+           VALUES ($1, $2, 'suivi_post_sortie', 'Suivi post-sortie', $3, 'a_planifier', $4)`,
+          [r.employee_id, r.parcours_num, due.toISOString().split('T')[0], r.id]
+        );
+        console.log(`[SCHEDULER] Suivi post-sortie cree pour ${r.first_name} ${r.last_name}`);
+      } catch (e) {
+        if (e.code !== '23505') throw e;
+      }
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur createPostSortieFollowups:', err.message);
   }
 }
 
@@ -1120,6 +1264,9 @@ async function runAllJobs() {
     await runInstrumented('checkContractEndings', checkContractEndings);
     await runInstrumented('checkInsertionMilestones', checkInsertionMilestones);
     await runInstrumented('checkInsertionInterviewAlerts', checkInsertionInterviewAlerts);
+    await runInstrumented('checkPassIaeExpiring', checkPassIaeExpiring);
+    await runInstrumented('checkRenouvellementsAPreparer', checkRenouvellementsAPreparer);
+    await runInstrumented('createPostSortieFollowups', createPostSortieFollowups);
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);

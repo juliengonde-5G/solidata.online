@@ -5,11 +5,19 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
-const { authorize } = require('../../middleware/auth');
-const { body, param } = require('express-validator');
+const { authorize, resolveBaseRole } = require('../../middleware/auth');
+const { body, param, query } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const CryptoJS = require('crypto-js');
-const { FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, analyzeInsertion, buildTimeline, computeMilestoneSchedule } = require('./engine');
+const {
+  FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, MILESTONE_TYPES, MILESTONE_TYPE_LABELS,
+  milestoneLabel, analyzeInsertion, buildTimeline,
+  computeCddiCumulativeMonths, resyncMilestones, generateMilestones,
+} = require('./engine');
+const { FREINS, freinColumns, RADAR_AXES } = require('./freins-registry');
+const { SENSITIVE_DIAG_FIELDS, encryptField, decryptField } = require('../../utils/field-crypto');
+const { maskInsertionRow, maskInsertionRows, MANAGER_HIDDEN_FIELDS } = require('./masking');
+const { readInsertionSetting } = require('../../utils/insertion-settings');
 const { autoLogActivity } = require('../../middleware/activity-logger');
 
 const PCM_KEY = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
@@ -20,39 +28,42 @@ if (!PCM_KEY) {
 
 router.use(autoLogActivity('insertion'));
 
-// Crée (idempotent) les jalons d'un salarié en calant les échéances sur son
-// contrat réel. Réutilisé par l'endpoint /initialize et par l'auto-init.
-async function generateMilestones(db, employeeId, userId) {
-  const empRes = await db.query(
-    `SELECT e.insertion_start_date, e.contract_start, e.contract_end,
-            ec.start_date AS c_start, ec.end_date AS c_end
-     FROM employees e
-     LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
-     WHERE e.id = $1`,
-    [employeeId]
-  );
-  if (empRes.rows.length === 0) return [];
-  const r = empRes.rows[0];
-  const start = r.insertion_start_date || r.c_start || r.contract_start || new Date();
-  const end = r.c_end || r.contract_end || null;
-  const schedule = computeMilestoneSchedule(start, end);
-
-  const results = [];
-  for (const d of schedule) {
-    const existing = await db.query(
-      'SELECT * FROM insertion_milestones WHERE employee_id = $1 AND milestone_type = $2',
-      [employeeId, d.type]
-    );
-    if (existing.rows.length > 0) { results.push(existing.rows[0]); continue; }
-    const ins = await db.query(
-      `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [employeeId, d.type, d.due, userId || null]
-    );
-    results.push(ins.rows[0]);
-  }
-  return results;
+// Rôle de BASE de l'utilisateur courant (les rôles custom héritent des accès
+// de leur modèle — corrige au passage la non-résolution historique, 03 §6.11).
+function baseRoleOf(req) {
+  return resolveBaseRole(req.user?.role);
 }
+
+// Parcours courant d'un salarié (RES-05 : unicité scopée par parcours).
+async function currentParcoursNum(db, employeeId) {
+  const r = await db.query('SELECT COALESCE(parcours_num, 1) AS pn FROM employees WHERE id = $1', [employeeId]);
+  return r.rows[0] ? Number(r.rows[0].pn) : 1;
+}
+
+// Snapshot probant d'un entretien dans insertion_milestones_history
+// (RES-02 : verrouillage probant, pattern refashion_dpav_history).
+async function snapshotMilestone(db, row, action, userId, motif = null) {
+  await db.query(
+    `INSERT INTO insertion_milestones_history (milestone_id, snapshot, action, changed_by, motif)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [row.id, JSON.stringify(row), action, userId || null, motif]
+  );
+}
+
+// Déchiffre en place les champs sensibles d'une ligne de diagnostic
+// (lecture ADMIN/RH ; un MANAGER ne les voit jamais — masking.js).
+function decryptDiagRow(row) {
+  if (!row) return row;
+  for (const f of SENSITIVE_DIAG_FIELDS) {
+    if (row[f] !== undefined) row[f] = decryptField(row[f]);
+  }
+  return row;
+}
+
+// Nouvelle définition unifiée des sorties dynamiques (D8/EXG-06) :
+// remplace l'ancien binaire sortie_classification = 'positive'.
+const DYNAMIC_SORTIE_CLASSES = ['emploi_durable', 'emploi_transition', 'sortie_positive'];
+const SORTIE_CLASSES = [...DYNAMIC_SORTIE_CLASSES, 'autre'];
 
 // GET /api/insertion — Vue d'ensemble de tous les employés actifs
 // IMPORTANT: doit etre AVANT /:employeeId pour ne pas etre intercepte
@@ -124,104 +135,149 @@ router.get('/freins-definitions', (req, res) => {
 });
 
 // GET /api/insertion/diagnostic/:employeeId — Récupérer le diagnostic CIP
+// (parcours courant par défaut ; ?parcours=N pour un parcours antérieur).
+// ADMIN/RH : champs sensibles DÉCHIFFRÉS ; MANAGER : champs sensibles RETIRÉS.
 router.get('/diagnostic/:employeeId', async (req, res) => {
   try {
+    const empId = parseInt(req.params.employeeId, 10);
+    if (Number.isNaN(empId)) return res.status(400).json({ error: 'ID employé invalide' });
+    const pn = req.query.parcours
+      ? parseInt(req.query.parcours, 10)
+      : await currentParcoursNum(pool, empId);
     const result = await pool.query(
-      'SELECT * FROM insertion_diagnostics WHERE employee_id = $1',
-      [req.params.employeeId]
+      'SELECT * FROM insertion_diagnostics WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2',
+      [empId, pn || 1]
     );
-    res.json(result.rows[0] || null);
+    const row = result.rows[0] || null;
+    if (!row) return res.json(null);
+    const baseRole = baseRoleOf(req);
+    if (baseRole === 'MANAGER') maskInsertionRow(row, baseRole);
+    else decryptDiagRow(row);
+    res.json(row);
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic GET :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
+// ── Champs éditables du diagnostic (extension 2026-07 PR1) ──
+// Le PUT n'écrit plus l'intégralité des colonnes : il met à jour UNIQUEMENT
+// les champs PRÉSENTS dans le body (support du stepper « sauvegarde auto »
+// rubrique par rubrique, statut_saisie en_cours/complet — REC-UX-01) et
+// accepte explicitement null pour effacer une valeur.
+const DIAG_FREIN_SCORE_FIELDS = FREINS.map((f) => f.column); // frein_mobilite … frein_judiciaire
+const DIAG_TEXT_FIELDS = [
+  // Historique
+  'parcours_anterieur', 'contraintes_sante', 'contraintes_mobilite', 'contraintes_familiales', 'autres_contraintes',
+  ...FREINS.flatMap((f) => (f.key === 'judiciaire'
+    ? [`${f.column}_detail`] // pas de colonne _causes pour le judiciaire (minimisation art. 10)
+    : [`${f.column}_detail`, `${f.column}_causes`])),
+  'obs_taches_realisees', 'obs_points_forts', 'obs_difficultes', 'obs_comportement_equipe', 'obs_autonomie_ponctualite',
+  'pref_aime_faire', 'pref_ne_veut_plus', 'pref_environnement_prefere', 'pref_environnement_eviter', 'pref_objectifs',
+  'explorama_interets', 'explorama_rejets', 'explorama_gestes_positifs', 'explorama_gestes_negatifs',
+  'explorama_environnements', 'explorama_rythme', 'cip_hypotheses_metiers', 'cip_questions',
+  // Rubriques structurées (trame officielle)
+  'commentaire_logement', 'commentaire_droits', 'commentaire_sante', 'commentaire_budget', 'commentaire_mobilite',
+  'commentaire_projet', 'commentaire_linguistique',
+  'metiers_souhaites', 'projet_formation', 'emploi_vise',
+  'attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee',
+];
+const DIAG_ENUM_FIELDS = {
+  logement_statut: ['locataire_social', 'locataire_prive', 'proprietaire', 'heberge', 'sans_abri'],
+  permis_b_statut: ['oui', 'non', 'code_en_cours', 'conduite_en_cours'],
+  situation_familiale: ['marie', 'celibataire', 'en_couple', 'divorce', 'veuf'],
+  statut_saisie: ['en_cours', 'complet'],
+  niveau_formation: null,   // nomenclature contrôlée applicativement côté front (infra3…niv6plus)
+  mutuelle_statut: null,
+  pret_a_se_former: null,
+  cecrl_niveau: null,
+  emploi_vise_rome: null,
+};
+const DIAG_BOOL_FIELDS = [
+  'logement_satisfaction', 'allocataire_caf', 'rqth', 'contre_indications', 'suivi_sante',
+  'difficultes_financieres', 'credits_en_cours', 'vehicule', 'autre_employeur',
+  'souhait_complement_heures', 'cpf_accessible', 'enfants_a_charge',
+];
+const DIAG_DATE_FIELDS = ['piece_identite_validite', 'rqth_fin'];
+const DIAG_NUM_FIELDS = ['autre_employeur_heures', 'nb_enfants'];
+const DIAG_ARRAY_FIELDS = ['ressources', 'moyen_transport'];
+const DIAG_JSONB_FIELDS = ['questionnaire_detail', 'fse_entree'];
+
+const ALL_DIAG_FIELDS = [
+  ...DIAG_FREIN_SCORE_FIELDS, ...DIAG_TEXT_FIELDS, ...Object.keys(DIAG_ENUM_FIELDS),
+  ...DIAG_BOOL_FIELDS, ...DIAG_DATE_FIELDS, ...DIAG_NUM_FIELDS, ...DIAG_ARRAY_FIELDS, ...DIAG_JSONB_FIELDS,
+];
+
 // PUT /api/insertion/diagnostic/:employeeId — Sauvegarder/mettre a jour le diagnostic
-router.put('/diagnostic/:employeeId', async (req, res) => {
+// Upsert par (employee_id, parcours_num) — contrainte insertion_diagnostics_employee_parcours_key.
+router.put('/diagnostic/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+  body('statut_saisie').optional({ nullable: true }).isIn(['en_cours', 'complet']).withMessage('statut_saisie invalide (en_cours/complet)'),
+  ...FREINS.map((f) => body(f.column).optional({ nullable: true }).isInt({ min: 1, max: 5 }).withMessage(`${f.column} : niveau attendu entre 1 et 5`)),
+], validate, async (req, res) => {
   try {
     const empId = parseInt(req.params.employeeId, 10);
-    if (isNaN(empId)) return res.status(400).json({ error: 'ID employe invalide' });
-    const d = req.body;
+    const baseRole = baseRoleOf(req);
+    const d = { ...req.body };
+
+    // Un MANAGER ne peut ni lire NI écrire les champs qui lui sont masqués
+    // (frein judiciaire, détails santé, commentaire budget).
+    if (baseRole === 'MANAGER') {
+      for (const k of Object.keys(d)) {
+        if (MANAGER_HIDDEN_FIELDS.includes(k) || k.startsWith('frein_judiciaire')) delete d[k];
+      }
+    }
+
+    const pn = await currentParcoursNum(pool, empId);
+
+    // Construit dynamiquement les couples colonne/valeur des champs PRÉSENTS.
+    const cols = [];
+    const vals = [];
+    const normalize = (field, v) => {
+      if (v === undefined) return undefined;
+      if (v === '') v = null;
+      if (v === null) return null;
+      if (DIAG_BOOL_FIELDS.includes(field)) return !!v;
+      if (DIAG_ARRAY_FIELDS.includes(field)) return Array.isArray(v) ? v : [String(v)];
+      if (DIAG_JSONB_FIELDS.includes(field)) return JSON.stringify(v);
+      if (SENSITIVE_DIAG_FIELDS.includes(field)) return encryptField(v); // chiffrement applicatif (D9)
+      return v;
+    };
+    for (const field of ALL_DIAG_FIELDS) {
+      if (!(field in d)) continue;
+      const enumVals = DIAG_ENUM_FIELDS[field];
+      if (enumVals && d[field] != null && d[field] !== '' && !enumVals.includes(d[field])) {
+        return res.status(400).json({ error: `Valeur invalide pour ${field}`, valeurs_acceptees: enumVals });
+      }
+      cols.push(field);
+      vals.push(normalize(field, d[field]));
+    }
+
+    const insertCols = ['employee_id', 'parcours_num', 'created_by', 'updated_by', ...cols];
+    const params = [empId, pn, req.user.id, req.user.id, ...vals];
+    const placeholders = insertCols.map((_, i) => `$${i + 1}`);
+    const updateSets = ['updated_by = $4', 'updated_at = NOW()',
+      ...cols.map((c, i) => `${c} = $${i + 5}`)];
 
     const result = await pool.query(`
-      INSERT INTO insertion_diagnostics (
-        employee_id, created_by, updated_by,
-        parcours_anterieur, contraintes_sante, contraintes_mobilite, contraintes_familiales, autres_contraintes,
-        frein_mobilite, frein_mobilite_detail, frein_mobilite_causes,
-        frein_sante, frein_sante_detail, frein_sante_causes,
-        frein_finances, frein_finances_detail, frein_finances_causes,
-        frein_famille, frein_famille_detail, frein_famille_causes,
-        frein_linguistique, frein_linguistique_detail, frein_linguistique_causes,
-        frein_administratif, frein_administratif_detail, frein_administratif_causes,
-        frein_numerique, frein_numerique_detail, frein_numerique_causes,
-        obs_taches_realisees, obs_points_forts, obs_difficultes,
-        obs_comportement_equipe, obs_autonomie_ponctualite,
-        pref_aime_faire, pref_ne_veut_plus, pref_environnement_prefere,
-        pref_environnement_eviter, pref_objectifs,
-        explorama_interets, explorama_rejets,
-        explorama_gestes_positifs, explorama_gestes_negatifs,
-        explorama_environnements, explorama_rythme,
-        cip_hypotheses_metiers, cip_questions
-      ) VALUES (
-        $1, $2, $2,
-        $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
-        $29, $30, $31, $32, $33,
-        $34, $35, $36, $37, $38,
-        $39, $40, $41, $42, $43, $44,
-        $45, $46
-      )
-      ON CONFLICT (employee_id) DO UPDATE SET
-        updated_by = $2, updated_at = NOW(),
-        parcours_anterieur = $3, contraintes_sante = $4, contraintes_mobilite = $5,
-        contraintes_familiales = $6, autres_contraintes = $7,
-        frein_mobilite = $8, frein_mobilite_detail = $9, frein_mobilite_causes = $10,
-        frein_sante = $11, frein_sante_detail = $12, frein_sante_causes = $13,
-        frein_finances = $14, frein_finances_detail = $15, frein_finances_causes = $16,
-        frein_famille = $17, frein_famille_detail = $18, frein_famille_causes = $19,
-        frein_linguistique = $20, frein_linguistique_detail = $21, frein_linguistique_causes = $22,
-        frein_administratif = $23, frein_administratif_detail = $24, frein_administratif_causes = $25,
-        frein_numerique = $26, frein_numerique_detail = $27, frein_numerique_causes = $28,
-        obs_taches_realisees = $29, obs_points_forts = $30, obs_difficultes = $31,
-        obs_comportement_equipe = $32, obs_autonomie_ponctualite = $33,
-        pref_aime_faire = $34, pref_ne_veut_plus = $35,
-        pref_environnement_prefere = $36, pref_environnement_eviter = $37,
-        pref_objectifs = $38,
-        explorama_interets = $39, explorama_rejets = $40,
-        explorama_gestes_positifs = $41, explorama_gestes_negatifs = $42,
-        explorama_environnements = $43, explorama_rythme = $44,
-        cip_hypotheses_metiers = $45, cip_questions = $46
+      INSERT INTO insertion_diagnostics (${insertCols.join(', ')})
+      VALUES (${placeholders.join(', ')})
+      ON CONFLICT (employee_id, parcours_num) DO UPDATE SET ${updateSets.join(', ')}
       RETURNING *
-    `, [
-      empId, req.user.id,
-      d.parcours_anterieur || null, d.contraintes_sante || null,
-      d.contraintes_mobilite || null, d.contraintes_familiales || null,
-      d.autres_contraintes || null,
-      d.frein_mobilite || null, d.frein_mobilite_detail || null, d.frein_mobilite_causes || null,
-      d.frein_sante || null, d.frein_sante_detail || null, d.frein_sante_causes || null,
-      d.frein_finances || null, d.frein_finances_detail || null, d.frein_finances_causes || null,
-      d.frein_famille || null, d.frein_famille_detail || null, d.frein_famille_causes || null,
-      d.frein_linguistique || null, d.frein_linguistique_detail || null, d.frein_linguistique_causes || null,
-      d.frein_administratif || null, d.frein_administratif_detail || null, d.frein_administratif_causes || null,
-      d.frein_numerique || null, d.frein_numerique_detail || null, d.frein_numerique_causes || null,
-      d.obs_taches_realisees || null, d.obs_points_forts || null,
-      d.obs_difficultes || null, d.obs_comportement_equipe || null,
-      d.obs_autonomie_ponctualite || null,
-      d.pref_aime_faire || null, d.pref_ne_veut_plus || null,
-      d.pref_environnement_prefere || null, d.pref_environnement_eviter || null,
-      d.pref_objectifs || null,
-      d.explorama_interets || null, d.explorama_rejets || null,
-      d.explorama_gestes_positifs || null, d.explorama_gestes_negatifs || null,
-      d.explorama_environnements || null, d.explorama_rythme || null,
-      d.cip_hypotheses_metiers || null, d.cip_questions || null,
-    ]);
+    `, params);
 
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    if (baseRole === 'MANAGER') maskInsertionRow(row, baseRole);
+    else decryptDiagRow(row);
+    res.json(row);
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic PUT :', err.message, err.detail || '');
     // On expose le code SQLSTATE (sans détail sensible) pour rendre l'erreur
-    // diagnosticable ; 42703 = colonne manquante (base non migrée).
+    // diagnosticable ; 42703 = colonne manquante (base non migrée),
+    // 23514 = valeur rejetée par un CHECK SQL.
+    if (err.code === '23514') {
+      return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code, constraint: err.constraint });
+    }
     const hint = err.code === '42703'
       ? 'Base non à jour (colonne manquante) — un redéploiement applique la migration.'
       : undefined;
@@ -234,7 +290,8 @@ router.put('/diagnostic/:employeeId', async (req, res) => {
 // JALONS INSERTION — Diagnostic accueil, M+3, M+6, M+10, Sortie
 // ══════════════════════════════════════════════════════════════
 
-// GET /api/insertion/milestones/:employeeId — Tous les jalons d'un salarié
+// GET /api/insertion/milestones/:employeeId — Tous les entretiens d'un salarié
+// (tous parcours confondus, triés par échéance ; MANAGER : frein judiciaire retiré).
 router.get('/milestones/:employeeId', async (req, res) => {
   try {
     const result = await pool.query(
@@ -245,150 +302,410 @@ router.get('/milestones/:employeeId', async (req, res) => {
        ORDER BY im.due_date`,
       [req.params.employeeId]
     );
-    res.json(result.rows);
+    res.json(maskInsertionRows(result.rows, baseRoleOf(req)));
   } catch (err) {
     console.error('[INSERTION] Erreur milestones GET :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// POST /api/insertion/milestones — Créer un jalon manuellement
+// Effet de clôture / réouverture du parcours au bilan de sortie (préservé de
+// l'ancien PUT — vigilance 03 §6.5). Idempotent.
+async function applySortieParcoursEffect(db, ms, requestedStatus) {
+  if (ms.milestone_type !== 'bilan_sortie') return;
+  if (ms.status === 'realise') {
+    await db.query(
+      `UPDATE employees
+         SET insertion_status = 'termine',
+             insertion_end_date = COALESCE(insertion_end_date, $2::date, contract_end, CURRENT_DATE),
+             updated_at = NOW()
+       WHERE id = $1 AND insertion_status <> 'termine'`,
+      [ms.employee_id, ms.completed_date || null]
+    );
+  } else if (requestedStatus && requestedStatus !== 'realise') {
+    // Retour arrière : le bilan de sortie n'est plus « réalisé » → rouvre le
+    // parcours précédemment clôturé par ce jalon (ne touche pas abandon/none).
+    await db.query(
+      `UPDATE employees
+         SET insertion_status = 'en_parcours', insertion_end_date = NULL, updated_at = NOW()
+       WHERE id = $1 AND insertion_status = 'termine'`,
+      [ms.employee_id]
+    );
+  }
+}
+
+// POST /api/insertion/milestones — Créer un entretien
+// Types TECHNIQUES (diagnostic_accueil, bilan_intermediaire, renouvellement,
+// bilan_sortie, suivi_post_sortie). bilan_intermediaire : créable à toute date,
+// titre auto « Bilan n° N ». renouvellement : liable à un contrat (contract_id).
+// diagnostic_accueil / bilan_sortie : uniques par parcours (upsert de l'échéance).
 router.post('/milestones', [
   body('employee_id').isInt().withMessage('ID employé requis'),
-  body('milestone_type').notEmpty().withMessage('Type de jalon requis'),
+  body('milestone_type').isIn(MILESTONE_TYPES).withMessage(`Type d'entretien invalide (attendu : ${MILESTONE_TYPES.join(', ')})`),
+  body('due_date').optional({ nullable: true }).isISO8601().withMessage('due_date invalide (AAAA-MM-JJ)'),
+  body('contract_id').optional({ nullable: true }).isInt().withMessage('contract_id invalide'),
+  body('titre').optional({ nullable: true }).isLength({ max: 120 }).withMessage('titre trop long (120 max)'),
 ], validate, async (req, res) => {
   try {
-    const { employee_id, milestone_type, due_date } = req.body;
-    if (!employee_id || !milestone_type) return res.status(400).json({ error: 'employee_id et milestone_type requis' });
+    const { employee_id, milestone_type, due_date, contract_id, previous_milestone_id } = req.body;
+    const due = due_date || new Date().toISOString().split('T')[0];
+    const pn = await currentParcoursNum(pool, employee_id);
+
+    // Lien renouvellement ↔ contrat : le contrat doit appartenir au salarié.
+    let contractId = null;
+    if (contract_id != null && contract_id !== '') {
+      const c = await pool.query('SELECT id FROM employee_contracts WHERE id = $1 AND employee_id = $2', [contract_id, employee_id]);
+      if (c.rows.length === 0) return res.status(400).json({ error: 'contract_id : contrat introuvable pour ce salarié' });
+      contractId = c.rows[0].id;
+    }
+
+    // Unicité partielle : UN diagnostic d'accueil et UN bilan de sortie par
+    // parcours (index idx_milestones_accueil_unique / idx_milestones_sortie_unique)
+    // → upsert de l'échéance (comportement historique conservé).
+    if (milestone_type === 'diagnostic_accueil' || milestone_type === 'bilan_sortie') {
+      const ex = await pool.query(
+        `SELECT * FROM insertion_milestones
+         WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2 AND milestone_type = $3`,
+        [employee_id, pn, milestone_type]
+      );
+      if (ex.rows.length > 0) {
+        const upd = await pool.query(
+          `UPDATE insertion_milestones SET due_date = COALESCE($1, due_date), updated_at = NOW()
+           WHERE id = $2 RETURNING *`,
+          [due_date || null, ex.rows[0].id]
+        );
+        return res.status(200).json(upd.rows[0]);
+      }
+    }
+
+    // Titre : fourni > auto par type.
+    let titre = (req.body.titre || '').trim() || null;
+    if (!titre) {
+      if (milestone_type === 'bilan_intermediaire') {
+        const n = await pool.query(
+          `SELECT COUNT(*)::int AS n FROM insertion_milestones
+           WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2 AND milestone_type = 'bilan_intermediaire'`,
+          [employee_id, pn]
+        );
+        titre = `Bilan n° ${(n.rows[0]?.n || 0) + 1}`;
+      } else if (milestone_type === 'renouvellement') {
+        const moisAnnee = new Date(due).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+        titre = `Renouvellement ${moisAnnee}`;
+      } else {
+        titre = MILESTONE_TYPE_LABELS[milestone_type];
+      }
+    }
 
     const result = await pool.query(
-      `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, created_by)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (employee_id, milestone_type) DO UPDATE SET
-         due_date = COALESCE($3, insertion_milestones.due_date),
-         updated_at = NOW()
+      `INSERT INTO insertion_milestones
+         (employee_id, parcours_num, milestone_type, titre, due_date, contract_id, previous_milestone_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [employee_id, milestone_type, due_date || new Date().toISOString().split('T')[0], req.user.id]
+      [employee_id, pn, milestone_type, titre, due, contractId, previous_milestone_id || null, req.user.id]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Un entretien de ce type existe déjà pour ce parcours.' });
+    }
     console.error('[INSERTION] Erreur milestones POST :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// PUT /api/insertion/milestones/:id — Mettre a jour un jalon (entretien bilan)
-router.put('/milestones/:id', async (req, res) => {
+// ── Champs éditables d'un entretien (PUT /milestones/:id) ──
+// Fin du COALESCE intégral (03 §6.3) : seuls les champs PRÉSENTS dans le body
+// sont écrits, et null est accepté (permet d'effacer une date, un frein…).
+const MILESTONE_JSONB_FIELDS = ['previous_review', 'validations', 'renouvellement_form', 'sortie_documents', 'remise_salarie', 'fse_sortie', 'ai_recommendations'];
+const MILESTONE_EDITABLE_FIELDS = [
+  'status', 'titre', 'due_date', 'interview_date', 'interviewer_id', 'completed_date',
+  ...FREINS.map((f) => f.column),
+  'cip_integration', 'cip_competences', 'cip_projet_pro', 'cip_socialisation',
+  'bilan_professionnel', 'bilan_social', 'objectifs_realises', 'objectifs_prochaine_periode',
+  'observations', 'actions_a_mener', 'avis_global',
+  'sortie_classification', 'sortie_type', 'sortie_commentaires', 'sortie_employeur',
+  'sortie_formation', 'sortie_employeur_siret', 'sortie_duree_contrat_mois',
+  'previous_milestone_id', 'contract_id',
+  'renouvellement_avis', 'renouvellement_duree_mois',
+  'post_sortie_situation', 'post_sortie_commentaire',
+  ...MILESTONE_JSONB_FIELDS,
+];
+
+// PUT /api/insertion/milestones/:id — Mettre à jour un entretien
+// REFUS si l'entretien est verrouillé (locked_at — clôture probante RES-02) → 409.
+// Un UPDATE sur un entretien déjà « realise » (hors clôture) est historisé
+// (snapshot 'update' dans insertion_milestones_history).
+router.put('/milestones/:id', [
+  param('id').isInt().withMessage('ID invalide'),
+  body('status').optional({ nullable: true }).isIn(['a_planifier', 'planifie', 'realise', 'reporte']).withMessage('status invalide'),
+  body('sortie_classification').optional({ nullable: true }).isIn(SORTIE_CLASSES).withMessage(`sortie_classification invalide (attendu : ${SORTIE_CLASSES.join(', ')})`),
+  body('renouvellement_avis').optional({ nullable: true }).isIn(['favorable', 'favorable_reserves', 'defavorable']).withMessage('renouvellement_avis invalide'),
+  body('post_sortie_situation').optional({ nullable: true }).isIn(['emploi_durable', 'emploi_transition', 'formation', 'recherche_emploi', 'autre', 'injoignable']).withMessage('post_sortie_situation invalide'),
+  ...FREINS.map((f) => body(f.column).optional({ nullable: true }).isInt({ min: 1, max: 5 }).withMessage(`${f.column} : niveau attendu entre 1 et 5`)),
+], validate, async (req, res) => {
   try {
     const d = req.body;
-    const result = await pool.query(
-      `UPDATE insertion_milestones SET
-        status = COALESCE($1, status),
-        interview_date = COALESCE($2, interview_date),
-        interviewer_id = COALESCE($3, interviewer_id),
-        completed_date = COALESCE($4, completed_date),
-        frein_mobilite = COALESCE($5, frein_mobilite),
-        frein_sante = COALESCE($6, frein_sante),
-        frein_finances = COALESCE($7, frein_finances),
-        frein_famille = COALESCE($8, frein_famille),
-        frein_linguistique = COALESCE($9, frein_linguistique),
-        frein_administratif = COALESCE($10, frein_administratif),
-        frein_numerique = COALESCE($11, frein_numerique),
-        cip_integration = COALESCE($12, cip_integration),
-        cip_competences = COALESCE($13, cip_competences),
-        cip_projet_pro = COALESCE($14, cip_projet_pro),
-        cip_socialisation = COALESCE($15, cip_socialisation),
-        bilan_professionnel = COALESCE($16, bilan_professionnel),
-        bilan_social = COALESCE($17, bilan_social),
-        objectifs_realises = COALESCE($18, objectifs_realises),
-        objectifs_prochaine_periode = COALESCE($19, objectifs_prochaine_periode),
-        observations = COALESCE($20, observations),
-        actions_a_mener = COALESCE($21, actions_a_mener),
-        avis_global = COALESCE($22, avis_global),
-        sortie_classification = COALESCE($23, sortie_classification),
-        sortie_type = COALESCE($24, sortie_type),
-        sortie_commentaires = COALESCE($25, sortie_commentaires),
-        sortie_employeur = COALESCE($26, sortie_employeur),
-        sortie_formation = COALESCE($27, sortie_formation),
-        sortie_employeur_siret = COALESCE($28, sortie_employeur_siret),
-        sortie_duree_contrat_mois = COALESCE($29, sortie_duree_contrat_mois),
-        ai_recommendations = COALESCE($30, ai_recommendations),
-        updated_at = NOW()
-      WHERE id = $31 RETURNING *`,
-      [
-        d.status, d.interview_date, d.interviewer_id, d.completed_date,
-        d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
-        d.frein_linguistique, d.frein_administratif, d.frein_numerique,
-        d.cip_integration, d.cip_competences, d.cip_projet_pro, d.cip_socialisation,
-        d.bilan_professionnel, d.bilan_social,
-        d.objectifs_realises, d.objectifs_prochaine_periode,
-        d.observations, d.actions_a_mener, d.avis_global,
-        d.sortie_classification, d.sortie_type, d.sortie_commentaires,
-        d.sortie_employeur, d.sortie_formation,
-        d.sortie_employeur_siret, d.sortie_duree_contrat_mois,
-        d.ai_recommendations ? JSON.stringify(d.ai_recommendations) : null,
-        req.params.id,
-      ]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Jalon non trouve' });
-    const ms = result.rows[0];
+    const before = await pool.query('SELECT * FROM insertion_milestones WHERE id = $1', [req.params.id]);
+    if (before.rows.length === 0) return res.status(404).json({ error: 'Entretien non trouvé' });
+    const prev = before.rows[0];
 
-    // Clôture du parcours d'insertion à la sortie : quand le « Bilan Sortie » est
-    // marqué réalisé, on solde le parcours du salarié (insertion_status='termine'
-    // + insertion_end_date) — sinon les cohortes double-comptent les sortis.
-    // Idempotent : ne réactive pas un parcours déjà terminé et n'écrase pas une
-    // date de sortie déjà posée (date = date de bilan réalisé, repli fin de contrat).
-    if (ms.milestone_type === 'Bilan Sortie' && ms.status === 'realise') {
-      await pool.query(
-        `UPDATE employees
-           SET insertion_status = 'termine',
-               insertion_end_date = COALESCE(insertion_end_date, $2::date, contract_end, CURRENT_DATE),
-               updated_at = NOW()
-         WHERE id = $1 AND insertion_status <> 'termine'`,
-        [ms.employee_id, ms.completed_date || null]
-      );
-    } else if (ms.milestone_type === 'Bilan Sortie' && d.status && d.status !== 'realise') {
-      // Retour arrière : le bilan de sortie n'est plus « réalisé » → rouvre le
-      // parcours précédemment clôturé par ce jalon (ne touche pas abandon/none).
-      await pool.query(
-        `UPDATE employees
-           SET insertion_status = 'en_parcours', insertion_end_date = NULL, updated_at = NOW()
-         WHERE id = $1 AND insertion_status = 'termine'`,
-        [ms.employee_id]
-      );
+    if (prev.locked_at) {
+      return res.status(409).json({
+        error: 'Entretien clôturé et verrouillé — modification refusée.',
+        hint: "Réouvrir d'abord l'entretien (POST /milestones/:id/reopen, ADMIN/RH, motif obligatoire).",
+        locked_at: prev.locked_at,
+      });
     }
 
-    res.json(ms);
+    const sets = [];
+    const vals = [];
+    for (const field of MILESTONE_EDITABLE_FIELDS) {
+      if (!(field in d)) continue;
+      let v = d[field] === '' ? null : d[field];
+      if (v != null && MILESTONE_JSONB_FIELDS.includes(field)) v = JSON.stringify(v);
+      vals.push(v);
+      sets.push(`${field} = $${vals.length}`);
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+
+    // Historisation : modification d'un entretien déjà réalisé (hors clôture).
+    if (prev.status === 'realise') {
+      await snapshotMilestone(pool, prev, 'update', req.user.id);
+    }
+
+    vals.push(req.params.id);
+    const result = await pool.query(
+      `UPDATE insertion_milestones SET ${sets.join(', ')}, updated_at = NOW()
+       WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    const ms = result.rows[0];
+
+    await applySortieParcoursEffect(pool, ms, d.status);
+
+    res.json(maskInsertionRow(ms, baseRoleOf(req)));
   } catch (err) {
+    if (err.code === '23514') {
+      return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code, constraint: err.constraint });
+    }
     console.error('[INSERTION] Erreur milestones PUT :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
+// POST /api/insertion/milestones/:id/close — CLÔTURE CONTRÔLÉE d'un entretien
+// (REC-UX-02 : « Enregistrer » = PUT brouillon, « Clôturer » = contrôles + verrou).
+// Contrôles : freins évalués (ou non-évaluation ASSUMÉE via assume_freins_non_evalues),
+// previous_review renseignée si un entretien réalisé antérieur existe, prochain
+// entretien « planifie » (existant ou créé via body.next) sauf bilan de sortie /
+// suivi post-sortie, catégorie de sortie + check-list documents si bilan_sortie.
+// Effets : snapshot probant 'close', status='realise' + completed_date + locked_at,
+// clôture du parcours (bilan de sortie), resyncMilestones (EXG-16/22).
+router.post('/milestones/:id/close', [
+  param('id').isInt().withMessage('ID invalide'),
+  body('completed_date').optional({ nullable: true }).isISO8601().withMessage('completed_date invalide'),
+  body('next.milestone_type').optional().isIn(MILESTONE_TYPES).withMessage('next.milestone_type invalide'),
+  body('next.due_date').optional().isISO8601().withMessage('next.due_date invalide'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT * FROM insertion_milestones WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (cur.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Entretien non trouvé' });
+    }
+    const ms = cur.rows[0];
+    if (ms.locked_at) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Entretien déjà clôturé (verrouillé).', hint: "Réouvrir d'abord (POST /milestones/:id/reopen)." });
+    }
+
+    const problems = [];
+
+    // 1. Freins évalués — ou non-évaluation explicitement assumée par la CIP.
+    const missing = FREINS.filter((f) => ms[f.column] == null).map((f) => f.key);
+    if (missing.length > 0 && req.body.assume_freins_non_evalues !== true) {
+      problems.push({
+        code: 'freins_non_evalues',
+        freins: missing,
+        message: `Freins non évalués : ${missing.join(', ')}. Évaluez-les ou clôturez avec « assume_freins_non_evalues » (non-évaluation assumée).`,
+      });
+    }
+
+    // 2. Évaluation du bilan précédent (previous_review) si un entretien
+    // réalisé antérieur existe sur ce parcours (REC-UX-03).
+    const prevRealise = await client.query(
+      `SELECT id FROM insertion_milestones
+       WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1)
+         AND id <> $3 AND status = 'realise' LIMIT 1`,
+      [ms.employee_id, ms.parcours_num, ms.id]
+    );
+    const pr = ms.previous_review;
+    const prEmpty = pr == null || (Array.isArray(pr) && pr.length === 0);
+    if (prevRealise.rows.length > 0 && prEmpty) {
+      problems.push({
+        code: 'previous_review_manquante',
+        message: "Un entretien réalisé antérieur existe : l'évaluation du bilan précédent (previous_review) doit être renseignée avant la clôture.",
+      });
+    }
+
+    // 3. Bilan de sortie : catégorie de sortie (nouvelle nomenclature) +
+    // check-list des documents remis (EXG-07).
+    if (ms.milestone_type === 'bilan_sortie') {
+      if (!ms.sortie_classification) {
+        problems.push({ code: 'sortie_classification_manquante', message: `Catégorie de sortie obligatoire (${SORTIE_CLASSES.join(', ')}).` });
+      }
+      if (ms.sortie_documents == null) {
+        problems.push({ code: 'sortie_documents_manquants', message: 'Check-list des documents de sortie obligatoire (STC, certificat de travail, attestation France Travail).' });
+      }
+    }
+
+    // 4. Prochain entretien « planifie » obligatoire (sauf sortie / post-sortie).
+    let createdNext = null;
+    if (!['bilan_sortie', 'suivi_post_sortie'].includes(ms.milestone_type)) {
+      const nextPlanned = await client.query(
+        `SELECT id FROM insertion_milestones
+         WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1)
+           AND id <> $3 AND status = 'planifie' LIMIT 1`,
+        [ms.employee_id, ms.parcours_num, ms.id]
+      );
+      if (nextPlanned.rows.length === 0) {
+        const next = req.body.next;
+        if (next && next.milestone_type && next.due_date) {
+          let titre = (next.titre || '').trim() || null;
+          if (!titre && next.milestone_type === 'bilan_intermediaire') {
+            const n = await client.query(
+              `SELECT COUNT(*)::int AS n FROM insertion_milestones
+               WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1) AND milestone_type = 'bilan_intermediaire'`,
+              [ms.employee_id, ms.parcours_num]
+            );
+            titre = `Bilan n° ${(n.rows[0]?.n || 0) + 1}`;
+          }
+          if (!titre) titre = MILESTONE_TYPE_LABELS[next.milestone_type];
+          const ins = await client.query(
+            `INSERT INTO insertion_milestones
+               (employee_id, parcours_num, milestone_type, titre, due_date, interview_date, status, previous_milestone_id, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, 'planifie', $7, $8) RETURNING *`,
+            [ms.employee_id, ms.parcours_num || 1, next.milestone_type, titre, next.due_date,
+              next.interview_date || null, ms.id, req.user.id]
+          );
+          createdNext = ins.rows[0];
+        } else {
+          problems.push({
+            code: 'prochain_entretien_manquant',
+            message: 'Planifiez le prochain entretien avant de clôturer (ou transmettez-le dans « next » : { milestone_type, due_date }).',
+          });
+        }
+      }
+    }
+
+    if (problems.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Clôture refusée — contrôles non satisfaits.', problems });
+    }
+
+    // Clôture : réalise + verrouille (probant).
+    const completedDate = req.body.completed_date || ms.completed_date || new Date().toISOString().split('T')[0];
+    const closed = await client.query(
+      `UPDATE insertion_milestones
+         SET status = 'realise', completed_date = $1, locked_at = NOW(), updated_at = NOW()
+       WHERE id = $2 RETURNING *`,
+      [completedDate, ms.id]
+    );
+    // Snapshot de l'état VERROUILLÉ (l'état probant de référence).
+    await snapshotMilestone(client, closed.rows[0], 'close', req.user.id);
+
+    // Effet de clôture du parcours (bilan de sortie) — préservé (03 §6.5).
+    await applySortieParcoursEffect(client, closed.rows[0], 'realise');
+
+    await client.query('COMMIT');
+
+    // Recalage des jalons après le bilan (EXG-16/22) — post-commit, best effort.
+    let resync = null;
+    try { resync = await resyncMilestones(pool, ms.employee_id, { userId: req.user.id }); }
+    catch (e) { console.error('[INSERTION] resync post-clôture :', e.message); }
+
+    res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: createdNext, resync });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[INSERTION] Erreur close milestone :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/insertion/milestones/:id/reopen — RÉOUVERTURE tracée (ADMIN/RH)
+// Motif obligatoire ; snapshot 'reopen' ; lève locked_at ; INVALIDE les
+// validations (caducité — RES-02 : une réouverture rend caduques les
+// validations horodatées, la trace reste dans l'historique).
+router.post('/milestones/:id/reopen', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('motif').isString().trim().notEmpty().withMessage('Motif de réouverture obligatoire'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT * FROM insertion_milestones WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (cur.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Entretien non trouvé' });
+    }
+    const ms = cur.rows[0];
+    if (!ms.locked_at) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: "Cet entretien n'est pas verrouillé — rien à réouvrir." });
+    }
+
+    // Snapshot de l'état AVANT réouverture (conserve notamment les validations).
+    await snapshotMilestone(client, ms, 'reopen', req.user.id, req.body.motif.trim());
+
+    const reopened = await client.query(
+      `UPDATE insertion_milestones
+         SET locked_at = NULL, validations = NULL, updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [ms.id]
+    );
+    await client.query('COMMIT');
+    res.json(maskInsertionRow(reopened.rows[0], baseRoleOf(req)));
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[INSERTION] Erreur reopen milestone :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /api/insertion/milestones/:employeeId/radar — Données radar chart (évolution freins)
+// 9 axes depuis freins-registry ; NULL HONNÊTE (un frein non évalué n'est plus
+// tracé à 1 — le frontend saute les points null) ; MANAGER : axe judiciaire ABSENT.
 router.get('/milestones/:employeeId/radar', async (req, res) => {
   try {
     const empId = req.params.employeeId;
+    const baseRole = baseRoleOf(req);
+    const regs = baseRole === 'MANAGER' ? FREINS.filter((f) => f.key !== 'judiciaire') : FREINS;
+    const axeKeys = regs.map((f) => f.column);
+    const axes = RADAR_AXES.filter((_, i) => baseRole !== 'MANAGER' || FREINS[i].key !== 'judiciaire');
+    const colsSql = axeKeys.join(', ');
 
-    // Diagnostic initial
+    // Diagnostic initial (parcours courant)
+    const pn = await currentParcoursNum(pool, empId);
     const diagRes = await pool.query(
-      'SELECT frein_mobilite, frein_sante, frein_finances, frein_famille, frein_linguistique, frein_administratif, frein_numerique FROM insertion_diagnostics WHERE employee_id = $1',
-      [empId]
+      `SELECT ${colsSql} FROM insertion_diagnostics WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2`,
+      [empId, pn]
     );
 
-    // Jalons réalisés avec scores
+    // Entretiens réalisés portant AU MOINS un frein évalué
     const milestonesRes = await pool.query(
-      `SELECT milestone_type, completed_date,
-        frein_mobilite, frein_sante, frein_finances, frein_famille, frein_linguistique, frein_administratif, frein_numerique
+      `SELECT milestone_type, titre, completed_date, ${freinColumns().join(', ')}
        FROM insertion_milestones
        WHERE employee_id = $1 AND status = 'realise'
-       AND frein_mobilite IS NOT NULL
+         AND COALESCE(${freinColumns().join(', ')}) IS NOT NULL
        ORDER BY due_date`,
       [empId]
     );
-
-    const axes = ['Mobilite', 'Sante', 'Finances', 'Famille', 'Langue', 'Administratif', 'Numerique'];
-    const axeKeys = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif', 'frein_numerique'];
 
     const series = [];
 
@@ -397,16 +714,16 @@ router.get('/milestones/:employeeId/radar', async (req, res) => {
       const d = diagRes.rows[0];
       series.push({
         label: 'Diagnostic initial',
-        data: axeKeys.map(k => d[k] || 1),
+        data: axeKeys.map((k) => (d[k] == null ? null : Number(d[k]))),
       });
     }
 
-    // Séries jalons
+    // Séries entretiens (libellé = titre de l'entretien)
     for (const ms of milestonesRes.rows) {
       series.push({
-        label: ms.milestone_type,
+        label: milestoneLabel(ms),
         date: ms.completed_date,
-        data: axeKeys.map(k => ms[k] || 1),
+        data: axeKeys.map((k) => (ms[k] == null ? null : Number(ms[k]))),
       });
     }
 
@@ -429,7 +746,7 @@ router.get('/milestones-overview', async (req, res) => {
       WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
       ORDER BY im.due_date
     `);
-    res.json(result.rows);
+    res.json(maskInsertionRows(result.rows, baseRoleOf(req)));
   } catch (err) {
     console.error('[INSERTION] Erreur milestones overview :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -483,12 +800,16 @@ router.post('/milestones/:employeeId/initialize', async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 
 // GET /api/insertion/action-plans/:employeeId — Tous les plans d'action
+// (le rattachement à un entretien est désormais OPTIONNEL → LEFT JOIN)
 router.get('/action-plans/:employeeId', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT ap.*, im.milestone_type
+      `SELECT ap.*, im.milestone_type, im.titre AS milestone_titre,
+              o.titre AS objectif_titre, p.nom AS partenaire_nom
        FROM cip_action_plans ap
-       JOIN insertion_milestones im ON ap.milestone_id = im.id
+       LEFT JOIN insertion_milestones im ON ap.milestone_id = im.id
+       LEFT JOIN insertion_objectifs o ON o.id = ap.objectif_id
+       LEFT JOIN insertion_partenaires p ON p.id = ap.partenaire_id
        WHERE ap.employee_id = $1
        ORDER BY ap.priority DESC, ap.created_at`,
       [req.params.employeeId]
@@ -501,44 +822,75 @@ router.get('/action-plans/:employeeId', async (req, res) => {
 });
 
 // POST /api/insertion/action-plans — Creer une action
+// milestone_id désormais OPTIONNEL (action possible hors entretien) ;
+// rattachable à un objectif (objectif_id) et à un partenaire (partenaire_id) ;
+// nouveaux champs : resultat, duree_minutes (RES-04 : durée des actions).
 router.post('/action-plans', [
-  body('milestone_id').isInt().withMessage('ID jalon requis'),
+  body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
   body('employee_id').isInt().withMessage('ID employé requis'),
   body('action_label').notEmpty().withMessage('Libellé de l\'action requis'),
-  body('category').notEmpty().withMessage('Catégorie requise'),
+  body('category').isIn(['competence', 'insertion', 'socialisation', 'frein']).withMessage('Catégorie invalide'),
+  body('priority').optional({ nullable: true }).isIn(['haute', 'moyenne', 'basse']).withMessage('Criticité invalide'),
+  body('echeance').optional({ nullable: true }).isISO8601().withMessage('Échéance invalide'),
+  body('objectif_id').optional({ nullable: true }).isInt().withMessage('objectif_id invalide'),
+  body('partenaire_id').optional({ nullable: true }).isInt().withMessage('partenaire_id invalide'),
+  body('duree_minutes').optional({ nullable: true }).isInt({ min: 0 }).withMessage('duree_minutes invalide'),
 ], validate, async (req, res) => {
   try {
-    const { milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes } = req.body;
+    const { milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes,
+      objectif_id, partenaire_id, resultat, duree_minutes } = req.body;
     const result = await pool.query(
-      `INSERT INTO cip_action_plans (milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [milestone_id, employee_id, action_label, category, frein_type || null, priority || 'moyenne', echeance || null, notes || null]
+      `INSERT INTO cip_action_plans
+         (milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes,
+          objectif_id, partenaire_id, resultat, duree_minutes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [milestone_id || null, employee_id, action_label, category, frein_type || null,
+        priority || 'moyenne', echeance || null, notes || null,
+        objectif_id || null, partenaire_id || null, resultat || null,
+        duree_minutes != null && duree_minutes !== '' ? duree_minutes : null, req.user.id]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23503') {
+      return res.status(400).json({ error: 'Référence invalide (entretien, objectif ou partenaire inexistant).' });
+    }
     console.error('[INSERTION] Erreur action-plans POST :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
 // PUT /api/insertion/action-plans/:id — Mettre a jour une action
-router.put('/action-plans/:id', async (req, res) => {
+// Champs PRÉSENTS uniquement (null accepté pour effacer échéance / rattachements).
+router.put('/action-plans/:id', [
+  param('id').isInt().withMessage('ID invalide'),
+  body('status').optional({ nullable: true }).isIn(['a_faire', 'en_cours', 'realise', 'abandonne']).withMessage('Statut invalide'),
+  body('priority').optional({ nullable: true }).isIn(['haute', 'moyenne', 'basse']).withMessage('Criticité invalide'),
+  body('duree_minutes').optional({ nullable: true }).isInt({ min: 0 }).withMessage('duree_minutes invalide'),
+], validate, async (req, res) => {
   try {
     const d = req.body;
+    const editable = ['action_label', 'status', 'priority', 'echeance', 'notes',
+      'category', 'frein_type', 'milestone_id', 'objectif_id', 'partenaire_id', 'resultat', 'duree_minutes'];
+    const sets = [];
+    const vals = [];
+    for (const field of editable) {
+      if (!(field in d)) continue;
+      vals.push(d[field] === '' ? null : d[field]);
+      sets.push(`${field} = $${vals.length}`);
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+    vals.push(req.params.id);
     const result = await pool.query(
-      `UPDATE cip_action_plans SET
-        action_label = COALESCE($1, action_label),
-        status = COALESCE($2, status),
-        priority = COALESCE($3, priority),
-        echeance = COALESCE($4, echeance),
-        notes = COALESCE($5, notes),
-        updated_at = NOW()
-      WHERE id = $6 RETURNING *`,
-      [d.action_label, d.status, d.priority, d.echeance, d.notes, req.params.id]
+      `UPDATE cip_action_plans SET ${sets.join(', ')}, updated_at = NOW()
+       WHERE id = $${vals.length} RETURNING *`,
+      vals
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Action non trouvee' });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23503' || err.code === '23514') {
+      return res.status(400).json({ error: 'Valeur ou référence invalide.', code: err.code });
+    }
     console.error('[INSERTION] Erreur action-plans PUT :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
@@ -559,23 +911,450 @@ router.delete('/action-plans/:id', async (req, res) => {
 router.get('/timeline/:employeeId', async (req, res) => {
   try {
     const empId = req.params.employeeId;
-    const empRes = await pool.query(
-      'SELECT e.*, ec.start_date, ec.end_date, ec.contract_type FROM employees e LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true WHERE e.id = $1',
-      [empId]
-    );
+    const empRes = await pool.query('SELECT e.* FROM employees e WHERE e.id = $1', [empId]);
     if (empRes.rows.length === 0) return res.status(404).json({ error: 'Employe non trouve' });
+
+    // TOUS les contrats (vigilance 03 §6.13 : les CDDI se renouvellent —
+    // fin du contrat courant seul).
+    let contracts = [];
+    try {
+      const c = await pool.query('SELECT * FROM employee_contracts WHERE employee_id = $1 ORDER BY start_date', [empId]);
+      contracts = c.rows;
+    } catch (err) { /* table absente sur base ancienne */ }
 
     const msRes = await pool.query('SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date', [empId]);
     let diagnostic = null;
     try {
-      const diagRes = await pool.query('SELECT created_at FROM insertion_diagnostics WHERE employee_id = $1', [empId]);
+      const diagRes = await pool.query('SELECT created_at FROM insertion_diagnostics WHERE employee_id = $1 ORDER BY parcours_num DESC LIMIT 1', [empId]);
       diagnostic = diagRes.rows[0] || null;
     } catch (err) { console.warn('[INSERTION] Timeline diagnostic:', err.message); }
 
-    const timeline = buildTimeline(empRes.rows[0], [empRes.rows[0]], msRes.rows, diagnostic);
+    const timeline = buildTimeline(empRes.rows[0], contracts, msRes.rows, diagnostic);
     res.json(timeline);
   } catch (err) {
     console.error('[INSERTION] Erreur timeline :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// RECALAGE MANUEL DES JALONS (EXG-22) — bouton fiche (ADMIN/RH)
+// Chemin à 2 segments → non capturé par GET /:employeeId.
+// ══════════════════════════════════════════════════════════════
+router.post('/:employeeId/resync-milestones', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const result = await resyncMilestones(pool, parseInt(req.params.employeeId, 10), { userId: req.user.id });
+    res.json(result);
+  } catch (err) {
+    console.error('[INSERTION] Erreur resync-milestones :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// OBJECTIFS INDIVIDUALISÉS (Lot 3) — objectifs + sous-objectifs
+// Lecture A/RH/M ; écriture A/RH. IMPORTANT : GET à 2 segments → sûr.
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/insertion/objectifs/:employeeId?statut= — liste plate (parent_id
+// pour l'arborescence côté front), tri parents d'abord puis ordre/échéance.
+router.get('/objectifs/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const params = [req.params.employeeId];
+    let filter = '';
+    if (req.query.statut) { params.push(req.query.statut); filter = ` AND o.statut = $${params.length}`; }
+    const result = await pool.query(
+      `SELECT o.*, im.titre AS milestone_titre, im.milestone_type,
+              (SELECT COUNT(*)::int FROM insertion_objectifs s WHERE s.parent_id = o.id) AS nb_sous_objectifs
+       FROM insertion_objectifs o
+       LEFT JOIN insertion_milestones im ON im.id = o.milestone_id
+       WHERE o.employee_id = $1${filter}
+       ORDER BY o.parent_id NULLS FIRST, o.ordre, o.echeance NULLS LAST, o.id`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[INSERTION] Erreur objectifs GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Garde sous-objectif : 1 seul niveau (un sous-objectif ne peut pas avoir pour
+// parent un objectif qui a lui-même un parent).
+async function checkObjectifParent(db, parentId, employeeId, selfId = null) {
+  const p = await db.query('SELECT id, employee_id, parent_id FROM insertion_objectifs WHERE id = $1', [parentId]);
+  if (p.rows.length === 0) return 'Objectif parent introuvable.';
+  if (Number(p.rows[0].employee_id) !== Number(employeeId)) return 'L\'objectif parent appartient à un autre salarié.';
+  if (p.rows[0].parent_id != null) return 'Un sous-objectif ne peut pas être rattaché à un autre sous-objectif (1 seul niveau).';
+  if (selfId != null && Number(parentId) === Number(selfId)) return 'Un objectif ne peut pas être son propre parent.';
+  return null;
+}
+
+const OBJECTIF_STATUTS = ['a_venir', 'en_cours', 'atteint', 'partiellement_atteint', 'abandonne', 'reporte'];
+
+// POST /api/insertion/objectifs — créer un objectif ou un sous-objectif (A/RH)
+router.post('/objectifs', authorize('ADMIN', 'RH'), [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('titre').isString().trim().notEmpty().isLength({ max: 200 }).withMessage('Titre requis (200 car. max)'),
+  body('parent_id').optional({ nullable: true }).isInt().withMessage('parent_id invalide'),
+  body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
+  body('origine').optional({ nullable: true }).isIn(['salarie', 'cip']).withMessage('origine invalide (salarie/cip)'),
+  body('statut').optional({ nullable: true }).isIn(OBJECTIF_STATUTS).withMessage('statut invalide'),
+  body('echeance').optional({ nullable: true }).isISO8601().withMessage('echeance invalide'),
+  body('date_butoir').optional({ nullable: true }).isISO8601().withMessage('date_butoir invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    if (d.parent_id) {
+      const errMsg = await checkObjectifParent(pool, d.parent_id, d.employee_id);
+      if (errMsg) return res.status(400).json({ error: errMsg });
+    }
+    const result = await pool.query(
+      `INSERT INTO insertion_objectifs
+         (employee_id, parent_id, milestone_id, titre, description, origine, echeance, date_butoir, statut, ordre, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [d.employee_id, d.parent_id || null, d.milestone_id || null, d.titre.trim(), d.description || null,
+        d.origine || 'cip', d.echeance || null, d.date_butoir || null, d.statut || 'en_cours',
+        Number.isInteger(d.ordre) ? d.ordre : 0, req.user.id]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié, entretien ou parent inexistant).' });
+    console.error('[INSERTION] Erreur objectifs POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/objectifs/:id — modifier (A/RH ; champs présents, null accepté)
+router.put('/objectifs/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('titre').optional().isString().trim().notEmpty().isLength({ max: 200 }).withMessage('Titre invalide'),
+  body('statut').optional({ nullable: true }).isIn(OBJECTIF_STATUTS).withMessage('statut invalide'),
+  body('origine').optional({ nullable: true }).isIn(['salarie', 'cip']).withMessage('origine invalide'),
+  body('parent_id').optional({ nullable: true }).isInt().withMessage('parent_id invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const cur = await pool.query('SELECT * FROM insertion_objectifs WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Objectif non trouvé' });
+
+    if (d.parent_id) {
+      const errMsg = await checkObjectifParent(pool, d.parent_id, cur.rows[0].employee_id, cur.rows[0].id);
+      if (errMsg) return res.status(400).json({ error: errMsg });
+      // Un objectif qui a des sous-objectifs ne peut pas devenir lui-même un sous-objectif.
+      const kids = await pool.query('SELECT 1 FROM insertion_objectifs WHERE parent_id = $1 LIMIT 1', [req.params.id]);
+      if (kids.rows.length > 0) return res.status(400).json({ error: 'Cet objectif a des sous-objectifs : il ne peut pas devenir un sous-objectif.' });
+    }
+
+    const editable = ['titre', 'description', 'origine', 'echeance', 'date_butoir', 'statut', 'ordre', 'parent_id', 'milestone_id'];
+    const sets = [];
+    const vals = [];
+    for (const field of editable) {
+      if (!(field in d)) continue;
+      vals.push(d[field] === '' ? null : d[field]);
+      sets.push(`${field} = $${vals.length}`);
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+    vals.push(req.params.id);
+    const result = await pool.query(
+      `UPDATE insertion_objectifs SET ${sets.join(', ')}, updated_at = NOW()
+       WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23503' || err.code === '23514') return res.status(400).json({ error: 'Valeur ou référence invalide.', code: err.code });
+    console.error('[INSERTION] Erreur objectifs PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/insertion/objectifs/:id — supprimer (A/RH ; sous-objectifs en CASCADE)
+router.delete('/objectifs/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM insertion_objectifs WHERE id = $1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Objectif non trouvé' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[INSERTION] Erreur objectifs DELETE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// PARTENAIRES (Lot 3) — référentiel des partenaires mobilisables
+// Lecture tous rôles du module ; écriture A/RH. AVANT /:employeeId.
+// ══════════════════════════════════════════════════════════════
+
+const PARTENAIRE_CATEGORIES = ['administratif', 'emploi', 'logement', 'sante', 'justice', 'formation', 'mobilite', 'autre'];
+
+// GET /api/insertion/partenaires?actifs=1&categorie=
+router.get('/partenaires', async (req, res) => {
+  try {
+    const params = [];
+    const where = [];
+    if (req.query.actifs === '1' || req.query.actifs === 'true') where.push('actif = true');
+    if (req.query.categorie) { params.push(req.query.categorie); where.push(`categorie = $${params.length}`); }
+    const result = await pool.query(
+      `SELECT * FROM insertion_partenaires
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY actif DESC, nom`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[INSERTION] Erreur partenaires GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/partenaires — créer (A/RH)
+router.post('/partenaires', authorize('ADMIN', 'RH'), [
+  body('nom').isString().trim().notEmpty().isLength({ max: 150 }).withMessage('Nom requis (150 car. max)'),
+  body('categorie').optional({ nullable: true }).isIn(PARTENAIRE_CATEGORIES).withMessage(`Catégorie invalide (${PARTENAIRE_CATEGORIES.join(', ')})`),
+  body('contact_email').optional({ nullable: true, checkFalsy: true }).isEmail().withMessage('Email invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const result = await pool.query(
+      `INSERT INTO insertion_partenaires (nom, categorie, contact_nom, contact_tel, contact_email, actif, notes)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, true), $7) RETURNING *`,
+      [d.nom.trim(), d.categorie || null, d.contact_nom || null, d.contact_tel || null,
+        d.contact_email || null, typeof d.actif === 'boolean' ? d.actif : null, d.notes || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Un partenaire porte déjà ce nom.' });
+    console.error('[INSERTION] Erreur partenaires POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/partenaires/:id — modifier (A/RH)
+router.put('/partenaires/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('nom').optional().isString().trim().notEmpty().isLength({ max: 150 }).withMessage('Nom invalide'),
+  body('categorie').optional({ nullable: true }).isIn(PARTENAIRE_CATEGORIES).withMessage('Catégorie invalide'),
+  body('contact_email').optional({ nullable: true, checkFalsy: true }).isEmail().withMessage('Email invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const editable = ['nom', 'categorie', 'contact_nom', 'contact_tel', 'contact_email', 'actif', 'notes'];
+    const sets = [];
+    const vals = [];
+    for (const field of editable) {
+      if (!(field in d)) continue;
+      vals.push(d[field] === '' ? null : d[field]);
+      sets.push(`${field} = $${vals.length}`);
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+    vals.push(req.params.id);
+    const result = await pool.query(
+      `UPDATE insertion_partenaires SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Partenaire non trouvé' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Un partenaire porte déjà ce nom.' });
+    console.error('[INSERTION] Erreur partenaires PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// TABLEAU TRANSVERSAL DES ACTIONS (Lot 3) — toutes-actions, tous salariés
+// Filtres : employee_id / category / priority / partenaire_id / retard / mine /
+// statut. Tri échéance. Pagination LIMIT/OFFSET. AVANT /:employeeId.
+// ══════════════════════════════════════════════════════════════
+router.get('/actions-overview', [
+  query('employee_id').optional().isInt().withMessage('employee_id invalide'),
+  query('partenaire_id').optional().isInt().withMessage('partenaire_id invalide'),
+  query('limit').optional().isInt({ min: 1, max: 500 }).withMessage('limit invalide (1-500)'),
+  query('offset').optional().isInt({ min: 0 }).withMessage('offset invalide'),
+], validate, async (req, res) => {
+  try {
+    const params = [];
+    const where = ['e.is_active = true'];
+    if (req.query.employee_id) { params.push(req.query.employee_id); where.push(`a.employee_id = $${params.length}`); }
+    if (req.query.category) { params.push(req.query.category); where.push(`a.category = $${params.length}`); }
+    if (req.query.priority) { params.push(req.query.priority); where.push(`a.priority = $${params.length}`); }
+    if (req.query.partenaire_id) { params.push(req.query.partenaire_id); where.push(`a.partenaire_id = $${params.length}`); }
+    if (req.query.statut) { params.push(req.query.statut); where.push(`a.status = $${params.length}`); }
+    if (req.query.retard === '1' || req.query.retard === 'true') {
+      where.push(`a.echeance < CURRENT_DATE AND a.status IN ('a_faire', 'en_cours')`);
+    }
+    if (req.query.mine === '1' || req.query.mine === 'true') {
+      params.push(req.user.id); where.push(`e.cip_referent_user_id = $${params.length}`);
+    }
+    const whereSql = 'WHERE ' + where.join(' AND ');
+
+    const totalRes = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM cip_action_plans a JOIN employees e ON e.id = a.employee_id ${whereSql}`,
+      params
+    );
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    params.push(limit, offset);
+    const rows = await pool.query(
+      `SELECT a.*, e.first_name, e.last_name,
+              im.titre AS milestone_titre, im.milestone_type,
+              o.titre AS objectif_titre, p.nom AS partenaire_nom,
+              (a.echeance IS NOT NULL AND a.echeance < CURRENT_DATE AND a.status IN ('a_faire', 'en_cours')) AS en_retard
+       FROM cip_action_plans a
+       JOIN employees e ON e.id = a.employee_id
+       LEFT JOIN insertion_milestones im ON im.id = a.milestone_id
+       LEFT JOIN insertion_objectifs o ON o.id = a.objectif_id
+       LEFT JOIN insertion_partenaires p ON p.id = a.partenaire_id
+       ${whereSql}
+       ORDER BY a.echeance ASC NULLS LAST, a.priority DESC, a.id
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({ total: totalRes.rows[0]?.n || 0, limit, offset, actions: rows.rows });
+  } catch (err) {
+    console.error('[INSERTION] Erreur actions-overview :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// ALERTES DE LA FICHE (Lot 1) — GET /alertes/:employeeId (A/RH/M)
+// Consolide : jalons en retard, prochain entretien non planifié, Pass IAE,
+// cumul CDDI ≥ 22 mois, diagnostic > délai cible, actions critiques en retard,
+// + les alertes récentes du scheduler (insertion_interview_alerts, enfin lues).
+// Chemin à 2 segments → sûr vis-à-vis de /:employeeId.
+// ══════════════════════════════════════════════════════════════
+router.get('/alertes/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const empRes = await pool.query(
+      `SELECT e.id, e.first_name, e.last_name, e.insertion_status, e.insertion_start_date,
+              e.pass_iae_number, e.pass_iae_end, COALESCE(e.parcours_num, 1) AS parcours_num
+       FROM employees e WHERE e.id = $1`,
+      [empId]
+    );
+    if (empRes.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    const emp = empRes.rows[0];
+    const alertes = [];
+    const today = new Date();
+
+    const soft = async (label, text, params = []) => {
+      try { return (await pool.query(text, params)).rows; }
+      catch (err) { console.error(`[INSERTION][ALERTES] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); return []; }
+    };
+
+    // 1. Jalons en retard (parcours courant, non réalisés, échéance dépassée)
+    const retards = await soft('retards', `
+      SELECT id, milestone_type, titre, due_date, (CURRENT_DATE - due_date) AS jours_retard
+      FROM insertion_milestones
+      WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2
+        AND status <> 'realise' AND due_date < CURRENT_DATE
+      ORDER BY due_date`, [empId, emp.parcours_num]);
+    for (const r of retards) {
+      alertes.push({
+        type: 'jalon_en_retard', niveau: 'critique',
+        message: `${r.titre || MILESTONE_TYPE_LABELS[r.milestone_type] || r.milestone_type} en retard de ${r.jours_retard} jour(s) (échéance ${new Date(r.due_date).toLocaleDateString('fr-FR')}).`,
+        milestone_id: r.id, due_date: r.due_date,
+      });
+    }
+
+    // 2. Prochain entretien à échéance sans date planifiée
+    const aPlanifier = await soft('a_planifier', `
+      SELECT id, milestone_type, titre, due_date
+      FROM insertion_milestones
+      WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2
+        AND status = 'a_planifier' AND due_date >= CURRENT_DATE
+      ORDER BY due_date LIMIT 1`, [empId, emp.parcours_num]);
+    if (aPlanifier.length > 0) {
+      const n = aPlanifier[0];
+      alertes.push({
+        type: 'entretien_a_planifier', niveau: 'attention',
+        message: `Prochain entretien « ${n.titre || MILESTONE_TYPE_LABELS[n.milestone_type] || n.milestone_type} » (échéance ${new Date(n.due_date).toLocaleDateString('fr-FR')}) : pas encore de date planifiée.`,
+        milestone_id: n.id, due_date: n.due_date,
+      });
+    }
+
+    // 3. Pass IAE proche de l'échéance (seuil 1 paramétrable, seuil 2 = 2 mois)
+    if (emp.pass_iae_end) {
+      const moisAlerte = await readInsertionSetting('insertion.alerte_pass_iae_mois');
+      const moisRestants = (new Date(emp.pass_iae_end) - today) / (30.44 * 86400000);
+      if (moisRestants < 0) {
+        alertes.push({ type: 'pass_iae_expire', niveau: 'critique', message: `Pass IAE expiré depuis le ${new Date(emp.pass_iae_end).toLocaleDateString('fr-FR')}.`, pass_iae_end: emp.pass_iae_end });
+      } else if (moisRestants <= 2) {
+        alertes.push({ type: 'pass_iae_bientot_expire', niveau: 'critique', message: `Pass IAE : fin le ${new Date(emp.pass_iae_end).toLocaleDateString('fr-FR')} (moins de 2 mois) — engager la demande de prolongation.`, pass_iae_end: emp.pass_iae_end });
+      } else if (moisRestants <= moisAlerte) {
+        alertes.push({ type: 'pass_iae_a_surveiller', niveau: 'attention', message: `Pass IAE : fin le ${new Date(emp.pass_iae_end).toLocaleDateString('fr-FR')} (moins de ${moisAlerte} mois).`, pass_iae_end: emp.pass_iae_end });
+      }
+    }
+
+    // 4. Cumul CDDI proche du plafond légal 24 mois (alerte dès 22)
+    const contrats = await soft('contrats', 'SELECT contract_type, start_date, end_date FROM employee_contracts WHERE employee_id = $1', [empId]);
+    const cddi = computeCddiCumulativeMonths(contrats, today);
+    if (cddi.months_total >= 22) {
+      alertes.push({
+        type: 'cddi_plafond', niveau: cddi.months_total >= 23 ? 'critique' : 'attention',
+        message: `Durée cumulée en CDDI : ${cddi.months_total} mois sur 24 (plafond légal, dérogations possibles).`,
+        months_total: cddi.months_total, months_elapsed: cddi.months_elapsed,
+      });
+    }
+
+    // 5. Diagnostic d'accueil au-delà du délai cible (settings, défaut 30 j)
+    if (emp.insertion_status === 'en_parcours' && emp.insertion_start_date) {
+      const delai = await readInsertionSetting('insertion.delai_diagnostic_jours');
+      const jours = Math.floor((today - new Date(emp.insertion_start_date)) / 86400000);
+      if (jours > delai) {
+        const diag = await soft('diagnostic', `
+          SELECT id, statut_saisie FROM insertion_diagnostics
+          WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2`, [empId, emp.parcours_num]);
+        if (diag.length === 0) {
+          alertes.push({ type: 'diagnostic_absent', niveau: 'critique', message: `Aucun diagnostic d'accueil ${jours} jours après le début du parcours (délai cible : ${delai} j).`, jours });
+        } else if (diag[0].statut_saisie === 'en_cours') {
+          alertes.push({ type: 'diagnostic_incomplet', niveau: 'attention', message: `Diagnostic d'accueil commencé mais non finalisé (${jours} jours après le début du parcours).`, jours });
+        }
+      }
+    }
+
+    // 6. Actions critiques (criticité haute) en retard
+    const actionsRetard = await soft('actions', `
+      SELECT id, action_label, echeance FROM cip_action_plans
+      WHERE employee_id = $1 AND priority = 'haute' AND echeance < CURRENT_DATE
+        AND status IN ('a_faire', 'en_cours') ORDER BY echeance`, [empId]);
+    for (const a of actionsRetard) {
+      alertes.push({
+        type: 'action_critique_en_retard', niveau: 'critique',
+        message: `Action critique en retard : « ${a.action_label} » (échéance ${new Date(a.echeance).toLocaleDateString('fr-FR')}).`,
+        action_id: a.id, echeance: a.echeance,
+      });
+    }
+
+    // 7. Alertes récentes du scheduler (30 derniers jours) — la table
+    // insertion_interview_alerts est enfin consommée par un écran.
+    const schedulerAlerts = await soft('scheduler', `
+      SELECT id, milestone_type, alert_type, target_date, created_at
+      FROM insertion_interview_alerts
+      WHERE employee_id = $1 AND created_at > NOW() - INTERVAL '30 days'
+      ORDER BY created_at DESC LIMIT 20`, [empId]);
+
+    res.json({
+      employee_id: empId,
+      generated_at: new Date().toISOString(),
+      total: alertes.length,
+      alertes,
+      alertes_scheduler: schedulerAlerts,
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur alertes :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -633,39 +1412,34 @@ router.get('/cohorte/stats', async (req, res) => {
       .filter((c) => c.days <= 60)
       .sort((a, b) => a.days - b.days);
 
-    // Répartition des freins : dernière évaluation par salarié (jalon réalisé, sinon diagnostic)
-    const axes = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif', 'frein_numerique'];
+    // Répartition des freins : dernière évaluation par salarié (jalon réalisé,
+    // sinon diagnostic) — 9 axes depuis le registre unique (freins-registry).
+    const axes = freinColumns();
+    const msCols = axes.map((c) => `im.${c}`).join(', ');
+    const dgCols = axes.map((c) => `d.${c}`).join(', ');
+    const coalesced = axes.map((c) => `COALESCE(lm.${c}, dg.${c}) AS ${c}`).join(', ');
     const freinsParams = [];
     let freinsFilter = '';
     if (mine) { freinsParams.push(refId); freinsFilter = ` AND e.cip_referent_user_id = $${freinsParams.length}`; }
     const freinsRows = await pool.query(`
       WITH last_ms AS (
-        SELECT DISTINCT ON (im.employee_id) im.employee_id,
-          im.frein_mobilite, im.frein_sante, im.frein_finances, im.frein_famille,
-          im.frein_linguistique, im.frein_administratif, im.frein_numerique
+        SELECT DISTINCT ON (im.employee_id) im.employee_id, ${msCols}
         FROM insertion_milestones im
         JOIN employees e ON e.id = im.employee_id
         WHERE e.insertion_status='en_parcours' AND e.is_active=true
-          AND im.status='realise' AND im.frein_mobilite IS NOT NULL${freinsFilter}
+          AND im.status='realise' AND COALESCE(${msCols}) IS NOT NULL${freinsFilter}
         ORDER BY im.employee_id, im.due_date DESC
       ),
       diag AS (
-        SELECT d.employee_id, d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
-          d.frein_linguistique, d.frein_administratif, d.frein_numerique
+        SELECT d.employee_id, ${dgCols}
         FROM insertion_diagnostics d
         JOIN employees e ON e.id=d.employee_id
         WHERE e.insertion_status='en_parcours' AND e.is_active=true${freinsFilter}
       )
       SELECT COALESCE(lm.employee_id, dg.employee_id) AS employee_id,
-        COALESCE(lm.frein_mobilite, dg.frein_mobilite) AS frein_mobilite,
-        COALESCE(lm.frein_sante, dg.frein_sante) AS frein_sante,
-        COALESCE(lm.frein_finances, dg.frein_finances) AS frein_finances,
-        COALESCE(lm.frein_famille, dg.frein_famille) AS frein_famille,
-        COALESCE(lm.frein_linguistique, dg.frein_linguistique) AS frein_linguistique,
-        COALESCE(lm.frein_administratif, dg.frein_administratif) AS frein_administratif,
-        COALESCE(lm.frein_numerique, dg.frein_numerique) AS frein_numerique
+        ${coalesced}
       FROM diag dg FULL OUTER JOIN last_ms lm ON lm.employee_id = dg.employee_id
-    `);
+    `, freinsParams);
     const freinsMoyennes = {};
     let freinDominant = null, maxMoy = 0;
     for (const axe of axes) {
@@ -675,22 +1449,30 @@ router.get('/cohorte/stats', async (req, res) => {
       if (moy && moy > maxMoy) { maxMoy = moy; freinDominant = axe; }
     }
 
-    // Taux de sorties dynamiques sur l'année
+    // Sorties de l'année — NOUVELLE NOMENCLATURE (D8/EXG-06) : une sortie est
+    // dynamique si sortie_classification IN (emploi_durable, emploi_transition,
+    // sortie_positive) ; taux décomposés par catégorie.
     const sorties = await pool.query(`
       SELECT sortie_classification, sortie_type, COUNT(*)::int AS n
       FROM insertion_milestones
-      WHERE milestone_type = 'Bilan Sortie' AND status = 'realise'
+      WHERE milestone_type = 'bilan_sortie' AND status = 'realise'
         AND sortie_classification IS NOT NULL
         AND COALESCE(completed_date, updated_at::date) BETWEEN $1 AND $2
       GROUP BY sortie_classification, sortie_type
     `, [`${year}-01-01`, `${year}-12-31`]);
-    let nbPositives = 0, nbNegatives = 0;
+    const parClassification = {};
     const parType = {};
+    let nbDynamiques = 0, nbAutres = 0;
     for (const s of sorties.rows) {
-      if (s.sortie_classification === 'positive') nbPositives += s.n; else nbNegatives += s.n;
+      parClassification[s.sortie_classification] = (parClassification[s.sortie_classification] || 0) + s.n;
+      if (DYNAMIC_SORTIE_CLASSES.includes(s.sortie_classification)) nbDynamiques += s.n; else nbAutres += s.n;
       if (s.sortie_type) parType[s.sortie_type] = (parType[s.sortie_type] || 0) + s.n;
     }
-    const totalSorties = nbPositives + nbNegatives;
+    const totalSorties = nbDynamiques + nbAutres;
+    const tauxParClassification = {};
+    for (const c of SORTIE_CLASSES) {
+      tauxParClassification[c] = totalSorties > 0 ? Math.round(((parClassification[c] || 0) / totalSorties) * 100) : null;
+    }
 
     // Objectif conventionné DREETS (item 61c) : taux de sorties dynamiques cible,
     // stocké en settings. Toujours structure-wide (indépendant du filtre « mine »).
@@ -712,9 +1494,15 @@ router.get('/cohorte/stats', async (req, res) => {
       objectif_sorties_dynamiques: objectifSorties,
       sorties: {
         total: totalSorties,
-        positives: nbPositives,
-        negatives: nbNegatives,
-        taux_dynamiques: totalSorties > 0 ? Math.round((nbPositives / totalSorties) * 100) : null,
+        dynamiques: nbDynamiques,
+        autres: nbAutres,
+        // Alias de compatibilité (ancien binaire positive/negative) — le
+        // frontend actuel lit positives/negatives ; retirés en phase C.
+        positives: nbDynamiques,
+        negatives: nbAutres,
+        taux_dynamiques: totalSorties > 0 ? Math.round((nbDynamiques / totalSorties) * 100) : null,
+        par_classification: parClassification,
+        taux_par_classification: tauxParClassification,
         par_type: parType,
       },
     });
@@ -764,16 +1552,18 @@ router.put('/objectif-sorties', authorize('ADMIN', 'RH'), async (req, res) => {
 });
 
 // GET /api/insertion/cip-referents — Utilisateurs RH/ADMIN actifs (sélecteur de
-// CIP référent). IMPORTANT: avant /:employeeId.
+// CIP référent). Résout les RÔLES CUSTOM vers leur rôle de base (un utilisateur
+// au rôle dupliqué depuis RH est un référent valide — vigilance 03 §6.11).
+// IMPORTANT: avant /:employeeId.
 router.get('/cip-referents', async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT id, first_name, last_name, role
        FROM users
-       WHERE COALESCE(is_active, true) = true AND role IN ('ADMIN', 'RH')
+       WHERE COALESCE(is_active, true) = true
        ORDER BY last_name NULLS LAST, first_name NULLS LAST`
     );
-    res.json(r.rows);
+    res.json(r.rows.filter((u) => ['ADMIN', 'RH'].includes(resolveBaseRole(u.role))));
   } catch (err) {
     console.error('[INSERTION] Erreur cip-referents :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -784,8 +1574,8 @@ router.get('/cip-referents', async (req, res) => {
 // AUDIT INSERTION — Synthèse de la situation d'insertion de la structure
 // ══════════════════════════════════════════════════════════════
 
-const MILESTONE_ORDER = ['Diagnostic accueil', 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan Sortie'];
-const FREIN_AXES = ['frein_mobilite', 'frein_sante', 'frein_finances', 'frein_famille', 'frein_linguistique', 'frein_administratif', 'frein_numerique'];
+const MILESTONE_ORDER = MILESTONE_TYPES; // 5 types techniques (extension 2026-07)
+const FREIN_AXES = freinColumns(); // 9 axes du registre unique
 
 // Agrège les indicateurs chiffrés de l'audit. Résilient : chaque requête qui
 // échoue (colonne absente sur base ancienne) dégrade au lieu de tout casser.
@@ -817,6 +1607,7 @@ async function gatherAuditKpis(year) {
     const r = msByType[type] || { total: 0, echus: 0, realises: 0, realises_echus: 0 };
     return {
       type,
+      label: MILESTONE_TYPE_LABELS[type] || type,
       total: r.total, echus: r.echus, realises: r.realises, realises_echus: r.realises_echus,
       taux_echeance: r.echus ? Math.round((r.realises_echus / r.echus) * 100) : null,
     };
@@ -827,32 +1618,27 @@ async function gatherAuditKpis(year) {
   }), { total: 0, echus: 0, realises: 0, realises_echus: 0 });
   const milestonesGlobal = { ...g, taux: g.echus ? Math.round((g.realises_echus / g.echus) * 100) : null };
 
-  // Freins consolidés (dernière éval par salarié : jalon réalisé sinon diagnostic)
+  // Freins consolidés (dernière éval par salarié : jalon réalisé sinon
+  // diagnostic) — 9 axes depuis le registre unique.
+  const auditMsCols = FREIN_AXES.map((c) => `im.${c}`).join(', ');
+  const auditDgCols = FREIN_AXES.map((c) => `d.${c}`).join(', ');
+  const auditCoalesced = FREIN_AXES.map((c) => `COALESCE(lm.${c}, dg.${c}) AS ${c}`).join(', ');
   const freinsRows = await soft('freins', `
     WITH last_ms AS (
-      SELECT DISTINCT ON (im.employee_id) im.employee_id,
-        im.frein_mobilite, im.frein_sante, im.frein_finances, im.frein_famille,
-        im.frein_linguistique, im.frein_administratif, im.frein_numerique
+      SELECT DISTINCT ON (im.employee_id) im.employee_id, ${auditMsCols}
       FROM insertion_milestones im
       JOIN employees e ON e.id = im.employee_id
       WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
-        AND im.status = 'realise' AND im.frein_mobilite IS NOT NULL
+        AND im.status = 'realise' AND COALESCE(${auditMsCols}) IS NOT NULL
       ORDER BY im.employee_id, im.due_date DESC
     ),
     diag AS (
-      SELECT d.employee_id, d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
-        d.frein_linguistique, d.frein_administratif, d.frein_numerique
+      SELECT d.employee_id, ${auditDgCols}
       FROM insertion_diagnostics d
       JOIN employees e ON e.id = d.employee_id
       WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
     )
-    SELECT COALESCE(lm.frein_mobilite, dg.frein_mobilite) AS frein_mobilite,
-      COALESCE(lm.frein_sante, dg.frein_sante) AS frein_sante,
-      COALESCE(lm.frein_finances, dg.frein_finances) AS frein_finances,
-      COALESCE(lm.frein_famille, dg.frein_famille) AS frein_famille,
-      COALESCE(lm.frein_linguistique, dg.frein_linguistique) AS frein_linguistique,
-      COALESCE(lm.frein_administratif, dg.frein_administratif) AS frein_administratif,
-      COALESCE(lm.frein_numerique, dg.frein_numerique) AS frein_numerique
+    SELECT ${auditCoalesced}
     FROM diag dg FULL OUTER JOIN last_ms lm ON lm.employee_id = dg.employee_id`);
   const freinsMoyennes = {};
   let freinDominant = null, maxMoy = 0, nbEvalues = 0;
@@ -879,21 +1665,28 @@ async function gatherAuditKpis(year) {
     if (r.priority) actions.par_priorite[r.priority] = (actions.par_priorite[r.priority] || 0) + r.n;
   }
 
-  // Sorties de l'année + statistiques
+  // Sorties de l'année + statistiques — nouvelle nomenclature à 4 catégories
+  // (dynamique = emploi_durable + emploi_transition + sortie_positive).
   const sortiesRows = await soft('sorties', `
     SELECT sortie_classification, sortie_type, COUNT(*)::int AS n
     FROM insertion_milestones
-    WHERE milestone_type = 'Bilan Sortie' AND status = 'realise'
+    WHERE milestone_type = 'bilan_sortie' AND status = 'realise'
       AND sortie_classification IS NOT NULL
       AND COALESCE(completed_date, updated_at::date) BETWEEN $1 AND $2
     GROUP BY sortie_classification, sortie_type`, [`${year}-01-01`, `${year}-12-31`]);
-  let nbPositives = 0, nbNegatives = 0;
+  const parClassification = {};
   const parType = {};
+  let nbDynamiques = 0, nbAutres = 0;
   for (const s of sortiesRows) {
-    if (s.sortie_classification === 'positive') nbPositives += s.n; else nbNegatives += s.n;
+    parClassification[s.sortie_classification] = (parClassification[s.sortie_classification] || 0) + s.n;
+    if (DYNAMIC_SORTIE_CLASSES.includes(s.sortie_classification)) nbDynamiques += s.n; else nbAutres += s.n;
     if (s.sortie_type) parType[s.sortie_type] = (parType[s.sortie_type] || 0) + s.n;
   }
-  const totalSorties = nbPositives + nbNegatives;
+  const totalSorties = nbDynamiques + nbAutres;
+  const tauxParClassification = {};
+  for (const c of SORTIE_CLASSES) {
+    tauxParClassification[c] = totalSorties > 0 ? Math.round(((parClassification[c] || 0) / totalSorties) * 100) : null;
+  }
 
   return {
     annee: year,
@@ -904,8 +1697,15 @@ async function gatherAuditKpis(year) {
     frein_dominant: freinDominant,
     actions,
     sorties: {
-      total: totalSorties, positives: nbPositives, negatives: nbNegatives,
-      taux_dynamiques: totalSorties > 0 ? Math.round((nbPositives / totalSorties) * 100) : null,
+      total: totalSorties,
+      dynamiques: nbDynamiques,
+      autres: nbAutres,
+      // Alias de compatibilité (ancien binaire) — retirés en phase C.
+      positives: nbDynamiques,
+      negatives: nbAutres,
+      taux_dynamiques: totalSorties > 0 ? Math.round((nbDynamiques / totalSorties) * 100) : null,
+      par_classification: parClassification,
+      taux_par_classification: tauxParClassification,
       par_type: parType,
     },
   };
@@ -970,10 +1770,12 @@ router.put('/:employeeId/cip-referent', authorize('ADMIN', 'RH'), async (req, re
       userId = parseInt(raw, 10);
       if (Number.isNaN(userId)) return res.status(400).json({ error: 'user_id invalide' });
       const u = await pool.query(
-        `SELECT id FROM users WHERE id = $1 AND COALESCE(is_active, true) = true AND role IN ('ADMIN', 'RH')`,
+        `SELECT id, role FROM users WHERE id = $1 AND COALESCE(is_active, true) = true`,
         [userId]
       );
-      if (u.rows.length === 0) return res.status(400).json({ error: 'Référent invalide (doit être un utilisateur RH/ADMIN actif).' });
+      if (u.rows.length === 0 || !['ADMIN', 'RH'].includes(resolveBaseRole(u.rows[0].role))) {
+        return res.status(400).json({ error: 'Référent invalide (doit être un utilisateur RH/ADMIN actif).' });
+      }
     }
     const r = await pool.query(
       `UPDATE employees SET cip_referent_user_id = $1, updated_at = NOW() WHERE id = $2
@@ -1083,25 +1885,31 @@ router.get('/:employeeId', async (req, res) => {
       } catch (err) { /* ignore */ }
     }
 
-    // 7. Diagnostic CIP
+    // 7. Diagnostic CIP (parcours courant — RES-05)
+    const baseRole = baseRoleOf(req);
     let diagnostic = null;
     try {
-      const diagRes = await pool.query('SELECT * FROM insertion_diagnostics WHERE employee_id = $1', [empId]);
+      const diagRes = await pool.query(
+        'SELECT * FROM insertion_diagnostics WHERE employee_id = $1 ORDER BY parcours_num DESC LIMIT 1', [empId]
+      );
       diagnostic = diagRes.rows[0] || null;
+      if (diagnostic) {
+        if (baseRole === 'MANAGER') maskInsertionRow(diagnostic, baseRole);
+        else decryptDiagRow(diagnostic);
+      }
     } catch (err) { /* table might not exist yet */ }
 
-    // 8. Jalons insertion — auto-initialisés si le salarié est en parcours et
-    // n'en a encore aucun (supprime le clic manuel « Initialiser jalons »).
+    // 8. Entretiens du parcours. L'AUTO-INIT PARESSEUSE EN LECTURE A ÉTÉ
+    // SUPPRIMÉE (effet de bord en GET — vigilance 03 §6.4) : l'initialisation
+    // se fait aux déclencheurs explicites (liaison candidat→collaborateur,
+    // import paie, bouton /milestones/:employeeId/initialize, scheduler).
     let milestones = [];
     try {
       const msRes = await pool.query(
         'SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date', [empId]
       );
-      milestones = msRes.rows;
-      if (milestones.length === 0 && employee.insertion_status === 'en_parcours') {
-        milestones = await generateMilestones(pool, empId, req.user.id);
-      }
-    } catch (err) { console.warn('[INSERTION] Jalons auto-init :', err.message); }
+      milestones = maskInsertionRows(msRes.rows, baseRole);
+    } catch (err) { console.warn('[INSERTION] Jalons :', err.message); }
 
     // 9. Plan d'action CIP
     let actionPlans = [];
@@ -1112,11 +1920,25 @@ router.get('/:employeeId', async (req, res) => {
       actionPlans = apRes.rows;
     } catch (err) { /* table might not exist yet */ }
 
-    // 10. Analyse complete
+    // 9bis. Objectifs individualisés (Lot 3)
+    let objectifs = [];
+    try {
+      const objRes = await pool.query(
+        `SELECT * FROM insertion_objectifs WHERE employee_id = $1
+         ORDER BY parent_id NULLS FIRST, ordre, id`, [empId]
+      );
+      objectifs = objRes.rows;
+    } catch (err) { /* table might not exist yet */ }
+
+    // 10. Analyse complete (le diagnostic est déjà masqué pour un MANAGER →
+    // l'axe judiciaire est absent de ses freins_sociaux)
     const analysis = analyzeInsertion(
       employee, contractsRes.rows, candidate, pcmReport,
       teamMembers, position, diagnostic, milestones
     );
+    if (baseRole === 'MANAGER' && analysis.freins_sociaux?.freins) {
+      analysis.freins_sociaux.freins = analysis.freins_sociaux.freins.filter((f) => f.type !== 'judiciaire');
+    }
 
     // 11. Timeline du parcours
     const timeline = buildTimeline(employee, contractsRes.rows, milestones, diagnostic);
@@ -1137,6 +1959,10 @@ router.get('/:employeeId', async (req, res) => {
         prescripteur_type: employee.prescripteur_type || null,
         cip_referent_user_id: employee.cip_referent_user_id || null,
         cip_referent_nom: employee.cip_referent_nom || null,
+        parcours_num: employee.parcours_num || 1,
+        pass_iae_number: employee.pass_iae_number || null,
+        pass_iae_start: employee.pass_iae_start || null,
+        pass_iae_end: employee.pass_iae_end || null,
       },
       has_pcm: !!pcmReport,
       has_candidate_data: !!candidate,
@@ -1146,6 +1972,7 @@ router.get('/:employeeId', async (req, res) => {
       nb_contracts: contractsRes.rows.length,
       milestones,
       action_plans: actionPlans,
+      objectifs,
       timeline,
       ...analysis,
     });
@@ -1229,11 +2056,40 @@ router.get('/ia/profil/:employeeId', authorize('ADMIN', 'RH'), async (req, res) 
 });
 
 // GET /api/insertion/ia/entretien/:employeeId — Guide d'entretien adapté PCM
+// ?milestoneId=N : préparation d'un ENTRETIEN précis (tout type) — la note est
+// alors PERSISTÉE sur l'entretien (ia_preparation + ia_preparation_at, historisée).
+// ?type= : type technique libre (défaut bilan_intermediaire).
 router.get('/ia/entretien/:employeeId', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { preparerEntretien } = require('../../services/insertion-ai');
-    const milestoneType = req.query.type || 'Bilan M+3';
-    res.json(await preparerEntretien(parseInt(req.params.employeeId), milestoneType));
+    const employeeId = parseInt(req.params.employeeId, 10);
+
+    let milestone = null;
+    let label = req.query.type || 'bilan_intermediaire';
+    if (req.query.milestoneId) {
+      const m = await pool.query(
+        'SELECT id, milestone_type, titre, employee_id FROM insertion_milestones WHERE id = $1 AND employee_id = $2',
+        [req.query.milestoneId, employeeId]
+      );
+      if (m.rows.length === 0) return res.status(404).json({ error: 'Entretien non trouvé pour ce salarié' });
+      milestone = m.rows[0];
+      label = milestoneLabel(milestone);
+    } else if (MILESTONE_TYPE_LABELS[label]) {
+      label = MILESTONE_TYPE_LABELS[label];
+    }
+
+    const prep = await preparerEntretien(employeeId, label);
+
+    if (milestone) {
+      // Persistance de la note de préparation (best effort — la réponse part même si l'écriture échoue).
+      try {
+        await pool.query(
+          'UPDATE insertion_milestones SET ia_preparation = $1, ia_preparation_at = NOW() WHERE id = $2',
+          [JSON.stringify(prep), milestone.id]
+        );
+      } catch (e) { console.error('[INSERTION] Persistance ia_preparation :', e.message); }
+    }
+    res.json(prep);
   } catch (err) {
     handleIaError(res, err, 'entretien');
   }

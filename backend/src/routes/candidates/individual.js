@@ -42,10 +42,15 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
       'sms_response', 'interviewer_name', 'interview_comment',
       'practical_test_done', 'practical_test_result', 'practical_test_comment',
       'assigned_team_id', 'position_id', 'comment',
+      // Extension insertion 2026-07 (PROP-02) : prescripteur structuré + Pass
+      // IAE + éligibilité saisis dès le recrutement, recopiés vers employees
+      // au link-employee (conversion.js).
+      'prescripteur_id', 'pass_iae_number', 'pass_iae_start', 'pass_iae_end', 'eligibilite_criteres',
     ];
 
     // Champs qui doivent être NULL au lieu de '' pour PostgreSQL (date, FK, CHECK constraints)
-    const nullableFields = ['appointment_date', 'position_id', 'assigned_team_id', 'practical_test_result', 'sms_response', 'gender'];
+    const nullableFields = ['appointment_date', 'position_id', 'assigned_team_id', 'practical_test_result', 'sms_response', 'gender',
+      'prescripteur_id', 'pass_iae_start', 'pass_iae_end'];
 
     for (const field of allowedFields) {
       if (fields[field] !== undefined) {
