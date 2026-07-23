@@ -1,9 +1,7 @@
 # Référentiel d'analyse de la performance de la pratique d'accompagnement
 
-> **→ version finalisée : `docs/REFERENTIEL_PERFORMANCE_CIP.md`** (indicateurs alignés sur les endpoints réellement livrés, le 23/07/2026). Le présent brouillon est conservé pour la traçabilité de la conception.
-
-> **Version projetée — établie sur les plans validés du 22/07/2026, à finaliser après développement.**
-> Les indicateurs décrits s'appuient sur les écrans et exports du module Insertion tel que conçu (rapports 04/05, corrigés par les revues 06/07). Les seuils indicatifs seront confirmés lors de la première revue d'équipe après mise en production.
+> **Module livré — dernière mise à jour 23/07/2026.**
+> Les indicateurs décrits s'appuient sur les écrans et exports du module Insertion effectivement livrés (« Espace CIP », « Pilotage & indicateurs » = `/insertion/audit`, « Actions CIP » = `/insertion/actions`) et sur les endpoints qui les alimentent (audit conventionnel `/insertion/audit` + cibles `/insertion/cibles`, cohorte `/insertion/cohorte/stats`, actions `/insertion/actions-overview`, satisfaction `/insertion/satisfaction-stats`, PMSMP `/insertion/pmsmp`). Les seuils indicatifs restent à confirmer lors de la première revue d'équipe après mise en production.
 
 ---
 
@@ -12,7 +10,7 @@
 Ce référentiel est un outil d'**analyse de la pratique d'accompagnement** et d'**aide au pilotage**. Il poursuit trois finalités, et trois seulement :
 
 1. **La qualité de l'accompagnement** : vérifier que chaque salarié en parcours bénéficie de ce que la structure s'est engagée à fournir (diagnostic dans les délais, bilans réguliers, actions suivies, sortie préparée), et repérer collectivement ce qui coince.
-2. **Une charge soutenable** : objectiver la charge réelle de la fonction accompagnement — aujourd'hui **0,86 ETP de CIP pour environ 46 salariés en parcours**, soit un ratio d'environ 53 accompagnements par ETP — pour ajuster l'organisation avant que la qualité ou la personne ne cède.
+2. **Une charge soutenable** : objectiver la charge réelle de la fonction accompagnement — aujourd'hui de l'ordre de **0,86 ETP de CIP pour environ 46 salariés en parcours**, soit un ratio d'environ 53 accompagnements par ETP — pour ajuster l'organisation avant que la qualité ou la personne ne cède.
 3. **Le plaidoyer pour les moyens** : donner à la direction des chiffres solides à porter au dialogue de gestion, auprès des financeurs et du conseil d'administration, pour argumenter les moyens de la fonction insertion.
 
 **Ce que cet outil n'est pas — et ne doit jamais devenir :**
@@ -39,6 +37,8 @@ Ce référentiel est un outil d'**analyse de la pratique d'accompagnement** et d
 Quatre familles. Pour chaque indicateur : définition, formule, source dans le module, fréquence de lecture, seuil indicatif et **limites d'interprétation**.
 
 > Convention de lecture des seuils : « cible » = niveau visé ; « vigilance » = niveau qui déclenche une discussion en revue (jamais une conclusion). Les seuils marqués « à confirmer en équipe » seront arrêtés lors de la première revue après mise en production.
+>
+> Tous les indicateurs sont calculés à partir des données déjà saisies et servis par les endpoints du module : `/insertion/audit` (indicateurs conventionnels et de pilotage) + `/insertion/cibles` (cibles paramétrées), `/insertion/cohorte/stats` (files actives, freins moyens, sorties), `/insertion/actions-overview` (journal d'actions filtrable), `/insertion/satisfaction-stats` (satisfaction agrégée), `/insertion/pmsmp`.
 
 ### Famille A — Couverture réglementaire
 
@@ -47,7 +47,7 @@ Quatre familles. Pour chaque indicateur : définition, formule, source dans le m
 **A1. Diagnostics d'accueil dans les 30 jours**
 - **Définition** : part des salariés entrés en parcours sur la période dont le diagnostic d'accueil a été réalisé dans les 30 jours suivant l'entrée.
 - **Formule** : diagnostics réalisés ≤ 30 j après la date d'entrée ÷ nombre d'entrées en parcours de la période. En complément : délai moyen de réalisation (jours).
-- **Source** : écran « Pilotage & indicateurs » (bloc délai diagnostic) ; liste des diagnostics en attente dans le bloc alertes.
+- **Source** : écran « Pilotage & indicateurs » (`/insertion/audit`, délai diagnostic vs cible) ; liste des diagnostics en attente dans le bloc alertes de l'Espace CIP.
 - **Fréquence** : trimestrielle.
 - **Seuil indicatif** : cible 100 % ; vigilance < 90 %.
 - **Limites** : une entrée groupée (cohorte de recrutement) ou l'absence du salarié (arrêt, imprévu) allonge mécaniquement le délai sans traduire une défaillance : lire avec les motifs. Le diagnostic en deux séances est conforme dès lors que la clôture tient dans la fenêtre.
@@ -63,8 +63,8 @@ Quatre familles. Pour chaque indicateur : définition, formule, source dans le m
 **A3. Renouvellements documentés**
 - **Définition** : part des renouvellements de CDDI intervenus qui portent un formulaire complet (volet encadrant + volet CIP) et la triple validation encadrant/CIP/directeur.
 - **Formule** : renouvellements avec formulaire complet et validé ÷ renouvellements de contrat de la période. En complément : part des dérogations > 24 mois avec motif et date de décision saisis (cible 100 %).
-- **Source** : liste « Renouvellements à préparer » + fiches ; file « dérogations à régulariser ».
-- **Fréquence** : trimestrielle (volume attendu : ~20-30 renouvellements par trimestre).
+- **Source** : liste « Renouvellements à préparer » (`/insertion/renouvellements`) + fiches ; file « dérogations à régulariser ».
+- **Fréquence** : trimestrielle.
 - **Seuil indicatif** : cible 100 % ; vigilance < 95 %.
 - **Limites** : un retard de validation du directeur ou de saisie de l'encadrant n'est pas un défaut d'accompagnement de la CIP — l'indicateur mesure le **circuit à trois**, et c'est souvent le circuit qu'il faut régler.
 
@@ -89,17 +89,17 @@ Quatre familles. Pour chaque indicateur : définition, formule, source dans le m
 - **Limites** : l'intensité utile dépend du parcours : une file active en phase stable appelle moins d'entretiens qu'une cohorte de nouveaux entrants. Ne jamais transformer ce repère en quota — c'est la **distribution** (y a-t-il des salariés sans aucun entretien depuis longtemps ?) qui compte, pas la moyenne.
 
 **B2. Délai entre deux bilans, comparé au rythme choisi**
-- **Définition** : écart moyen entre bilans réalisés consécutifs d'un même salarié, rapporté au rythme de suivi individualisé défini sur sa fiche (mensuel, bimestriel, trimestriel).
+- **Définition** : écart moyen entre bilans réalisés consécutifs d'un même salarié, rapporté au rythme de suivi retenu (à défaut de rythme par salarié — livré en phase ultérieure —, le rythme des bilans paramétré, défaut 2 mois).
 - **Formule** : moyenne des (délai constaté − rythme prévu), et part des salariés « dans leur rythme » (délai ≤ rythme prévu + 2 semaines).
 - **Source** : « Pilotage & indicateurs » ; alertes ambre « bilan en retard ».
 - **Fréquence** : trimestrielle.
 - **Seuil indicatif** : cible ≥ 80 % des salariés « dans leur rythme » ; vigilance < 60 %.
-- **Limites** : le point de comparaison est le rythme **choisi par la CIP pour chaque salarié**, pas une norme unique. Une dérive générale signale plutôt une surcharge (voir famille D) qu'un défaut de pratique : c'est typiquement un indicateur de plaidoyer.
+- **Limites** : le point de comparaison est le rythme retenu, pas une norme unique. Une dérive générale signale plutôt une surcharge (voir famille D) qu'un défaut de pratique : c'est typiquement un indicateur de plaidoyer.
 
 **B3. Actions d'accompagnement par salarié**
 - **Définition** : nombre d'actions du journal (créées ou soldées) par salarié en parcours sur la période ; répartition par catégorie et par partenaire.
 - **Formule** : actions de la période ÷ file active moyenne ; ventilations par catégorie/partenaire.
-- **Source** : page « Actions CIP » (filtres + export CSV) ; statistique annuelle par partenaire.
+- **Source** : page « Actions CIP » (`/insertion/actions-overview`, filtres + export CSV) ; statistique annuelle par partenaire.
 - **Fréquence** : trimestrielle ; ventilation par partenaire en lecture annuelle.
 - **Seuil indicatif** : pas de seuil — indicateur de **description**, pas de performance. À lire en tendance.
 - **Limites** : compter n'est pas peser : une action « dossier de surendettement » représente des heures, une action « relance téléphonique » quelques minutes — le volume d'heures (B5) est plus honnête. Un chiffre bas peut aussi signifier une saisie différée : vérifier l'hygiène de saisie avant toute autre lecture. **Ne jamais fixer d'objectif de volume d'actions** : cela produirait de la saisie, pas de l'accompagnement.
@@ -127,10 +127,10 @@ Quatre familles. Pour chaque indicateur : définition, formule, source dans le m
 **C1. Évolution des freins**
 - **Définition** : progression moyenne des neuf axes de freins entre la première et la dernière évaluation, pour les salariés présents depuis au moins 6 mois ; part des salariés avec au moins un frein en amélioration.
 - **Formule** : moyenne des deltas par axe (dernière évaluation − première), axes « non évalué » exclus ; % de salariés avec ≥ 1 axe en amélioration.
-- **Source** : « Pilotage & indicateurs » (freins moyens de cohorte) ; toiles d'araignée superposées sur les fiches (usage individuel d'accompagnement uniquement).
+- **Source** : « Pilotage & indicateurs » (freins moyens de cohorte, `/insertion/cohorte/stats`) ; toiles d'araignée superposées sur les fiches (usage individuel d'accompagnement uniquement).
 - **Fréquence** : semestrielle et annuelle.
 - **Seuil indicatif** : pas de seuil — lecture en tendance pluriannuelle.
-- **Limites** : l'échelle 1-5 est un jugement professionnel, pas une mesure ; une réévaluation honnête peut « dégrader » un score parce que la confiance a permis de voir un problème jusque-là caché — **une baisse peut être une bonne nouvelle clinique**. Ne jamais agréger en « note moyenne du salarié », ne jamais lire cet indicateur individuellement en instance, et ne jamais en faire un objectif chiffré : on obtiendrait des évaluations complaisantes.
+- **Limites** : l'échelle 1-5 est un jugement professionnel, pas une mesure ; une réévaluation honnête peut « dégrader » un score parce que la confiance a permis de voir un problème jusque-là caché — **une baisse peut être une bonne nouvelle clinique**. Ne jamais agréger en « note moyenne du salarié », ne jamais lire cet indicateur individuellement en instance, et ne jamais en faire un objectif chiffré : on obtiendrait des évaluations complaisantes. L'axe judiciaire, sensible, ne doit pas être restitué hors ADMIN/RH ni sur de très petits effectifs.
 
 **C2. Objectifs atteints, en cours, abandonnés**
 - **Définition** : devenir des objectifs individualisés du parcours (co-construits, origine salarié ou CIP).
@@ -142,8 +142,8 @@ Quatre familles. Pour chaque indicateur : définition, formule, source dans le m
 
 **C3. Sorties par catégorie, comparées à l'objectif conventionnel**
 - **Définition** : répartition des sorties constatées de l'année selon la nomenclature officielle (emploi durable / emploi de transition / sortie positive / autres avec sous-motifs) ; taux de sorties dynamiques.
-- **Formule** : sorties de la catégorie ÷ sorties constatées de l'année (règle de calcul documentée à l'écran), comparé aux cibles conventionnelles paramétrées.
-- **Source** : « Pilotage & indicateurs » (bloc sorties) ; export de synthèse.
+- **Formule** : sorties de la catégorie ÷ sorties constatées de l'année (règle de calcul documentée à l'écran), comparé aux cibles conventionnelles paramétrées (`/insertion/cibles`).
+- **Source** : « Pilotage & indicateurs » (bloc indicateurs conventionnels) ; export de synthèse.
 - **Fréquence** : annuelle (suivi trimestriel indicatif en cours d'année).
 - **Seuil indicatif** : l'objectif conventionnel paramétré — affiché « objectif non paramétré » tant que la direction n'a pas confirmé les valeurs sur les documents contractuels.
 - **Limites** : sur ~20-30 sorties par an, **une seule sortie déplace le taux de 3 à 5 points** : les écarts d'une année ne signifient rien isolément. Le taux dépend du marché de l'emploi local, du profil des publics accueillis et de la conjoncture — jamais de la seule pratique d'accompagnement. La première année suivant la bascule de nomenclature (2026) n'est pas comparable aux séries antérieures (note méthodologique jointe au bilan annuel).
@@ -151,7 +151,7 @@ Quatre familles. Pour chaque indicateur : définition, formule, source dans le m
 **C4. Satisfaction de sortie**
 - **Définition** : ce que disent les personnes à la sortie (questionnaire interne : accueil, accompagnement, compétences, conditions de travail, bilan personnel, satisfaction globale) ; taux de réponse.
 - **Formule** : moyennes par thème sur les questionnaires de l'année ; répondants ÷ sortants.
-- **Source** : restitution annuelle anonymisée (module Insertion).
+- **Source** : restitution annuelle anonymisée (`/insertion/satisfaction-stats`).
 - **Fréquence** : annuelle.
 - **Seuil indicatif** : taux de réponse cible ≥ 70 % ; vigilance sur tout thème durablement en retrait des autres.
 - **Limites** : biais de désirabilité (le questionnaire est proposé par la structure au moment du départ) et petits effectifs : lire en tendance pluriannuelle et par thème, jamais en valeur absolue. Les verbatims libres (suggestions) valent souvent plus que les moyennes.
@@ -216,7 +216,7 @@ Objet : familles A (couverture) et D (soutenabilité) en série trimestrielle, f
 Objet : consolider l'année — famille C complète (sorties vs objectifs conventionnels, satisfaction, post-sortie), volume d'accompagnement (B5, au titre de l'article 5), ratio de charge (D1) et son historique. Supports : export de synthèse du module + note méthodologique (bascule de nomenclature 2026 la première année). La partie « charge » du dossier est relue par la CIP avant transmission.
 
 **3.4 Rapport annuel et label RSEi**
-Les agrégats des familles C et D alimentent le rapport annuel d'activité, la revue qualité annuelle (satisfaction + post-sortie + indicateurs → plan d'amélioration daté) et le dossier de labellisation RSEi (preuves du volet social : traçabilité de l'accompagnement, écoute des bénéficiaires, effets des parcours). Un même chiffre ne se recalcule jamais deux fois : tout part des mêmes exports datés.
+Les agrégats des familles C et D alimentent le rapport annuel d'activité, la revue qualité annuelle (satisfaction + post-sortie + indicateurs → plan d'amélioration daté) et le dossier de labellisation RSEi (preuves du volet social : traçabilité de l'accompagnement, écoute des bénéficiaires, effets des parcours), ce dernier relevant d'une mission dédiée distincte. Un même chiffre ne se recalcule jamais deux fois : tout part des mêmes exports datés.
 
 ---
 
@@ -257,4 +257,4 @@ Pour chaque item, trois réponses possibles — « ça va » / « sous tension �
 
 ---
 
-*Référentiel établi le 22/07/2026 dans le cadre de la mission Insertion (livrable 10). À présenter au CSE avec le module, à confirmer en première revue d'équipe après mise en production, puis à réviser annuellement.*
+*Référentiel établi le 22/07/2026 dans le cadre de la mission Insertion, finalisé le 23/07/2026 après livraison du module. À présenter au CSE avec le module, à confirmer en première revue d'équipe après mise en production, puis à réviser annuellement.*

@@ -4,6 +4,8 @@
 
 *Destinataires : DDETS de Seine-Maritime (dialogue de gestion et contrôle ACI), Conseil départemental de Seine-Maritime, Convergence, organisme labellisateur RSEi.*
 
+> **→ version finalisée : `docs/NOTE_CERTIFICATEURS_INSERTION.md`** (ajustée au périmètre livré PR 1 + PR 2, le 23/07/2026). Le présent brouillon est conservé pour la traçabilité de la conception.
+
 > **Version projetée — établie sur les plans validés du 22/07/2026, à finaliser après développement.**
 > La présente note décrit le dispositif tel qu'il a été conçu, validé en interne et passé au crible de deux revues indépendantes (revue utilisatrice UX/CIP et revue d'audit en posture DDETS/qualité). Le développement est engagé sur cette base ; la note sera actualisée et rééditée à la mise en production, après vérification de la conformité du réalisé au conçu.
 
