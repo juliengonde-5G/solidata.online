@@ -11,7 +11,7 @@ const { FREINS, FREIN_KEYS } = require('./freins-registry');
 // d'affichage passent par la colonne `titre` (ou le label ci-dessous).
 // ══════════════════════════════════════════════════════════════
 
-const MILESTONE_TYPES = ['diagnostic_accueil', 'bilan_intermediaire', 'renouvellement', 'bilan_sortie', 'suivi_post_sortie'];
+const MILESTONE_TYPES = ['diagnostic_accueil', 'bilan_intermediaire', 'renouvellement', 'bilan_sortie', 'suivi_post_sortie', 'periode_essai'];
 
 const MILESTONE_TYPE_LABELS = {
   diagnostic_accueil: "Diagnostic d'accueil",
@@ -19,6 +19,10 @@ const MILESTONE_TYPE_LABELS = {
   renouvellement: 'Renouvellement de contrat',
   bilan_sortie: 'Bilan de sortie',
   suivi_post_sortie: 'Suivi post-sortie',
+  // Lot 8 (2026-07 PR3) — entretien de période d'essai (EXG-30 / PROP-03) :
+  // point de bascule OFFICIEL vers l'accompagnement (procédure interne). Créé
+  // automatiquement à la liaison candidat→collaborateur (ensurePeriodeEssaiMilestone).
+  periode_essai: "Entretien de période d'essai",
 };
 
 // Libellé d'affichage d'un entretien : titre saisi > label du type > type brut.
@@ -1663,6 +1667,108 @@ async function resyncMilestones(db, employeeId, { userId = null } = {}) {
  * @param {number|null} userId
  * @returns {Promise<Array>} les jalons du parcours (existants + créés)
  */
+// ══════════════════════════════════════════════════════════════
+// LOT 8 (2026-07 PR3) — co-construction & espace encadrant technique
+// ══════════════════════════════════════════════════════════════
+
+// Les 4 profils de style d'apprentissage (modèle Kolb) — complément du PCM.
+const LEARNING_STYLES = ['adaptateur', 'divergeur', 'assimilateur', 'convergeur'];
+
+/**
+ * Calcule le style d'apprentissage (Kolb) à partir du questionnaire A/B du
+ * livret parcours (24 items — EXG-32). Fonction PURE (aucune I/O), documentée
+ * et déterministe : le frontend peut la répliquer, le backend l'expose et
+ * accepte aussi le résultat déjà calculé (le PUT diagnostic recalcule quand
+ * seules les réponses sont fournies).
+ *
+ * Règle : les items sont répartis en deux moitiés (« colonnes 1&2 vs 3&4 ») —
+ *  - 1re moitié → axe PERCEPTION : réponse 'A' = expérience concrète (CE),
+ *    'B' = conceptualisation abstraite (AC) ;
+ *  - 2e moitié → axe TRAITEMENT : réponse 'A' = expérimentation active (AE),
+ *    'B' = observation réfléchie (RO).
+ * Majorité simple par axe (égalité → CE / AE), puis quadrant Kolb :
+ *   CE+AE → adaptateur · CE+RO → divergeur · AC+RO → assimilateur · AC+AE → convergeur.
+ *
+ * @param {Array<string>|Object} reponses tableau de 'A'/'B' (ou objet indexé 1..N)
+ * @returns {'adaptateur'|'divergeur'|'assimilateur'|'convergeur'|null}
+ */
+function computeLearningStyle(reponses) {
+  let arr = null;
+  if (Array.isArray(reponses)) arr = reponses;
+  else if (reponses && typeof reponses === 'object') {
+    arr = Object.keys(reponses)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((k) => reponses[k]);
+  }
+  if (!arr || arr.length < 2) return null;
+  const norm = (v) => String(v == null ? '' : v).trim().toUpperCase();
+  const half = Math.floor(arr.length / 2);
+  const perc = arr.slice(0, half).map(norm);
+  const proc = arr.slice(half).map(norm);
+  const countA = (xs) => xs.filter((x) => x === 'A').length;
+  const percA = countA(perc);
+  const procA = countA(proc);
+  const perception = percA >= perc.length - percA ? 'CE' : 'AC';
+  const processing = procA >= proc.length - procA ? 'AE' : 'RO';
+  if (perception === 'CE' && processing === 'AE') return 'adaptateur';
+  if (perception === 'CE' && processing === 'RO') return 'divergeur';
+  if (perception === 'AC' && processing === 'RO') return 'assimilateur';
+  return 'convergeur'; // AC + AE
+}
+
+/**
+ * Moyenne d'une grille de compétences en EXCLUANT les items « N/E » (non
+ * évalués) — même doctrine que « freins non évalués » (un N/E ne pèse jamais
+ * sur la moyenne). Un item est N/E si non_evalue===true OU note nulle/vide.
+ * @param {Array<{note?:number, non_evalue?:boolean}>} scores
+ * @returns {{ moyenne:number|null, n_notes:number, n_ne:number }}
+ */
+function competenceAverage(scores) {
+  const list = Array.isArray(scores) ? scores : [];
+  const evalues = list
+    .filter((s) => s && s.non_evalue !== true && s.note != null && s.note !== '')
+    .map((s) => Number(s.note))
+    .filter((n) => !Number.isNaN(n));
+  const n_ne = list.length - evalues.length;
+  if (evalues.length === 0) return { moyenne: null, n_notes: 0, n_ne };
+  const sum = evalues.reduce((a, b) => a + b, 0);
+  return { moyenne: Math.round((sum / evalues.length) * 10) / 10, n_notes: evalues.length, n_ne };
+}
+
+/**
+ * Crée (idempotent) l'entretien de période d'essai du parcours courant
+ * (EXG-30 / PROP-03). Un seul par (employee_id, parcours_num). Échéance = début
+ * de contrat + `joursEssai` (défaut 30, paramétrable insertion.periode_essai_jours).
+ * Déclencheur principal : liaison candidat→collaborateur (conversion.js).
+ * @param {import('pg').Pool|import('pg').PoolClient} db
+ * @param {number} employeeId
+ * @param {{ parcoursNum?:number, startDate?:string|Date, joursEssai?:number, userId?:number }} [opts]
+ * @returns {Promise<object|null>} le jalon (existant ou créé)
+ */
+async function ensurePeriodeEssaiMilestone(db, employeeId, { parcoursNum = 1, startDate, joursEssai = 30, userId = null } = {}) {
+  const ex = await db.query(
+    `SELECT * FROM insertion_milestones
+     WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2 AND milestone_type = 'periode_essai' LIMIT 1`,
+    [employeeId, parcoursNum]
+  );
+  if (ex.rows.length > 0) return ex.rows[0];
+  const base = new Date(startDate || Date.now());
+  const due = new Date(base);
+  due.setDate(due.getDate() + (Number(joursEssai) > 0 ? Number(joursEssai) : 30));
+  const iso = due.toISOString().slice(0, 10);
+  try {
+    const ins = await db.query(
+      `INSERT INTO insertion_milestones (employee_id, parcours_num, milestone_type, titre, due_date, created_by)
+       VALUES ($1, $2, 'periode_essai', $3, $4, $5) RETURNING *`,
+      [employeeId, parcoursNum, MILESTONE_TYPE_LABELS.periode_essai, iso, userId]
+    );
+    return ins.rows[0];
+  } catch (e) {
+    if (e.code === '23505') return null; // course concurrente : le jalon existe déjà
+    throw e;
+  }
+}
+
 async function generateMilestones(db, employeeId, userId) {
   const empRes = await db.query(
     `SELECT e.insertion_start_date, e.contract_start, e.contract_end,
@@ -1719,4 +1825,9 @@ module.exports = {
   resyncMilestones,
   generateMilestones,
   findScheduleMatch,
+  // Lot 8 (2026-07 PR3)
+  LEARNING_STYLES,
+  computeLearningStyle,
+  competenceAverage,
+  ensurePeriodeEssaiMilestone,
 };

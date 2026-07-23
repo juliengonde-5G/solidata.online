@@ -41,6 +41,10 @@ const INSERTION_SETTING_DEFAULTS = {
   'insertion.rythme_bilans_mois': 2,
   'insertion.renouvellement_anticipation_jours': 42,
   'insertion.retention_months': 24,
+  // Lot 8 (PR3) — durée de la période d'essai en jours (échéance de l'entretien
+  // de période d'essai créé à la liaison candidat→collaborateur, EXG-30). Lue
+  // côté serveur (conversion.js), non exposée par GET /insertion/parametres.
+  'insertion.periode_essai_jours': 30,
 };
 
 /**

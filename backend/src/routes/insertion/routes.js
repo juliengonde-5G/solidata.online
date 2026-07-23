@@ -13,6 +13,7 @@ const {
   FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, MILESTONE_TYPES, MILESTONE_TYPE_LABELS,
   milestoneLabel, analyzeInsertion, buildTimeline,
   computeCddiCumulativeMonths, resyncMilestones, generateMilestones,
+  LEARNING_STYLES, computeLearningStyle, competenceAverage,
 } = require('./engine');
 const { FREINS, freinColumns, RADAR_AXES } = require('./freins-registry');
 const { SENSITIVE_DIAG_FIELDS, encryptField, decryptField } = require('../../utils/field-crypto');
@@ -183,6 +184,10 @@ const DIAG_TEXT_FIELDS = [
   'commentaire_projet', 'commentaire_linguistique',
   'metiers_souhaites', 'projet_formation', 'emploi_vise',
   'attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee',
+  // Lot 8 (PR3) — co-construction : SWOT / besoins / COA (EXG-28), savoir-faire
+  // et savoir-être du portefeuille de compétences (EXG-32). Non sensibles.
+  'swot_atouts', 'swot_faiblesses', 'swot_opportunites', 'swot_menaces',
+  'besoins_exprimes', 'coa_texte', 'savoir_faire', 'savoir_etre',
 ];
 const DIAG_ENUM_FIELDS = {
   logement_statut: ['locataire_social', 'locataire_prive', 'proprietaire', 'heberge', 'sans_abri'],
@@ -194,6 +199,8 @@ const DIAG_ENUM_FIELDS = {
   pret_a_se_former: null,
   cecrl_niveau: null,
   emploi_vise_rome: null,
+  // Lot 8 (PR3) — style d'apprentissage Kolb (EXG-32) : 4 profils.
+  style_apprentissage: LEARNING_STYLES,
 };
 const DIAG_BOOL_FIELDS = [
   'logement_satisfaction', 'allocataire_caf', 'rqth', 'contre_indications', 'suivi_sante',
@@ -203,7 +210,10 @@ const DIAG_BOOL_FIELDS = [
 const DIAG_DATE_FIELDS = ['piece_identite_validite', 'rqth_fin'];
 const DIAG_NUM_FIELDS = ['autre_employeur_heures', 'nb_enfants'];
 const DIAG_ARRAY_FIELDS = ['ressources', 'moyen_transport'];
-const DIAG_JSONB_FIELDS = ['questionnaire_detail', 'fse_entree'];
+const DIAG_JSONB_FIELDS = ['questionnaire_detail', 'fse_entree',
+  // Lot 8 (PR3) — portefeuille de compétences (cases cochées) + réponses au
+  // questionnaire 24 items du style d'apprentissage (EXG-32).
+  'portefeuille_interets', 'portefeuille_competences', 'style_apprentissage_reponses'];
 
 const ALL_DIAG_FIELDS = [
   ...DIAG_FREIN_SCORE_FIELDS, ...DIAG_TEXT_FIELDS, ...Object.keys(DIAG_ENUM_FIELDS),
@@ -281,6 +291,14 @@ router.put('/diagnostic/:employeeId', [
       for (const k of Object.keys(d)) {
         if (MANAGER_HIDDEN_FIELDS.includes(k) || k.startsWith('frein_judiciaire')) delete d[k];
       }
+    }
+
+    // Lot 8 (EXG-32) — style d'apprentissage : si le front envoie seulement les
+    // 24 réponses A/B (style_apprentissage_reponses) sans le résultat, on le
+    // calcule côté serveur (helper pur exposé) ; le front peut aussi le fournir.
+    if (('style_apprentissage_reponses' in d) && !('style_apprentissage' in d) && d.style_apprentissage_reponses) {
+      const st = computeLearningStyle(d.style_apprentissage_reponses);
+      if (st) d.style_apprentissage = st;
     }
 
     const pn = await currentParcoursNum(pool, empId);
@@ -396,6 +414,24 @@ async function applySortieParcoursEffect(db, ms, requestedStatus) {
   }
 }
 
+// Effet de clôture d'un entretien de période d'essai (Lot 8, EXG-30/PROP-03).
+// Décision « rompu » → clôture propre du parcours (statut abandon + date de
+// sortie) au lieu du parcours fantôme historique. « confirme »/« a_revoir » →
+// le parcours continue (bascule officielle vers l'accompagnement). Idempotent.
+async function applyPeriodeEssaiEffect(db, ms) {
+  if (ms.milestone_type !== 'periode_essai') return;
+  if (ms.periode_essai_decision === 'rompu' && ms.status === 'realise') {
+    await db.query(
+      `UPDATE employees
+         SET insertion_status = 'abandon',
+             insertion_end_date = COALESCE(insertion_end_date, $2::date, CURRENT_DATE),
+             updated_at = NOW()
+       WHERE id = $1 AND insertion_status = 'en_parcours'`,
+      [ms.employee_id, ms.completed_date || null]
+    );
+  }
+}
+
 // POST /api/insertion/milestones — Créer un entretien
 // Types TECHNIQUES (diagnostic_accueil, bilan_intermediaire, renouvellement,
 // bilan_sortie, suivi_post_sortie). bilan_intermediaire : créable à toute date,
@@ -488,7 +524,7 @@ router.post('/milestones', [
 // ── Champs éditables d'un entretien (PUT /milestones/:id) ──
 // Fin du COALESCE intégral (03 §6.3) : seuls les champs PRÉSENTS dans le body
 // sont écrits, et null est accepté (permet d'effacer une date, un frein…).
-const MILESTONE_JSONB_FIELDS = ['previous_review', 'validations', 'renouvellement_form', 'sortie_documents', 'remise_salarie', 'fse_sortie', 'ai_recommendations'];
+const MILESTONE_JSONB_FIELDS = ['previous_review', 'validations', 'renouvellement_form', 'sortie_documents', 'remise_salarie', 'fse_sortie', 'ai_recommendations', 'periode_essai_form'];
 const MILESTONE_EDITABLE_FIELDS = [
   'status', 'titre', 'due_date', 'interview_date', 'interviewer_id', 'completed_date',
   ...FREINS.map((f) => f.column),
@@ -500,6 +536,7 @@ const MILESTONE_EDITABLE_FIELDS = [
   'previous_milestone_id', 'contract_id',
   'renouvellement_avis', 'renouvellement_duree_mois',
   'post_sortie_situation', 'post_sortie_commentaire',
+  'periode_essai_decision', // Lot 8 (PR3) — décision de période d'essai
   ...MILESTONE_JSONB_FIELDS,
 ];
 
@@ -513,6 +550,7 @@ router.put('/milestones/:id', [
   body('sortie_classification').optional({ nullable: true }).isIn(SORTIE_CLASSES).withMessage(`sortie_classification invalide (attendu : ${SORTIE_CLASSES.join(', ')})`),
   body('renouvellement_avis').optional({ nullable: true }).isIn(['favorable', 'favorable_reserves', 'defavorable']).withMessage('renouvellement_avis invalide'),
   body('post_sortie_situation').optional({ nullable: true }).isIn(['emploi_durable', 'emploi_transition', 'formation', 'recherche_emploi', 'autre', 'injoignable']).withMessage('post_sortie_situation invalide'),
+  body('periode_essai_decision').optional({ nullable: true }).isIn(['confirme', 'rompu', 'a_revoir']).withMessage('periode_essai_decision invalide (confirme, rompu, a_revoir)'),
   ...FREINS.map((f) => body(f.column).optional({ nullable: true }).isInt({ min: 1, max: 5 }).withMessage(`${f.column} : niveau attendu entre 1 et 5`)),
 ], validate, async (req, res) => {
   try {
@@ -607,30 +645,49 @@ router.post('/milestones/:id/close', [
 
     const problems = [];
 
+    // Lot 8 (EXG-30) — l'entretien de période d'essai a des contrôles ADAPTÉS :
+    // pas d'exigence de freins (il précède le diagnostic social) ni de bilan
+    // précédent (c'est le tout premier jalon), mais une DÉCISION obligatoire.
+    const isPeriodeEssai = ms.milestone_type === 'periode_essai';
+
     // 1. Freins évalués — ou non-évaluation explicitement assumée par la CIP.
-    const missing = FREINS.filter((f) => ms[f.column] == null).map((f) => f.key);
-    if (missing.length > 0 && req.body.assume_freins_non_evalues !== true) {
-      problems.push({
-        code: 'freins_non_evalues',
-        freins: missing,
-        message: `Freins non évalués : ${missing.join(', ')}. Évaluez-les ou clôturez avec « assume_freins_non_evalues » (non-évaluation assumée).`,
-      });
+    //    (Non applicable à l'entretien de période d'essai.)
+    if (!isPeriodeEssai) {
+      const missing = FREINS.filter((f) => ms[f.column] == null).map((f) => f.key);
+      if (missing.length > 0 && req.body.assume_freins_non_evalues !== true) {
+        problems.push({
+          code: 'freins_non_evalues',
+          freins: missing,
+          message: `Freins non évalués : ${missing.join(', ')}. Évaluez-les ou clôturez avec « assume_freins_non_evalues » (non-évaluation assumée).`,
+        });
+      }
     }
 
     // 2. Évaluation du bilan précédent (previous_review) si un entretien
-    // réalisé antérieur existe sur ce parcours (REC-UX-03).
-    const prevRealise = await client.query(
-      `SELECT id FROM insertion_milestones
-       WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1)
-         AND id <> $3 AND status = 'realise' LIMIT 1`,
-      [ms.employee_id, ms.parcours_num, ms.id]
-    );
-    const pr = ms.previous_review;
-    const prEmpty = pr == null || (Array.isArray(pr) && pr.length === 0);
-    if (prevRealise.rows.length > 0 && prEmpty) {
+    // réalisé antérieur existe sur ce parcours (REC-UX-03). Non exigée pour la
+    // période d'essai (premier jalon du parcours).
+    if (!isPeriodeEssai) {
+      const prevRealise = await client.query(
+        `SELECT id FROM insertion_milestones
+         WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1)
+           AND id <> $3 AND status = 'realise' LIMIT 1`,
+        [ms.employee_id, ms.parcours_num, ms.id]
+      );
+      const pr = ms.previous_review;
+      const prEmpty = pr == null || (Array.isArray(pr) && pr.length === 0);
+      if (prevRealise.rows.length > 0 && prEmpty) {
+        problems.push({
+          code: 'previous_review_manquante',
+          message: "Un entretien réalisé antérieur existe : l'évaluation du bilan précédent (previous_review) doit être renseignée avant la clôture.",
+        });
+      }
+    }
+
+    // 2bis. Période d'essai : décision obligatoire (confirme / rompu / a_revoir).
+    if (isPeriodeEssai && !ms.periode_essai_decision) {
       problems.push({
-        code: 'previous_review_manquante',
-        message: "Un entretien réalisé antérieur existe : l'évaluation du bilan précédent (previous_review) doit être renseignée avant la clôture.",
+        code: 'periode_essai_decision_manquante',
+        message: "Décision de période d'essai obligatoire (confirme, rompu, a_revoir) avant la clôture.",
       });
     }
 
@@ -645,9 +702,11 @@ router.post('/milestones/:id/close', [
       }
     }
 
-    // 4. Prochain entretien « planifie » obligatoire (sauf sortie / post-sortie).
+    // 4. Prochain entretien « planifie » obligatoire (sauf sortie / post-sortie
+    //    / période d'essai — pour cette dernière, le diagnostic d'accueil est
+    //    déjà posé comme jalon suivant).
     let createdNext = null;
-    if (!['bilan_sortie', 'suivi_post_sortie'].includes(ms.milestone_type)) {
+    if (!['bilan_sortie', 'suivi_post_sortie', 'periode_essai'].includes(ms.milestone_type)) {
       const nextPlanned = await client.query(
         `SELECT id FROM insertion_milestones
          WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1)
@@ -702,6 +761,8 @@ router.post('/milestones/:id/close', [
 
     // Effet de clôture du parcours (bilan de sortie) — préservé (03 §6.5).
     await applySortieParcoursEffect(client, closed.rows[0], 'realise');
+    // Effet de clôture de la période d'essai (Lot 8) : rupture → abandon.
+    await applyPeriodeEssaiEffect(client, closed.rows[0]);
 
     await client.query('COMMIT');
 
@@ -2830,6 +2891,362 @@ router.put('/:employeeId/cip-referent', authorize('ADMIN', 'RH'), async (req, re
     res.json({ ...r.rows[0], cip_referent_nom: nom });
   } catch (err) {
     console.error('[INSERTION] Erreur cip-referent PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// LOT 8 (PR3) — GRILLES DE COMPÉTENCES par filière (EXG-26/27) + espace ETI
+// Référentiel ADMINISTRABLE (écriture ADMIN) ; évaluations saisissables par
+// l'ETI (MANAGER) ET la CIP (ADMIN/RH). Les compétences ne portent AUCUNE
+// donnée art. 9/10 → l'ETI y est légitime, le masking du diagnostic social
+// continue de s'appliquer aux AUTRES endpoints. N/E (non_evalue) exclu des
+// moyennes (competenceAverage). Chemins ≥ 2 segments ou non numériques → placés
+// AVANT GET /:employeeId. NB périmètre : faute de lien schéma fiable
+// encadrant→équipe (table teams sans manager_user_id), l'accès MANAGER n'est
+// pas restreint par équipe — même périmètre que le formulaire de renouvellement
+// (voie ETI existante).
+// ══════════════════════════════════════════════════════════════
+
+const COMPETENCE_FILIERES = ['tri', 'collecte', 'logistique', 'boutique', 'transverse'];
+
+// GET /api/insertion/competence-referentiels?filiere=&actifs=1 — grille administrable
+router.get('/competence-referentiels', [
+  query('filiere').optional().isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
+], validate, async (req, res) => {
+  try {
+    const params = [];
+    const where = [];
+    if (req.query.filiere) { params.push(req.query.filiere); where.push(`filiere = $${params.length}`); }
+    if (req.query.actifs === '1' || req.query.actifs === 'true') where.push('actif = true');
+    const r = await pool.query(
+      `SELECT * FROM insertion_competence_referentiels
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY filiere, rubrique, ordre, item`,
+      params
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[INSERTION] Erreur competence-referentiels GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/competence-referentiels — créer un item (ADMIN)
+router.post('/competence-referentiels', authorize('ADMIN'), [
+  body('filiere').isIn(COMPETENCE_FILIERES).withMessage(`filiere invalide (${COMPETENCE_FILIERES.join(', ')})`),
+  body('rubrique').isString().trim().notEmpty().isLength({ max: 120 }).withMessage('rubrique requise (120 car. max)'),
+  body('item').isString().trim().notEmpty().isLength({ max: 200 }).withMessage('item requis (200 car. max)'),
+  body('ordre').optional({ nullable: true }).isInt().withMessage('ordre invalide'),
+  body('actif').optional({ nullable: true }).isBoolean().withMessage('actif invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const r = await pool.query(
+      `INSERT INTO insertion_competence_referentiels (filiere, rubrique, item, ordre, actif)
+       VALUES ($1, $2, $3, $4, COALESCE($5, true)) RETURNING *`,
+      [d.filiere, d.rubrique.trim(), d.item.trim(), Number.isInteger(d.ordre) ? d.ordre : 0,
+        typeof d.actif === 'boolean' ? d.actif : null]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Cet item existe déjà pour cette filière et cette rubrique.' });
+    console.error('[INSERTION] Erreur competence-referentiels POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/competence-referentiels/:id — modifier (ADMIN)
+router.put('/competence-referentiels/:id', authorize('ADMIN'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('filiere').optional().isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
+  body('rubrique').optional().isString().trim().notEmpty().isLength({ max: 120 }).withMessage('rubrique invalide'),
+  body('item').optional().isString().trim().notEmpty().isLength({ max: 200 }).withMessage('item invalide'),
+  body('ordre').optional({ nullable: true }).isInt().withMessage('ordre invalide'),
+  body('actif').optional({ nullable: true }).isBoolean().withMessage('actif invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const editable = ['filiere', 'rubrique', 'item', 'ordre', 'actif'];
+    const sets = []; const vals = [];
+    for (const f of editable) { if (!(f in d)) continue; vals.push(d[f] === '' ? null : d[f]); sets.push(`${f} = $${vals.length}`); }
+    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+    vals.push(req.params.id);
+    const r = await pool.query(`UPDATE insertion_competence_referentiels SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`, vals);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Item non trouvé' });
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Cet item existe déjà pour cette filière et cette rubrique.' });
+    console.error('[INSERTION] Erreur competence-referentiels PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/insertion/competence-referentiels/:id — supprimer (ADMIN)
+// Les scores déjà saisis conservent leur snapshot rubrique/item (FK SET NULL).
+router.delete('/competence-referentiels/:id', authorize('ADMIN'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM insertion_competence_referentiels WHERE id = $1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Item non trouvé' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[INSERTION] Erreur competence-referentiels DELETE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Insère les scores d'une évaluation. Snapshot rubrique/item depuis le
+// référentiel (résiste à une suppression ultérieure de l'item). N/E =
+// non_evalue===true OU note vide → note NULL. Note contrôlée 0-10.
+async function insertCompetenceScores(client, evaluationId, scores) {
+  if (!Array.isArray(scores) || scores.length === 0) return 0;
+  const refIds = [...new Set(scores.map((s) => s && s.referentiel_id).filter((x) => x != null))];
+  const refMap = new Map();
+  if (refIds.length > 0) {
+    const r = await client.query('SELECT id, rubrique, item FROM insertion_competence_referentiels WHERE id = ANY($1::int[])', [refIds]);
+    for (const row of r.rows) refMap.set(Number(row.id), row);
+  }
+  let n = 0;
+  for (const s of scores) {
+    if (!s || typeof s !== 'object') continue;
+    const ref = s.referentiel_id != null ? refMap.get(Number(s.referentiel_id)) : null;
+    const nonEval = s.non_evalue === true || s.note == null || s.note === '';
+    let note = null;
+    if (!nonEval) {
+      note = parseInt(s.note, 10);
+      if (Number.isNaN(note) || note < 0 || note > 10) { const err = new Error('note hors bornes'); err.code = 'COMP_NOTE'; throw err; }
+    }
+    await client.query(
+      `INSERT INTO insertion_competence_scores (evaluation_id, referentiel_id, rubrique, item, note, non_evalue, observation, objectif)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [evaluationId, s.referentiel_id != null ? s.referentiel_id : null,
+        (s.rubrique && String(s.rubrique).trim()) || (ref ? ref.rubrique : null),
+        (s.item && String(s.item).trim()) || (ref ? ref.item : null),
+        note, nonEval, s.observation || null, s.objectif || null]
+    );
+    n++;
+  }
+  return n;
+}
+
+// GET /api/insertion/competences/:employeeId — évaluations + scores (module,
+// MANAGER inclus). Chaque évaluation porte ses scores et sa moyenne (N/E exclu).
+router.get('/competences/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const evals = await pool.query(
+      `SELECT ev.*, u.first_name AS evaluateur_first, u.last_name AS evaluateur_last
+       FROM insertion_competence_evaluations ev
+       LEFT JOIN users u ON u.id = ev.evaluateur_id
+       WHERE ev.employee_id = $1
+       ORDER BY ev.date_evaluation DESC NULLS LAST, ev.id DESC`,
+      [empId]
+    );
+    const ids = evals.rows.map((e) => e.id);
+    const scoresByEval = new Map();
+    if (ids.length > 0) {
+      const sc = await pool.query(
+        `SELECT s.*, r.rubrique AS ref_rubrique, r.item AS ref_item, r.actif AS ref_actif
+         FROM insertion_competence_scores s
+         LEFT JOIN insertion_competence_referentiels r ON r.id = s.referentiel_id
+         WHERE s.evaluation_id = ANY($1::int[])
+         ORDER BY s.id`,
+        [ids]
+      );
+      for (const row of sc.rows) {
+        row.rubrique = row.rubrique || row.ref_rubrique;
+        row.item = row.item || row.ref_item;
+        if (!scoresByEval.has(row.evaluation_id)) scoresByEval.set(row.evaluation_id, []);
+        scoresByEval.get(row.evaluation_id).push(row);
+      }
+    }
+    const out = evals.rows.map((e) => {
+      const scores = scoresByEval.get(e.id) || [];
+      return { ...e, scores, moyenne: competenceAverage(scores).moyenne };
+    });
+    res.json(out);
+  } catch (err) {
+    console.error('[INSERTION] Erreur competences GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/competences — créer une évaluation + ses scores
+// (ADMIN/RH/MANAGER — l'ETI est un évaluateur légitime). Transactionnel.
+router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('filiere').optional({ nullable: true }).isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
+  body('statut').optional({ nullable: true }).isIn(['brouillon', 'valide']).withMessage('statut invalide (brouillon/valide)'),
+  body('date_evaluation').optional({ nullable: true }).isISO8601().withMessage('date_evaluation invalide'),
+  body('periode').optional({ nullable: true }).isLength({ max: 20 }).withMessage('periode trop longue (20 max)'),
+  body('scores').optional({ nullable: true }).isArray().withMessage('scores doit être un tableau'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const d = req.body;
+    const emp = await client.query('SELECT id FROM employees WHERE id = $1', [d.employee_id]);
+    if (emp.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Salarié non trouvé' }); }
+    const pn = await currentParcoursNum(client, d.employee_id);
+    await client.query('BEGIN');
+    const ev = await client.query(
+      `INSERT INTO insertion_competence_evaluations
+         (employee_id, parcours_num, filiere, periode, date_evaluation, evaluateur_id, statut, validations, synthese, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 'brouillon'), $8, $9, $10) RETURNING *`,
+      [d.employee_id, pn, d.filiere || null, d.periode || null, d.date_evaluation || null,
+        req.user.id, d.statut || null, d.validations != null ? JSON.stringify(d.validations) : null,
+        d.synthese || null, req.user.id]
+    );
+    const evaluation = ev.rows[0];
+    await insertCompetenceScores(client, evaluation.id, d.scores);
+    await client.query('COMMIT');
+    const scoresRes = await pool.query('SELECT * FROM insertion_competence_scores WHERE evaluation_id = $1 ORDER BY id', [evaluation.id]);
+    res.status(201).json({ ...evaluation, scores: scoresRes.rows, moyenne: competenceAverage(scoresRes.rows).moyenne });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === 'COMP_NOTE') return res.status(400).json({ error: 'Note de compétence hors bornes (0-10) — utilisez N/E (non_evalue) pour un item non évalué.' });
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié ou item de référentiel inexistant).' });
+    console.error('[INSERTION] Erreur competences POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/insertion/competences/:id — modifier l'évaluation (statut,
+// validations…) et REMPLACER ses scores si `scores` est fourni (ADMIN/RH/MANAGER).
+router.put('/competences/:id', authorize('ADMIN', 'RH', 'MANAGER'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('statut').optional({ nullable: true }).isIn(['brouillon', 'valide']).withMessage('statut invalide'),
+  body('filiere').optional({ nullable: true }).isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
+  body('date_evaluation').optional({ nullable: true }).isISO8601().withMessage('date_evaluation invalide'),
+  body('periode').optional({ nullable: true }).isLength({ max: 20 }).withMessage('periode trop longue (20 max)'),
+  body('scores').optional({ nullable: true }).isArray().withMessage('scores doit être un tableau'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const d = req.body;
+    const cur = await client.query('SELECT id FROM insertion_competence_evaluations WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Évaluation non trouvée' }); }
+    await client.query('BEGIN');
+    const editable = ['filiere', 'periode', 'date_evaluation', 'statut', 'synthese'];
+    const sets = []; const vals = [];
+    for (const f of editable) { if (!(f in d)) continue; vals.push(d[f] === '' ? null : d[f]); sets.push(`${f} = $${vals.length}`); }
+    if ('validations' in d) { vals.push(d.validations != null ? JSON.stringify(d.validations) : null); sets.push(`validations = $${vals.length}`); }
+    if (sets.length > 0) {
+      vals.push(req.params.id);
+      await client.query(`UPDATE insertion_competence_evaluations SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${vals.length}`, vals);
+    }
+    if (Array.isArray(d.scores)) {
+      await client.query('DELETE FROM insertion_competence_scores WHERE evaluation_id = $1', [req.params.id]);
+      await insertCompetenceScores(client, req.params.id, d.scores);
+    }
+    await client.query('COMMIT');
+    const ev = await pool.query('SELECT * FROM insertion_competence_evaluations WHERE id = $1', [req.params.id]);
+    const scoresRes = await pool.query('SELECT * FROM insertion_competence_scores WHERE evaluation_id = $1 ORDER BY id', [req.params.id]);
+    res.json({ ...ev.rows[0], scores: scoresRes.rows, moyenne: competenceAverage(scoresRes.rows).moyenne });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === 'COMP_NOTE') return res.status(400).json({ error: 'Note de compétence hors bornes (0-10) — utilisez N/E (non_evalue) pour un item non évalué.' });
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (item de référentiel inexistant).' });
+    console.error('[INSERTION] Erreur competences PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/insertion/competences/:id — supprimer une évaluation (ADMIN/RH ;
+// scores en CASCADE).
+router.delete('/competences/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM insertion_competence_evaluations WHERE id = $1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Évaluation non trouvée' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[INSERTION] Erreur competences DELETE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// LOT 8 (PR3) — CHECKLIST D'EMBAUCHE (EXG-30 / PROP-05)
+// Une checklist par salarié, items JSONB. Écriture ADMIN/RH, lecture module
+// (MANAGER inclus). Pas de moteur d'état (ERP léger). AVANT GET /:employeeId.
+// ══════════════════════════════════════════════════════════════
+
+const CHECKLIST_STEPS = ['promesse_embauche', 'contrat_signe', 'mutuelle', 'charte_insertion', 'livret_accueil', 'reglement_interieur', 'formation_poste'];
+
+// Normalise les items stockés vers une forme complète (le front n'a pas à gérer
+// les absences) : chaque step → { fait, date, responsable }.
+function normalizeChecklistItems(items) {
+  const src = items || {};
+  const out = {};
+  for (const step of CHECKLIST_STEPS) {
+    const it = src[step] || {};
+    out[step] = { fait: it.fait === true, date: it.date || null, responsable: it.responsable || null };
+  }
+  return out;
+}
+
+// GET /api/insertion/checklist-embauche/:employeeId — lecture (module)
+router.get('/checklist-embauche/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const r = await pool.query('SELECT * FROM insertion_checklist_embauche WHERE employee_id = $1', [empId]);
+    res.json({
+      employee_id: empId,
+      exists: r.rows.length > 0,
+      steps: CHECKLIST_STEPS,
+      items: normalizeChecklistItems(r.rows[0]?.items),
+      updated_at: r.rows[0]?.updated_at || null,
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur checklist-embauche GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/checklist-embauche/:employeeId — upsert idempotent (ADMIN/RH).
+// Fusion : les steps absents du body conservent leur valeur enregistrée ; un
+// step à null est retiré ; les steps inconnus sont ignorés.
+router.put('/checklist-embauche/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+  body('items').isObject().withMessage('items (objet) requis'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const emp = await pool.query('SELECT id FROM employees WHERE id = $1', [empId]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+
+    const cur = await pool.query('SELECT items FROM insertion_checklist_embauche WHERE employee_id = $1', [empId]);
+    const merged = { ...(cur.rows[0]?.items || {}) };
+    for (const [step, val] of Object.entries(req.body.items || {})) {
+      if (!CHECKLIST_STEPS.includes(step)) continue; // ignore les steps inconnus
+      if (val == null) { delete merged[step]; continue; }
+      merged[step] = {
+        fait: val.fait === true,
+        date: val.date || null,
+        responsable: val.responsable != null && val.responsable !== '' ? String(val.responsable).slice(0, 150) : null,
+      };
+    }
+    const r = await pool.query(
+      `INSERT INTO insertion_checklist_embauche (employee_id, items, created_by, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (employee_id) DO UPDATE SET items = $2, updated_at = NOW()
+       RETURNING *`,
+      [empId, JSON.stringify(merged), req.user.id]
+    );
+    res.json({ ...r.rows[0], items: normalizeChecklistItems(r.rows[0].items), steps: CHECKLIST_STEPS });
+  } catch (err) {
+    console.error('[INSERTION] Erreur checklist-embauche PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

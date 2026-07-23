@@ -1481,3 +1481,195 @@ describe('CONTRAT GET /exports/insertion-synthese (PR 2 — EXG-14)', () => {
     expect(res.text).toContain('saisie officielle : ASP');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT 8 (2026-07 PR3) — grilles de compétences, période d'essai, checklist
+// ═══════════════════════════════════════════════════════════════════════════
+const del = (path, role = 'ADMIN') => request(app).delete(path).set('Authorization', `Bearer ${TOKENS[role]}`);
+
+describe('CONTRAT /insertion/competence-referentiels (Lot 8, EXG-26)', () => {
+  it('GET accessible au module (MANAGER inclus)', async () => {
+    mockQuery.mockImplementation((sql) => {
+      if (/FROM insertion_competence_referentiels/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ id: 1, filiere: 'tri', rubrique: 'Activités métier', item: 'Tri par catégorie', ordre: 2, actif: true }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await get('/api/insertion/competence-referentiels?filiere=tri&actifs=1', 'MANAGER');
+    expect(res.status).toBe(200);
+    expect(res.body[0].item).toBe('Tri par catégorie');
+  });
+
+  it('écriture réservée ADMIN : POST MANAGER/RH → 403, ADMIN → 201', async () => {
+    expect((await post('/api/insertion/competence-referentiels', 'MANAGER', { filiere: 'tri', rubrique: 'R', item: 'I' })).status).toBe(403);
+    expect((await post('/api/insertion/competence-referentiels', 'RH', { filiere: 'tri', rubrique: 'R', item: 'I' })).status).toBe(403);
+    mockQuery.mockImplementation((sql, params) => {
+      if (/INSERT INTO insertion_competence_referentiels/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ id: 5, filiere: params[0], rubrique: params[1], item: params[2] }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const ok = await post('/api/insertion/competence-referentiels', 'ADMIN', { filiere: 'boutique', rubrique: 'Activités métier', item: 'Tenue de caisse' });
+    expect(ok.status).toBe(201);
+    expect(ok.body.item).toBe('Tenue de caisse');
+  });
+
+  it('filiere hors référentiel → 400 ; doublon → 409', async () => {
+    expect((await post('/api/insertion/competence-referentiels', 'ADMIN', { filiere: 'zzz', rubrique: 'R', item: 'I' })).status).toBe(400);
+    mockQuery.mockImplementation((sql) => {
+      if (/INSERT INTO insertion_competence_referentiels/.test(String(sql))) { const e = new Error('dup'); e.code = '23505'; return Promise.reject(e); }
+      return Promise.resolve({ rows: [] });
+    });
+    const dup = await post('/api/insertion/competence-referentiels', 'ADMIN', { filiere: 'tri', rubrique: 'R', item: 'I' });
+    expect(dup.status).toBe(409);
+  });
+
+  it('DELETE réservé ADMIN (MANAGER → 403)', async () => {
+    expect((await del('/api/insertion/competence-referentiels/1', 'MANAGER')).status).toBe(403);
+  });
+});
+
+describe('CONTRAT /insertion/competences (Lot 8, EXG-26/27 — accès ETI)', () => {
+  it('GET (MANAGER) : évaluations + scores + moyenne (N/E exclu)', async () => {
+    mockQuery.mockImplementation((sql, params) => {
+      const s = String(sql);
+      if (/FROM insertion_competence_evaluations ev/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 10, employee_id: 5, filiere: 'tri', periode: '1-6', statut: 'valide' }] });
+      }
+      if (/FROM insertion_competence_scores s/.test(s)) {
+        return Promise.resolve({ rows: [
+          { id: 1, evaluation_id: 10, note: 7, non_evalue: false, rubrique: null, ref_rubrique: 'Comportement', item: null, ref_item: 'Assiduité' },
+          { id: 2, evaluation_id: 10, note: null, non_evalue: true, rubrique: 'Comportement', item: 'Sécurité' },
+          { id: 3, evaluation_id: 10, note: 9, non_evalue: false, rubrique: 'Activités métier', item: 'Tri' },
+        ] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await get('/api/insertion/competences/5', 'MANAGER');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].scores).toHaveLength(3);
+    expect(res.body[0].moyenne).toBe(8); // (7+9)/2, N/E exclu
+    // snapshot repli sur le référentiel courant quand le snapshot est null
+    expect(res.body[0].scores[0].rubrique).toBe('Comportement');
+  });
+
+  it('POST par MANAGER (ETI légitime) → 201 : transaction + scores + moyenne', async () => {
+    const calls = [];
+    mockQuery.mockImplementation((sql, params) => {
+      calls.push({ sql: String(sql), params });
+      const s = String(sql);
+      if (/SELECT id FROM employees WHERE id = \$1/.test(s)) return Promise.resolve({ rows: [{ id: 5 }] });
+      if (/COALESCE\(parcours_num, 1\) AS pn FROM employees/.test(s)) return Promise.resolve({ rows: [{ pn: 1 }] });
+      if (/INSERT INTO insertion_competence_evaluations/.test(s)) return Promise.resolve({ rows: [{ id: 20, employee_id: 5, parcours_num: 1, statut: 'brouillon' }] });
+      if (/SELECT \* FROM insertion_competence_scores WHERE evaluation_id = \$1/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 1, note: 6, non_evalue: false }, { id: 2, note: null, non_evalue: true }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await post('/api/insertion/competences', 'MANAGER', {
+      employee_id: 5, filiere: 'tri', periode: '1-6',
+      scores: [{ referentiel_id: null, rubrique: 'Comportement', item: 'Assiduité', note: 6 }, { rubrique: 'Comportement', item: 'Sécurité', non_evalue: true }],
+    });
+    expect(res.status).toBe(201);
+    expect(calls.some((c) => c.sql === 'BEGIN')).toBe(true);
+    expect(calls.some((c) => c.sql === 'COMMIT')).toBe(true);
+    expect(calls.some((c) => /INSERT INTO insertion_competence_scores/.test(c.sql))).toBe(true);
+    expect(res.body.moyenne).toBe(6); // 1 note évaluée + 1 N/E exclu
+  });
+
+  it('POST : note hors bornes (0-10) → 400 + ROLLBACK', async () => {
+    const calls = [];
+    mockQuery.mockImplementation((sql) => {
+      calls.push(String(sql));
+      const s = String(sql);
+      if (/SELECT id FROM employees WHERE id = \$1/.test(s)) return Promise.resolve({ rows: [{ id: 5 }] });
+      if (/COALESCE\(parcours_num, 1\) AS pn FROM employees/.test(s)) return Promise.resolve({ rows: [{ pn: 1 }] });
+      if (/INSERT INTO insertion_competence_evaluations/.test(s)) return Promise.resolve({ rows: [{ id: 20 }] });
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await post('/api/insertion/competences', 'MANAGER', { employee_id: 5, scores: [{ note: 11 }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/0-10|N\/E/);
+    expect(calls).toContain('ROLLBACK');
+  });
+
+  it('DELETE réservé ADMIN/RH (MANAGER → 403)', async () => {
+    expect((await del('/api/insertion/competences/20', 'MANAGER')).status).toBe(403);
+  });
+});
+
+describe('CONTRAT POST /insertion/milestones/:id/close — période d\'essai (Lot 8, EXG-30)', () => {
+  it('sans décision → 409 { periode_essai_decision_manquante } SANS freins/previous_review/prochain', async () => {
+    mockQuery.mockImplementation((sql) => {
+      if (/FOR UPDATE/.test(String(sql))) {
+        return Promise.resolve({ rows: [fullMilestone({
+          milestone_type: 'periode_essai', titre: "Entretien de période d'essai",
+          periode_essai_decision: null,
+          ...Object.fromEntries(FREINS.map((f) => [f.column, null])), // freins non évalués : ignorés pour ce type
+        })] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await post('/api/insertion/milestones/10/close', 'RH', {});
+    expect(res.status).toBe(409);
+    const codes = res.body.problems.map((p) => p.code);
+    expect(codes).toContain('periode_essai_decision_manquante');
+    expect(codes).not.toContain('freins_non_evalues');
+    expect(codes).not.toContain('previous_review_manquante');
+    expect(codes).not.toContain('prochain_entretien_manquant');
+  });
+
+  it('décision « rompu » → 200 + clôture du parcours en abandon', async () => {
+    const calls = [];
+    mockQuery.mockImplementation((sql, params) => {
+      calls.push({ sql: String(sql), params });
+      const s = String(sql);
+      if (/FOR UPDATE/.test(s)) {
+        return Promise.resolve({ rows: [fullMilestone({ milestone_type: 'periode_essai', periode_essai_decision: 'rompu' })] });
+      }
+      if (/UPDATE insertion_milestones\s+SET status = 'realise'/.test(s)) {
+        return Promise.resolve({ rows: [fullMilestone({ milestone_type: 'periode_essai', periode_essai_decision: 'rompu', status: 'realise', completed_date: params[0], locked_at: '2026-07-23T10:00:00Z' })] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await post('/api/insertion/milestones/10/close', 'RH', { completed_date: '2026-02-01' });
+    expect(res.status).toBe(200);
+    expect(res.body.milestone.status).toBe('realise');
+    expect(res.body.next).toBeNull(); // pas de prochain entretien exigé pour la période d'essai
+    const effet = calls.find((c) => /UPDATE employees\s+SET insertion_status = 'abandon'/.test(c.sql));
+    expect(effet).toBeTruthy();
+  });
+});
+
+describe('CONTRAT /insertion/checklist-embauche (Lot 8, EXG-30/PROP-05)', () => {
+  it('GET (MANAGER) : items normalisés + steps, même sans ligne en base', async () => {
+    mockQuery.mockResolvedValue({ rows: [] });
+    const res = await get('/api/insertion/checklist-embauche/5', 'MANAGER');
+    expect(res.status).toBe(200);
+    expect(res.body.exists).toBe(false);
+    expect(res.body.steps).toEqual(expect.arrayContaining(['promesse_embauche', 'contrat_signe', 'mutuelle', 'charte_insertion', 'livret_accueil', 'reglement_interieur', 'formation_poste']));
+    expect(res.body.items.contrat_signe).toEqual({ fait: false, date: null, responsable: null });
+  });
+
+  it('PUT réservé ADMIN/RH : MANAGER → 403 ; RH → merge + upsert', async () => {
+    expect((await put('/api/insertion/checklist-embauche/5', 'MANAGER', { items: { mutuelle: { fait: true } } })).status).toBe(403);
+    const calls = [];
+    mockQuery.mockImplementation((sql, params) => {
+      calls.push({ sql: String(sql), params });
+      const s = String(sql);
+      if (/SELECT id FROM employees WHERE id = \$1/.test(s)) return Promise.resolve({ rows: [{ id: 5 }] });
+      if (/SELECT items FROM insertion_checklist_embauche/.test(s)) return Promise.resolve({ rows: [{ items: { contrat_signe: { fait: true } } }] });
+      if (/INSERT INTO insertion_checklist_embauche/.test(s)) return Promise.resolve({ rows: [{ id: 1, employee_id: 5, items: JSON.parse(params[1]) }] });
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await put('/api/insertion/checklist-embauche/5', 'RH', { items: { mutuelle: { fait: true, responsable: 'Assistante' }, inconnu_step: { fait: true } } });
+    expect(res.status).toBe(200);
+    // merge : le contrat_signe existant est conservé, mutuelle ajoutée, step inconnu ignoré
+    const ins = calls.find((c) => /INSERT INTO insertion_checklist_embauche/.test(c.sql));
+    const written = JSON.parse(ins.params[1]);
+    expect(written.contrat_signe.fait).toBe(true);
+    expect(written.mutuelle).toEqual({ fait: true, date: null, responsable: 'Assistante' });
+    expect('inconnu_step' in written).toBe(false);
+  });
+});
