@@ -263,6 +263,13 @@ Gabarits : fiche diagnostic (9 rubriques + radar + mention RGPD pied de page —
 
 ---
 
+## 6 bis. Addendum — décisions de la direction du 23 juillet 2026
+
+1. **FSE+ confirmé → intégré à la PR 1 (EXG-12 active)** : le diagnostic d'accueil porte une sous-section « Données FSE+ (entrée) » — les champs structurés déjà prévus sont réutilisés (niveau_formation, ressources, logement_statut, situation_familiale, rqth) + `fse_entree JSONB` pour les items restants du questionnaire participant ; le bilan de sortie porte `fse_sortie JSONB` (situation à la sortie au sens FSE+). Export « Ma démarche FSE+ » étendu en conséquence. **Conservation** : piste d'audit ≥ 5 ans après dernier paiement — les champs FSE+ sont **exclus de l'anonymisation à 2 ans** (archivage séparé accès restreint, à inscrire à l'AIPD et au registre).
+2. **Convergence CVG confirmé** : bloc « indicateurs CVG » réservé au tableau de bord (Lot 6) ; paramétrage précis **à réception de la trame de reporting CVG** (demandée à la direction) — les indicateurs génériques (freins, sorties, actions logement/santé/global) sont déjà couverts par le modèle.
+3. **Recevabilité RSEi ACI confirmée** : sans impact sur la PR 1 ; le module Pilotage RSE reste planifié en PR 3 (rsei/03, RSEI-10).
+4. **Révisions des revues intégrées au périmètre PR 1** (rapport 11 § 2) : stepper diagnostic avec sauvegarde auto (statut brouillon), Enregistrer vs Clôturer, `previous_review` en 1 geste, `parcours_num` sur diagnostics/entretiens/satisfaction, table `insertion_milestones_history` (verrouillage probant, pattern refashion_dpav_history), `remise_salarie JSONB` sur les entretiens (remise PDF tracée + exemplaire signé scanné), `duree_minutes` sur `cip_action_plans`, gabarits PDF « exemplaire salarié » (FALC) / « exemplaire dossier », bouton « + Action » global ≤ 30 s.
+
 ## 7. Points de vigilance (hérités du rapport 03 §6)
 
 1. Ordre des routes : tout nouveau GET avant `GET /:employeeId` (attrape-tout).

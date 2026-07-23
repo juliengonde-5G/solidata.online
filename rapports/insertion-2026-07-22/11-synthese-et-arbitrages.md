@@ -76,7 +76,18 @@ Les 9 recommandations mineures UX (vocabulaire, radar limité à 3 séries affic
 4. **PR 3 (phase 2)** — lot 8 (espace ETI complet, portefeuille de compétences, période d'essai, checklist embauche) + premiers éléments RSEi logiciels si validés (RSEI-10 module Pilotage RSE).
 5. CLAUDE.md et DOCUMENTATION_APPLICATIVE seront mis à jour dans chaque PR de code (pas dans la présente mission d'étude).
 
-## 5. Points d'attention restants
+## 5. Validation reçue de la direction (23 juillet 2026)
+
+Réponse de Julien Gondé : « OK » + trois décisions complémentaires. Conséquences actées :
+
+| Décision | Conséquence |
+|---|---|
+| **Plans validés** (option recommandée) | Plans 04/05 **révisés** (§ 2) validés ; défauts secondaires du § 3 applicables sauf contre-ordre ; radar **9 axes / export 7 freins** ; développement **PR 1 lancé**, PR ouverte en fin de réalisation pour relecture commune avant merge |
+| **« ACI compatible label RSEi »** | RSEI-00 (recevabilité) levé — la feuille de route rsei/03 s'applique ; référent + quick wins côté direction ; module Pilotage RSE maintenu en PR 3 |
+| **« ST est bien certifié Convergence CVG »** | L'arbitrage c est tranché : indicateurs du programme CVG (Convergence France) à intégrer au tableau de bord (Lot 6) — **trame de reporting CVG à fournir par la direction** |
+| **« Co-financement FSE+ en cours »** | EXG-12 devient **obligatoire dès la PR 1** (réserve RES-06 de l'auditeur : recueil participant à l'entrée non rattrapable) — voir addendum du plan 05 |
+
+## 6. Points d'attention restants
 
 - **Charge CIP** : la réussite dépend du respect strict des exigences de vitesse de saisie (REC-UX-04 chronométrée en recette, pré-remplissages systématiques).
 - **Migration** : la levée des contraintes d'unicité et la reclassification des sorties sont les deux opérations les plus délicates — tests sur copie de base de production avant déploiement.
