@@ -40,6 +40,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const AdminPredictive = lazy(() => import('./pages/AdminPredictive'));
 const CollectionProposals = lazy(() => import('./pages/CollectionProposals'));
 const InsertionParcours = lazy(() => import('./pages/InsertionParcours'));
+const ActionsCIP = lazy(() => import('./pages/ActionsCIP'));
 const AuditInsertion = lazy(() => import('./pages/AuditInsertion'));
 const PlanningHebdo = lazy(() => import('./pages/PlanningHebdo'));
 const PlanningTournees = lazy(() => import('./pages/PlanningTournees'));
@@ -175,6 +176,7 @@ function App() {
               <Route path="/skills" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Skills /></ProtectedRoute>} />
               <Route path="/prescripteurs" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Prescripteurs /></ProtectedRoute>} />
               <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><InsertionParcours /></ProtectedRoute>} />
+              <Route path="/insertion/actions" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><ActionsCIP /></ProtectedRoute>} />
               <Route path="/insertion/audit" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><AuditInsertion /></ProtectedRoute>} />
               <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PlanningHebdo /></ProtectedRoute>} />
               <Route path="/pointage" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Pointage /></ProtectedRoute>} />
