@@ -162,6 +162,11 @@ async function anonymizeEmployee(client, id) {
     { col: 'manager_malibou_id', value: null },
     { col: 'malibou_id', value: null },
     { col: 'prescripteur', value: null }, // texte libre (on garde prescripteur_id catégoriel)
+    // Identifiants IAE nominatifs (2026-07) — les DATES de Pass restent (agrégats)
+    { col: 'pass_iae_number', value: null },
+    { col: 'france_travail_id', value: null },
+    { col: 'eligibilite_criteres', value: null },
+    { col: 'eligibilite_justificatifs_ref', value: null },
     { col: 'is_active', raw: 'false' },
     { col: 'updated_at', raw: 'NOW()' },
   ]);
@@ -175,35 +180,107 @@ async function anonymizeEmployee(client, id) {
   );
 
   // Diagnostic CIP — verbatims + détails santé/social ; on CONSERVE les scores
-  // freins numériques (agrégats de cohorte).
+  // freins numériques (agrégats de cohorte) et les champs CATÉGORIELS des
+  // rubriques structurées (logement_statut, ressources, situation_familiale,
+  // niveau_formation… — typologies non nominatives des tableaux de bord).
+  // ⚠ fse_entree est VOLONTAIREMENT CONSERVÉ : piste d'audit FSE+ ≥ 5 ans
+  // après dernier paiement (addendum plan 05 §6bis-1) — exclue de
+  // l'anonymisation à 2 ans, inscrite au registre RGPD et à l'AIPD.
   await nullifyBy(client, 'insertion_diagnostics', 'employee_id', id, [
     'parcours_anterieur', 'contraintes_sante', 'contraintes_mobilite', 'contraintes_familiales', 'autres_contraintes',
     'frein_mobilite_detail', 'frein_sante_detail', 'frein_finances_detail', 'frein_famille_detail',
     'frein_linguistique_detail', 'frein_administratif_detail', 'frein_numerique_detail',
     'frein_mobilite_causes', 'frein_sante_causes', 'frein_finances_causes', 'frein_famille_causes',
     'frein_linguistique_causes', 'frein_administratif_causes', 'frein_numerique_causes',
+    // Nouveaux axes (2026-07) : logement + judiciaire (art. 10 — détail chiffré)
+    'frein_logement_detail', 'frein_logement_causes', 'frein_judiciaire_detail',
     'obs_taches_realisees', 'obs_points_forts', 'obs_difficultes', 'obs_comportement_equipe', 'obs_autonomie_ponctualite',
     'pref_aime_faire', 'pref_ne_veut_plus', 'pref_environnement_prefere', 'pref_environnement_eviter', 'pref_objectifs',
     'explorama_interets', 'explorama_rejets', 'explorama_gestes_positifs', 'explorama_gestes_negatifs',
     'explorama_environnements', 'explorama_rythme', 'cip_hypotheses_metiers', 'cip_questions',
+    // Rubriques structurées 2026-07 : textes libres + santé art. 9 (booleens
+    // santé compris — alignés sur employees.disability_status déjà purgé)
+    'commentaire_logement', 'commentaire_droits', 'commentaire_sante', 'commentaire_budget',
+    'commentaire_mobilite', 'commentaire_projet', 'commentaire_linguistique',
+    'metiers_souhaites', 'projet_formation', 'emploi_vise', 'emploi_vise_rome',
+    'attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee',
+    'mutuelle_statut', 'rqth', 'rqth_fin', 'contre_indications', 'suivi_sante',
+    'piece_identite_validite', 'questionnaire_detail',
   ]);
 
   // Jalons — bilans/observations/sortie nominative ; on CONSERVE
-  // milestone_type/status/dates/scores freins/sortie_classification/type/durée
-  // (statistiques DREETS de sortie dynamique).
+  // milestone_type/titre/status/dates/scores freins/sortie_classification/type/
+  // durée (statistiques DREETS de sortie dynamique), renouvellement_avis/durée
+  // et post_sortie_situation (catégoriels agrégés).
+  // ⚠ fse_sortie est VOLONTAIREMENT CONSERVÉ (piste d'audit FSE+ ≥ 5 ans —
+  // même doctrine que fse_entree ci-dessus).
   await nullifyBy(client, 'insertion_milestones', 'employee_id', id, [
     'bilan_professionnel', 'bilan_social', 'objectifs_realises', 'objectifs_prochaine_periode',
     'observations', 'actions_a_mener', 'cip_integration', 'cip_competences', 'cip_projet_pro', 'cip_socialisation',
     'sortie_commentaires', 'sortie_employeur', 'sortie_formation', 'ai_recommendations',
+    // Nouveaux JSONB / textes 2026-07 (verbatims, validations nominatives,
+    // préparation IA, formulaire de renouvellement, remise tracée)
+    'previous_review', 'validations', 'ia_preparation', 'renouvellement_form',
+    'sortie_documents', 'remise_salarie', 'post_sortie_commentaire',
   ]);
 
-  // Plans d'action — action_label est NOT NULL → placeholder ; notes → NULL.
+  // Snapshots probants (insertion_milestones_history) : ils contiennent la
+  // ligne complète AVANT anonymisation (verbatims inclus) → purge intégrale
+  // pour ce salarié (revue Codex PR#73). Le RGPD prime sur l'audit interne ;
+  // les données FSE+ survivent sur les lignes vivantes (fse_entree/fse_sortie
+  // conservés ci-dessus), jamais via l'historique.
+  if (await tableExists(client, 'insertion_milestones_history')) {
+    await client.query(
+      `DELETE FROM insertion_milestones_history
+       WHERE milestone_id IN (SELECT id FROM insertion_milestones WHERE employee_id = $1)`,
+      [id]
+    );
+  }
+
+  // Plans d'action — action_label est NOT NULL → placeholder ; notes/resultat → NULL.
   if (await tableExists(client, 'cip_action_plans')) {
     const cols = await existingColumns(client, 'cip_action_plans');
     if (cols.has('employee_id') && cols.has('action_label')) {
       const sets = ["action_label = 'ANONYMISÉ'"];
       if (cols.has('notes')) sets.push('notes = NULL');
+      if (cols.has('resultat')) sets.push('resultat = NULL');
       await client.query(`UPDATE cip_action_plans SET ${sets.join(', ')} WHERE employee_id = $1`, [id]);
+    }
+  }
+
+  // Objectifs individualisés (2026-07) — titre NOT NULL → placeholder,
+  // description → NULL ; statuts/échéances conservés (agrégats).
+  if (await tableExists(client, 'insertion_objectifs')) {
+    const cols = await existingColumns(client, 'insertion_objectifs');
+    if (cols.has('employee_id') && cols.has('titre')) {
+      const sets = ["titre = 'ANONYMISÉ'"];
+      if (cols.has('description')) sets.push('description = NULL');
+      await client.query(`UPDATE insertion_objectifs SET ${sets.join(', ')} WHERE employee_id = $1`, [id]);
+    }
+  }
+
+  // PMSMP (2026-07) — entreprise NOT NULL → placeholder ; tuteur/bilan/siret →
+  // NULL ; dates/objet conservés (agrégats de volumétrie).
+  if (await tableExists(client, 'insertion_pmsmp')) {
+    const cols = await existingColumns(client, 'insertion_pmsmp');
+    if (cols.has('employee_id') && cols.has('entreprise')) {
+      const sets = ["entreprise = 'ANONYMISÉ'"];
+      for (const c of ['siret', 'tuteur', 'bilan', 'convention_ref']) if (cols.has(c)) sets.push(`${c} = NULL`);
+      await client.query(`UPDATE insertion_pmsmp SET ${sets.join(', ')} WHERE employee_id = $1`, [id]);
+    }
+  }
+
+  // Satisfaction de sortie (2026-07) — verbatims → NULL, réponses détaillées
+  // vidées ; satisfaction_globale + situation_sortie conservées (agrégats qualité).
+  if (await tableExists(client, 'insertion_satisfaction_sortie')) {
+    const cols = await existingColumns(client, 'insertion_satisfaction_sortie');
+    if (cols.has('employee_id')) {
+      const sets = [];
+      for (const c of ['suggestions', 'avis_transmis']) if (cols.has(c)) sets.push(`${c} = NULL`);
+      if (cols.has('reponses')) sets.push(`reponses = '{}'::jsonb`);
+      if (sets.length > 0) {
+        await client.query(`UPDATE insertion_satisfaction_sortie SET ${sets.join(', ')} WHERE employee_id = $1`, [id]);
+      }
     }
   }
 }

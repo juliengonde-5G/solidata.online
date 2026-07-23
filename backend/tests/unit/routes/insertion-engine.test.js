@@ -2,7 +2,37 @@ const {
   computeMilestoneSchedule,
   computeCddiCumulativeMonths,
   resyncMilestones,
+  MILESTONE_TYPES,
+  milestoneLabel,
 } = require('../../../src/routes/insertion/engine');
+
+// ── Extension 2026-07 (PR1) : l'échéancier produit désormais des TYPES
+// TECHNIQUES (CHECK SQL) + un titre d'affichage ────────────────────────────
+describe('insertion/engine — computeMilestoneSchedule (types techniques 2026-07)', () => {
+  it('contrat 12 mois → accueil + 3 bilans intermédiaires titrés + sortie', () => {
+    const s = computeMilestoneSchedule('2026-01-01', '2027-01-01');
+    expect(s.map((d) => d.type)).toEqual([
+      'diagnostic_accueil', 'bilan_intermediaire', 'bilan_intermediaire', 'bilan_intermediaire', 'bilan_sortie',
+    ]);
+    expect(s.map((d) => d.titre)).toEqual([
+      "Diagnostic d'accueil", 'Bilan M+3', 'Bilan M+6', 'Bilan M+10', 'Bilan de sortie',
+    ]);
+    // Tous les types produits sont acceptés par le CHECK SQL.
+    for (const d of s) expect(MILESTONE_TYPES).toContain(d.type);
+  });
+
+  it('contrat 6 mois → pas de M+6/M+10 (jalons fantômes)', () => {
+    const s = computeMilestoneSchedule('2026-01-01', '2026-07-01');
+    expect(s.filter((d) => d.type === 'bilan_intermediaire').map((d) => d.titre)).toEqual(['Bilan M+3']);
+    expect(s[s.length - 1].type).toBe('bilan_sortie');
+  });
+
+  it('milestoneLabel : titre > label du type > type brut', () => {
+    expect(milestoneLabel({ milestone_type: 'bilan_intermediaire', titre: 'Bilan n° 4' })).toBe('Bilan n° 4');
+    expect(milestoneLabel({ milestone_type: 'bilan_sortie' })).toBe('Bilan de sortie');
+    expect(milestoneLabel({ milestone_type: 'inconnu' })).toBe('inconnu');
+  });
+});
 
 describe('insertion/engine — computeCddiCumulativeMonths (item 41)', () => {
   it('somme un unique contrat CDDI de 6 mois (~6)', () => {
@@ -64,6 +94,8 @@ describe('insertion/engine — computeCddiCumulativeMonths (item 41)', () => {
 });
 
 // ── Mock pg minimal pour resyncMilestones ────────────────────────────────────
+// (extension 2026-07 : le SELECT des jalons porte aussi titre/locked_at et
+// filtre le parcours courant — le matcher suit la nouvelle requête)
 function makeMockDb({ employee, milestones }) {
   const calls = [];
   let insertId = 1000;
@@ -74,7 +106,7 @@ function makeMockDb({ employee, milestones }) {
       if (/FROM employees e/i.test(sql) && /insertion_status/i.test(sql)) {
         return { rows: employee ? [employee] : [] };
       }
-      if (/SELECT id, milestone_type, due_date, status FROM insertion_milestones/i.test(sql)) {
+      if (/SELECT id, milestone_type, titre, due_date, status, locked_at/i.test(sql)) {
         return { rows: milestones || [] };
       }
       if (/UPDATE insertion_milestones SET due_date/i.test(sql)) return { rows: [] };
@@ -85,13 +117,13 @@ function makeMockDb({ employee, milestones }) {
   return db;
 }
 
-describe('insertion/engine — resyncMilestones (item 41c)', () => {
+describe('insertion/engine — resyncMilestones (item 41c, types techniques 2026-07)', () => {
   const START = '2026-01-01';
   const OLD_END = '2026-07-01'; // contrat 6 mois
   const NEW_END = '2027-01-01'; // prolongé à 12 mois
 
   it('ne fait rien si le parcours n’est pas « en_parcours »', async () => {
-    const db = makeMockDb({ employee: { insertion_status: 'termine' } });
+    const db = makeMockDb({ employee: { insertion_status: 'termine', parcours_num: 1 } });
     const r = await resyncMilestones(db, 1);
     expect(r.skipped).toBe('not_en_parcours');
     // Une seule requête (le SELECT employé), pas de lecture des jalons.
@@ -100,48 +132,69 @@ describe('insertion/engine — resyncMilestones (item 41c)', () => {
 
   it('ne fait rien si le parcours n’a aucun jalon (laisse /initialize)', async () => {
     const db = makeMockDb({
-      employee: { insertion_status: 'en_parcours', insertion_start_date: START, c_end: NEW_END },
+      employee: { insertion_status: 'en_parcours', parcours_num: 1, insertion_start_date: START, c_end: NEW_END },
       milestones: [],
     });
     const r = await resyncMilestones(db, 1);
     expect(r.skipped).toBe('not_initialized');
   });
 
-  it('repousse le Bilan Sortie non réalisé et complète les jalons devenus applicables, sans toucher les réalisés', async () => {
-    // Jalons initiaux calés sur le contrat 6 mois, seedés depuis le moteur.
+  it('repousse le bilan de sortie non réalisé et complète les bilans devenus applicables, sans toucher les réalisés', async () => {
+    // Jalons initiaux calés sur le contrat 6 mois, seedés depuis le moteur
+    // (types techniques + titres — l'appariement des bilans intermédiaires se
+    // fait par titre).
     const oldSchedule = computeMilestoneSchedule(START, OLD_END);
     const milestones = oldSchedule.map((d, i) => ({
       id: i + 1,
       milestone_type: d.type,
+      titre: d.titre,
       due_date: d.due,
-      status: d.type === 'Diagnostic accueil' ? 'realise' : 'a_planifier',
+      status: d.type === 'diagnostic_accueil' ? 'realise' : 'a_planifier',
+      locked_at: null,
     }));
 
     const db = makeMockDb({
-      employee: { insertion_status: 'en_parcours', insertion_start_date: START, c_start: START, c_end: NEW_END },
+      employee: { insertion_status: 'en_parcours', parcours_num: 1, insertion_start_date: START, c_start: START, c_end: NEW_END },
       milestones,
     });
     const r = await resyncMilestones(db, 42, { userId: 7 });
 
-    // Bilan Sortie déplacé sur la nouvelle échéance.
-    expect(r.updated.map((u) => u.type)).toContain('Bilan Sortie');
-    // Jalons intermédiaires devenus applicables (contrat 6→12 mois) créés.
-    const createdTypes = r.created.map((c) => c.type);
-    expect(createdTypes).toEqual(expect.arrayContaining(['Bilan M+6', 'Bilan M+10']));
-    // Le Diagnostic accueil réalisé n’est jamais mis à jour.
+    // Bilan de sortie déplacé sur la nouvelle échéance.
+    expect(r.updated.map((u) => u.type)).toContain('bilan_sortie');
+    // Bilans intermédiaires devenus applicables (contrat 6→12 mois) créés,
+    // identifiés par leur TITRE (le type est partagé).
+    expect(r.created.every((c) => c.type === 'bilan_intermediaire')).toBe(true);
+    expect(r.created.map((c) => c.titre)).toEqual(expect.arrayContaining(['Bilan M+6', 'Bilan M+10']));
+    // Le diagnostic d'accueil réalisé n’est jamais mis à jour.
     const updatedDiag = db.calls.some(
       (c) => /UPDATE insertion_milestones SET due_date/i.test(c.sql) && c.params && c.params[1] === 1
     );
     expect(updatedDiag).toBe(false);
   });
 
+  it('ne touche jamais un entretien VERROUILLÉ (locked_at — clôture probante)', async () => {
+    const schedule = computeMilestoneSchedule(START, NEW_END);
+    const milestones = schedule.map((d, i) => ({
+      id: i + 1, milestone_type: d.type, titre: d.titre,
+      due_date: '2020-01-01', // volontairement faux → recalable
+      status: 'planifie',
+      locked_at: i === 0 ? '2026-02-01T10:00:00Z' : null, // 1er verrouillé
+    }));
+    const db = makeMockDb({
+      employee: { insertion_status: 'en_parcours', parcours_num: 1, insertion_start_date: START, c_end: NEW_END },
+      milestones,
+    });
+    const r = await resyncMilestones(db, 1);
+    expect(r.updated.map((u) => u.id)).not.toContain(1);
+  });
+
   it('est idempotent : un 2e passage sur le contrat déjà recalé ne change rien', async () => {
     const newSchedule = computeMilestoneSchedule(START, NEW_END);
     const milestones = newSchedule.map((d, i) => ({
-      id: i + 1, milestone_type: d.type, due_date: d.due, status: 'a_planifier',
+      id: i + 1, milestone_type: d.type, titre: d.titre, due_date: d.due, status: 'a_planifier', locked_at: null,
     }));
     const db = makeMockDb({
-      employee: { insertion_status: 'en_parcours', insertion_start_date: START, c_end: NEW_END },
+      employee: { insertion_status: 'en_parcours', parcours_num: 1, insertion_start_date: START, c_end: NEW_END },
       milestones,
     });
     const r = await resyncMilestones(db, 1);

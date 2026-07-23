@@ -7,10 +7,14 @@ import { useAuth } from '../contexts/AuthContext';
 
 const IA_TIMEOUT = 180000; // rapport riche (max_tokens élevé) — nginx autorise 300 s sur /api
 
+// 9 axes — aligné sur le registre unique backend (freins-registry, PR1) :
+// les moyennes consolidées sont des agrégats NON nominatifs (l'axe judiciaire
+// individuel reste masqué aux managers dans les fiches, pas ici).
 const FREIN_LABELS = {
   frein_mobilite: 'Mobilité', frein_sante: 'Santé', frein_finances: 'Finances',
   frein_famille: 'Famille', frein_linguistique: 'Langue',
   frein_administratif: 'Administratif', frein_numerique: 'Numérique',
+  frein_logement: 'Logement', frein_judiciaire: 'Judiciaire',
 };
 const CATEGORY_LABELS = { competence: 'Compétence', insertion: 'Insertion pro', socialisation: 'Socialisation', frein: 'Levée de frein' };
 const PRIORITY_LABELS = { haute: 'Haute', moyenne: 'Moyenne', basse: 'Basse' };
@@ -18,7 +22,7 @@ const STATUS_LABELS = { a_faire: 'À faire', en_cours: 'En cours' };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// ── Radar SVG des 7 freins consolidés (moyennes 0-5) ──
+// ── Radar SVG des 9 freins consolidés (moyennes 0-5) ──
 function FreinsRadar({ moyennes }) {
   const keys = Object.keys(FREIN_LABELS);
   const size = 340, cx = size / 2, cy = size / 2, r = 105;
@@ -126,7 +130,7 @@ export default function AuditInsertion() {
     const kpi = (l, v, sub) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ''}</div>`;
     const miniTable = (title, obj, labels) => `<div style="flex:1"><div class="mini-h">${title}</div>${Object.keys(obj || {}).length ? Object.entries(obj).map(([k, n]) => `<div class="mini-row"><span>${esc(labels?.[k] || k)}</span><span>${n}</span></div>`).join('') : '<div class="mini-row" style="color:#9ca3af">—</div>'}</div>`;
 
-    // Radar SVG des 7 freins (toile d'araignée), même géométrie que l'écran.
+    // Radar SVG des 9 freins (toile d'araignée), même géométrie que l'écran.
     const radarSvg = (m) => {
       const keys = Object.keys(FREIN_LABELS);
       const size = 300, cx = 150, cy = 150, r = 90;
@@ -154,7 +158,7 @@ export default function AuditInsertion() {
       + kpi('Personnes en parcours', data.nb_en_parcours, null)
       + kpi('Réalisation jalons (échus)', (data.milestones?.global?.taux ?? '—') + ' %', `${data.milestones?.global?.realises_echus || 0}/${data.milestones?.global?.echus || 0} échus`)
       + kpi("Plans d'action en cours", act.total_en_cours || 0, null)
-      + kpi(`Sorties dynamiques ${data.annee}`, (s.taux_dynamiques ?? '—') + (s.taux_dynamiques != null ? ' %' : ''), `${s.positives || 0}/${s.total || 0} sorties`)
+      + kpi(`Sorties dynamiques ${data.annee}`, (s.taux_dynamiques ?? '—') + (s.taux_dynamiques != null ? ' %' : ''), `${s.dynamiques || 0}/${s.total || 0} sorties`)
       + `</div></div>`;
 
     // 2. Réalisation par échéance — barres
@@ -166,8 +170,8 @@ export default function AuditInsertion() {
       }).join('')
       + `<div class="note">Taux = jalons réalisés parmi ceux dont l'échéance est passée.</div></div>`;
 
-    // 3. Radar des 7 freins + barres
-    body += `<div class="section"><div class="section-title">Cartographie consolidée des 7 freins (moyenne /5)</div><div class="two">`
+    // 3. Radar des 9 freins + barres
+    body += `<div class="section"><div class="section-title">Cartographie consolidée des 9 freins (moyenne /5)</div><div class="two">`
       + `<div style="flex:0 0 250px;text-align:center">${radarSvg(freins)}</div>`
       + `<div style="flex:1">`
       + Object.keys(FREIN_LABELS).map((k) => {
@@ -180,7 +184,7 @@ export default function AuditInsertion() {
     // 4. Sorties & statistiques
     const sortieBox = (v, l, color) => `<div class="statbox"><div class="statv" style="color:${color}">${v}</div><div class="statl">${l}</div></div>`;
     body += `<div class="section"><div class="section-title">Sorties &amp; statistiques (${data.annee})</div><div class="statrow">`
-      + sortieBox(s.total || 0, 'Total', '#0f172a') + sortieBox(s.positives || 0, 'Dynamiques', '#16a34a') + sortieBox(s.negatives || 0, 'Autres', '#64748b')
+      + sortieBox(s.total || 0, 'Total', '#0f172a') + sortieBox(s.dynamiques || 0, 'Dynamiques', '#16a34a') + sortieBox(s.autres || 0, 'Autres', '#64748b')
       + `</div>`
       + (s.total > 0 ? `<div class="bar-row" style="margin-top:6px"><div class="bar-label">Taux dynamiques</div><div class="bar-bg"><div class="bar-fill" style="width:${s.taux_dynamiques ?? 0}%;background:#16a34a"></div></div><div class="bar-val">${s.taux_dynamiques ?? '—'} %</div></div>` : '')
       + (Object.keys(s.par_type || {}).length ? `<table><tr><th>Type de sortie</th><th style="text-align:right">Nombre</th></tr>${Object.entries(s.par_type).map(([t, n]) => `<tr><td>${esc(t)}</td><td style="text-align:right">${n}</td></tr>`).join('')}</table>` : `<div class="note">Aucune sortie enregistrée sur la période.</div>`)
@@ -283,7 +287,7 @@ export default function AuditInsertion() {
               <StatCard icon={Users} label="Personnes en parcours" value={data.nb_en_parcours} tone="blue" />
               <StatCard icon={ListChecks} label="Réalisation jalons (échus)" value={data.milestones?.global?.taux != null ? `${data.milestones.global.taux} %` : '—'} sub={`${data.milestones?.global?.realises_echus || 0}/${data.milestones?.global?.echus || 0} échus réalisés`} tone="teal" />
               <StatCard icon={Target} label="Plans d'action en cours" value={act.total_en_cours || 0} tone="amber" />
-              <StatCard icon={LogOut} label={`Sorties dynamiques ${data.annee}`} value={s.taux_dynamiques != null ? `${s.taux_dynamiques} %` : '—'} sub={`${s.positives || 0}/${s.total || 0} sorties`} tone="green" />
+              <StatCard icon={LogOut} label={`Sorties dynamiques ${data.annee}`} value={s.taux_dynamiques != null ? `${s.taux_dynamiques} %` : '—'} sub={`${s.dynamiques || 0}/${s.total || 0} sorties`} tone="green" />
             </div>
 
             {/* 2. Réalisation par échéance */}
@@ -308,7 +312,7 @@ export default function AuditInsertion() {
             {/* 3. Radar freins + 5. Sorties */}
             <div className="grid lg:grid-cols-2 gap-6">
               <div className="bg-white rounded-xl border p-5">
-                <h3 className="font-semibold text-gray-800 mb-2">Cartographie consolidée des 7 freins</h3>
+                <h3 className="font-semibold text-gray-800 mb-2">Cartographie consolidée des 9 freins</h3>
                 <p className="text-[11px] text-gray-400 mb-2">Moyenne cohorte (/5) sur {data.freins_nb_evalues || 0} salarié(s) évalué(s){data.frein_dominant ? ` — frein dominant : ${FREIN_LABELS[data.frein_dominant]}` : ''}.</p>
                 <FreinsRadar moyennes={freins} />
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-3">
@@ -325,8 +329,8 @@ export default function AuditInsertion() {
                 <h3 className="font-semibold text-gray-800 mb-3">Sorties &amp; statistiques ({data.annee})</h3>
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   <div className="text-center"><div className="text-2xl font-bold text-gray-800">{s.total || 0}</div><div className="text-xs text-gray-500">Total</div></div>
-                  <div className="text-center"><div className="text-2xl font-bold text-green-600">{s.positives || 0}</div><div className="text-xs text-gray-500">Dynamiques</div></div>
-                  <div className="text-center"><div className="text-2xl font-bold text-gray-400">{s.negatives || 0}</div><div className="text-xs text-gray-500">Autres</div></div>
+                  <div className="text-center"><div className="text-2xl font-bold text-green-600">{s.dynamiques || 0}</div><div className="text-xs text-gray-500">Dynamiques</div></div>
+                  <div className="text-center"><div className="text-2xl font-bold text-gray-400">{s.autres || 0}</div><div className="text-xs text-gray-500">Autres</div></div>
                 </div>
                 {s.total > 0 && (
                   <>

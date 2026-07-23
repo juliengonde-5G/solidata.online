@@ -2,6 +2,38 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
+const { generateMilestones } = require('../insertion/engine');
+
+// Libellés FR des champs d'entretien de recrutement réutilisés pour pré-remplir
+// le diagnostic d'insertion (PROP-01 : continuité candidat→collaborateur).
+const SITUATION_LABELS = { reconversion: 'reconversion', retour_emploi: "retour à l'emploi", autre: 'autre situation' };
+const DUREE_SANS_EMPLOI_LABELS = { moins_6_mois: 'moins de 6 mois sans emploi', '6_mois_1_an': '6 mois à 1 an sans emploi', plus_1_an: "plus d'1 an sans emploi" };
+
+/**
+ * Compose le texte « parcours antérieur » du diagnostic squelette à partir de
+ * l'entretien de recrutement : situation, durée sans emploi, difficultés et
+ * freins ÉVOQUÉS — EN TEXTE uniquement, jamais de score pré-posé (le CIP
+ * évalue lui-même les 9 axes au diagnostic).
+ */
+function buildParcoursAnterieurText(itw) {
+  if (!itw) return null;
+  const parts = [];
+  if (itw.parcours_professionnel) parts.push(`Parcours professionnel (entretien de recrutement) : ${itw.parcours_professionnel}`);
+  const situ = [];
+  if (itw.situation_actuelle) situ.push(SITUATION_LABELS[itw.situation_actuelle] || itw.situation_actuelle);
+  if (itw.duree_sans_emploi) situ.push(DUREE_SANS_EMPLOI_LABELS[itw.duree_sans_emploi] || itw.duree_sans_emploi);
+  if (situ.length) parts.push(`Situation à l'embauche : ${situ.join(', ')}.`);
+  if (Array.isArray(itw.difficultes_recherche) && itw.difficultes_recherche.length) {
+    parts.push(`Difficultés de recherche évoquées : ${itw.difficultes_recherche.join(', ')}.`);
+  }
+  if (Array.isArray(itw.freins_emploi) && itw.freins_emploi.length) {
+    parts.push(`Freins évoqués à l'embauche : ${itw.freins_emploi.join(', ')}${itw.freins_emploi_autre ? ` (${itw.freins_emploi_autre})` : ''}.`);
+  }
+  if (Array.isArray(itw.structure_accompagnement) && itw.structure_accompagnement.length) {
+    parts.push(`Accompagnement existant : ${itw.structure_accompagnement.join(', ')}.`);
+  }
+  return parts.length ? parts.join('\n') : null;
+}
 
 // ══════════════════════════════════════════
 // LIAISON CANDIDAT (recrutement) ↔ COLLABORATEUR (RH)
@@ -122,31 +154,107 @@ router.post('/:id/link-employee', authorize('ADMIN', 'RH'), async (req, res) => 
         WHERE e.id = $1 AND c.id = $2`,
       [employeeId, id]);
 
-    // Squelette de diagnostic d'insertion : garantit que le profil PCM du
-    // candidat remonte dans le module Insertion. Best effort — ne bloque pas la
-    // liaison si la table/contrainte n'existe pas sur une base ancienne.
-    try {
+    // Exécute un bloc best-effort SOUS SAVEPOINT : un échec (colonne absente
+    // sur base ancienne…) est isolé sans avorter la transaction principale
+    // (sinon « current transaction is aborted » sur les requêtes suivantes).
+    const underSavepoint = async (name, fn) => {
+      await client.query(`SAVEPOINT ${name}`);
+      try {
+        const out = await fn();
+        await client.query(`RELEASE SAVEPOINT ${name}`);
+        return { ok: true, out };
+      } catch (e) {
+        try { await client.query(`ROLLBACK TO SAVEPOINT ${name}`); } catch (_) { /* tx close */ }
+        console.warn(`[CANDIDATES] link-employee « ${name} » ignoré :`, e.message);
+        return { ok: false, error: e };
+      }
+    };
+
+    // PROP-01/02 (extension 2026-07 PR1) — Recopie du prescripteur, du Pass IAE
+    // et des critères d'éligibilité saisis au recrutement vers la fiche RH.
+    // COALESCE(e.col, c.col) : ne JAMAIS écraser une valeur déjà saisie côté RH
+    // (le candidat ne fait que COMBLER les trous). Best effort sur base ancienne.
+    await underSavepoint('link_copy_iae', () => client.query(
+      `UPDATE employees e SET
+         prescripteur_id = COALESCE(e.prescripteur_id, c.prescripteur_id),
+         pass_iae_number = COALESCE(e.pass_iae_number, c.pass_iae_number),
+         pass_iae_start = COALESCE(e.pass_iae_start, c.pass_iae_start),
+         pass_iae_end = COALESCE(e.pass_iae_end, c.pass_iae_end),
+         eligibilite_criteres = COALESCE(e.eligibilite_criteres, c.eligibilite_criteres),
+         updated_at = NOW()
+       FROM candidates c
+       WHERE e.id = $1 AND c.id = $2`,
+      [employeeId, id]));
+
+    // Initialisation du parcours d'insertion À LA LIAISON (remplace l'ancienne
+    // auto-init paresseuse en GET du module insertion) : uniquement si un
+    // contrat CDDI actif existe ; ne réactive jamais un parcours clôturé.
+    const insertion = { initialise: false, milestones_created: 0, info: null };
+    const initRes = await underSavepoint('link_insertion_init', async () => {
+      const ctr = await client.query(
+        `SELECT ec.start_date FROM employee_contracts ec
+         WHERE ec.employee_id = $1 AND ec.is_current = true AND UPPER(ec.contract_type) = 'CDDI'
+         ORDER BY ec.start_date DESC LIMIT 1`, [employeeId]);
+      const empRow = await client.query(
+        'SELECT insertion_status, contract_type, contract_start FROM employees WHERE id = $1', [employeeId]);
+      const e0 = empRow.rows[0] || {};
+      const cddiStart = ctr.rows[0]?.start_date
+        || (String(e0.contract_type || '').toUpperCase() === 'CDDI' ? e0.contract_start : null);
+
+      if (!cddiStart) {
+        insertion.info = "Pas de contrat CDDI actif : parcours d'insertion non initialisé (statut inchangé).";
+        return;
+      }
+      if (['termine', 'abandon'].includes(e0.insertion_status)) {
+        insertion.info = `Parcours précédemment clôturé (${e0.insertion_status}) — non réactivé par la liaison.`;
+        return;
+      }
       await client.query(
-        `INSERT INTO insertion_diagnostics (employee_id, created_by)
-         VALUES ($1, $2) ON CONFLICT (employee_id) DO NOTHING`,
-        [employeeId, req.user.id]);
-    } catch (e) { /* non bloquant */ }
+        `UPDATE employees SET
+           insertion_status = 'en_parcours',
+           insertion_start_date = COALESCE(insertion_start_date, $2::date),
+           updated_at = NOW()
+         WHERE id = $1`,
+        [employeeId, cddiStart]);
+      const ms = await generateMilestones(client, employeeId, req.user.id);
+      insertion.initialise = true;
+      insertion.milestones_created = ms.length;
+    });
+    if (!initRes.ok) insertion.info = 'Initialisation du parcours impossible sur cette base (voir logs).';
+
+    // Squelette de diagnostic d'insertion (parcours COURANT) : garantit que le
+    // profil PCM du candidat remonte dans le module Insertion, et PRÉ-REMPLIT
+    // le parcours antérieur depuis l'entretien de recrutement (texte contextuel,
+    // JAMAIS de score de frein pré-posé). Best effort — ne bloque pas la liaison.
+    await underSavepoint('link_diag_squelette', async () => {
+      const itw = await client.query(
+        'SELECT * FROM recruitment_interviews WHERE candidate_id = $1 ORDER BY created_at DESC LIMIT 1', [id]);
+      const parcoursAnterieur = buildParcoursAnterieurText(itw.rows[0]);
+      const pnRow = await client.query('SELECT COALESCE(parcours_num, 1) AS pn FROM employees WHERE id = $1', [employeeId]);
+      const pn = pnRow.rows[0] ? Number(pnRow.rows[0].pn) : 1;
+      await client.query(
+        `INSERT INTO insertion_diagnostics (employee_id, parcours_num, created_by, parcours_anterieur, statut_saisie)
+         VALUES ($1, $2, $3, $4, 'en_cours')
+         ON CONFLICT (employee_id, parcours_num) DO NOTHING`,
+        [employeeId, pn, req.user.id, parcoursAnterieur]);
+    });
 
     const grantedSkills = [];
     if (grantedPermis) grantedSkills.push('permis B');
     if (grantedCaces) grantedSkills.push('CACES');
     const skillNote = grantedSkills.length ? ` — compétences recopiées : ${grantedSkills.join(', ')}` : '';
+    const insertionNote = insertion.initialise ? ' — parcours d\'insertion initialisé (jalons posés)' : '';
     await client.query(
       'INSERT INTO candidate_history (candidate_id, to_status, comment, changed_by) VALUES ($1, $2, $3, $4)',
       [id, cand.rows[0].status,
-        `Fiche de recrutement liée au collaborateur #${employeeId} (${emp.rows[0].first_name || ''} ${emp.rows[0].last_name || ''})${skillNote}`.trim(),
+        `Fiche de recrutement liée au collaborateur #${employeeId} (${emp.rows[0].first_name || ''} ${emp.rows[0].last_name || ''})${skillNote}${insertionNote}`.trim(),
         req.user.id]);
     await client.query('COMMIT');
 
     const updated = await pool.query(
-      'SELECT id, first_name, last_name, position, malibou_id, candidate_id, is_active FROM employees WHERE id = $1',
+      'SELECT id, first_name, last_name, position, malibou_id, candidate_id, is_active, insertion_status, insertion_start_date FROM employees WHERE id = $1',
       [employeeId]);
-    res.json({ message: 'Fiche de recrutement liée au collaborateur.', employee: updated.rows[0] });
+    res.json({ message: 'Fiche de recrutement liée au collaborateur.', employee: updated.rows[0], insertion });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[CANDIDATES] Erreur link-employee :', err);

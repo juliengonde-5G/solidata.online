@@ -4,6 +4,7 @@ const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { monthBounds } = require('../utils/month-range');
+const { freinColumns } = require('./insertion/freins-registry');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER', 'RH'));
 
@@ -373,20 +374,27 @@ router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
             AND wh.date >= $1::date
             AND wh.date < $2::date
         ) AS heures_trimestre,
+        diag.fse_entree,
         sortie.milestone_type AS sortie_type_jalon,
         sortie.sortie_classification,
         sortie.sortie_type,
         sortie.sortie_employeur_siret,
         sortie.sortie_duree_contrat_mois,
-        sortie.completed_date AS sortie_date
+        sortie.completed_date AS sortie_date,
+        sortie.fse_sortie
       FROM employees e
       LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
       LEFT JOIN LATERAL (
+        SELECT d.fse_entree FROM insertion_diagnostics d
+        WHERE d.employee_id = e.id
+        ORDER BY d.parcours_num DESC LIMIT 1
+      ) diag ON true
+      LEFT JOIN LATERAL (
         SELECT milestone_type, sortie_classification, sortie_type,
-               sortie_employeur_siret, sortie_duree_contrat_mois, completed_date
+               sortie_employeur_siret, sortie_duree_contrat_mois, completed_date, fse_sortie
         FROM insertion_milestones m
         WHERE m.employee_id = e.id
-          AND m.milestone_type = 'Bilan Sortie'
+          AND m.milestone_type = 'bilan_sortie'
           AND m.completed_date >= $1::date
           AND m.completed_date < $2::date
         ORDER BY m.completed_date DESC LIMIT 1
@@ -401,12 +409,18 @@ router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
     `, [periodeStart, periodeEnd]).catch(() => ({ rows: [] }));
 
     // CSV semi-colon — encodage UTF-8 BOM pour Excel
+    // Classification = NOUVELLE nomenclature (emploi_durable / emploi_transition /
+    // sortie_positive / autre — D8/EXG-06) ; « Sortie dynamique » explicite.
+    // Données FSE+ (EXG-12) : fse_entree (diagnostic) / fse_sortie (bilan de
+    // sortie) sérialisées en JSON.
+    const DYN = ['emploi_durable', 'emploi_transition', 'sortie_positive'];
     const headers = [
       'ID', 'Civilité', 'Genre', 'Prénom', 'Nom', 'Type contrat', 'Début contrat', 'Fin contrat',
       'Statut insertion', 'Début parcours', 'Fin parcours',
       'Prescripteur (organisme)', 'Prescripteur (type)', 'Date prescription',
       'Heures travaillées (trimestre)',
-      'Sortie type', 'Classification', 'Catégorie', 'SIRET employeur sortie', 'Durée contrat sortie (mois)', 'Date sortie',
+      'Sortie type', 'Classification', 'Sortie dynamique', 'Catégorie', 'SIRET employeur sortie', 'Durée contrat sortie (mois)', 'Date sortie',
+      'FSE+ entrée', 'FSE+ sortie',
     ];
     const lines = rows.map(r => [
       r.id,
@@ -426,10 +440,13 @@ router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
       r.heures_trimestre || 0,
       r.sortie_type_jalon || '',
       r.sortie_classification || '',
+      r.sortie_classification ? (DYN.includes(r.sortie_classification) ? 'oui' : 'non') : '',
       r.sortie_type || '',
       r.sortie_employeur_siret || '',
       r.sortie_duree_contrat_mois != null ? r.sortie_duree_contrat_mois : '',
       r.sortie_date ? new Date(r.sortie_date).toISOString().slice(0, 10) : '',
+      r.fse_entree ? JSON.stringify(r.fse_entree) : '',
+      r.fse_sortie ? JSON.stringify(r.fse_sortie) : '',
     ].map(v => {
       const s = String(v ?? '').replace(/"/g, '""');
       return /[;\n"]/.test(s) ? `"${s}"` : s;
@@ -518,7 +535,8 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
   };
 
   try {
-    // 1) Salariés en insertion (vue synthèse curée).
+    // 1) Salariés en insertion (vue synthèse curée) — les 9 freins du registre
+    // unique (feuille Salariés : colonnes frein_mobilite … frein_judiciaire).
     let salaries = await soft('salaries', `
       SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom,
              e.position AS poste, t.name AS equipe,
@@ -526,14 +544,14 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
              e.insertion_start_date AS debut_parcours,
              COALESCE(e.insertion_end_date, e.contract_end) AS fin_prevue,
              e.prescripteur, po.nom AS prescripteur_orga, po.type AS prescripteur_type,
+             e.pass_iae_number, e.pass_iae_end,
              e.visite_medicale_date,
-             d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
-             d.frein_linguistique, d.frein_administratif, d.frein_numerique,
+             ${freinColumns('d.').join(', ')},
              (SELECT COUNT(*) FROM insertion_milestones m WHERE m.employee_id = e.id) AS nb_jalons,
              (SELECT COUNT(*) FROM insertion_milestones m WHERE m.employee_id = e.id AND m.status = 'realise') AS jalons_realises
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
-      LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
+      LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id AND COALESCE(d.parcours_num, 1) = COALESCE(e.parcours_num, 1)
       LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
       WHERE e.insertion_status IS DISTINCT FROM 'none'
          OR d.employee_id IS NOT NULL
@@ -551,13 +569,21 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
       `);
     }
 
-    // 2) Diagnostics CIP — toutes les colonnes.
+    // 2) Diagnostics CIP — toutes les colonnes. Les champs sensibles chiffrés
+    // (santé / judiciaire, utils/field-crypto) sont DÉCHIFFRÉS : cet export est
+    // réservé ADMIN/RH (diffusion restreinte, mention RGPD en feuille 1).
+    const { SENSITIVE_DIAG_FIELDS, decryptField } = require('../utils/field-crypto');
     const diagnostics = await soft('diagnostics', `
       SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom, d.*
       FROM insertion_diagnostics d
       JOIN employees e ON e.id = d.employee_id
       ORDER BY e.last_name, e.first_name
     `);
+    for (const row of diagnostics) {
+      for (const f of SENSITIVE_DIAG_FIELDS) {
+        if (row[f] !== undefined) row[f] = decryptField(row[f]);
+      }
+    }
 
     // 3) Jalons — toutes les colonnes.
     const jalons = await soft('jalons', `

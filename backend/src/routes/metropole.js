@@ -304,8 +304,10 @@ router.get('/sortie-dynamique', async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     // Définition unifiée avec le module insertion (routes/insertion/routes.js,
-    // cohorte/stats) : une sortie est « dynamique » si sortie_classification = 'positive'.
-    // Le jalon de sortie est 'Bilan Sortie' (status = 'realise'), daté par
+    // cohorte/stats) — NOUVELLE NOMENCLATURE 2026-07 (D8/EXG-06) : une sortie
+    // est « dynamique » si sortie_classification IN ('emploi_durable',
+    // 'emploi_transition', 'sortie_positive') ; 'autre' = non dynamique.
+    // Le jalon de sortie est 'bilan_sortie' (status = 'realise'), daté par
     // completed_date (repli updated_at). La ventilation par type de sortie utilise
     // les valeurs réelles du formulaire de bilan (CDI / CDD / CDD_court / formation /
     // creation_activite).
@@ -313,20 +315,23 @@ router.get('/sortie-dynamique', async (req, res) => {
       WITH sorties AS (
         SELECT im.sortie_type, im.sortie_classification
         FROM insertion_milestones im
-        WHERE im.milestone_type = 'Bilan Sortie'
+        WHERE im.milestone_type = 'bilan_sortie'
           AND im.status = 'realise'
           AND im.sortie_classification IS NOT NULL
           AND EXTRACT(YEAR FROM COALESCE(im.completed_date, im.updated_at::date)) = $1
       )
       SELECT
         COUNT(*)::int AS total_sorties,
-        COUNT(*) FILTER (WHERE sortie_classification = 'positive')::int AS dynamiques,
+        COUNT(*) FILTER (WHERE sortie_classification IN ('emploi_durable', 'emploi_transition', 'sortie_positive'))::int AS dynamiques,
         COUNT(*) FILTER (WHERE sortie_type = 'CDI')::int AS cdi,
         COUNT(*) FILTER (WHERE sortie_type IN ('CDD','CDD_court'))::int AS cdd,
         COUNT(*) FILTER (WHERE sortie_type = 'formation')::int AS formation,
         COUNT(*) FILTER (WHERE sortie_type = 'creation_activite')::int AS creation,
-        COUNT(*) FILTER (WHERE sortie_classification = 'negative')::int AS non_dynamiques,
-        ROUND(100.0 * COUNT(*) FILTER (WHERE sortie_classification = 'positive')::numeric
+        COUNT(*) FILTER (WHERE sortie_classification = 'autre')::int AS non_dynamiques,
+        COUNT(*) FILTER (WHERE sortie_classification = 'emploi_durable')::int AS emploi_durable,
+        COUNT(*) FILTER (WHERE sortie_classification = 'emploi_transition')::int AS emploi_transition,
+        COUNT(*) FILTER (WHERE sortie_classification = 'sortie_positive')::int AS sortie_positive,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE sortie_classification IN ('emploi_durable', 'emploi_transition', 'sortie_positive'))::numeric
               / NULLIF(COUNT(*), 0), 1) AS taux_dynamique_pct
       FROM sorties
     `, [annee]);

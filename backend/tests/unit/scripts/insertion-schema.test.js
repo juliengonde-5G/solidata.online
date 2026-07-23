@@ -93,8 +93,19 @@ describe('insertion schema — init-db.js est la source unique', () => {
     expect(initDbSrc).toMatch(/sortie_duree_contrat_mois/);
   });
 
-  test('l\'anti-doublon (employee_id, milestone_type) pour ON CONFLICT est garanti', () => {
-    expect(initDbSrc).toMatch(/idx_milestones_emp_type_unique/);
+  // ADAPTÉ (extension entretiens 2026-07, PR1) : l'invariant historique
+  // « un seul jalon par (employee_id, milestone_type) » est VOLONTAIREMENT
+  // levé — le modèle entretiens autorise N occurrences d'un même type. Ce
+  // test vérifiait l'index unique global idx_milestones_emp_type_unique ;
+  // il vérifie désormais son retrait effectif (DROP + plus aucune création,
+  // plus de DELETE de « doublons » devenus légitimes) et son remplacement
+  // par les index uniques PARTIELS accueil/sortie par parcours.
+  test('l\'anti-doublon global (employee_id, milestone_type) est remplacé par les index partiels accueil/sortie', () => {
+    expect(initDbSrc).toContain('DROP INDEX IF EXISTS idx_milestones_emp_type_unique');
+    expect(initDbSrc).not.toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS idx_milestones_emp_type_unique/);
+    expect(initDbSrc).not.toMatch(/DELETE FROM insertion_milestones a USING insertion_milestones b/);
+    expect(initDbSrc).toMatch(/idx_milestones_accueil_unique/);
+    expect(initDbSrc).toMatch(/idx_milestones_sortie_unique/);
   });
 
   test('les colonnes employees.insertion_* sont migrées dans init-db.js', () => {

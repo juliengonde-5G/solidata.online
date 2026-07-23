@@ -1,6 +1,15 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const pool = require('../config/database');
 const { createPseudonymizer, redactContactInfo, ageBracket } = require('../utils/pii-pseudonymize');
+const { FREINS, FREIN_KEYS, freinColumns } = require('../routes/insertion/freins-registry');
+const { SENSITIVE_DIAG_FIELDS, decryptField } = require('../utils/field-crypto');
+const { milestoneLabel } = require('../routes/insertion/engine');
+
+// Axes transmis à l'IA : le DÉTAIL du frein judiciaire (art. 10 RGPD) n'est
+// JAMAIS envoyé au sous-traitant IA — seul le score 1-5 (impact organisationnel)
+// est transmis. Les détails santé le sont (déchiffrés puis pseudonymisés),
+// comme historiquement.
+const IA_FREINS = FREINS.map((f) => ({ key: f.key, column: f.column, withDetail: f.key !== 'judiciaire' }));
 
 // ══════════════════════════════════════════════════════════════
 // SERVICE IA INSERTION — Analyse Claude des profils PCM
@@ -52,9 +61,10 @@ Tu accompagnes le CIP (Conseiller en Insertion Professionnelle) dans le suivi de
 
 Contexte métier :
 - 4 filières : collecte (chauffeurs), tri (opérateurs chaîne de tri), logistique, boutique
-- 7 freins périphériques suivis (échelle 1-5, 1=pas de frein, 5=frein majeur) :
-  mobilité, santé, finances, famille, linguistique, administratif, numérique
-- Jalons obligatoires : Diagnostic accueil, Bilan M+3, M+6, M+10, Sortie
+- 9 freins périphériques suivis (échelle 1-5, 1=pas de frein, 5=frein majeur) :
+  mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire
+- Frein judiciaire : tu ne reçois QUE le niveau (impact organisationnel) — ne spécule JAMAIS sur la nature de faits
+- Entretiens du parcours : diagnostic d'accueil (M+1), bilans intermédiaires à fréquence libre, renouvellement de contrat, bilan de sortie, suivi post-sortie
 - 6 types de personnalité PCM : Analyseur, Persévérant, Empathique, Imagineur, Énergiseur, Promoteur
 
 Ton rôle :
@@ -81,7 +91,7 @@ async function getEmployeeInsertionData(employeeId) {
     return { rows: [] };
   });
 
-  const [employee, diagnostic, milestones, actionPlans, pcmReport, candidate] = await Promise.all([
+  const [employee, diagnostic, milestones, actionPlans, objectifs, pcmReport, candidate] = await Promise.all([
     pool.query(`
       SELECT e.*, e.position as position_name, t.name as team_name
       FROM employees e
@@ -91,9 +101,10 @@ async function getEmployeeInsertionData(employeeId) {
       console.error(`[INSERTION-AI] requête salarié dégradée (${e.code || '?'}) : ${e.message}`);
       return pool.query(`SELECT * FROM employees WHERE id = $1`, [employeeId]);
     }),
-    soft(`SELECT * FROM insertion_diagnostics WHERE employee_id = $1`, [employeeId], 'diagnostic'),
+    soft(`SELECT * FROM insertion_diagnostics WHERE employee_id = $1 ORDER BY parcours_num DESC LIMIT 1`, [employeeId], 'diagnostic'),
     soft(`SELECT * FROM insertion_milestones WHERE employee_id = $1 ORDER BY due_date`, [employeeId], 'jalons'),
     soft(`SELECT * FROM cip_action_plans WHERE employee_id = $1 ORDER BY priority, created_at`, [employeeId], 'plans'),
+    soft(`SELECT * FROM insertion_objectifs WHERE employee_id = $1 ORDER BY parent_id NULLS FIRST, ordre, id LIMIT 40`, [employeeId], 'objectifs'),
     // PCM : chercher via le candidat lié
     soft(`
       SELECT pr.encrypted_report, pr.base_type, pr.phase_type, pr.risk_alert
@@ -132,11 +143,23 @@ async function getEmployeeInsertionData(employeeId) {
     }
   }
 
+  // Déchiffrement applicatif des champs sensibles du diagnostic (santé) —
+  // AVANT pseudonymisation. Le détail JUDICIAIRE est ensuite EXCLU des
+  // payloads IA (IA_FREINS.withDetail=false) : il est déchiffré ici uniquement
+  // pour rester cohérent côté serveur, jamais transmis à Anthropic.
+  const diag = diagnostic.rows[0] || null;
+  if (diag) {
+    for (const f of SENSITIVE_DIAG_FIELDS) {
+      if (diag[f] !== undefined) diag[f] = decryptField(diag[f]);
+    }
+  }
+
   return {
     employee: employee.rows[0],
-    diagnostic: diagnostic.rows[0] || null,
+    diagnostic: diag,
     milestones: milestones.rows,
     actionPlans: actionPlans.rows,
+    objectifs: objectifs.rows,
     pcm: pcmData,
     candidate: candidate.rows[0] || null,
   };
@@ -183,15 +206,11 @@ async function analyseProfilComplet(employeeId) {
       scores: data.pcm.scores || null,
       alerte_risque: data.pcm.risk_alert || false,
     } : null,
-    freins: diag ? {
-      mobilite: { score: diag.frein_mobilite || diag.mobilite, detail: pseudo.scrubText(diag.frein_mobilite_detail) },
-      sante: { score: diag.frein_sante || diag.sante, detail: pseudo.scrubText(diag.frein_sante_detail) },
-      finances: { score: diag.frein_finances || diag.finances, detail: pseudo.scrubText(diag.frein_finances_detail) },
-      famille: { score: diag.frein_famille || diag.famille, detail: pseudo.scrubText(diag.frein_famille_detail) },
-      linguistique: { score: diag.frein_linguistique || diag.linguistique, detail: pseudo.scrubText(diag.frein_linguistique_detail) },
-      administratif: { score: diag.frein_administratif || diag.administratif, detail: pseudo.scrubText(diag.frein_administratif_detail) },
-      numerique: { score: diag.frein_numerique || diag.numerique, detail: pseudo.scrubText(diag.frein_numerique_detail) },
-    } : null,
+    // 9 axes du registre — le détail judiciaire n'est JAMAIS transmis (art. 10).
+    freins: diag ? Object.fromEntries(IA_FREINS.map((f) => [f.key, {
+      score: diag[f.column] ?? null,
+      ...(f.withDetail ? { detail: pseudo.scrubText(diag[`${f.column}_detail`]) } : {}),
+    }])) : null,
     observations: diag ? {
       points_forts: pseudo.scrubText(diag.obs_points_forts),
       difficultes: pseudo.scrubText(diag.obs_difficultes),
@@ -200,11 +219,20 @@ async function analyseProfilComplet(employeeId) {
     } : null,
     jalons: data.milestones.map(m => ({
       type: m.milestone_type,
+      titre: milestoneLabel(m),
       statut: m.status,
       date_prevue: m.due_date,
       date_realise: m.completed_date,
       avis_global: pseudo.scrubText(m.avis_global),
       bilan: pseudo.scrubText(m.bilan_professionnel),
+    })),
+    objectifs: (data.objectifs || []).filter(o => !['atteint', 'abandonne'].includes(o.statut)).map(o => ({
+      titre: pseudo.scrubText(o.titre),
+      description: pseudo.scrubText(o.description),
+      statut: o.statut,
+      origine: o.origine,
+      echeance: o.echeance,
+      sous_objectif: o.parent_id != null,
     })),
     actions_en_cours: data.actionPlans.filter(a => a.status !== 'realise' && a.status !== 'abandonne').map(a => ({
       label: pseudo.scrubText(a.action_label),
@@ -268,17 +296,13 @@ async function preparerEntretien(employeeId, milestoneType) {
     salarie: { reference: ref, poste: emp.position_name, equipe: emp.team_name, tranche_age: ageBracket(emp.birth_date) },
     type_entretien: milestoneType,
     pcm_type: data.pcm?.base?.type || data.pcm?.base_type || null,
-    freins_actuels: diag ? {
-      mobilite: diag.frein_mobilite || diag.mobilite,
-      sante: diag.frein_sante || diag.sante,
-      finances: diag.frein_finances || diag.finances,
-      famille: diag.frein_famille || diag.famille,
-      linguistique: diag.frein_linguistique || diag.linguistique,
-      administratif: diag.frein_administratif || diag.administratif,
-      numerique: diag.frein_numerique || diag.numerique,
-    } : null,
+    // 9 axes du registre (scores seulement — pas de détail dans la préparation)
+    freins_actuels: diag ? Object.fromEntries(FREIN_KEYS.map((k) => [k, diag[`frein_${k}`] ?? null])) : null,
     jalons_precedents: data.milestones.filter(m => m.status === 'realise').map(m => ({
-      type: m.milestone_type, avis: pseudo.scrubText(m.avis_global), bilan: pseudo.scrubText(m.bilan_professionnel),
+      type: m.milestone_type, titre: milestoneLabel(m), avis: pseudo.scrubText(m.avis_global), bilan: pseudo.scrubText(m.bilan_professionnel),
+    })),
+    objectifs_en_cours: (data.objectifs || []).filter(o => ['a_venir', 'en_cours', 'reporte'].includes(o.statut)).map(o => ({
+      titre: pseudo.scrubText(o.titre), statut: o.statut, echeance: o.echeance,
     })),
     actions_en_cours: data.actionPlans.filter(a => a.status === 'en_cours').map(a => pseudo.scrubText(a.action_label)),
   };
@@ -316,13 +340,12 @@ async function bilanCohorte() {
   const anthropic = getClient();
   if (!anthropic) throw new Error('ANTHROPIC_API_KEY non configurée');
 
-  // Tous les salariés en parcours actif avec diagnostic
+  // Tous les salariés en parcours actif avec diagnostic (9 axes du registre)
   const actifs = await pool.query(`
     SELECT e.id, e.first_name, e.last_name, e.insertion_status,
            e.insertion_start_date, e.contract_start,
            e.position as position_name, t.name as team_name,
-           d.frein_mobilite, d.frein_sante, d.frein_finances, d.frein_famille,
-           d.frein_linguistique, d.frein_administratif, d.frein_numerique
+           ${freinColumns('d.').join(', ')}
     FROM employees e
     LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
     LEFT JOIN teams t ON e.team_id = t.id
@@ -333,7 +356,7 @@ async function bilanCohorte() {
 
   // Jalons en retard (secondaire : ne doit pas casser le bilan si colonne absente)
   const retards = await pool.query(`
-    SELECT m.employee_id, e.first_name, e.last_name, m.milestone_type,
+    SELECT m.employee_id, e.first_name, e.last_name, m.milestone_type, m.titre,
            m.due_date, m.status
     FROM insertion_milestones m
     JOIN employees e ON m.employee_id = e.id
@@ -366,19 +389,11 @@ async function bilanCohorte() {
       anciennete_mois: e.insertion_start_date
         ? Math.round((Date.now() - new Date(e.insertion_start_date)) / (30 * 86400000))
         : null,
-      freins: {
-        mobilite: e.frein_mobilite || e.mobilite,
-        sante: e.frein_sante || e.sante,
-        finances: e.frein_finances || e.finances,
-        famille: e.frein_famille || e.famille,
-        linguistique: e.frein_linguistique || e.linguistique,
-        administratif: e.frein_administratif || e.administratif,
-        numerique: e.frein_numerique || e.numerique,
-      },
+      freins: Object.fromEntries(FREIN_KEYS.map((k) => [k, e[`frein_${k}`] ?? null])),
     })),
     jalons_en_retard: retards.rows.map(r => ({
       salarie: pseudo.person({ key: `emp-${r.employee_id}`, first: r.first_name, last: r.last_name }),
-      jalon: r.milestone_type,
+      jalon: milestoneLabel(r),
       date_prevue: r.due_date,
     })),
     actions_en_retard: actionsRetard.rows.map(a => ({

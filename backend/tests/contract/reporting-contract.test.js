@@ -105,11 +105,16 @@ describe('CONTRAT GET /dashboard/alertes → { generated_at, total, seuil_stock_
 describe('CONTRAT GET /metropole/sortie-dynamique → { annee, total_sorties, dynamiques, ... } (ReportingMetropole.jsx)', () => {
   it('porte annee + tous les compteurs de sortie lus par la page', async () => {
     mockQuery.mockImplementation((sql) => {
-      if (/milestone_type = 'Bilan Sortie'/.test(String(sql))) {
+      // Extension 2026-07 : le jalon de sortie est requalifié 'bilan_sortie'
+      // (types techniques) et « dynamique » = 3 catégories de la nouvelle
+      // nomenclature — la requête mockée suit la migration de données.
+      if (/milestone_type = 'bilan_sortie'/.test(String(sql))) {
         // une seule ligne agrégée (COUNT/FILTER) — pg renvoie taux en numeric (string)
         return Promise.resolve({ rows: [{
           total_sorties: 10, dynamiques: 7, cdi: 3, cdd: 2,
-          formation: 1, creation: 1, non_dynamiques: 3, taux_dynamique_pct: '70.0',
+          formation: 1, creation: 1, non_dynamiques: 3,
+          emploi_durable: 4, emploi_transition: 2, sortie_positive: 1,
+          taux_dynamique_pct: '70.0',
         }] });
       }
       return Promise.resolve({ rows: [] });

@@ -1,9 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader, Section, ErrorState } from '../components';
 import { Users } from 'lucide-react';
 import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
+import AlertesBloc from '../components/insertion/AlertesBloc';
+import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
+import ActionsPanel from '../components/insertion/ActionsPanel';
+import {
+  ENTRETIEN_STATUS_LABELS, ENTRETIEN_STATUS_COLORS, frDate as frDateIns,
+} from '../components/insertion/freins';
 
 const CONTRACT_LABELS = {
   CDI: 'CDI', CDD: 'CDD', CDDI: 'CDDI', interim: 'Intérim', stage: 'Stage', apprentissage: 'Apprentissage',
@@ -379,12 +386,13 @@ export default function Employees() {
               </div>
 
               {/* Tabs */}
-              <div className="flex border-b px-5">
+              <div className="flex border-b px-5 overflow-x-auto">
                 {[
                   { key: 'info', label: 'Informations' },
                   { key: 'contracts', label: 'Contrats' },
                   { key: 'availability', label: 'Disponibilités' },
                   { key: 'pcm', label: 'Profil PCM' },
+                  { key: 'insertion', label: 'Parcours insertion' },
                 ].map(t => (
                   <button key={t.key} onClick={() => setDetailTab(t.key)}
                     className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
@@ -797,6 +805,13 @@ export default function Employees() {
                   </div>
                 )}
 
+                {/* Parcours insertion (lecture seule — REC-UX-12 : un seul chemin
+                    d'édition, l'espace CIP ; les champs sensibles sont masqués
+                    par le backend selon le rôle) */}
+                {detailTab === 'insertion' && (
+                  <InsertionReadOnlyTab employee={selected} />
+                )}
+
                 {detailTab === 'availability' && (
                   <div className="space-y-4">
                     <p className="text-sm text-gray-500">Jours d'indisponibilité hebdomadaire :</p>
@@ -903,6 +918,82 @@ function Field({ label, value }) {
     <div>
       <span className="text-gray-500 text-xs">{label}</span>
       <p className="font-medium">{value || '—'}</p>
+    </div>
+  );
+}
+
+// Onglet « Parcours insertion » de la fiche collaborateur — CONSULTATION
+// uniquement (points d'attention + historique + objectifs/actions en lecture).
+// Toute saisie passe par l'espace CIP (« Ouvrir dans l'espace CIP »).
+function InsertionReadOnlyTab({ employee }) {
+  const [timeline, setTimeline] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    api.get(`/insertion/timeline/${employee.id}`)
+      .then((r) => { if (alive) { setTimeline(r.data); setError(null); } })
+      .catch((err) => { if (alive) setError(err.response?.data?.error || err.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [employee.id]);
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-xs text-gray-400">Consultation — la saisie (diagnostic, bilans, actions) se fait dans l'espace CIP.</p>
+        <Link to={`/insertion?employee=${employee.id}`}
+          className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 whitespace-nowrap">
+          Ouvrir dans l'espace CIP
+        </Link>
+      </div>
+
+      <AlertesBloc employeeId={employee.id} />
+
+      {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">Parcours indisponible : {error}</div>}
+      {loading && <p className="text-xs text-gray-400">Chargement du parcours…</p>}
+
+      {timeline?.events?.length > 0 && (
+        <div>
+          <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Historique du parcours</h4>
+          <div className="relative">
+            <div className="absolute left-2.5 top-0 bottom-0 w-0.5 bg-gray-200" />
+            {timeline.events.map((ev, i) => (
+              <div key={i} className="relative flex items-start mb-3 pl-8">
+                <div className={`absolute left-1.5 w-2.5 h-2.5 rounded-full border-2 ${
+                  ev.status === 'realise' ? 'bg-green-500 border-green-500' :
+                  ev.status === 'planifie' ? 'bg-blue-500 border-blue-500' : 'bg-white border-gray-300'
+                }`} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-sm ${ev.status === 'realise' ? 'text-green-700 font-medium' : 'text-gray-600'}`}>{ev.label}</span>
+                    {ev.type === 'milestone' && ev.status && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${ENTRETIEN_STATUS_COLORS[ev.status] || ''}`}>
+                        {ENTRETIEN_STATUS_LABELS[ev.status] || ev.status}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-gray-400">{ev.date ? frDateIns(ev.date) : 'Date non définie'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!loading && !error && (!timeline || !timeline.events?.length) && (
+        <p className="text-xs text-gray-400 border border-dashed rounded-lg p-3 text-center">
+          Aucun parcours d'insertion démarré pour ce collaborateur.
+        </p>
+      )}
+
+      <div className="border-t pt-3">
+        <ObjectifsPanel employeeId={employee.id} canEdit={false} />
+      </div>
+      <div className="border-t pt-3">
+        <ActionsPanel employeeId={employee.id} readOnly compact />
+      </div>
     </div>
   );
 }
