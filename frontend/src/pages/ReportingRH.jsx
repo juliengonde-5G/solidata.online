@@ -28,6 +28,7 @@ export default function ReportingRH() {
   const [formation, setFormation] = useState(null);
   const [etp, setEtp] = useState(null);
   const [absent, setAbsent] = useState(null);
+  const [egaliteFH, setEgaliteFH] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
@@ -35,7 +36,7 @@ export default function ReportingRH() {
     setLoading(true);
     const annee = new Date().getFullYear();
     try {
-      const [empRes, teamRes, candRes, insRes, absRes, formRes, etpRes, absKpiRes] = await Promise.all([
+      const [empRes, teamRes, candRes, insRes, absRes, formRes, etpRes, absKpiRes, fhRes] = await Promise.all([
         api.get('/employees?is_active=true'),
         api.get('/teams'),
         api.get('/candidates'),
@@ -44,6 +45,7 @@ export default function ReportingRH() {
         api.get(`/employees/kpi/formation?annee=${annee}`).catch(() => ({ data: null })),
         api.get(`/employees/kpi/etp?annee=${annee}`).catch(() => ({ data: null })),
         api.get(`/employees/kpi/absenteisme?annee=${annee}`).catch(() => ({ data: null })),
+        api.get(`/employees/kpi/egalite-fh?annee=${annee}`).catch(() => ({ data: null })),
       ]);
       const empData = Array.isArray(empRes.data) ? empRes.data : (empRes.data?.employees || []);
       setEmployees(empData);
@@ -54,6 +56,7 @@ export default function ReportingRH() {
       setFormation(formRes.data);
       setEtp(etpRes.data);
       setAbsent(absKpiRes.data);
+      setEgaliteFH(fhRes.data);
     } catch (err) { console.error(err); }
     setLoading(false);
   };
@@ -232,6 +235,88 @@ export default function ReportingRH() {
             </ResponsiveContainer>
           )}
         </Section>
+
+        {/* Égalité femmes/hommes (RSEi 2.2) */}
+        {egaliteFH && egaliteFH.effectif && (
+          <Section title="Égalité femmes/hommes (RSEi 2.2)" icon={Users}>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <KPICard
+                title="Part de femmes"
+                value={egaliteFH.effectif.part_femmes_pct != null ? `${egaliteFH.effectif.part_femmes_pct}` : '—'}
+                unit={egaliteFH.effectif.part_femmes_pct != null ? '%' : ''}
+                icon={Users} accent="primary"
+              />
+              <KPICard title="Femmes" value={egaliteFH.effectif.femmes} unit={`/ ${egaliteFH.effectif.total}`} icon={Users} accent="emerald" />
+              <KPICard title="Hommes" value={egaliteFH.effectif.hommes} unit={`/ ${egaliteFH.effectif.total}`} icon={Users} accent="slate" />
+              <KPICard
+                title="Femmes dans l'encadrement"
+                value={egaliteFH.encadrement?.part_femmes_pct != null ? `${egaliteFH.encadrement.part_femmes_pct}` : '—'}
+                unit={egaliteFH.encadrement?.part_femmes_pct != null ? '%' : ''}
+                icon={ClipboardList} accent="amber"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Répartition par équipe */}
+              <div>
+                <h4 className="text-sm font-semibold text-slate-600 mb-2">Répartition par équipe</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                        <th className="py-2 pr-2">Équipe</th>
+                        <th className="py-2 px-2 text-right">Femmes</th>
+                        <th className="py-2 px-2 text-right">Hommes</th>
+                        <th className="py-2 px-2 text-right">N.R.</th>
+                        <th className="py-2 pl-2 text-right">% femmes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(egaliteFH.par_equipe || []).map((r, i) => (
+                        <tr key={i} className="border-b border-slate-50">
+                          <td className="py-2 pr-2 text-slate-700">{r.equipe}</td>
+                          <td className="py-2 px-2 text-right">{r.femmes}</td>
+                          <td className="py-2 px-2 text-right">{r.hommes}</td>
+                          <td className="py-2 px-2 text-right text-slate-400">{r.non_renseigne}</td>
+                          <td className="py-2 pl-2 text-right font-medium">{r.part_femmes_pct != null ? `${r.part_femmes_pct} %` : '—'}</td>
+                        </tr>
+                      ))}
+                      {(!egaliteFH.par_equipe || egaliteFH.par_equipe.length === 0) && (
+                        <tr><td colSpan={5} className="py-6 text-center text-slate-400">Aucune donnée</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Accès à la formation par sexe */}
+              <div>
+                <h4 className="text-sm font-semibold text-slate-600 mb-2">Accès à la formation par sexe</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-emerald-50 rounded-card p-4">
+                    <p className="text-xs text-slate-500">Femmes — heures</p>
+                    <p className="text-2xl font-bold text-emerald-700">{Math.round((egaliteFH.formation?.femmes_heures || 0))} h</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Moy./femme : {egaliteFH.formation?.femmes_heures_moyennes != null ? `${egaliteFH.formation.femmes_heures_moyennes} h` : '—'}
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 rounded-card p-4">
+                    <p className="text-xs text-slate-500">Hommes — heures</p>
+                    <p className="text-2xl font-bold text-slate-700">{Math.round((egaliteFH.formation?.hommes_heures || 0))} h</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Moy./homme : {egaliteFH.formation?.hommes_heures_moyennes != null ? `${egaliteFH.formation.hommes_heures_moyennes} h` : '—'}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-slate-500">
+                  Répartition permanents / parcours — femmes {egaliteFH.par_statut?.permanent?.femmes ?? 0}+{egaliteFH.par_statut?.parcours?.femmes ?? 0},
+                  hommes {egaliteFH.par_statut?.permanent?.hommes ?? 0}+{egaliteFH.par_statut?.parcours?.hommes ?? 0}.
+                </div>
+              </div>
+            </div>
+            {egaliteFH.note && <p className="mt-4 text-xs text-slate-400 italic">{egaliteFH.note}</p>}
+          </Section>
+        )}
 
         {/* Insertion summary */}
         {insertionStats && (

@@ -5840,6 +5840,48 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_documents_revision ON qhse_documents(date_revision_prevue);');
     console.log('[INIT-DB] QHSE — documents de prévention (RSEI-06) + REX SST (RSEI-07) ✓');
 
+    // ══════════════════════════════════════════
+    // RH — RSEI-12 : plan de formation formalisé (besoins → planifié → réalisé)
+    // Sert le critère RSEi 2.1 « Emplois et compétences » (le socle N3 exige un
+    // ajustement en cours d'année tracé) et alimente 2.6/B10. Ce que l'ERP porte du
+    // 2.1 : la formalisation, le suivi et la mesure du plan — l'ingénierie reste RH.
+    // NON NOMINATIF par conception : le plan porte sur des ACTIONS (nb de participants
+    // prévus/réalisés), pas sur des individus ; les heures individuelles sont déjà
+    // dans work_hours (type 'training'). Aucun employee_id → aucune surface RGPD
+    // nouvelle. Couvre permanents ET salariés en parcours (public_cible).
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS formation_actions (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        intitule VARCHAR(200) NOT NULL,
+        type_formation VARCHAR(30) NOT NULL DEFAULT 'autre'
+          CHECK (type_formation IN ('interne','externe','obligatoire_securite','habilitation','tutorat','autre')),
+        origine_besoin VARCHAR(30) NOT NULL DEFAULT 'autre'
+          CHECK (origine_besoin IN ('entretien','reglementaire','projet_entreprise','souhait_salarie','autre')),
+        public_cible VARCHAR(20) NOT NULL DEFAULT 'tous'
+          CHECK (public_cible IN ('permanents','parcours','tous')),
+        organisme VARCHAR(150),
+        statut VARCHAR(20) NOT NULL DEFAULT 'identifie'
+          CHECK (statut IN ('identifie','planifie','realise','annule')),
+        date_prevue DATE,
+        date_realisation DATE,
+        nb_participants_prevus INTEGER,
+        nb_participants_realises INTEGER,
+        heures_prevues NUMERIC(8,2),
+        heures_realisees NUMERIC(8,2),
+        cout_prevu NUMERIC(10,2),
+        cout_realise NUMERIC(10,2),
+        commentaire TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_formation_actions_annee ON formation_actions(annee);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_formation_actions_statut ON formation_actions(statut);');
+    console.log('[INIT-DB] RH — plan de formation (RSEI-12) ✓');
+
     // Registre RGPD — sous-traitance IA (Anthropic) — Vague 3, item 3.C-6.
     // Documente le recours au modèle Claude (Anthropic PBC, sous-traitant art. 28)
     // pour l'aide à l'analyse insertion et l'assistant conversationnel. Les données
@@ -6535,7 +6577,7 @@ async function initDatabase() {
       'carburant_pleins', 'ges_facteurs',
       'enquete_modeles', 'enquete_questions', 'enquete_campagnes', 'enquete_reponses',
       'achats_fournisseurs', 'achats_criteres', 'achats_fds',
-      'qhse_documents',
+      'qhse_documents', 'formation_actions',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une
