@@ -790,6 +790,75 @@ async function purgeExpiredCandidates() {
   }
 }
 
+/**
+ * Purge RGPD des dossiers d'insertion (EXG-40, PR 2) — rétention paramétrable.
+ *
+ * ANONYMISE (jamais de DELETE de lignes : le job ne supprime rien, il passe
+ * par services/anonymization.anonymizeEmployee qui nullifie/placeholde) les
+ * dossiers des salariés :
+ *   - parcours CLOS (insertion_status 'termine' ou 'abandon') — jamais un
+ *     parcours en cours ni un dossier sans parcours ;
+ *   - fiche INACTIVE (is_active=false — un salarié réembauché est épargné) ;
+ *   - fin de parcours antérieure à `insertion.retention_months` (défaut
+ *     24 mois — référentiel CNIL secteur social 2023 : base active 2 ans après
+ *     le dernier contact ; le suivi post-sortie 3-6 mois tient dans la marge).
+ *
+ * Le service d'anonymisation PRÉSERVE fse_entree/fse_sortie (piste d'audit
+ * FSE+ ≥ 5 ans, §6bis-1) et les agrégats statistiques (scores de freins,
+ * classifications de sortie). Chaque dossier est traité dans sa propre
+ * transaction + entrée rgpd_audit_log (pattern purgeExpiredCandidates) ; le
+ * log ne porte pas le nom (minimisation), seulement l'id et les paramètres.
+ */
+async function purgeInsertionDossiers() {
+  try {
+    const { readInsertionSetting } = require('../utils/insertion-settings');
+    const raw = Number(await readInsertionSetting('insertion.retention_months'));
+    const months = Number.isFinite(raw) && raw >= 1 ? Math.round(raw) : 24;
+
+    const expired = await pool.query(
+      `SELECT id, insertion_status, insertion_end_date
+       FROM employees
+       WHERE insertion_status IN ('termine', 'abandon')
+         AND is_active = false
+         AND insertion_end_date IS NOT NULL
+         AND insertion_end_date < NOW() - make_interval(months => $1)
+         AND first_name <> 'ANONYME'`,
+      [months]
+    );
+    if (expired.rows.length === 0) return;
+
+    const { anonymizeEmployee } = require('./anonymization');
+    let done = 0;
+    for (const e of expired.rows) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await anonymizeEmployee(client, e.id);
+        await client.query(
+          `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
+           VALUES (NULL, 'AUTO_PURGE_INSERTION', 'employee', $1, $2)`,
+          [e.id, JSON.stringify({
+            reason: `Purge RGPD insertion — parcours ${e.insertion_status} clos depuis plus de ${months} mois`,
+            retention_months: months,
+            insertion_end_date: e.insertion_end_date,
+          })]
+        );
+        await client.query('COMMIT');
+        done += 1;
+        console.log(`[SCHEDULER] RGPD insertion : dossier employé #${e.id} anonymisé (${e.insertion_status}, fin ${e.insertion_end_date ? new Date(e.insertion_end_date).toISOString().slice(0, 10) : '?'})`);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`[SCHEDULER] purge dossier insertion #${e.id} :`, err.message);
+      } finally {
+        client.release();
+      }
+    }
+    console.log(`[SCHEDULER] RGPD insertion : ${done}/${expired.rows.length} dossier(s) anonymisé(s) (rétention ${months} mois)`);
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur purgeInsertionDossiers:', err.message);
+  }
+}
+
 // ══════════════════════════════════════════
 // VERROU DISTRIBUÉ (Advisory Lock PostgreSQL)
 // ══════════════════════════════════════════
@@ -1270,6 +1339,7 @@ async function runAllJobs() {
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
+    await runInstrumented('purgeInsertionDossiers', purgeInsertionDossiers);
     await runInstrumented('purgeOldGpsPositions', purgeOldGpsPositions);
     await runInstrumented('purgeExpiredRefreshTokens', purgeExpiredRefreshTokens);
     await runInstrumented('refreshMaterializedViews', refreshMaterializedViews);

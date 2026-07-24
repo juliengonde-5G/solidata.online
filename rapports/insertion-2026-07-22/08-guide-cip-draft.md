@@ -1,5 +1,7 @@
 # Guide CIP — Le module Insertion au quotidien (projet)
 
+> **→ version finalisée : `docs/GUIDE_CIP_INSERTION.md`** (réconciliée avec le réalisé PR 1 + PR 2, le 23/07/2026). Le présent brouillon est conservé pour la traçabilité de la conception.
+
 > **Version projetée — établie sur les plans validés du 22/07/2026, à finaliser après développement.**
 > Ce guide décrit le module Insertion tel qu'il fonctionnera après la mise en œuvre des plans validés (rapports 04 et 05, corrigés par les revues UX/CIP et audit — rapports 06 et 07). Les écrans définitifs pourront différer à la marge ; le guide sera relu et mis à jour lors de la recette, avec vous.
 

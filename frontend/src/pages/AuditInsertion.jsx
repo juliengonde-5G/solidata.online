@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
-import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks } from 'lucide-react';
+import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks, Download, Pencil } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { getInsertionParametres, PARAMETRES_DEFAUTS } from '../components/insertion/parametres';
 
 const IA_TIMEOUT = 180000; // rapport riche (max_tokens élevé) — nginx autorise 300 s sur /api
+const EXPORT_TIMEOUT = 120000;
 
 // 9 axes — aligné sur le registre unique backend (freins-registry, PR1) :
 // les moyennes consolidées sont des agrégats NON nominatifs (l'axe judiciaire
@@ -77,9 +79,319 @@ function Bar({ pct, tone = 'teal' }) {
   );
 }
 
+// ── Blocs « Indicateurs conventionnels » (EXG-47/D12, PR 2) ──────────────────
+
+// Carte réalisé vs cible : écart quand la cible existe, sinon badge honnête
+// « objectif non paramétré » (doctrine KPI — jamais de valeur inventée).
+function CibleCard({ label, realise, cible, ecart, unit = '%', sub }) {
+  const aCible = cible != null;
+  const ecartBadge = aCible && ecart != null ? (
+    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${ecart >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+      {ecart >= 0 ? '+' : ''}{ecart} {unit === '%' ? 'pt' : unit}
+    </span>
+  ) : null;
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">{label}</div>
+      <div className="mt-1 flex items-baseline gap-2 flex-wrap">
+        <span className="text-2xl font-bold text-gray-800">{realise != null ? `${realise} ${unit}` : '—'}</span>
+        {ecartBadge}
+      </div>
+      <div className="text-[11px] mt-0.5">
+        {aCible
+          ? <span className="text-gray-500">Cible conventionnée : <strong>{cible} {unit}</strong></span>
+          : <span className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">objectif non paramétré</span>}
+      </div>
+      {sub && <div className="text-[10px] text-gray-400 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+// Petites barres horizontales pour les typologies (répartitions non nominatives).
+function MiniBars({ title, data, emptyLabel = 'Aucune donnée' }) {
+  const entries = Object.entries(data || {}).sort((a, b) => b[1] - a[1]);
+  const max = entries.length ? Math.max(...entries.map(([, n]) => n)) : 0;
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-500 uppercase mb-1.5">{title}</p>
+      {entries.length === 0 ? <p className="text-xs text-gray-400">{emptyLabel}</p> : (
+        <div className="space-y-1">
+          {entries.map(([k, n]) => (
+            <div key={k} className="flex items-center gap-2">
+              <span className="w-28 text-[11px] text-gray-600 truncate" title={k}>{k}</span>
+              <div className="flex-1 bg-gray-100 rounded-full h-2">
+                <div className="bg-teal-500 h-2 rounded-full" style={{ width: `${max ? (n / max) * 100 : 0}%` }} />
+              </div>
+              <span className="w-7 text-right text-[11px] text-gray-600 font-medium">{n}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Formulaire des cibles conventionnelles (ADMIN/RH) — GET/PUT /insertion/cibles.
+// Champ vide = « objectif non paramétré » (efface la cible côté serveur).
+const CIBLE_FIELDS = [
+  { name: 'cible_taux_dynamiques', label: 'Taux de sorties dynamiques (%)' },
+  { name: 'cible_taux_durable', label: 'Taux emploi durable (%)' },
+  { name: 'cible_taux_transition', label: 'Taux emploi de transition (%)' },
+  { name: 'cible_taux_positive', label: 'Taux autres sorties positives (%)' },
+  { name: 'cible_etp_conventionnes', label: 'ETP conventionnés (annexe financière)' },
+  { name: 'effectif_reference', label: 'Effectif de référence (personnes)' },
+];
+
+function CiblesForm({ onSaved, onClose }) {
+  const [form, setForm] = useState(null);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.get('/insertion/cibles')
+      .then((r) => {
+        if (!alive) return;
+        const f = {};
+        for (const c of CIBLE_FIELDS) f[c.name] = r.data?.[c.name] != null ? String(r.data[c.name]) : '';
+        setForm(f);
+        setNote(r.data?.note || '');
+      })
+      .catch((err) => { if (alive) setError(err.response?.data?.error || err.message); });
+    return () => { alive = false; };
+  }, []);
+
+  const save = async () => {
+    setSaving(true); setError(null);
+    try {
+      const body = {};
+      for (const c of CIBLE_FIELDS) {
+        const raw = String(form[c.name] ?? '').trim().replace(',', '.');
+        body[c.name] = raw === '' ? null : parseFloat(raw);
+        if (raw !== '' && Number.isNaN(body[c.name])) {
+          setError(`${c.label} : nombre attendu (ou champ vide pour « non paramétré »).`);
+          setSaving(false);
+          return;
+        }
+      }
+      await api.put('/insertion/cibles', body);
+      onSaved();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center px-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold text-gray-800">Cibles conventionnelles</h3>
+        <p className="text-[11px] text-gray-500 bg-amber-50 border border-amber-200 rounded-lg p-2">
+          À reporter depuis l'<strong>annexe financière confirmée par la direction</strong> — jamais de valeur estimée.
+          Un champ vide = « objectif non paramétré » (la carte l'affiche honnêtement).
+        </p>
+        {note && <p className="text-[10px] text-gray-400">{note}</p>}
+        {error && <div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{error}</div>}
+        {!form ? <LoadingSpinner size="md" message="Chargement des cibles…" /> : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {CIBLE_FIELDS.map((c) => (
+              <div key={c.name}>
+                <label className="block text-xs text-gray-500 mb-0.5">{c.label}</label>
+                <input type="number" min="0" step="0.01" value={form[c.name]}
+                  onChange={(e) => setForm({ ...form, [c.name]: e.target.value })}
+                  placeholder="non paramétré" className="input-modern py-1.5 w-full" />
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700">Annuler</button>
+          <button type="button" onClick={save} disabled={saving || !form}
+            className="px-4 py-1.5 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 disabled:opacity-50">
+            {saving ? 'Enregistrement…' : 'Enregistrer les cibles'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Modale d'export du tableau des freins (REC-UX-14) ────────────────────────
+// Complétude par colonne AVANT génération + filtres année / statut / CIP +
+// variante sensible (ADMIN/RH, génération journalisée au registre RGPD).
+const STATUT_EXPORT_OPTIONS = [
+  ['all', "Tous (en parcours + sortis de l'année)"],
+  ['en_parcours', 'En parcours'],
+  ['sortis', "Sortis (dans l'année)"],
+];
+
+function ExportFreinsModal({ year, onClose }) {
+  const [filters, setFilters] = useState({ annee: String(year || ''), statut: 'all', cip: '', sensibles: false, format: 'xlsx' });
+  const [cips, setCips] = useState([]);
+  const [comp, setComp] = useState(null);
+  const [compLoading, setCompLoading] = useState(true);
+  const [compError, setCompError] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+
+  useEffect(() => {
+    api.get('/insertion/cip-referents')
+      .then((r) => setCips(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setCips([]));
+  }, []);
+
+  const qs = useCallback((f) => {
+    const p = new URLSearchParams();
+    if (f.annee) p.set('annee', f.annee);
+    if (f.statut) p.set('statut', f.statut);
+    if (f.cip) p.set('cip', f.cip);
+    p.set('sensibles', f.sensibles ? '1' : '0');
+    return p.toString();
+  }, []);
+
+  // Complétude recalculée à chaque changement de filtre (REC-UX-14 : voir les
+  // colonnes faibles AVANT de générer).
+  useEffect(() => {
+    let alive = true;
+    setCompLoading(true);
+    api.get(`/exports/insertion-freins/completude?${qs(filters)}`)
+      .then((r) => { if (alive) { setComp(r.data); setCompError(null); } })
+      .catch((err) => { if (alive) { setComp(null); setCompError(err.response?.data?.error || err.message); } })
+      .finally(() => { if (alive) setCompLoading(false); });
+    return () => { alive = false; };
+  }, [filters, qs]);
+
+  const download = async () => {
+    setDownloading(true); setDownloadError(null);
+    try {
+      const res = await api.get(`/exports/insertion-freins?format=${filters.format}&${qs(filters)}`,
+        { responseType: 'blob', timeout: EXPORT_TIMEOUT });
+      const stamp = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `insertion_freins_${stamp}.${filters.format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      let msg = "Erreur lors de la génération de l'export.";
+      try { const txt = await err.response?.data?.text?.(); if (txt) msg = JSON.parse(txt).error || msg; } catch { /* message générique */ }
+      setDownloadError(msg);
+    }
+    setDownloading(false);
+  };
+
+  const faibles = (comp?.colonnes || []).filter((c) => c.pct != null && c.pct < 80).length;
+  const yearNow = new Date().getFullYear();
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center px-4 py-6 overflow-y-auto" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-4 space-y-3 my-auto max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="font-semibold text-gray-800">Export « Tableau des freins » (23 colonnes)</h3>
+            <p className="text-[11px] text-gray-400">Vérifiez la complétude avant de générer — chaque génération est <strong>journalisée</strong> au registre RGPD.</p>
+          </div>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none" aria-label="Fermer">×</button>
+        </div>
+
+        {/* Filtres */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div>
+            <label className="block text-xs text-gray-500 mb-0.5">Année</label>
+            <select value={filters.annee} onChange={(e) => setFilters({ ...filters, annee: e.target.value })} className="input-modern py-1.5 w-full text-sm">
+              <option value="">Toutes</option>
+              {Array.from({ length: 6 }, (_, i) => yearNow - i).map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-0.5">Population</label>
+            <select value={filters.statut} onChange={(e) => setFilters({ ...filters, statut: e.target.value })} className="input-modern py-1.5 w-full text-sm">
+              {STATUT_EXPORT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-0.5">CIP référent</label>
+            <select value={filters.cip} onChange={(e) => setFilters({ ...filters, cip: e.target.value })} className="input-modern py-1.5 w-full text-sm">
+              <option value="">Tous</option>
+              {cips.map((c) => <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-0.5">Format</label>
+            <select value={filters.format} onChange={(e) => setFilters({ ...filters, format: e.target.value })} className="input-modern py-1.5 w-full text-sm">
+              <option value="xlsx">Excel (.xlsx)</option>
+              <option value="csv">CSV</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Variante sensible */}
+        <label className={`flex items-start gap-2 text-sm rounded-lg border p-2.5 cursor-pointer ${filters.sensibles ? 'bg-red-50 border-red-300 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+          <input type="checkbox" checked={filters.sensibles}
+            onChange={(e) => setFilters({ ...filters, sensibles: e.target.checked })}
+            className="rounded border-gray-300 mt-0.5" />
+          <span>
+            Inclure la colonne sensible <strong>« Frein judiciaire »</strong> (art. 10 RGPD).
+            {filters.sensibles && <span className="block text-xs mt-0.5">⚠ Variante sensible : génération journalisée sous une action distincte — diffusion strictement limitée ADMIN/RH, jamais transmise à l'extérieur.</span>}
+          </span>
+        </label>
+
+        {/* Rappel visuel de la variante choisie */}
+        <p className={`text-[11px] px-2 py-1 rounded inline-block ${filters.sensibles ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
+          Variante : {filters.sensibles ? 'AVEC colonne judiciaire (sensible)' : 'sans colonne judiciaire (défaut)'}
+        </p>
+
+        {/* Complétude par colonne */}
+        <div className="border rounded-lg p-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+            <p className="text-sm font-semibold text-gray-700">
+              Complétude — {comp ? `${comp.total} fiche(s) dans le périmètre` : '…'}
+            </p>
+            {comp && faibles > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800">{faibles} colonne(s) &lt; 80 % — complétez les diagnostics avant l'envoi</span>
+            )}
+          </div>
+          {compError && <div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">Complétude indisponible : {compError}</div>}
+          {compLoading && <p className="text-xs text-gray-400">Calcul de la complétude…</p>}
+          {!compLoading && comp && comp.total === 0 && (
+            <p className="text-xs text-gray-400">Aucune fiche dans ce périmètre — ajustez les filtres.</p>
+          )}
+          {!compLoading && comp && comp.total > 0 && (
+            <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+              {comp.colonnes.map((c) => (
+                <div key={c.cle} className="flex items-center gap-2">
+                  <span className="w-44 text-[11px] text-gray-600 truncate" title={c.colonne}>{c.colonne}</span>
+                  <div className="flex-1 bg-gray-100 rounded-full h-2">
+                    <div className={`h-2 rounded-full ${c.pct >= 80 ? 'bg-green-500' : c.pct >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                      style={{ width: `${c.pct || 0}%` }} />
+                  </div>
+                  <span className="w-16 text-right text-[11px] text-gray-500">{c.pct != null ? `${c.pct} %` : '—'} ({c.renseigne})</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {downloadError && <div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{downloadError}</div>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700">Annuler</button>
+          <button type="button" onClick={download} disabled={downloading || (comp && comp.total === 0)}
+            className="px-4 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 inline-flex items-center gap-1.5">
+            <Download className="w-4 h-4" /> {downloading ? 'Génération…' : "Générer l'export"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AuditInsertion() {
   const { user } = useAuth();
-  const canIa = ['ADMIN', 'RH'].includes(user?.base_role || user?.role);
+  const canIa = ['ADMIN', 'RH'].includes(user?.base_role || user?.role); // ADMIN/RH : IA, cibles, export freins
   const [year, setYear] = useState(new Date().getFullYear());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -88,6 +400,12 @@ export default function AuditInsertion() {
   const [ia, setIa] = useState(null);
   const [iaLoading, setIaLoading] = useState(false);
   const [iaError, setIaError] = useState(null);
+
+  const [ciblesOpen, setCiblesOpen] = useState(false);
+  const [exportFreinsOpen, setExportFreinsOpen] = useState(false);
+  const [syntheseLoading, setSyntheseLoading] = useState(false);
+  const [syntheseError, setSyntheseError] = useState(null);
+  const [delaiCible, setDelaiCible] = useState(PARAMETRES_DEFAUTS.delai_diagnostic_jours);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -98,6 +416,35 @@ export default function AuditInsertion() {
   }, [year]);
 
   useEffect(() => { load(); }, [load]);
+  // Cible du délai de diagnostic (réglage insertion.delai_diagnostic_jours, défaut 30 j).
+  useEffect(() => {
+    getInsertionParametres().then((p) => {
+      const n = Number(p?.delai_diagnostic_jours);
+      if (Number.isFinite(n) && n > 0) setDelaiCible(n);
+    });
+  }, []);
+
+  // Synthèse comité de pilotage — CSV agrégé non nominatif (EXG-14).
+  const downloadSynthese = async () => {
+    setSyntheseLoading(true); setSyntheseError(null);
+    try {
+      const res = await api.get(`/exports/insertion-synthese?year=${year}&format=csv`,
+        { responseType: 'blob', timeout: EXPORT_TIMEOUT });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `insertion_synthese_${year}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      let msg = "Erreur lors de l'export de la synthèse comité.";
+      try { const txt = await err.response?.data?.text?.(); if (txt) msg = JSON.parse(txt).error || msg; } catch { /* message générique */ }
+      setSyntheseError(msg);
+    }
+    setSyntheseLoading(false);
+  };
 
   const generateIa = async () => {
     setIaLoading(true); setIaError(null);
@@ -153,6 +500,24 @@ export default function AuditInsertion() {
       + `<div class="sub">Situation d'insertion de la structure • Année ${data.annee}</div></div>`
       + `<div style="text-align:right"><div class="sub">Solidarité Textiles</div><div class="sub">Édité le ${date}</div></div></div>`;
 
+    // 0. Indicateurs conventionnels — réalisé vs cibles (EXG-47)
+    const conv = data.conventionnel || {};
+    const convRow = (label, realise, cible, ecart, unit = '%') =>
+      `<tr><td>${label}</td><td style="text-align:right">${realise != null ? realise + ' ' + unit : '—'}</td>`
+      + `<td style="text-align:right">${cible != null ? cible + ' ' + unit : '<em style="color:#94a3b8">non paramétré</em>'}</td>`
+      + `<td style="text-align:right;color:${ecart == null ? '#94a3b8' : ecart >= 0 ? '#16a34a' : '#dc2626'}">${ecart != null ? (ecart >= 0 ? '+' : '') + ecart : '—'}</td></tr>`;
+    body += `<div class="section"><div class="section-title">Indicateurs conventionnels (${data.annee})</div>`
+      + `<table><tr><th>Indicateur</th><th style="text-align:right">Réalisé</th><th style="text-align:right">Cible</th><th style="text-align:right">Écart</th></tr>`
+      + convRow('Sorties dynamiques', conv.taux_realises?.dynamiques, conv.cibles?.cible_taux_dynamiques, conv.ecarts?.dynamiques)
+      + convRow('Emploi durable', conv.taux_realises?.emploi_durable, conv.cibles?.cible_taux_durable, conv.ecarts?.emploi_durable)
+      + convRow('Emploi de transition', conv.taux_realises?.emploi_transition, conv.cibles?.cible_taux_transition, conv.ecarts?.emploi_transition)
+      + convRow('Autres sorties positives', conv.taux_realises?.sortie_positive, conv.cibles?.cible_taux_positive, conv.ecarts?.sortie_positive)
+      + convRow('ETP réalisés (approché)', data.etp_realises_approx?.valeur, conv.cibles?.cible_etp_conventionnes, conv.ecarts?.etp, 'ETP')
+      + `</table>`
+      + `<div class="note">${esc(data.etp_realises_approx?.note || '')}</div>`
+      + `<div class="note">Délai moyen du diagnostic d'accueil : ${data.delai_moyen_diagnostic_jours != null ? data.delai_moyen_diagnostic_jours + ' j' : '—'} • PMSMP : ${data.pmsmp?.nb ?? 0} convention(s), ${data.pmsmp?.jours ?? 0} j • Satisfaction de sortie : ${data.satisfaction?.nb_reponses ? (data.satisfaction.moyenne_globale ?? '—') + '/4 (' + data.satisfaction.nb_reponses + ' rép.)' : 'aucune réponse'} • CVG : trame de reporting en attente (direction).</div>`
+      + `<div class="note">${esc(conv.methode || '')}</div></div>`;
+
     // 1. Indicateurs clés — cartes KPI
     body += `<div class="section"><div class="section-title">Indicateurs clés</div><div class="kpis">`
       + kpi('Personnes en parcours', data.nb_en_parcours, null)
@@ -166,7 +531,7 @@ export default function AuditInsertion() {
       + ms.map((m) => {
         const pct = m.taux_echeance;
         const w = pct == null ? 0 : Math.max(pct, 2);
-        return `<div class="bar-row"><div class="bar-label">${esc(m.type)}</div><div class="bar-bg"><div class="bar-fill" style="width:${w}%;background:${barColor(pct)}"></div></div><div class="bar-val">${pct == null ? 'n/a' : pct + '%'} (${m.realises_echus}/${m.echus})</div></div>`;
+        return `<div class="bar-row"><div class="bar-label">${esc(m.label || m.type)}</div><div class="bar-bg"><div class="bar-fill" style="width:${w}%;background:${barColor(pct)}"></div></div><div class="bar-val">${pct == null ? 'n/a' : pct + '%'} (${m.realises_echus}/${m.echus})</div></div>`;
       }).join('')
       + `<div class="note">Taux = jalons réalisés parmi ceux dont l'échéance est passée.</div></div>`;
 
@@ -265,11 +630,23 @@ export default function AuditInsertion() {
           subtitle="Synthèse de la situation d'insertion de la structure — direction & CIP"
           icon={ClipboardList}
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <select value={year} onChange={(e) => setYear(Number(e.target.value))}
                 className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white">
                 {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
+              <button onClick={downloadSynthese} disabled={syntheseLoading}
+                title="Synthèse agrégée non nominative pour le comité de pilotage (CSV)"
+                className="btn-ghost text-sm inline-flex items-center gap-1.5 disabled:opacity-50">
+                <Download className="w-4 h-4" /> {syntheseLoading ? 'Export…' : 'Synthèse comité (CSV)'}
+              </button>
+              {canIa && (
+                <button onClick={() => setExportFreinsOpen(true)}
+                  title="Export nominatif 23 colonnes — complétude et filtres avant génération (journalisé RGPD)"
+                  className="btn-ghost text-sm inline-flex items-center gap-1.5">
+                  <Download className="w-4 h-4" /> Tableau des freins…
+                </button>
+              )}
               <button onClick={printReport} disabled={!data}
                 className="btn-ghost text-sm inline-flex items-center gap-1.5">
                 <Printer className="w-4 h-4" /> Exporter PDF
@@ -279,9 +656,116 @@ export default function AuditInsertion() {
         />
 
         {error && <div className="mb-4 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-3">Impossible de charger l'audit : {error}</div>}
+        {syntheseError && <div className="mb-4 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{syntheseError}</div>}
 
         {data && (
           <div className="space-y-6">
+            {/* 0. Indicateurs conventionnels (EXG-47/D12) — EN TÊTE : réalisé vs
+                cibles de l'annexe financière, ETP « contrôle ERP », typologies,
+                délai diagnostic, PMSMP, satisfaction, encart CVG. */}
+            <div className="bg-white rounded-xl border p-5">
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                <h3 className="font-semibold text-gray-800 flex items-center gap-2"><Target className="w-4 h-4 text-teal-600" /> Indicateurs conventionnels ({data.annee})</h3>
+                {canIa && (
+                  <button onClick={() => setCiblesOpen(true)}
+                    className="text-xs text-teal-700 hover:underline inline-flex items-center gap-1">
+                    <Pencil className="w-3.5 h-3.5" /> Paramétrer les cibles
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-400 mb-3">{data.conventionnel?.methode || 'Taux calculés sur les sorties constatées de l\'année civile.'}</p>
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+                <CibleCard label="Sorties dynamiques" realise={data.conventionnel?.taux_realises?.dynamiques}
+                  cible={data.conventionnel?.cibles?.cible_taux_dynamiques} ecart={data.conventionnel?.ecarts?.dynamiques}
+                  sub={`${s.dynamiques || 0}/${s.total || 0} sorties constatées`} />
+                <CibleCard label="Emploi durable" realise={data.conventionnel?.taux_realises?.emploi_durable}
+                  cible={data.conventionnel?.cibles?.cible_taux_durable} ecart={data.conventionnel?.ecarts?.emploi_durable} />
+                <CibleCard label="Emploi de transition" realise={data.conventionnel?.taux_realises?.emploi_transition}
+                  cible={data.conventionnel?.cibles?.cible_taux_transition} ecart={data.conventionnel?.ecarts?.emploi_transition} />
+                <CibleCard label="Autres sorties positives" realise={data.conventionnel?.taux_realises?.sortie_positive}
+                  cible={data.conventionnel?.cibles?.cible_taux_positive} ecart={data.conventionnel?.ecarts?.sortie_positive} />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* ETP réalisés — approximation ERP, source officielle ASP TOUJOURS visible */}
+                <div className="rounded-xl border border-gray-200 p-3 sm:col-span-1">
+                  <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">ETP réalisés (approché)</div>
+                  <div className="mt-1 flex items-baseline gap-2 flex-wrap">
+                    <span className="text-2xl font-bold text-gray-800">{data.etp_realises_approx?.valeur ?? '—'}</span>
+                    {data.conventionnel?.cibles?.cible_etp_conventionnes != null && data.conventionnel?.ecarts?.etp != null && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${data.conventionnel.ecarts.etp >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {data.conventionnel.ecarts.etp >= 0 ? '+' : ''}{data.conventionnel.ecarts.etp} ETP
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] mt-0.5">
+                    {data.conventionnel?.cibles?.cible_etp_conventionnes != null
+                      ? <span className="text-gray-500">Cible conventionnée : <strong>{data.conventionnel.cibles.cible_etp_conventionnes} ETP</strong></span>
+                      : <span className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">objectif non paramétré</span>}
+                    <span className="text-gray-400"> · {data.etp_realises_approx?.nb_cddi_actifs ?? 0} CDDI actifs</span>
+                  </div>
+                  <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-1.5 py-1 mt-1.5">
+                    {data.etp_realises_approx?.note || 'Contrôle ERP — la saisie officielle des ETP reste celle des états mensuels de présence ASP.'}
+                  </p>
+                </div>
+
+                {/* Délai moyen du diagnostic */}
+                <div className="rounded-xl border border-gray-200 p-3">
+                  <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Délai moyen du diagnostic d'accueil</div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className={`text-2xl font-bold ${data.delai_moyen_diagnostic_jours == null ? 'text-gray-800' : data.delai_moyen_diagnostic_jours <= delaiCible ? 'text-green-700' : 'text-red-600'}`}>
+                      {data.delai_moyen_diagnostic_jours != null ? `${data.delai_moyen_diagnostic_jours} j` : '—'}
+                    </span>
+                    <span className="text-[11px] text-gray-400">cible ≤ {delaiCible} j</span>
+                  </div>
+                  {data.delai_moyen_diagnostic_jours != null && (
+                    <div className="mt-1.5"><Bar pct={Math.min(100, (delaiCible / Math.max(data.delai_moyen_diagnostic_jours, 1)) * 100)} tone={data.delai_moyen_diagnostic_jours <= delaiCible ? 'green' : 'red'} /></div>
+                  )}
+                  <p className="text-[10px] text-gray-400 mt-1">Jours entre l'entrée en parcours et le diagnostic réalisé (diagnostics de l'année).</p>
+                </div>
+
+                {/* PMSMP + satisfaction de l'année */}
+                <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                  <div>
+                    <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">PMSMP {data.annee}</div>
+                    <p className="text-sm text-gray-700 mt-0.5">
+                      <span className="text-xl font-bold text-gray-800">{data.pmsmp?.nb ?? 0}</span> convention(s)
+                      <span className="text-gray-400"> · {data.pmsmp?.jours ?? 0} j · {data.pmsmp?.nb_salaries ?? 0} salarié(s)</span>
+                    </p>
+                  </div>
+                  <div className="border-t pt-1.5">
+                    <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Satisfaction de sortie</div>
+                    <p className="text-sm text-gray-700 mt-0.5">
+                      {data.satisfaction?.nb_reponses ? (
+                        <><span className="text-xl font-bold text-gray-800">{data.satisfaction.moyenne_globale ?? '—'}</span><span className="text-gray-400"> /4 · {data.satisfaction.nb_reponses} réponse(s)</span></>
+                      ) : <span className="text-gray-400">Aucune réponse enregistrée</span>}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Typologies des publics (non nominatif) */}
+              <div className="grid sm:grid-cols-3 gap-4 mt-4 border-t pt-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-1.5">Public accompagné</p>
+                  <p className="text-sm text-gray-700"><span className="text-xl font-bold text-gray-800">{data.typologies?.effectif ?? 0}</span> en parcours</p>
+                  <p className="text-sm text-gray-700 mt-1"><span className="text-xl font-bold text-gray-800">{data.typologies?.rqth ?? 0}</span> RQTH</p>
+                  <div className="mt-2">
+                    <MiniBars title="Tranches d'âge" data={data.typologies?.tranches_age} emptyLabel="Dates de naissance non renseignées" />
+                  </div>
+                </div>
+                <MiniBars title="Ressources à l'entrée" data={data.typologies?.ressources} emptyLabel="Rubrique budget des diagnostics vide" />
+                <MiniBars title="Niveaux de formation" data={data.typologies?.niveaux_formation} emptyLabel="Niveaux non renseignés au diagnostic" />
+              </div>
+
+              {/* Encart CVG — réservé, en attente de la trame direction */}
+              <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-600">
+                <strong>Programme Convergence (CVG)</strong> — en attente de la trame de reporting (direction).
+                {data.cvg?.note ? ` ${data.cvg.note}` : ''}
+              </div>
+            </div>
+
             {/* 1. Indicateurs clés */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <StatCard icon={Users} label="Personnes en parcours" value={data.nb_en_parcours} tone="blue" />
@@ -296,7 +780,7 @@ export default function AuditInsertion() {
               <div className="space-y-3">
                 {ms.map((m) => (
                   <div key={m.type} className="flex items-center gap-3">
-                    <div className="w-40 text-sm text-gray-600 shrink-0">{m.type}</div>
+                    <div className="w-40 text-sm text-gray-600 shrink-0">{m.label || m.type}</div>
                     <div className="flex-1"><Bar pct={m.taux_echeance ?? 0} tone={m.taux_echeance == null ? 'teal' : m.taux_echeance >= 80 ? 'green' : m.taux_echeance >= 50 ? 'amber' : 'red'} /></div>
                     <div className="w-28 text-right text-xs text-gray-500 shrink-0">
                       {m.taux_echeance != null ? <span className="font-semibold text-gray-700">{m.taux_echeance}%</span> : <span className="text-gray-400">n/a</span>}
@@ -437,6 +921,14 @@ export default function AuditInsertion() {
               {!ia && !iaError && canIa && <p className="text-sm text-gray-400">Cliquez sur « Générer le rapport IA » pour produire la synthèse. Le rapport peut ensuite être exporté en PDF pour la direction.</p>}
             </div>
           </div>
+        )}
+
+        {/* Modales : cibles conventionnelles + export freins */}
+        {ciblesOpen && (
+          <CiblesForm onClose={() => setCiblesOpen(false)} onSaved={() => { setCiblesOpen(false); load(); }} />
+        )}
+        {exportFreinsOpen && (
+          <ExportFreinsModal year={year} onClose={() => setExportFreinsOpen(false)} />
         )}
       </div>
     </Layout>

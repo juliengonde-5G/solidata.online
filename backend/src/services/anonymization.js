@@ -206,6 +206,13 @@ async function anonymizeEmployee(client, id) {
     'attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee',
     'mutuelle_statut', 'rqth', 'rqth_fin', 'contre_indications', 'suivi_sante',
     'piece_identite_validite', 'questionnaire_detail',
+    // Lot 8 (2026-07 PR3) — co-construction : SWOT / besoins / COA + portefeuille
+    // de compétences + réponses du style d'apprentissage (verbatims / JSONB
+    // nominatifs). On CONSERVE style_apprentissage (catégoriel non nominatif —
+    // agrégat de cohorte, même doctrine que les scores de freins).
+    'swot_atouts', 'swot_faiblesses', 'swot_opportunites', 'swot_menaces',
+    'besoins_exprimes', 'coa_texte', 'savoir_faire', 'savoir_etre',
+    'portefeuille_interets', 'portefeuille_competences', 'style_apprentissage_reponses',
   ]);
 
   // Jalons — bilans/observations/sortie nominative ; on CONSERVE
@@ -222,6 +229,9 @@ async function anonymizeEmployee(client, id) {
     // préparation IA, formulaire de renouvellement, remise tracée)
     'previous_review', 'validations', 'ia_preparation', 'renouvellement_form',
     'sortie_documents', 'remise_salarie', 'post_sortie_commentaire',
+    // Lot 8 (2026-07 PR3) — formulaire de période d'essai (avis encadrant/CIP).
+    // On CONSERVE periode_essai_decision (catégoriel agrégé : rupture vs confirmé).
+    'periode_essai_form',
   ]);
 
   // Snapshots probants (insertion_milestones_history) : ils contiennent la
@@ -267,6 +277,42 @@ async function anonymizeEmployee(client, id) {
       const sets = ["entreprise = 'ANONYMISÉ'"];
       for (const c of ['siret', 'tuteur', 'bilan', 'convention_ref']) if (cols.has(c)) sets.push(`${c} = NULL`);
       await client.query(`UPDATE insertion_pmsmp SET ${sets.join(', ')} WHERE employee_id = $1`, [id]);
+    }
+  }
+
+  // Grilles de compétences (2026-07 Lot 8) — observations/objectifs libres et
+  // synthèse/validations nominatives → NULL ; on CONSERVE les NOTES /10 et le
+  // marqueur non_evalue (agrégats de progression, même doctrine que les freins).
+  if (await tableExists(client, 'insertion_competence_evaluations')) {
+    const cols = await existingColumns(client, 'insertion_competence_evaluations');
+    if (cols.has('employee_id')) {
+      const sets = [];
+      for (const c of ['synthese', 'validations']) if (cols.has(c)) sets.push(`${c} = NULL`);
+      if (sets.length > 0) {
+        await client.query(`UPDATE insertion_competence_evaluations SET ${sets.join(', ')} WHERE employee_id = $1`, [id]);
+      }
+    }
+  }
+  if (await tableExists(client, 'insertion_competence_scores')) {
+    const cols = await existingColumns(client, 'insertion_competence_scores');
+    if (cols.has('evaluation_id') && (cols.has('observation') || cols.has('objectif'))) {
+      const sets = [];
+      for (const c of ['observation', 'objectif']) if (cols.has(c)) sets.push(`${c} = NULL`);
+      await client.query(
+        `UPDATE insertion_competence_scores SET ${sets.join(', ')}
+         WHERE evaluation_id IN (SELECT id FROM insertion_competence_evaluations WHERE employee_id = $1)`,
+        [id]
+      );
+    }
+  }
+
+  // Checklist d'embauche (2026-07 Lot 8) — les responsables (noms) vivent dans
+  // le JSONB items → reset à {} (retire aussi les dates de remise, non
+  // structurelles). La ligne subsiste (marqueur d'existence).
+  if (await tableExists(client, 'insertion_checklist_embauche')) {
+    const cols = await existingColumns(client, 'insertion_checklist_embauche');
+    if (cols.has('employee_id') && cols.has('items')) {
+      await client.query(`UPDATE insertion_checklist_embauche SET items = '{}'::jsonb WHERE employee_id = $1`, [id]);
     }
   }
 

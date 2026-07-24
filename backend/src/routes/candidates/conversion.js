@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
-const { generateMilestones } = require('../insertion/engine');
+const { generateMilestones, ensurePeriodeEssaiMilestone } = require('../insertion/engine');
+const { readInsertionSetting } = require('../../utils/insertion-settings');
 
 // Libellés FR des champs d'entretien de recrutement réutilisés pour pré-remplir
 // le diagnostic d'insertion (PROP-01 : continuité candidat→collaborateur).
@@ -219,6 +220,18 @@ router.post('/:id/link-employee', authorize('ADMIN', 'RH'), async (req, res) => 
       const ms = await generateMilestones(client, employeeId, req.user.id);
       insertion.initialise = true;
       insertion.milestones_created = ms.length;
+
+      // Lot 8 (EXG-30 / PROP-03) — entretien de période d'essai : le chaînon
+      // recrutement → accompagnement. Créé automatiquement à la liaison,
+      // échéance = début de contrat + durée de période d'essai (paramétrable
+      // insertion.periode_essai_jours, défaut 30). Idempotent (un par parcours).
+      const pnRow0 = await client.query('SELECT COALESCE(parcours_num, 1) AS pn FROM employees WHERE id = $1', [employeeId]);
+      const pn0 = pnRow0.rows[0] ? Number(pnRow0.rows[0].pn) : 1;
+      const joursEssai = Math.round(Number(await readInsertionSetting('insertion.periode_essai_jours')) || 30);
+      const pe = await ensurePeriodeEssaiMilestone(client, employeeId, {
+        parcoursNum: pn0, startDate: cddiStart, joursEssai, userId: req.user.id,
+      });
+      insertion.periode_essai_created = !!pe;
     });
     if (!initRes.ok) insertion.info = 'Initialisation du parcours impossible sur cette base (voir logs).';
 
@@ -237,6 +250,32 @@ router.post('/:id/link-employee', authorize('ADMIN', 'RH'), async (req, res) => 
          VALUES ($1, $2, $3, $4, 'en_cours')
          ON CONFLICT (employee_id, parcours_num) DO NOTHING`,
         [employeeId, pn, req.user.id, parcoursAnterieur]);
+    });
+
+    // Lot 8 (EXG-30 / PROP-05) — checklist d'embauche : créée à la liaison,
+    // PRÉ-COCHÉE depuis les documents déjà remis au recrutement (charte
+    // d'insertion, livret d'accueil — recruitment_documents). Idempotent (une
+    // par salarié) ; ne réécrit jamais une checklist déjà démarrée. Best effort.
+    await underSavepoint('link_checklist_embauche', async () => {
+      const docs = await client.query(
+        `SELECT document_type, delivered_at FROM recruitment_documents WHERE candidate_id = $1`, [id]);
+      const items = {};
+      const map = { charte_insertion: 'charte_insertion', livret_accueil: 'livret_accueil' };
+      for (const doc of docs.rows) {
+        const step = map[doc.document_type];
+        if (step) {
+          items[step] = {
+            fait: true,
+            date: doc.delivered_at ? new Date(doc.delivered_at).toISOString().slice(0, 10) : null,
+            responsable: 'Recrutement (remis au candidat)',
+          };
+        }
+      }
+      await client.query(
+        `INSERT INTO insertion_checklist_embauche (employee_id, items, created_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (employee_id) DO NOTHING`,
+        [employeeId, JSON.stringify(items), req.user.id]);
     });
 
     const grantedSkills = [];

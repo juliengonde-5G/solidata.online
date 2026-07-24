@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader, Section, ErrorState } from '../components';
 import { Users } from 'lucide-react';
@@ -8,6 +8,9 @@ import api from '../services/api';
 import AlertesBloc from '../components/insertion/AlertesBloc';
 import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
 import ActionsPanel from '../components/insertion/ActionsPanel';
+import FriseParcours from '../components/insertion/FriseParcours';
+import CompetencesETI from '../components/insertion/CompetencesETI';
+import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
 import {
   ENTRETIEN_STATUS_LABELS, ENTRETIEN_STATUS_COLORS, frDate as frDateIns,
 } from '../components/insertion/freins';
@@ -926,19 +929,34 @@ function Field({ label, value }) {
 // uniquement (points d'attention + historique + objectifs/actions en lecture).
 // Toute saisie passe par l'espace CIP (« Ouvrir dans l'espace CIP »).
 function InsertionReadOnlyTab({ employee }) {
-  const [timeline, setTimeline] = useState(null);
+  const navigate = useNavigate();
+  const [parcours, setParcours] = useState(null); // réponse GET /insertion/:id (timeline, milestones, objectifs, pmsmp…)
+  const [contracts, setContracts] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    api.get(`/insertion/timeline/${employee.id}`)
-      .then((r) => { if (alive) { setTimeline(r.data); setError(null); } })
+    Promise.all([
+      api.get(`/insertion/${employee.id}`),
+      api.get(`/employees/${employee.id}/contracts`).catch(() => ({ data: [] })),
+    ])
+      .then(([pRes, cRes]) => {
+        if (!alive) return;
+        setParcours(pRes.data);
+        setContracts(Array.isArray(cRes.data) ? cRes.data : []);
+        setError(null);
+      })
       .catch((err) => { if (alive) setError(err.response?.data?.error || err.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [employee.id]);
+
+  const timeline = parcours?.timeline || null;
+  // Lecture seule (REC-UX-12) : tout clic sur la frise ouvre l'espace CIP,
+  // seul chemin d'édition.
+  const openCip = () => navigate(`/insertion?employee=${employee.id}`);
 
   return (
     <div className="space-y-4 text-sm">
@@ -952,8 +970,26 @@ function InsertionReadOnlyTab({ employee }) {
 
       <AlertesBloc employeeId={employee.id} />
 
+      <ChecklistEmbauche employeeId={employee.id} canEdit={false} />
+
       {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">Parcours indisponible : {error}</div>}
       {loading && <p className="text-xs text-gray-400">Chargement du parcours…</p>}
+
+      {!loading && !error && parcours && (
+        <div>
+          <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Frise du parcours</h4>
+          <FriseParcours
+            employee={parcours.employee || employee}
+            contracts={contracts}
+            milestones={parcours.milestones || []}
+            objectifs={parcours.objectifs || []}
+            pmsmp={parcours.pmsmp || []}
+            hasCandidate={!!parcours.has_candidate_data}
+            hasPcm={!!parcours.has_pcm}
+            onSelect={openCip}
+          />
+        </div>
+      )}
 
       {timeline?.events?.length > 0 && (
         <div>
@@ -993,6 +1029,9 @@ function InsertionReadOnlyTab({ employee }) {
       </div>
       <div className="border-t pt-3">
         <ActionsPanel employeeId={employee.id} readOnly compact />
+      </div>
+      <div className="border-t pt-3">
+        <CompetencesETI employeeId={employee.id} employee={employee} canEdit={false} />
       </div>
     </div>
   );

@@ -3,8 +3,11 @@ const router = express.Router();
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { query } = require('express-validator');
+const { validate } = require('../middleware/validate');
 const { monthBounds } = require('../utils/month-range');
-const { freinColumns } = require('./insertion/freins-registry');
+const { FREINS, freinColumns } = require('./insertion/freins-registry');
+const { freinsExportColumns, rowToCells, computeCompletude } = require('../utils/insertion-freins-export');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER', 'RH'));
 
@@ -645,6 +648,295 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
   } catch (err) {
     console.error('[EXPORTS] Erreur export insertion :', err);
     res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+});
+
+// ══════════════════════════════════════════
+// PR 2 — Export « tableau des freins » 23 colonnes (EXG-25/38/43)
+//
+// Reproduit colonne à colonne le tableau du CDC (rapport 01 §5, ordre STRICT ;
+// arbitrage NOM/Prénom en 2 colonnes). Règle de valorisation des freins :
+// DERNIÈRE évaluation en date — dernier entretien réalisé du parcours courant
+// portant au moins un frein non nul (LATERAL), repli axe par axe sur le
+// diagnostic d'accueil (COALESCE par colonne, même règle que /insertion/audit).
+//
+// RGPD : identité + santé (RQTH) + judiciaire (variante) → ADMIN/RH uniquement,
+// CHAQUE génération journalisée dans rgpd_audit_log AVANT l'envoi du fichier
+// (le journal qui échoue fait échouer l'export : pas d'export non tracé).
+// `sensibles=0` (défaut) : SANS la colonne « Frein judiciaire » (art. 10,
+// EXG-38) — la colonne n'est alors même pas lue en SQL (defense in depth).
+// ══════════════════════════════════════════
+
+const FREINS_STATUTS = ['all', 'en_parcours', 'sortis'];
+
+const freinsFilterValidators = [
+  query('sensibles').optional().isIn(['0', '1']).withMessage('sensibles invalide (0 ou 1)'),
+  query('annee').optional().isInt({ min: 2000, max: 2100 }).withMessage('annee invalide'),
+  query('statut').optional().isIn(FREINS_STATUTS).withMessage(`statut invalide (${FREINS_STATUTS.join(', ')})`),
+  query('cip').optional().isInt().withMessage('cip invalide (id utilisateur)'),
+];
+
+function parseFreinsFilters(req) {
+  return {
+    sensibles: req.query.sensibles === '1',
+    statut: FREINS_STATUTS.includes(req.query.statut) ? req.query.statut : 'all',
+    annee: req.query.annee ? parseInt(req.query.annee, 10) : null,
+    cip: req.query.cip ? parseInt(req.query.cip, 10) : null,
+  };
+}
+
+/**
+ * Population + valorisation des 23 colonnes. Filtres :
+ *  - statut=en_parcours → salariés en parcours ;
+ *  - statut=sortis      → parcours terminés/abandonnés (annee → fin de parcours
+ *    dans l'année) ;
+ *  - statut=all (défaut) → toute personne passée en parcours (annee → en
+ *    parcours OU sortie dans l'année) ;
+ *  - cip → CIP référent.
+ * Les axes de freins lus en SQL excluent le judiciaire quand sensibles=0.
+ */
+async function fetchFreinsRows({ statut = 'all', annee = null, cip = null, sensibles = false }) {
+  const axes = sensibles ? freinColumns() : freinColumns().filter((c) => c !== 'frein_judiciaire');
+  const lmCols = axes.map((c) => `im.${c}`).join(', ');
+  const coalesced = axes.map((c) => `COALESCE(lm.${c}, d.${c}) AS ${c}`).join(', ');
+
+  const params = [];
+  const where = [
+    `(e.insertion_status IS DISTINCT FROM 'none'
+       OR EXISTS (SELECT 1 FROM insertion_milestones mx WHERE mx.employee_id = e.id))`,
+  ];
+  if (statut === 'en_parcours') {
+    where.push(`e.insertion_status = 'en_parcours'`);
+  } else if (statut === 'sortis') {
+    where.push(`e.insertion_status IN ('termine', 'abandon')`);
+    if (annee) { params.push(annee); where.push(`EXTRACT(YEAR FROM e.insertion_end_date) = $${params.length}`); }
+  } else if (annee) {
+    params.push(annee);
+    where.push(`(e.insertion_status = 'en_parcours' OR EXTRACT(YEAR FROM e.insertion_end_date) = $${params.length})`);
+  }
+  if (cip) { params.push(cip); where.push(`e.cip_referent_user_id = $${params.length}`); }
+
+  const { rows } = await pool.query(`
+    SELECT e.id, e.last_name, e.first_name, e.nationality, e.gender, e.birth_date,
+           e.city, e.qualification, e.disability_status, e.pass_iae_end,
+           COALESCE(prem.premier_cddi, e.insertion_start_date, e.contract_start) AS date_entree_aci,
+           COALESCE(cc.weekly_hours, e.weekly_hours) AS heures_semaine,
+           d.rqth, d.niveau_formation, d.ressources, d.logement_statut,
+           d.situation_familiale, d.projet_formation, d.emploi_vise, d.emploi_vise_rome,
+           ${coalesced},
+           pm.nb_pmsmp, pm.derniere_pmsmp
+    FROM employees e
+    LEFT JOIN LATERAL (
+      SELECT MIN(ec.start_date) AS premier_cddi
+      FROM employee_contracts ec
+      WHERE ec.employee_id = e.id AND UPPER(ec.contract_type) = 'CDDI'
+    ) prem ON true
+    LEFT JOIN LATERAL (
+      SELECT ec.weekly_hours FROM employee_contracts ec
+      WHERE ec.employee_id = e.id AND ec.is_current = true
+      ORDER BY ec.start_date DESC LIMIT 1
+    ) cc ON true
+    LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
+      AND COALESCE(d.parcours_num, 1) = COALESCE(e.parcours_num, 1)
+    LEFT JOIN LATERAL (
+      SELECT ${lmCols}
+      FROM insertion_milestones im
+      WHERE im.employee_id = e.id
+        AND COALESCE(im.parcours_num, 1) = COALESCE(e.parcours_num, 1)
+        AND im.status = 'realise'
+        AND COALESCE(${lmCols}) IS NOT NULL
+      ORDER BY COALESCE(im.completed_date, im.due_date) DESC, im.id DESC
+      LIMIT 1
+    ) lm ON true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS nb_pmsmp, MAX(p.date_fin) AS derniere_pmsmp
+      FROM insertion_pmsmp p WHERE p.employee_id = e.id
+    ) pm ON true
+    WHERE ${where.join('\n      AND ')}
+    ORDER BY e.last_name, e.first_name
+  `, params);
+  return rows;
+}
+
+// Journal RGPD (EXG-43) — même format d'entrée que routes/rgpd.js. La variante
+// sensible (frein judiciaire inclus) est journalisée sous une action DISTINCTE.
+async function logExportFreins(req, { format, sensibles, statut, annee, cip, lignes }) {
+  await pool.query(
+    'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+    [req.user.id,
+      sensibles ? 'EXPORT_INSERTION_FREINS_SENSIBLE' : 'EXPORT_INSERTION_FREINS',
+      'insertion_freins', null,
+      JSON.stringify({ format, sensibles, statut, annee, cip, lignes, requested_by: req.user.id })]
+  );
+}
+
+// GET /api/exports/insertion-freins?format=xlsx|csv&sensibles=0|1&annee=&statut=&cip=
+router.get('/insertion-freins', authorize('ADMIN', 'RH'), [
+  query('format').optional().isIn(['xlsx', 'csv']).withMessage('format invalide (xlsx ou csv)'),
+  ...freinsFilterValidators,
+], validate, async (req, res) => {
+  try {
+    const format = (req.query.format || 'xlsx').toLowerCase();
+    const filtres = parseFreinsFilters(req);
+    const rows = await fetchFreinsRows(filtres);
+    const cols = freinsExportColumns(filtres.sensibles);
+    const cellRows = rows.map((r) => rowToCells(r, filtres.sensibles));
+
+    // EXG-43 : journal AVANT l'envoi — un échec de journalisation fait échouer
+    // l'export (jamais de fichier nominatif non tracé).
+    await logExportFreins(req, { format, ...filtres, lignes: cellRows.length });
+
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    if (format === 'csv') {
+      const esc = (v) => {
+        const s = String(v ?? '');
+        return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      // CSV STRICT (pas de ligne de méta : le tableau doit rester importable
+      // colonne à colonne — la traçabilité vit dans rgpd_audit_log).
+      const lines = cellRows.map((row) => cols.map((c) => esc(row[c.key])).join(';'));
+      const csv = '﻿' + cols.map((c) => c.header).join(';') + '\n'
+        + lines.join('\n') + (lines.length ? '\n' : '');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=insertion_freins_${stamp}.csv`);
+      return res.send(csv);
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'SOLIDATA';
+    const sheet = workbook.addWorksheet('Freins');
+    sheet.columns = cols.map((c) => ({ header: c.header, key: c.key, width: Math.min(Math.max(c.header.length + 2, 12), 30) }));
+    for (const row of cellRows) sheet.addRow(row);
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+    const info = workbook.addWorksheet('Informations');
+    info.columns = [{ header: 'Champ', key: 'k', width: 30 }, { header: 'Valeur', key: 'v', width: 80 }];
+    info.addRows([
+      { k: 'Export', v: 'Tableau des freins (CDC — 23 colonnes)' },
+      { k: 'Généré le', v: new Date().toISOString() },
+      { k: 'Lignes', v: cellRows.length },
+      { k: 'Filtres', v: `statut=${filtres.statut}${filtres.annee ? `, annee=${filtres.annee}` : ''}${filtres.cip ? `, cip=${filtres.cip}` : ''}` },
+      { k: 'Colonnes sensibles', v: filtres.sensibles ? 'OUI — frein judiciaire inclus (art. 10 RGPD, diffusion interdite hors ADMIN/RH)' : 'Non (frein judiciaire exclu — EXG-38)' },
+      { k: 'Règle des freins', v: "Dernière évaluation en date : dernier entretien réalisé du parcours courant portant au moins un frein, repli axe par axe sur le diagnostic d'accueil. Vide = non évalué." },
+      { k: 'Confidentialité', v: 'Données personnelles (dont santé). Diffusion restreinte ADMIN/RH — génération journalisée (registre RGPD). Toute transmission externe passe par la synthèse agrégée non nominative.' },
+    ]);
+    info.getRow(1).font = { bold: true };
+    info.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=insertion_freins_${stamp}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[EXPORTS] Erreur export insertion-freins :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/exports/insertion-freins/completude — % de renseigné par colonne
+// (REC-UX-14 : l'écran affiche les colonnes faibles AVANT de générer l'export).
+// Mêmes filtres que l'export ; agrégat sans donnée nominative dans la réponse,
+// mais réservé ADMIN/RH comme l'export qu'il prépare. Pas de journalisation
+// (aucune ligne nominative ne sort).
+router.get('/insertion-freins/completude', authorize('ADMIN', 'RH'),
+  freinsFilterValidators, validate, async (req, res) => {
+    try {
+      const filtres = parseFreinsFilters(req);
+      const rows = await fetchFreinsRows(filtres);
+      const cellRows = rows.map((r) => rowToCells(r, filtres.sensibles));
+      const comp = computeCompletude(cellRows, filtres.sensibles);
+      res.json({
+        sensibles: filtres.sensibles,
+        filtres: { statut: filtres.statut, annee: filtres.annee, cip: filtres.cip },
+        total: comp.total,
+        colonnes: comp.colonnes,
+      });
+    } catch (err) {
+      console.error('[EXPORTS] Erreur completude insertion-freins :', err);
+      res.status(500).json({ error: 'Erreur serveur' });
+    }
+  });
+
+// ══════════════════════════════════════════
+// PR 2 — Synthèse comité de pilotage (EXG-14)
+//
+// Agrégats STRICTEMENT non nominatifs (effectifs, ETP approchés « contrôle »,
+// typologies via tranches d'âge pii-pseudonymize, entretiens, sorties vs
+// cibles, PMSMP, satisfaction) pour les COPIL 2×/an (art. 3.4) et le bilan
+// annuel (art. 5). Réutilise gatherAuditKpis (mêmes chiffres que la page
+// AuditInsertion — une seule vérité). ADMIN/MANAGER/RH (router).
+// ══════════════════════════════════════════
+const SYNTHESE_MENTION = 'Document agrégé non nominatif — comité de pilotage';
+
+router.get('/insertion-synthese', [
+  query('year').optional().isInt({ min: 2000, max: 2100 }).withMessage('year invalide'),
+  query('format').optional().isIn(['json', 'csv']).withMessage('format invalide (json ou csv)'),
+], validate, async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    // Require paresseux : routes.js vérifie PCM_ENCRYPTION_KEY/JWT_SECRET au
+    // chargement — on ne le charge qu'à l'usage (env déjà posé à ce stade).
+    const { gatherAuditKpis } = require('./insertion/routes');
+    const k = await gatherAuditKpis(year);
+
+    if ((req.query.format || 'json').toLowerCase() === 'csv') {
+      const rows = [];
+      const cible = (v) => (v == null ? 'objectif non paramétré' : v);
+      rows.push(['Général', 'Année', k.annee]);
+      rows.push(['Général', 'Salariés en parcours', k.nb_en_parcours]);
+      rows.push(['Général', 'Délai moyen du diagnostic (jours)', k.delai_moyen_diagnostic_jours ?? '']);
+      rows.push(['ETP (contrôle ERP)', 'ETP réalisés approchés', k.etp_realises_approx?.valeur ?? '']);
+      rows.push(['ETP (contrôle ERP)', 'CDDI actifs', k.etp_realises_approx?.nb_cddi_actifs ?? '']);
+      rows.push(['ETP (contrôle ERP)', 'Cible conventionnée', cible(k.conventionnel?.cibles?.cible_etp_conventionnes)]);
+      rows.push(['ETP (contrôle ERP)', 'Note', k.etp_realises_approx?.note || '']);
+      rows.push(['Typologies', 'RQTH', k.typologies?.rqth ?? '']);
+      for (const [src, n] of Object.entries(k.typologies?.ressources || {})) rows.push(['Typologies', `Ressource — ${src}`, n]);
+      for (const [niv, n] of Object.entries(k.typologies?.niveaux_formation || {})) rows.push(['Typologies', `Niveau de formation — ${niv}`, n]);
+      for (const [tr, n] of Object.entries(k.typologies?.tranches_age || {})) rows.push(['Typologies', `Tranche d'âge — ${tr}`, n]);
+      for (const m of k.milestones?.par_type || []) {
+        rows.push(['Entretiens', `${m.label} — réalisés / échus`, `${m.realises_echus} / ${m.echus}`]);
+      }
+      rows.push(['Entretiens', 'Taux de réalisation global (échus) %', k.milestones?.global?.taux ?? '']);
+      for (const f of FREINS) {
+        const moy = k.freins_moyennes?.[f.column];
+        rows.push(['Freins (moyenne cohorte /5)', f.label, moy ?? 'non évalué']);
+      }
+      rows.push(['Sorties', 'Total constaté', k.sorties?.total ?? 0]);
+      rows.push(['Sorties', 'Dynamiques — nb', k.sorties?.dynamiques ?? 0]);
+      rows.push(['Sorties', 'Taux dynamiques (%)', k.sorties?.taux_dynamiques ?? '']);
+      rows.push(['Sorties', 'Cible dynamiques (%)', cible(k.conventionnel?.cibles?.cible_taux_dynamiques)]);
+      for (const [cls, cKey] of [['emploi_durable', 'cible_taux_durable'], ['emploi_transition', 'cible_taux_transition'], ['sortie_positive', 'cible_taux_positive']]) {
+        rows.push(['Sorties', `${cls} — nb`, k.sorties?.par_classification?.[cls] ?? 0]);
+        rows.push(['Sorties', `${cls} — taux (%)`, k.sorties?.taux_par_classification?.[cls] ?? '']);
+        rows.push(['Sorties', `${cls} — cible (%)`, cible(k.conventionnel?.cibles?.[cKey])]);
+      }
+      rows.push(['Sorties', 'Méthode', k.conventionnel?.methode || '']);
+      rows.push(['PMSMP', 'Conventions de l\'année', k.pmsmp?.nb ?? 0]);
+      rows.push(['PMSMP', 'Jours calendaires', k.pmsmp?.jours ?? 0]);
+      rows.push(['PMSMP', 'Salariés concernés', k.pmsmp?.nb_salaries ?? 0]);
+      rows.push(['Satisfaction de sortie', 'Réponses', k.satisfaction?.nb_reponses ?? 0]);
+      rows.push(['Satisfaction de sortie', 'Moyenne globale (1-4)', k.satisfaction?.moyenne_globale ?? '']);
+      rows.push(['Actions CIP', 'En cours', k.actions?.total_en_cours ?? 0]);
+
+      const esc = (v) => {
+        const s = String(v ?? '');
+        return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      const csv = '﻿' + `${SYNTHESE_MENTION}\n`
+        + 'Section;Indicateur;Valeur\n'
+        + rows.map((r) => r.map(esc).join(';')).join('\n') + '\n';
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=insertion_synthese_${year}.csv`);
+      return res.send(csv);
+    }
+
+    res.json({ mention: SYNTHESE_MENTION, ...k });
+  } catch (err) {
+    console.error('[EXPORTS] Erreur insertion-synthese :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

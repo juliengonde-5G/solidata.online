@@ -3,7 +3,11 @@ const {
   computeCddiCumulativeMonths,
   resyncMilestones,
   MILESTONE_TYPES,
+  MILESTONE_TYPE_LABELS,
   milestoneLabel,
+  computeLearningStyle,
+  competenceAverage,
+  ensurePeriodeEssaiMilestone,
 } = require('../../../src/routes/insertion/engine');
 
 // ── Extension 2026-07 (PR1) : l'échéancier produit désormais des TYPES
@@ -200,5 +204,80 @@ describe('insertion/engine — resyncMilestones (item 41c, types techniques 2026
     const r = await resyncMilestones(db, 1);
     expect(r.updated).toHaveLength(0);
     expect(r.created).toHaveLength(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT 8 (2026-07 PR3) — helpers PURS de co-construction & période d'essai
+// ═══════════════════════════════════════════════════════════════════════════
+describe('insertion/engine — computeLearningStyle (Kolb, EXG-32)', () => {
+  const A24 = Array(24).fill('A');
+  const B24 = Array(24).fill('B');
+
+  it('les 4 profils sont produits de façon déterministe', () => {
+    // 1re moitié = perception (A=CE, B=AC), 2e moitié = traitement (A=AE, B=RO)
+    expect(computeLearningStyle(A24)).toBe('adaptateur');                                   // CE + AE
+    expect(computeLearningStyle([...Array(12).fill('A'), ...Array(12).fill('B')])).toBe('divergeur');     // CE + RO
+    expect(computeLearningStyle(B24)).toBe('assimilateur');                                  // AC + RO
+    expect(computeLearningStyle([...Array(12).fill('B'), ...Array(12).fill('A')])).toBe('convergeur');    // AC + AE
+  });
+
+  it('accepte un objet indexé 1..N et normalise la casse', () => {
+    const obj = {};
+    for (let i = 1; i <= 24; i++) obj[i] = i <= 12 ? 'a' : 'b';
+    expect(computeLearningStyle(obj)).toBe('divergeur');
+  });
+
+  it('entrée invalide → null', () => {
+    expect(computeLearningStyle(null)).toBeNull();
+    expect(computeLearningStyle([])).toBeNull();
+    expect(computeLearningStyle(['A'])).toBeNull();
+  });
+});
+
+describe('insertion/engine — competenceAverage (N/E exclu, EXG-27)', () => {
+  it('exclut les N/E (non_evalue) et les notes nulles de la moyenne', () => {
+    const scores = [
+      { note: 7, non_evalue: false },
+      { note: null, non_evalue: true },   // N/E → exclu
+      { note: 9, non_evalue: false },
+      { note: '', non_evalue: false },     // vide → exclu (compté N/E)
+    ];
+    expect(competenceAverage(scores)).toEqual({ moyenne: 8, n_notes: 2, n_ne: 2 });
+  });
+
+  it('aucune note évaluée → moyenne null', () => {
+    expect(competenceAverage([{ non_evalue: true }, { note: null }])).toEqual({ moyenne: null, n_notes: 0, n_ne: 2 });
+    expect(competenceAverage([])).toEqual({ moyenne: null, n_notes: 0, n_ne: 0 });
+  });
+
+  it('arrondi à 1 décimale', () => {
+    expect(competenceAverage([{ note: 8 }, { note: 9 }, { note: 9 }]).moyenne).toBe(8.7);
+  });
+});
+
+describe('insertion/engine — ensurePeriodeEssaiMilestone (EXG-30, idempotent)', () => {
+  it('crée le jalon à start + joursEssai quand aucun n\'existe', async () => {
+    const calls = [];
+    const db = { query: (sql, params) => {
+      calls.push({ sql: String(sql), params });
+      if (/milestone_type = 'periode_essai' LIMIT 1/.test(String(sql))) return Promise.resolve({ rows: [] });
+      if (/INSERT INTO insertion_milestones/.test(String(sql))) return Promise.resolve({ rows: [{ id: 7, due_date: params[3] }] });
+      return Promise.resolve({ rows: [] });
+    } };
+    const r = await ensurePeriodeEssaiMilestone(db, 5, { parcoursNum: 1, startDate: '2026-01-01', joursEssai: 30, userId: 2 });
+    expect(r.id).toBe(7);
+    const ins = calls.find((c) => /INSERT INTO insertion_milestones/.test(c.sql));
+    expect(ins.params[3]).toBe('2026-01-31');                    // due = start + 30 j
+    expect(ins.params[2]).toBe(MILESTONE_TYPE_LABELS.periode_essai);
+  });
+
+  it('idempotent : ne recrée pas si un jalon période d\'essai existe déjà', async () => {
+    const db = { query: (sql) => {
+      if (/milestone_type = 'periode_essai' LIMIT 1/.test(String(sql))) return Promise.resolve({ rows: [{ id: 3 }] });
+      throw new Error('INSERT ne doit pas être appelé');
+    } };
+    const r = await ensurePeriodeEssaiMilestone(db, 5, { startDate: '2026-01-01' });
+    expect(r.id).toBe(3);
   });
 });

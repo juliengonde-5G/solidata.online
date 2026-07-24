@@ -3576,10 +3576,10 @@ async function initDatabase() {
         (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
       SELECT
         'Accompagnement socio-professionnel des salariés en insertion',
-        'Suivi individualisé du parcours d''insertion (conventionnement IAE) : diagnostic socio-professionnel d''accueil, entretiens et bilans périodiques, évaluation des freins périphériques (9 axes), objectifs et plans d''action d''accompagnement, périodes d''immersion (PMSMP), renouvellements de contrat, bilan et suivi post-sortie, questionnaire de satisfaction ; reporting réglementaire agrégé (DREETS/ASP, FSE+, financeurs).',
+        'Suivi individualisé du parcours d''insertion (conventionnement IAE) : diagnostic socio-professionnel d''accueil, entretiens et bilans périodiques, évaluation des freins périphériques (9 axes), objectifs et plans d''action d''accompagnement, périodes d''immersion (PMSMP), renouvellements de contrat, bilan et suivi post-sortie, questionnaire de satisfaction ; entretien de période d''essai et checklist d''embauche (continuité recrutement), évaluations de compétences métier par l''encadrant technique et co-construction du projet (SWOT, portefeuille de compétences, style d''apprentissage) ; reporting réglementaire agrégé (DREETS/ASP, FSE+, financeurs).',
         'Obligation légale et mission d''intérêt public (IAE, art. L5132-1 s. Code du travail)',
         'Salariés en parcours d''insertion (CDDI) et candidats liés',
-        'Identité et situation socio-professionnelle, freins périphériques (scores 1-5 et observations), dont : données de SANTÉ (art. 9 RGPD — commentaires chiffrés applicativement, aucun diagnostic médical) et données JUDICIAIRES (art. 10 RGPD — niveau de frein et impact organisationnel factuel uniquement, détail chiffré), logement, ressources/budget, mobilité, situation familiale, formation et projet professionnel, Pass IAE, données FSE+ (entrée/sortie)',
+        'Identité et situation socio-professionnelle, freins périphériques (scores 1-5 et observations), dont : données de SANTÉ (art. 9 RGPD — commentaires chiffrés applicativement, aucun diagnostic médical) et données JUDICIAIRES (art. 10 RGPD — niveau de frein et impact organisationnel factuel uniquement, détail chiffré), logement, ressources/budget, mobilité, situation familiale, formation et projet professionnel, Pass IAE, données FSE+ (entrée/sortie), grilles de compétences métier (notes /10 évaluées par l''encadrant technique, sans donnée sensible), portefeuille de compétences, style d''apprentissage et checklist d''embauche',
         'CIP et service RH (nominatif), direction ; agrégats NON nominatifs uniquement : financeurs et comités de pilotage (DREETS, FSE+, convention)',
         'Parcours + 24 mois après dernier contact (anonymisation) ; FSE+ : piste d''audit séparée >= 5 ans',
         'Chiffrement applicatif AES-256 des champs santé/judiciaire (utils/field-crypto.js), masquage par rôle (MANAGER sans accès aux données sensibles), accès restreint ADMIN/RH pour l''écriture, pseudonymisation systématique avant tout appel IA (utils/pii-pseudonymize.js), journalisation applicative des consultations et exports ; champs FSE+ exclus de l''anonymisation à 2 ans (piste d''audit >= 5 ans après dernier paiement, archivage à accès restreint — à inscrire à l''AIPD)'
@@ -3632,6 +3632,188 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_alert_acks_emp ON insertion_alert_acks(employee_id, alert_type, acked_until DESC);');
 
     console.log('[INIT-DB] Migration extension entretiens 2026-07 (PR1) ✓');
+
+    // ══════════════════════════════════════════════════════════════
+    // -- Migration Lot 8 — espace encadrant technique, co-construction et
+    //    continuité recrutement (2026-07 PR3) --
+    // Couvre EXG-26 (grilles de compétences par filière, administrables),
+    // EXG-27 (volet accompagnement social/professionnel noté, N/E hors moyenne),
+    // EXG-28 (SWOT / besoins / COA), EXG-32 (portefeuille de compétences, CECRL,
+    // style d'apprentissage Kolb) et EXG-30/PROP-03/PROP-05 (entretien de
+    // période d'essai + checklist d'embauche). Tout idempotent (ADD COLUMN IF
+    // NOT EXISTS, CREATE TABLE IF NOT EXISTS, DO block scan pg_constraint pour le
+    // CHECK milestone_type élargi, seeds gardés ON CONFLICT DO NOTHING).
+    // ══════════════════════════════════════════════════════════════
+
+    // (8a) insertion_milestones — type 'periode_essai' ajouté au CHECK +
+    // formulaire/décision de période d'essai. Même pattern DROP-scan + ADD gardé
+    // que le CHECK d'origine : le marqueur 'periode_essai' épargne le nouveau
+    // CHECK aux exécutions suivantes. ORDRE : le bloc PR1 (plus haut) crée le
+    // CHECK à 5 valeurs (base neuve) ; ce bloc l'élargit à 6 valeurs. Sur base
+    // déjà migrée, le DROP-scan PR1 (« NOT ILIKE bilan_intermediaire ») laisse
+    // en place le CHECK à 6 valeurs (il contient bilan_intermediaire), et son
+    // ADD gardé ne recrée rien (contrainte déjà nommée).
+    await client.query(`
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS periode_essai_form JSONB;
+      ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS periode_essai_decision VARCHAR(20) CHECK (periode_essai_decision IN ('confirme', 'rompu', 'a_revoir'));
+    `);
+    await client.query(`
+      DO $$
+      DECLARE cname text;
+      BEGIN
+        FOR cname IN
+          SELECT conname FROM pg_constraint
+          WHERE conrelid = 'insertion_milestones'::regclass AND contype = 'c'
+            AND pg_get_constraintdef(oid) ILIKE '%milestone_type%'
+            AND pg_get_constraintdef(oid) NOT ILIKE '%periode_essai%'
+        LOOP
+          EXECUTE 'ALTER TABLE insertion_milestones DROP CONSTRAINT ' || quote_ident(cname);
+        END LOOP;
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'insertion_milestones'::regclass AND conname = 'insertion_milestones_milestone_type_check'
+        ) THEN
+          ALTER TABLE insertion_milestones ADD CONSTRAINT insertion_milestones_milestone_type_check
+            CHECK (milestone_type IN ('diagnostic_accueil', 'bilan_intermediaire', 'renouvellement', 'bilan_sortie', 'suivi_post_sortie', 'periode_essai'));
+        END IF;
+      END $$;
+    `);
+
+    // (8b) insertion_diagnostics — co-construction : SWOT d'entrée (EXG-28),
+    // besoins exprimés, COA ; portefeuille de compétences + savoir-faire/être
+    // + style d'apprentissage Kolb (EXG-32 ; cecrl_niveau existe déjà PR1).
+    // Champs NON sensibles → visibles ETI (aucun ajout à MANAGER_HIDDEN_FIELDS).
+    await client.query(`
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS swot_atouts TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS swot_faiblesses TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS swot_opportunites TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS swot_menaces TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS besoins_exprimes TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS coa_texte TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS portefeuille_interets JSONB;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS portefeuille_competences JSONB;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS savoir_faire TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS savoir_etre TEXT;
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS style_apprentissage VARCHAR(20) CHECK (style_apprentissage IN ('adaptateur', 'divergeur', 'assimilateur', 'convergeur'));
+      ALTER TABLE insertion_diagnostics ADD COLUMN IF NOT EXISTS style_apprentissage_reponses JSONB;
+    `);
+
+    // (8c) Grilles de compétences ADMINISTRABLES par filière (EXG-26/27).
+    // Référentiel = items (rubrique + item) par filière ; UNIQUE(filiere,
+    // rubrique, item) pour un seed idempotent. Les 4 filières ST (tri, collecte,
+    // logistique, boutique) + 'transverse' (comportement / accompagnement).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_competence_referentiels (
+        id SERIAL PRIMARY KEY,
+        filiere VARCHAR(20) NOT NULL CHECK (filiere IN ('tri', 'collecte', 'logistique', 'boutique', 'transverse')),
+        rubrique VARCHAR(120) NOT NULL,
+        item VARCHAR(200) NOT NULL,
+        ordre SMALLINT NOT NULL DEFAULT 0,
+        actif BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(filiere, rubrique, item)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_competence_referentiels_filiere ON insertion_competence_referentiels(filiere, actif);');
+
+    // Évaluations périodiques (par tranches 1-6 / 6-12 / 12-18 / 18-24 mois),
+    // saisies par l'ETI, triple validation (salarié/ETI/CIP) en JSONB horodaté.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_competence_evaluations (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        parcours_num SMALLINT NOT NULL DEFAULT 1,
+        filiere VARCHAR(20),
+        periode VARCHAR(20),
+        date_evaluation DATE,
+        evaluateur_id INTEGER REFERENCES users(id),
+        statut VARCHAR(15) NOT NULL DEFAULT 'brouillon' CHECK (statut IN ('brouillon', 'valide')),
+        validations JSONB,
+        synthese TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_competence_eval_employee ON insertion_competence_evaluations(employee_id, parcours_num);');
+
+    // Notes /10 ou N/E (non_evalue) par item ; rubrique/item SNAPSHOT dénormalisé
+    // pour résister à la suppression d'un item du référentiel (FK SET NULL).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_competence_scores (
+        id SERIAL PRIMARY KEY,
+        evaluation_id INTEGER NOT NULL REFERENCES insertion_competence_evaluations(id) ON DELETE CASCADE,
+        referentiel_id INTEGER REFERENCES insertion_competence_referentiels(id) ON DELETE SET NULL,
+        rubrique VARCHAR(120),
+        item VARCHAR(200),
+        note SMALLINT CHECK (note BETWEEN 0 AND 10),
+        non_evalue BOOLEAN NOT NULL DEFAULT false,
+        observation TEXT,
+        objectif TEXT
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_competence_scores_eval ON insertion_competence_scores(evaluation_id);');
+
+    // Seed idempotent d'un jeu de départ ADMINISTRABLE (éditable ensuite). Un
+    // item renommé/désactivé par l'utilisateur n'est jamais réécrit (ON CONFLICT
+    // (filiere, rubrique, item) DO NOTHING). Rubrique « Comportement » commune +
+    // volet « Accompagnement social et professionnel » (EXG-27) en transverse ;
+    // activités métier par filière.
+    await client.query(`
+      INSERT INTO insertion_competence_referentiels (filiere, rubrique, item, ordre) VALUES
+        ('transverse', 'Comportement', 'Assiduité', 1),
+        ('transverse', 'Comportement', 'Ponctualité', 2),
+        ('transverse', 'Comportement', 'Respect des consignes', 3),
+        ('transverse', 'Comportement', 'Respect des règles de sécurité', 4),
+        ('transverse', 'Comportement', 'Intégration dans l''équipe', 5),
+        ('transverse', 'Comportement', 'Communication', 6),
+        ('transverse', 'Comportement', 'Autonomie au poste', 7),
+        ('transverse', 'Accompagnement social et professionnel', 'Assiduité aux rendez-vous', 1),
+        ('transverse', 'Accompagnement social et professionnel', 'Autonomie dans les démarches', 2),
+        ('transverse', 'Accompagnement social et professionnel', 'Compétences informatiques / numériques', 3),
+        ('transverse', 'Accompagnement social et professionnel', 'Intérêt pour le projet professionnel', 4),
+        ('transverse', 'Accompagnement social et professionnel', 'CV / lettre de motivation / TRE', 5),
+        ('transverse', 'Accompagnement social et professionnel', 'Enquêtes métiers', 6),
+        ('transverse', 'Accompagnement social et professionnel', 'PMSMP réalisée(s)', 7),
+        ('tri', 'Activités métier', 'Ouverture des sacs / craquage', 1),
+        ('tri', 'Activités métier', 'Tri par catégorie et qualité', 2),
+        ('tri', 'Activités métier', 'Cadence de tri', 3),
+        ('tri', 'Activités métier', 'Reconnaissance des matières textiles', 4),
+        ('tri', 'Activités métier', 'Conditionnement / mise en balle', 5),
+        ('collecte', 'Activités métier', 'Conduite et sécurité du véhicule', 1),
+        ('collecte', 'Activités métier', 'Manutention et port de charges', 2),
+        ('collecte', 'Activités métier', 'Vidage des points d''apport (CAV)', 3),
+        ('collecte', 'Activités métier', 'Tenue de la feuille de tournée', 4),
+        ('collecte', 'Activités métier', 'Relation avec les partenaires / usagers', 5),
+        ('logistique', 'Activités métier', 'Réception et contrôle des flux', 1),
+        ('logistique', 'Activités métier', 'Préparation de commandes', 2),
+        ('logistique', 'Activités métier', 'Gestion et rangement du stock', 3),
+        ('logistique', 'Activités métier', 'Utilisation des engins (transpalette / CACES)', 4),
+        ('logistique', 'Activités métier', 'Étiquetage et traçabilité', 5),
+        ('boutique', 'Activités métier', 'Accueil et relation client', 1),
+        ('boutique', 'Activités métier', 'Tenue de caisse', 2),
+        ('boutique', 'Activités métier', 'Mise en rayon et merchandising', 3),
+        ('boutique', 'Activités métier', 'Étiquetage et valorisation des produits', 4),
+        ('boutique', 'Activités métier', 'Gestion des stocks boutique', 5)
+      ON CONFLICT (filiere, rubrique, item) DO NOTHING;
+    `);
+
+    // (8d) Checklist d'embauche (EXG-30 / PROP-05) — une par salarié, items en
+    // JSONB (promesse_embauche, contrat_signe, mutuelle, charte_insertion,
+    // livret_accueil, reglement_interieur, formation_poste), chacun
+    // { fait, date, responsable }. Pas de moteur d'état (ERP léger).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_checklist_embauche (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL UNIQUE REFERENCES employees(id) ON DELETE CASCADE,
+        items JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    console.log("[INIT-DB] Migration Lot 8 — encadrant / co-construction / période d'essai (PR3) ✓");
 
     console.log('[INIT-DB] Module Parcours Insertion ✓');
 

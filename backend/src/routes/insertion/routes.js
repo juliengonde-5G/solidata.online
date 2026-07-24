@@ -13,12 +13,15 @@ const {
   FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, MILESTONE_TYPES, MILESTONE_TYPE_LABELS,
   milestoneLabel, analyzeInsertion, buildTimeline,
   computeCddiCumulativeMonths, resyncMilestones, generateMilestones,
+  LEARNING_STYLES, computeLearningStyle, competenceAverage,
 } = require('./engine');
 const { FREINS, freinColumns, RADAR_AXES } = require('./freins-registry');
 const { SENSITIVE_DIAG_FIELDS, encryptField, decryptField } = require('../../utils/field-crypto');
 const { maskInsertionRow, maskInsertionRows, MANAGER_HIDDEN_FIELDS } = require('./masking');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
 const { autoLogActivity } = require('../../middleware/activity-logger');
+const { PMSMP_MAX_JOURS_CONVENTION, PMSMP_MAX_CUMUL_12M, pmsmpDays, computeCumul12MoisGlissants } = require('./pmsmp-rules');
+const { ageBracket } = require('../../utils/pii-pseudonymize');
 
 const PCM_KEY = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
 if (!PCM_KEY) {
@@ -181,6 +184,10 @@ const DIAG_TEXT_FIELDS = [
   'commentaire_projet', 'commentaire_linguistique',
   'metiers_souhaites', 'projet_formation', 'emploi_vise',
   'attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee',
+  // Lot 8 (PR3) — co-construction : SWOT / besoins / COA (EXG-28), savoir-faire
+  // et savoir-être du portefeuille de compétences (EXG-32). Non sensibles.
+  'swot_atouts', 'swot_faiblesses', 'swot_opportunites', 'swot_menaces',
+  'besoins_exprimes', 'coa_texte', 'savoir_faire', 'savoir_etre',
 ];
 const DIAG_ENUM_FIELDS = {
   logement_statut: ['locataire_social', 'locataire_prive', 'proprietaire', 'heberge', 'sans_abri'],
@@ -192,6 +199,8 @@ const DIAG_ENUM_FIELDS = {
   pret_a_se_former: null,
   cecrl_niveau: null,
   emploi_vise_rome: null,
+  // Lot 8 (PR3) — style d'apprentissage Kolb (EXG-32) : 4 profils.
+  style_apprentissage: LEARNING_STYLES,
 };
 const DIAG_BOOL_FIELDS = [
   'logement_satisfaction', 'allocataire_caf', 'rqth', 'contre_indications', 'suivi_sante',
@@ -201,7 +210,10 @@ const DIAG_BOOL_FIELDS = [
 const DIAG_DATE_FIELDS = ['piece_identite_validite', 'rqth_fin'];
 const DIAG_NUM_FIELDS = ['autre_employeur_heures', 'nb_enfants'];
 const DIAG_ARRAY_FIELDS = ['ressources', 'moyen_transport'];
-const DIAG_JSONB_FIELDS = ['questionnaire_detail', 'fse_entree'];
+const DIAG_JSONB_FIELDS = ['questionnaire_detail', 'fse_entree',
+  // Lot 8 (PR3) — portefeuille de compétences (cases cochées) + réponses au
+  // questionnaire 24 items du style d'apprentissage (EXG-32).
+  'portefeuille_interets', 'portefeuille_competences', 'style_apprentissage_reponses'];
 
 const ALL_DIAG_FIELDS = [
   ...DIAG_FREIN_SCORE_FIELDS, ...DIAG_TEXT_FIELDS, ...Object.keys(DIAG_ENUM_FIELDS),
@@ -279,6 +291,14 @@ router.put('/diagnostic/:employeeId', [
       for (const k of Object.keys(d)) {
         if (MANAGER_HIDDEN_FIELDS.includes(k) || k.startsWith('frein_judiciaire')) delete d[k];
       }
+    }
+
+    // Lot 8 (EXG-32) — style d'apprentissage : si le front envoie seulement les
+    // 24 réponses A/B (style_apprentissage_reponses) sans le résultat, on le
+    // calcule côté serveur (helper pur exposé) ; le front peut aussi le fournir.
+    if (('style_apprentissage_reponses' in d) && !('style_apprentissage' in d) && d.style_apprentissage_reponses) {
+      const st = computeLearningStyle(d.style_apprentissage_reponses);
+      if (st) d.style_apprentissage = st;
     }
 
     const pn = await currentParcoursNum(pool, empId);
@@ -394,6 +414,24 @@ async function applySortieParcoursEffect(db, ms, requestedStatus) {
   }
 }
 
+// Effet de clôture d'un entretien de période d'essai (Lot 8, EXG-30/PROP-03).
+// Décision « rompu » → clôture propre du parcours (statut abandon + date de
+// sortie) au lieu du parcours fantôme historique. « confirme »/« a_revoir » →
+// le parcours continue (bascule officielle vers l'accompagnement). Idempotent.
+async function applyPeriodeEssaiEffect(db, ms) {
+  if (ms.milestone_type !== 'periode_essai') return;
+  if (ms.periode_essai_decision === 'rompu' && ms.status === 'realise') {
+    await db.query(
+      `UPDATE employees
+         SET insertion_status = 'abandon',
+             insertion_end_date = COALESCE(insertion_end_date, $2::date, CURRENT_DATE),
+             updated_at = NOW()
+       WHERE id = $1 AND insertion_status = 'en_parcours'`,
+      [ms.employee_id, ms.completed_date || null]
+    );
+  }
+}
+
 // POST /api/insertion/milestones — Créer un entretien
 // Types TECHNIQUES (diagnostic_accueil, bilan_intermediaire, renouvellement,
 // bilan_sortie, suivi_post_sortie). bilan_intermediaire : créable à toute date,
@@ -408,6 +446,16 @@ router.post('/milestones', [
 ], validate, async (req, res) => {
   try {
     const { employee_id, milestone_type, due_date, contract_id, previous_milestone_id } = req.body;
+
+    // Garde ETI (RES-10, PR 2) : un MANAGER (encadrant technique) ne crée que
+    // des entretiens de RENOUVELLEMENT (son volet — écran ETI phase B) ; tout
+    // autre type reste réservé ADMIN/RH.
+    if (baseRoleOf(req) === 'MANAGER' && milestone_type !== 'renouvellement') {
+      return res.status(403).json({
+        error: "Un encadrant (MANAGER) ne peut créer que des entretiens de renouvellement.",
+      });
+    }
+
     const due = due_date || new Date().toISOString().split('T')[0];
     const pn = await currentParcoursNum(pool, employee_id);
 
@@ -476,7 +524,41 @@ router.post('/milestones', [
 // ── Champs éditables d'un entretien (PUT /milestones/:id) ──
 // Fin du COALESCE intégral (03 §6.3) : seuls les champs PRÉSENTS dans le body
 // sont écrits, et null est accepté (permet d'effacer une date, un frein…).
-const MILESTONE_JSONB_FIELDS = ['previous_review', 'validations', 'renouvellement_form', 'sortie_documents', 'remise_salarie', 'fse_sortie', 'ai_recommendations'];
+// Un MANAGER (encadrant technique) n'agit que sur SES salariés. Rattachement :
+// employees.manager_id → fiche encadrant → users.id, OU cip_referent_user_id.
+// FAIL-CLOSED : sans rattachement connu, le MANAGER est refusé (P1 revue Codex
+// PR#74 — sinon tout encadrant pourrait écrire le renouvellement d'autrui).
+async function managerOwnsEmployee(db, employeeId, userId) {
+  const r = await db.query(
+    `SELECT e.cip_referent_user_id, mgr.user_id AS manager_user_id
+     FROM employees e
+     LEFT JOIN employees mgr ON mgr.id = e.manager_id
+     WHERE e.id = $1`,
+    [employeeId]
+  );
+  if (r.rows.length === 0) return false;
+  const row = r.rows[0];
+  return (row.cip_referent_user_id != null && row.cip_referent_user_id === userId)
+    || (row.manager_user_id != null && row.manager_user_id === userId);
+}
+
+// Fusion des validations PAR RÔLE (traçabilité — P1 revue Codex PR#74) : une
+// écriture ne remplace QUE le rôle qu'elle porte ; les autres signatures
+// (eti / cip / salarie / directeur) sont PRÉSERVÉES. La purge est réservée à la
+// réouverture (validations = NULL, caducité tracée dans l'historique).
+function normalizeValidations(x) {
+  if (typeof x === 'string') { try { x = JSON.parse(x); } catch (_) { return []; } }
+  return Array.isArray(x) ? x.filter((v) => v && v.role) : [];
+}
+function mergeValidations(existing, incoming) {
+  const inc = normalizeValidations(incoming);
+  if (inc.length === 0) return normalizeValidations(existing);
+  const roles = new Set(inc.map((v) => v.role));
+  const kept = normalizeValidations(existing).filter((v) => !roles.has(v.role));
+  return [...kept, ...inc];
+}
+
+const MILESTONE_JSONB_FIELDS = ['previous_review', 'validations', 'renouvellement_form', 'sortie_documents', 'remise_salarie', 'fse_sortie', 'ai_recommendations', 'periode_essai_form'];
 const MILESTONE_EDITABLE_FIELDS = [
   'status', 'titre', 'due_date', 'interview_date', 'interviewer_id', 'completed_date',
   ...FREINS.map((f) => f.column),
@@ -488,6 +570,7 @@ const MILESTONE_EDITABLE_FIELDS = [
   'previous_milestone_id', 'contract_id',
   'renouvellement_avis', 'renouvellement_duree_mois',
   'post_sortie_situation', 'post_sortie_commentaire',
+  'periode_essai_decision', // Lot 8 (PR3) — décision de période d'essai
   ...MILESTONE_JSONB_FIELDS,
 ];
 
@@ -501,10 +584,23 @@ router.put('/milestones/:id', [
   body('sortie_classification').optional({ nullable: true }).isIn(SORTIE_CLASSES).withMessage(`sortie_classification invalide (attendu : ${SORTIE_CLASSES.join(', ')})`),
   body('renouvellement_avis').optional({ nullable: true }).isIn(['favorable', 'favorable_reserves', 'defavorable']).withMessage('renouvellement_avis invalide'),
   body('post_sortie_situation').optional({ nullable: true }).isIn(['emploi_durable', 'emploi_transition', 'formation', 'recherche_emploi', 'autre', 'injoignable']).withMessage('post_sortie_situation invalide'),
+  body('periode_essai_decision').optional({ nullable: true }).isIn(['confirme', 'rompu', 'a_revoir']).withMessage('periode_essai_decision invalide (confirme, rompu, a_revoir)'),
   ...FREINS.map((f) => body(f.column).optional({ nullable: true }).isInt({ min: 1, max: 5 }).withMessage(`${f.column} : niveau attendu entre 1 et 5`)),
 ], validate, async (req, res) => {
   try {
     const d = req.body;
+
+    // Garde ETI (RES-10, PR 2) : le PUT générique écrit TOUS les champs (dont
+    // freins art. 9/10, bilans, sortie) → interdit à un MANAGER. Son écriture
+    // passe EXCLUSIVEMENT par la route limitée
+    // PUT /renouvellements/:milestoneId/formulaire (renouvellement_form + avis).
+    if (baseRoleOf(req) === 'MANAGER') {
+      return res.status(403).json({
+        error: "Modification réservée ADMIN/RH.",
+        hint: "Encadrant : utilisez le formulaire de renouvellement (PUT /api/insertion/renouvellements/:id/formulaire).",
+      });
+    }
+
     const before = await pool.query('SELECT * FROM insertion_milestones WHERE id = $1', [req.params.id]);
     if (before.rows.length === 0) return res.status(404).json({ error: 'Entretien non trouvé' });
     const prev = before.rows[0];
@@ -522,7 +618,12 @@ router.put('/milestones/:id', [
     for (const field of MILESTONE_EDITABLE_FIELDS) {
       if (!(field in d)) continue;
       let v = d[field] === '' ? null : d[field];
-      if (v != null && MILESTONE_JSONB_FIELDS.includes(field)) v = JSON.stringify(v);
+      if (field === 'validations') {
+        // Jamais d'écrasement : on fusionne par rôle avec l'existant (P1 Codex).
+        v = JSON.stringify(mergeValidations(prev.validations, d.validations));
+      } else if (v != null && MILESTONE_JSONB_FIELDS.includes(field)) {
+        v = JSON.stringify(v);
+      }
       vals.push(v);
       sets.push(`${field} = $${vals.length}`);
     }
@@ -583,31 +684,67 @@ router.post('/milestones/:id/close', [
 
     const problems = [];
 
+    // Lot 8 (EXG-30) — l'entretien de période d'essai a des contrôles ADAPTÉS :
+    // pas d'exigence de freins (il précède le diagnostic social) ni de bilan
+    // précédent (c'est le tout premier jalon), mais une DÉCISION obligatoire.
+    const isPeriodeEssai = ms.milestone_type === 'periode_essai';
+
     // 1. Freins évalués — ou non-évaluation explicitement assumée par la CIP.
-    const missing = FREINS.filter((f) => ms[f.column] == null).map((f) => f.key);
-    if (missing.length > 0 && req.body.assume_freins_non_evalues !== true) {
-      problems.push({
-        code: 'freins_non_evalues',
-        freins: missing,
-        message: `Freins non évalués : ${missing.join(', ')}. Évaluez-les ou clôturez avec « assume_freins_non_evalues » (non-évaluation assumée).`,
-      });
+    //    (Non applicable à l'entretien de période d'essai.)
+    if (!isPeriodeEssai) {
+      const missing = FREINS.filter((f) => ms[f.column] == null).map((f) => f.key);
+      if (missing.length > 0 && req.body.assume_freins_non_evalues !== true) {
+        problems.push({
+          code: 'freins_non_evalues',
+          freins: missing,
+          message: `Freins non évalués : ${missing.join(', ')}. Évaluez-les ou clôturez avec « assume_freins_non_evalues » (non-évaluation assumée).`,
+        });
+      }
     }
 
     // 2. Évaluation du bilan précédent (previous_review) si un entretien
-    // réalisé antérieur existe sur ce parcours (REC-UX-03).
-    const prevRealise = await client.query(
-      `SELECT id FROM insertion_milestones
-       WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1)
-         AND id <> $3 AND status = 'realise' LIMIT 1`,
-      [ms.employee_id, ms.parcours_num, ms.id]
-    );
-    const pr = ms.previous_review;
-    const prEmpty = pr == null || (Array.isArray(pr) && pr.length === 0);
-    if (prevRealise.rows.length > 0 && prEmpty) {
+    // réalisé antérieur existe sur ce parcours (REC-UX-03). Non exigée pour la
+    // période d'essai (premier jalon du parcours).
+    if (!isPeriodeEssai) {
+      const prevRealise = await client.query(
+        `SELECT id FROM insertion_milestones
+         WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1)
+           AND id <> $3 AND status = 'realise' LIMIT 1`,
+        [ms.employee_id, ms.parcours_num, ms.id]
+      );
+      const pr = ms.previous_review;
+      const prEmpty = pr == null || (Array.isArray(pr) && pr.length === 0);
+      if (prevRealise.rows.length > 0 && prEmpty) {
+        problems.push({
+          code: 'previous_review_manquante',
+          message: "Un entretien réalisé antérieur existe : l'évaluation du bilan précédent (previous_review) doit être renseignée avant la clôture.",
+        });
+      }
+    }
+
+    // 2bis. Période d'essai : décision obligatoire (confirme / rompu / a_revoir).
+    if (isPeriodeEssai && !ms.periode_essai_decision) {
       problems.push({
-        code: 'previous_review_manquante',
-        message: "Un entretien réalisé antérieur existe : l'évaluation du bilan précédent (previous_review) doit être renseignée avant la clôture.",
+        code: 'periode_essai_decision_manquante',
+        message: "Décision de période d'essai obligatoire (confirme, rompu, a_revoir) avant la clôture.",
       });
+    }
+
+    // 2ter. Renouvellement (EXG-04) : triple validation encadrant/CIP/directeur
+    // exigée avant clôture (P1 revue Codex PR#74). Les signatures sont posées au
+    // fil de l'eau (formulaire ETI → validation 'eti' ; clôture en présence →
+    // 'salarie'+'cip' ; validation direction → 'directeur') et préservées par
+    // mergeValidations. La décision ne peut être finalisée sans les trois.
+    if (ms.milestone_type === 'renouvellement') {
+      const roles = new Set(normalizeValidations(ms.validations).map((v) => v.role));
+      const manquants = ['eti', 'cip', 'directeur'].filter((r) => !roles.has(r));
+      if (manquants.length > 0) {
+        problems.push({
+          code: 'validations_renouvellement_incompletes',
+          manquants,
+          message: `Validation(s) manquante(s) avant clôture du renouvellement : ${manquants.join(', ')} (triple validation encadrant / CIP / directeur requise).`,
+        });
+      }
     }
 
     // 3. Bilan de sortie : catégorie de sortie (nouvelle nomenclature) +
@@ -621,9 +758,11 @@ router.post('/milestones/:id/close', [
       }
     }
 
-    // 4. Prochain entretien « planifie » obligatoire (sauf sortie / post-sortie).
+    // 4. Prochain entretien « planifie » obligatoire (sauf sortie / post-sortie
+    //    / période d'essai — pour cette dernière, le diagnostic d'accueil est
+    //    déjà posé comme jalon suivant).
     let createdNext = null;
-    if (!['bilan_sortie', 'suivi_post_sortie'].includes(ms.milestone_type)) {
+    if (!['bilan_sortie', 'suivi_post_sortie', 'periode_essai'].includes(ms.milestone_type)) {
       const nextPlanned = await client.query(
         `SELECT id FROM insertion_milestones
          WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = COALESCE($2, 1)
@@ -678,6 +817,8 @@ router.post('/milestones/:id/close', [
 
     // Effet de clôture du parcours (bilan de sortie) — préservé (03 §6.5).
     await applySortieParcoursEffect(client, closed.rows[0], 'realise');
+    // Effet de clôture de la période d'essai (Lot 8) : rupture → abandon.
+    await applyPeriodeEssaiEffect(client, closed.rows[0]);
 
     await client.query('COMMIT');
 
@@ -1301,7 +1442,8 @@ router.get('/alertes/:employeeId', [
     const empId = parseInt(req.params.employeeId, 10);
     const empRes = await pool.query(
       `SELECT e.id, e.first_name, e.last_name, e.insertion_status, e.insertion_start_date,
-              e.pass_iae_number, e.pass_iae_end, COALESCE(e.parcours_num, 1) AS parcours_num
+              e.pass_iae_number, e.pass_iae_end, e.cddi_derogation_motif,
+              COALESCE(e.parcours_num, 1) AS parcours_num
        FROM employees e WHERE e.id = $1`,
       [empId]
     );
@@ -1367,6 +1509,17 @@ router.get('/alertes/:employeeId', [
         type: 'cddi_plafond', niveau: cddi.months_total >= 23 ? 'critique' : 'attention',
         message: `Durée cumulée en CDDI : ${cddi.months_total} mois sur 24 (plafond légal, dérogations possibles).`,
         months_total: cddi.months_total, months_elapsed: cddi.months_elapsed,
+      });
+    }
+    // 4bis. Dérogation à régulariser (EXG-03 / RES-08, PR 2) : cumul > 24 mois
+    // SANS motif de dérogation saisi — l'import paie ne bloque jamais (voie
+    // Malibou), la régularisation se pilote donc ici (file visible tant que le
+    // motif + la date de décision ne sont pas renseignés sur la fiche).
+    if (cddi.months_total > 24 && !emp.cddi_derogation_motif) {
+      alertes.push({
+        type: 'cddi_derogation_requise', niveau: 'critique',
+        message: `Cumul CDDI ${cddi.months_total} mois > 24 sans motif de dérogation (L.5132-15-1) — saisir le motif (formation en cours, 50 ans et plus, RQTH, CDI inclusion) et la date de décision sur la fiche.`,
+        months_total: cddi.months_total,
       });
     }
 
@@ -1467,6 +1620,772 @@ router.post('/alertes/:employeeId/ack', [
     res.status(201).json(r.rows[0]);
   } catch (err) {
     console.error('[INSERTION] Erreur alertes ack :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// PMSMP (EXG-05, PR 2) — périodes de mise en situation en milieu professionnel
+// Écriture ADMIN/RH ; lecture module (MANAGER inclus). Bornes réglementaires :
+// ≤ 31 j par convention (non forçable) ; cumul ≤ 60 j / 12 mois glissants
+// (forçable avec motif tracé — assiette prudente, cf. pmsmp-rules.js RES-07).
+// Chemins à ≥ 2 segments → sûrs vis-à-vis de GET /:employeeId.
+// ══════════════════════════════════════════════════════════════
+
+const PMSMP_OBJETS = ['decouvrir_metier', 'confirmer_projet', 'initier_recrutement'];
+const PMSMP_RAPPEL_OUTIL = "Saisie officielle : Immersion Facilitée (art. 3.3 de la convention) — cette fiche est un suivi interne de contrôle, elle ne remplace pas la convention Cerfa ni la saisie dans l'outil officiel.";
+
+// Contrôles communs POST/PUT. Retourne { refus:{status,body} } si blocage,
+// sinon { forced, motif, cumul, jours } (forced=true quand le dépassement 60 j
+// est explicitement assumé — motif obligatoire, tracé dans `bilan`).
+async function checkPmsmpRules(db, { employeeId, dateDebut, dateFin, excludeId = null, autresJoursConnus = 0, force = false, motifDepassement = null }) {
+  const jours = pmsmpDays(dateDebut, dateFin);
+  if (jours == null) {
+    return { refus: { status: 400, body: { error: 'date_fin doit être postérieure ou égale à date_debut.' } } };
+  }
+  if (jours > PMSMP_MAX_JOURS_CONVENTION) {
+    return { refus: { status: 409, body: {
+      error: `Une convention PMSMP ne peut pas dépasser ${PMSMP_MAX_JOURS_CONVENTION} jours calendaires (1 mois maximum par convention — L.5135-1 s.).`,
+      code: 'pmsmp_duree', jours,
+    } } };
+  }
+  const params = [employeeId];
+  let excl = '';
+  if (excludeId != null) { params.push(excludeId); excl = ' AND id <> $2'; }
+  const existantes = await db.query(
+    `SELECT date_debut, date_fin FROM insertion_pmsmp WHERE employee_id = $1${excl}`, params
+  );
+  const cumul = computeCumul12MoisGlissants(
+    { date_debut: dateDebut, date_fin: dateFin }, existantes.rows, autresJoursConnus
+  );
+  if (cumul && cumul.depassement) {
+    if (force !== true) {
+      return { refus: { status: 409, body: {
+        error: `Cumul PMSMP de ${cumul.total} jours sur 12 mois glissants (${cumul.fenetre_du} → ${cumul.fenetre_au}) — plafond ${PMSMP_MAX_CUMUL_12M} j.`,
+        code: 'pmsmp_cumul',
+        detail: `Assiette prudente toutes entreprises confondues : ${cumul.jours_enregistres} j déjà enregistrés + ${cumul.jours_nouvelle} j de cette période + ${cumul.autres_jours_connus} j déclarés hors ERP (autres employeurs). Le plafond réglementaire s'apprécie pour un même bénéficiaire chez un MÊME organisme d'accueil (Q/R DGEFP) : si le dépassement est licite (organismes différents), enregistrez avec { force: true, motif_depassement }.`,
+        cumul,
+      } } };
+    }
+    const motif = typeof motifDepassement === 'string' ? motifDepassement.trim() : '';
+    if (!motif) {
+      return { refus: { status: 400, body: {
+        error: 'motif_depassement obligatoire pour forcer un enregistrement au-delà du cumul de 60 j / 12 mois.',
+        code: 'pmsmp_motif_requis',
+      } } };
+    }
+    return { forced: true, motif, cumul, jours };
+  }
+  return { forced: false, cumul, jours };
+}
+
+// Trace du forçage, ajoutée au champ `bilan` (journal probant de la fiche).
+function pmsmpForceTrace(motif, cumul) {
+  const stamp = new Date().toISOString().slice(0, 10);
+  return `[${stamp}] Dépassement du cumul PMSMP (${cumul.total} j / plafond ${PMSMP_MAX_CUMUL_12M} j sur 12 mois) assumé : ${motif}`;
+}
+
+// GET /api/insertion/pmsmp/:employeeId — liste + cumul courant (lecture module)
+router.get('/pmsmp/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const rows = await pool.query(
+      `SELECT p.*, u.first_name AS created_by_first, u.last_name AS created_by_last
+       FROM insertion_pmsmp p
+       LEFT JOIN users u ON u.id = p.created_by
+       WHERE p.employee_id = $1
+       ORDER BY p.date_debut DESC, p.id DESC`,
+      [empId]
+    );
+    // Cumul observé sur la fenêtre de 12 mois se terminant aujourd'hui
+    // (jours_enregistres seulement — la « nouvelle » période sonde est vide).
+    const today = new Date().toISOString().slice(0, 10);
+    const sonde = computeCumul12MoisGlissants({ date_debut: today, date_fin: today }, rows.rows, 0);
+    res.json({
+      employee_id: empId,
+      total: rows.rows.length,
+      cumul_12mois_jours: sonde ? sonde.jours_enregistres : 0,
+      regles: { max_jours_convention: PMSMP_MAX_JOURS_CONVENTION, max_cumul_12mois: PMSMP_MAX_CUMUL_12M },
+      pmsmp: maskInsertionRows(rows.rows.map((r) => ({ ...r, jours: pmsmpDays(r.date_debut, r.date_fin) })), baseRoleOf(req)),
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur pmsmp GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/pmsmp — créer (ADMIN/RH)
+router.post('/pmsmp', authorize('ADMIN', 'RH'), [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('entreprise').isString().trim().notEmpty().isLength({ max: 200 }).withMessage('Entreprise requise (200 car. max)'),
+  body('siret').optional({ nullable: true, checkFalsy: true }).matches(/^\d{14}$/).withMessage('SIRET invalide (14 chiffres)'),
+  body('objet').isIn(PMSMP_OBJETS).withMessage(`Objet invalide (${PMSMP_OBJETS.join(', ')})`),
+  body('date_debut').isISO8601().withMessage('date_debut invalide (AAAA-MM-JJ)'),
+  body('date_fin').isISO8601().withMessage('date_fin invalide (AAAA-MM-JJ)'),
+  body('tuteur').optional({ nullable: true }).isLength({ max: 120 }).withMessage('tuteur trop long (120 max)'),
+  body('convention_ref').optional({ nullable: true }).isLength({ max: 60 }).withMessage('convention_ref trop longue (60 max)'),
+  body('saisie_outil_officiel').optional({ nullable: true }).isBoolean().withMessage('saisie_outil_officiel invalide'),
+  body('autres_jours_connus').optional({ nullable: true }).isInt({ min: 0, max: 366 }).withMessage('autres_jours_connus invalide (0-366)'),
+  body('force').optional().isBoolean().withMessage('force invalide'),
+  body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
+], validate, async (req, res) => {
+  // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74) : le
+  // contrôle de cumul et l'insertion sont sérialisés, sinon deux saisies
+  // concurrentes pourraient chacune passer le plafond 60 j puis totaliser > 60 j.
+  const client = await pool.connect();
+  try {
+    const d = req.body;
+    await client.query('BEGIN');
+    const emp = await client.query('SELECT id FROM employees WHERE id = $1 FOR UPDATE', [d.employee_id]);
+    if (emp.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Salarié non trouvé' }); }
+
+    const check = await checkPmsmpRules(client, {
+      employeeId: d.employee_id, dateDebut: d.date_debut, dateFin: d.date_fin,
+      autresJoursConnus: d.autres_jours_connus, force: d.force === true, motifDepassement: d.motif_depassement,
+    });
+    if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
+
+    let bilan = (d.bilan != null && d.bilan !== '') ? String(d.bilan) : null;
+    if (check.forced) bilan = `${bilan ? bilan + '\n' : ''}${pmsmpForceTrace(check.motif, check.cumul)}`;
+
+    const r = await client.query(
+      `INSERT INTO insertion_pmsmp
+         (employee_id, entreprise, siret, objet, date_debut, date_fin, tuteur, bilan, saisie_outil_officiel, convention_ref, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false), $10, $11)
+       RETURNING *`,
+      [d.employee_id, d.entreprise.trim(), d.siret || null, d.objet, d.date_debut, d.date_fin,
+        d.tuteur || null, bilan, typeof d.saisie_outil_officiel === 'boolean' ? d.saisie_outil_officiel : null,
+        d.convention_ref || null, req.user.id]
+    );
+    await client.query('COMMIT');
+    const row = r.rows[0];
+    const out = { ...row, jours: pmsmpDays(row.date_debut, row.date_fin) };
+    if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
+    res.status(201).json(out);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié inexistant).' });
+    console.error('[INSERTION] Erreur pmsmp POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/insertion/pmsmp/:id — modifier (ADMIN/RH ; champs présents, null accepté)
+router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('entreprise').optional().isString().trim().notEmpty().isLength({ max: 200 }).withMessage('Entreprise invalide'),
+  body('siret').optional({ nullable: true, checkFalsy: true }).matches(/^\d{14}$/).withMessage('SIRET invalide (14 chiffres)'),
+  body('objet').optional().isIn(PMSMP_OBJETS).withMessage(`Objet invalide (${PMSMP_OBJETS.join(', ')})`),
+  body('date_debut').optional().isISO8601().withMessage('date_debut invalide'),
+  body('date_fin').optional().isISO8601().withMessage('date_fin invalide'),
+  body('autres_jours_connus').optional({ nullable: true }).isInt({ min: 0, max: 366 }).withMessage('autres_jours_connus invalide (0-366)'),
+  body('tuteur').optional({ nullable: true }).isLength({ max: 120 }).withMessage('tuteur trop long (120 max)'),
+  body('convention_ref').optional({ nullable: true }).isLength({ max: 60 }).withMessage('convention_ref trop longue (60 max)'),
+  body('saisie_outil_officiel').optional({ nullable: true }).isBoolean().withMessage('saisie_outil_officiel invalide'),
+  body('force').optional().isBoolean().withMessage('force invalide'),
+  body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
+], validate, async (req, res) => {
+  // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74), même
+  // motif que le POST : contrôle de cumul et écriture sérialisés.
+  const client = await pool.connect();
+  try {
+    const d = req.body;
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT * FROM insertion_pmsmp WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'PMSMP non trouvée' }); }
+    const ex = cur.rows[0];
+    await client.query('SELECT id FROM employees WHERE id = $1 FOR UPDATE', [ex.employee_id]);
+
+    // Contrôles sur les dates EFFECTIVES (fusion body + existant).
+    const dateDebut = 'date_debut' in d ? d.date_debut : ex.date_debut;
+    const dateFin = 'date_fin' in d ? d.date_fin : ex.date_fin;
+    const check = await checkPmsmpRules(client, {
+      employeeId: ex.employee_id, dateDebut, dateFin, excludeId: ex.id,
+      autresJoursConnus: d.autres_jours_connus, force: d.force === true, motifDepassement: d.motif_depassement,
+    });
+    if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
+
+    const editable = ['entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan', 'saisie_outil_officiel', 'convention_ref'];
+    const sets = [];
+    const vals = [];
+    for (const field of editable) {
+      if (!(field in d)) continue;
+      vals.push(d[field] === '' ? null : d[field]);
+      sets.push(`${field} = $${vals.length}`);
+    }
+    if (check.forced) {
+      // Trace du dépassement assumé dans le bilan (même si `bilan` absent du body).
+      const base = ('bilan' in d ? d.bilan : ex.bilan) || '';
+      const traced = `${base ? base + '\n' : ''}${pmsmpForceTrace(check.motif, check.cumul)}`;
+      const idx = sets.findIndex((s) => s.startsWith('bilan ='));
+      if (idx >= 0) vals[parseInt(sets[idx].split('$')[1], 10) - 1] = traced;
+      else { vals.push(traced); sets.push(`bilan = $${vals.length}`); }
+    }
+    if (sets.length === 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Aucun champ à modifier' }); }
+    vals.push(req.params.id);
+    const r = await client.query(
+      `UPDATE insertion_pmsmp SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    await client.query('COMMIT');
+    const row = r.rows[0];
+    const out = { ...row, jours: pmsmpDays(row.date_debut, row.date_fin) };
+    if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
+    res.json(out);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '23514') return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code });
+    console.error('[INSERTION] Erreur pmsmp PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/insertion/pmsmp/:id — supprimer (ADMIN/RH)
+router.delete('/pmsmp/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM insertion_pmsmp WHERE id = $1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'PMSMP non trouvée' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[INSERTION] Erreur pmsmp DELETE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// SATISFACTION DE SORTIE (EXG-09, PR 2) — questionnaire qualité
+// Saisie ADMIN/RH (upsert par employee_id + parcours_num — RES-05) ;
+// restitution agrégée ANONYME ouverte au module (ADMIN/RH/MANAGER).
+// ══════════════════════════════════════════════════════════════
+
+// POST /api/insertion/satisfaction/:employeeId — saisir/ressaisir (ADMIN/RH).
+// Le POST porte l'INTÉGRALITÉ du questionnaire (une ressaisie remplace la
+// précédente — le questionnaire est rempli en une fois à la sortie).
+router.post('/satisfaction/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+  body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
+  body('date_reponse').optional({ nullable: true }).isISO8601().withMessage('date_reponse invalide'),
+  body('satisfaction_globale').optional({ nullable: true }).isInt({ min: 1, max: 4 }).withMessage('satisfaction_globale : échelle 1-4'),
+  body('situation_sortie').optional({ nullable: true }).isLength({ max: 30 }).withMessage('situation_sortie trop longue (30 max)'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const emp = await pool.query('SELECT id FROM employees WHERE id = $1', [empId]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    const pn = await currentParcoursNum(pool, empId);
+    const d = req.body;
+    const reponses = (d.reponses != null && typeof d.reponses === 'object') ? d.reponses : {};
+    const r = await pool.query(
+      `INSERT INTO insertion_satisfaction_sortie
+         (employee_id, parcours_num, milestone_id, date_reponse, reponses, situation_sortie, satisfaction_globale, suggestions, avis_transmis, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (employee_id, parcours_num) DO UPDATE SET
+         milestone_id = EXCLUDED.milestone_id,
+         date_reponse = EXCLUDED.date_reponse,
+         reponses = EXCLUDED.reponses,
+         situation_sortie = EXCLUDED.situation_sortie,
+         satisfaction_globale = EXCLUDED.satisfaction_globale,
+         suggestions = EXCLUDED.suggestions,
+         avis_transmis = EXCLUDED.avis_transmis,
+         created_by = EXCLUDED.created_by
+       RETURNING *`,
+      [empId, pn, d.milestone_id || null, d.date_reponse || null, JSON.stringify(reponses),
+        d.situation_sortie || null, d.satisfaction_globale != null && d.satisfaction_globale !== '' ? d.satisfaction_globale : null,
+        d.suggestions || null, d.avis_transmis || null, req.user.id]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (entretien inexistant).' });
+    console.error('[INSERTION] Erreur satisfaction POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/satisfaction/:employeeId — réponse du parcours courant
+// (?parcours=N pour un parcours antérieur). Lecture module.
+router.get('/satisfaction/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const pn = req.query.parcours ? parseInt(req.query.parcours, 10) : await currentParcoursNum(pool, empId);
+    const r = await pool.query(
+      'SELECT * FROM insertion_satisfaction_sortie WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2',
+      [empId, pn || 1]
+    );
+    res.json(r.rows[0] ? maskInsertionRow(r.rows[0], baseRoleOf(req)) : null);
+  } catch (err) {
+    console.error('[INSERTION] Erreur satisfaction GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Agrégats ANONYMES du questionnaire (aucune donnée nominative, aucun verbatim).
+// `reponses` JSONB : sections de la trame — valeur numérique 1-4 directe ou
+// objet { question: note } (moyenne des notes 1-4 ; textes ignorés).
+function computeSatisfactionAgregats(rows) {
+  const repartition = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  const situations = {};
+  const sections = {}; // clé → { somme, nb }
+  let sommeGlobale = 0;
+  let nbGlobale = 0;
+  const collect = (sectionKey, v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 1 || n > 4) return;
+    if (!sections[sectionKey]) sections[sectionKey] = { somme: 0, nb: 0 };
+    sections[sectionKey].somme += n;
+    sections[sectionKey].nb += 1;
+  };
+  for (const r of rows) {
+    const g = Number(r.satisfaction_globale);
+    if (Number.isFinite(g) && g >= 1 && g <= 4) {
+      repartition[g] += 1;
+      sommeGlobale += g;
+      nbGlobale += 1;
+    }
+    if (r.situation_sortie) situations[r.situation_sortie] = (situations[r.situation_sortie] || 0) + 1;
+    const rep = (r.reponses && typeof r.reponses === 'object') ? r.reponses : {};
+    for (const [k, v] of Object.entries(rep)) {
+      if (v != null && typeof v === 'object' && !Array.isArray(v)) {
+        for (const sub of Object.values(v)) collect(k, sub);
+      } else {
+        collect(k, v);
+      }
+    }
+  }
+  const sectionsOut = {};
+  for (const [k, s] of Object.entries(sections)) {
+    sectionsOut[k] = { moyenne: +(s.somme / s.nb).toFixed(2), nb: s.nb };
+  }
+  return {
+    nb_reponses: rows.length,
+    satisfaction_globale: {
+      moyenne: nbGlobale ? +(sommeGlobale / nbGlobale).toFixed(2) : null,
+      repartition,
+    },
+    situations_sortie: situations,
+    sections: sectionsOut,
+  };
+}
+
+// GET /api/insertion/satisfaction-stats?year= — agrégats anonymes (module).
+router.get('/satisfaction-stats', [
+  query('year').optional().isInt({ min: 2000, max: 2100 }).withMessage('year invalide'),
+], validate, async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const rows = await pool.query(
+      `SELECT reponses, situation_sortie, satisfaction_globale
+       FROM insertion_satisfaction_sortie
+       WHERE EXTRACT(YEAR FROM COALESCE(date_reponse, created_at::date)) = $1`,
+      [year]
+    );
+    res.json({ annee: year, ...computeSatisfactionAgregats(rows.rows) });
+  } catch (err) {
+    console.error('[INSERTION] Erreur satisfaction-stats :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// RENOUVELLEMENTS (EXG-04 reste, PR 2) — file des CDDI à préparer + volet ETI
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/insertion/renouvellements — contrats CDDI courants finissant dans la
+// fenêtre d'anticipation (settings insertion.renouvellement_anticipation_jours,
+// défaut 42 j), avec l'état de l'entretien de renouvellement (existant : id,
+// statut, avis, formulaire rempli — sinon `a_creer`). Lecture module (A/RH/M).
+router.get('/renouvellements', async (req, res) => {
+  try {
+    const jours = Math.round(Number(await readInsertionSetting('insertion.renouvellement_anticipation_jours')) || 42);
+    const rows = await pool.query(
+      `SELECT e.id AS employee_id, e.first_name, e.last_name,
+              ec.id AS contract_id, ec.end_date AS contract_end,
+              (ec.end_date - CURRENT_DATE) AS jours_restants,
+              m.id AS milestone_id, m.status AS milestone_status, m.titre AS milestone_titre,
+              m.due_date AS milestone_due_date, m.renouvellement_avis, m.renouvellement_duree_mois,
+              (m.renouvellement_form IS NOT NULL) AS formulaire_rempli,
+              (m.locked_at IS NOT NULL) AS verrouille
+       FROM employees e
+       JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+       LEFT JOIN LATERAL (
+         SELECT im.* FROM insertion_milestones im
+         WHERE im.employee_id = e.id AND im.milestone_type = 'renouvellement'
+           AND (im.contract_id = ec.id OR im.status <> 'realise')
+         ORDER BY (im.contract_id = ec.id) DESC, im.due_date DESC
+         LIMIT 1
+       ) m ON true
+       WHERE e.is_active = true AND e.insertion_status = 'en_parcours'
+         AND UPPER(ec.contract_type) = 'CDDI'
+         AND ec.end_date IS NOT NULL
+         AND ec.end_date >= CURRENT_DATE
+         AND ec.end_date < CURRENT_DATE + make_interval(days => $1)
+       ORDER BY ec.end_date, e.last_name`,
+      [jours]
+    );
+    const renouvellements = rows.rows.map((r) => ({
+      employee_id: r.employee_id,
+      first_name: r.first_name,
+      last_name: r.last_name,
+      contract_id: r.contract_id,
+      contract_end: r.contract_end,
+      jours_restants: r.jours_restants,
+      a_creer: r.milestone_id == null,
+      entretien: r.milestone_id == null ? null : {
+        id: r.milestone_id,
+        status: r.milestone_status,
+        titre: r.milestone_titre,
+        due_date: r.milestone_due_date,
+        renouvellement_avis: r.renouvellement_avis,
+        renouvellement_duree_mois: r.renouvellement_duree_mois,
+        formulaire_rempli: r.formulaire_rempli === true,
+        verrouille: r.verrouille === true,
+      },
+    }));
+    res.json({ anticipation_jours: jours, total: renouvellements.length, renouvellements });
+  } catch (err) {
+    console.error('[INSERTION] Erreur renouvellements :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Champs — et SEULS champs — inscriptibles par la route « formulaire ETI ».
+const RENOUVELLEMENT_FORM_FIELDS = ['renouvellement_form', 'renouvellement_avis', 'renouvellement_duree_mois'];
+
+// PUT /api/insertion/renouvellements/:milestoneId/formulaire — volet ETI
+// (ADMIN/RH/MANAGER — c'est LA voie d'écriture du MANAGER, cf. garde RES-10 du
+// PUT /milestones/:id). N'écrit QUE renouvellement_form / renouvellement_avis /
+// renouvellement_duree_mois + une validation « eti » horodatée (validations) ;
+// tout autre champ transmis → 400. Un MANAGER ne voit jamais les champs
+// masqués dans la réponse (maskInsertionRow).
+router.put('/renouvellements/:milestoneId/formulaire', [
+  param('milestoneId').isInt().withMessage('ID invalide'),
+  body('renouvellement_avis').optional({ nullable: true }).isIn(['favorable', 'favorable_reserves', 'defavorable']).withMessage('renouvellement_avis invalide (favorable, favorable_reserves, defavorable)'),
+  body('renouvellement_duree_mois').optional({ nullable: true }).isInt({ min: 1, max: 24 }).withMessage('renouvellement_duree_mois invalide (1-24)'),
+], validate, async (req, res) => {
+  try {
+    const refuses = Object.keys(req.body).filter((k) => !RENOUVELLEMENT_FORM_FIELDS.includes(k));
+    if (refuses.length > 0) {
+      return res.status(400).json({
+        error: 'Champs refusés sur cette route (formulaire ETI limité au bloc renouvellement).',
+        champs_refuses: refuses,
+        champs_acceptes: RENOUVELLEMENT_FORM_FIELDS,
+      });
+    }
+    const present = RENOUVELLEMENT_FORM_FIELDS.filter((f) => f in req.body);
+    if (present.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+
+    const cur = await pool.query('SELECT * FROM insertion_milestones WHERE id = $1', [req.params.milestoneId]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Entretien non trouvé' });
+    const prev = cur.rows[0];
+    if (prev.milestone_type !== 'renouvellement') {
+      return res.status(400).json({ error: "Cette route ne s'applique qu'aux entretiens de type renouvellement." });
+    }
+    // Ownership encadrant (P1 revue Codex PR#74) : un MANAGER ne peut écrire QUE
+    // le renouvellement d'un salarié dont il est l'encadrant référent (ou le CIP
+    // référent). ADMIN/RH conservent le bypass. Fail-closed pour le MANAGER.
+    if (baseRoleOf(req) === 'MANAGER' && !(await managerOwnsEmployee(pool, prev.employee_id, req.user.id))) {
+      return res.status(403).json({
+        error: "Accès refusé : vous n'êtes pas l'encadrant référent de ce salarié.",
+        code: 'renouvellement_non_autorise',
+      });
+    }
+    if (prev.locked_at) {
+      return res.status(409).json({
+        error: 'Entretien clôturé et verrouillé — modification refusée.',
+        hint: "Réouvrir d'abord l'entretien (POST /milestones/:id/reopen, ADMIN/RH, motif obligatoire).",
+        locked_at: prev.locked_at,
+      });
+    }
+
+    // Historisation d'une modification sur un entretien déjà réalisé (RES-02).
+    if (prev.status === 'realise') {
+      await snapshotMilestone(pool, prev, 'update', req.user.id);
+    }
+
+    // Validation ETI horodatée (D7) : remplace une éventuelle validation « eti »
+    // antérieure (le formulaire re-signé remplace la signature précédente ; la
+    // trace historique vit dans insertion_milestones_history).
+    let validations = prev.validations;
+    if (typeof validations === 'string') { try { validations = JSON.parse(validations); } catch (_) { validations = null; } }
+    if (!Array.isArray(validations)) validations = [];
+    validations = validations.filter((v) => v && v.role !== 'eti');
+    validations.push({ role: 'eti', user_id: req.user.id, at: new Date().toISOString(), mode: 'compte' });
+
+    const sets = [];
+    const vals = [];
+    for (const field of present) {
+      let v = req.body[field] === '' ? null : req.body[field];
+      if (field === 'renouvellement_form' && v != null) v = JSON.stringify(v);
+      vals.push(v);
+      sets.push(`${field} = $${vals.length}`);
+    }
+    vals.push(JSON.stringify(validations));
+    sets.push(`validations = $${vals.length}`);
+    vals.push(req.params.milestoneId);
+    const r = await pool.query(
+      `UPDATE insertion_milestones SET ${sets.join(', ')}, updated_at = NOW()
+       WHERE id = $${vals.length} RETURNING *`,
+      vals
+    );
+    res.json(maskInsertionRow(r.rows[0], baseRoleOf(req)));
+  } catch (err) {
+    if (err.code === '23514') return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code });
+    console.error('[INSERTION] Erreur renouvellement formulaire :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// BILAN DE PROLONGATION PASS IAE (EXG-02, PR 2) — JSON structuré pour le PDF
+// (phase B). Destinataire externe (prescripteur habilité) → SANS axe judiciaire
+// (art. 10, EXG-38) et SANS détail santé (art. 9) ; niveaux de freins seuls.
+// ADMIN/RH uniquement.
+// ══════════════════════════════════════════════════════════════
+router.get('/pass-iae/bilan/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const empRes = await pool.query(
+      `SELECT e.id, e.first_name, e.last_name, e.position, e.insertion_status,
+              e.insertion_start_date, e.insertion_end_date,
+              e.pass_iae_number, e.pass_iae_start, e.pass_iae_end,
+              COALESCE(e.parcours_num, 1) AS parcours_num,
+              po.nom AS prescripteur_nom, po.type AS prescripteur_type
+       FROM employees e
+       LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
+       WHERE e.id = $1`,
+      [empId]
+    );
+    if (empRes.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    const emp = empRes.rows[0];
+    const pn = Number(emp.parcours_num) || 1;
+
+    const soft = async (label, text, params = []) => {
+      try { return (await pool.query(text, params)).rows; }
+      catch (err) { console.error(`[INSERTION][PASS-IAE] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); return []; }
+    };
+
+    // Contrats → cumul CDDI (support du bilan de prolongation).
+    const contrats = await soft('contrats', 'SELECT contract_type, start_date, end_date FROM employee_contracts WHERE employee_id = $1 ORDER BY start_date', [empId]);
+    const cddi = computeCddiCumulativeMonths(contrats);
+
+    // Entretiens du parcours courant (tous statuts — la phase B distingue).
+    const entretiens = await soft('entretiens', `
+      SELECT id, milestone_type, titre, status, due_date, completed_date, avis_global,
+             renouvellement_avis, renouvellement_duree_mois
+      FROM insertion_milestones
+      WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2
+      ORDER BY due_date`, [empId, pn]);
+
+    // Freins : premier vs dernier snapshot — axes du registre SANS judiciaire
+    // (destinataire externe). Diagnostic = point de départ ; dernier entretien
+    // réalisé portant au moins un frein = point courant.
+    const axesExternes = FREINS.filter((f) => f.key !== 'judiciaire');
+    const axeCols = axesExternes.map((f) => f.column);
+    const diag = await soft('diagnostic', `
+      SELECT ${axeCols.join(', ')}, projet_formation, emploi_vise, niveau_formation
+      FROM insertion_diagnostics
+      WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2`, [empId, pn]);
+    const msFreins = await soft('freins_ms', `
+      SELECT ${axeCols.join(', ')}, completed_date, due_date
+      FROM insertion_milestones
+      WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2
+        AND status = 'realise' AND COALESCE(${axeCols.join(', ')}) IS NOT NULL
+      ORDER BY COALESCE(completed_date, due_date)`, [empId, pn]);
+    const premierSrc = diag[0] || msFreins[0] || {};
+    const dernierSrc = msFreins.length > 0 ? msFreins[msFreins.length - 1] : (diag[0] || {});
+    const freins = axesExternes.map((f) => {
+      const premier = premierSrc[f.column] == null ? null : Number(premierSrc[f.column]);
+      const dernier = dernierSrc[f.column] == null ? null : Number(dernierSrc[f.column]);
+      return {
+        key: f.key, label: f.label,
+        premier, dernier,
+        delta: premier != null && dernier != null ? dernier - premier : null,
+      };
+    });
+
+    // Objectifs (statuts) — nominatifs par nature (bilan destiné au prescripteur).
+    const objectifs = await soft('objectifs', `
+      SELECT titre, statut, origine, echeance, date_butoir, parent_id
+      FROM insertion_objectifs WHERE employee_id = $1
+      ORDER BY parent_id NULLS FIRST, ordre, id`, [empId]);
+    const objectifsParStatut = {};
+    for (const o of objectifs) objectifsParStatut[o.statut] = (objectifsParStatut[o.statut] || 0) + 1;
+
+    // Actions avec partenaires (art. 5 : nature/objet/date/partenaire/résultat).
+    // Minimisation destinataire externe : les actions liées au frein judiciaire
+    // sont EXCLUES ; celles liées au frein santé sont comptées mais leur
+    // libellé/résultat est masqué (art. 9).
+    const actionsRaw = await soft('actions', `
+      SELECT a.action_label, a.category, a.frein_type, a.status, a.echeance,
+             a.resultat, a.duree_minutes, p.nom AS partenaire_nom
+      FROM cip_action_plans a
+      LEFT JOIN insertion_partenaires p ON p.id = a.partenaire_id
+      WHERE a.employee_id = $1
+      ORDER BY a.echeance NULLS LAST, a.created_at`, [empId]);
+    const actions = [];
+    const actionsParCategorie = {};
+    for (const a of actionsRaw) {
+      const ft = String(a.frein_type || '').toLowerCase();
+      if (ft.includes('judiciaire')) continue; // jamais transmis (art. 10)
+      actionsParCategorie[a.category] = (actionsParCategorie[a.category] || 0) + 1;
+      if (ft.includes('sante')) {
+        actions.push({ category: a.category, status: a.status, echeance: a.echeance, partenaire_nom: a.partenaire_nom, action_label: null, resultat: null, detail_masque: true });
+      } else {
+        actions.push({ action_label: a.action_label, category: a.category, status: a.status, echeance: a.echeance, partenaire_nom: a.partenaire_nom, resultat: a.resultat, duree_minutes: a.duree_minutes });
+      }
+    }
+
+    // PMSMP réalisées / en cours.
+    const pmsmp = (await soft('pmsmp', `
+      SELECT entreprise, objet, date_debut, date_fin, saisie_outil_officiel
+      FROM insertion_pmsmp WHERE employee_id = $1 ORDER BY date_debut`, [empId]))
+      .map((p) => ({ ...p, jours: pmsmpDays(p.date_debut, p.date_fin) }));
+
+    // Formations repérables : projet exprimé (diagnostic) + actions de montée en
+    // compétences / libellés « formation ».
+    const formations = {
+      projet_formation: diag[0]?.projet_formation || null,
+      emploi_vise: diag[0]?.emploi_vise || null,
+      niveau_formation: diag[0]?.niveau_formation || null,
+      actions_formation: actions.filter((a) => a.category === 'competence' || /formation/i.test(a.action_label || '')),
+    };
+
+    res.json({
+      genere_le: new Date().toISOString(),
+      usage: 'Bilan du parcours en appui de la demande de prolongation du Pass IAE (destinataire : prescripteur habilité).',
+      mention: "Document de travail ERP — la demande officielle de prolongation se fait sur les emplois de l'inclusion, qui fait foi.",
+      salarie: {
+        id: emp.id, first_name: emp.first_name, last_name: emp.last_name,
+        poste: emp.position, parcours_num: pn,
+      },
+      pass_iae: { number: emp.pass_iae_number, start: emp.pass_iae_start, end: emp.pass_iae_end },
+      prescripteur: { nom: emp.prescripteur_nom, type: emp.prescripteur_type },
+      parcours: {
+        insertion_status: emp.insertion_status,
+        insertion_start_date: emp.insertion_start_date,
+        insertion_end_date: emp.insertion_end_date,
+      },
+      cddi,
+      entretiens,
+      freins,
+      objectifs: { total: objectifs.length, par_statut: objectifsParStatut, liste: objectifs },
+      actions: { total: actions.length, par_categorie: actionsParCategorie, liste: actions },
+      pmsmp,
+      formations,
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur bilan Pass IAE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// CIBLES CONVENTIONNELLES (EXG-47/D12, PR 2) — settings NULLABLES
+// null = « objectif non paramétré » (JAMAIS de valeur inventée — doctrine KPI
+// honnêtes). Lecture module ; écriture ADMIN/RH après confirmation direction
+// sur le PDF original de l'annexe financière (R-04).
+// ══════════════════════════════════════════════════════════════
+
+const INSERTION_CIBLE_KEYS = {
+  cible_etp_conventionnes: 'insertion.cible_etp_conventionnes',   // ETP (ex. 24,76)
+  cible_taux_dynamiques: 'insertion.cible_taux_dynamiques',       // % 0-100
+  cible_taux_durable: 'insertion.cible_taux_durable',             // % 0-100
+  cible_taux_transition: 'insertion.cible_taux_transition',       // % 0-100
+  cible_taux_positive: 'insertion.cible_taux_positive',           // % 0-100
+  effectif_reference: 'insertion.effectif_reference',             // effectif (ex. 46)
+};
+
+// Lit les 6 cibles (null si absentes / invalides). Résilient.
+async function readCibles() {
+  const out = {};
+  for (const k of Object.keys(INSERTION_CIBLE_KEYS)) out[k] = null;
+  try {
+    const r = await pool.query(
+      'SELECT key, value FROM settings WHERE key = ANY($1)',
+      [Object.values(INSERTION_CIBLE_KEYS)]
+    );
+    const byKey = new Map(r.rows.map((row) => [row.key, row.value]));
+    for (const [name, key] of Object.entries(INSERTION_CIBLE_KEYS)) {
+      const v = byKey.get(key);
+      if (v == null || v === '') continue;
+      const n = parseFloat(v);
+      out[name] = Number.isNaN(n) ? null : n;
+    }
+    // Repli : la cible « dynamiques » historique (objectif-sorties, éditée dans
+    // le CohortePanel) reste honorée tant que la nouvelle clé n'est pas posée.
+    if (out.cible_taux_dynamiques == null) {
+      out.cible_taux_dynamiques = await readObjectifSorties();
+    }
+  } catch (_) { /* défauts null */ }
+  return out;
+}
+
+// GET /api/insertion/cibles — lecture (tous rôles du module)
+router.get('/cibles', async (req, res) => {
+  try {
+    res.json({
+      ...(await readCibles()),
+      note: "null = objectif non paramétré — saisir les valeurs conventionnelles confirmées par la direction (annexe financière), jamais de valeur estimée.",
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur cibles GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/cibles — édition (ADMIN/RH). Champs présents uniquement ;
+// null / '' efface (retour à « objectif non paramétré »). Express-validator en
+// première ligne (bornes), garde applicative conservée en défense (types).
+router.put('/cibles', authorize('ADMIN', 'RH'), [
+  body('cible_etp_conventionnes').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }).withMessage('cible_etp_conventionnes : nombre positif attendu (ou null pour effacer)'),
+  body('cible_taux_dynamiques').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100 }).withMessage('cible_taux_dynamiques : pourcentage 0-100 attendu'),
+  body('cible_taux_durable').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100 }).withMessage('cible_taux_durable : pourcentage 0-100 attendu'),
+  body('cible_taux_transition').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100 }).withMessage('cible_taux_transition : pourcentage 0-100 attendu'),
+  body('cible_taux_positive').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100 }).withMessage('cible_taux_positive : pourcentage 0-100 attendu'),
+  body('effectif_reference').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }).withMessage('effectif_reference : nombre positif attendu'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body || {};
+    const updates = [];
+    for (const [name, key] of Object.entries(INSERTION_CIBLE_KEYS)) {
+      if (!(name in d)) continue;
+      const raw = d[name];
+      let num = null;
+      if (raw !== null && raw !== undefined && raw !== '') {
+        num = parseFloat(raw);
+        if (Number.isNaN(num)) return res.status(400).json({ error: `${name} : nombre attendu (ou null pour effacer).` });
+        if (name.startsWith('cible_taux') && (num < 0 || num > 100)) {
+          return res.status(400).json({ error: `${name} : pourcentage attendu entre 0 et 100.` });
+        }
+        if (!name.startsWith('cible_taux') && num < 0) {
+          return res.status(400).json({ error: `${name} : valeur positive attendue.` });
+        }
+      }
+      updates.push({ key, value: num == null ? null : String(num) });
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'Aucune cible à modifier' });
+    for (const u of updates) {
+      await pool.query(
+        `INSERT INTO settings (key, value, category, updated_at)
+         VALUES ($1, $2, 'insertion', NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+        [u.key, u.value]
+      );
+    }
+    res.json(await readCibles());
+  } catch (err) {
+    console.error('[INSERTION] Erreur cibles PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -1832,6 +2751,117 @@ async function gatherAuditKpis(year) {
   for (const c of SORTIE_CLASSES) {
     tauxParClassification[c] = totalSorties > 0 ? Math.round(((parClassification[c] || 0) / totalSorties) * 100) : null;
   }
+  const tauxDynamiques = totalSorties > 0 ? Math.round((nbDynamiques / totalSorties) * 100) : null;
+
+  // ── Extension PR 2 (EXG-10/14/24/47, §6bis-2) ──────────────────────────────
+
+  // Typologies des publics — parcours COURANT (en_parcours actifs) : RQTH
+  // (booléen structuré du diagnostic, repli sur le texte disability_status de
+  // l'import paie), ressources perçues, niveaux de formation (nomenclature
+  // officielle du diagnostic), tranches d'âge NON nominatives (ageBracket de
+  // pii-pseudonymize — jamais la date de naissance en restitution).
+  const typoRows = await soft('typologies', `
+    SELECT e.birth_date, e.disability_status, d.rqth, d.ressources, d.niveau_formation
+    FROM employees e
+    LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
+      AND COALESCE(d.parcours_num, 1) = COALESCE(e.parcours_num, 1)
+    WHERE e.insertion_status = 'en_parcours' AND e.is_active = true`);
+  const typologies = { effectif: typoRows.length, rqth: 0, ressources: {}, niveaux_formation: {}, tranches_age: {} };
+  for (const r of typoRows) {
+    const rqth = r.rqth === true
+      || (r.rqth == null && r.disability_status != null && String(r.disability_status).trim() !== '');
+    if (rqth) typologies.rqth += 1;
+    if (Array.isArray(r.ressources)) {
+      for (const src of r.ressources) {
+        if (src) typologies.ressources[src] = (typologies.ressources[src] || 0) + 1;
+      }
+    }
+    if (r.niveau_formation) {
+      typologies.niveaux_formation[r.niveau_formation] = (typologies.niveaux_formation[r.niveau_formation] || 0) + 1;
+    }
+    const tranche = ageBracket(r.birth_date);
+    if (tranche) typologies.tranches_age[tranche] = (typologies.tranches_age[tranche] || 0) + 1;
+  }
+
+  // Délai moyen de réalisation du diagnostic d'accueil (jours entre l'entrée en
+  // parcours et la réalisation) — diagnostics réalisés dans l'année.
+  const delaiRows = await soft('delai_diagnostic', `
+    SELECT AVG(im.completed_date - e.insertion_start_date)::numeric AS delai_jours,
+           COUNT(*)::int AS nb
+    FROM insertion_milestones im
+    JOIN employees e ON e.id = im.employee_id
+    WHERE im.milestone_type = 'diagnostic_accueil' AND im.status = 'realise'
+      AND im.completed_date IS NOT NULL AND e.insertion_start_date IS NOT NULL
+      AND im.completed_date >= e.insertion_start_date
+      AND im.completed_date BETWEEN $1 AND $2`, [`${year}-01-01`, `${year}-12-31`]);
+  const delaiMoyenDiagnostic = delaiRows[0] && delaiRows[0].delai_jours != null
+    ? Math.round(Number(delaiRows[0].delai_jours)) : null;
+
+  // ETP réalisés APPROCHÉS — contrôle ERP uniquement (EXG-10) : somme des
+  // weekly_hours/35 des CDDI actifs (contrat courant, repli fiche). La valeur
+  // OFFICIELLE reste celle des états mensuels de présence ASP (base 1 820 h).
+  const etpRows = await soft('etp_realises', `
+    SELECT COALESCE(SUM(COALESCE(ec.weekly_hours, e.weekly_hours, 35)::numeric / 35), 0) AS etp,
+           COUNT(*)::int AS nb
+    FROM employees e
+    LEFT JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+    WHERE e.is_active = true
+      AND UPPER(COALESCE(ec.contract_type, e.contract_type, '')) = 'CDDI'`);
+  const etpRealisesApprox = {
+    valeur: etpRows[0] ? Math.round(Number(etpRows[0].etp) * 100) / 100 : null,
+    nb_cddi_actifs: etpRows[0] ? etpRows[0].nb : 0,
+    source: 'controle_erp',
+    note: "Approximation ERP (somme heures hebdo / 35 des CDDI actifs) — saisie officielle : ASP (états mensuels de présence).",
+  };
+
+  // Compteurs PMSMP de l'année (EXG-05/10) : conventions démarrées dans l'année
+  // + volume de jours calendaires.
+  const pmsmpRows = await soft('pmsmp_annee', `
+    SELECT COUNT(*)::int AS nb,
+           COALESCE(SUM(p.date_fin - p.date_debut + 1), 0)::int AS jours,
+           COUNT(DISTINCT p.employee_id)::int AS nb_salaries
+    FROM insertion_pmsmp p
+    WHERE p.date_debut BETWEEN $1 AND $2`, [`${year}-01-01`, `${year}-12-31`]);
+  const pmsmp = pmsmpRows[0]
+    ? { nb: pmsmpRows[0].nb, jours: pmsmpRows[0].jours, nb_salaries: pmsmpRows[0].nb_salaries }
+    : { nb: 0, jours: 0, nb_salaries: 0 };
+
+  // Satisfaction de sortie de l'année (EXG-09) — agrégat anonyme.
+  const satRows = await soft('satisfaction_annee', `
+    SELECT COUNT(*)::int AS nb,
+           ROUND(AVG(satisfaction_globale)::numeric, 2) AS moyenne
+    FROM insertion_satisfaction_sortie
+    WHERE EXTRACT(YEAR FROM COALESCE(date_reponse, created_at::date)) = $1`, [year]);
+  const satisfaction = {
+    nb_reponses: satRows[0] ? satRows[0].nb : 0,
+    moyenne_globale: satRows[0] && satRows[0].moyenne != null ? Number(satRows[0].moyenne) : null,
+  };
+
+  // Bloc conventionnel (EXG-47/D12) : taux réalisés vs cibles paramétrées.
+  // Cible absente → null = « objectif non paramétré » (JAMAIS de valeur
+  // inventée). Dénominateur documenté (RES-09) : sorties CONSTATÉES de l'année
+  // = bilans de sortie réalisés portant une classification (année civile).
+  const cibles = await readCibles();
+  const tauxRealises = {
+    dynamiques: tauxDynamiques,
+    emploi_durable: tauxParClassification.emploi_durable,
+    emploi_transition: tauxParClassification.emploi_transition,
+    sortie_positive: tauxParClassification.sortie_positive,
+  };
+  const ecart = (realise, cible) => (realise != null && cible != null
+    ? Math.round((realise - cible) * 10) / 10 : null);
+  const conventionnel = {
+    cibles,
+    taux_realises: tauxRealises,
+    ecarts: {
+      dynamiques: ecart(tauxRealises.dynamiques, cibles.cible_taux_dynamiques),
+      emploi_durable: ecart(tauxRealises.emploi_durable, cibles.cible_taux_durable),
+      emploi_transition: ecart(tauxRealises.emploi_transition, cibles.cible_taux_transition),
+      sortie_positive: ecart(tauxRealises.sortie_positive, cibles.cible_taux_positive),
+      etp: ecart(etpRealisesApprox.valeur, cibles.cible_etp_conventionnes),
+    },
+    methode: "Taux calculés sur les sorties constatées de l'année civile (dénominateur = bilans de sortie réalisés portant une classification — changement de méthode 2026). Cible null = objectif non paramétré.",
+  };
 
   return {
     annee: year,
@@ -1845,11 +2875,22 @@ async function gatherAuditKpis(year) {
       total: totalSorties,
       dynamiques: nbDynamiques,
       autres: nbAutres,
-      taux_dynamiques: totalSorties > 0 ? Math.round((nbDynamiques / totalSorties) * 100) : null,
+      taux_dynamiques: tauxDynamiques,
       par_classification: parClassification,
       taux_par_classification: tauxParClassification,
       par_type: parType,
     },
+    // ── Blocs PR 2 (EXG-10/14/24/47) ──
+    conventionnel,
+    typologies,
+    delai_moyen_diagnostic_jours: delaiMoyenDiagnostic,
+    etp_realises_approx: etpRealisesApprox,
+    pmsmp,
+    satisfaction,
+    // Convergence (CVG, §6bis-2) : bloc réservé — le paramétrage précis attend
+    // la trame de reporting CVG demandée à la direction ; les indicateurs
+    // génériques (freins, sorties, actions) sont déjà couverts ci-dessus.
+    cvg: { statut: 'trame_en_attente', note: 'Indicateurs CVG à paramétrer à réception de la trame de reporting Convergence (décision direction du 23/07/2026).' },
   };
 }
 
@@ -1933,6 +2974,362 @@ router.put('/:employeeId/cip-referent', authorize('ADMIN', 'RH'), async (req, re
     res.json({ ...r.rows[0], cip_referent_nom: nom });
   } catch (err) {
     console.error('[INSERTION] Erreur cip-referent PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// LOT 8 (PR3) — GRILLES DE COMPÉTENCES par filière (EXG-26/27) + espace ETI
+// Référentiel ADMINISTRABLE (écriture ADMIN) ; évaluations saisissables par
+// l'ETI (MANAGER) ET la CIP (ADMIN/RH). Les compétences ne portent AUCUNE
+// donnée art. 9/10 → l'ETI y est légitime, le masking du diagnostic social
+// continue de s'appliquer aux AUTRES endpoints. N/E (non_evalue) exclu des
+// moyennes (competenceAverage). Chemins ≥ 2 segments ou non numériques → placés
+// AVANT GET /:employeeId. NB périmètre : faute de lien schéma fiable
+// encadrant→équipe (table teams sans manager_user_id), l'accès MANAGER n'est
+// pas restreint par équipe — même périmètre que le formulaire de renouvellement
+// (voie ETI existante).
+// ══════════════════════════════════════════════════════════════
+
+const COMPETENCE_FILIERES = ['tri', 'collecte', 'logistique', 'boutique', 'transverse'];
+
+// GET /api/insertion/competence-referentiels?filiere=&actifs=1 — grille administrable
+router.get('/competence-referentiels', [
+  query('filiere').optional().isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
+], validate, async (req, res) => {
+  try {
+    const params = [];
+    const where = [];
+    if (req.query.filiere) { params.push(req.query.filiere); where.push(`filiere = $${params.length}`); }
+    if (req.query.actifs === '1' || req.query.actifs === 'true') where.push('actif = true');
+    const r = await pool.query(
+      `SELECT * FROM insertion_competence_referentiels
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY filiere, rubrique, ordre, item`,
+      params
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[INSERTION] Erreur competence-referentiels GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/competence-referentiels — créer un item (ADMIN)
+router.post('/competence-referentiels', authorize('ADMIN'), [
+  body('filiere').isIn(COMPETENCE_FILIERES).withMessage(`filiere invalide (${COMPETENCE_FILIERES.join(', ')})`),
+  body('rubrique').isString().trim().notEmpty().isLength({ max: 120 }).withMessage('rubrique requise (120 car. max)'),
+  body('item').isString().trim().notEmpty().isLength({ max: 200 }).withMessage('item requis (200 car. max)'),
+  body('ordre').optional({ nullable: true }).isInt().withMessage('ordre invalide'),
+  body('actif').optional({ nullable: true }).isBoolean().withMessage('actif invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const r = await pool.query(
+      `INSERT INTO insertion_competence_referentiels (filiere, rubrique, item, ordre, actif)
+       VALUES ($1, $2, $3, $4, COALESCE($5, true)) RETURNING *`,
+      [d.filiere, d.rubrique.trim(), d.item.trim(), Number.isInteger(d.ordre) ? d.ordre : 0,
+        typeof d.actif === 'boolean' ? d.actif : null]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Cet item existe déjà pour cette filière et cette rubrique.' });
+    console.error('[INSERTION] Erreur competence-referentiels POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/competence-referentiels/:id — modifier (ADMIN)
+router.put('/competence-referentiels/:id', authorize('ADMIN'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('filiere').optional().isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
+  body('rubrique').optional().isString().trim().notEmpty().isLength({ max: 120 }).withMessage('rubrique invalide'),
+  body('item').optional().isString().trim().notEmpty().isLength({ max: 200 }).withMessage('item invalide'),
+  body('ordre').optional({ nullable: true }).isInt().withMessage('ordre invalide'),
+  body('actif').optional({ nullable: true }).isBoolean().withMessage('actif invalide'),
+], validate, async (req, res) => {
+  try {
+    const d = req.body;
+    const editable = ['filiere', 'rubrique', 'item', 'ordre', 'actif'];
+    const sets = []; const vals = [];
+    for (const f of editable) { if (!(f in d)) continue; vals.push(d[f] === '' ? null : d[f]); sets.push(`${f} = $${vals.length}`); }
+    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+    vals.push(req.params.id);
+    const r = await pool.query(`UPDATE insertion_competence_referentiels SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`, vals);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Item non trouvé' });
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Cet item existe déjà pour cette filière et cette rubrique.' });
+    console.error('[INSERTION] Erreur competence-referentiels PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/insertion/competence-referentiels/:id — supprimer (ADMIN)
+// Les scores déjà saisis conservent leur snapshot rubrique/item (FK SET NULL).
+router.delete('/competence-referentiels/:id', authorize('ADMIN'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM insertion_competence_referentiels WHERE id = $1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Item non trouvé' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[INSERTION] Erreur competence-referentiels DELETE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Insère les scores d'une évaluation. Snapshot rubrique/item depuis le
+// référentiel (résiste à une suppression ultérieure de l'item). N/E =
+// non_evalue===true OU note vide → note NULL. Note contrôlée 0-10.
+async function insertCompetenceScores(client, evaluationId, scores) {
+  if (!Array.isArray(scores) || scores.length === 0) return 0;
+  const refIds = [...new Set(scores.map((s) => s && s.referentiel_id).filter((x) => x != null))];
+  const refMap = new Map();
+  if (refIds.length > 0) {
+    const r = await client.query('SELECT id, rubrique, item FROM insertion_competence_referentiels WHERE id = ANY($1::int[])', [refIds]);
+    for (const row of r.rows) refMap.set(Number(row.id), row);
+  }
+  let n = 0;
+  for (const s of scores) {
+    if (!s || typeof s !== 'object') continue;
+    const ref = s.referentiel_id != null ? refMap.get(Number(s.referentiel_id)) : null;
+    const nonEval = s.non_evalue === true || s.note == null || s.note === '';
+    let note = null;
+    if (!nonEval) {
+      note = parseInt(s.note, 10);
+      if (Number.isNaN(note) || note < 0 || note > 10) { const err = new Error('note hors bornes'); err.code = 'COMP_NOTE'; throw err; }
+    }
+    await client.query(
+      `INSERT INTO insertion_competence_scores (evaluation_id, referentiel_id, rubrique, item, note, non_evalue, observation, objectif)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [evaluationId, s.referentiel_id != null ? s.referentiel_id : null,
+        (s.rubrique && String(s.rubrique).trim()) || (ref ? ref.rubrique : null),
+        (s.item && String(s.item).trim()) || (ref ? ref.item : null),
+        note, nonEval, s.observation || null, s.objectif || null]
+    );
+    n++;
+  }
+  return n;
+}
+
+// GET /api/insertion/competences/:employeeId — évaluations + scores (module,
+// MANAGER inclus). Chaque évaluation porte ses scores et sa moyenne (N/E exclu).
+router.get('/competences/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const evals = await pool.query(
+      `SELECT ev.*, u.first_name AS evaluateur_first, u.last_name AS evaluateur_last
+       FROM insertion_competence_evaluations ev
+       LEFT JOIN users u ON u.id = ev.evaluateur_id
+       WHERE ev.employee_id = $1
+       ORDER BY ev.date_evaluation DESC NULLS LAST, ev.id DESC`,
+      [empId]
+    );
+    const ids = evals.rows.map((e) => e.id);
+    const scoresByEval = new Map();
+    if (ids.length > 0) {
+      const sc = await pool.query(
+        `SELECT s.*, r.rubrique AS ref_rubrique, r.item AS ref_item, r.actif AS ref_actif
+         FROM insertion_competence_scores s
+         LEFT JOIN insertion_competence_referentiels r ON r.id = s.referentiel_id
+         WHERE s.evaluation_id = ANY($1::int[])
+         ORDER BY s.id`,
+        [ids]
+      );
+      for (const row of sc.rows) {
+        row.rubrique = row.rubrique || row.ref_rubrique;
+        row.item = row.item || row.ref_item;
+        if (!scoresByEval.has(row.evaluation_id)) scoresByEval.set(row.evaluation_id, []);
+        scoresByEval.get(row.evaluation_id).push(row);
+      }
+    }
+    const out = evals.rows.map((e) => {
+      const scores = scoresByEval.get(e.id) || [];
+      return { ...e, scores, moyenne: competenceAverage(scores).moyenne };
+    });
+    res.json(out);
+  } catch (err) {
+    console.error('[INSERTION] Erreur competences GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/competences — créer une évaluation + ses scores
+// (ADMIN/RH/MANAGER — l'ETI est un évaluateur légitime). Transactionnel.
+router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('filiere').optional({ nullable: true }).isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
+  body('statut').optional({ nullable: true }).isIn(['brouillon', 'valide']).withMessage('statut invalide (brouillon/valide)'),
+  body('date_evaluation').optional({ nullable: true }).isISO8601().withMessage('date_evaluation invalide'),
+  body('periode').optional({ nullable: true }).isLength({ max: 20 }).withMessage('periode trop longue (20 max)'),
+  body('scores').optional({ nullable: true }).isArray().withMessage('scores doit être un tableau'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const d = req.body;
+    const emp = await client.query('SELECT id FROM employees WHERE id = $1', [d.employee_id]);
+    if (emp.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Salarié non trouvé' }); }
+    const pn = await currentParcoursNum(client, d.employee_id);
+    await client.query('BEGIN');
+    const ev = await client.query(
+      `INSERT INTO insertion_competence_evaluations
+         (employee_id, parcours_num, filiere, periode, date_evaluation, evaluateur_id, statut, validations, synthese, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 'brouillon'), $8, $9, $10) RETURNING *`,
+      [d.employee_id, pn, d.filiere || null, d.periode || null, d.date_evaluation || null,
+        req.user.id, d.statut || null, d.validations != null ? JSON.stringify(d.validations) : null,
+        d.synthese || null, req.user.id]
+    );
+    const evaluation = ev.rows[0];
+    await insertCompetenceScores(client, evaluation.id, d.scores);
+    await client.query('COMMIT');
+    const scoresRes = await pool.query('SELECT * FROM insertion_competence_scores WHERE evaluation_id = $1 ORDER BY id', [evaluation.id]);
+    res.status(201).json({ ...evaluation, scores: scoresRes.rows, moyenne: competenceAverage(scoresRes.rows).moyenne });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === 'COMP_NOTE') return res.status(400).json({ error: 'Note de compétence hors bornes (0-10) — utilisez N/E (non_evalue) pour un item non évalué.' });
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié ou item de référentiel inexistant).' });
+    console.error('[INSERTION] Erreur competences POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/insertion/competences/:id — modifier l'évaluation (statut,
+// validations…) et REMPLACER ses scores si `scores` est fourni (ADMIN/RH/MANAGER).
+router.put('/competences/:id', authorize('ADMIN', 'RH', 'MANAGER'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('statut').optional({ nullable: true }).isIn(['brouillon', 'valide']).withMessage('statut invalide'),
+  body('filiere').optional({ nullable: true }).isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
+  body('date_evaluation').optional({ nullable: true }).isISO8601().withMessage('date_evaluation invalide'),
+  body('periode').optional({ nullable: true }).isLength({ max: 20 }).withMessage('periode trop longue (20 max)'),
+  body('scores').optional({ nullable: true }).isArray().withMessage('scores doit être un tableau'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const d = req.body;
+    const cur = await client.query('SELECT id FROM insertion_competence_evaluations WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Évaluation non trouvée' }); }
+    await client.query('BEGIN');
+    const editable = ['filiere', 'periode', 'date_evaluation', 'statut', 'synthese'];
+    const sets = []; const vals = [];
+    for (const f of editable) { if (!(f in d)) continue; vals.push(d[f] === '' ? null : d[f]); sets.push(`${f} = $${vals.length}`); }
+    if ('validations' in d) { vals.push(d.validations != null ? JSON.stringify(d.validations) : null); sets.push(`validations = $${vals.length}`); }
+    if (sets.length > 0) {
+      vals.push(req.params.id);
+      await client.query(`UPDATE insertion_competence_evaluations SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${vals.length}`, vals);
+    }
+    if (Array.isArray(d.scores)) {
+      await client.query('DELETE FROM insertion_competence_scores WHERE evaluation_id = $1', [req.params.id]);
+      await insertCompetenceScores(client, req.params.id, d.scores);
+    }
+    await client.query('COMMIT');
+    const ev = await pool.query('SELECT * FROM insertion_competence_evaluations WHERE id = $1', [req.params.id]);
+    const scoresRes = await pool.query('SELECT * FROM insertion_competence_scores WHERE evaluation_id = $1 ORDER BY id', [req.params.id]);
+    res.json({ ...ev.rows[0], scores: scoresRes.rows, moyenne: competenceAverage(scoresRes.rows).moyenne });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === 'COMP_NOTE') return res.status(400).json({ error: 'Note de compétence hors bornes (0-10) — utilisez N/E (non_evalue) pour un item non évalué.' });
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (item de référentiel inexistant).' });
+    console.error('[INSERTION] Erreur competences PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/insertion/competences/:id — supprimer une évaluation (ADMIN/RH ;
+// scores en CASCADE).
+router.delete('/competences/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM insertion_competence_evaluations WHERE id = $1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Évaluation non trouvée' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[INSERTION] Erreur competences DELETE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// LOT 8 (PR3) — CHECKLIST D'EMBAUCHE (EXG-30 / PROP-05)
+// Une checklist par salarié, items JSONB. Écriture ADMIN/RH, lecture module
+// (MANAGER inclus). Pas de moteur d'état (ERP léger). AVANT GET /:employeeId.
+// ══════════════════════════════════════════════════════════════
+
+const CHECKLIST_STEPS = ['promesse_embauche', 'contrat_signe', 'mutuelle', 'charte_insertion', 'livret_accueil', 'reglement_interieur', 'formation_poste'];
+
+// Normalise les items stockés vers une forme complète (le front n'a pas à gérer
+// les absences) : chaque step → { fait, date, responsable }.
+function normalizeChecklistItems(items) {
+  const src = items || {};
+  const out = {};
+  for (const step of CHECKLIST_STEPS) {
+    const it = src[step] || {};
+    out[step] = { fait: it.fait === true, date: it.date || null, responsable: it.responsable || null };
+  }
+  return out;
+}
+
+// GET /api/insertion/checklist-embauche/:employeeId — lecture (module)
+router.get('/checklist-embauche/:employeeId', [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const r = await pool.query('SELECT * FROM insertion_checklist_embauche WHERE employee_id = $1', [empId]);
+    res.json({
+      employee_id: empId,
+      exists: r.rows.length > 0,
+      steps: CHECKLIST_STEPS,
+      items: normalizeChecklistItems(r.rows[0]?.items),
+      updated_at: r.rows[0]?.updated_at || null,
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur checklist-embauche GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/checklist-embauche/:employeeId — upsert idempotent (ADMIN/RH).
+// Fusion : les steps absents du body conservent leur valeur enregistrée ; un
+// step à null est retiré ; les steps inconnus sont ignorés.
+router.put('/checklist-embauche/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+  body('items').isObject().withMessage('items (objet) requis'),
+], validate, async (req, res) => {
+  try {
+    const empId = parseInt(req.params.employeeId, 10);
+    const emp = await pool.query('SELECT id FROM employees WHERE id = $1', [empId]);
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+
+    const cur = await pool.query('SELECT items FROM insertion_checklist_embauche WHERE employee_id = $1', [empId]);
+    const merged = { ...(cur.rows[0]?.items || {}) };
+    for (const [step, val] of Object.entries(req.body.items || {})) {
+      if (!CHECKLIST_STEPS.includes(step)) continue; // ignore les steps inconnus
+      if (val == null) { delete merged[step]; continue; }
+      merged[step] = {
+        fait: val.fait === true,
+        date: val.date || null,
+        responsable: val.responsable != null && val.responsable !== '' ? String(val.responsable).slice(0, 150) : null,
+      };
+    }
+    const r = await pool.query(
+      `INSERT INTO insertion_checklist_embauche (employee_id, items, created_by, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (employee_id) DO UPDATE SET items = $2, updated_at = NOW()
+       RETURNING *`,
+      [empId, JSON.stringify(merged), req.user.id]
+    );
+    res.json({ ...r.rows[0], items: normalizeChecklistItems(r.rows[0].items), steps: CHECKLIST_STEPS });
+  } catch (err) {
+    console.error('[INSERTION] Erreur checklist-embauche PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -2072,6 +3469,27 @@ router.get('/:employeeId', async (req, res) => {
       objectifs = objRes.rows;
     } catch (err) { /* table might not exist yet */ }
 
+    // 9ter. PMSMP + satisfaction de sortie (PR 2 — EXG-05/09, plan 05 §2.1) :
+    // agrégées à la fiche (onglet Synthèse) ; le détail/CRUD vit sur
+    // /pmsmp/:employeeId et /satisfaction/:employeeId.
+    let pmsmp = [];
+    try {
+      const pmRes = await pool.query(
+        'SELECT * FROM insertion_pmsmp WHERE employee_id = $1 ORDER BY date_debut DESC, id DESC', [empId]
+      );
+      pmsmp = maskInsertionRows(
+        pmRes.rows.map((r) => ({ ...r, jours: pmsmpDays(r.date_debut, r.date_fin) })), baseRole
+      );
+    } catch (err) { /* table might not exist yet */ }
+    let satisfaction = null;
+    try {
+      const stRes = await pool.query(
+        'SELECT * FROM insertion_satisfaction_sortie WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2',
+        [empId, employee.parcours_num || 1]
+      );
+      satisfaction = stRes.rows[0] ? maskInsertionRow(stRes.rows[0], baseRole) : null;
+    } catch (err) { /* table might not exist yet */ }
+
     // 10. Analyse complete (le diagnostic est déjà masqué pour un MANAGER →
     // l'axe judiciaire est absent de ses freins_sociaux)
     const analysis = analyzeInsertion(
@@ -2115,6 +3533,8 @@ router.get('/:employeeId', async (req, res) => {
       milestones,
       action_plans: actionPlans,
       objectifs,
+      pmsmp,
+      satisfaction,
       timeline,
       ...analysis,
     });
@@ -2248,3 +3668,8 @@ router.get('/ia/cohorte', authorize('ADMIN', 'RH'), async (req, res) => {
 });
 
 module.exports = router;
+// Réutilisé par routes/exports.js (GET /api/exports/insertion-synthese —
+// EXG-14) : mêmes agrégats NON nominatifs que GET /insertion/audit, sans
+// dupliquer ~150 lignes de SQL. Un router Express est une fonction : on peut
+// lui attacher des propriétés sans changer son contrat.
+module.exports.gatherAuditKpis = gatherAuditKpis;
