@@ -46,6 +46,8 @@ const RenouvellementETI = lazy(() => import('./pages/RenouvellementETI'));
 const AdminInsertion = lazy(() => import('./pages/AdminInsertion'));
 const PilotageRSE = lazy(() => import('./pages/PilotageRSE'));
 const EnergieGES = lazy(() => import('./pages/EnergieGES'));
+const Enquetes = lazy(() => import('./pages/Enquetes'));
+const EnqueteReponse = lazy(() => import('./pages/EnqueteReponse'));
 const PlanningHebdo = lazy(() => import('./pages/PlanningHebdo'));
 const PlanningTournees = lazy(() => import('./pages/PlanningTournees'));
 const DashboardCollecte = lazy(() => import('./pages/DashboardCollecte'));
@@ -150,6 +152,8 @@ function App() {
               <Route path="/balance" element={<BalancePage />} />
               <Route path="/balance/:token" element={<BalancePage />} />
               <Route path="/pcm-test/:token" element={<PCMTest />} />
+              {/* Réponse publique à une enquête (RSEI-13) — SANS authentification, mode kiosque FALC */}
+              <Route path="/enquete/:token" element={<EnqueteReponse />} />
               <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
 
 
@@ -257,6 +261,9 @@ function App() {
 
               {/* Énergie & GES (RSEI-11 — 29e module, critère RSEi 4.2) */}
               <Route path="/energie" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><EnergieGES /></ProtectedRoute>} />
+
+              {/* Enquêtes (RSEI-13 — 30e module) — administration ; la réponse publique /enquete/:token est hors auth */}
+              <Route path="/enquetes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><Enquetes /></ProtectedRoute>} />
 
               {/* QHSE (item 58 — accidents, habilitations, EPI) */}
               <Route path="/qhse" element={<Navigate to="/qhse/accidents" replace />} />
