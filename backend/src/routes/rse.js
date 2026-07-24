@@ -150,14 +150,19 @@ async function gather3Volets(annee) {
       return { disponible: false, note: 'Agrégats insertion indisponibles (fonction non exportée).' };
     }
     const k = await insertion.gatherAuditKpis(annee);
-    // Effectifs F/H NON nominatifs (comptage par civilité) — RSEI-08.
-    const fh = await soft(async () => (await pool.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE civility IS NOT NULL AND (civility ILIKE 'Mme%' OR civility ILIKE 'Mlle%' OR civility ILIKE 'Madame%' OR civility ILIKE 'Mademoiselle%'))::int AS femmes,
-         COUNT(*) FILTER (WHERE civility IS NOT NULL AND TRIM(civility) <> '' AND NOT (civility ILIKE 'Mme%' OR civility ILIKE 'Mlle%' OR civility ILIKE 'Madame%' OR civility ILIKE 'Mademoiselle%'))::int AS hommes,
-         COUNT(*) FILTER (WHERE civility IS NULL OR TRIM(civility) = '')::int AS non_renseigne,
-         COUNT(*)::int AS total
-       FROM employees WHERE is_active = true`)).rows[0] || null, null);
+    // Effectifs F/H NON nominatifs — RSEI-08. Le champ `gender` ('F'/'M', import paie)
+    // fait foi ; la civilité n'est qu'un repli (revue Codex PR#82, cohérent avec
+    // employees.kpi/egalite-fh). non_renseigne = reste (total − femmes − hommes).
+    const fh = await soft(async () => {
+      const r = (await pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE gender = 'F' OR (gender IS NULL AND (civility ILIKE 'Mme%' OR civility ILIKE 'Mlle%' OR civility ILIKE 'Madame%' OR civility ILIKE 'Mademoiselle%')))::int AS femmes,
+           COUNT(*) FILTER (WHERE gender = 'M' OR (gender IS NULL AND (civility ILIKE 'M' OR civility ILIKE 'M.%' OR civility ILIKE 'Mr%' OR civility ILIKE 'Monsieur%')))::int AS hommes,
+           COUNT(*)::int AS total
+         FROM employees WHERE is_active = true`)).rows[0];
+      if (r) r.non_renseigne = r.total - r.femmes - r.hommes;
+      return r || null;
+    }, null);
     return {
       disponible: true,
       source: 'insertion.audit (agrégats non nominatifs)',

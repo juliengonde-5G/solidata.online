@@ -297,14 +297,14 @@ export default function ReportingRH() {
                     <p className="text-xs text-slate-500">Femmes — heures</p>
                     <p className="text-2xl font-bold text-emerald-700">{Math.round((egaliteFH.formation?.femmes_heures || 0))} h</p>
                     <p className="text-xs text-slate-500 mt-1">
-                      Moy./femme : {egaliteFH.formation?.femmes_heures_moyennes != null ? `${egaliteFH.formation.femmes_heures_moyennes} h` : '—'}
+                      Moy./femme formée : {egaliteFH.formation?.femmes_heures_moyennes != null ? `${egaliteFH.formation.femmes_heures_moyennes} h` : '—'}
                     </p>
                   </div>
                   <div className="bg-slate-50 rounded-card p-4">
                     <p className="text-xs text-slate-500">Hommes — heures</p>
                     <p className="text-2xl font-bold text-slate-700">{Math.round((egaliteFH.formation?.hommes_heures || 0))} h</p>
                     <p className="text-xs text-slate-500 mt-1">
-                      Moy./homme : {egaliteFH.formation?.hommes_heures_moyennes != null ? `${egaliteFH.formation.hommes_heures_moyennes} h` : '—'}
+                      Moy./homme formé : {egaliteFH.formation?.hommes_heures_moyennes != null ? `${egaliteFH.formation.hommes_heures_moyennes} h` : '—'}
                     </p>
                   </div>
                 </div>

@@ -5875,11 +5875,33 @@ async function initDatabase() {
         commentaire TEXT,
         created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
+        updated_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT chk_formation_nonneg CHECK (
+          (nb_participants_prevus IS NULL OR nb_participants_prevus >= 0) AND
+          (nb_participants_realises IS NULL OR nb_participants_realises >= 0) AND
+          (heures_prevues IS NULL OR heures_prevues >= 0) AND
+          (heures_realisees IS NULL OR heures_realisees >= 0) AND
+          (cout_prevu IS NULL OR cout_prevu >= 0) AND
+          (cout_realise IS NULL OR cout_realise >= 0)
+        )
       );
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_formation_actions_annee ON formation_actions(annee);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_formation_actions_statut ON formation_actions(statut);');
+    // Revue Codex PR#82 : garde anti-négatif aussi sur une table déjà créée sans la
+    // contrainte (ajout idempotent — la table est neuve, aucune donnée négative attendue).
+    await client.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_formation_nonneg') THEN
+        ALTER TABLE formation_actions ADD CONSTRAINT chk_formation_nonneg CHECK (
+          (nb_participants_prevus IS NULL OR nb_participants_prevus >= 0) AND
+          (nb_participants_realises IS NULL OR nb_participants_realises >= 0) AND
+          (heures_prevues IS NULL OR heures_prevues >= 0) AND
+          (heures_realisees IS NULL OR heures_realisees >= 0) AND
+          (cout_prevu IS NULL OR cout_prevu >= 0) AND
+          (cout_realise IS NULL OR cout_realise >= 0)
+        );
+      END IF;
+    END $$;`);
     console.log('[INIT-DB] RH — plan de formation (RSEI-12) ✓');
 
     // Registre RGPD — sous-traitance IA (Anthropic) — Vague 3, item 3.C-6.

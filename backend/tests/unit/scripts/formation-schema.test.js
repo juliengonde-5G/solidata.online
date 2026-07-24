@@ -38,6 +38,14 @@ describe('schéma RH RSEI-12 — plan de formation', () => {
     expect(tbl).toContain('created_by INTEGER REFERENCES users(id)');
   });
 
+  test('CHECK anti-négatif sur participants / heures / coûts (revue Codex PR#82)', () => {
+    expect(tbl).toContain('CONSTRAINT chk_formation_nonneg CHECK');
+    expect(tbl).toContain('nb_participants_prevus >= 0');
+    expect(tbl).toContain('cout_realise >= 0');
+    // migration idempotente pour une table déjà créée sans la contrainte
+    expect(src).toContain("WHERE conname = 'chk_formation_nonneg'");
+  });
+
   test('formation_actions ajoutée au resync des séquences SERIAL', () => {
     const arr = src.slice(src.indexOf('const tablesAResyncer = ['), src.indexOf('const tablesAResyncer = [') + 3000);
     expect(arr).toContain("'formation_actions'");

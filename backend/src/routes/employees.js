@@ -1166,10 +1166,16 @@ router.get('/kpi/absenteisme', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
 router.get('/kpi/egalite-fh', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
-    // Classification du sexe partagée (miroir du bilan RSE gather3Volets).
+    // Classification du sexe (miroir du bilan RSE gather3Volets). Revue Codex PR#82 :
+    // le champ `employees.gender` ('F'/'M') est renseigné par l'import paie
+    // (collaborator-import.normalizeGender) et par l'éditeur — il fait FOI. La
+    // civilité n'est qu'un REPLI explicite (formes masculines listées ; une civilité
+    // non reconnue reste « non renseigné », jamais classée H par défaut).
     const SEXE = `CASE
+      WHEN e.gender = 'F' THEN 'F'
+      WHEN e.gender = 'M' THEN 'H'
       WHEN e.civility ILIKE 'Mme%' OR e.civility ILIKE 'Mlle%' OR e.civility ILIKE 'Madame%' OR e.civility ILIKE 'Mademoiselle%' THEN 'F'
-      WHEN e.civility IS NOT NULL AND TRIM(e.civility) <> '' THEN 'H'
+      WHEN e.civility ILIKE 'M' OR e.civility ILIKE 'M.%' OR e.civility ILIKE 'Mr%' OR e.civility ILIKE 'Monsieur%' THEN 'H'
       ELSE 'NR' END`;
 
     // Effectif global + permanents vs parcours.
@@ -1216,14 +1222,17 @@ router.get('/kpi/egalite-fh', authorize('ADMIN', 'RH', 'MANAGER'), async (req, r
     const encadrement = bucket();
     for (const r of enc.rows) add(encadrement, r.sexe, r.n);
 
-    // Accès à la formation par sexe (heures 'training' de l'année).
+    // Accès à la formation par sexe — FLUX ANNUEL. Revue Codex PR#82 : on part des
+    // heures 'training' de l'année (jointure DEPUIS work_hours), sans filtrer sur
+    // is_active — sinon les heures d'un salarié parti en cours d'année (import paie)
+    // disparaîtraient du total B10. Comptabilise donc toutes les personnes formées
+    // dans l'exercice, présentes ou sorties.
     const form = await pool.query(`
       SELECT ${SEXE} AS sexe,
-             COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type = 'training'), 0)::numeric(10,2) AS heures,
-             COUNT(DISTINCT e.id) FILTER (WHERE wh.type = 'training' AND wh.hours_worked > 0)::int AS nb_formes
-      FROM employees e
-      LEFT JOIN work_hours wh ON wh.employee_id = e.id AND EXTRACT(YEAR FROM wh.date) = $1
-      WHERE e.is_active = true
+             COALESCE(SUM(wh.hours_worked), 0)::numeric(10,2) AS heures,
+             COUNT(DISTINCT e.id)::int AS nb_formes
+      FROM work_hours wh JOIN employees e ON e.id = wh.employee_id
+      WHERE wh.type = 'training' AND wh.hours_worked > 0 AND EXTRACT(YEAR FROM wh.date) = $1
       GROUP BY 1`, [annee]);
     const formation = { femmes_heures: 0, hommes_heures: 0, non_renseigne_heures: 0, femmes_nb_formes: 0, hommes_nb_formes: 0 };
     for (const r of form.rows) {
@@ -1233,9 +1242,10 @@ router.get('/kpi/egalite-fh', authorize('ADMIN', 'RH', 'MANAGER'), async (req, r
       else formation.non_renseigne_heures += h;
     }
     formation.total_heures = Math.round((formation.femmes_heures + formation.hommes_heures + formation.non_renseigne_heures) * 100) / 100;
-    // Heures moyennes par femme / homme (B10) — null si effectif nul (jamais 0 inventé).
-    formation.femmes_heures_moyennes = global.femmes > 0 ? Math.round((formation.femmes_heures / global.femmes) * 100) / 100 : null;
-    formation.hommes_heures_moyennes = global.hommes > 0 ? Math.round((formation.hommes_heures / global.hommes) * 100) / 100 : null;
+    // Heures moyennes PAR PERSONNE FORMÉE (population cohérente avec le total, quel
+    // que soit l'is_active) — null si personne formée (jamais 0 inventé).
+    formation.femmes_heures_moyennes = formation.femmes_nb_formes > 0 ? Math.round((formation.femmes_heures / formation.femmes_nb_formes) * 100) / 100 : null;
+    formation.hommes_heures_moyennes = formation.hommes_nb_formes > 0 ? Math.round((formation.hommes_heures / formation.hommes_nb_formes) * 100) / 100 : null;
 
     res.json({
       annee,
@@ -1247,7 +1257,7 @@ router.get('/kpi/egalite-fh', authorize('ADMIN', 'RH', 'MANAGER'), async (req, r
       par_equipe,
       encadrement: { ...encadrement, part_femmes_pct: partF(encadrement) },
       formation,
-      note: 'Répartition F/H estimée à partir de la civilité (Mme/M.) — aucun champ « sexe » déclaratif en base. Agrégats non nominatifs.',
+      note: 'Sexe issu du champ « genre » (renseigné à l\'import paie), civilité en repli. Effectif et encadrement = photo actuelle ; accès à la formation = flux annuel (toutes les personnes formées dans l\'exercice, y compris les salariés sortis). Agrégats non nominatifs.',
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1317,6 +1327,11 @@ router.post('/formation/actions', authorize('ADMIN', 'RH', 'MANAGER'), async (re
     if (b.public_cible && !FORMATION_PUBLICS.includes(b.public_cible)) return res.status(400).json({ error: 'Public invalide', allowed: FORMATION_PUBLICS });
     if (b.statut && !FORMATION_STATUTS.includes(b.statut)) return res.status(400).json({ error: 'Statut invalide', allowed: FORMATION_STATUTS });
     const num = (v) => (v === '' || v == null ? null : v);
+    // Revue Codex PR#82 : refuser les quantités négatives (participants, heures, coûts).
+    for (const nf of ['nb_participants_prevus', 'nb_participants_realises', 'heures_prevues', 'heures_realisees', 'cout_prevu', 'cout_realise']) {
+      const v = num(b[nf]);
+      if (v != null && !(Number(v) >= 0)) return res.status(400).json({ error: `« ${nf} » doit être positif ou nul` });
+    }
     const r = await pool.query(
       `INSERT INTO formation_actions
          (annee, intitule, type_formation, origine_besoin, public_cible, organisme, statut,
@@ -1343,9 +1358,14 @@ router.patch('/formation/actions/:id', authorize('ADMIN', 'RH', 'MANAGER'), asyn
       organisme: () => true,
       statut: (v) => FORMATION_STATUTS.includes(v),
       date_prevue: () => true, date_realisation: () => true,
-      nb_participants_prevus: () => true, nb_participants_realises: () => true,
-      heures_prevues: () => true, heures_realisees: () => true,
-      cout_prevu: () => true, cout_realise: () => true, commentaire: () => true,
+      // Quantités : positives ou nulles (revue Codex PR#82).
+      nb_participants_prevus: (v) => v === '' || v == null || Number(v) >= 0,
+      nb_participants_realises: (v) => v === '' || v == null || Number(v) >= 0,
+      heures_prevues: (v) => v === '' || v == null || Number(v) >= 0,
+      heures_realisees: (v) => v === '' || v == null || Number(v) >= 0,
+      cout_prevu: (v) => v === '' || v == null || Number(v) >= 0,
+      cout_realise: (v) => v === '' || v == null || Number(v) >= 0,
+      commentaire: () => true,
     };
     const sets = [];
     const params = [];

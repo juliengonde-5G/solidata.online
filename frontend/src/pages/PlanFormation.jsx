@@ -246,22 +246,22 @@ export default function PlanFormation() {
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Participants prévus / réalisés</label>
             <div className="flex gap-2">
-              <input type="number" value={form.nb_participants_prevus} onChange={(e) => setForm((f) => ({ ...f, nb_participants_prevus: e.target.value }))} className="input-modern w-full text-sm" placeholder="prévus" />
-              <input type="number" value={form.nb_participants_realises} onChange={(e) => setForm((f) => ({ ...f, nb_participants_realises: e.target.value }))} className="input-modern w-full text-sm" placeholder="réalisés" />
+              <input type="number" min="0" value={form.nb_participants_prevus} onChange={(e) => setForm((f) => ({ ...f, nb_participants_prevus: e.target.value }))} className="input-modern w-full text-sm" placeholder="prévus" />
+              <input type="number" min="0" value={form.nb_participants_realises} onChange={(e) => setForm((f) => ({ ...f, nb_participants_realises: e.target.value }))} className="input-modern w-full text-sm" placeholder="réalisés" />
             </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Heures prévues / réalisées</label>
             <div className="flex gap-2">
-              <input type="number" step="0.5" value={form.heures_prevues} onChange={(e) => setForm((f) => ({ ...f, heures_prevues: e.target.value }))} className="input-modern w-full text-sm" placeholder="prévues" />
-              <input type="number" step="0.5" value={form.heures_realisees} onChange={(e) => setForm((f) => ({ ...f, heures_realisees: e.target.value }))} className="input-modern w-full text-sm" placeholder="réalisées" />
+              <input type="number" min="0" step="0.5" value={form.heures_prevues} onChange={(e) => setForm((f) => ({ ...f, heures_prevues: e.target.value }))} className="input-modern w-full text-sm" placeholder="prévues" />
+              <input type="number" min="0" step="0.5" value={form.heures_realisees} onChange={(e) => setForm((f) => ({ ...f, heures_realisees: e.target.value }))} className="input-modern w-full text-sm" placeholder="réalisées" />
             </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Coût prévu / réalisé (€)</label>
             <div className="flex gap-2">
-              <input type="number" step="0.01" value={form.cout_prevu} onChange={(e) => setForm((f) => ({ ...f, cout_prevu: e.target.value }))} className="input-modern w-full text-sm" placeholder="prévu" />
-              <input type="number" step="0.01" value={form.cout_realise} onChange={(e) => setForm((f) => ({ ...f, cout_realise: e.target.value }))} className="input-modern w-full text-sm" placeholder="réalisé" />
+              <input type="number" min="0" step="0.01" value={form.cout_prevu} onChange={(e) => setForm((f) => ({ ...f, cout_prevu: e.target.value }))} className="input-modern w-full text-sm" placeholder="prévu" />
+              <input type="number" min="0" step="0.01" value={form.cout_realise} onChange={(e) => setForm((f) => ({ ...f, cout_realise: e.target.value }))} className="input-modern w-full text-sm" placeholder="réalisé" />
             </div>
           </div>
           <div className="sm:col-span-2">

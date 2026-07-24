@@ -690,11 +690,26 @@ router.get('/documents/synthese', async (req, res) => {
         ? { present: true, id: doc.id, titre: doc.titre, statut_revision: doc.statut_revision, irp_consulte: doc.irp_consulte, date_maj: doc.date_maj }
         : { present: false };
     }
-    const a_reviser = rows.filter((x) => x.statut_revision === 'a_reviser');
-    const bientot = rows.filter((x) => x.statut_revision === 'bientot');
-    const sans_consultation_irp = rows.filter((x) => !x.irp_consulte);
+    // Version COURANTE par (type, titre) : la plus récente (date_document, sinon
+    // date_maj/created_at, sinon id). Seule la version courante déclenche une alerte
+    // de révision — une version antérieure supersédée ne doit pas alerter à vie
+    // (revue Codex PR#80).
+    const keyOf = (x) => `${x.type}||${String(x.titre || '').trim().toLowerCase()}`;
+    const rankOf = (x) => new Date(x.date_document || x.date_maj || x.created_at || 0).getTime();
+    const currentByKey = new Map();
+    for (const x of rows) {
+      const k = keyOf(x);
+      const cur = currentByKey.get(k);
+      if (!cur || rankOf(x) > rankOf(cur) || (rankOf(x) === rankOf(cur) && x.id > cur.id)) currentByKey.set(k, x);
+    }
+    const currents = new Set([...currentByKey.values()].map((x) => x.id));
+    const isCurrent = (x) => currents.has(x.id);
+    const a_reviser = rows.filter((x) => isCurrent(x) && x.statut_revision === 'a_reviser');
+    const bientot = rows.filter((x) => isCurrent(x) && x.statut_revision === 'bientot');
+    const sans_consultation_irp = rows.filter((x) => isCurrent(x) && !x.irp_consulte);
     res.json({
       total: rows.length,
+      versions_courantes: currents.size,
       presence_socles: presence,
       a_reviser,
       bientot,
