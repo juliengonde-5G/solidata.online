@@ -116,3 +116,28 @@ describe('computeCumul12MoisGlissants — fenêtre de 12 mois se terminant à la
     expect(c.jours_enregistres).toBe(0);
   });
 });
+
+// ── Correctif revue Codex PR#74 : fenêtre glissante et 29 février ────────────
+describe('computeCumul12MoisGlissants — bornage 29 février (revue Codex PR#74)', () => {
+  it('période finissant le 29/02/2024 : la fenêtre démarre le 01/03/2023 (et non le 02/03)', () => {
+    const r = computeCumul12MoisGlissants({ date_debut: '2024-02-29', date_fin: '2024-02-29' }, []);
+    expect(r.fenetre_du).toBe('2023-03-01');
+    expect(r.fenetre_au).toBe('2024-02-29');
+  });
+
+  it('un jour de PMSMP le 01/03/2023 est bien COMPTÉ dans la fenêtre se terminant le 29/02/2024', () => {
+    const r = computeCumul12MoisGlissants(
+      { date_debut: '2024-02-29', date_fin: '2024-02-29' },
+      [{ date_debut: '2023-03-01', date_fin: '2023-03-01' }]
+    );
+    // 1 (nouvelle) + 1 (le 01/03/2023, autrefois exclu à tort) = 2
+    expect(r.jours_enregistres).toBe(1);
+    expect(r.total).toBe(2);
+  });
+
+  it('mois standard : fenêtre inclusive de 12 mois (au − 12 mois + 1 j)', () => {
+    const r = computeCumul12MoisGlissants({ date_debut: '2024-06-15', date_fin: '2024-06-15' }, []);
+    expect(r.fenetre_du).toBe('2023-06-16');
+    expect(r.fenetre_au).toBe('2024-06-15');
+  });
+});

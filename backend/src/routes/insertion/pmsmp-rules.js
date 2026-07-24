@@ -45,6 +45,20 @@ function pmsmpDays(dateDebut, dateFin) {
   return Math.round((b - a) / DAY_MS) + 1;
 }
 
+/**
+ * Recul de N mois avec BORNAGE de fin de mois (évite la normalisation JS des
+ * quantièmes invalides : Date.UTC(2024, -11, 30) déborderait en 2023-03-02).
+ * Ex. 2024-02-29 − 12 mois → 2023-02-28 (et non une date de mars).
+ */
+function subtractMonthsClamped(date, months) {
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth();
+  const d = date.getUTCDate();
+  // Dernier jour du mois cible (jour 0 du mois suivant le mois cible).
+  const lastDayTarget = new Date(Date.UTC(y, m - months + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - months, Math.min(d, lastDayTarget)));
+}
+
 /** Jours d'intersection INCLUSIFS entre [debut, fin] et [du, au] (0 si disjoints). */
 function overlapDays(debut, fin, du, au) {
   const s = Math.max(debut.getTime(), du.getTime());
@@ -74,8 +88,11 @@ function computeCumul12MoisGlissants(nouvelle, existantes = [], autresJoursConnu
   const nf = toUtcDate(nouvelle && nouvelle.date_fin);
   if (!nd || !nf || nf < nd) return null;
 
-  // Fenêtre glissante : les 12 mois se terminant à la fin de la période contrôlée.
-  const du = new Date(Date.UTC(nf.getUTCFullYear(), nf.getUTCMonth() - PMSMP_FENETRE_MOIS, nf.getUTCDate() + 1));
+  // Fenêtre glissante : les 12 mois se terminant à la fin de la période
+  // contrôlée. Recul de 12 mois AVEC bornage de fin de mois PUIS +1 jour (fenêtre
+  // inclusive de 12 mois exactement) — corrige la dérive du 29/02 qui excluait à
+  // tort un jour de la fenêtre (revue Codex PR#74).
+  const du = new Date(subtractMonthsClamped(nf, PMSMP_FENETRE_MOIS).getTime() + DAY_MS);
   const au = nf;
 
   const joursNouvelle = overlapDays(nd, nf, du, au);

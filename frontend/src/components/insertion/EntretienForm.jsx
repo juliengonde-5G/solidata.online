@@ -259,17 +259,32 @@ export default function EntretienForm({
     });
   }, []);
   const [presence, setPresence] = useState(Array.isArray(milestone.validations) && milestone.validations.some((v) => v.mode === 'presence'));
+  // Renouvellement (EXG-04) : la clôture exige la triple validation encadrant/
+  // CIP/directeur. L'encadrant ('eti') signe via l'écran ETI ; ici la CIP pose sa
+  // validation et atteste celle du directeur. Le serveur fusionne par rôle (les
+  // signatures existantes, dont 'eti', sont préservées).
+  const hasRole = (r) => Array.isArray(milestone.validations) && milestone.validations.some((v) => v && v.role === r);
+  const [directeurValide, setDirecteurValide] = useState(hasRole('directeur'));
 
   const doClose = async () => {
     setClosing(true); setProblems(null); setError(null);
     try {
       // 1. Le contrôle de clôture lit la BASE : on pousse d'abord le brouillon
       // (previous_review avec échéances calculées, freins, validations…).
-      if (presence && !readOnly) {
-        pendingRef.current.validations = [
-          { role: 'salarie', at: new Date().toISOString(), mode: 'presence' },
-          { role: 'cip', user_id: user?.id, at: new Date().toISOString(), mode: 'compte' },
-        ];
+      if (!readOnly) {
+        const now = new Date().toISOString();
+        let vs = null;
+        if (type === 'renouvellement') {
+          vs = [{ role: 'cip', user_id: user?.id, at: now, mode: 'compte' }];
+          if (directeurValide) vs.push({ role: 'directeur', user_id: user?.id, at: now, mode: 'compte' });
+          if (presence) vs.push({ role: 'salarie', at: now, mode: 'presence' });
+        } else if (presence) {
+          vs = [
+            { role: 'salarie', at: now, mode: 'presence' },
+            { role: 'cip', user_id: user?.id, at: now, mode: 'compte' },
+          ];
+        }
+        if (vs) pendingRef.current.validations = vs;
       }
       const flushed = await flush();
       if (!flushed) { setClosing(false); return; }
@@ -950,6 +965,13 @@ export default function EntretienForm({
               <input type="checkbox" checked={presence} onChange={(e) => setPresence(e.target.checked)} className="rounded border-gray-300" />
               Relu avec le salarié (validation en présence)
             </label>
+            {type === 'renouvellement' && (
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={directeurValide} onChange={(e) => setDirecteurValide(e.target.checked)} className="rounded border-gray-300" />
+                Décision validée par le directeur
+                <span className="text-[11px] text-gray-400">(requis avec l'avis de l'encadrant pour clôturer)</span>
+              </label>
+            )}
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" onClick={() => setCloseModal(false)} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700">Annuler</button>
               <button type="button" onClick={doClose} disabled={closing}

@@ -215,6 +215,36 @@ describe('CONTRAT POST /insertion/milestones/:id/close', () => {
     for (const p of res.body.problems) expect(typeof p.message).toBe('string');
   });
 
+  it('clôture d’un renouvellement : triple validation eti/cip/directeur exigée (P1 Codex PR#74)', async () => {
+    const freinsOk = Object.fromEntries(FREINS.map((f) => [f.column, 3]));
+    // Manque 'directeur' → 409 avec le code dédié
+    mockQuery.mockImplementation((sql) => {
+      const s = String(sql);
+      if (/FOR UPDATE/.test(s)) return Promise.resolve({ rows: [fullMilestone({ milestone_type: 'renouvellement', ...freinsOk, previous_review: [{ kind: 'action', id: 1, verdict: 'ok' }], validations: [{ role: 'eti' }, { role: 'cip' }] })] });
+      if (/status = 'realise' LIMIT 1/.test(s)) return Promise.resolve({ rows: [] });
+      if (/status = 'planifie' LIMIT 1/.test(s)) return Promise.resolve({ rows: [{ id: 9 }] }); // prochain déjà planifié
+      return Promise.resolve({ rows: [] });
+    });
+    const manque = await post('/api/insertion/milestones/10/close', 'RH', {});
+    expect(manque.status).toBe(409);
+    const codes = manque.body.problems.map((p) => p.code);
+    expect(codes).toContain('validations_renouvellement_incompletes');
+    const prob = manque.body.problems.find((p) => p.code === 'validations_renouvellement_incompletes');
+    expect(prob.manquants).toEqual(['directeur']);
+
+    // Les trois présentes → la clôture n'est plus bloquée par ce contrôle
+    mockQuery.mockImplementation((sql, params) => {
+      const s = String(sql);
+      if (/FOR UPDATE/.test(s)) return Promise.resolve({ rows: [fullMilestone({ milestone_type: 'renouvellement', ...freinsOk, previous_review: [{ kind: 'action', id: 1, verdict: 'ok' }], validations: [{ role: 'eti' }, { role: 'cip' }, { role: 'directeur' }] })] });
+      if (/status = 'realise' LIMIT 1/.test(s)) return Promise.resolve({ rows: [] });
+      if (/status = 'planifie' LIMIT 1/.test(s)) return Promise.resolve({ rows: [{ id: 9 }] });
+      if (/UPDATE insertion_milestones\s+SET status = 'realise'/.test(s)) return Promise.resolve({ rows: [fullMilestone({ status: 'realise', completed_date: params[0], locked_at: 'x' })] });
+      return Promise.resolve({ rows: [] });
+    });
+    const ok = await post('/api/insertion/milestones/10/close', 'RH', {});
+    expect(ok.status).toBe(200);
+  });
+
   it('clôture OK : realise + locked_at + snapshot close + prochain entretien créé planifie + resync', async () => {
     const calls = [];
     mockQuery.mockImplementation((sql, params) => {
@@ -1123,6 +1153,10 @@ describe('CONTRAT /insertion/renouvellements (PR 2 — EXG-04/RES-10)', () => {
       if (/SELECT \* FROM insertion_milestones WHERE id = \$1/.test(s)) {
         return Promise.resolve({ rows: [fullMilestone({ id: 44, milestone_type: 'renouvellement', titre: 'Renouvellement', frein_judiciaire: 4 })] });
       }
+      // Ownership : le MANAGER (id 1) est l'encadrant référent du salarié.
+      if (/cip_referent_user_id, mgr\.user_id/.test(s)) {
+        return Promise.resolve({ rows: [{ cip_referent_user_id: null, manager_user_id: 1 }] });
+      }
       if (/UPDATE insertion_milestones SET/.test(s)) {
         update = { sql: s, params };
         return Promise.resolve({ rows: [fullMilestone({ id: 44, milestone_type: 'renouvellement', frein_judiciaire: 4, renouvellement_avis: params[1], validations: [{ role: 'eti', user_id: 1, at: 'x', mode: 'compte' }] })] });
@@ -1146,6 +1180,37 @@ describe('CONTRAT /insertion/renouvellements (PR 2 — EXG-04/RES-10)', () => {
     // Masquage MANAGER conservé sur la réponse
     expect('frein_judiciaire' in res.body).toBe(false);
     expect(res.body.renouvellement_avis).toBe('favorable_reserves');
+  });
+
+  it('PUT formulaire (MANAGER NON référent) → 403 { code: renouvellement_non_autorise } (P1 Codex PR#74)', async () => {
+    mockQuery.mockImplementation((sql) => {
+      const s = String(sql);
+      if (/SELECT \* FROM insertion_milestones WHERE id = \$1/.test(s)) {
+        return Promise.resolve({ rows: [fullMilestone({ id: 44, milestone_type: 'renouvellement' })] });
+      }
+      // Ownership : ni CIP référent ni encadrant du salarié (autre encadrant).
+      if (/cip_referent_user_id, mgr\.user_id/.test(s)) {
+        return Promise.resolve({ rows: [{ cip_referent_user_id: 99, manager_user_id: 42 }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await put('/api/insertion/renouvellements/44/formulaire', 'MANAGER', { renouvellement_avis: 'favorable' });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('renouvellement_non_autorise');
+  });
+
+  it('ADMIN/RH conservent le bypass d’ownership sur le formulaire de renouvellement', async () => {
+    mockQuery.mockImplementation((sql, params) => {
+      const s = String(sql);
+      if (/SELECT \* FROM insertion_milestones WHERE id = \$1/.test(s)) {
+        return Promise.resolve({ rows: [fullMilestone({ id: 44, milestone_type: 'renouvellement' })] });
+      }
+      if (/cip_referent_user_id, mgr\.user_id/.test(s)) return Promise.resolve({ rows: [{ cip_referent_user_id: 999, manager_user_id: 999 }] });
+      if (/UPDATE insertion_milestones SET/.test(s)) return Promise.resolve({ rows: [fullMilestone({ id: 44, milestone_type: 'renouvellement', renouvellement_avis: params[1] })] });
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await put('/api/insertion/renouvellements/44/formulaire', 'RH', { renouvellement_avis: 'favorable' });
+    expect(res.status).toBe(200); // RH n'est pas soumis au contrôle d'ownership
   });
 
   it('PUT formulaire : entretien verrouillé → 409 ; type non renouvellement → 400 ; avis hors enum → 400', async () => {

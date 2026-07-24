@@ -524,6 +524,40 @@ router.post('/milestones', [
 // ── Champs éditables d'un entretien (PUT /milestones/:id) ──
 // Fin du COALESCE intégral (03 §6.3) : seuls les champs PRÉSENTS dans le body
 // sont écrits, et null est accepté (permet d'effacer une date, un frein…).
+// Un MANAGER (encadrant technique) n'agit que sur SES salariés. Rattachement :
+// employees.manager_id → fiche encadrant → users.id, OU cip_referent_user_id.
+// FAIL-CLOSED : sans rattachement connu, le MANAGER est refusé (P1 revue Codex
+// PR#74 — sinon tout encadrant pourrait écrire le renouvellement d'autrui).
+async function managerOwnsEmployee(db, employeeId, userId) {
+  const r = await db.query(
+    `SELECT e.cip_referent_user_id, mgr.user_id AS manager_user_id
+     FROM employees e
+     LEFT JOIN employees mgr ON mgr.id = e.manager_id
+     WHERE e.id = $1`,
+    [employeeId]
+  );
+  if (r.rows.length === 0) return false;
+  const row = r.rows[0];
+  return (row.cip_referent_user_id != null && row.cip_referent_user_id === userId)
+    || (row.manager_user_id != null && row.manager_user_id === userId);
+}
+
+// Fusion des validations PAR RÔLE (traçabilité — P1 revue Codex PR#74) : une
+// écriture ne remplace QUE le rôle qu'elle porte ; les autres signatures
+// (eti / cip / salarie / directeur) sont PRÉSERVÉES. La purge est réservée à la
+// réouverture (validations = NULL, caducité tracée dans l'historique).
+function normalizeValidations(x) {
+  if (typeof x === 'string') { try { x = JSON.parse(x); } catch (_) { return []; } }
+  return Array.isArray(x) ? x.filter((v) => v && v.role) : [];
+}
+function mergeValidations(existing, incoming) {
+  const inc = normalizeValidations(incoming);
+  if (inc.length === 0) return normalizeValidations(existing);
+  const roles = new Set(inc.map((v) => v.role));
+  const kept = normalizeValidations(existing).filter((v) => !roles.has(v.role));
+  return [...kept, ...inc];
+}
+
 const MILESTONE_JSONB_FIELDS = ['previous_review', 'validations', 'renouvellement_form', 'sortie_documents', 'remise_salarie', 'fse_sortie', 'ai_recommendations', 'periode_essai_form'];
 const MILESTONE_EDITABLE_FIELDS = [
   'status', 'titre', 'due_date', 'interview_date', 'interviewer_id', 'completed_date',
@@ -584,7 +618,12 @@ router.put('/milestones/:id', [
     for (const field of MILESTONE_EDITABLE_FIELDS) {
       if (!(field in d)) continue;
       let v = d[field] === '' ? null : d[field];
-      if (v != null && MILESTONE_JSONB_FIELDS.includes(field)) v = JSON.stringify(v);
+      if (field === 'validations') {
+        // Jamais d'écrasement : on fusionne par rôle avec l'existant (P1 Codex).
+        v = JSON.stringify(mergeValidations(prev.validations, d.validations));
+      } else if (v != null && MILESTONE_JSONB_FIELDS.includes(field)) {
+        v = JSON.stringify(v);
+      }
       vals.push(v);
       sets.push(`${field} = $${vals.length}`);
     }
@@ -689,6 +728,23 @@ router.post('/milestones/:id/close', [
         code: 'periode_essai_decision_manquante',
         message: "Décision de période d'essai obligatoire (confirme, rompu, a_revoir) avant la clôture.",
       });
+    }
+
+    // 2ter. Renouvellement (EXG-04) : triple validation encadrant/CIP/directeur
+    // exigée avant clôture (P1 revue Codex PR#74). Les signatures sont posées au
+    // fil de l'eau (formulaire ETI → validation 'eti' ; clôture en présence →
+    // 'salarie'+'cip' ; validation direction → 'directeur') et préservées par
+    // mergeValidations. La décision ne peut être finalisée sans les trois.
+    if (ms.milestone_type === 'renouvellement') {
+      const roles = new Set(normalizeValidations(ms.validations).map((v) => v.role));
+      const manquants = ['eti', 'cip', 'directeur'].filter((r) => !roles.has(r));
+      if (manquants.length > 0) {
+        problems.push({
+          code: 'validations_renouvellement_incompletes',
+          manquants,
+          message: `Validation(s) manquante(s) avant clôture du renouvellement : ${manquants.join(', ')} (triple validation encadrant / CIP / directeur requise).`,
+        });
+      }
     }
 
     // 3. Bilan de sortie : catégorie de sortie (nouvelle nomenclature) +
@@ -1675,21 +1731,26 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
   body('force').optional().isBoolean().withMessage('force invalide'),
   body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
 ], validate, async (req, res) => {
+  // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74) : le
+  // contrôle de cumul et l'insertion sont sérialisés, sinon deux saisies
+  // concurrentes pourraient chacune passer le plafond 60 j puis totaliser > 60 j.
+  const client = await pool.connect();
   try {
     const d = req.body;
-    const emp = await pool.query('SELECT id FROM employees WHERE id = $1', [d.employee_id]);
-    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    await client.query('BEGIN');
+    const emp = await client.query('SELECT id FROM employees WHERE id = $1 FOR UPDATE', [d.employee_id]);
+    if (emp.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Salarié non trouvé' }); }
 
-    const check = await checkPmsmpRules(pool, {
+    const check = await checkPmsmpRules(client, {
       employeeId: d.employee_id, dateDebut: d.date_debut, dateFin: d.date_fin,
       autresJoursConnus: d.autres_jours_connus, force: d.force === true, motifDepassement: d.motif_depassement,
     });
-    if (check.refus) return res.status(check.refus.status).json(check.refus.body);
+    if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
 
     let bilan = (d.bilan != null && d.bilan !== '') ? String(d.bilan) : null;
     if (check.forced) bilan = `${bilan ? bilan + '\n' : ''}${pmsmpForceTrace(check.motif, check.cumul)}`;
 
-    const r = await pool.query(
+    const r = await client.query(
       `INSERT INTO insertion_pmsmp
          (employee_id, entreprise, siret, objet, date_debut, date_fin, tuteur, bilan, saisie_outil_officiel, convention_ref, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false), $10, $11)
@@ -1698,14 +1759,18 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
         d.tuteur || null, bilan, typeof d.saisie_outil_officiel === 'boolean' ? d.saisie_outil_officiel : null,
         d.convention_ref || null, req.user.id]
     );
+    await client.query('COMMIT');
     const row = r.rows[0];
     const out = { ...row, jours: pmsmpDays(row.date_debut, row.date_fin) };
     if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
     res.status(201).json(out);
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié inexistant).' });
     console.error('[INSERTION] Erreur pmsmp POST :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1724,20 +1789,25 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
   body('force').optional().isBoolean().withMessage('force invalide'),
   body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
 ], validate, async (req, res) => {
+  // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74), même
+  // motif que le POST : contrôle de cumul et écriture sérialisés.
+  const client = await pool.connect();
   try {
     const d = req.body;
-    const cur = await pool.query('SELECT * FROM insertion_pmsmp WHERE id = $1', [req.params.id]);
-    if (cur.rows.length === 0) return res.status(404).json({ error: 'PMSMP non trouvée' });
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT * FROM insertion_pmsmp WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'PMSMP non trouvée' }); }
     const ex = cur.rows[0];
+    await client.query('SELECT id FROM employees WHERE id = $1 FOR UPDATE', [ex.employee_id]);
 
     // Contrôles sur les dates EFFECTIVES (fusion body + existant).
     const dateDebut = 'date_debut' in d ? d.date_debut : ex.date_debut;
     const dateFin = 'date_fin' in d ? d.date_fin : ex.date_fin;
-    const check = await checkPmsmpRules(pool, {
+    const check = await checkPmsmpRules(client, {
       employeeId: ex.employee_id, dateDebut, dateFin, excludeId: ex.id,
       autresJoursConnus: d.autres_jours_connus, force: d.force === true, motifDepassement: d.motif_depassement,
     });
-    if (check.refus) return res.status(check.refus.status).json(check.refus.body);
+    if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
 
     const editable = ['entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan', 'saisie_outil_officiel', 'convention_ref'];
     const sets = [];
@@ -1755,20 +1825,24 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
       if (idx >= 0) vals[parseInt(sets[idx].split('$')[1], 10) - 1] = traced;
       else { vals.push(traced); sets.push(`bilan = $${vals.length}`); }
     }
-    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
+    if (sets.length === 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Aucun champ à modifier' }); }
     vals.push(req.params.id);
-    const r = await pool.query(
+    const r = await client.query(
       `UPDATE insertion_pmsmp SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
       vals
     );
+    await client.query('COMMIT');
     const row = r.rows[0];
     const out = { ...row, jours: pmsmpDays(row.date_debut, row.date_fin) };
     if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
     res.json(out);
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23514') return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code });
     console.error('[INSERTION] Erreur pmsmp PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
@@ -2014,6 +2088,15 @@ router.put('/renouvellements/:milestoneId/formulaire', [
     const prev = cur.rows[0];
     if (prev.milestone_type !== 'renouvellement') {
       return res.status(400).json({ error: "Cette route ne s'applique qu'aux entretiens de type renouvellement." });
+    }
+    // Ownership encadrant (P1 revue Codex PR#74) : un MANAGER ne peut écrire QUE
+    // le renouvellement d'un salarié dont il est l'encadrant référent (ou le CIP
+    // référent). ADMIN/RH conservent le bypass. Fail-closed pour le MANAGER.
+    if (baseRoleOf(req) === 'MANAGER' && !(await managerOwnsEmployee(pool, prev.employee_id, req.user.id))) {
+      return res.status(403).json({
+        error: "Accès refusé : vous n'êtes pas l'encadrant référent de ce salarié.",
+        code: 'renouvellement_non_autorise',
+      });
     }
     if (prev.locked_at) {
       return res.status(409).json({
