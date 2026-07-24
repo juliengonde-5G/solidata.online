@@ -46,6 +46,7 @@ const RenouvellementETI = lazy(() => import('./pages/RenouvellementETI'));
 const AdminInsertion = lazy(() => import('./pages/AdminInsertion'));
 const PilotageRSE = lazy(() => import('./pages/PilotageRSE'));
 const EnergieGES = lazy(() => import('./pages/EnergieGES'));
+const AchatsResponsables = lazy(() => import('./pages/AchatsResponsables'));
 const Enquetes = lazy(() => import('./pages/Enquetes'));
 const EnqueteReponse = lazy(() => import('./pages/EnqueteReponse'));
 const PlanningHebdo = lazy(() => import('./pages/PlanningHebdo'));
@@ -261,6 +262,9 @@ function App() {
 
               {/* Énergie & GES (RSEI-11 — 29e module, critère RSEi 4.2) */}
               <Route path="/energie" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><EnergieGES /></ProtectedRoute>} />
+
+              {/* Achats responsables (RSEI-17 — 31e module, critère RSEi 1.7) */}
+              <Route path="/achats" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><AchatsResponsables /></ProtectedRoute>} />
 
               {/* Enquêtes (RSEI-13 — 30e module) — administration ; la réponse publique /enquete/:token est hors auth */}
               <Route path="/enquetes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><Enquetes /></ProtectedRoute>} />
