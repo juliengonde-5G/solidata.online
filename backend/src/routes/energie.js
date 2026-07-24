@@ -793,5 +793,9 @@ router.get('/vsme-b3b6', READ, [query('annee').optional().isInt({ min: 2000, max
 // Oracles exposés pour les tests (comme metropole.distributeTonnageProrata).
 router.pickFacteur = pickFacteur;
 router.computeConsommation100km = computeConsommation100km;
+// Agrégats annuels réutilisés par le module Pilotage RSE (RSEI-18, bilan 3 volets)
+// — consommés en LECTURE, agrégats NON nominatifs (émissions propres, intensité).
+router.computeAnnualGes = computeAnnualGes;
+router.resolveCA = resolveCA;
 
 module.exports = router;

@@ -32,6 +32,40 @@ jest.mock('../../src/middleware/activity-logger', () => ({
   logActivity: () => {},
 }));
 
+// RSEI-18 : le bilan (GET /rse/bilan) consolide des AGRÉGATS NON NOMINATIFS
+// d'autres modules (insertion.gatherAuditKpis, energie.computeAnnualGes/resolveCA,
+// achats.computeMontantRapprochement). On les mocke ici pour garder ce contrat
+// hermétique et déterministe (le module RSE les importe paresseusement).
+jest.mock('../../src/routes/insertion/routes', () => ({
+  gatherAuditKpis: jest.fn(async (annee) => ({
+    annee,
+    nb_en_parcours: 5,
+    sorties: { total: 4, dynamiques: 3, autres: 1, taux_dynamiques: 75, par_classification: { emploi_durable: 2, emploi_transition: 1, sortie_positive: 0, autre: 1 } },
+    milestones: { global: { total: 10, echus: 8, realises: 7, realises_echus: 6, taux: 75 } },
+    etp_realises_approx: { valeur: 12.5, nb_cddi_actifs: 15, source: 'controle_erp' },
+    typologies: { effectif: 20, rqth: 4, tranches_age: { '26-45': 12 } },
+    conventionnel: { cibles: { cible_taux_dynamiques: 60 }, taux_realises: { dynamiques: 75 }, ecarts: { dynamiques: 15 } },
+    pmsmp: { nb: 3, jours: 40, nb_salaries: 3 },
+    satisfaction: { nb_reponses: 5, moyenne_globale: 4.2 },
+  })),
+}));
+jest.mock('../../src/routes/energie', () => ({
+  computeAnnualGes: jest.fn(async (annee) => ({
+    annee,
+    energie: [
+      { poste: 'electricite', conso: 12000, tco2e: 0.7 },
+      { poste: 'gaz', conso: 5000, tco2e: 0.9 },
+      { poste: 'eau', conso: 300, tco2e: null },
+    ],
+    carburant: [{ poste: 'gazole', litres: 4000, tco2e: 10.6 }],
+    totaux: { tco2e_energie: 1.6, tco2e_carburant: 10.6, tco2e_total: 12.2 },
+  })),
+  resolveCA: jest.fn(async () => ({ ca: 500000, source: 'gl' })),
+}));
+jest.mock('../../src/routes/achats', () => ({
+  computeMontantRapprochement: jest.fn(async () => ({ part_montant_pct: 32.5 })),
+}));
+
 const express = require('express');
 const request = require('supertest');
 
@@ -309,6 +343,109 @@ describe('CONTRAT GET /rse/bilan', () => {
 
   it('annee non entière → 400', async () => {
     expect((await get('/api/rse/bilan?annee=abcd', 'RH')).status).toBe(400);
+  });
+
+  it('enrichit la réponse avec indicateurs_3_volets (social/environnement/économique) + ecarts_niveau', async () => {
+    mockQuery.mockImplementation((sql) => {
+      const s = String(sql);
+      // volet social : effectifs F/H NON nominatifs (comptage par civilité)
+      if (/AS femmes/.test(s)) return Promise.resolve({ rows: [{ femmes: 8, hommes: 12, non_renseigne: 0, total: 20 }] });
+      // volet environnement : tonnage collecté annuel (tournées terminées)
+      if (/FROM tours WHERE status = 'completed'/.test(s)) return Promise.resolve({ rows: [{ kg: 120000 }] });
+      // volet économique : compteurs fournisseurs responsables
+      if (/FROM achats_fournisseurs/.test(s)) return Promise.resolve({ rows: [{ total: 10, responsables: 6 }] });
+      // analyse d'écarts : critères sous le niveau visé
+      if (/niveau_auto_evalue IS NULL OR niveau_auto_evalue < niveau_vise/.test(s)) {
+        return Promise.resolve({ rows: [{ code: '1.5', intitule: 'Pilotage', chapitre: 1, niveau_vise: 3, niveau_auto_evalue: 1 }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await get('/api/rse/bilan?annee=2026', 'RH');
+    expect(res.status).toBe(200);
+    const v = res.body.indicateurs_3_volets;
+    expect(v).toBeTruthy();
+    // — social (agrégats non nominatifs de gatherAuditKpis + F/H)
+    expect(v.social.disponible).toBe(true);
+    expect(v.social.nb_en_parcours).toBe(5);
+    expect(v.social.sorties.taux_dynamiques).toBe(75);
+    expect(v.social.effectifs_fh.femmes).toBe(8);
+    expect(v.social.effectifs_fh.hommes).toBe(12);
+    // — environnement (émissions propres energie + tonnage/CO2 évité)
+    expect(v.environnement.disponible).toBe(true);
+    expect(v.environnement.ges.tco2e_total).toBe(12.2);
+    expect(v.environnement.ges.intensite_tco2e_par_keuro_ca).not.toBeNull();
+    expect(v.environnement.valorisation.disponible).toBe(true);
+    expect(v.environnement.valorisation.co2_evite_tonnes).toBeGreaterThan(0);
+    // — économique / VSME dérivé du même objet GES + achats
+    expect(v.economique.disponible).toBe(true);
+    expect(v.economique.vsme.b3_energie.total_energie_kwh).toBe(17000);
+    expect(v.economique.vsme.b6_eau.consommation_eau_m3).toBe(300);
+    expect(v.economique.achats.part_responsables_pct).toBe(60);
+    expect(v.economique.achats.part_montant_pct).toBe(32.5);
+    // — analyse d'écarts
+    expect(Array.isArray(res.body.ecarts_niveau)).toBe(true);
+    expect(res.body.ecarts_niveau[0].code).toBe('1.5');
+  });
+
+  it('résilience : une source agrégée en échec ne casse pas le bilan (volet marqué indisponible)', async () => {
+    const energie = require('../../src/routes/energie');
+    energie.computeAnnualGes.mockRejectedValueOnce(new Error('module énergie indisponible'));
+    const res = await get('/api/rse/bilan?annee=2026', 'RH');
+    expect(res.status).toBe(200);
+    // le volet environnement dégrade proprement (ges indisponible), le bilan tient
+    expect(res.body.indicateurs_3_volets).toBeTruthy();
+    expect(res.body.indicateurs_3_volets.environnement.ges.disponible).not.toBe(true);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// DOSSIER DE CANDIDATURE AFNOR (RSEI-18)
+// ───────────────────────────────────────────────────────────────────────────
+describe('CONTRAT GET /rse/dossier-candidature', () => {
+  it('page de garde (identité structure + synthèse des niveaux) + chapitres groupés', async () => {
+    mockQuery.mockImplementation((sql) => {
+      const s = String(sql);
+      if (/rsei_criteres c LEFT JOIN users/.test(s)) {
+        return Promise.resolve({ rows: [
+          { chapitre: 1, code: '1.1', intitule: 'Projet', niveau_vise: 2, niveau_auto_evalue: 2, commentaire: 'ok', ordre: 1, pilote_nom: 'A B' },
+          { chapitre: 2, code: '2.1', intitule: 'Emplois', niveau_vise: 2, niveau_auto_evalue: null, commentaire: null, ordre: 10, pilote_nom: null },
+        ] });
+      }
+      if (/unnest\(critere_codes\) AS code/.test(s) && /reference/.test(s)) {
+        return Promise.resolve({ rows: [{ code: '1.1', id: 1, reference: `P-${YEAR}-001`, intitule: 'Doc', type: 'procedure', source: 'QHSE', lien_interne: null, date_preuve: '2026-01-01', echeance_fraicheur: '2027-01-01' }] });
+      }
+      if (/DISTINCT ON \(i\.critere_code\)/.test(s)) return Promise.resolve({ rows: [] });
+      if (/FROM settings WHERE key = ANY/.test(s)) {
+        return Promise.resolve({ rows: [
+          { key: 'company_name', value: 'Solidarité Textiles' },
+          { key: 'company_siret', value: '12345678901234' },
+        ] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await get('/api/rse/dossier-candidature', 'ADMIN');
+    expect(res.status).toBe(200);
+    // page de garde — identité structure depuis settings (jamais inventée)
+    expect(res.body.page_garde.structure.nom).toBe('Solidarité Textiles');
+    expect(res.body.page_garde.structure.siret).toBe('12345678901234');
+    expect(res.body.page_garde.structure.telephone).toBeNull();
+    // synthèse des niveaux
+    expect(res.body.page_garde.synthese_niveaux.total).toBe(2);
+    expect(res.body.page_garde.synthese_niveaux.cotes).toBe(1); // seul 1.1 coté
+    // groupé par chapitre
+    expect(res.body.chapitres).toHaveLength(2);
+    expect(res.body.chapitres[0].chapitre).toBe(1);
+    expect(res.body.chapitres[0].criteres[0].preuves[0].reference).toBe(`P-${YEAR}-001`);
+    // liste plate conservée (compat)
+    expect(Array.isArray(res.body.criteres)).toBe(true);
+    expect(res.body.criteres).toHaveLength(2);
+  });
+
+  it('lecture ouverte ADMIN/MANAGER/RH, refusée COLLABORATEUR (403)', async () => {
+    for (const role of ['ADMIN', 'MANAGER', 'RH']) {
+      expect((await get('/api/rse/dossier-candidature', role)).status).toBe(200);
+    }
+    expect((await get('/api/rse/dossier-candidature', 'COLLABORATEUR')).status).toBe(403);
   });
 });
 

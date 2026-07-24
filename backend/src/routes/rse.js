@@ -92,6 +92,266 @@ async function nextPreuveReference(db) {
   return `P-${year}-${String(seq).padStart(3, '0')}`;
 }
 
+// Lit une valeur de la table settings (clé/valeur). Renvoie null si absente.
+async function readSetting(key) {
+  try {
+    const r = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
+    return r.rows[0] ? r.rows[0].value : null;
+  } catch (_) { return null; }
+}
+
+// Identité de la structure pour la page de garde du dossier de candidature —
+// lue depuis les settings généraux (JAMAIS de valeur inventée : null si absent).
+async function gatherStructureIdentity() {
+  const map = { company_name: 'nom', company_address: 'adresse', company_siret: 'siret', company_phone: 'telephone' };
+  const out = { nom: null, adresse: null, siret: null, telephone: null };
+  try {
+    const r = await pool.query('SELECT key, value FROM settings WHERE key = ANY($1)', [Object.keys(map)]);
+    for (const row of r.rows) { if (map[row.key]) out[map[row.key]] = row.value || null; }
+  } catch (_) { /* défauts null */ }
+  return out;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// CONSOLIDATION DES 3 VOLETS (RSEI-18) — bilan RSE annuel = VSME + insertion +
+// environnement. AGRÉGATS NON NOMINATIFS UNIQUEMENT : le module RSE consomme les
+// fonctions d'agrégation existantes (insertion.gatherAuditKpis, energie.computeAnnualGes)
+// ou des requêtes agrégées ; JAMAIS de JOIN nominatif insertion. Chaque volet est
+// « soft » : si une source échoue, le bilan ne casse pas, la section est marquée
+// indisponible. Doctrine « jamais de valeur inventée » : donnée manquante → null.
+// ───────────────────────────────────────────────────────────────────────────
+
+// Facteurs CO2 ÉVITÉ (ADEME) par filière de valorisation — MIROIR de metropole.js
+// (réutilisation=3.169, recyclage=0.500, chiffons=0.750, csr=0.121 t CO2/t textile).
+const FACTEURS_CO2_EVITE = { reutilisation: 3.169, recyclage: 0.500, chiffons: 0.750, csr: 0.121 };
+const MIX_CO2_FALLBACK = { reutilisation: 0.40, recyclage: 0.35, chiffons: 0.15, csr: 0.10 };
+
+async function gather3Volets(annee) {
+  const debut = `${annee}-01-01`;
+  const finExclu = `${annee + 1}-01-01`;
+
+  // ── VOLET SOCIAL / INSERTION ────────────────────────────────────────────
+  // Agrégats NON nominatifs de gatherAuditKpis (insertion/routes.js, déjà exporté).
+  // Import PARESSEUX dans le soft : évite tout couplage à la charge du module au
+  // démarrage et dégrade proprement si l'agrégat échoue.
+  const social = await soft(async () => {
+    const insertion = require('./insertion/routes');
+    if (typeof insertion.gatherAuditKpis !== 'function') {
+      return { disponible: false, note: 'Agrégats insertion indisponibles (fonction non exportée).' };
+    }
+    const k = await insertion.gatherAuditKpis(annee);
+    // Effectifs F/H NON nominatifs (comptage par civilité) — RSEI-08.
+    const fh = await soft(async () => (await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE civility IS NOT NULL AND (civility ILIKE 'Mme%' OR civility ILIKE 'Mlle%' OR civility ILIKE 'Madame%' OR civility ILIKE 'Mademoiselle%'))::int AS femmes,
+         COUNT(*) FILTER (WHERE civility IS NOT NULL AND TRIM(civility) <> '' AND NOT (civility ILIKE 'Mme%' OR civility ILIKE 'Mlle%' OR civility ILIKE 'Madame%' OR civility ILIKE 'Mademoiselle%'))::int AS hommes,
+         COUNT(*) FILTER (WHERE civility IS NULL OR TRIM(civility) = '')::int AS non_renseigne,
+         COUNT(*)::int AS total
+       FROM employees WHERE is_active = true`)).rows[0] || null, null);
+    return {
+      disponible: true,
+      source: 'insertion.audit (agrégats non nominatifs)',
+      nb_en_parcours: k.nb_en_parcours ?? null,
+      sorties: k.sorties ? {
+        total: k.sorties.total, dynamiques: k.sorties.dynamiques, autres: k.sorties.autres,
+        taux_dynamiques: k.sorties.taux_dynamiques, par_classification: k.sorties.par_classification || {},
+      } : null,
+      milestones_global: k.milestones ? k.milestones.global : null,
+      etp_realises_approx: k.etp_realises_approx || null,
+      typologies: k.typologies ? { effectif: k.typologies.effectif, rqth: k.typologies.rqth, tranches_age: k.typologies.tranches_age || {} } : null,
+      conventionnel: k.conventionnel ? { cibles: k.conventionnel.cibles, taux_realises: k.conventionnel.taux_realises, ecarts: k.conventionnel.ecarts } : null,
+      pmsmp: k.pmsmp || null,
+      satisfaction: k.satisfaction || null,
+      effectifs_fh: fh,
+    };
+  }, { disponible: false, note: 'Volet social indisponible (source insertion en échec).' });
+
+  // ── VOLET ENVIRONNEMENT ─────────────────────────────────────────────────
+  // (a) émissions PROPRES (energie/GES : tCO2e total + intensité) ;
+  // (b) CO2 évité / tonnages valorisés (agrégat annuel, facteurs ADEME).
+  let gesObj = null; // partagé avec le volet économique (VSME B3/B6)
+  const gesBlock = await soft(async () => {
+    const energie = require('./energie');
+    if (typeof energie.computeAnnualGes !== 'function') return null;
+    const ges = await energie.computeAnnualGes(annee);
+    gesObj = ges;
+    let caRef = null, caSource = null;
+    if (typeof energie.resolveCA === 'function') {
+      const c = await energie.resolveCA(annee);
+      caRef = c && c.ca != null ? c.ca : null;
+      caSource = c ? c.source : null;
+    }
+    const intensite = (caRef && caRef > 0)
+      ? Math.round((ges.totaux.tco2e_total / (caRef / 1000)) * 1000) / 1000 : null;
+    return {
+      disponible: true,
+      tco2e_total: ges.totaux.tco2e_total,
+      tco2e_energie: ges.totaux.tco2e_energie,
+      tco2e_carburant: ges.totaux.tco2e_carburant,
+      intensite_tco2e_par_keuro_ca: intensite,
+      ca_reference: caRef,
+      ca_source: caSource,
+      avertissement: 'Facteurs d\'émission INDICATIFS et paramétrables (ADEME Base Empreinte). Ne prétendent pas à l\'exactitude réglementaire.',
+    };
+  }, null);
+
+  const valorisation = await soft(async () => {
+    // Tonnage collecté de l'année (tournées terminées).
+    const tRow = await pool.query(
+      `SELECT COALESCE(SUM(total_weight_kg), 0)::float AS kg
+       FROM tours WHERE status = 'completed' AND date >= $1 AND date < $2`, [debut, finExclu]);
+    const totalKg = Number(tRow.rows[0] && tRow.rows[0].kg) || 0;
+    if (totalKg <= 0) return { disponible: false, note: 'Aucun tonnage collecté sur l\'exercice.' };
+    const totalTonnes = totalKg / 1000;
+    // Mix de valorisation observé (colisages scellés de l'année) sinon fallback.
+    let mix = { ...MIX_CO2_FALLBACK, source: 'fallback' };
+    try {
+      const m = await pool.query(
+        `SELECT
+           SUM(CASE WHEN cs.famille_refashion = 'reutilisation' THEN c.poids_kg ELSE 0 END) AS reutilisation_kg,
+           SUM(CASE WHEN cs.famille_refashion = 'recyclage' AND cs.nom NOT ILIKE 'Chiffons%' THEN c.poids_kg ELSE 0 END) AS recyclage_kg,
+           SUM(CASE WHEN cs.famille_refashion = 'recyclage' AND cs.nom ILIKE 'Chiffons%' THEN c.poids_kg ELSE 0 END) AS chiffons_kg,
+           SUM(CASE WHEN cs.famille_refashion = 'csr' THEN c.poids_kg ELSE 0 END) AS csr_kg,
+           SUM(c.poids_kg) AS total_kg
+         FROM colisages c JOIN categories_sortantes cs ON c.categorie_sortante_id = cs.id
+         WHERE c.status IN ('scelle','expedie','livre') AND c.scelle_at IS NOT NULL
+           AND c.scelle_at >= $1::date AND c.scelle_at < $2::date`, [debut, finExclu]);
+      const t = parseFloat(m.rows[0] && m.rows[0].total_kg) || 0;
+      if (t > 100) {
+        mix = {
+          reutilisation: parseFloat(m.rows[0].reutilisation_kg) / t,
+          recyclage: parseFloat(m.rows[0].recyclage_kg) / t,
+          chiffons: parseFloat(m.rows[0].chiffons_kg) / t,
+          csr: parseFloat(m.rows[0].csr_kg) / t,
+          source: 'observe',
+        };
+      }
+    } catch (_) { /* fallback mix */ }
+    const co2 = totalTonnes * (
+      mix.reutilisation * FACTEURS_CO2_EVITE.reutilisation +
+      mix.recyclage * FACTEURS_CO2_EVITE.recyclage +
+      mix.chiffons * FACTEURS_CO2_EVITE.chiffons +
+      mix.csr * FACTEURS_CO2_EVITE.csr);
+    return {
+      disponible: true,
+      tonnage_collecte_tonnes: Math.round(totalTonnes * 100) / 100,
+      co2_evite_tonnes: Math.round(co2 * 100) / 100,
+      mix_source: mix.source,
+    };
+  }, { disponible: false, note: 'Tonnages / CO2 évité indisponibles.' });
+
+  const environnement = {
+    disponible: !!((gesBlock && gesBlock.disponible) || (valorisation && valorisation.disponible)),
+    ges: gesBlock || { disponible: false, note: 'Module Énergie & GES indisponible.' },
+    valorisation,
+  };
+
+  // ── VOLET ÉCONOMIQUE / GOUVERNANCE ──────────────────────────────────────
+  // (a) VSME B3 (énergie/GES) / B6 (eau) dérivés du même objet GES ;
+  // (b) achats responsables (compteurs + part montant, jamais inventée).
+  const vsme = gesObj ? (() => {
+    const de = (poste) => { const e = gesObj.energie.find((x) => x.poste === poste); return e ? Math.round(e.conso * 1000) / 1000 : 0; };
+    const elec = de('electricite'), gaz = de('gaz'), eau = de('eau');
+    const gazT = (gesObj.energie.find((x) => x.poste === 'gaz') || {}).tco2e || 0;
+    const elecT = (gesObj.energie.find((x) => x.poste === 'electricite') || {}).tco2e || 0;
+    return {
+      disponible: true,
+      b3_energie: { electricite_kwh: elec, gaz_kwh: gaz, total_energie_kwh: Math.round((elec + gaz) * 1000) / 1000, part_renouvelable_pct: null },
+      b3_ges: {
+        scope1_tco2e: Math.round((gesObj.totaux.tco2e_carburant + gazT) * 1000) / 1000,
+        scope2_tco2e: Math.round(elecT * 1000) / 1000,
+        total_tco2e: gesObj.totaux.tco2e_total,
+      },
+      b6_eau: { consommation_eau_m3: eau },
+    };
+  })() : { disponible: false, note: 'Données VSME B3/B6 indisponibles (module Énergie & GES).' };
+
+  const achats = await soft(async () => {
+    const r = await pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE local OR inclusif OR demarche_rse OR labellise)::int AS responsables
+       FROM achats_fournisseurs`);
+    const row = r.rows[0] || { total: 0, responsables: 0 };
+    let partMontant = null;
+    try {
+      const ach = require('./achats');
+      if (typeof ach.computeMontantRapprochement === 'function') {
+        const m = await ach.computeMontantRapprochement(annee);
+        partMontant = m ? m.part_montant_pct : null;
+      }
+    } catch (_) { /* montant indisponible */ }
+    return {
+      disponible: true,
+      fournisseurs_total: row.total,
+      fournisseurs_responsables: row.responsables,
+      part_responsables_pct: row.total ? Math.round((row.responsables / row.total) * 100) : null,
+      part_montant_pct: partMontant,
+    };
+  }, { disponible: false, note: 'Volet achats responsables indisponible.' });
+
+  const economique = {
+    disponible: !!(vsme.disponible || achats.disponible),
+    vsme,
+    achats,
+    // NB : les compteurs du plan d'action RSE (actions, taux, preuves, niveaux)
+    // figurent déjà dans le corps du bilan (plan_action / niveaux / preuves).
+  };
+
+  return { social, environnement, economique };
+}
+
+// Assemble le dossier par critère (niveau, preuves rattachées, dernier constat,
+// commentaire) — partagé par /dossier-afnor (plat) et /dossier-candidature
+// (groupé par chapitre + page de garde). AGRÉGATS NON nominatifs.
+async function buildDossierData(referentiel) {
+  const criteres = await soft(async () => (await pool.query(
+    `SELECT c.chapitre, c.code, c.intitule, c.niveau_vise, c.niveau_auto_evalue,
+            c.commentaire, c.ordre, (u.first_name || ' ' || u.last_name) AS pilote_nom
+     FROM rsei_criteres c LEFT JOIN users u ON u.id = c.pilote_user_id
+     WHERE c.referentiel = $1 ORDER BY c.ordre, c.code`, [referentiel])).rows, []);
+
+  const preuves = await soft(async () => (await pool.query(
+    `SELECT code, id, reference, intitule, type, source, lien_interne, date_preuve, echeance_fraicheur
+     FROM rsei_preuves, unnest(critere_codes) AS code
+     ORDER BY date_preuve DESC NULLS LAST, id DESC`)).rows, []);
+
+  const constats = await soft(async () => (await pool.query(
+    `SELECT DISTINCT ON (i.critere_code)
+            i.critere_code, i.niveau_constate, i.constat, i.ecart,
+            e.date_evaluation, e.type AS evaluation_type, e.libelle AS evaluation_libelle
+     FROM rsei_evaluation_items i
+     JOIN rsei_evaluations e ON e.id = i.evaluation_id
+     ORDER BY i.critere_code, e.date_evaluation DESC NULLS LAST, i.id DESC`)).rows, []);
+
+  const preuvesByCode = {};
+  for (const p of preuves) { (preuvesByCode[p.code] = preuvesByCode[p.code] || []).push(p); }
+  const constatByCode = Object.fromEntries(constats.map((c) => [c.critere_code, c]));
+
+  return criteres.map((c) => ({
+    code: c.code, chapitre: c.chapitre, intitule: c.intitule,
+    niveau_vise: c.niveau_vise, niveau_auto_evalue: c.niveau_auto_evalue,
+    commentaire: c.commentaire, pilote_nom: c.pilote_nom,
+    preuves: (preuvesByCode[c.code] || []).map((p) => ({
+      reference: p.reference, intitule: p.intitule, type: p.type,
+      source: p.source, lien_interne: p.lien_interne,
+      date_preuve: p.date_preuve, echeance_fraicheur: p.echeance_fraicheur,
+    })),
+    dernier_constat: constatByCode[c.code] || null,
+  }));
+}
+
+// Synthèse des niveaux (répartition visé / auto-évalué) sur une liste de critères.
+function synthetiserNiveaux(criteres) {
+  const out = { total: criteres.length, cotes: 0, vise: { 1: 0, 2: 0, 3: 0, 4: 0, non_cote: 0 }, auto_evalue: { 1: 0, 2: 0, 3: 0, 4: 0, non_cote: 0 } };
+  const bump = (dist, v) => { if (v == null) dist.non_cote += 1; else if (dist[v] !== undefined) dist[v] += 1; };
+  for (const c of criteres) {
+    if (c.niveau_auto_evalue != null) out.cotes += 1;
+    bump(out.vise, c.niveau_vise);
+    bump(out.auto_evalue, c.niveau_auto_evalue);
+  }
+  return out;
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // UTILISATEURS ASSIGNABLES (pilote de critère / responsable d'action /
 // évaluateur). Ouvert aux rôles de lecture du module (dont REF_RSE=MANAGER) car
@@ -916,47 +1176,54 @@ router.get('/dashboard', READ, async (req, res) => {
 router.get('/dossier-afnor', READ, async (req, res) => {
   try {
     const referentiel = req.query.referentiel || DEFAULT_REFERENTIEL;
+    const criteres = await buildDossierData(referentiel);
+    res.json({ referentiel, generated_at: new Date().toISOString(), criteres });
+  } catch (err) {
+    console.error('[RSE] GET dossier-afnor :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
-    const criteres = await soft(async () => (await pool.query(
-      `SELECT c.chapitre, c.code, c.intitule, c.niveau_vise, c.niveau_auto_evalue,
-              c.commentaire, (u.first_name || ' ' || u.last_name) AS pilote_nom
-       FROM rsei_criteres c LEFT JOIN users u ON u.id = c.pilote_user_id
-       WHERE c.referentiel = $1 ORDER BY c.ordre, c.code`, [referentiel])).rows, []);
+// ───────────────────────────────────────────────────────────────────────────
+// DOSSIER DE CANDIDATURE AFNOR (RSEI-18) — assemblage complet pour l'évaluateur :
+// page de garde (identité structure + synthèse des niveaux), puis par CHAPITRE et
+// critère (niveau visé/auto-évalué, preuves rattachées, dernier constat, commentaire).
+// Extension de /dossier-afnor (conservé pour compat) ; agrégats NON nominatifs.
+// ───────────────────────────────────────────────────────────────────────────
+router.get('/dossier-candidature', READ, [query('referentiel').optional().isString()], validate, async (req, res) => {
+  try {
+    const referentiel = req.query.referentiel || DEFAULT_REFERENTIEL;
+    const criteres = await buildDossierData(referentiel);
+    const identite = await gatherStructureIdentity();
+    const synthese = synthetiserNiveaux(criteres);
 
-    const preuves = await soft(async () => (await pool.query(
-      `SELECT code, id, reference, intitule, type, source, lien_interne, date_preuve, echeance_fraicheur
-       FROM rsei_preuves, unnest(critere_codes) AS code
-       ORDER BY date_preuve DESC NULLS LAST, id DESC`)).rows, []);
-
-    const constats = await soft(async () => (await pool.query(
-      `SELECT DISTINCT ON (i.critere_code)
-              i.critere_code, i.niveau_constate, i.constat, i.ecart,
-              e.date_evaluation, e.type AS evaluation_type, e.libelle AS evaluation_libelle
-       FROM rsei_evaluation_items i
-       JOIN rsei_evaluations e ON e.id = i.evaluation_id
-       ORDER BY i.critere_code, e.date_evaluation DESC NULLS LAST, i.id DESC`)).rows, []);
-
-    const preuvesByCode = {};
-    for (const p of preuves) { (preuvesByCode[p.code] = preuvesByCode[p.code] || []).push(p); }
-    const constatByCode = Object.fromEntries(constats.map((c) => [c.critere_code, c]));
+    // Groupement par chapitre (ordre numérique).
+    const byCh = {};
+    for (const c of criteres) { (byCh[c.chapitre] = byCh[c.chapitre] || []).push(c); }
+    const chapitres = Object.keys(byCh)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((ch) => ({
+        chapitre: Number(ch),
+        nb_criteres: byCh[ch].length,
+        nb_preuves: byCh[ch].reduce((s, c) => s + c.preuves.length, 0),
+        criteres: byCh[ch],
+      }));
 
     res.json({
       referentiel,
       generated_at: new Date().toISOString(),
-      criteres: criteres.map((c) => ({
-        code: c.code, chapitre: c.chapitre, intitule: c.intitule,
-        niveau_vise: c.niveau_vise, niveau_auto_evalue: c.niveau_auto_evalue,
-        commentaire: c.commentaire, pilote_nom: c.pilote_nom,
-        preuves: (preuvesByCode[c.code] || []).map((p) => ({
-          reference: p.reference, intitule: p.intitule, type: p.type,
-          source: p.source, lien_interne: p.lien_interne,
-          date_preuve: p.date_preuve, echeance_fraicheur: p.echeance_fraicheur,
-        })),
-        dernier_constat: constatByCode[c.code] || null,
-      })),
+      page_garde: {
+        structure: identite,
+        referentiel,
+        date: new Date().toISOString().slice(0, 10),
+        synthese_niveaux: synthese,
+      },
+      synthese_niveaux: synthese,
+      chapitres,
+      criteres, // liste plate conservée (compat avec le rendu par critère)
     });
   } catch (err) {
-    console.error('[RSE] GET dossier-afnor :', err.message);
+    console.error('[RSE] GET dossier-candidature :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -1017,6 +1284,19 @@ router.get('/bilan', READ, [query('annee').optional().isInt({ min: 2020, max: 21
       };
     }
 
+    // Analyse d'écarts : critères dont le niveau auto-évalué est SOUS le niveau
+    // visé (ou pas encore coté alors qu'une cible est fixée). NON nominatif.
+    const ecartsNiveau = await soft(async () => (await pool.query(
+      `SELECT code, intitule, chapitre, niveau_vise, niveau_auto_evalue
+       FROM rsei_criteres
+       WHERE referentiel = $1 AND niveau_vise IS NOT NULL
+         AND (niveau_auto_evalue IS NULL OR niveau_auto_evalue < niveau_vise)
+       ORDER BY (niveau_vise - COALESCE(niveau_auto_evalue, 0)) DESC, ordre, code`, [referentiel])).rows, []);
+
+    // Consolidation des 3 volets (VSME + insertion + environnement) — agrégats
+    // NON nominatifs, résilients. RSEI-18.
+    const indicateurs3Volets = await gather3Volets(annee);
+
     res.json({
       annee, referentiel, generated_at: new Date().toISOString(),
       plan_action: {
@@ -1027,6 +1307,8 @@ router.get('/bilan', READ, [query('annee').optional().isInt({ min: 2020, max: 21
       },
       niveaux: { vise: repartition('niveau_vise'), auto_evalue: repartition('niveau_auto_evalue') },
       preuves: { total: preuveGlobal.total || 0, perimees: preuveGlobal.perimees || 0 },
+      ecarts_niveau: ecartsNiveau,
+      indicateurs_3_volets: indicateurs3Volets,
       derniere_evaluation: derniereEvaluation,
     });
   } catch (err) {
