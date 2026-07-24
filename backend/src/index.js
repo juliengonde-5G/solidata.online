@@ -203,6 +203,10 @@ app.use('/api/insertion', require('./routes/insertion'));
 // RSEI-10 : module « Pilotage RSE » (28e module — labellisation RSEi).
 app.use('/api/rse', require('./routes/rse'));
 app.use('/api/energie', require('./routes/energie'));
+// RSEI-13 : module « Enquêtes » (30e module) — moteur générique de questionnaires
+// anonymes. La surface publique (réponse anonyme) est /api/enquetes/public/:token,
+// gérée AVANT authenticate à l'intérieur du routeur (pattern webhook SumUp).
+app.use('/api/enquetes', require('./routes/enquetes'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/historique', require('./routes/historique'));
 app.use('/api/metropole', require('./routes/metropole'));

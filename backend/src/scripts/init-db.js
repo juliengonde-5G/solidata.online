@@ -6194,6 +6194,133 @@ async function initDatabase() {
     console.log('[INIT-DB] Module Énergie & GES (RSEI-11) — 5 tables + 6 facteurs ADEME + siège + registre RGPD ✓');
 
     // ══════════════════════════════════════════
+    // Module Enquêtes (RSEI-13) — 30e module
+    //
+    // Mini-moteur GÉNÉRIQUE de questionnaires ANONYMES : modèles administrables
+    // (échelles + texte libre), diffusion par lien/QR (token de campagne), mode
+    // kiosque FALC, restitution AGRÉGÉE avec SEUIL D'ANONYMAT n ≥ 5, archivage des
+    // campagnes = preuve datée. Cadrage : rapports/rsei-2026-07-22/03 §2.2 (RSEI-13).
+    // Usages : enquête conditions de travail/QVCT tous salariés (2.5), mesure de
+    // participation aux sensibilisations (4.4), questionnaire d'intégration M1
+    // (RSEI-14, 3.2), enquêtes PP externes (RSEI-16).
+    //
+    // ANONYMAT RÉEL by design (principe du module) : la table des RÉPONSES ne porte
+    // AUCUNE clé étrangère vers users/employees. Une réponse à une campagne anonyme
+    // n'est rattachée à personne — seul un `jeton_unicite` FACULTATIF (opaque, sans
+    // identité) permet d'éviter les doublons. Le seuil n ≥ 5 est appliqué à la
+    // RESTITUTION (routes/enquetes.js), pas au stockage. Registre RGPD dédié.
+    // ══════════════════════════════════════════
+
+    // pgcrypto requis pour gen_random_bytes (token de campagne) — idempotent. Ce
+    // module est en fin d'init-db (chemin « base neuve »), on (re)garantit l'extension.
+    await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+
+    // (a) Modèles de questionnaire (réutilisables). `anonyme` gouverne la
+    //     restitution (verbatims bruts seulement si anonyme, cf. routes). `categorie`
+    //     classe l'usage RSEi (qvct / satisfaction / integration / sensibilisation /
+    //     parties_prenantes / autre).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS enquete_modeles (
+        id SERIAL PRIMARY KEY,
+        titre TEXT NOT NULL,
+        description TEXT,
+        categorie VARCHAR(20) NOT NULL DEFAULT 'autre'
+          CHECK (categorie IN ('qvct', 'satisfaction', 'integration', 'sensibilisation', 'parties_prenantes', 'autre')),
+        anonyme BOOLEAN NOT NULL DEFAULT true,
+        actif BOOLEAN NOT NULL DEFAULT true,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_enquete_modeles_categorie ON enquete_modeles(categorie);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_enquete_modeles_actif ON enquete_modeles(actif);');
+
+    // (b) Questions d'un modèle. `type` : echelle / choix_unique / choix_multiple /
+    //     texte / oui_non / note_10. `options` JSONB = libellés de choix (pour les
+    //     types à choix). CASCADE : supprimer un modèle supprime ses questions.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS enquete_questions (
+        id SERIAL PRIMARY KEY,
+        modele_id INTEGER NOT NULL REFERENCES enquete_modeles(id) ON DELETE CASCADE,
+        ordre INTEGER NOT NULL DEFAULT 0,
+        libelle TEXT NOT NULL,
+        type VARCHAR(15) NOT NULL
+          CHECK (type IN ('echelle', 'choix_unique', 'choix_multiple', 'texte', 'oui_non', 'note_10')),
+        options JSONB NOT NULL DEFAULT '[]'::jsonb,
+        obligatoire BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_enquete_questions_modele ON enquete_questions(modele_id, ordre);');
+
+    // (c) Campagnes de diffusion d'un modèle. `token` (hex 32) = lien de réponse
+    //     anonyme (diffusion lien/QR, pattern qr_token véhicule). `statut` :
+    //     brouillon → ouverte → close. modele_id en REFERENCES SANS cascade
+    //     (NO ACTION) : une campagne archivée = preuve datée, elle protège son
+    //     modèle de la suppression (DELETE modèle → 409 s'il a des campagnes).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS enquete_campagnes (
+        id SERIAL PRIMARY KEY,
+        modele_id INTEGER NOT NULL REFERENCES enquete_modeles(id),
+        titre TEXT NOT NULL,
+        public_cible VARCHAR(120),
+        token VARCHAR(64) NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(16), 'hex'),
+        date_ouverture DATE,
+        date_cloture DATE,
+        statut VARCHAR(12) NOT NULL DEFAULT 'brouillon'
+          CHECK (statut IN ('brouillon', 'ouverte', 'close')),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_enquete_campagnes_modele ON enquete_campagnes(modele_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_enquete_campagnes_statut ON enquete_campagnes(statut);');
+    // idx sur token superflu (UNIQUE crée déjà l'index).
+
+    // (d) Réponses anonymes. ⚠ AUCUNE FK vers users/employees : le principe même du
+    //     module est l'anonymat. `reponses` JSONB = { question_id → valeur }.
+    //     `jeton_unicite` FACULTATIF (opaque, sans identité) : anti-doublon sans
+    //     identifier — unique PAR campagne quand renseigné (index partiel).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS enquete_reponses (
+        id SERIAL PRIMARY KEY,
+        campagne_id INTEGER NOT NULL REFERENCES enquete_campagnes(id) ON DELETE CASCADE,
+        submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        jeton_unicite VARCHAR(80),
+        reponses JSONB NOT NULL DEFAULT '{}'::jsonb
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_enquete_reponses_campagne ON enquete_reponses(campagne_id);');
+    await client.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_enquete_reponses_jeton
+       ON enquete_reponses(campagne_id, jeton_unicite) WHERE jeton_unicite IS NOT NULL;`
+    );
+
+    // Registre RGPD — traitement « Enquêtes internes » (anonymes, agrégats n≥5).
+    // Idempotent via WHERE NOT EXISTS. Minimisation : les réponses ne portent aucune
+    // identité ; la restitution est agrégée avec un seuil d'anonymat strict (n≥5).
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Enquêtes internes (anonymes, agrégats seuil n≥5)',
+        'Recueillir de manière ANONYME l''avis des salariés et des parties prenantes (conditions de travail/QVCT, satisfaction, intégration, participation aux sensibilisations) via des questionnaires diffusés par lien/QR, au titre de la démarche RSE (critères RSEi 2.5, 5.3, 3.2, 4.4). La restitution est exclusivement AGRÉGÉE et soumise à un SEUIL D''ANONYMAT (aucun détail en deçà de 5 réponses).',
+        'Intérêt légitime (démarche volontaire de RSE ; écoute des parties prenantes)',
+        'Salariés et parties prenantes répondant volontairement et anonymement aux campagnes',
+        'Réponses aux questionnaires (échelles, choix, notes, texte libre). AUCUNE donnée d''identité n''est collectée pour une campagne anonyme : les réponses ne sont rattachées à aucun utilisateur ni salarié. Un jeton d''unicité facultatif et opaque (anti-doublon) ne permet pas de ré-identifier le répondant. AUCUNE donnée de catégorie particulière attendue.',
+        'Référent RSE, direction, RH, QHSE (résultats agrégés uniquement)',
+        'Campagnes archivées comme preuve datée de la démarche (cycle de labellisation + cycle précédent)',
+        'Anonymat structurel (aucune FK vers users/employees sur les réponses), seuil d''anonymat n≥5 appliqué à la restitution, endpoints de réponse publics sans collecte d''identité, requêtes SQL paramétrées, journalisation applicative côté administration (autoLogActivity)'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Enquêtes internes (anonymes, agrégats seuil n≥5)'
+      );
+    `);
+    console.log('[INIT-DB] Module Enquêtes (RSEI-13) — 4 tables + registre RGPD ✓');
+
+    // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL
     //
     // Symptôme observé en prod : INSERT INTO employees échoue avec
@@ -6229,6 +6356,7 @@ async function initDatabase() {
       'rsei_evaluation_items', 'rsei_parties_prenantes', 'rsei_interactions',
       'energie_sites', 'energie_compteurs', 'energie_releves',
       'carburant_pleins', 'ges_facteurs',
+      'enquete_modeles', 'enquete_questions', 'enquete_campagnes', 'enquete_reponses',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une
