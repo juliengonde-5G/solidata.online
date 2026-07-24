@@ -11,7 +11,7 @@ import {
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
-  TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare,
+  TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, ShoppingCart,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -242,6 +242,18 @@ const NAV_TREE = [
     icon: MessageSquare,
     children: [
       { label: 'Enquêtes internes', path: '/enquetes', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
+    ],
+  },
+  {
+    // Module « Achats responsables » (RSEI-17 — 31e module). Outille le critère
+    // RSEi 1.7 : référentiel fournisseurs + statut responsable, critères d'achat,
+    // registre des FDS, part d'achats responsables. Lecture ADMIN/MANAGER/RH/QHSE ;
+    // la visibilité fine se règle dans /admin/permissions (module 'achats').
+    id: 'achats',
+    label: 'Achats responsables',
+    icon: ShoppingCart,
+    children: [
+      { label: 'Achats responsables', path: '/achats', icon: ShoppingCart, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
     ],
   },
   {

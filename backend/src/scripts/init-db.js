@@ -6325,6 +6325,131 @@ async function initDatabase() {
     console.log('[INIT-DB] Module Enquêtes (RSEI-13) — 4 tables + registre RGPD ✓');
 
     // ══════════════════════════════════════════
+    // Module Achats responsables (RSEI-17) — 31e module
+    //
+    // Mini-module d'OUTILLAGE de la démarche d'achats responsables (critère RSEi
+    // 1.7). Cadrage : rapports/rsei-2026-07-22/03-plan-action-rsei.md §2.3 (RSEI-17).
+    //   (a) mini-référentiel FOURNISSEURS avec statut (local / inclusif ESS-SIAE-EA /
+    //       démarche RSE / labellisé) — un fournisseur « responsable » = au moins un
+    //       de ces 4 drapeaux à true (calcul APPLICATIF, cf. routes/achats.js) ;
+    //   (b) CRITÈRES d'achat par famille (administrables, seed de départ) ;
+    //   (c) registre des FDS (fiches de données de sécurité) des produits dangereux ;
+    //   (d) rapprochement avec la CLASSE 60 du Grand Livre (financial_gl_entries,
+    //       Pennylane pull) pour estimer la PART D'ACHATS RESPONSABLES — indicateur
+    //       exemple du 1.7 N3. Le rapprochement est fait côté route (soft, « jamais
+    //       de valeur inventée » : part en montant null si le total classe 60 est
+    //       indisponible). La politique d'achats elle-même reste un acte de direction.
+    //
+    // CONFIDENTIALITÉ : données FOURNISSEURS (personnes morales), NON NOMINATIVES.
+    // Aucune donnée de salarié/parcours. Entrée dédiée au registre RGPD.
+    // ══════════════════════════════════════════
+
+    // (a) Fournisseurs référencés. `categorie` = famille d'achat (contrainte).
+    //     Les 4 drapeaux de responsabilité sont indépendants (un fournisseur peut
+    //     être local ET inclusif). `local` est un mot-clé PG NON réservé → utilisable
+    //     comme nom de colonne (les requêtes le qualifient par alias par prudence).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS achats_fournisseurs (
+        id SERIAL PRIMARY KEY,
+        nom TEXT NOT NULL,
+        siret VARCHAR(20),
+        categorie VARCHAR(20) NOT NULL DEFAULT 'autre'
+          CHECK (categorie IN ('fournitures', 'epi', 'transport', 'prestations', 'energie', 'alimentaire', 'autre')),
+        local BOOLEAN NOT NULL DEFAULT false,
+        inclusif BOOLEAN NOT NULL DEFAULT false,
+        demarche_rse BOOLEAN NOT NULL DEFAULT false,
+        labellise BOOLEAN NOT NULL DEFAULT false,
+        label_detail VARCHAR(200),
+        commune VARCHAR(120),
+        actif BOOLEAN NOT NULL DEFAULT true,
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_achats_fournisseurs_categorie ON achats_fournisseurs(categorie);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_achats_fournisseurs_actif ON achats_fournisseurs(actif);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_achats_fournisseurs_siret ON achats_fournisseurs(siret);');
+
+    // (b) Critères d'achat par famille (administrable). UNIQUE(famille, critere) pour
+    //     un seed idempotent ON CONFLICT DO NOTHING. `poids` facultatif (pondération).
+    //     `famille` libre (peut valoir 'transverse' = s'applique à toutes les familles).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS achats_criteres (
+        id SERIAL PRIMARY KEY,
+        famille VARCHAR(30) NOT NULL DEFAULT 'transverse',
+        critere TEXT NOT NULL,
+        poids SMALLINT,
+        actif BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (famille, critere)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_achats_criteres_famille ON achats_criteres(famille);');
+    // Seed de critères de départ raisonnables (idempotent). Éditables ensuite.
+    await client.query(`
+      INSERT INTO achats_criteres (famille, critere) VALUES
+        ('fournitures', 'Privilégier un fournisseur local (circuit court, ancrage territorial)'),
+        ('fournitures', 'Réduire les emballages et privilégier les produits réemployés, reconditionnés ou recyclés'),
+        ('epi', 'Exiger les fiches de données de sécurité (FDS) des produits dangereux'),
+        ('prestations', 'Préférer un ESAT / une entreprise adaptée (EA) ou une SIAE pour les prestations sous-traitées'),
+        ('transport', 'Regrouper et optimiser les livraisons pour réduire les émissions'),
+        ('energie', 'Rechercher une électricité d''origine renouvelable'),
+        ('alimentaire', 'Privilégier des produits durables, de saison ou issus de circuits responsables'),
+        ('transverse', 'Interroger l''engagement RSE ou le label du fournisseur au référencement')
+      ON CONFLICT (famille, critere) DO NOTHING;
+    `);
+
+    // (c) Registre des FDS (fiches de données de sécurité) des produits dangereux.
+    //     `fournisseur_id` en REFERENCES ... ON DELETE SET NULL (supprimer un
+    //     fournisseur ne détruit pas la traçabilité FDS). Pièce jointe : pattern
+    //     Refashion/rsei_preuves (fichier_path/original_name/mime). FK APRÈS
+    //     achats_fournisseurs (table parente créée juste au-dessus).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS achats_fds (
+        id SERIAL PRIMARY KEY,
+        produit VARCHAR(200) NOT NULL,
+        fournisseur_id INTEGER REFERENCES achats_fournisseurs(id) ON DELETE SET NULL,
+        reference VARCHAR(120),
+        date_fds DATE,
+        date_revision DATE,
+        fichier_path TEXT,
+        fichier_original_name TEXT,
+        fichier_mime VARCHAR(120),
+        dangers VARCHAR(200),
+        epi_requis TEXT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_achats_fds_fournisseur ON achats_fds(fournisseur_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_achats_fds_revision ON achats_fds(date_revision);');
+
+    // Registre RGPD — traitement « Achats responsables » (données NON nominatives).
+    // Idempotent via WHERE NOT EXISTS. Aucune donnée de personne physique : le module
+    // ne manipule que des fournisseurs (personnes morales) et des produits.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Achats responsables (données fournisseurs, non nominatives)',
+        'Outiller la démarche d''achats responsables (critère RSEi 1.7) : référentiel des fournisseurs et de leur statut (local / inclusif / démarche RSE / labellisé), critères d''achat par famille, registre des FDS des produits dangereux, et estimation de la part d''achats responsables par rapprochement avec la classe 60 du Grand Livre.',
+        'Intérêt légitime (démarche volontaire de RSE ; obligations de sécurité au travail pour les FDS)',
+        'Aucune personne physique concernée : le module ne traite que des fournisseurs (personnes morales) et des produits.',
+        'Données de fournisseurs (raison sociale, SIRET, commune, statut de responsabilité), critères d''achat, fiches de données de sécurité de produits. Le SIRET est une donnée d''entreprise, non un identifiant de personne physique. AUCUNE donnée de salarié ni de parcours.',
+        'Référent RSE, direction, RH, QHSE (FDS)',
+        'Relation fournisseur + archivage (labellisation) ; FDS tant que le produit est utilisé',
+        'Données non nominatives, requêtes SQL paramétrées, habilitations par rôle (lecture ADMIN/MANAGER/RH/QHSE, écriture ADMIN/RH/MANAGER), journalisation applicative (autoLogActivity), pièces jointes FDS filtrées par type (documentFilter)'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Achats responsables (données fournisseurs, non nominatives)'
+      );
+    `);
+    console.log('[INIT-DB] Module Achats responsables (RSEI-17) — 3 tables + 8 critères + registre RGPD ✓');
+
+    // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL
     //
     // Symptôme observé en prod : INSERT INTO employees échoue avec
@@ -6361,6 +6486,7 @@ async function initDatabase() {
       'energie_sites', 'energie_compteurs', 'energie_releves',
       'carburant_pleins', 'ges_facteurs',
       'enquete_modeles', 'enquete_questions', 'enquete_campagnes', 'enquete_reponses',
+      'achats_fournisseurs', 'achats_criteres', 'achats_fds',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une
