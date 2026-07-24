@@ -14,7 +14,7 @@ import ActionsRSE from '../components/rse/ActionsRSE';
 import RegistrePreuves from '../components/rse/RegistrePreuves';
 import EvaluationsRSE from '../components/rse/EvaluationsRSE';
 import PartiesPrenantes from '../components/rse/PartiesPrenantes';
-import { printBilanRse, printDossierAfnor } from '../components/rse/pdf-rse';
+import { printBilanRse, printDossierCandidature } from '../components/rse/pdf-rse';
 
 const TABS = [
   { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
@@ -109,8 +109,8 @@ function DocumentsTab() {
   const genDossier = async () => {
     setBusy('dossier'); setError(null);
     try {
-      const r = await api.get('/rse/dossier-afnor');
-      printDossierAfnor(r.data);
+      const r = await api.get('/rse/dossier-candidature');
+      printDossierCandidature(r.data);
     } catch (err) { setError(apiErr(err, 'Échec de la génération du dossier.')); }
     setBusy(null);
   };
@@ -122,9 +122,9 @@ function DocumentsTab() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border p-5 flex flex-col">
-          <div className="flex items-center gap-2 text-slate-800 font-semibold"><FileText className="w-5 h-5 text-emerald-600" /> Bilan RSE annuel</div>
+          <div className="flex items-center gap-2 text-slate-800 font-semibold"><FileText className="w-5 h-5 text-emerald-600" /> Bilan RSE annuel (PDF)</div>
           <p className="text-sm text-slate-500 mt-1 flex-1">
-            Synthèse de l'exercice : état du plan d'action, répartition des niveaux de maturité, preuves, dernière évaluation interne. Mise en page A4 (bilan 5.4).
+            Synthèse de l'exercice : état du plan d'action, <strong>indicateurs des 3 volets</strong> (VSME + insertion + environnement), analyse d'écarts, niveaux de maturité et décisions de revue. Mise en page A4 (bilan 5.4).
           </p>
           <div className="flex items-center gap-2 mt-3">
             <label className="text-sm text-slate-500" htmlFor="doc-year">Année</label>
@@ -138,9 +138,9 @@ function DocumentsTab() {
         </div>
 
         <div className="bg-white rounded-xl border p-5 flex flex-col">
-          <div className="flex items-center gap-2 text-slate-800 font-semibold"><ClipboardList className="w-5 h-5 text-emerald-600" /> Dossier de préparation AFNOR</div>
+          <div className="flex items-center gap-2 text-slate-800 font-semibold"><ClipboardList className="w-5 h-5 text-emerald-600" /> Dossier de candidature AFNOR (PDF)</div>
           <p className="text-sm text-slate-500 mt-1 flex-1">
-            Par critère : niveau visé / auto-évalué, pilote, preuves rattachées, dernier constat et commentaire. Support de la phase 1 de l'évaluation.
+            Page de garde (identité structure, synthèse des niveaux) puis, par chapitre et critère : niveau visé / auto-évalué, pilote, preuves rattachées, dernier constat et commentaire. Support de la phase 1 de l'évaluation.
           </p>
           <div className="flex items-center mt-3">
             <button onClick={genDossier} disabled={busy === 'dossier'} className="btn-primary text-sm inline-flex items-center gap-1.5 disabled:opacity-50 ml-auto">
