@@ -168,8 +168,11 @@ function FichierCell({ fds, canWrite, onChanged, onError }) {
 }
 
 // Badges de statut d'une FDS (miroir de l'oracle aggregateFds).
+// Le seuil de fraîcheur EFFECTIF est fourni par le backend (`fds.fraicheur_jours`,
+// setting `achats.fds_fraicheur_jours`) → badges cohérents avec le dashboard ;
+// repli sur le défaut de `fdsStatus` si le champ est absent (revue Codex PR#78).
 function StatutFdsBadges({ fds }) {
-  const st = fdsStatus(fds);
+  const st = fdsStatus(fds, fds && fds.fraicheur_jours);
   if (!st.aTraiter) {
     return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">à jour</span>;
   }
