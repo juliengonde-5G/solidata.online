@@ -117,12 +117,16 @@ function toBool(v) {
 
 /** Déduit F/M depuis la civilité (Mme/M.) puis un éventuel champ sexe. */
 function normalizeGender(civility, genderRaw) {
-  const c = stripAccents(civility || '').trim().toLowerCase().replace(/\./g, '');
-  if (c === 'mme' || c === 'mlle' || c === 'madame' || c === 'mademoiselle') return 'F';
-  if (c === 'm' || c === 'mr' || c === 'monsieur') return 'M';
+  // Le SEXE DÉCLARÉ (colonne « Sexe »/« Genre » de l'export paie) prime sur la
+  // civilité — la civilité (Mme/M.) n'est qu'un repli quand le sexe n'est pas
+  // renseigné (revue Codex PR#83 : sinon un « Mme » avec « Sexe = M » stockait 'F',
+  // et l'indicateur F/H perdait la déclaration explicite).
   const g = stripAccents(genderRaw || '').trim().toUpperCase();
   if (['F', 'FEMME', 'FEMININ'].includes(g)) return 'F';
   if (['M', 'H', 'HOMME', 'MASCULIN'].includes(g)) return 'M';
+  const c = stripAccents(civility || '').trim().toLowerCase().replace(/\./g, '');
+  if (c === 'mme' || c === 'mlle' || c === 'madame' || c === 'mademoiselle') return 'F';
+  if (c === 'm' || c === 'mr' || c === 'monsieur') return 'M';
   return null;
 }
 
