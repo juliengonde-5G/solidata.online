@@ -601,6 +601,46 @@ async function checkEnergieSaisie() {
   }
 }
 
+/**
+ * Révision des documents de prévention QHSE (RSEI-06) — job instrumenté, léger.
+ * Rappelle (log + trace job_runs) les documents (DUERP, plan de prévention, RPS…)
+ * dont la révision est dépassée ou arrive à échéance sous un seuil (défaut 60 j),
+ * et l'absence des documents socles attendus (DUERP notamment). La page QHSE
+ * (onglet Documents / synthèse) reste la surface d'alerte LIVE ; ce job la double
+ * d'une trace horodatée. Résilient : table absente sur base non migrée → rend 0.
+ */
+async function checkQhseDocuments() {
+  try {
+    let seuilJours = 60;
+    try {
+      const s = await pool.query("SELECT value FROM settings WHERE key = 'qhse.revision_alerte_jours'");
+      const n = parseInt(s.rows[0] && s.rows[0].value, 10);
+      if (Number.isFinite(n) && n > 0) seuilJours = n;
+    } catch (_) { /* défaut 60 j */ }
+
+    const r = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE date_revision_prevue IS NOT NULL AND date_revision_prevue < CURRENT_DATE)::int AS a_reviser,
+         COUNT(*) FILTER (WHERE date_revision_prevue IS NOT NULL
+                            AND date_revision_prevue >= CURRENT_DATE
+                            AND date_revision_prevue < CURRENT_DATE + make_interval(days => $1))::int AS bientot,
+         COUNT(*) FILTER (WHERE type = 'duerp')::int AS nb_duerp
+       FROM qhse_documents`,
+      [seuilJours]
+    );
+    const aReviser = (r.rows[0] && r.rows[0].a_reviser) || 0;
+    const bientot = (r.rows[0] && r.rows[0].bientot) || 0;
+    const duerpAbsent = (r.rows[0] && r.rows[0].nb_duerp) ? 0 : 1;
+    if (aReviser || bientot || duerpAbsent) {
+      console.log(`[SCHEDULER] QHSE documents — à réviser: ${aReviser}, révision proche (< ${seuilJours} j): ${bientot}, DUERP absent: ${duerpAbsent ? 'oui' : 'non'}`);
+    }
+    return { items: aReviser + bientot + duerpAbsent, a_reviser: aReviser, bientot, duerp_absent: !!duerpAbsent };
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur checkQhseDocuments:', err.message);
+    return { items: 0 };
+  }
+}
+
 async function createInsertionAlert(milestone, alertType, targetDate) {
   try {
     // Eviter les doublons
@@ -1426,6 +1466,7 @@ async function runAllJobs() {
     await runInstrumented('createPostSortieFollowups', createPostSortieFollowups);
     await runInstrumented('checkRseEcheances', checkRseEcheances);
     await runInstrumented('checkEnergieSaisie', checkEnergieSaisie);
+    await runInstrumented('checkQhseDocuments', checkQhseDocuments);
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
@@ -1467,4 +1508,5 @@ module.exports = {
   purgeOldJobRuns,
   checkRseEcheances,
   checkEnergieSaisie,
+  checkQhseDocuments,
 };

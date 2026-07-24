@@ -11,7 +11,7 @@ jest.mock('../../../src/middleware/auth', () => ({
 }));
 
 const qhse = require('../../../src/routes/qhse');
-const { computeTauxFrequence, computeTauxGravite, habilitationStatut, syncEmployeeCertBooleans } = qhse;
+const { computeTauxFrequence, computeTauxGravite, habilitationStatut, documentStatut, syncEmployeeCertBooleans } = qhse;
 
 describe('computeTauxFrequence (TF1)', () => {
   it('applique (AT avec arrêt × 1 000 000) / heures travaillées', () => {
@@ -118,6 +118,31 @@ describe('syncEmployeeCertBooleans (synchro non destructive)', () => {
   });
 });
 
+describe('documentStatut (fraîcheur des documents de prévention — RSEI-06)', () => {
+  const today = new Date('2026-07-24T00:00:00');
+  const plus = (d) => { const x = new Date(today); x.setDate(x.getDate() + d); return x; };
+
+  it('sans date de révision → sans_echeance', () => {
+    expect(documentStatut(null, today)).toEqual({ statut: 'sans_echeance', jours_restants: null });
+  });
+  it('date de révision passée → a_reviser (badge rouge)', () => {
+    expect(documentStatut(plus(-1), today)).toEqual({ statut: 'a_reviser', jours_restants: -1 });
+  });
+  it('révision aujourd’hui → bientot (pas encore dépassée)', () => {
+    expect(documentStatut(plus(0), today)).toEqual({ statut: 'bientot', jours_restants: 0 });
+  });
+  it('borne du seuil (60 j par défaut) incluse → bientot', () => {
+    expect(documentStatut(plus(60), today).statut).toBe('bientot');
+  });
+  it('au-delà du seuil → a_jour (badge vert)', () => {
+    expect(documentStatut(plus(61), today).statut).toBe('a_jour');
+  });
+  it('seuil injectable (30 j) : 45 j → a_jour', () => {
+    expect(documentStatut(plus(45), today, 30).statut).toBe('a_jour');
+    expect(documentStatut(plus(30), today, 30).statut).toBe('bientot');
+  });
+});
+
 describe('routeur QHSE', () => {
   it('expose un routeur Express montable', () => {
     expect(typeof qhse).toBe('function');
@@ -126,5 +151,9 @@ describe('routeur QHSE', () => {
     expect(qhse.EVENT_TYPES).toContain('accident_travail');
     expect(qhse.HAB_TYPES).toContain('caces_3');
     expect(qhse.EPI_TYPES).toContain('gilet_hv');
+  });
+  it('expose les référentiels RSEI-06/07 (documents + REX)', () => {
+    expect(qhse.DOC_TYPES).toEqual(['duerp', 'plan_prevention', 'rps', 'protocole_securite', 'consignes', 'autre']);
+    expect(qhse.REX_EVENT_TYPES).toEqual(['accident_travail', 'presqu_accident']);
   });
 });
