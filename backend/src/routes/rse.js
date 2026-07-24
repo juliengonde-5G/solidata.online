@@ -261,12 +261,14 @@ router.post('/actions', WRITE, [
       indicateur = null, echeance = null, moyens = null,
       statut = 'a_faire', priorite = 'moyenne',
     } = req.body;
+    // Une action créée déjà « réalisée » est soldée ce jour (ou à la date fournie).
+    const dateRealisation = statut === 'realise' ? (req.body.date_realisation || new Date().toISOString().slice(0, 10)) : null;
     const r = await pool.query(
       `INSERT INTO rsei_actions
-         (titre, description, critere_codes, responsable_user_id, indicateur, echeance, moyens, statut, priorite, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (titre, description, critere_codes, responsable_user_id, indicateur, echeance, moyens, statut, priorite, date_realisation, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [titre.trim(), description, critere_codes || [], responsable_user_id, indicateur, echeance, moyens, statut, priorite, req.user.id]
+      [titre.trim(), description, critere_codes || [], responsable_user_id, indicateur, echeance, moyens, statut, priorite, dateRealisation, req.user.id]
     );
     res.status(201).json(r.rows[0]);
   } catch (err) {
@@ -297,6 +299,17 @@ router.put('/actions/:id', WRITE, [
       }
     }
     if (!sets.length) return res.status(400).json({ error: 'Aucune modification' });
+    // Solde : date_realisation posée quand l'action PASSE à « realise » (sans en
+    // écraser une déjà saisie), effacée si elle en sort (revue Codex PR#75).
+    if (Object.prototype.hasOwnProperty.call(req.body, 'statut')) {
+      if (req.body.statut === 'realise') {
+        const d = req.body.date_realisation || new Date().toISOString().slice(0, 10);
+        params.push(d);
+        sets.push(`date_realisation = COALESCE(date_realisation, $${params.length})`);
+      } else {
+        sets.push('date_realisation = NULL');
+      }
+    }
     params.push(req.params.id);
     const r = await pool.query(
       `UPDATE rsei_actions SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length} RETURNING *`,
@@ -440,16 +453,31 @@ router.delete('/preuves/:id', WRITE, [param('id').isInt()], validate, async (req
 router.post('/preuves/:id/fichier', WRITE, uploadPreuve.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Fichier requis (pdf, image ou document)' });
-    const r = await pool.query(
-      `UPDATE rsei_preuves
-         SET fichier_path = $1, fichier_original_name = $2, fichier_mime = $3, updated_at = NOW()
-       WHERE id = $4
-       RETURNING id, reference, fichier_original_name, fichier_mime`,
-      [req.file.filename, req.file.originalname, req.file.mimetype, req.params.id]
-    );
-    if (r.rowCount === 0) {
+    // Récupère l'éventuel fichier ANTÉRIEUR pour le supprimer après remplacement
+    // (sinon un orphelin s'accumule à chaque remplacement — revue Codex PR#75).
+    const before = await pool.query('SELECT fichier_path FROM rsei_preuves WHERE id = $1', [req.params.id]);
+    if (before.rowCount === 0) {
       try { fs.unlinkSync(path.join(preuveDir, req.file.filename)); } catch (_) {}
       return res.status(404).json({ error: 'Preuve introuvable' });
+    }
+    const ancien = before.rows[0].fichier_path;
+    let r;
+    try {
+      r = await pool.query(
+        `UPDATE rsei_preuves
+           SET fichier_path = $1, fichier_original_name = $2, fichier_mime = $3, updated_at = NOW()
+         WHERE id = $4
+         RETURNING id, reference, fichier_original_name, fichier_mime`,
+        [req.file.filename, req.file.originalname, req.file.mimetype, req.params.id]
+      );
+    } catch (dbErr) {
+      // Échec DB : on nettoie le fichier fraîchement uploadé pour ne pas laisser d'orphelin.
+      try { fs.unlinkSync(path.join(preuveDir, req.file.filename)); } catch (_) {}
+      throw dbErr;
+    }
+    // Remplacement réussi : supprime l'ancien fichier s'il différait du nouveau.
+    if (ancien && path.basename(ancien) !== req.file.filename) {
+      try { fs.unlinkSync(path.join(preuveDir, path.basename(ancien))); } catch (_) {}
     }
     res.status(201).json({ ...r.rows[0], has_fichier: true });
   } catch (err) {
@@ -594,6 +622,13 @@ router.post('/evaluations/:id/items', WRITE, [
   body('action_id').optional({ nullable: true }).isInt(),
 ], validate, async (req, res) => {
   try {
+    // Une campagne clôturée est un enregistrement d'audit figé : pas d'écriture
+    // d'items tant qu'elle n'est pas rouverte (revue Codex PR#75).
+    const ev = await pool.query('SELECT statut FROM rsei_evaluations WHERE id = $1', [req.params.id]);
+    if (ev.rowCount === 0) return res.status(404).json({ error: 'Campagne d\'évaluation introuvable' });
+    if (ev.rows[0].statut === 'cloturee') {
+      return res.status(409).json({ error: 'Campagne clôturée — cotation figée. Rouvrez la campagne pour la modifier.', code: 'evaluation_cloturee' });
+    }
     const { critere_code, niveau_constate = null, constat = null, ecart = null, action_id = null } = req.body;
     const r = await pool.query(
       `INSERT INTO rsei_evaluation_items (evaluation_id, critere_code, niveau_constate, constat, ecart, action_id)
@@ -619,6 +654,12 @@ router.put('/evaluations/:id/items/:itemId', WRITE, [
   body('action_id').optional({ nullable: true }).isInt(),
 ], validate, async (req, res) => {
   try {
+    // Verrou : pas de modification de cotation sur une campagne clôturée (Codex PR#75).
+    const ev = await pool.query('SELECT statut FROM rsei_evaluations WHERE id = $1', [req.params.id]);
+    if (ev.rowCount === 0) return res.status(404).json({ error: 'Campagne d\'évaluation introuvable' });
+    if (ev.rows[0].statut === 'cloturee') {
+      return res.status(409).json({ error: 'Campagne clôturée — cotation figée. Rouvrez la campagne pour la modifier.', code: 'evaluation_cloturee' });
+    }
     const fields = ['niveau_constate', 'constat', 'ecart', 'action_id'];
     const sets = [];
     const params = [];
@@ -784,11 +825,15 @@ router.get('/dashboard', READ, async (req, res) => {
        FROM rsei_criteres c LEFT JOIN users u ON u.id = c.pilote_user_id
        WHERE c.referentiel = $1 ORDER BY c.ordre, c.code`, [referentiel])).rows, []);
 
+    // Une preuve « fraîche » = récente (< 12 mois) ET non périmée (échéance de
+    // fraîcheur nulle ou future). Sans la seconde condition, un critère adossé à
+    // une seule preuve périmée serait compté « niveau 2 démontrable » (revue Codex PR#75).
     const preuveAgg = await soft(async () => (await pool.query(
       `SELECT code,
               COUNT(*)::int AS nb,
               COUNT(*) FILTER (WHERE echeance_fraicheur IS NOT NULL AND echeance_fraicheur < CURRENT_DATE)::int AS nb_perimees,
-              COUNT(*) FILTER (WHERE date_preuve IS NOT NULL AND date_preuve >= CURRENT_DATE - INTERVAL '12 months')::int AS nb_fraiches
+              COUNT(*) FILTER (WHERE date_preuve IS NOT NULL AND date_preuve >= CURRENT_DATE - INTERVAL '12 months'
+                               AND (echeance_fraicheur IS NULL OR echeance_fraicheur >= CURRENT_DATE))::int AS nb_fraiches
        FROM rsei_preuves, unnest(critere_codes) AS code
        GROUP BY code`)).rows, []);
 
@@ -800,11 +845,15 @@ router.get('/dashboard', READ, async (req, res) => {
        GROUP BY code`)).rows, []);
 
     const ACTION_GLOBAL_DEFAULT = { total: 0, realisees: 0, echues: 0, echues_realisees: 0, en_retard: 0 };
+    // « Soldées à l'échéance » = réalisées AVANT ou À leur date butoir (compare
+    // la date de réalisation effective à l'échéance, pas le simple statut courant
+    // qui compterait une action soldée en retard comme à l'heure — revue Codex PR#75).
     const actionGlobal = await soft(async () => (await pool.query(
       `SELECT COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE statut = 'realise')::int AS realisees,
               COUNT(*) FILTER (WHERE echeance IS NOT NULL AND echeance < CURRENT_DATE)::int AS echues,
-              COUNT(*) FILTER (WHERE statut = 'realise' AND echeance IS NOT NULL AND echeance < CURRENT_DATE)::int AS echues_realisees,
+              COUNT(*) FILTER (WHERE echeance IS NOT NULL AND echeance < CURRENT_DATE
+                               AND date_realisation IS NOT NULL AND date_realisation <= echeance)::int AS echues_realisees,
               COUNT(*) FILTER (WHERE statut IN ('a_faire', 'en_cours') AND echeance IS NOT NULL AND echeance < CURRENT_DATE)::int AS en_retard
        FROM rsei_actions`)).rows[0] || ACTION_GLOBAL_DEFAULT, ACTION_GLOBAL_DEFAULT);
 

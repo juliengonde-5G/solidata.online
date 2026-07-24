@@ -66,6 +66,9 @@ const MODULE_CATALOG = [
   // /admin/permissions puisse l'accorder/masquer par rôle (notamment au référent
   // RSE et au QHSE).
   { key: 'energie', label: 'Énergie & GES' },
+  // RSEI-13 : module « Enquêtes » (30e module) — moteur de questionnaires anonymes.
+  // Ajouté au catalogue pour l'accorder/masquer par rôle (REF_RSE, QHSE pour QVCT).
+  { key: 'enquetes', label: 'Enquêtes' },
   { key: 'admin', label: 'Administration' },
 ];
 const MODULE_KEYS = MODULE_CATALOG.map((m) => m.key);

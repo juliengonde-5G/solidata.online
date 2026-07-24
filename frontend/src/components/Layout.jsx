@@ -11,7 +11,7 @@ import {
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
-  TrendingUp, AlertTriangle, Leaf, Zap, Gauge,
+  TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -230,6 +230,18 @@ const NAV_TREE = [
     icon: Zap,
     children: [
       { label: 'Énergie & GES', path: '/energie', icon: Gauge, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
+    ],
+  },
+  {
+    // Module « Enquêtes » (RSEI-13 — 30e module). Questionnaires anonymes (QVCT,
+    // satisfaction, intégration…) diffusés par lien ; restitution agrégée avec
+    // seuil d'anonymat n ≥ 5. Lecture/écriture ADMIN/MANAGER/RH/QHSE ; la
+    // visibilité fine se règle dans /admin/permissions (module 'enquetes').
+    id: 'enquetes',
+    label: 'Enquêtes',
+    icon: MessageSquare,
+    children: [
+      { label: 'Enquêtes internes', path: '/enquetes', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
     ],
   },
   {

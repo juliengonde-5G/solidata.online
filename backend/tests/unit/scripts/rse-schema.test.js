@@ -74,6 +74,9 @@ describe('schéma RSE — les 7 tables du module', () => {
     expect(tbl.slice(0, 1000)).toMatch(/CHECK \(statut IN \('a_faire', 'en_cours', 'realise', 'abandonne'\)\)/);
     expect(tbl.slice(0, 1000)).toMatch(/CHECK \(priorite IN \('haute', 'moyenne', 'basse'\)\)/);
     expect(tbl.slice(0, 1000)).toContain('critere_codes TEXT[]');
+    // date_realisation (revue Codex PR#75) : solde effectif pour le KPI « à l'échéance »
+    expect(tbl.slice(0, 1000)).toContain('date_realisation DATE');
+    expect(src).toContain('ADD COLUMN IF NOT EXISTS date_realisation DATE');
   });
 
   test('rsei_preuves : reference UNIQUE + péremption (echeance_fraicheur)', () => {

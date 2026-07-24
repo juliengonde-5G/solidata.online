@@ -373,7 +373,9 @@ describe('CONTRAT /rse/evaluations', () => {
   it('POST /:id/items : upsert d\'une cotation par critère (201)', async () => {
     expect((await post('/api/rse/evaluations/4/items', 'COLLABORATEUR', { critere_code: '1.1' })).status).toBe(403);
     mockQuery.mockImplementation((sql, params) => {
-      if (/INSERT INTO rsei_evaluation_items/.test(String(sql))) {
+      const s = String(sql);
+      if (/SELECT statut FROM rsei_evaluations WHERE id/.test(s)) return Promise.resolve({ rows: [{ statut: 'en_cours' }], rowCount: 1 });
+      if (/INSERT INTO rsei_evaluation_items/.test(s)) {
         return Promise.resolve({ rows: [{ id: 1, evaluation_id: params[0], critere_code: params[1], niveau_constate: params[2] }] });
       }
       return Promise.resolve({ rows: [] });
@@ -386,5 +388,15 @@ describe('CONTRAT /rse/evaluations', () => {
 
   it('POST /:id/items : niveau_constate hors 1-4 → 400', async () => {
     expect((await post('/api/rse/evaluations/4/items', 'RH', { critere_code: '1.5', niveau_constate: 9 })).status).toBe(400);
+  });
+
+  it('POST /:id/items sur campagne CLÔTURÉE → 409 (audit figé — revue Codex PR#75)', async () => {
+    mockQuery.mockImplementation((sql) => {
+      if (/SELECT statut FROM rsei_evaluations WHERE id/.test(String(sql))) return Promise.resolve({ rows: [{ statut: 'cloturee' }], rowCount: 1 });
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await post('/api/rse/evaluations/4/items', 'RH', { critere_code: '1.5', niveau_constate: 2 });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('evaluation_cloturee');
   });
 });
