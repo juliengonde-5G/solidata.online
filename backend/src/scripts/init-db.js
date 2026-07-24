@@ -5902,11 +5902,15 @@ async function initDatabase() {
         moyens TEXT,
         statut VARCHAR(15) NOT NULL DEFAULT 'a_faire' CHECK (statut IN ('a_faire', 'en_cours', 'realise', 'abandonne')),
         priorite VARCHAR(10) NOT NULL DEFAULT 'moyenne' CHECK (priorite IN ('haute', 'moyenne', 'basse')),
+        date_realisation DATE,
         created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    // date_realisation (revue Codex PR#75) : date effective de solde d'une
+    // action, pour distinguer « soldée à l'échéance » d'un simple statut realise.
+    await client.query(`ALTER TABLE rsei_actions ADD COLUMN IF NOT EXISTS date_realisation DATE;`);
     await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_actions_statut ON rsei_actions(statut);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_actions_echeance ON rsei_actions(echeance);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_actions_responsable ON rsei_actions(responsable_user_id);');
