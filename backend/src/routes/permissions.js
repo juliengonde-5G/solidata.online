@@ -69,6 +69,9 @@ const MODULE_CATALOG = [
   // RSEI-13 : module « Enquêtes » (30e module) — moteur de questionnaires anonymes.
   // Ajouté au catalogue pour l'accorder/masquer par rôle (REF_RSE, QHSE pour QVCT).
   { key: 'enquetes', label: 'Enquêtes' },
+  // RSEI-17 : module « Achats responsables » (31e module) — référentiel fournisseurs,
+  // critères d'achat, registre des FDS. Accordable/masquable par rôle (REF_RSE, QHSE).
+  { key: 'achats', label: 'Achats responsables' },
   { key: 'admin', label: 'Administration' },
 ];
 const MODULE_KEYS = MODULE_CATALOG.map((m) => m.key);

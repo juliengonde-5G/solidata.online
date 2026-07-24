@@ -207,6 +207,9 @@ app.use('/api/energie', require('./routes/energie'));
 // anonymes. La surface publique (réponse anonyme) est /api/enquetes/public/:token,
 // gérée AVANT authenticate à l'intérieur du routeur (pattern webhook SumUp).
 app.use('/api/enquetes', require('./routes/enquetes'));
+// RSEI-17 : module « Achats responsables » (31e module) — référentiel fournisseurs,
+// critères d'achat par famille, registre des FDS, rapprochement classe 60 du GL.
+app.use('/api/achats', require('./routes/achats'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/historique', require('./routes/historique'));
 app.use('/api/metropole', require('./routes/metropole'));
