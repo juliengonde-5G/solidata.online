@@ -200,6 +200,8 @@ app.use('/api/communes', require('./routes/communes'));
 app.use('/api/stock-original', require('./routes/stock-original'));
 app.use('/api/referentiels', require('./routes/referentiels'));
 app.use('/api/insertion', require('./routes/insertion'));
+// RSEI-10 : module « Pilotage RSE » (28e module — labellisation RSEi).
+app.use('/api/rse', require('./routes/rse'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/historique', require('./routes/historique'));
 app.use('/api/metropole', require('./routes/metropole'));

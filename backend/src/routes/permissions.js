@@ -58,6 +58,10 @@ const MODULE_CATALOG = [
   { key: 'qhse', label: 'QHSE' },
   { key: 'audit', label: 'Audit & conformité (auditeur AUTORITE)' },
   { key: 'analyse', label: 'Analyse & Finances' },
+  // RSEI-10 : module « Pilotage RSE » (28e module). Ajouté au catalogue pour que
+  // /admin/permissions puisse l'accorder/masquer par rôle — notamment au rôle
+  // personnalisé REF_RSE (dupliqué de MANAGER, restreint à ce module).
+  { key: 'rse', label: 'Pilotage RSE' },
   { key: 'admin', label: 'Administration' },
 ];
 const MODULE_KEYS = MODULE_CATALOG.map((m) => m.key);

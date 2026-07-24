@@ -5815,6 +5815,226 @@ async function initDatabase() {
     console.log('[INIT-DB] Registre RGPD — sous-traitance IA Anthropic ✓');
 
     // ══════════════════════════════════════════
+    // Module Pilotage RSE (RSEI-10) — 28e module
+    //
+    // Outille la démarche de labellisation RSEi (référentiel 2026, évaluation
+    // AFNOR) : les 27 critères du référentiel, le plan d'action RSE, le registre
+    // de preuves (P-AAAA-NNN, péremption/fraîcheur), les campagnes d'auto-évaluation
+    // et d'audit interne, la matrice des parties prenantes et le journal des
+    // dialogues/réclamations. Cadrage : rapports/rsei-2026-07-22/03 §3 ; méthode
+    // du référent : rapport 02 (§4 grille de cotation, §6 registre, §7 tableau
+    // de bord). CONFIDENTIALITÉ by design : ce module ne manipule QUE des agrégats
+    // non nominatifs — aucune donnée individuelle de parcours n'y entre (jamais de
+    // JOIN sur les tables insertion nominatives ; les indicateurs insertion sont
+    // lus via les endpoints agrégés existants). Toutes les tables créées après
+    // users (FK pilote/responsable/created_by).
+    // ══════════════════════════════════════════
+
+    // (a) Les 27 critères du référentiel (versionnés par `referentiel`). Le niveau
+    //     visé et le niveau auto-évalué sont NULLABLES = « non coté » : doctrine
+    //     « jamais de valeur inventée » (rapport 02 §4.2). 1 pilote métier / critère.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rsei_criteres (
+        id SERIAL PRIMARY KEY,
+        referentiel VARCHAR(30) NOT NULL DEFAULT 'RSEi-2026',
+        chapitre SMALLINT NOT NULL CHECK (chapitre BETWEEN 1 AND 5),
+        code VARCHAR(10) NOT NULL,
+        intitule TEXT NOT NULL,
+        niveau_vise SMALLINT CHECK (niveau_vise BETWEEN 1 AND 4),
+        niveau_auto_evalue SMALLINT CHECK (niveau_auto_evalue BETWEEN 1 AND 4),
+        pilote_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        commentaire TEXT,
+        ordre INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (referentiel, code)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_criteres_ref ON rsei_criteres(referentiel);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_criteres_pilote ON rsei_criteres(pilote_user_id);');
+
+    // Seed idempotent des 27 critères EXACTS (référentiel RSEi-2026). Les niveaux
+    // restent NULL (non cotés). ON CONFLICT (referentiel, code) DO NOTHING : un
+    // réimport ne réécrit jamais un critère déjà coté par le référent.
+    await client.query(`
+      INSERT INTO rsei_criteres (referentiel, chapitre, code, intitule, ordre) VALUES
+        ('RSEi-2026', 1, '1.1', 'Projet d''entreprise et modèle d''affaires', 1),
+        ('RSEi-2026', 1, '1.2', 'Identification et dialogue avec les parties prenantes', 2),
+        ('RSEi-2026', 1, '1.3', 'Gouvernance et instances de décisions stratégiques', 3),
+        ('RSEi-2026', 1, '1.4', 'Ancrage territorial', 4),
+        ('RSEi-2026', 1, '1.5', 'Pilotage du projet d''entreprise et plan d''action RSE', 5),
+        ('RSEi-2026', 1, '1.6', 'Veille technologique et concurrentielle', 6),
+        ('RSEi-2026', 1, '1.7', 'Achats durables et socialement responsables', 7),
+        ('RSEi-2026', 1, '1.8', 'Indicateurs économiques et de gouvernance responsables', 8),
+        ('RSEi-2026', 2, '2.1', 'Emplois et compétences', 9),
+        ('RSEi-2026', 2, '2.2', 'Promotion de l''égalité et de la diversité', 10),
+        ('RSEi-2026', 2, '2.3', 'Dialogue social', 11),
+        ('RSEi-2026', 2, '2.4', 'Santé et sécurité au travail', 12),
+        ('RSEi-2026', 2, '2.5', 'Organisation, contenu et réalisation du travail', 13),
+        ('RSEi-2026', 2, '2.6', 'Indicateurs liés aux ressources humaines', 14),
+        ('RSEi-2026', 3, '3.1', 'Mission d''inclusion', 15),
+        ('RSEi-2026', 3, '3.2', 'Accueil, recrutement et intégration', 16),
+        ('RSEi-2026', 3, '3.3', 'Accompagnement durant le parcours', 17),
+        ('RSEi-2026', 3, '3.4', 'Préparation à la sortie', 18),
+        ('RSEi-2026', 4, '4.1', 'Démarche environnementale', 19),
+        ('RSEi-2026', 4, '4.2', 'Énergies et GES', 20),
+        ('RSEi-2026', 4, '4.3', 'Préservation de la ressource et contribution à l''économie circulaire', 21),
+        ('RSEi-2026', 4, '4.4', 'Sensibilisation aux enjeux environnementaux et partenariats', 22),
+        ('RSEi-2026', 4, '4.5', 'Indicateurs environnementaux', 23),
+        ('RSEi-2026', 5, '5.1', 'Évaluations internes', 24),
+        ('RSEi-2026', 5, '5.2', 'Analyse des résultats', 25),
+        ('RSEi-2026', 5, '5.3', 'Évaluation de la satisfaction des parties prenantes', 26),
+        ('RSEi-2026', 5, '5.4', 'Bilan et amélioration du plan d''action RSE', 27)
+      ON CONFLICT (referentiel, code) DO NOTHING;
+    `);
+
+    // (b) Plan d'action RSE (décalque de cip_action_plans). Un ou plusieurs
+    //     critères servis (critere_codes TEXT[]).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rsei_actions (
+        id SERIAL PRIMARY KEY,
+        titre TEXT NOT NULL,
+        description TEXT,
+        critere_codes TEXT[] NOT NULL DEFAULT '{}',
+        responsable_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        indicateur TEXT,
+        echeance DATE,
+        moyens TEXT,
+        statut VARCHAR(15) NOT NULL DEFAULT 'a_faire' CHECK (statut IN ('a_faire', 'en_cours', 'realise', 'abandonne')),
+        priorite VARCHAR(10) NOT NULL DEFAULT 'moyenne' CHECK (priorite IN ('haute', 'moyenne', 'basse')),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_actions_statut ON rsei_actions(statut);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_actions_echeance ON rsei_actions(echeance);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_actions_responsable ON rsei_actions(responsable_user_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_actions_criteres ON rsei_actions USING GIN (critere_codes);');
+
+    // (c) Registre de preuves (rapport 02 §6). Référence P-AAAA-NNN générée à la
+    //     création. `source` = module ERP ou externe ; `lien_interne` = deep-link
+    //     vers un écran ERP (référencer plutôt que dupliquer) ; `fichier_path` =
+    //     pièce uploadée (pattern justificatifs Refashion) ; `echeance_fraicheur`
+    //     = date de péremption (< 12 mois pour les preuves d'activité, §4.3).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rsei_preuves (
+        id SERIAL PRIMARY KEY,
+        reference VARCHAR(20) NOT NULL UNIQUE,
+        intitule TEXT NOT NULL,
+        critere_codes TEXT[] NOT NULL DEFAULT '{}',
+        type VARCHAR(30),
+        source VARCHAR(120),
+        lien_interne TEXT,
+        fichier_path TEXT,
+        fichier_original_name TEXT,
+        fichier_mime VARCHAR(120),
+        date_preuve DATE,
+        echeance_fraicheur DATE,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_preuves_fraicheur ON rsei_preuves(echeance_fraicheur);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_preuves_date ON rsei_preuves(date_preuve);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_preuves_criteres ON rsei_preuves USING GIN (critere_codes);');
+
+    // (d) Campagnes d'évaluation (auto-évaluation annuelle + audit interne 5.1).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rsei_evaluations (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(20) NOT NULL CHECK (type IN ('auto_evaluation', 'audit_interne')),
+        libelle TEXT NOT NULL,
+        date_evaluation DATE,
+        evaluateur_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        statut VARCHAR(15) NOT NULL DEFAULT 'en_cours' CHECK (statut IN ('en_cours', 'cloturee')),
+        synthese TEXT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_evaluations_date ON rsei_evaluations(date_evaluation);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_evaluations_statut ON rsei_evaluations(statut);');
+
+    // (e) Cotation par critère d'une campagne (constat + écart + action corrective
+    //     liée). UNIQUE(evaluation_id, critere_code) : une cotation par critère.
+    //     FK action_id déclarée APRÈS rsei_actions (créée en (b)).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rsei_evaluation_items (
+        id SERIAL PRIMARY KEY,
+        evaluation_id INTEGER NOT NULL REFERENCES rsei_evaluations(id) ON DELETE CASCADE,
+        critere_code VARCHAR(10) NOT NULL,
+        niveau_constate SMALLINT CHECK (niveau_constate BETWEEN 1 AND 4),
+        constat TEXT,
+        ecart TEXT,
+        action_id INTEGER REFERENCES rsei_actions(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (evaluation_id, critere_code)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_eval_items_eval ON rsei_evaluation_items(evaluation_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_eval_items_critere ON rsei_evaluation_items(critere_code);');
+
+    // (f) Matrice d'impact des parties prenantes (1.2).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rsei_parties_prenantes (
+        id SERIAL PRIMARY KEY,
+        nom TEXT NOT NULL,
+        categorie VARCHAR(30),
+        influence SMALLINT CHECK (influence BETWEEN 1 AND 4),
+        interet SMALLINT CHECK (interet BETWEEN 1 AND 4),
+        attentes TEXT,
+        actif BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_pp_categorie ON rsei_parties_prenantes(categorie);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_pp_actif ON rsei_parties_prenantes(actif);');
+
+    // (g) Journal des dialogues / demandes / réclamations des PP (5.3 N2).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rsei_interactions (
+        id SERIAL PRIMARY KEY,
+        partie_prenante_id INTEGER NOT NULL REFERENCES rsei_parties_prenantes(id) ON DELETE CASCADE,
+        date_interaction DATE,
+        canal VARCHAR(60),
+        objet TEXT,
+        type VARCHAR(15) NOT NULL DEFAULT 'dialogue' CHECK (type IN ('dialogue', 'demande', 'reclamation', 'information')),
+        reponse_apportee TEXT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_interactions_pp ON rsei_interactions(partie_prenante_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_rsei_interactions_date ON rsei_interactions(date_interaction);');
+
+    // Registre RGPD — traitement « Pilotage RSE » (agrégats non nominatifs).
+    // Idempotent via WHERE NOT EXISTS. Documente la minimisation : ce module ne
+    // contient AUCUNE donnée individuelle de parcours (confidentialité ch. 3).
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Pilotage RSE (agrégats non nominatifs)',
+        'Pilotage et évaluation de la démarche RSE en vue de la labellisation RSEi (référentiel 2026, évaluation AFNOR) : tableau de bord des 27 critères, plan d''action RSE, registre de preuves, campagnes d''auto-évaluation et d''audit interne, matrice des parties prenantes et journal des dialogues/réclamations. AUCUNE donnée individuelle de salarié en parcours n''est traitée dans ce module (les indicateurs d''inclusion sont lus sous forme d''agrégats non nominatifs).',
+        'Intérêt légitime (démarche volontaire de RSE et de labellisation)',
+        'Utilisateurs internes (pilotes de critères, référent RSE, direction) ; contacts des parties prenantes externes (financeurs, prescripteurs, clients, collectivités, fournisseurs, partenaires)',
+        'Rattachements utilisateurs (pilote / responsable d''action / évaluateur), preuves documentaires et liens internes, cotations de maturité, coordonnées et attentes des parties prenantes externes, journal des interactions. AUCUNE donnée de catégorie particulière ni donnée nominative de parcours d''insertion.',
+        'Référent RSE, direction, pilotes de critères ; évaluateur AFNOR (consultation in situ le cas échéant)',
+        'Cycle de labellisation en cours + cycle précédent (6 ans glissants)',
+        'Accès restreint (lecture ADMIN/MANAGER/RH — dont rôle personnalisé REF_RSE de base MANAGER ; écriture ADMIN/RH), journalisation applicative (autoLogActivity), agrégats non nominatifs uniquement, uploads filtrés (MIME + extension) et servis avec en-têtes anti-sniffing'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Pilotage RSE (agrégats non nominatifs)'
+      );
+    `);
+    console.log('[INIT-DB] Module Pilotage RSE (RSEI-10) — 7 tables + 27 critères + registre RGPD ✓');
+
+    // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL
     //
     // Symptôme observé en prod : INSERT INTO employees échoue avec
@@ -5846,6 +6066,8 @@ async function initDatabase() {
       'vak_meteo_quotidien', 'vak_sumup_sync_log',
       'association_points', 'cav_sensor_readings', 'refashion_dpav',
       'refashion_communes', 'refashion_subventions', 'historique_mensuel',
+      'rsei_criteres', 'rsei_actions', 'rsei_preuves', 'rsei_evaluations',
+      'rsei_evaluation_items', 'rsei_parties_prenantes', 'rsei_interactions',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une
