@@ -11,7 +11,7 @@ import {
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
-  TrendingUp, AlertTriangle, Leaf,
+  TrendingUp, AlertTriangle, Leaf, Zap, Gauge,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -219,6 +219,17 @@ const NAV_TREE = [
     icon: Leaf,
     children: [
       { label: 'Tableau de bord RSE', path: '/rse', icon: Leaf, roles: ['ADMIN', 'MANAGER', 'RH'] },
+    ],
+  },
+  {
+    // Module « Énergie & GES » (RSEI-11 — 29e module). Comble le critère RSEi 4.2
+    // (Énergies et GES) et alimente l'export VSME (B3/B6). Lecture ADMIN/MANAGER/
+    // RH/QHSE ; la visibilité fine se règle dans /admin/permissions (module 'energie').
+    id: 'energie',
+    label: 'Énergie & GES',
+    icon: Zap,
+    children: [
+      { label: 'Énergie & GES', path: '/energie', icon: Gauge, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
     ],
   },
   {

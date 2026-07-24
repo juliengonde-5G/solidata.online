@@ -62,6 +62,10 @@ const MODULE_CATALOG = [
   // /admin/permissions puisse l'accorder/masquer par rôle — notamment au rôle
   // personnalisé REF_RSE (dupliqué de MANAGER, restreint à ce module).
   { key: 'rse', label: 'Pilotage RSE' },
+  // RSEI-11 : module « Énergie & GES » (29e module). Ajouté au catalogue pour que
+  // /admin/permissions puisse l'accorder/masquer par rôle (notamment au référent
+  // RSE et au QHSE).
+  { key: 'energie', label: 'Énergie & GES' },
   { key: 'admin', label: 'Administration' },
 ];
 const MODULE_KEYS = MODULE_CATALOG.map((m) => m.key);

@@ -45,6 +45,7 @@ const AuditInsertion = lazy(() => import('./pages/AuditInsertion'));
 const RenouvellementETI = lazy(() => import('./pages/RenouvellementETI'));
 const AdminInsertion = lazy(() => import('./pages/AdminInsertion'));
 const PilotageRSE = lazy(() => import('./pages/PilotageRSE'));
+const EnergieGES = lazy(() => import('./pages/EnergieGES'));
 const PlanningHebdo = lazy(() => import('./pages/PlanningHebdo'));
 const PlanningTournees = lazy(() => import('./pages/PlanningTournees'));
 const DashboardCollecte = lazy(() => import('./pages/DashboardCollecte'));
@@ -253,6 +254,9 @@ function App() {
 
               {/* Pilotage RSE (RSEI-10 — 28e module, labellisation RSEi) */}
               <Route path="/rse" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH']}><PilotageRSE /></ProtectedRoute>} />
+
+              {/* Énergie & GES (RSEI-11 — 29e module, critère RSEi 4.2) */}
+              <Route path="/energie" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><EnergieGES /></ProtectedRoute>} />
 
               {/* QHSE (item 58 — accidents, habilitations, EPI) */}
               <Route path="/qhse" element={<Navigate to="/qhse/accidents" replace />} />

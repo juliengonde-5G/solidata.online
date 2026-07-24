@@ -563,6 +563,44 @@ async function checkRseEcheances() {
   }
 }
 
+/**
+ * Saisie du module Énergie & GES (RSEI-11) — job instrumenté, léger.
+ * Rappelle (log + trace job_runs) si un relevé mensuel manque pour un compteur
+ * ACTIF au titre du mois écoulé (la saisie mensuelle est le prérequis du critère
+ * 4.2 et des 12 mois de données visés avant l'évaluation AFNOR). Le dashboard
+ * GET /api/energie/dashboard reste la surface d'analyse ; ce job double d'une
+ * trace horodatée le rappel de saisie. Résilient : tables absentes → rend 0.
+ */
+async function checkEnergieSaisie() {
+  try {
+    // Mois écoulé (le mois précédent le mois courant).
+    const now = new Date();
+    let annee = now.getFullYear();
+    let mois = now.getMonth(); // getMonth() = 0-11 → mois précédent (1-12) = getMonth()
+    if (mois === 0) { mois = 12; annee -= 1; }
+
+    const r = await pool.query(
+      `SELECT COUNT(*)::int AS actifs,
+              COUNT(rel.id)::int AS saisis
+       FROM energie_compteurs c
+       LEFT JOIN energie_releves rel
+         ON rel.compteur_id = c.id AND rel.periode_annee = $1 AND rel.periode_mois = $2
+       WHERE c.actif = true`,
+      [annee, mois]
+    );
+    const actifs = (r.rows[0] && r.rows[0].actifs) || 0;
+    const saisis = (r.rows[0] && r.rows[0].saisis) || 0;
+    const manquants = Math.max(0, actifs - saisis);
+    if (manquants > 0) {
+      console.log(`[SCHEDULER] Énergie & GES — ${manquants} relevé(s) mensuel(s) manquant(s) pour ${String(mois).padStart(2, '0')}/${annee} (${saisis}/${actifs} compteurs saisis)`);
+    }
+    return { items: manquants, periode: `${annee}-${String(mois).padStart(2, '0')}`, compteurs_actifs: actifs, releves_saisis: saisis };
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur checkEnergieSaisie:', err.message);
+    return { items: 0 };
+  }
+}
+
 async function createInsertionAlert(milestone, alertType, targetDate) {
   try {
     // Eviter les doublons
@@ -1387,6 +1425,7 @@ async function runAllJobs() {
     await runInstrumented('checkRenouvellementsAPreparer', checkRenouvellementsAPreparer);
     await runInstrumented('createPostSortieFollowups', createPostSortieFollowups);
     await runInstrumented('checkRseEcheances', checkRseEcheances);
+    await runInstrumented('checkEnergieSaisie', checkEnergieSaisie);
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
@@ -1427,4 +1466,5 @@ module.exports = {
   runInstrumented,
   purgeOldJobRuns,
   checkRseEcheances,
+  checkEnergieSaisie,
 };

@@ -6035,6 +6035,165 @@ async function initDatabase() {
     console.log('[INIT-DB] Module Pilotage RSE (RSEI-10) — 7 tables + 27 critères + registre RGPD ✓');
 
     // ══════════════════════════════════════════
+    // Module Énergie & GES (RSEI-11) — 29e module
+    //
+    // Comble le critère 4.2 « Énergies et GES » (le seul à 0 du référentiel RSEi)
+    // et alimente 4.1 / 4.5 (B3 énergie/GES, B6 eau de l'export VSME RSEI-09).
+    // Cadrage : rapports/rsei-2026-07-22/03-plan-action-rsei.md §2.2 (RSEI-11).
+    //   (a) énergie bâtiments : relevés mensuels par site/compteur (électricité,
+    //       gaz, eau) ;
+    //   (b) carburant flotte : pleins par véhicule (date, litres, €, km) → L/100 km,
+    //       la dérive = signal maintenance (synergie module véhicules) ;
+    //   (c) conversion GES méthode ADEME — même mécanique que metropole.js (CO2
+    //       évité), mais facteurs DISTINCTS pour les émissions PROPRES, stockés en
+    //       base et PARAMÉTRABLES (ges_facteurs). Intensité tCO2e / CA.
+    // Toutes les tables créées après users (FK saisi_par) et vehicles (FK des
+    // pleins), déjà présentes plus haut → chemin « base neuve » sûr.
+    // ══════════════════════════════════════════
+
+    // (a) Sites / bâtiments de la structure.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS energie_sites (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(120) NOT NULL,
+        adresse TEXT,
+        actif BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_energie_sites_actif ON energie_sites(actif);');
+    // Seed idempotent d'au moins le siège (Le Houlme) — WHERE NOT EXISTS (pas de
+    // clé naturelle unique sur nom : un réimport ne recrée pas de doublon).
+    await client.query(`
+      INSERT INTO energie_sites (nom, adresse)
+      SELECT 'Siège — Le Houlme', 'Centre de tri, Le Houlme (76)'
+      WHERE NOT EXISTS (SELECT 1 FROM energie_sites WHERE nom = 'Siège — Le Houlme');
+    `);
+
+    // (b) Compteurs d'un site (électricité, gaz, eau, autre). unite par défaut
+    //     'kWh' (mettre 'm3' pour l'eau et le gaz facturé au m3).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS energie_compteurs (
+        id SERIAL PRIMARY KEY,
+        site_id INTEGER NOT NULL REFERENCES energie_sites(id) ON DELETE CASCADE,
+        type VARCHAR(15) NOT NULL CHECK (type IN ('electricite', 'gaz', 'eau', 'autre')),
+        reference VARCHAR(80),
+        unite VARCHAR(10) NOT NULL DEFAULT 'kWh',
+        actif BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_energie_compteurs_site ON energie_compteurs(site_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_energie_compteurs_actif ON energie_compteurs(actif);');
+
+    // (c) Relevés mensuels d'un compteur (consommation de la période + coût €).
+    //     UNIQUE(compteur, année, mois) : un relevé par compteur et par mois.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS energie_releves (
+        id SERIAL PRIMARY KEY,
+        compteur_id INTEGER NOT NULL REFERENCES energie_compteurs(id) ON DELETE CASCADE,
+        periode_annee SMALLINT NOT NULL,
+        periode_mois SMALLINT NOT NULL CHECK (periode_mois BETWEEN 1 AND 12),
+        valeur NUMERIC(14,3) NOT NULL,
+        cout_euros NUMERIC(12,2),
+        saisi_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (compteur_id, periode_annee, periode_mois)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_energie_releves_compteur ON energie_releves(compteur_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_energie_releves_periode ON energie_releves(periode_annee, periode_mois);');
+
+    // (d) Pleins de carburant par véhicule (rapprochés du kilométrage relevé au
+    //     plein → L/100 km). vehicle_id SET NULL (un plein reste tracé même si le
+    //     véhicule est supprimé). km_compteur = relevé du compteur AU plein (saisie
+    //     terrain : les checklists mobiles / GPS ne donnent pas le km à la pompe).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS carburant_pleins (
+        id SERIAL PRIMARY KEY,
+        vehicle_id INTEGER REFERENCES vehicles(id) ON DELETE SET NULL,
+        date_plein DATE NOT NULL,
+        litres NUMERIC(10,2) NOT NULL,
+        cout_euros NUMERIC(12,2),
+        km_compteur INTEGER,
+        type_carburant VARCHAR(12) NOT NULL DEFAULT 'gazole'
+          CHECK (type_carburant IN ('gazole', 'essence', 'gnv', 'electrique', 'adblue', 'autre')),
+        saisi_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_carburant_pleins_vehicle ON carburant_pleins(vehicle_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_carburant_pleins_date ON carburant_pleins(date_plein);');
+
+    // (e) Facteurs d'émission GES (kg CO2e par unité), méthode ADEME. STOCKÉS EN
+    //     BASE et PARAMÉTRABLES (édition ADMIN/RH via PUT /api/energie/facteurs) —
+    //     à la différence des facteurs de CO2 ÉVITÉ hardcodés de metropole.js, ces
+    //     facteurs d'émissions PROPRES doivent pouvoir être ajustés/versionnés.
+    //     UNIQUE(poste, annee).
+    //
+    //     ⚠ VALEURS INDICATIVES à ajuster par la structure — elles ne prétendent PAS
+    //     à l'exactitude réglementaire. Ordres de grandeur « usage France »,
+    //     sources ADEME Base Empreinte (à confirmer/millésimer par le référent RSE).
+    //     Repères indicatifs : électricité ~0,052 kgCO2e/kWh (usage) ; gaz naturel
+    //     ~0,227 kgCO2e/kWh PCI ; eau ~0,132 kgCO2e/m3 ; gazole ~2,51 kgCO2e/L ;
+    //     essence ~2,28 kgCO2e/L ; GNV ~2,96 kgCO2e/kg.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ges_facteurs (
+        id SERIAL PRIMARY KEY,
+        poste VARCHAR(20) NOT NULL,
+        unite VARCHAR(10) NOT NULL,
+        facteur_kgco2e NUMERIC(12,5) NOT NULL,
+        source VARCHAR(120) NOT NULL DEFAULT 'ADEME Base Empreinte',
+        annee SMALLINT,
+        actif BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (poste, annee)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_ges_facteurs_poste ON ges_facteurs(poste);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_ges_facteurs_actif ON ges_facteurs(actif);');
+    // Seed idempotent (ON CONFLICT (poste, annee) DO NOTHING). Millésime 2024
+    // (concret pour que ON CONFLICT s'applique). Valeurs INDICATIVES et
+    // PARAMÉTRABLES — la structure les ajuste avec ses propres facteurs ADEME.
+    await client.query(`
+      INSERT INTO ges_facteurs (poste, unite, facteur_kgco2e, source, annee) VALUES
+        ('electricite', 'kWh', 0.05200, 'ADEME Base Empreinte (indicatif, à ajuster)', 2024),
+        ('gaz',         'kWh', 0.22700, 'ADEME Base Empreinte (indicatif, à ajuster)', 2024),
+        ('eau',         'm3',  0.13200, 'ADEME Base Empreinte (indicatif, à ajuster)', 2024),
+        ('gazole',      'L',   2.51000, 'ADEME Base Empreinte (indicatif, à ajuster)', 2024),
+        ('essence',     'L',   2.28000, 'ADEME Base Empreinte (indicatif, à ajuster)', 2024),
+        ('gnv',         'kg',  2.96000, 'ADEME Base Empreinte (indicatif, à ajuster)', 2024)
+      ON CONFLICT (poste, annee) DO NOTHING;
+    `);
+
+    // Registre RGPD — traitement « Énergie & GES » (données quasi non personnelles).
+    // Idempotent via WHERE NOT EXISTS. Minimisation : seules des consommations et
+    // des pleins (données techniques) + le rattachement de l'utilisateur ayant SAISI
+    // la donnée (saisi_par) sont conservés — aucune donnée personnelle sensible.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Énergie & GES (mesure des impacts environnementaux propres)',
+        'Mesurer les consommations d''énergie des bâtiments (électricité, gaz, eau) et de carburant de la flotte, calculer les émissions de GES (méthode ADEME, facteurs paramétrables) et l''intensité carbone, au titre de la démarche RSE (critère RSEi 4.2) et de l''export VSME (B3/B6).',
+        'Intérêt légitime (démarche volontaire de RSE et de mesure d''impact environnemental)',
+        'Utilisateurs internes ayant saisi les relevés/pleins (saisi_par)',
+        'Consommations d''énergie et d''eau par site/compteur, pleins de carburant par véhicule (date, litres, coût, kilométrage), facteurs d''émission. Rattachement à l''utilisateur ayant effectué la saisie. AUCUNE donnée de catégorie particulière.',
+        'Référent RSE, direction, QHSE, RH',
+        'Historique de mesure conservé pour le suivi pluriannuel (≥ 5 ans, piste d''audit environnemental)',
+        'Accès restreint (lecture ADMIN/MANAGER/RH/QHSE ; écriture ADMIN/RH/MANAGER ; facteurs d''émission éditables ADMIN/RH), requêtes SQL paramétrées, journalisation applicative (autoLogActivity)'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Énergie & GES (mesure des impacts environnementaux propres)'
+      );
+    `);
+    console.log('[INIT-DB] Module Énergie & GES (RSEI-11) — 5 tables + 6 facteurs ADEME + siège + registre RGPD ✓');
+
+    // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL
     //
     // Symptôme observé en prod : INSERT INTO employees échoue avec
@@ -6068,6 +6227,8 @@ async function initDatabase() {
       'refashion_communes', 'refashion_subventions', 'historique_mensuel',
       'rsei_criteres', 'rsei_actions', 'rsei_preuves', 'rsei_evaluations',
       'rsei_evaluation_items', 'rsei_parties_prenantes', 'rsei_interactions',
+      'energie_sites', 'energie_compteurs', 'energie_releves',
+      'carburant_pleins', 'ges_facteurs',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une
