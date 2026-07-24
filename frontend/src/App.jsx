@@ -44,6 +44,7 @@ const ActionsCIP = lazy(() => import('./pages/ActionsCIP'));
 const AuditInsertion = lazy(() => import('./pages/AuditInsertion'));
 const RenouvellementETI = lazy(() => import('./pages/RenouvellementETI'));
 const AdminInsertion = lazy(() => import('./pages/AdminInsertion'));
+const PilotageRSE = lazy(() => import('./pages/PilotageRSE'));
 const PlanningHebdo = lazy(() => import('./pages/PlanningHebdo'));
 const PlanningTournees = lazy(() => import('./pages/PlanningTournees'));
 const DashboardCollecte = lazy(() => import('./pages/DashboardCollecte'));
@@ -249,6 +250,9 @@ function App() {
               <Route path="/finance/pl" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinancePL /></ProtectedRoute>} />
               <Route path="/finance/bilan" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinanceBilan /></ProtectedRoute>} />
               <Route path="/finance/controles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinanceControles /></ProtectedRoute>} />
+
+              {/* Pilotage RSE (RSEI-10 — 28e module, labellisation RSEi) */}
+              <Route path="/rse" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH']}><PilotageRSE /></ProtectedRoute>} />
 
               {/* QHSE (item 58 — accidents, habilitations, EPI) */}
               <Route path="/qhse" element={<Navigate to="/qhse/accidents" replace />} />

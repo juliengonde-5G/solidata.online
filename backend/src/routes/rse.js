@@ -93,6 +93,28 @@ async function nextPreuveReference(db) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// UTILISATEURS ASSIGNABLES (pilote de critère / responsable d'action /
+// évaluateur). Ouvert aux rôles de lecture du module (dont REF_RSE=MANAGER) car
+// GET /users est réservé ADMIN — sans quoi le référent ne pourrait désigner
+// personne. Renvoie les permanents actifs (id + nom + rôle de base), sans donnée
+// sensible. Déclaré AVANT toute route paramétrée.
+// ───────────────────────────────────────────────────────────────────────────
+router.get('/assignable-users', READ, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, first_name, last_name, role
+       FROM users
+       WHERE COALESCE(is_active, true) = true
+       ORDER BY last_name NULLS LAST, first_name NULLS LAST`
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[RSE] Erreur assignable-users :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // CRITÈRES — les 27 critères du référentiel
 // ───────────────────────────────────────────────────────────────────────────
 
