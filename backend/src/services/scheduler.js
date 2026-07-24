@@ -618,14 +618,26 @@ async function checkQhseDocuments() {
       if (Number.isFinite(n) && n > 0) seuilJours = n;
     } catch (_) { /* défaut 60 j */ }
 
+    // Seule la version COURANTE de chaque document (type + titre) est prise en compte
+    // — une version antérieure supersédée ne doit pas alerter à vie (revue Codex PR#80).
     const r = await pool.query(
-      `SELECT
+      `WITH courant AS (
+         SELECT d.* FROM qhse_documents d
+         WHERE NOT EXISTS (
+           SELECT 1 FROM qhse_documents d2
+           WHERE d2.type = d.type
+             AND lower(trim(COALESCE(d2.titre, ''))) = lower(trim(COALESCE(d.titre, '')))
+             AND (COALESCE(d2.date_document, d2.date_maj, d2.created_at::date), d2.id)
+               > (COALESCE(d.date_document, d.date_maj, d.created_at::date), d.id)
+         )
+       )
+       SELECT
          COUNT(*) FILTER (WHERE date_revision_prevue IS NOT NULL AND date_revision_prevue < CURRENT_DATE)::int AS a_reviser,
          COUNT(*) FILTER (WHERE date_revision_prevue IS NOT NULL
                             AND date_revision_prevue >= CURRENT_DATE
                             AND date_revision_prevue < CURRENT_DATE + make_interval(days => $1))::int AS bientot,
          COUNT(*) FILTER (WHERE type = 'duerp')::int AS nb_duerp
-       FROM qhse_documents`,
+       FROM courant`,
       [seuilJours]
     );
     const aReviser = (r.rows[0] && r.rows[0].a_reviser) || 0;

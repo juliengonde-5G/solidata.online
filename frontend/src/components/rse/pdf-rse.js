@@ -109,6 +109,11 @@ function renderVolets(v) {
       ['Satisfaction de sortie (moyenne)', sat.moyenne_globale != null ? sat.moyenne_globale + ' / 5' : null],
       ['PMSMP — conventions / jours', pm.nb != null ? `${pm.nb} / ${pm.jours}` : null],
     ]);
+    // Périmètre temporel (revue Codex PR#81) : distingue les agrégats annuels des
+    // photos à la date de génération — visible dans le PDF, pas seulement dans l'API.
+    if (s.perimetre_temporel && s.perimetre_temporel.note) {
+      h += `<p class="note"><strong>Périmètre :</strong> ${esc(s.perimetre_temporel.note)}</p>`;
+    }
   } else {
     h += `<div class="note">${esc(s.note || 'Volet indisponible.')}</div>`;
   }
