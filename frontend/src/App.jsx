@@ -274,6 +274,8 @@ function App() {
               <Route path="/qhse/accidents" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="accidents" /></ProtectedRoute>} />
               <Route path="/qhse/habilitations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="habilitations" /></ProtectedRoute>} />
               <Route path="/qhse/epi" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="epi" /></ProtectedRoute>} />
+              <Route path="/qhse/documents" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="documents" /></ProtectedRoute>} />
+              <Route path="/qhse/rex" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="rex" /></ProtectedRoute>} />
 
               {/* Administration */}
               <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />

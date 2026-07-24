@@ -5792,6 +5792,54 @@ async function initDatabase() {
     `);
     console.log('[INIT-DB] Module QHSE (accidents, habilitations, EPI) + registre RGPD ✓');
 
+    // ══════════════════════════════════════════
+    // QHSE — RSEI-06 (documents de prévention : DUERP, plan de prévention, RPS)
+    //        + RSEI-07 (retours d'expérience SST sur qhse_events)
+    // Sert le critère 2.4 « Santé et sécurité au travail » du référentiel RSEi :
+    //   - RSEI-06 : registre des documents de prévention avec pièce jointe
+    //     (pattern Refashion), date de mise à jour, TRACE de la consultation des
+    //     IRP/CSE, et échéance de révision (alerte scheduler checkQhseDocuments) —
+    //     transforme l'attendu N1 le plus scruté du 2.4 en preuve d'un clic.
+    //   - RSEI-07 : boucle REX (analyse des causes → action corrective →
+    //     efficacité vérifiée) portée par les accidents/presqu'accidents déjà saisis.
+    // RGPD : documents de prévention = pièces ORGANISATIONNELLES non nominatives
+    // (le DUERP porte sur des unités de travail, pas sur des personnes) ; le
+    // traitement QHSE au registre art. 30 (ci-dessus) couvre le module.
+    // ══════════════════════════════════════════
+
+    // RSEI-07 — colonnes de retour d'expérience sur le registre d'évènements.
+    await client.query(`ALTER TABLE qhse_events ADD COLUMN IF NOT EXISTS analyse_causes TEXT;`);
+    await client.query(`ALTER TABLE qhse_events ADD COLUMN IF NOT EXISTS action_corrective TEXT;`);
+    await client.query(`ALTER TABLE qhse_events ADD COLUMN IF NOT EXISTS efficacite_verifiee_le DATE;`);
+    await client.query(`ALTER TABLE qhse_events ADD COLUMN IF NOT EXISTS efficacite_constat TEXT;`);
+
+    // RSEI-06 — registre des documents de prévention (DUERP, plan de prévention,
+    // volet RPS, protocole de sécurité, consignes). Un enregistrement par
+    // document/version ; l'historique des versions = les lignes successives.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS qhse_documents (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(30) NOT NULL CHECK (type IN ('duerp','plan_prevention','rps','protocole_securite','consignes','autre')),
+        titre VARCHAR(200) NOT NULL,
+        version VARCHAR(50),
+        date_document DATE,
+        date_maj DATE,
+        date_revision_prevue DATE,
+        irp_consultation_date DATE,
+        irp_consultation_avis TEXT,
+        fichier_path TEXT,
+        fichier_original_name VARCHAR(255),
+        fichier_mime VARCHAR(120),
+        remarque TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_documents_type ON qhse_documents(type);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_qhse_documents_revision ON qhse_documents(date_revision_prevue);');
+    console.log('[INIT-DB] QHSE — documents de prévention (RSEI-06) + REX SST (RSEI-07) ✓');
+
     // Registre RGPD — sous-traitance IA (Anthropic) — Vague 3, item 3.C-6.
     // Documente le recours au modèle Claude (Anthropic PBC, sous-traitant art. 28)
     // pour l'aide à l'analyse insertion et l'assistant conversationnel. Les données
@@ -6487,6 +6535,7 @@ async function initDatabase() {
       'carburant_pleins', 'ges_facteurs',
       'enquete_modeles', 'enquete_questions', 'enquete_campagnes', 'enquete_reponses',
       'achats_fournisseurs', 'achats_criteres', 'achats_fds',
+      'qhse_documents',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une
