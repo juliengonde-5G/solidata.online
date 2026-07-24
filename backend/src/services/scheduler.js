@@ -513,6 +513,56 @@ async function createPostSortieFollowups() {
   }
 }
 
+/**
+ * Échéances du module Pilotage RSE (RSEI-10) — job instrumenté.
+ * Observe (journal job_runs via runInstrumented) et journalise :
+ *  - actions du plan RSE en retard (échéance passée, non soldées) ;
+ *  - preuves périmées (echeance_fraicheur < aujourd'hui) ;
+ *  - preuves dont la fraîcheur arrive à échéance sous `rse.alerte_fraicheur_jours`
+ *    (setting, défaut 90 j) — la « liste de courses » du référent (rapport 02 §6.4).
+ * Le tableau de bord GET /api/rse/dashboard est la surface d'alerte LIVE (compteurs
+ * par critère) ; ce job la double d'une trace horodatée (job_runs / items_processed)
+ * sans créer de table d'alertes dédiée. Résilient : toute erreur (tables absentes
+ * sur une base non migrée) est absorbée et rend 0.
+ */
+async function checkRseEcheances() {
+  try {
+    let seuilJours = 90;
+    try {
+      const s = await pool.query("SELECT value FROM settings WHERE key = 'rse.alerte_fraicheur_jours'");
+      const n = parseInt(s.rows[0] && s.rows[0].value, 10);
+      if (Number.isFinite(n) && n > 0) seuilJours = n;
+    } catch (_) { /* défaut 90 j */ }
+
+    const actionsRetard = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM rsei_actions
+       WHERE echeance IS NOT NULL AND echeance < CURRENT_DATE
+         AND statut IN ('a_faire', 'en_cours')`
+    );
+    const preuvesPerimees = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM rsei_preuves
+       WHERE echeance_fraicheur IS NOT NULL AND echeance_fraicheur < CURRENT_DATE`
+    );
+    const preuvesProches = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM rsei_preuves
+       WHERE echeance_fraicheur IS NOT NULL
+         AND echeance_fraicheur >= CURRENT_DATE
+         AND echeance_fraicheur < CURRENT_DATE + make_interval(days => $1)`,
+      [seuilJours]
+    );
+    const aRetard = (actionsRetard.rows[0] && actionsRetard.rows[0].n) || 0;
+    const perimees = (preuvesPerimees.rows[0] && preuvesPerimees.rows[0].n) || 0;
+    const proches = (preuvesProches.rows[0] && preuvesProches.rows[0].n) || 0;
+    if (aRetard || perimees || proches) {
+      console.log(`[SCHEDULER] RSE échéances — actions en retard: ${aRetard}, preuves périmées: ${perimees}, preuves à renouveler (< ${seuilJours} j): ${proches}`);
+    }
+    return { items: aRetard + perimees + proches, actions_en_retard: aRetard, preuves_perimees: perimees, preuves_a_renouveler: proches };
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur checkRseEcheances:', err.message);
+    return { items: 0 };
+  }
+}
+
 async function createInsertionAlert(milestone, alertType, targetDate) {
   try {
     // Eviter les doublons
@@ -1336,6 +1386,7 @@ async function runAllJobs() {
     await runInstrumented('checkPassIaeExpiring', checkPassIaeExpiring);
     await runInstrumented('checkRenouvellementsAPreparer', checkRenouvellementsAPreparer);
     await runInstrumented('createPostSortieFollowups', createPostSortieFollowups);
+    await runInstrumented('checkRseEcheances', checkRseEcheances);
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
@@ -1375,4 +1426,5 @@ module.exports = {
   // Exposés pour l'observabilité (routes/monitoring.js) et les tests.
   runInstrumented,
   purgeOldJobRuns,
+  checkRseEcheances,
 };

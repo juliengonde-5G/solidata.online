@@ -499,6 +499,29 @@ annulee   annulee   annulee     annulee
 
 ---
 
+### 2.10 Pilotage RSE
+
+**Route** : `/rse` — section sidebar « Pilotage RSE » (rôles ADMIN, MANAGER, RH ; et le rôle personnalisé **REF_RSE**).
+
+Ce module **outille la démarche de labellisation RSEi** de la structure (référentiel RSEi 2026, évaluation AFNOR Certification). Point important : **c'est l'association Solidarité Textiles qui est labellisée, jamais le logiciel** — le module est un **outil de preuve et de pilotage** de la maturité RSE, il ne délivre aucune certification. Il ne manipule que des **agrégats non nominatifs** : aucune donnée individuelle de parcours d'insertion n'y entre (confidentialité du chapitre 3 du référentiel).
+
+**6 onglets** :
+
+| Onglet | Fonction |
+|--------|----------|
+| **Tableau de bord** | Cartographie (heatmap) des **27 critères** du référentiel : niveau visé / niveau auto-évalué, preuves fraîches ou périmées, actions en retard, par critère. KPI globaux : couverture « niveau 2 démontrable », taux d'actions soldées à l'échéance, preuves périmées. Cliquer un critère ouvre sa cotation (niveaux, pilote, commentaire). |
+| **Plan d'action** | Plan d'action RSE : titre, critère(s) servi(s), responsable, indicateur, échéance, moyens, statut (à faire / en cours / réalisé / abandonné), priorité. Filtres + export CSV. |
+| **Registre de preuves** | Preuves horodatées avec **référence automatique `P-AAAA-NNN`** (séquentielle par année), rattachées à un ou plusieurs critères, avec source, lien interne vers un écran ERP (référencer plutôt que dupliquer) ou pièce jointe uploadée, et une **échéance de fraîcheur** (une preuve trop ancienne devient « périmée »). |
+| **Évaluations** | Campagnes d'**auto-évaluation** et d'**audit interne**, cotées critère par critère (niveau constaté, constat, écart, action corrective liée). |
+| **Parties prenantes** | Matrice d'impact des parties prenantes (influence / intérêt / attentes) + **journal des interactions** (dialogues, demandes, réclamations) avec la réponse apportée. |
+| **Documents** | Génération de deux PDF A4 : le **bilan RSE annuel** (état du plan d'action, répartition des niveaux, preuves, dernière évaluation interne) et le **dossier de préparation AFNOR** (par critère : niveau, pilote, preuves rattachées, dernier constat). Rappel affiché : la communication externe sur le label n'est autorisée qu'à partir du niveau 2. |
+
+**Doctrine « non coté »** : un critère non encore évalué reste à `NULL` (« non coté ») — le module **n'affiche jamais un « 0 » ni un niveau inventé**. Le tableau de bord distingue explicitement « critères cotés » de la couverture réelle, pour ne pas donner une fausse impression de maturité.
+
+**Rôle REF_RSE** : le référent RSE dispose d'un rôle personnalisé créé par **duplication de MANAGER** (`/admin/permissions`), auquel on accorde le module `rse`. L'écriture du module est ouverte à ADMIN / RH / MANAGER pour que le référent tienne lui-même le plan et le registre ; la visibilité fine (le référent oui, les autres MANAGER non) se règle dans la matrice d'habilitations par module.
+
+---
+
 ## 3. Application Mobile (PWA)
 
 ### 3.1 Vue d'ensemble

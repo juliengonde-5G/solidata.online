@@ -11,7 +11,7 @@ import {
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
-  TrendingUp, AlertTriangle,
+  TrendingUp, AlertTriangle, Leaf,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -207,6 +207,18 @@ const NAV_TREE = [
       { label: "Accidents & presqu'accidents", path: '/qhse/accidents', icon: AlertTriangle, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
       { label: 'Habilitations', path: '/qhse/habilitations', icon: IdCard, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
       { label: 'Dotation EPI', path: '/qhse/epi', icon: ShieldCheck, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
+    ],
+  },
+  {
+    // Module « Pilotage RSE » (RSEI-10 — 28e module). Démarche de labellisation
+    // RSEi : agrégats non nominatifs uniquement. Le rôle personnalisé REF_RSE
+    // (base MANAGER) le voit ; la visibilité fine se règle dans /admin/permissions
+    // (module 'rse'). base_role : un rôle custom suit son rôle de base.
+    id: 'rse',
+    label: 'Pilotage RSE',
+    icon: Leaf,
+    children: [
+      { label: 'Tableau de bord RSE', path: '/rse', icon: Leaf, roles: ['ADMIN', 'MANAGER', 'RH'] },
     ],
   },
   {
