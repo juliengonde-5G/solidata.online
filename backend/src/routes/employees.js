@@ -1156,4 +1156,223 @@ router.get('/kpi/absenteisme', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// RSEI-08 — Indicateurs d'égalité femmes/hommes (critère RSEi 2.2)
+// Agrégats NON NOMINATIFS. Le sexe est déduit de la CIVILITÉ (heuristique
+// Mme/Mlle → F, autre civilité renseignée → H, sinon « non renseigné ») — la
+// base ne stocke pas de champ « sexe » ; l'indicateur est donc une estimation
+// documentée, jamais présentée comme une donnée déclarative. Alimente B8/B10.
+// ══════════════════════════════════════════════════════════════════════════
+router.get('/kpi/egalite-fh', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee) || new Date().getFullYear();
+    // Classification du sexe partagée (miroir du bilan RSE gather3Volets).
+    const SEXE = `CASE
+      WHEN e.civility ILIKE 'Mme%' OR e.civility ILIKE 'Mlle%' OR e.civility ILIKE 'Madame%' OR e.civility ILIKE 'Mademoiselle%' THEN 'F'
+      WHEN e.civility IS NOT NULL AND TRIM(e.civility) <> '' THEN 'H'
+      ELSE 'NR' END`;
+
+    // Effectif global + permanents vs parcours.
+    const eff = await pool.query(`
+      SELECT ${SEXE} AS sexe,
+             (e.insertion_status = 'en_parcours') AS en_parcours,
+             COUNT(*)::int AS n
+      FROM employees e WHERE e.is_active = true
+      GROUP BY 1, 2`);
+    const bucket = () => ({ femmes: 0, hommes: 0, non_renseigne: 0, total: 0 });
+    const global = bucket(), permanent = bucket(), parcours = bucket();
+    const add = (b, sexe, n) => {
+      if (sexe === 'F') b.femmes += n; else if (sexe === 'H') b.hommes += n; else b.non_renseigne += n;
+      b.total += n;
+    };
+    for (const r of eff.rows) {
+      add(global, r.sexe, r.n);
+      add(r.en_parcours ? parcours : permanent, r.sexe, r.n);
+    }
+    const partF = (b) => b.total > 0 ? Math.round((b.femmes / b.total) * 1000) / 10 : null;
+
+    // Répartition par équipe (proxy « filière »).
+    const parEquipe = await pool.query(`
+      SELECT COALESCE(t.name, 'Sans équipe') AS equipe, t.type AS filiere_type,
+             ${SEXE} AS sexe, COUNT(*)::int AS n
+      FROM employees e LEFT JOIN teams t ON t.id = e.team_id
+      WHERE e.is_active = true
+      GROUP BY t.name, t.type, ${SEXE}
+      ORDER BY equipe`);
+    const equipeMap = new Map();
+    for (const r of parEquipe.rows) {
+      if (!equipeMap.has(r.equipe)) equipeMap.set(r.equipe, { equipe: r.equipe, filiere_type: r.filiere_type, ...bucket() });
+      add(equipeMap.get(r.equipe), r.sexe, r.n);
+    }
+    const par_equipe = [...equipeMap.values()].map((b) => ({ ...b, part_femmes_pct: partF(b) }));
+
+    // Encadrement : salarié désigné comme manager d'au moins un actif.
+    const enc = await pool.query(`
+      SELECT ${SEXE} AS sexe, COUNT(*)::int AS n
+      FROM employees e
+      WHERE e.is_active = true
+        AND EXISTS (SELECT 1 FROM employees m WHERE m.manager_id = e.id AND m.is_active = true)
+      GROUP BY 1`);
+    const encadrement = bucket();
+    for (const r of enc.rows) add(encadrement, r.sexe, r.n);
+
+    // Accès à la formation par sexe (heures 'training' de l'année).
+    const form = await pool.query(`
+      SELECT ${SEXE} AS sexe,
+             COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type = 'training'), 0)::numeric(10,2) AS heures,
+             COUNT(DISTINCT e.id) FILTER (WHERE wh.type = 'training' AND wh.hours_worked > 0)::int AS nb_formes
+      FROM employees e
+      LEFT JOIN work_hours wh ON wh.employee_id = e.id AND EXTRACT(YEAR FROM wh.date) = $1
+      WHERE e.is_active = true
+      GROUP BY 1`, [annee]);
+    const formation = { femmes_heures: 0, hommes_heures: 0, non_renseigne_heures: 0, femmes_nb_formes: 0, hommes_nb_formes: 0 };
+    for (const r of form.rows) {
+      const h = Number(r.heures) || 0;
+      if (r.sexe === 'F') { formation.femmes_heures += h; formation.femmes_nb_formes += r.nb_formes; }
+      else if (r.sexe === 'H') { formation.hommes_heures += h; formation.hommes_nb_formes += r.nb_formes; }
+      else formation.non_renseigne_heures += h;
+    }
+    formation.total_heures = Math.round((formation.femmes_heures + formation.hommes_heures + formation.non_renseigne_heures) * 100) / 100;
+    // Heures moyennes par femme / homme (B10) — null si effectif nul (jamais 0 inventé).
+    formation.femmes_heures_moyennes = global.femmes > 0 ? Math.round((formation.femmes_heures / global.femmes) * 100) / 100 : null;
+    formation.hommes_heures_moyennes = global.hommes > 0 ? Math.round((formation.hommes_heures / global.hommes) * 100) / 100 : null;
+
+    res.json({
+      annee,
+      effectif: { ...global, part_femmes_pct: partF(global) },
+      par_statut: {
+        permanent: { ...permanent, part_femmes_pct: partF(permanent) },
+        parcours: { ...parcours, part_femmes_pct: partF(parcours) },
+      },
+      par_equipe,
+      encadrement: { ...encadrement, part_femmes_pct: partF(encadrement) },
+      formation,
+      note: 'Répartition F/H estimée à partir de la civilité (Mme/M.) — aucun champ « sexe » déclaratif en base. Agrégats non nominatifs.',
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// RSEI-12 — Plan de formation (critère RSEi 2.1). Actions non nominatives
+// (nb de participants prévus/réalisés) ; les heures individuelles restent dans
+// work_hours. Couvre permanents ET parcours (public_cible).
+// ══════════════════════════════════════════════════════════════════════════
+const FORMATION_TYPES = ['interne', 'externe', 'obligatoire_securite', 'habilitation', 'tutorat', 'autre'];
+const FORMATION_ORIGINES = ['entretien', 'reglementaire', 'projet_entreprise', 'souhait_salarie', 'autre'];
+const FORMATION_PUBLICS = ['permanents', 'parcours', 'tous'];
+const FORMATION_STATUTS = ['identifie', 'planifie', 'realise', 'annule'];
+
+// NB : routes en 2 segments sous /formation/* — la route `GET /:id` (plus haut)
+// capterait un `/formation` mono-segment (id = "formation"). Même convention que
+// les KPI (/kpi/formation…).
+router.get('/formation/actions', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const params = [];
+    const where = [];
+    if (req.query.annee) { params.push(parseInt(req.query.annee, 10)); where.push(`annee = $${params.length}`); }
+    if (req.query.statut && FORMATION_STATUTS.includes(req.query.statut)) { params.push(req.query.statut); where.push(`statut = $${params.length}`); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const r = await pool.query(
+      `SELECT f.*, CONCAT(u.first_name, ' ', u.last_name) AS created_by_name
+       FROM formation_actions f LEFT JOIN users u ON u.id = f.created_by
+       ${whereSql}
+       ORDER BY f.date_prevue ASC NULLS LAST, f.id DESC`, params);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/formation/bilan', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const annee = parseInt(req.query.annee, 10) || new Date().getFullYear();
+    const r = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE statut = 'identifie')::int AS identifiees,
+         COUNT(*) FILTER (WHERE statut = 'planifie')::int AS planifiees,
+         COUNT(*) FILTER (WHERE statut = 'realise')::int AS realisees,
+         COUNT(*) FILTER (WHERE statut = 'annule')::int AS annulees,
+         COALESCE(SUM(heures_prevues), 0)::numeric(10,2) AS heures_prevues,
+         COALESCE(SUM(heures_realisees) FILTER (WHERE statut = 'realise'), 0)::numeric(10,2) AS heures_realisees,
+         COALESCE(SUM(cout_prevu), 0)::numeric(12,2) AS cout_prevu,
+         COALESCE(SUM(cout_realise) FILTER (WHERE statut = 'realise'), 0)::numeric(12,2) AS cout_realise,
+         COUNT(*) FILTER (WHERE public_cible IN ('permanents','tous'))::int AS pour_permanents,
+         COUNT(*) FILTER (WHERE public_cible IN ('parcours','tous'))::int AS pour_parcours
+       FROM formation_actions WHERE annee = $1`, [annee]);
+    const s = r.rows[0];
+    // Taux de réalisation : réalisées / (planifiées + réalisées) — les « identifiées »
+    // ne sont pas encore engagées, les « annulées » sont hors dénominateur.
+    const base = s.planifiees + s.realisees;
+    const taux_realisation_pct = base > 0 ? Math.round((s.realisees / base) * 1000) / 10 : null;
+    res.json({ annee, ...s, taux_realisation_pct });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/formation/actions', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.intitule || !String(b.intitule).trim()) return res.status(400).json({ error: "L'intitulé est obligatoire" });
+    const annee = parseInt(b.annee, 10) || new Date().getFullYear();
+    if (b.type_formation && !FORMATION_TYPES.includes(b.type_formation)) return res.status(400).json({ error: 'Type invalide', allowed: FORMATION_TYPES });
+    if (b.origine_besoin && !FORMATION_ORIGINES.includes(b.origine_besoin)) return res.status(400).json({ error: 'Origine invalide', allowed: FORMATION_ORIGINES });
+    if (b.public_cible && !FORMATION_PUBLICS.includes(b.public_cible)) return res.status(400).json({ error: 'Public invalide', allowed: FORMATION_PUBLICS });
+    if (b.statut && !FORMATION_STATUTS.includes(b.statut)) return res.status(400).json({ error: 'Statut invalide', allowed: FORMATION_STATUTS });
+    const num = (v) => (v === '' || v == null ? null : v);
+    const r = await pool.query(
+      `INSERT INTO formation_actions
+         (annee, intitule, type_formation, origine_besoin, public_cible, organisme, statut,
+          date_prevue, date_realisation, nb_participants_prevus, nb_participants_realises,
+          heures_prevues, heures_realisees, cout_prevu, cout_realise, commentaire, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+      [annee, String(b.intitule).trim(), b.type_formation || 'autre', b.origine_besoin || 'autre',
+       b.public_cible || 'tous', b.organisme || null, b.statut || 'identifie',
+       num(b.date_prevue), num(b.date_realisation), num(b.nb_participants_prevus), num(b.nb_participants_realises),
+       num(b.heures_prevues), num(b.heures_realisees), num(b.cout_prevu), num(b.cout_realise),
+       b.commentaire || null, req.user.id]);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch('/formation/actions/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+  try {
+    const allowed = {
+      annee: (v) => Number.isInteger(parseInt(v, 10)),
+      intitule: (v) => !!(v && String(v).trim()),
+      type_formation: (v) => FORMATION_TYPES.includes(v),
+      origine_besoin: (v) => FORMATION_ORIGINES.includes(v),
+      public_cible: (v) => FORMATION_PUBLICS.includes(v),
+      organisme: () => true,
+      statut: (v) => FORMATION_STATUTS.includes(v),
+      date_prevue: () => true, date_realisation: () => true,
+      nb_participants_prevus: () => true, nb_participants_realises: () => true,
+      heures_prevues: () => true, heures_realisees: () => true,
+      cout_prevu: () => true, cout_realise: () => true, commentaire: () => true,
+    };
+    const sets = [];
+    const params = [];
+    for (const [key, validate] of Object.entries(allowed)) {
+      if (!(key in req.body)) continue;
+      let val = req.body[key];
+      if (!validate(val)) return res.status(400).json({ error: `Valeur invalide pour « ${key} »` });
+      if (key === 'intitule') val = String(val).trim();
+      else if (key !== 'annee') val = (val === '' ? null : val);
+      params.push(val);
+      sets.push(`${key} = $${params.length}`);
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à mettre à jour' });
+    sets.push('updated_at = NOW()');
+    params.push(req.params.id);
+    const r = await pool.query(`UPDATE formation_actions SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Action de formation introuvable' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/formation/actions/:id', authorize('ADMIN', 'RH'), async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM formation_actions WHERE id = $1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Action de formation introuvable' });
+    res.json({ message: 'Action supprimée' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;

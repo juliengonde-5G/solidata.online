@@ -12,6 +12,7 @@ import {
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
   TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, ShoppingCart,
+  GraduationCap,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -171,6 +172,7 @@ const NAV_TREE = [
           { label: 'Actions CIP', path: '/insertion/actions', icon: ListChecks, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Pilotage & indicateurs', path: '/insertion/audit', icon: ClipboardList, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Compétences', path: '/skills', icon: Star, roles: ['ADMIN', 'RH'] },
+          { label: 'Plan de formation', path: '/rh/formation', icon: GraduationCap, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Prescripteurs', path: '/prescripteurs', icon: Building2, roles: ['ADMIN', 'RH'] },
           {
             label: 'Réglages',
