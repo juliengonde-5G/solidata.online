@@ -822,6 +822,9 @@ router.post('/documents/:id/fichier', uploadDoc.single('file'), async (req, res)
     }
     res.status(201).json(decorateDocument(r.rows[0]));
   } catch (err) {
+    // Nettoyage de l'orphelin sur tout échec après l'écriture Multer (revue Codex
+    // PR#78, même classe : lookup initial qui rejette, :id non entier, UPDATE en erreur).
+    if (req.file) { try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ } }
     console.error('[QHSE] Erreur upload fichier document :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }

@@ -43,6 +43,15 @@ const { autoLogActivity } = require('../middleware/activity-logger');
 const CATEGORIES = ['fournitures', 'epi', 'transport', 'prestations', 'energie', 'alimentaire', 'autre'];
 const FDS_FRAICHEUR_DEFAUT = 365; // jours ; setting `achats.fds_fraicheur_jours` surcharge.
 
+// Seuil de fraîcheur FDS EFFECTIF (setting `achats.fds_fraicheur_jours` sinon défaut).
+// Source unique pour le dashboard ET la liste /fds → badges cohérents des deux côtés
+// (revue Codex PR#78 : le registre appliquait 365 en dur pendant que le dashboard
+// utilisait le seuil configuré).
+async function getFdsFraicheurJours() {
+  const seuil = parseInt(await readSetting('achats.fds_fraicheur_jours'), 10);
+  return Number.isFinite(seuil) && seuil > 0 ? seuil : FDS_FRAICHEUR_DEFAUT;
+}
+
 // Stockage des pièces jointes FDS (pattern Refashion / rsei_preuves).
 const fdsDir = path.join(__dirname, '..', '..', 'uploads', 'achats-fds');
 try { fs.mkdirSync(fdsDir, { recursive: true }); } catch (e) { /* ignore */ }
@@ -276,8 +285,7 @@ router.get('/dashboard', READ, [query('annee').optional().isInt({ min: 2000, max
     for (const c of criteres) { (criteresParFamille[c.famille] = criteresParFamille[c.famille] || []).push(c); }
 
     // FDS — seuil de fraîcheur paramétrable, agrégat côté serveur (testable).
-    const seuil = parseInt(await readSetting('achats.fds_fraicheur_jours'), 10);
-    const fraicheur = Number.isFinite(seuil) && seuil > 0 ? seuil : FDS_FRAICHEUR_DEFAUT;
+    const fraicheur = await getFdsFraicheurJours();
     const fdsRows = await soft(async () => (await pool.query(
       `SELECT d.id, d.produit, d.reference, d.date_fds, d.date_revision, d.dangers,
               (d.fichier_path IS NOT NULL) AS has_fichier, f.nom AS fournisseur_nom
@@ -529,7 +537,10 @@ router.get('/fds', READ, async (req, res) => {
        ORDER BY d.produit, d.id`,
       params
     );
-    res.json(r.rows);
+    // Seuil de fraîcheur EFFECTIF joint à chaque ligne → le registre applique le même
+    // seuil que le dashboard pour ses badges (revue Codex PR#78).
+    const fraicheurJours = await getFdsFraicheurJours();
+    res.json(r.rows.map((row) => ({ ...row, fraicheur_jours: fraicheurJours })));
   } catch (err) {
     console.error('[ACHATS] GET fds :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -619,25 +630,23 @@ router.post('/fds/:id/fichier', WRITE, uploadFds.single('file'), async (req, res
       return res.status(404).json({ error: 'FDS introuvable' });
     }
     const ancien = before.rows[0].fichier_path;
-    let r;
-    try {
-      r = await pool.query(
-        `UPDATE achats_fds
-           SET fichier_path = $1, fichier_original_name = $2, fichier_mime = $3, updated_at = NOW()
-         WHERE id = $4
-         RETURNING id, produit, fichier_original_name, fichier_mime`,
-        [req.file.filename, req.file.originalname, req.file.mimetype, req.params.id]
-      );
-    } catch (dbErr) {
-      try { fs.unlinkSync(path.join(fdsDir, req.file.filename)); } catch (_) {}
-      throw dbErr;
-    }
+    const r = await pool.query(
+      `UPDATE achats_fds
+         SET fichier_path = $1, fichier_original_name = $2, fichier_mime = $3, updated_at = NOW()
+       WHERE id = $4
+       RETURNING id, produit, fichier_original_name, fichier_mime`,
+      [req.file.filename, req.file.originalname, req.file.mimetype, req.params.id]
+    );
     // Remplacement réussi : supprime l'ancien fichier s'il différait du nouveau.
     if (ancien && path.basename(ancien) !== req.file.filename) {
       try { fs.unlinkSync(path.join(fdsDir, path.basename(ancien))); } catch (_) {}
     }
     res.status(201).json({ ...r.rows[0], has_fichier: true });
   } catch (err) {
+    // Revue Codex (PR#78) : tout échec APRÈS l'écriture Multer (lookup initial qui
+    // rejette, :id non entier atteignant PostgreSQL, UPDATE en erreur) doit nettoyer
+    // le fichier uploadé — sinon des échecs répétés saturent le stockage d'orphelins.
+    if (req.file) { try { fs.unlinkSync(path.join(fdsDir, req.file.filename)); } catch (_) {} }
     console.error('[ACHATS] upload fichier fds :', err.message);
     res.status(500).json({ error: err.message });
   }

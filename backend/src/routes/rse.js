@@ -126,6 +126,16 @@ async function gatherStructureIdentity() {
 const FACTEURS_CO2_EVITE = { reutilisation: 3.169, recyclage: 0.500, chiffons: 0.750, csr: 0.121 };
 const MIX_CO2_FALLBACK = { reutilisation: 0.40, recyclage: 0.35, chiffons: 0.15, csr: 0.10 };
 
+// Revue Codex (PR#79) : computeAnnualGes rend des tableaux VIDES + totaux à 0 quand
+// aucune donnée n'est saisie. Une observation = au moins un relevé d'énergie OU un
+// plein de carburant sur l'exercice. Sans observation, le GES est « non mesuré »
+// (jamais présenté comme un zéro). Pur et exporté pour le test.
+function gesHasObservations(ges) {
+  return !!(ges && (
+    (Array.isArray(ges.energie) && ges.energie.length > 0) ||
+    (Array.isArray(ges.carburant) && ges.carburant.length > 0)));
+}
+
 async function gather3Volets(annee) {
   const debut = `${annee}-01-01`;
   const finExclu = `${annee + 1}-01-01`;
@@ -151,6 +161,16 @@ async function gather3Volets(annee) {
     return {
       disponible: true,
       source: 'insertion.audit (agrégats non nominatifs)',
+      // Revue Codex (PR#79) : gatherAuditKpis mélange des agrégats ANNUELS (bornés
+      // par l'exercice) et des PHOTOS À LA DATE DE GÉNÉRATION (comptages d'actifs).
+      // On explicite le périmètre temporel de chaque bloc pour qu'un bilan d'une
+      // année passée ne présente pas un effectif actuel comme s'il datait de l'exercice.
+      perimetre_temporel: {
+        exercice: annee,
+        annuel: ['sorties', 'pmsmp', 'satisfaction', 'conventionnel'],
+        photo_actuelle: ['nb_en_parcours', 'milestones_global', 'etp_realises_approx', 'typologies', 'effectifs_fh'],
+        note: `Sorties, PMSMP, satisfaction et taux conventionnels = exercice ${annee}. Effectif en parcours, jalons, ETP, typologies et répartition F/H = photo à la date de génération du bilan (non rétroactifs), à lire comme tels pour un exercice antérieur.`,
+      },
       nb_en_parcours: k.nb_en_parcours ?? null,
       sorties: k.sorties ? {
         total: k.sorties.total, dynamiques: k.sorties.dynamiques, autres: k.sorties.autres,
@@ -174,6 +194,13 @@ async function gather3Volets(annee) {
     const energie = require('./energie');
     if (typeof energie.computeAnnualGes !== 'function') return null;
     const ges = await energie.computeAnnualGes(annee);
+    // Sans garde, le bilan présenterait « 0 tCO2e » comme une mesure (faux zéro) : on
+    // ne considère les données disponibles QUE s'il existe au moins une observation ;
+    // sinon gesObj reste null (le volet VSME B3/B6 dégrade en conséquence) et le bloc
+    // est « indisponible » (cf. gesHasObservations, revue Codex PR#79).
+    if (!gesHasObservations(ges)) {
+      return { disponible: false, note: `Aucun relevé d'énergie ni plein de carburant saisi pour l'exercice ${annee} — impact GES propre NON MESURÉ (ne pas interpréter comme un zéro).` };
+    }
     gesObj = ges;
     let caRef = null, caSource = null;
     if (typeof energie.resolveCA === 'function') {
@@ -250,13 +277,17 @@ async function gather3Volets(annee) {
   // (a) VSME B3 (énergie/GES) / B6 (eau) dérivés du même objet GES ;
   // (b) achats responsables (compteurs + part montant, jamais inventée).
   const vsme = gesObj ? (() => {
-    const de = (poste) => { const e = gesObj.energie.find((x) => x.poste === poste); return e ? Math.round(e.conso * 1000) / 1000 : 0; };
+    // Revue Codex (PR#79) : une consommation absente (poste sans relevé) doit rester
+    // NULL — jamais 0 — pour ne pas affirmer une consommation mesurée nulle.
+    const de = (poste) => { const e = gesObj.energie.find((x) => x.poste === poste); return e ? Math.round(e.conso * 1000) / 1000 : null; };
     const elec = de('electricite'), gaz = de('gaz'), eau = de('eau');
     const gazT = (gesObj.energie.find((x) => x.poste === 'gaz') || {}).tco2e || 0;
     const elecT = (gesObj.energie.find((x) => x.poste === 'electricite') || {}).tco2e || 0;
+    const totalEnergie = (elec == null && gaz == null)
+      ? null : Math.round(((elec || 0) + (gaz || 0)) * 1000) / 1000;
     return {
       disponible: true,
-      b3_energie: { electricite_kwh: elec, gaz_kwh: gaz, total_energie_kwh: Math.round((elec + gaz) * 1000) / 1000, part_renouvelable_pct: null },
+      b3_energie: { electricite_kwh: elec, gaz_kwh: gaz, total_energie_kwh: totalEnergie, part_renouvelable_pct: null },
       b3_ges: {
         scope1_tco2e: Math.round((gesObj.totaux.tco2e_carburant + gazT) * 1000) / 1000,
         scope2_tco2e: Math.round(elecT * 1000) / 1000,
@@ -264,7 +295,7 @@ async function gather3Volets(annee) {
       },
       b6_eau: { consommation_eau_m3: eau },
     };
-  })() : { disponible: false, note: 'Données VSME B3/B6 indisponibles (module Énergie & GES).' };
+  })() : { disponible: false, note: 'Données VSME B3/B6 indisponibles (aucune observation énergie/GES sur l\'exercice).' };
 
   const achats = await soft(async () => {
     const r = await pool.query(
@@ -1318,3 +1349,5 @@ router.get('/bilan', READ, [query('annee').optional().isInt({ min: 2020, max: 21
 });
 
 module.exports = router;
+// Exporté pour les tests unitaires (revue Codex PR#79 — garde anti-faux-zéro GES).
+module.exports.gesHasObservations = gesHasObservations;
