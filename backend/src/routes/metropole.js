@@ -399,6 +399,7 @@ router.get('/captation-par-commune', async (req, res) => {
       SELECT
         COALESCE(rc.nom, c.commune, '(non rattaché)') AS commune,
         rc.code_insee,
+        rc.epci_code,
         rc.epci_nom,
         COALESCE(rc.population_insee, c.population_commune) AS population,
         COALESCE(ROUND(SUM(pt.poids_total_kg::numeric / NULLIF(cpt.nb_cav_collectes, 0))), 0)::int AS poids_kg,
@@ -418,7 +419,15 @@ router.get('/captation-par-commune', async (req, res) => {
       JOIN cav_par_tour cpt ON cpt.tour_id = t.id
       LEFT JOIN referentiel_communes rc ON c.code_insee_commune = rc.code_insee
       WHERE t.status = 'completed' AND EXTRACT(YEAR FROM t.date) = $1
-      GROUP BY COALESCE(rc.nom, c.commune, '(non rattaché)'), rc.code_insee, rc.epci_nom,
+        -- Lot 10 (2026-08) : le référentiel communes couvre désormais des EPCI
+        -- limitrophes (Eure/Seine-Maritime). Ce KPI est un reporting MÉTROPOLE
+        -- DE ROUEN : on ne garde que les CAV rattachés à une commune de la
+        -- Métropole (epci_code 200023414) OU non rattachés / sans EPCI (legacy,
+        -- comportement historique conservé). Les CAV rattachés à un AUTRE EPCI
+        -- sont exclus — leur part de tonnage n'est PAS réattribuée (le prorata
+        -- par CAV reste exact pour les communes affichées).
+        AND (rc.code_insee IS NULL OR rc.epci_code IS NULL OR rc.epci_code = '200023414')
+      GROUP BY COALESCE(rc.nom, c.commune, '(non rattaché)'), rc.code_insee, rc.epci_code, rc.epci_nom,
                COALESCE(rc.population_insee, c.population_commune)
       ORDER BY poids_kg DESC
     `, [annee]);

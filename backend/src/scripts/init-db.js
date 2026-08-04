@@ -1653,14 +1653,14 @@ async function initDatabase() {
     await client.query(`ALTER TABLE refashion_taux_subvention ADD COLUMN IF NOT EXISTS justificatif_original_name TEXT`);
     await client.query(`ALTER TABLE refashion_taux_subvention ADD COLUMN IF NOT EXISTS justificatif_mime VARCHAR(120)`);
 
-    // -- Référentiel communes INSEE (Métropole Rouen)
+    // -- Référentiel communes INSEE (Métropole Rouen + EPCI limitrophes — Lot 10 2026-08)
     await client.query(`
       CREATE TABLE IF NOT EXISTS referentiel_communes (
         code_insee VARCHAR(5) PRIMARY KEY,
         nom VARCHAR(150) NOT NULL,
         code_postal VARCHAR(5),
-        epci_code VARCHAR(10),
-        epci_nom VARCHAR(150),
+        epci_code VARCHAR(20),
+        epci_nom TEXT,
         population_insee INTEGER,
         is_metropole_rouen BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
@@ -1668,6 +1668,33 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_ref_communes_epci ON referentiel_communes(epci_code) WHERE is_metropole_rouen = true;
       CREATE INDEX IF NOT EXISTS idx_ref_communes_cp ON referentiel_communes(code_postal);
     `);
+    // Lot 10 (2026-08) — élargissement du référentiel aux EPCI limitrophes (Eure 27 /
+    // Seine-Maritime 76). Sur les bases EXISTANTES, epci_code/epci_nom datent du sprint
+    // P0 05/2026 en VARCHAR(10)/VARCHAR(150) : on garantit leur existence (ADD IF NOT
+    // EXISTS, no-op si présentes) puis on élargit les types (code EPCI = SIREN 9
+    // chiffres, marge à 20 ; nom libre en TEXT). Idempotent : l'ALTER TYPE n'est joué
+    // que si le type courant est plus étroit. AUCUN backfill SQL de epci_code ici :
+    // les communes déjà présentes sans EPCI recevront 200023414 (Métropole Rouen) au
+    // prochain POST /api/communes/refresh-metropole (upsert via l'API geo.api.gouv.fr).
+    await client.query(`ALTER TABLE referentiel_communes ADD COLUMN IF NOT EXISTS epci_code VARCHAR(20)`);
+    await client.query(`ALTER TABLE referentiel_communes ADD COLUMN IF NOT EXISTS epci_nom TEXT`);
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'referentiel_communes' AND column_name = 'epci_code'
+                     AND character_maximum_length IS NOT NULL AND character_maximum_length < 20) THEN
+          ALTER TABLE referentiel_communes ALTER COLUMN epci_code TYPE VARCHAR(20);
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'referentiel_communes' AND column_name = 'epci_nom'
+                     AND data_type <> 'text') THEN
+          ALTER TABLE referentiel_communes ALTER COLUMN epci_nom TYPE TEXT;
+        END IF;
+      END $$;
+    `);
+    // Index plein (le partiel idx_ref_communes_epci ne couvre que la Métropole) pour
+    // le filtre par EPCI de la page Admin > Communes.
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_ref_communes_epci_all ON referentiel_communes(epci_code)`);
     await client.query(`DO $$ BEGIN ALTER TABLE cav ADD COLUMN code_insee_commune VARCHAR(5) REFERENCES referentiel_communes(code_insee) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_cav_code_insee ON cav(code_insee_commune);`);
 
