@@ -799,7 +799,10 @@ export default function InsertionParcours() {
     try {
       setLoadError(null);
       const res = await api.get('/insertion');
-      setEmployees(Array.isArray(res.data) ? res.data : []);
+      // Tri alphabétique NOM puis PRÉNOM (Lot 1 « Règles de gestion des noms »)
+      // — filet de sécurité côté front en complément du tri backend.
+      const list = Array.isArray(res.data) ? res.data : [];
+      setEmployees([...list].sort(compareByName));
     } catch (err) {
       console.error('[InsertionParcours] Erreur chargement:', err);
       setLoadError(err.response?.data?.detail || err.message || 'Erreur de chargement');
@@ -1003,7 +1006,7 @@ export default function InsertionParcours() {
                 className={`w-full text-left p-2 rounded mb-1 text-sm transition ${
                   selectedEmployee?.id === e.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'
                 }`}>
-                <div className="font-medium">{e.first_name} {e.last_name}</div>
+                <div className="font-medium">{formatEmployeeName(e.last_name, e.first_name)}</div>
                 <div className="text-xs text-gray-500">{e.team_name || 'Équipe ?'} - {e.position || 'Poste ?'}</div>
                 <div className="flex gap-1 mt-1">
                   {e.has_pcm && <span className="text-xs px-1 rounded bg-purple-100 text-purple-700">PCM</span>}
