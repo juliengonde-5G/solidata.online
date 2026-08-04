@@ -1373,11 +1373,16 @@ router.put('/partenaires/:id', authorize('ADMIN', 'RH'), [
 // ══════════════════════════════════════════════════════════════
 // TABLEAU TRANSVERSAL DES ACTIONS (Lot 3) — toutes-actions, tous salariés
 // Filtres : employee_id / category / priority / partenaire_id / retard / mine /
-// statut. Tri échéance. Pagination LIMIT/OFFSET. AVANT /:employeeId.
+// gestionnaire_id / statut. Tri échéance. Pagination LIMIT/OFFSET. AVANT /:employeeId.
+// Sémantique « gestionnaire » (filtre gestionnaire_id) : le CIP référent du
+// salarié (employees.cip_referent_user_id) s'il est renseigné, SINON le
+// créateur de l'action (cip_action_plans.created_by) — un CIP retrouve ainsi
+// toutes les actions dont il a la charge, même pour les salariés sans référent.
 // ══════════════════════════════════════════════════════════════
 router.get('/actions-overview', [
   query('employee_id').optional().isInt().withMessage('employee_id invalide'),
   query('partenaire_id').optional().isInt().withMessage('partenaire_id invalide'),
+  query('gestionnaire_id').optional().isInt().withMessage('gestionnaire_id invalide'),
   query('limit').optional().isInt({ min: 1, max: 500 }).withMessage('limit invalide (1-500)'),
   query('offset').optional().isInt({ min: 0 }).withMessage('offset invalide'),
 ], validate, async (req, res) => {
@@ -1394,6 +1399,10 @@ router.get('/actions-overview', [
     }
     if (req.query.mine === '1' || req.query.mine === 'true') {
       params.push(req.user.id); where.push(`e.cip_referent_user_id = $${params.length}`);
+    }
+    if (req.query.gestionnaire_id) {
+      params.push(req.query.gestionnaire_id);
+      where.push(`COALESCE(e.cip_referent_user_id, a.created_by) = $${params.length}`);
     }
     const whereSql = 'WHERE ' + where.join(' AND ');
 

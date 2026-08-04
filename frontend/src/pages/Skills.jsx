@@ -28,6 +28,13 @@ const SKILL_CATEGORIES = {
 // source du planning hebdo chauffeur/cariste) → colonne = champ employees.
 const OPERATIONAL = { permis_b: 'has_permis_b', caces: 'has_caces' };
 
+// Règles de gestion des noms : « NOM Prénom » (nom de famille en MAJUSCULES),
+// tri alphabétique nom de famille puis prénom.
+const formatName = (p) => `${String(p?.last_name || '').toUpperCase()} ${p?.first_name || ''}`.trim();
+const compareByName = (a, b) =>
+  String(a?.last_name || '').localeCompare(String(b?.last_name || ''), 'fr', { sensitivity: 'base' })
+  || String(a?.first_name || '').localeCompare(String(b?.first_name || ''), 'fr', { sensitivity: 'base' });
+
 export default function Skills() {
   const { user } = useAuth();
   const canEdit = ['ADMIN', 'RH'].includes(user?.base_role || user?.role);
@@ -40,9 +47,15 @@ export default function Skills() {
   // Part des EMPLOYÉS (et non plus d'un mauvais id candidat). Les compétences
   // du candidat lié sont chargées UNIQUEMENT quand candidate_id existe (bon
   // identifiant), ce qui corrige la jointure fautive et réduit les appels.
+  // Périmètre : uniquement les salariés ACTIFS et EN PARCOURS D'INSERTION
+  // (is_active = true ET insertion_status = 'en_parcours') — filtre appliqué
+  // côté front, la page consommant l'endpoint générique GET /employees.
+  // Tri : nom de famille puis prénom.
   const fetchData = useCallback(async () => {
-    const res = await api.get('/employees');
-    const emps = res.data || [];
+    const res = await api.get('/employees?is_active=true');
+    const emps = (res.data || [])
+      .filter((e) => e.is_active === true && e.insertion_status === 'en_parcours')
+      .sort(compareByName);
     return Promise.all(emps.map(async (emp) => {
       let candSkills = [];
       if (emp.candidate_id) {
@@ -89,7 +102,7 @@ export default function Skills() {
       <div className="p-4 sm:p-6">
         <PageHeader
           title="Compétences"
-          subtitle={`Matrice des compétences — ${employees.length} collaborateurs`}
+          subtitle={`Matrice des compétences — ${employees.length} salarié${employees.length > 1 ? 's' : ''} actif${employees.length > 1 ? 's' : ''} en parcours d'insertion`}
           icon={Star}
           actions={
             <div className="flex gap-2">
@@ -148,9 +161,11 @@ export default function Skills() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="text-left p-2 font-semibold text-gray-500 sticky left-0 bg-gray-50 min-w-[160px]">Collaborateur</th>
+                    {/* Nom de la compétence affiché sous chaque logo (icône) */}
                     {Object.entries(SKILL_CATEGORIES).map(([key, cat]) => (
-                      <th key={key} className="p-2 font-semibold text-gray-500 text-center min-w-[40px]" title={`${cat.label}${OPERATIONAL[key] ? ' (éditable)' : ''}`}>
-                        <span className="text-sm">{cat.icon}</span>
+                      <th key={key} className="p-2 font-semibold text-gray-500 text-center min-w-[64px] align-bottom" title={`${cat.label}${OPERATIONAL[key] ? ' (éditable)' : ''}`}>
+                        <span className="block text-sm">{cat.icon}</span>
+                        <span className="block text-[9px] font-medium text-gray-400 leading-tight mt-0.5">{cat.label}</span>
                       </th>
                     ))}
                   </tr>
@@ -158,7 +173,7 @@ export default function Skills() {
                 <tbody>
                   {employees.map((emp) => (
                     <tr key={emp.id} className="border-t hover:bg-gray-50">
-                      <td className="p-2 font-medium sticky left-0 bg-white">{emp.first_name} {emp.last_name}</td>
+                      <td className="p-2 font-medium sticky left-0 bg-white">{formatName(emp)}</td>
                       {Object.keys(SKILL_CATEGORIES).map((key) => {
                         const on = hasSkill(emp, key);
                         const editable = canEdit && OPERATIONAL[key];
