@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import { Modal, KanbanBoard, StatusBadge } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
+import { formatEmployeeName, formatLastName, compareByName } from '../utils/names';
 
 const STATUSES = ['received', 'interview', 'hired', 'rejected'];
 
@@ -312,7 +313,8 @@ export default function Candidates() {
     };
     const out = {};
     for (const s of STATUSES) {
-      out[s] = (kanban[s] || []).filter((c) => matchesSearch(c) && matchesView(c) && matchesPosition(c));
+      // Tri alphabétique NOM puis PRÉNOM (Lot 1 « Règles de gestion des noms »).
+      out[s] = (kanban[s] || []).filter((c) => matchesSearch(c) && matchesView(c) && matchesPosition(c)).sort(compareByName);
     }
     return out;
   }, [kanban, searchQuery, activeView, activePosition]);
@@ -358,7 +360,7 @@ export default function Candidates() {
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-sm text-slate-800 leading-tight truncate">
-            {c.first_name || '?'} {c.last_name || '?'}
+            {formatEmployeeName(c.last_name, c.first_name) || '?'}
           </p>
           {(c.position_title || c.email) && (
             <p className="text-[11px] text-slate-500 mt-0.5 truncate">
@@ -491,7 +493,7 @@ export default function Candidates() {
                     {(selected.first_name?.[0] || '?').toUpperCase()}{(selected.last_name?.[0] || '').toUpperCase()}
                   </span>
                   <div className="min-w-0">
-                    <h2 className="font-extrabold text-lg text-slate-800 truncate">{selected.first_name || '?'} {selected.last_name || '?'}</h2>
+                    <h2 className="font-extrabold text-lg text-slate-800 truncate">{formatEmployeeName(selected.last_name, selected.first_name) || '?'}</h2>
                     <div className="mt-1">
                       <StatusBadge status={selected.status} type="candidat" size="sm" />
                     </div>
