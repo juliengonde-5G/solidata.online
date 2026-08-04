@@ -746,10 +746,74 @@ router.get('/gl/:year/bilan', async (req, res) => {
 // TRESORERIE — Données structurées pour la page trésorerie
 // ══════════════════════════════════════════
 
+// Résolution du SOLDE INITIAL de trésorerie au 1er janvier (cascade honnête,
+// même doctrine que energie.resolveCA — « jamais de valeur inventée ») :
+//   (1) setting explicite `finance.tresorerie_solde_initial_<annee>` (table
+//       settings, saisi par un ADMIN via PUT /gl/:year/solde-initial) ;
+//   (2) sinon, si le Grand Livre Pennylane N-1 est importé : solde des comptes
+//       512* (banque) au 31/12 N-1 (somme débit-crédit de l'exercice N-1,
+//       à-nouveaux inclus dans l'export Pennylane) ;
+//   (3) sinon 0 avec source 'aucune' → le front affiche l'avertissement
+//       « solde initial non renseigné ».
+// La source retenue est exposée dans la réponse API (traçabilité).
+async function resolveSoldeInitialTresorerie(year) {
+  const rd2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+  // (1) Setting explicite saisi par un ADMIN
+  try {
+    const r = await pool.query(
+      'SELECT value FROM settings WHERE key = $1',
+      [`finance.tresorerie_solde_initial_${year}`]
+    );
+    if (r.rows.length > 0 && r.rows[0].value != null && String(r.rows[0].value).trim() !== '') {
+      const v = parseFloat(String(r.rows[0].value).replace(/\s/g, '').replace(',', '.'));
+      if (!Number.isNaN(v)) {
+        return {
+          montant: rd2(v),
+          source: 'setting',
+          detail: `Solde saisi manuellement (paramètre finance.tresorerie_solde_initial_${year})`,
+        };
+      }
+    }
+  } catch (e) {
+    console.error('[FINANCE] solde initial — lecture settings indisponible :', e.code || e.message);
+  }
+
+  // (2) Grand Livre Pennylane N-1 : solde des comptes 512* (banque) au 31/12
+  try {
+    const r = await pool.query(`
+      SELECT COUNT(*)::int AS nb, COALESCE(SUM(g.debit - g.credit), 0) AS solde
+      FROM financial_gl_entries g
+      JOIN financial_exercises e ON g.exercise_id = e.id
+      WHERE e.year = $1 AND g.account LIKE '512%'
+    `, [year - 1]);
+    if ((parseInt(r.rows[0]?.nb) || 0) > 0) {
+      return {
+        montant: rd2(r.rows[0].solde),
+        source: 'gl_n1',
+        detail: `Solde des comptes 512 (banque) au 31/12/${year - 1} d'après le Grand Livre Pennylane importé`,
+      };
+    }
+  } catch (e) {
+    console.error('[FINANCE] solde initial — lecture GL N-1 indisponible :', e.code || e.message);
+  }
+
+  // (3) Rien : 0 assumé + avertissement côté UI
+  return {
+    montant: 0,
+    source: 'aucune',
+    detail: `Solde initial non renseigné : aucun paramètre saisi et Grand Livre ${year - 1} non importé. La courbe part de 0.`,
+  };
+}
+
 router.get('/gl/:year/tresorerie', async (req, res) => {
   try {
     const year = parseInt(req.params.year);
     const MONTHS_FR = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
+
+    // Solde initial au 01/01 : toute la courbe (solde mensuel, position,
+    // cascade) part de ce montant au lieu de 0 (demande client lot 8).
+    const soldeInitial = await resolveSoldeInitialTresorerie(year);
 
     // Source 1 : Écritures GL 512 (banque/trésorerie) pour les totaux mensuels
     const r = await pool.query(`

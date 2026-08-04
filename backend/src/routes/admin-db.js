@@ -110,7 +110,7 @@ router.post('/restore', async (req, res) => {
       return res.status(400).json({ error: 'Nom de fichier invalide' });
     }
 
-    const filepath = path.join(__dirname, '..', '..', 'backups', safeName);
+    const filepath = path.join(dbBackup.BACKUP_DIR, safeName);
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Sauvegarde non trouvée' });
 
     execFileSync('psql', ['-f', filepath], {
@@ -137,7 +137,7 @@ router.delete('/backups/:filename', async (req, res) => {
     if (!SAFE_BACKUP_NAME.test(safeName)) {
       return res.status(400).json({ error: 'Nom de fichier invalide' });
     }
-    const filepath = path.join(__dirname, '..', '..', 'backups', safeName);
+    const filepath = path.join(dbBackup.BACKUP_DIR, safeName);
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Fichier non trouvé' });
     fs.unlinkSync(filepath);
     res.json({ message: 'Sauvegarde supprimée' });
