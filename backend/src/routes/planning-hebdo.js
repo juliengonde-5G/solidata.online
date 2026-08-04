@@ -184,7 +184,7 @@ router.get('/', authorize(...READ_ROLES), async (req, res) => {
       LEFT JOIN teams t ON e.team_id = t.id
       LEFT JOIN positions p ON s.position_id = p.id
       WHERE s.date >= $1 AND s.date <= $2
-      ORDER BY s.date, e.last_name
+      ORDER BY s.date, UPPER(e.last_name), UPPER(e.first_name)
     `, [dateFrom, dateTo]);
 
     // 2. Employes actifs avec dispo
@@ -198,7 +198,7 @@ router.get('/', authorize(...READ_ROLES), async (req, res) => {
       LEFT JOIN employee_availability ea ON ea.employee_id = e.id
       WHERE e.is_active = true
       GROUP BY e.id, t.name, t.type
-      ORDER BY t.type, e.last_name
+      ORDER BY t.type, UPPER(e.last_name), UPPER(e.first_name)
     `);
 
     // 3. Absences
@@ -431,7 +431,7 @@ router.get('/employes-disponibles', authorize(...WRITE_ROLES), async (req, res) 
       query += ' AND e.has_caces = true';
     }
 
-    query += ' ORDER BY t.type, e.last_name';
+    query += ' ORDER BY t.type, UPPER(e.last_name), UPPER(e.first_name)';
     const result = await pool.query(query, params);
 
     // Calculer le statut d'affectation par période

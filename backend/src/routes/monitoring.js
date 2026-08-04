@@ -118,6 +118,9 @@ const JOB_SCHEDULE = {
   generateDailyPredictions:       { label: 'Prédictions remplissage J..J+7',     cadence: 'quotidien 5h',      maxAgeHours: DAILY },
   generateNextDayDispatchProposals:{ label: 'Dispatch auto J-1',                 cadence: 'quotidien 18h',     maxAgeHours: DAILY },
   // ── hebdo / mensuel / annuel ──
+  // Sauvegarde auto BDD (Lot 11) : mardi & vendredi 4h → plus grand intervalle
+  // entre deux succès = 4 jours (ven→mar) ; tolérance 5 jours avant « en retard ».
+  autoDatabaseBackup:             { label: 'Sauvegarde auto BDD (pg_dump)',      cadence: 'mardi & vendredi 4h', maxAgeHours: 24 * 5 },
   checkQhseHabilitationExpiries:  { label: 'Habilitations QHSE à échéance',      cadence: 'hebdo (lundi 8h)',  maxAgeHours: WEEKLY },
   discoverEvents:                 { label: 'Découverte événements locaux',       cadence: 'mensuel (1er 4h)',  maxAgeHours: MONTHLY },
   recalcSeasonalFactors:          { label: 'Recalcul facteurs saisonniers',      cadence: 'mensuel (1er 4h)',  maxAgeHours: MONTHLY },

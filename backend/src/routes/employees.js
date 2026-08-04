@@ -58,7 +58,10 @@ router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
     if (is_active !== undefined) { params.push(is_active === 'true'); query += ` AND e.is_active = $${params.length}`; }
     if (search) { params.push(`%${search}%`); query += ` AND (e.first_name ILIKE $${params.length} OR e.last_name ILIKE $${params.length})`; }
 
-    query += ' ORDER BY e.last_name, e.first_name';
+    // Tri alphabétique par NOM de famille puis PRÉNOM (Lot 1 « Règles de gestion
+    // des noms »), insensible à la casse via UPPER() — le nom de famille est
+    // affiché en majuscules côté front (formatEmployeeName).
+    query += ' ORDER BY UPPER(e.last_name), UPPER(e.first_name)';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
@@ -234,7 +237,7 @@ router.get('/:id/candidate-matches', authorize('ADMIN', 'RH'), async (req, res) 
                     WHERE ps.candidate_id = c.id) AS has_pcm
       FROM candidates c
       WHERE NOT EXISTS (SELECT 1 FROM employees em WHERE em.candidate_id = c.id)
-      ORDER BY c.last_name, c.first_name`);
+      ORDER BY UPPER(c.last_name), UPPER(c.first_name)`);
 
     const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
     const ef = norm(e.first_name); const el = norm(e.last_name);
@@ -300,7 +303,7 @@ router.get('/schedule/planning', authorize('ADMIN', 'RH', 'MANAGER'), async (req
     if (team_id) { params.push(team_id); query += ` AND e.team_id = $${params.length}`; }
     if (employee_id) { params.push(employee_id); query += ` AND s.employee_id = $${params.length}`; }
 
-    query += ' ORDER BY s.date, e.last_name';
+    query += ' ORDER BY s.date, UPPER(e.last_name), UPPER(e.first_name)';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
@@ -541,7 +544,7 @@ router.get('/work-hours/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
     if (employee_id) { params.push(employee_id); query += ` AND wh.employee_id = $${params.length}`; }
     if (team_id) { params.push(team_id); query += ` AND e.team_id = $${params.length}`; }
 
-    query += ' ORDER BY wh.date, e.last_name';
+    query += ' ORDER BY wh.date, UPPER(e.last_name), UPPER(e.first_name)';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
@@ -617,7 +620,7 @@ router.get('/work-hours/summary', authorize('ADMIN', 'RH', 'MANAGER'), async (re
        LEFT JOIN teams t ON e.team_id = t.id
        WHERE e.is_active = true
        GROUP BY e.id, e.first_name, e.last_name, e.weekly_hours, e.team_id, t.name
-       ORDER BY e.last_name`,
+       ORDER BY UPPER(e.last_name), UPPER(e.first_name)`,
       monthBounds(month)
     );
 

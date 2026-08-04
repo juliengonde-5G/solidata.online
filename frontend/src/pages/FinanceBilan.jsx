@@ -80,6 +80,26 @@ export default function FinanceBilan() {
           <ErrorState variant="card" title="Bilan indisponible" message={error} onRetry={loadData} />
         )}
 
+        {/* Honnêteté N-1 : si l'exercice précédent n'est pas importé depuis
+            Pennylane, les colonnes N-1 restent vides (—) au lieu de faux zéros. */}
+        {!loading && data && data.n1_disponible === false && (
+          <div className="p-4 rounded-xl border border-amber-200 bg-amber-50">
+            <p className="text-sm font-semibold text-amber-800">
+              Exercice N-1 ({data.n1_annee ?? year - 1}) non importé
+            </p>
+            <p className="text-xs text-amber-700 mt-1">
+              Les colonnes « Année N-1 » et les variations sont vides car aucune écriture du Grand Livre {data.n1_annee ?? year - 1} n'est
+              présente en base. Pour les alimenter, importez l'exercice {data.n1_annee ?? year - 1} depuis la page Pennylane
+              (action « GL Analytique », en sélectionnant l'exercice {data.n1_annee ?? year - 1}).
+            </p>
+          </div>
+        )}
+        {!loading && data && data.n1_disponible === true && (
+          <p className="text-xs text-slate-400">
+            Colonnes N-1 : exercice {data.n1_annee ?? year - 1} d'après le Grand Livre Pennylane importé.
+          </p>
+        )}
+
         {/* KPI Cards avec comparatif N-1 */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <KPICard title="Total Actif" value={fmtK(kpis.total_actif)} unit="EUR" icon={Scale} accent="primary" loading={loading}

@@ -236,7 +236,7 @@ router.get('/daily-summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, re
       LEFT JOIN work_hours wh ON wh.employee_id = e.id AND wh.date = $1
       WHERE e.is_active = true
       GROUP BY e.id, e.first_name, e.last_name, e.team_id, t.name, wh.hours_worked, wh.overtime_hours, wh.validated_by
-      ORDER BY e.last_name, e.first_name
+      ORDER BY UPPER(e.last_name), UPPER(e.first_name)
     `, [date]);
 
     res.json(result.rows);
@@ -266,7 +266,7 @@ router.get('/monthly-summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
       LEFT JOIN pointage_events pe ON pe.employee_id = e.id AND pe.date BETWEEN $1 AND $2
       WHERE e.is_active = true
       GROUP BY e.id, e.first_name, e.last_name, e.weekly_hours, t.name
-      ORDER BY e.last_name, e.first_name
+      ORDER BY UPPER(e.last_name), UPPER(e.first_name)
     `, [startDate, endDate]);
 
     res.json(result.rows);
@@ -474,7 +474,7 @@ router.get('/alerts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
         AND (pe.count IS NULL OR pe.count < 4)
       ORDER BY
         CASE WHEN pe.count IS NULL OR pe.count = 0 THEN 0 ELSE 1 END,
-        e.last_name
+        UPPER(e.last_name), UPPER(e.first_name)
     `, [date]);
 
     res.json(result.rows);

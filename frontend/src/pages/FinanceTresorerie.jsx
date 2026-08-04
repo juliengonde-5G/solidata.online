@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Landmark, List } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Landmark, List, Pencil } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import { PageHeader, KPICard, DataTable, LoadingSpinner, Section, ErrorState } from '../components';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -25,11 +26,18 @@ const fmtK = (v) => {
 };
 
 export default function FinanceTresorerie() {
+  const { user } = useAuth();
+  const isAdmin = (user?.base_role || user?.role) === 'ADMIN';
   const [year, setYear] = useState(new Date().getFullYear());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [error, setError] = useState(null);
+  // Saisie ADMIN du solde initial au 01/01 (priorité 1 de la cascade backend)
+  const [editingSolde, setEditingSolde] = useState(false);
+  const [soldeInput, setSoldeInput] = useState('');
+  const [savingSolde, setSavingSolde] = useState(false);
+  const [soldeError, setSoldeError] = useState(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
@@ -54,7 +62,23 @@ export default function FinanceTresorerie() {
     setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const saveSoldeInitial = async (montant) => {
+    setSavingSolde(true);
+    setSoldeError(null);
+    try {
+      await api.put(`/finance/gl/${year}/solde-initial`, { montant });
+      setEditingSolde(false);
+      setSoldeInput('');
+      await loadData();
+    } catch (err) {
+      console.error('Erreur solde initial:', err);
+      setSoldeError(err.response?.data?.error || "Erreur lors de l'enregistrement du solde initial");
+    }
+    setSavingSolde(false);
+  };
+
   const kpis = data?.kpis || {};
+  const soldeInitial = data?.solde_initial || null;
   const waterfallData = data?.waterfall || [];
   const monthlyData = data?.monthly || [];
   const cashFlowGroups = data?.cash_flow || [];
@@ -104,6 +128,87 @@ export default function FinanceTresorerie() {
           <KPICard title="Decaissements YTD" value={fmtK(kpis.decaissements)} unit="EUR" icon={ArrowUp} accent="red" loading={loading} />
           <KPICard title="Variation" value={fmtK(kpis.variation)} unit="EUR" icon={ArrowUpDown} accent="amber" loading={loading} />
         </div>
+
+        {/* Solde initial au 01/01 — cascade honnête : saisie ADMIN > GL N-1 > 0 */}
+        {!loading && soldeInitial && (
+          <div className={`p-4 rounded-xl border ${
+            soldeInitial.source === 'aucune'
+              ? 'border-amber-200 bg-amber-50'
+              : 'border-slate-200 bg-slate-50/50'
+          }`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                {soldeInitial.source === 'aucune' && (
+                  <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
+                )}
+                <div>
+                  <p className={`text-sm font-semibold ${soldeInitial.source === 'aucune' ? 'text-amber-800' : 'text-slate-800'}`}>
+                    Solde initial au 01/01/{year} : {fmt(soldeInitial.montant)} EUR
+                    {soldeInitial.source === 'aucune' && ' — non renseigné'}
+                  </p>
+                  <p className={`text-xs mt-1 ${soldeInitial.source === 'aucune' ? 'text-amber-700' : 'text-slate-500'}`}>
+                    {soldeInitial.source === 'setting' && `Source : ${soldeInitial.detail || 'saisie manuelle (paramètre ADMIN)'}`}
+                    {soldeInitial.source === 'gl_n1' && `Source : ${soldeInitial.detail || `solde des comptes 512 (banque) au 31/12/${year - 1} d'après le Grand Livre Pennylane importé`}`}
+                    {soldeInitial.source === 'aucune' && `${soldeInitial.detail || `Aucun solde d'origine : la courbe part de 0, ce qui fausse le solde bancaire disponible.`} ${isAdmin ? 'Saisissez le solde réel au 1er janvier, ou importez le Grand Livre ' + (year - 1) + ' depuis la page Pennylane.' : 'Demandez à un administrateur de le saisir.'}`}
+                    {' '}Le solde affiché = solde initial + flux cumulés.
+                  </p>
+                  {soldeError && <p className="text-xs text-red-600 mt-1">{soldeError}</p>}
+                </div>
+              </div>
+              {isAdmin && !editingSolde && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setSoldeInput(soldeInitial.source === 'setting' ? String(soldeInitial.montant) : ''); setEditingSolde(true); setSoldeError(null); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-medium hover:bg-teal-700"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    {soldeInitial.source === 'setting' ? 'Modifier' : 'Saisir le solde initial'}
+                  </button>
+                  {soldeInitial.source === 'setting' && (
+                    <button
+                      onClick={() => saveSoldeInitial(null)}
+                      disabled={savingSolde}
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs font-medium hover:bg-slate-100 disabled:opacity-50"
+                      title="Effacer la saisie manuelle et revenir au calcul automatique (Grand Livre N-1, sinon 0)"
+                    >
+                      Effacer la saisie
+                    </button>
+                  )}
+                </div>
+              )}
+              {isAdmin && editingSolde && (
+                <form
+                  onSubmit={(e) => { e.preventDefault(); saveSoldeInitial(soldeInput); }}
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={soldeInput}
+                    onChange={(e) => setSoldeInput(e.target.value)}
+                    placeholder={`Solde au 01/01/${year} en EUR`}
+                    className="w-44 px-3 py-1.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={savingSolde || String(soldeInput).trim() === ''}
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 disabled:opacity-50"
+                  >
+                    {savingSolde ? 'Enregistrement...' : 'Enregistrer'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingSolde(false); setSoldeError(null); }}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs font-medium hover:bg-slate-100"
+                  >
+                    Annuler
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Graphiques */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

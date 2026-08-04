@@ -228,6 +228,236 @@ router.get('/audit', authorize('ADMIN', 'DPO'), async (req, res) => {
 });
 
 // ══════════════════════════════════════════
+// RAPPEL CODIFIÉ DES RÈGLES DE GESTION (Lot 5)
+// ══════════════════════════════════════════
+
+// GET /api/rgpd/politique — rappel, à destination des utilisateurs de l'écran
+// RGPD, des règles de gestion des données personnelles RÉELLEMENT appliquées
+// par le code (conservation/anonymisation, suppression/purge, chiffrement/
+// masquage, droits des personnes, journalisation/traçabilité, sous-traitance
+// IA). AUCUNE règle inventée : chaque entrée référence le fichier qui
+// l'implémente réellement. Les valeurs paramétrables (table `settings`) sont
+// lues en direct avec repli sur le défaut du code (même mécanisme que
+// readInsertionSetting) — jamais une valeur figée qui divergerait du réglage
+// effectif. Mêmes gardes que /registre et /audit (page RGPD = ADMIN/DPO).
+router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
+  try {
+    const { readInsertionSetting } = require('../utils/insertion-settings');
+    const retentionInsertionMois = await readInsertionSetting('insertion.retention_months');
+
+    let registreCount = null;
+    try {
+      const r = await pool.query('SELECT COUNT(*)::int AS c FROM rgpd_registre');
+      registreCount = r.rows[0]?.c ?? null;
+    } catch (_) { /* table absente sur une base ancienne : compteur omis */ }
+
+    const categories = [
+      {
+        key: 'conservation',
+        label: 'Conservation & anonymisation',
+        description: 'Durées de conservation des données personnelles avant anonymisation automatique.',
+        regles: [
+          {
+            titre: 'Candidatures non recrutées',
+            description: "Un candidat dont le statut n'est pas « recruté » est anonymisé (identité, CV, notes d'entretien, PCM, mises en situation, documents) 24 mois après sa dernière mise à jour (déclenchement manuel depuis cet écran) ou sa date de création (job planifié quotidien) — même délai, colonne de référence différente selon le déclencheur.",
+            valeur: '24 mois',
+            source: 'code',
+            reference: 'backend/src/routes/rgpd.js (POST /purge-expired), backend/src/services/scheduler.js (purgeExpiredCandidates)',
+          },
+          {
+            titre: "Dossiers d'insertion clos",
+            description: "Le dossier d'un salarié dont le parcours d'insertion est terminé ou abandonné (fiche devenue inactive) est anonymisé automatiquement une fois ce délai écoulé après la fin du parcours (insertion_end_date). Les agrégats non nominatifs (scores de freins, classification de sortie, dates, heures) sont conservés pour le pilotage.",
+            valeur: `${retentionInsertionMois} mois`,
+            source: 'insertion.retention_months',
+            reference: 'backend/src/services/scheduler.js (purgeInsertionDossiers), backend/src/utils/insertion-settings.js',
+          },
+          {
+            titre: 'Données FSE+ (entrée/sortie)',
+            description: "Les données FSE+ (fse_entree/fse_sortie, JSONB des jalons/diagnostics) constituent une piste d'audit du financement européen : elles sont VOLONTAIREMENT exclues de l'anonymisation du dossier d'insertion ci-dessus et conservées séparément au-delà.",
+            valeur: '≥ 5 ans après le dernier paiement',
+            source: 'code',
+            reference: 'backend/src/services/anonymization.js (anonymizeEmployee), registre RGPD (backend/src/scripts/init-db.js)',
+          },
+          {
+            titre: 'Positions GPS des véhicules',
+            description: "Les relevés de géolocalisation des tournées de collecte sont supprimés DÉFINITIVEMENT (DELETE, pas d'anonymisation — aucune donnée exploitable à conserver) après ce délai.",
+            valeur: '90 jours',
+            source: 'code',
+            reference: 'backend/src/services/scheduler.js (purgeOldGpsPositions)',
+          },
+        ],
+      },
+      {
+        key: 'suppression',
+        label: 'Suppression & purge',
+        description: 'Mécanismes effectifs de suppression, de purge planifiée et de révocation.',
+        regles: [
+          {
+            titre: 'Purge automatique quotidienne',
+            description: "4 jobs planifiés tournent chaque jour et couvrent le MÊME périmètre que les actions manuelles de cet écran : anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, suppression des positions GPS obsolètes, suppression des jetons de rafraîchissement expirés.",
+            valeur: 'quotidien',
+            source: 'code',
+            reference: 'backend/src/services/scheduler.js',
+          },
+          {
+            titre: 'Durée de vie des sessions (JWT)',
+            description: "Le jeton d'accès expire après ce délai ; le jeton de rafraîchissement (cookie) après le second délai. Les jetons de rafraîchissement expirés sont supprimés chaque jour par le job planifié (ils ne s'accumulent pas en base entre deux redémarrages).",
+            valeur: 'accès 8h / rafraîchissement 7j',
+            source: 'code',
+            reference: 'backend/src/routes/auth.js (JWT_EXPIRES_IN / JWT_REFRESH_EXPIRES_IN), backend/src/services/scheduler.js (purgeExpiredRefreshTokens)',
+          },
+          {
+            titre: 'Révocation immédiate de session',
+            description: "Une déconnexion, une réinitialisation de mot de passe, une désactivation de compte ou une déconnexion forcée par un administrateur incrémente un compteur de version (users.token_version) : tout jeton émis avant devient invalide immédiatement, sans attendre son expiration naturelle (jusqu'à 8h).",
+            valeur: 'immédiat',
+            source: 'code',
+            reference: 'backend/src/middleware/auth.js, backend/src/routes/auth.js',
+          },
+          {
+            titre: "Anonymisation manuelle (droit à l'effacement, art. 17)",
+            description: "Un ADMIN ou un DPO peut anonymiser à tout moment un candidat ou un salarié depuis cet écran, avec un motif obligatoire. Le même service (anonymizeCandidate / anonymizeEmployee) est utilisé par la purge automatique : aucun périmètre différent entre les deux voies.",
+            valeur: 'à la demande, motif requis',
+            source: 'code',
+            reference: 'backend/src/routes/rgpd.js (POST /anonymize/:type/:id), backend/src/services/anonymization.js',
+          },
+        ],
+      },
+      {
+        key: 'chiffrement',
+        label: 'Chiffrement & masquage',
+        description: 'Protection technique des catégories de données les plus sensibles (art. 9/10 RGPD).',
+        regles: [
+          {
+            titre: "Champs sensibles du diagnostic d'insertion",
+            description: "Les champs texte relatifs à la santé (art. 9) et au judiciaire (art. 10) — commentaire_sante, frein_sante_detail, frein_sante_causes, frein_judiciaire_detail — sont chiffrés en base (préfixe encv1:), déchiffrés uniquement en couche route.",
+            valeur: 'AES (crypto-js), clé PCM_ENCRYPTION_KEY',
+            source: 'code',
+            reference: 'backend/src/utils/field-crypto.js',
+          },
+          {
+            titre: 'Rapports PCM (test de personnalité)',
+            description: "Les rapports du test de personnalité (Process Communication Model) sont chiffrés en base avec le même mécanisme de clé que les champs sensibles d'insertion.",
+            valeur: 'AES (crypto-js)',
+            source: 'code',
+            reference: 'backend/src/routes/pcm.js',
+          },
+          {
+            titre: 'Masquage par rôle (MANAGER)',
+            description: "Pour un utilisateur MANAGER, le frein judiciaire (score/détail/causes), les détails santé et le commentaire budget sont RETIRÉS des réponses API du module Insertion (la clé disparaît, elle n'est jamais mise à null — distingue « non habilité » de « non renseigné »). ADMIN et RH voient tout.",
+            valeur: 'ADMIN/RH uniquement',
+            source: 'code',
+            reference: 'backend/src/routes/insertion/masking.js',
+          },
+          {
+            titre: 'Anonymat structurel des enquêtes internes',
+            description: "Les réponses aux enquêtes (QVCT, satisfaction, intégration…) ne portent AUCUNE clé étrangère vers un utilisateur ou un salarié. La restitution n'affiche jamais de distribution ni de moyenne par question en dessous de ce seuil de réponses.",
+            valeur: 'n ≥ 5 réponses',
+            source: 'code',
+            reference: 'backend/src/routes/enquetes.js (SEUIL_ANONYMAT)',
+          },
+        ],
+      },
+      {
+        key: 'droits',
+        label: 'Droits des personnes',
+        description: "Droits exercés depuis cet écran (accès, effacement, consentement) ou déclarés au registre.",
+        regles: [
+          {
+            titre: "Droit d'accès (art. 15)",
+            description: "Export JSON de toutes les données d'un candidat (identité, compétences, historique, rapports PCM) ou d'un salarié (identité, contrats), disponible depuis l'onglet « Droits des personnes » de cet écran.",
+            valeur: 'export à la demande',
+            source: 'code',
+            reference: 'backend/src/routes/rgpd.js (GET /export/:type/:id)',
+          },
+          {
+            titre: "Droit à l'effacement (art. 17)",
+            description: "Anonymisation manuelle avec motif obligatoire, disponible depuis cet écran (bouton « Anonymiser »).",
+            valeur: 'à la demande, motif requis',
+            source: 'code',
+            reference: 'backend/src/routes/rgpd.js (POST /anonymize/:type/:id)',
+          },
+          {
+            titre: 'Gestion du consentement',
+            description: "Chaque consentement (type, accordé/révoqué, commentaire) est horodaté et attribué à l'utilisateur qui l'a enregistré ; un nouvel enregistrement met à jour le précédent (une ligne par entité/type).",
+            valeur: 'par personne et par type',
+            source: 'code',
+            reference: 'backend/src/routes/rgpd.js (GET/POST /consent)',
+          },
+          {
+            titre: 'Registre des traitements (art. 30)',
+            description: "Chaque traitement de données déclaré précise finalité, base légale, catégories de personnes/données, destinataires, durée de conservation et mesures de sécurité. Consultable dans l'onglet « Registre des traitements ».",
+            valeur: registreCount != null ? `${registreCount} traitement(s) déclaré(s)` : 'consultable dans l\'onglet Registre',
+            source: 'code',
+            reference: 'backend/src/routes/rgpd.js (GET/POST /registre), backend/src/scripts/init-db.js (seed)',
+          },
+        ],
+      },
+      {
+        key: 'journalisation',
+        label: 'Journalisation & traçabilité',
+        description: 'Traçabilité applicative des actions portant sur des données personnelles.',
+        regles: [
+          {
+            titre: 'Journal RGPD',
+            description: "Toute création de traitement, tout export, toute anonymisation, tout consentement et toute purge sont journalisés (utilisateur, action, type/ID d'entité, détail JSON), consultables dans l'onglet « Journal d'audit » de cet écran.",
+            valeur: 'systématique',
+            source: 'code',
+            reference: 'backend/src/routes/rgpd.js, table rgpd_audit_log',
+          },
+          {
+            titre: 'Export du module Insertion (23 colonnes)',
+            description: "La génération de l'export insertion (freins, situations) est journalisée AVANT l'envoi du fichier : un échec de journalisation fait échouer l'export — aucun fichier nominatif ne part sans trace.",
+            valeur: 'avant envoi, bloquant',
+            source: 'code',
+            reference: 'backend/src/routes/exports.js (logExportFreins)',
+          },
+          {
+            titre: 'Colonne « Frein judiciaire » exclue par défaut',
+            description: "L'export insertion-freins n'inclut la colonne judiciaire (art. 10) que si le paramètre sensibles=1 est explicitement demandé — la colonne n'est alors même pas lue en SQL sinon (defense in depth). Réservé ADMIN/RH dans tous les cas.",
+            valeur: 'sensibles=0 par défaut',
+            source: 'code',
+            reference: 'backend/src/routes/exports.js (fetchFreinsRows, GET /insertion-freins)',
+          },
+        ],
+      },
+      {
+        key: 'sous_traitance_ia',
+        label: 'Sous-traitance IA (Anthropic)',
+        description: "Minimisation des données personnelles transmises au modèle Claude (analyses IA, SolidataBot).",
+        regles: [
+          {
+            titre: "Pseudonymisation avant tout appel au modèle",
+            description: "Avant chaque appel à l'API Anthropic (analyse d'insertion, assistant SolidataBot), les identités sont remplacées par un jeton stable (« Salarié A »…), la date de naissance par une tranche d'âge, et les coordonnées/identifiants (email, téléphone, matricule, NIR, IBAN) sont masqués dans les textes libres.",
+            valeur: 'systématique',
+            source: 'code',
+            reference: 'backend/src/utils/pii-pseudonymize.js',
+          },
+          {
+            titre: 'Ré-hydratation strictement interne',
+            description: "Les jetons ne sont ré-substitués par le nom réel que côté serveur, pour l'affichage à l'utilisateur (CIP) — jamais transmis à Anthropic sous cette forme.",
+            valeur: 'interne uniquement',
+            source: 'code',
+            reference: 'backend/src/utils/pii-pseudonymize.js (rehydrate)',
+          },
+          {
+            titre: 'Accès restreint aux analyses IA',
+            description: "Les endpoints d'analyse IA du module Insertion (profil, préparation d'entretien, bilan de cohorte) sont réservés ADMIN/RH.",
+            valeur: 'ADMIN/RH',
+            source: 'code',
+            reference: 'backend/src/routes/insertion/routes.js',
+          },
+        ],
+      },
+    ];
+
+    res.json({ generated_at: new Date().toISOString(), categories });
+  } catch (err) {
+    console.error('[RGPD] Erreur politique :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
 // PURGE AUTOMATIQUE (Conservation limitée)
 // ══════════════════════════════════════════
 

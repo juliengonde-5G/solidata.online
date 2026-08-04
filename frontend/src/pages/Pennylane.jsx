@@ -27,6 +27,12 @@ export default function Pennylane() {
     api_key: '', company_id: '', is_active: false,
     sync_invoices: true, sync_suppliers: true, sync_journal: true,
   });
+  // Exercice ciblé par les imports GL / Trésorerie — permet de ramener un
+  // exercice antérieur (ex. N-1 pour le comparatif du bilan et le solde
+  // initial de trésorerie). Défaut : année courante.
+  const currentYear = new Date().getFullYear();
+  const [syncYear, setSyncYear] = useState(currentYear);
+  const syncYears = Array.from({ length: 6 }, (_, i) => currentYear - i);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -99,7 +105,8 @@ export default function Pennylane() {
     setSyncingGL(true);
     setGlDiag(null);
     try {
-      const res = await api.post('/pennylane/sync/gl');
+      // L'exercice sélectionné est transmis au backend (défaut : année courante)
+      const res = await api.post('/pennylane/sync/gl', { year: syncYear });
       setGlDiag(res.data);
       loadAll();
     } catch (err) {
@@ -112,7 +119,7 @@ export default function Pennylane() {
   const syncTransactions = async () => {
     setSyncingTx(true);
     try {
-      const res = await api.post('/pennylane/sync/transactions');
+      const res = await api.post('/pennylane/sync/transactions', { year: syncYear });
       alert(res.data.message);
       loadAll();
     } catch (err) {
@@ -189,6 +196,30 @@ export default function Pennylane() {
 
         {/* Actions */}
         <Section title="Actions de synchronisation">
+          {/* Exercice ciblé par les imports GL / Trésorerie : permet d'importer
+              un exercice antérieur (comparatif N-1 du bilan, solde initial) */}
+          {canEdit && (
+            <div className="mb-4 flex flex-wrap items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <label className="text-sm font-medium text-slate-700" htmlFor="pennylane-sync-year">
+                Exercice à importer (GL Analytique &amp; Trésorerie) :
+              </label>
+              <select
+                id="pennylane-sync-year"
+                value={syncYear}
+                onChange={(e) => setSyncYear(Number(e.target.value))}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {syncYears.map((y) => (
+                  <option key={y} value={y}>{y}{y === currentYear ? ' (courant)' : ''}</option>
+                ))}
+              </select>
+              {syncYear !== currentYear && (
+                <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  Import d'un exercice antérieur — utile pour le comparatif N-1 du bilan et le solde initial de trésorerie
+                </span>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Test connexion */}
             {canEdit && (
@@ -235,7 +266,7 @@ export default function Pennylane() {
                 <Download className="w-5 h-5 text-amber-600" />
               </div>
               <div className="text-left">
-                <p className="font-medium text-sm">{syncingGL ? 'Import en cours...' : 'GL Analytique'}</p>
+                <p className="font-medium text-sm">{syncingGL ? 'Import en cours...' : `GL Analytique ${syncYear}`}</p>
                 <p className="text-xs text-slate-400">Grand livre + catégories analytiques</p>
               </div>
             </button>
@@ -252,7 +283,7 @@ export default function Pennylane() {
                 <Download className="w-5 h-5 text-cyan-600" />
               </div>
               <div className="text-left">
-                <p className="font-medium text-sm">{syncingTx ? 'Import en cours...' : 'Tresorerie'}</p>
+                <p className="font-medium text-sm">{syncingTx ? 'Import en cours...' : `Tresorerie ${syncYear}`}</p>
                 <p className="text-xs text-slate-400">Importer les transactions</p>
               </div>
             </button>

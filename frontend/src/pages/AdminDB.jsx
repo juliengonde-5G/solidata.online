@@ -10,6 +10,7 @@ export default function AdminDB() {
   const [tab, setTab] = useState('info');
   const [info, setInfo] = useState(null);
   const [backups, setBackups] = useState([]);
+  const [autoBackupJob, setAutoBackupJob] = useState(null); // dernier run du job scheduler autoDatabaseBackup
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -25,6 +26,12 @@ export default function AdminDB() {
       } else if (tab === 'backups') {
         const r = await api.get('/admin-db/backups');
         setBackups(r.data);
+        // Dernière exécution du job de sauvegarde automatique (best-effort,
+        // via la supervision des jobs — un échec n'empêche pas d'afficher la liste).
+        try {
+          const m = await api.get('/monitoring/jobs');
+          setAutoBackupJob((m.data?.jobs || []).find(j => j.job_name === 'autoDatabaseBackup') || null);
+        } catch { setAutoBackupJob(null); }
       } else if (tab === 'stats') {
         const r = await api.get('/admin-db/stats');
         setStats(r.data);
@@ -169,27 +176,57 @@ export default function AdminDB() {
 
             {tab === 'backups' && (
               <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900">
+                  <p className="font-semibold">Sauvegarde automatique : mardi et vendredi à 04:00 (heure serveur, UTC)</p>
+                  <p className="text-xs mt-1 text-blue-800">
+                    Fichiers préfixés <span className="font-mono">auto_</span> — les 8 sauvegardes automatiques
+                    les plus récentes sont conservées (les sauvegardes manuelles ne sont jamais supprimées automatiquement).
+                    Restauration possible depuis n'importe quelle ligne de l'historique ci-dessous.
+                  </p>
+                  {autoBackupJob?.last_run && (
+                    <p className="text-xs mt-2">
+                      Dernière exécution du job :{' '}
+                      <span className="font-medium">{new Date(autoBackupJob.last_run.started_at).toLocaleString('fr-FR')}</span>
+                      {' — '}
+                      <span className={autoBackupJob.last_run.status === 'success' ? 'text-green-700 font-medium' : 'text-red-700 font-medium'}>
+                        {autoBackupJob.last_run.status === 'success' ? 'succès' : autoBackupJob.last_run.status}
+                      </span>
+                      {autoBackupJob.late === true && <span className="text-red-700 font-medium"> · en retard</span>}
+                    </p>
+                  )}
+                  {autoBackupJob && !autoBackupJob.last_run && (
+                    <p className="text-xs mt-2 text-blue-800">Le job n'a pas encore tourné (première exécution au prochain mardi ou vendredi 04:00).</p>
+                  )}
+                </div>
                 <button onClick={createBackup} disabled={actionLoading} className="btn-primary text-sm">
                   {actionLoading ? 'Sauvegarde en cours...' : 'Créer une sauvegarde'}
                 </button>
                 <div className="bg-white rounded-xl border overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                      <tr><th className="px-4 py-3 text-left">Fichier</th><th className="px-4 py-3 text-left">Taille</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-right">Actions</th></tr>
+                      <tr><th className="px-4 py-3 text-left">Fichier</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Taille</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-right">Actions</th></tr>
                     </thead>
                     <tbody className="divide-y">
-                      {backups.map(b => (
-                        <tr key={b.filename} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-mono text-xs">{b.filename}</td>
-                          <td className="px-4 py-3">{b.size}</td>
-                          <td className="px-4 py-3">{new Date(b.created_at).toLocaleString('fr-FR')}</td>
-                          <td className="px-4 py-3 text-right space-x-2">
-                            <button onClick={() => restoreBackup(b.filename)} className="text-blue-600 hover:underline text-xs">Restaurer</button>
-                            <button onClick={() => deleteBackup(b.filename)} className="text-red-600 hover:underline text-xs">Supprimer</button>
-                          </td>
-                        </tr>
-                      ))}
-                      {backups.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Aucune sauvegarde</td></tr>}
+                      {backups.map(b => {
+                        const isAuto = b.auto ?? b.filename.startsWith('auto_');
+                        return (
+                          <tr key={b.filename} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 font-mono text-xs">{b.filename}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${isAuto ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                                {isAuto ? 'auto' : 'manuelle'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">{b.size}</td>
+                            <td className="px-4 py-3">{new Date(b.created_at).toLocaleString('fr-FR')}</td>
+                            <td className="px-4 py-3 text-right space-x-2">
+                              <button onClick={() => restoreBackup(b.filename)} className="text-blue-600 hover:underline text-xs">Restaurer</button>
+                              <button onClick={() => deleteBackup(b.filename)} className="text-red-600 hover:underline text-xs">Supprimer</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {backups.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Aucune sauvegarde</td></tr>}
                     </tbody>
                   </table>
                 </div>

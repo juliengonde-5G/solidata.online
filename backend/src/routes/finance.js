@@ -827,8 +827,9 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     const glEntries = r.rows;
 
     // Mensuel : encaissements (debit), décaissements (credit), solde cumulé
+    // — le cumul démarre au solde initial du 01/01 (et non plus à 0).
     const monthly = Array.from({ length: 12 }, () => ({ encaissements: 0, decaissements: 0, solde: 0 }));
-    let cumul = 0;
+    let cumul = soldeInitial.montant;
 
     for (const e of glEntries) {
       if (!e.date) continue;
@@ -852,11 +853,11 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     const now = new Date();
     const currentMonth = now.getFullYear() === year ? now.getMonth() : 11;
     const position = monthly[currentMonth]?.solde || 0;
-    const prevPosition = currentMonth > 0 ? monthly[currentMonth - 1]?.solde || 0 : 0;
+    const prevPosition = currentMonth > 0 ? monthly[currentMonth - 1]?.solde || 0 : soldeInitial.montant;
 
-    // Waterfall
+    // Waterfall — la première barre porte le solde initial résolu (cascade)
     const waterfall = [
-      { label: 'Solde initial', value: 0, invisible: 0, type: 'total' },
+      { label: 'Solde initial', value: Math.round(soldeInitial.montant), invisible: 0, type: 'total' },
     ];
     for (let i = 0; i <= currentMonth; i++) {
       const net = monthly[i].encaissements - monthly[i].decaissements;
@@ -923,12 +924,57 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
         variation: Math.round((totalEncaissements - totalDecaissements) * 100) / 100,
         position_trend: prevPosition !== 0 ? Math.round((position - prevPosition) / Math.abs(prevPosition) * 100) : 0,
       },
+      // Solde initial au 01/01 + source utilisée (setting | gl_n1 | aucune) —
+      // le solde affiché = solde initial + flux cumulés.
+      solde_initial: { ...soldeInitial, annee: year },
       monthly,
       waterfall,
       cash_flow: cashFlow,
     });
   } catch (err) {
     console.error('[FINANCE] Erreur trésorerie :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// SOLDE INITIAL TRESORERIE — saisie ADMIN (priorité 1 de la cascade)
+// ══════════════════════════════════════════
+// PUT /gl/:year/solde-initial { montant } — enregistre le solde de trésorerie
+// au 1er janvier de l'exercice dans la table settings (clé
+// finance.tresorerie_solde_initial_<annee>). Un montant null/'' efface la
+// saisie et rend la main à la cascade (GL N-1, sinon 0 + avertissement).
+// ADMIN uniquement (le garde-fou par méthode du routeur ferme déjà FINANCE ;
+// authorize('ADMIN') resserre ici au-delà de ADMIN/MANAGER).
+router.put('/gl/:year/solde-initial', authorize('ADMIN'), async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+    if (Number.isNaN(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'Année invalide' });
+    }
+    const key = `finance.tresorerie_solde_initial_${year}`;
+    const raw = req.body?.montant;
+
+    if (raw === null || raw === undefined || String(raw).trim() === '') {
+      // Effacement : retour à la cascade (GL N-1, sinon 0)
+      await pool.query('DELETE FROM settings WHERE key = $1', [key]);
+    } else {
+      const montant = parseFloat(String(raw).replace(/\s/g, '').replace(',', '.'));
+      if (Number.isNaN(montant)) {
+        return res.status(400).json({ error: 'Montant invalide' });
+      }
+      await pool.query(
+        `INSERT INTO settings (key, value, category) VALUES ($1, $2, 'finance')
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [key, String(Math.round(montant * 100) / 100)]
+      );
+    }
+
+    // Renvoie le solde initial effectif après écriture (source re-résolue)
+    const soldeInitial = await resolveSoldeInitialTresorerie(year);
+    res.json({ ok: true, solde_initial: { ...soldeInitial, annee: year } });
+  } catch (err) {
+    console.error('[FINANCE] Erreur PUT solde-initial :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

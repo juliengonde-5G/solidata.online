@@ -845,6 +845,39 @@ async function syncTransactionsFromApi({ io, triggeredBy = null, sinceOverride =
   }
 }
 
+// ── Détail d'une transaction SumUp (lignes produits) ──
+// Le résumé renvoyé par /v0.1/me/transactions/history et la charge webhook ne
+// portent PAS le détail produits — or c'est lui qui contient les quantités
+// (donc le poids vendu). La forme DOCUMENTÉE du « retrieve » SumUp est
+// GET /v0.1/me/transactions?id=<id> (paramètre de requête) ; l'ancienne forme
+// par chemin /v0.1/me/transactions/<id> est conservée en dernier repli.
+// Sans détail exploitable, on retombe sur le résumé (ticket 1 ligne globale,
+// poids 0 — jamais de valeur inventée) en le JOURNALISANT : un ticket sans
+// lignes n'est plus un échec silencieux.
+async function fetchTransactionDetail(tx) {
+  if (!tx) return tx;
+  const hasItems = (Array.isArray(tx.line_items) && tx.line_items.length > 0)
+    || (Array.isArray(tx.products) && tx.products.length > 0);
+  if (hasItems) return tx;
+  const txId = tx.id || tx.transaction_id;
+  const txCode = tx.transaction_code;
+  if (!txId && !txCode) return tx;
+  const attempts = [];
+  if (txId) attempts.push(['/v0.1/me/transactions', { id: txId }]);
+  if (txCode) attempts.push(['/v0.1/me/transactions', { transaction_code: txCode }]);
+  if (txId) attempts.push([`/v0.1/me/transactions/${txId}`, {}]);
+  for (const [p, params] of attempts) {
+    try {
+      const d = await sumupApiGet(p, params);
+      if (d && (d.id || d.transaction_code || d.transaction_id || d.amount != null)) return d;
+    } catch (_) { /* essaie la forme suivante */ }
+  }
+  logger.warn('SumUp détail transaction indisponible — résumé utilisé (lignes produits absentes, poids non calculable)', {
+    transaction_id: txId || txCode,
+  });
+  return tx;
+}
+
 // ── Ingest une transaction SumUp en BDD (lookup VAK, UPSERT ticket + ventes) ──
 async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = {}) {
   try {
@@ -859,13 +892,10 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
     if (vakRow.rows.length === 0) return false; // hors VAK
     const vakId = vakRow.rows[0].id;
 
-    // SumUp peut fournir le détail produits (line_items) sur /transactions/{id} (richer)
-    let detail = tx;
+    // Détail produits (quantités → poids) : ni le résumé history ni le webhook
+    // ne portent les lignes ; on va le chercher (cf. fetchTransactionDetail).
     const txId = tx.id || tx.transaction_id;
-    if (txId && !tx.line_items) {
-      try { detail = await sumupApiGet(`/v0.1/me/transactions/${txId}`); }
-      catch (_) { /* keep summary */ }
-    }
+    const detail = await fetchTransactionDetail(tx);
     // Mapping pur : montants, quantités et poids signés (négatifs pour un
     // remboursement, cf. mapSumUpTransaction/isRefundTransaction) → le ticket
     // de remboursement nette la vente d'origine dans tous les agrégats et
@@ -1017,6 +1047,7 @@ module.exports = {
   sumupApiGet,
   syncTransactionsFromApi,
   ingestSumUpTransaction,
+  fetchTransactionDetail,
   // Webhooks
   validateWebhookSignature,
   registerWebhook,
@@ -1024,6 +1055,7 @@ module.exports = {
   importCSVContent,
   parseFRDate,
   getSegment,
+  isKgItem,
   normalizePaymentMethod,
   // Remboursements (sémantique partagée CSV / API / webhook)
   isRefundTransaction,

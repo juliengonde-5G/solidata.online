@@ -1,15 +1,26 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { DataTable, Modal, PageHeader } from '../components';
-import { Shield, ScrollText } from 'lucide-react';
+import { Shield, ScrollText, BookOpen, Clock, Trash2, Lock, UserCheck, FileClock, Bot } from 'lucide-react';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
+
+const POLITIQUE_ICONS = {
+  conservation: Clock,
+  suppression: Trash2,
+  chiffrement: Lock,
+  droits: UserCheck,
+  journalisation: FileClock,
+  sous_traitance_ia: Bot,
+};
 
 export default function RGPD() {
   const { confirm, ConfirmDialogElement } = useConfirm();
   const [tab, setTab] = useState('registre');
   const [registre, setRegistre] = useState([]);
   const [audit, setAudit] = useState([]);
+  const [politique, setPolitique] = useState(null);
+  const [politiqueError, setPolitiqueError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ nom_traitement: '', finalite: '', base_legale: 'consentement', categories_personnes: '', categories_donnees: '', destinataires: '', duree_conservation: '', mesures_securite: '' });
@@ -27,8 +38,15 @@ export default function RGPD() {
       } else if (tab === 'audit') {
         const r = await api.get('/rgpd/audit');
         setAudit(r.data);
+      } else if (tab === 'politique') {
+        setPolitiqueError(null);
+        const r = await api.get('/rgpd/politique');
+        setPolitique(r.data);
       }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      if (tab === 'politique') setPolitiqueError(err.response?.data?.error || 'Erreur de chargement');
+    }
     setLoading(false);
   };
 
@@ -86,6 +104,7 @@ export default function RGPD() {
     { key: 'registre', label: 'Registre des traitements' },
     { key: 'droits', label: 'Droits des personnes' },
     { key: 'audit', label: 'Journal d\'audit' },
+    { key: 'politique', label: 'Règles de gestion des données' },
   ];
 
   const BASES = ['consentement', 'contrat', 'obligation_legale', 'interet_legitime', 'mission_publique', 'interet_vital'];
@@ -198,6 +217,68 @@ export default function RGPD() {
                 emptyMessage="Aucune entrée"
                 dense
               />
+            )}
+
+            {tab === 'politique' && (
+              <div className="space-y-5">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex gap-3 items-start">
+                  <BookOpen className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div className="text-sm text-blue-900">
+                    <p className="font-medium">Rappel des règles de gestion réellement installées dans le code</p>
+                    <p className="text-blue-800/80 mt-0.5">
+                      Chaque règle ci-dessous reflète le comportement effectif du logiciel (durée de conservation, purge,
+                      chiffrement, droits, journalisation, sous-traitance IA) — pas une intention. La référence indique le
+                      fichier source qui l'implémente. Les valeurs marquées « paramétrable » sont lues en direct dans les
+                      réglages de l'application.
+                    </p>
+                  </div>
+                </div>
+
+                {politiqueError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">{politiqueError}</div>
+                )}
+
+                {politique && (
+                  <>
+                    <p className="text-xs text-gray-400">
+                      Généré le {new Date(politique.generated_at).toLocaleString('fr-FR')}
+                    </p>
+                    {politique.categories.map((cat) => {
+                      const Icon = POLITIQUE_ICONS[cat.key] || Shield;
+                      return (
+                        <div key={cat.key} className="bg-white rounded-xl border overflow-hidden">
+                          <div className="flex items-center gap-2 px-5 py-3 border-b bg-gray-50">
+                            <Icon className="w-4 h-4 text-primary" />
+                            <h3 className="font-semibold text-gray-900">{cat.label}</h3>
+                            {cat.description && <span className="text-xs text-gray-500 ml-1">— {cat.description}</span>}
+                          </div>
+                          <div className="divide-y">
+                            {cat.regles.map((regle, i) => (
+                              <div key={i} className="px-5 py-4 flex flex-col md:flex-row md:items-start gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-medium text-gray-900 text-sm">{regle.titre}</span>
+                                    <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold whitespace-nowrap">
+                                      {regle.valeur}
+                                    </span>
+                                    {regle.source !== 'code' && (
+                                      <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs whitespace-nowrap" title="Paramétrable dans les réglages de l'application">
+                                        paramétrable : {regle.source}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-gray-600 mt-1">{regle.description}</p>
+                                  <p className="text-xs text-gray-400 mt-1.5 font-mono truncate" title={regle.reference}>{regle.reference}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
             )}
           </>
         )}
