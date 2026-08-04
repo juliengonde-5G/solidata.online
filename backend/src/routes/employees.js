@@ -748,7 +748,8 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 router.get('/:id/contracts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT ec.*, t.name as team_name, p.title as position_title
+      `SELECT ec.*, t.name as team_name,
+              COALESCE(ec.position_title, p.title) as position_title
        FROM employee_contracts ec
        LEFT JOIN teams t ON ec.team_id = t.id
        LEFT JOIN positions p ON ec.position_id = p.id
