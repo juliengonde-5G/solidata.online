@@ -237,7 +237,7 @@ function AgendaBloc({ stats, onSelect }) {
   // Retards regroupés par salarié : une ligne = un salarié, badges cumulés.
   const retardsParSalarie = new Map();
   for (const j of stats.jalons_en_retard || []) {
-    const cur = retardsParSalarie.get(j.employee_id) || { id: j.employee_id, nom: `${j.first_name} ${j.last_name}`, items: [] };
+    const cur = retardsParSalarie.get(j.employee_id) || { id: j.employee_id, nom: formatEmployeeName(j.last_name, j.first_name), items: [] };
     cur.items.push(j);
     retardsParSalarie.set(j.employee_id, cur);
   }
@@ -274,7 +274,7 @@ function AgendaBloc({ stats, onSelect }) {
           {today.length ? today.map((j) => (
             <button key={j.id} onClick={() => onSelect(j.employee_id)}
               className="w-full text-left flex items-center justify-between gap-2 p-2 rounded hover:bg-teal-50 text-sm">
-              <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+              <span className="truncate">{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
               <span className="flex items-center gap-1.5 flex-shrink-0">
                 <IaPretBadge ready={j.ia_preparation_ready} />
                 <span className="text-xs text-teal-700 font-medium">{heureRdv(j.interview_date) || "aujourd'hui"}</span>
@@ -287,7 +287,7 @@ function AgendaBloc({ stats, onSelect }) {
           {week.length ? week.map((j) => (
             <button key={j.id} onClick={() => onSelect(j.employee_id)}
               className="w-full text-left flex items-center justify-between gap-2 p-2 rounded hover:bg-slate-50 text-sm">
-              <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+              <span className="truncate">{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
               <span className="flex items-center gap-1.5 flex-shrink-0">
                 <IaPretBadge ready={j.ia_preparation_ready} />
                 <span className="text-xs text-slate-500 font-medium">
