@@ -5,7 +5,7 @@ import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader, Section, Err
 import { Users } from 'lucide-react';
 import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
-import { formatEmployeeName } from '../utils/names';
+import { formatEmployeeName, formatLastName } from '../utils/names';
 import AlertesBloc from '../components/insertion/AlertesBloc';
 import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
 import ActionsPanel from '../components/insertion/ActionsPanel';
@@ -415,7 +415,7 @@ export default function Employees() {
                       <>
                         <div className="grid grid-cols-2 gap-3">
                           <Field label="Prénom" value={selected.first_name} />
-                          <Field label="Nom" value={selected.last_name} />
+                          <Field label="Nom" value={formatLastName(selected.last_name)} />
                           <Field label="Email" value={selected.email} />
                           <Field label="Téléphone" value={selected.phone} />
                           <Field label="Équipe" value={selected.team_name} />

@@ -3,6 +3,7 @@ import api from '../../services/api';
 import { useToast } from '../Toast';
 import { ACTION_CATEGORY_LABELS, ACTION_PRIORITY_LABELS, entretienLabel } from './freins';
 import { getInsertionParametres, PARAMETRES_DEFAUTS, plusJours } from './parametres';
+import { formatEmployeeName, compareByName } from '../../utils/names';
 
 /**
  * « + Action » global (REC-UX-04) — saisie d'une action au vol en ≤ 30 s.
@@ -104,7 +105,8 @@ function QuickActionModal({ defaultEmployeeId, defaultEmployeeName, defaultMiles
     .sort((a, b) => {
       const ra = recents.indexOf(a.id), rb = recents.indexOf(b.id);
       if (ra !== -1 || rb !== -1) return (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb);
-      return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`);
+      // Tri alphabétique NOM puis PRÉNOM (Lot 1 « Règles de gestion des noms »).
+      return compareByName(a, b);
     });
 
   const selectedEmp = employees.find((e) => e.id === form.employee_id)
@@ -128,7 +130,7 @@ function QuickActionModal({ defaultEmployeeId, defaultEmployeeName, defaultMiles
       });
       pushRecent(form.employee_id);
       const emp = employees.find((e) => e.id === form.employee_id);
-      toast.success(`Action ajoutée pour ${emp ? `${emp.first_name} ${emp.last_name}` : defaultEmployeeName || 'le salarié'}`);
+      toast.success(`Action ajoutée pour ${emp ? formatEmployeeName(emp.last_name, emp.first_name) : defaultEmployeeName || 'le salarié'}`);
       if (onCreated) onCreated();
       onClose();
     } catch (err) {
@@ -155,7 +157,7 @@ function QuickActionModal({ defaultEmployeeId, defaultEmployeeName, defaultMiles
         {/* Salarié (obligatoire) */}
         {selectedEmp && form.employee_id ? (
           <div className="flex items-center justify-between bg-teal-50 border border-teal-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-teal-800">{selectedEmp.first_name} {selectedEmp.last_name}</span>
+            <span className="font-medium text-teal-800">{formatEmployeeName(selectedEmp.last_name, selectedEmp.first_name)}</span>
             {!defaultEmployeeId && (
               <button type="button" onClick={() => setForm({ ...form, employee_id: null, milestone_id: '', objectif_id: '' })}
                 className="text-xs text-teal-700 hover:underline">Changer</button>
@@ -171,7 +173,7 @@ function QuickActionModal({ defaultEmployeeId, defaultEmployeeName, defaultMiles
                 <li key={e.id}>
                   <button type="button" onClick={() => { setForm({ ...form, employee_id: e.id }); setTimeout(() => labelRef.current?.focus(), 30); }}
                     className="w-full text-left px-3 py-1.5 text-sm hover:bg-teal-50 flex items-center justify-between">
-                    <span>{e.first_name} {e.last_name}</span>
+                    <span>{formatEmployeeName(e.last_name, e.first_name)}</span>
                     {recents.includes(e.id) && <span className="text-[10px] text-gray-400">récent</span>}
                   </button>
                 </li>

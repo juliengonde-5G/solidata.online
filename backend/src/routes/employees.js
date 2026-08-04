@@ -10,7 +10,7 @@ const { validate } = require('../middleware/validate');
 const { monthBounds } = require('../utils/month-range');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const { imageFilter, spreadsheetFilter } = require('../utils/upload-filters');
-const { parseWorkbookBuffer, upsertCollaborators } = require('../services/collaborator-import');
+const { parseWorkbookFull, upsertCollaborators } = require('../services/collaborator-import');
 const { computeCddiCumulativeMonths, resyncMilestones } = require('./insertion/engine');
 
 // Upload photo
@@ -918,9 +918,12 @@ router.post('/import/csv', authorize('ADMIN', 'RH'), async (req, res) => {
 
 // POST /api/employees/import/xlsx — Import direct de l'export complet Malibou (.xlsx)
 //
-// Accepte le classeur tel quel (feuilles « Informations salariés » + « Contrats »)
-// via multipart/form-data (champ `file`). Parse côté serveur avec exceljs puis
-// applique le même upsert idempotent que la voie CSV.
+// Accepte le classeur tel quel via multipart/form-data (champ `file`). Parse
+// côté serveur avec exceljs puis applique le même upsert idempotent que la
+// voie CSV. Lot 3 (2026-08) : lit désormais les 4 feuilles exploitables —
+// « Informations salariés », « Contrats » (HISTORIQUE COMPLET des avenants,
+// périodes effectives chaînées par date d'avenant), « Heures travaillées »
+// (hebdo ISO) et « Congés & Télétravail ».
 router.post('/import/xlsx', authorize('ADMIN', 'RH'), runUpload(uploadSpreadsheet.single('file')), async (req, res) => {
   const client = await pool.connect();
   try {
@@ -928,21 +931,30 @@ router.post('/import/xlsx', authorize('ADMIN', 'RH'), runUpload(uploadSpreadshee
       return res.status(400).json({ error: 'Fichier .xlsx requis (champ « file »)' });
     }
 
-    const collaborators = await parseWorkbookBuffer(req.file.buffer);
+    const parsed = await parseWorkbookFull(req.file.buffer);
+    const collaborators = parsed.collaborators;
     if (!collaborators.length) {
       return res.status(400).json({ error: 'Aucun collaborateur exploitable trouvé dans le classeur (feuille « Informations salariés »).' });
     }
 
     await client.query('BEGIN');
-    const { created, updated, errors, warnings } = await upsertCollaborators(client, collaborators, { userId: req.user.id });
+    const { created, updated, errors, warnings, historique } = await upsertCollaborators(client, collaborators, {
+      userId: req.user.id,
+      contracts: parsed.contractsByMatricule,
+      weekHours: parsed.weekHoursByMatricule,
+      leaves: parsed.leavesByMatricule,
+    });
     await client.query('COMMIT');
 
+    const h = historique || { contracts: {}, week_hours: {}, leaves: {} };
+    const fmt = (o) => `${o.created || 0} créé(s) / ${o.updated || 0} mis à jour`;
     res.json({
-      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''}${warnings && warnings.length ? `, ${warnings.length} avertissement(s)` : ''} — ${collaborators.length} ligne(s) lue(s)`,
+      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''}${warnings && warnings.length ? `, ${warnings.length} avertissement(s)` : ''} — ${collaborators.length} ligne(s) lue(s) ; contrats/avenants : ${fmt(h.contracts)} ; semaines d'heures : ${fmt(h.week_hours)} ; absences : ${fmt(h.leaves)}`,
       created,
       updated,
       errors,
       warnings: warnings || [],
+      historique: h,
       total: created.length + updated.length + errors.length,
     });
   } catch (err) {

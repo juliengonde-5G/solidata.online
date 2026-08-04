@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import api from '../services/api';
 import { frDate } from '../components/insertion/freins';
+import { formatEmployeeName } from '../utils/names';
 
 /**
  * Écran ETI de renouvellement (REC-UX-06 — bloquant PR 2).
@@ -110,7 +111,7 @@ export default function RenouvellementETI() {
       }
 
       setInfo({
-        nom: entry ? `${entry.first_name} ${entry.last_name}` : 'Salarié',
+        nom: entry ? formatEmployeeName(entry.last_name, entry.first_name) : 'Salarié',
         contract_end: entry?.contract_end || null,
         jours_restants: entry?.jours_restants ?? null,
         titre: milestone?.titre || entry?.entretien?.titre || 'Renouvellement',

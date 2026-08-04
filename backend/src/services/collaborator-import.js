@@ -260,24 +260,269 @@ function pick(obj, ...headers) {
   return null;
 }
 
+// ── Lot 3 (2026-08) — Historique des contrats, planning, heures, congés ────
+
+/** Nombre décimal tolérant (virgule FR) → number ou null. */
+function toNum(v) {
+  if (v == null || v === '') return null;
+  const n = parseFloat(String(v).replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Heure 'HH:MM' normalisée (gère string '8:30'/'08h30' et objet Date exceljs). */
+function cleanTime(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date && !isNaN(v)) {
+    return `${String(v.getUTCHours()).padStart(2, '0')}:${String(v.getUTCMinutes()).padStart(2, '0')}`;
+  }
+  const m = String(v).trim().match(/^(\d{1,2})[:hH](\d{2})/);
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null;
+}
+
+/** Veille d'une date ISO (YYYY-MM-DD), en UTC (déterministe). */
+function dayBeforeISO(iso) {
+  if (!iso) return null;
+  const d = new Date(`${iso}T12:00:00Z`);
+  if (isNaN(d)) return null;
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+const DAYS_FR = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
+const DAY_LABELS = { lundi: 'Lundi', mardi: 'Mardi', mercredi: 'Mercredi', jeudi: 'Jeudi', vendredi: 'Vendredi', samedi: 'Samedi', dimanche: 'Dimanche' };
+
 /**
- * Parse un buffer .xlsx (export complet Malibou) → liste de collaborateurs
- * normalisés, en fusionnant « Informations salariés » (identité/coordonnées)
- * et « Contrats » (poste / type / dates / horaires — dernier contrat).
+ * Planning hebdomadaire contractuel depuis les 28 colonnes horaires de la
+ * feuille « Contrats ». RÈGLE MÉTIER : une colonne VIDE = demi-journée NON
+ * travaillée → le jour/la demi-journée est simplement ABSENT du JSON.
+ * Forme : { lundi: { matin: {debut,fin}, apres_midi: {debut,fin} }, ... }
+ * Renvoie null si aucun horaire n'est renseigné (ex. forfait jours).
  */
-async function parseWorkbookBuffer(buffer) {
+function parseWeeklySchedule(rowObj) {
+  const sched = {};
+  let any = false;
+  for (const day of DAYS_FR) {
+    const label = DAY_LABELS[day];
+    const periods = {};
+    for (const [key, periodLabel] of [['matin', 'Matin'], ['apres_midi', 'Après-midi']]) {
+      const debut = cleanTime(pick(rowObj, `${label} - ${periodLabel} - Heure de début`, `${label} - ${periodLabel} - Heure de debut`));
+      const fin = cleanTime(pick(rowObj, `${label} - ${periodLabel} - Heure de fin`));
+      if (debut || fin) {
+        periods[key] = { debut, fin };
+        any = true;
+      }
+    }
+    if (Object.keys(periods).length > 0) sched[day] = periods;
+  }
+  return any ? sched : null;
+}
+
+/** Normalise une ligne brute de la feuille « Contrats » (un avenant). */
+function normalizeContractRow(c) {
+  const position = cleanStr(pick(c, 'Intitulé de poste', 'Intitule de poste', 'Poste'));
+  const rawType = normalizeContractType(pick(c, 'Type de contrat'));
+  // Item 41 : un poste « … Cddi » sous type Malibou « CDD » est un CDDI — objet
+  // métier central du suivi d'insertion (cumul 24 mois), on ne le perd plus.
+  const contractType = (/cddi/i.test(position || '') && String(rawType || '').toUpperCase() === 'CDD')
+    ? 'CDDI' : rawType;
+  const officialStart = toISODate(pick(c, 'Date de début', 'Date de debut'));
+  return {
+    matricule: cleanStr(pick(c, 'Matricule')),
+    contract_uid: cleanStr(pick(c, 'ID contrat')),
+    official_start: officialStart,
+    official_end: toISODate(pick(c, 'Date de fin')),
+    // Date d'avenant absente (contrat mono-ligne) → la ligne vaut depuis le début.
+    avenant_date: toISODate(pick(c, "Date d'avenant")) || officialStart,
+    trial_period_end: toISODate(pick(c, "Fin de période d'essai effective", "Fin de période d'essai")),
+    dpae_reference: cleanStr(pick(c, 'Référence DPAE', 'Reference DPAE')),
+    dpae_date: toISODate(pick(c, 'Date DPAE', "Date d'envoi DPAE")),
+    position,
+    contract_type: contractType,
+    motif_cdd: cleanStr(pick(c, 'Motif du CDD')),
+    statut_cadre: toBool(pick(c, 'Statut cadre')),
+    qualification: cleanStr(pick(c, 'Qualification')),
+    gross_salary: cleanStr(pick(c, 'Salaire brut')),
+    work_time_type: cleanStr(pick(c, 'Type de temps de travail')),
+    work_time_category: cleanStr(pick(c, 'Temps plein / Temps partiel')),
+    days_per_week: toNum(pick(c, 'Nombre de jours par semaine')),
+    weekly_hours: toNum(pick(c, "Nombre d'heures par semaine")),
+    days_per_year: toNum(pick(c, 'Nombre de jours par an')),
+    hours_per_year: toNum(pick(c, "Nombre d'heures par an")),
+    weekly_schedule: parseWeeklySchedule(c),
+    siret: cleanStr(pick(c, 'SIRET')),
+    establishment: cleanStr(pick(c, 'Établissement', 'Etablissement')),
+  };
+}
+
+/**
+ * Chaînage des avenants d'un même matricule (RÈGLE MÉTIER client) :
+ *  - tri par Date d'avenant (à défaut Date de début) ;
+ *  - période effective d'une ligne = [date d'avenant → date de fin], la ligne
+ *    précédente s'arrêtant LA VEILLE de la date d'avenant suivante (sans jamais
+ *    dépasser sa propre date de fin officielle — cas de deux contrats disjoints) ;
+ *  - la date d'embauche du contrat = Date de début officielle (unique, répétée
+ *    sur chaque ligne d'avenant) ;
+ *  - origin : 1re ligne du salarié = 'embauche', 1re ligne d'un NOUVEAU contrat
+ *    (ID contrat différent) = 'renouvellement', autres lignes = 'avenant'.
+ */
+function buildContractChain(rows) {
+  const sorted = [...rows].sort((a, b) => {
+    const ka = a.avenant_date || a.official_start || '';
+    const kb = b.avenant_date || b.official_start || '';
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    const sa = a.official_start || '';
+    const sb = b.official_start || '';
+    return sa < sb ? -1 : sa > sb ? 1 : 0;
+  });
+  return sorted.map((row, i) => {
+    const effectiveStart = row.avenant_date || row.official_start || null;
+    let effectiveEnd = row.official_end || null;
+    const next = sorted[i + 1];
+    if (next) {
+      const nextStart = next.avenant_date || next.official_start;
+      const eve = dayBeforeISO(nextStart);
+      if (eve && (effectiveEnd == null || eve < effectiveEnd)) effectiveEnd = eve;
+      // Deux avenants le même jour (donnée dégénérée) : ne pas inverser la période.
+      if (effectiveStart && effectiveEnd && effectiveEnd < effectiveStart) effectiveEnd = effectiveStart;
+    }
+    let origin = 'avenant';
+    if (i === 0) origin = 'embauche';
+    else if (row.contract_uid && sorted[i - 1].contract_uid && row.contract_uid !== sorted[i - 1].contract_uid) origin = 'renouvellement';
+    return { ...row, effective_start: effectiveStart, effective_end: effectiveEnd, origin };
+  });
+}
+
+/**
+ * Dédoublonnage de la feuille « Heures travaillées » : Malibou émet UNE ligne
+ * par CONTRAT et par semaine, les heures étant DUPLIQUÉES sur chaque ligne
+ * (constaté sur l'export réel : 262/277 doublons strictement identiques,
+ * les autres portant 0 ou l'ancienne quotité). On retient donc la ligne du
+ * contrat à la quotité la plus élevée (dernier avenant) — JAMAIS de somme,
+ * qui doublerait les heures.
+ */
+function pickBetterWeekRow(a, b) {
+  const ka = [a.hours_contract || 0, a.hours_expected || 0, a.hours_worked || 0];
+  const kb = [b.hours_contract || 0, b.hours_expected || 0, b.hours_worked || 0];
+  for (let i = 0; i < 3; i++) {
+    if (ka[i] !== kb[i]) return ka[i] > kb[i] ? a : b;
+  }
+  return b;
+}
+
+/** Feuille « Heures travaillées » → { matricule: [semaines dédoublonnées] }. */
+function parseWeekHoursSheet(sheet) {
+  const byMat = {};
+  for (const r of sheetToObjects(sheet)) {
+    const mat = cleanStr(pick(r, 'Matricule'));
+    const isoYear = toNum(pick(r, 'Année (ISO)', 'Annee (ISO)'));
+    const isoWeek = toNum(pick(r, 'Semaine (ISO)'));
+    if (!mat || !isoYear || !isoWeek) continue;
+    const row = {
+      iso_year: isoYear,
+      iso_week: isoWeek,
+      week_start: toISODate(pick(r, 'Date de début', 'Date de debut')),
+      week_end: toISODate(pick(r, 'Date de fin')),
+      statut: cleanStr(pick(r, 'Statut')),
+      hours_worked: toNum(pick(r, 'Heures travaillées', 'Heures travaillees')),
+      hours_expected: toNum(pick(r, 'Heures attendues')),
+      hours_contract: toNum(pick(r, 'Heures contractuelles')),
+      hours_absence: toNum(pick(r, "Heures d'absence")),
+      hs_0: toNum(pick(r, 'HS 0%')),
+      hs_25: toNum(pick(r, 'HS 25%')),
+      hs_50: toNum(pick(r, 'HS 50%')),
+      h_inf: toNum(pick(r, 'H inf.')),
+      hc_0: toNum(pick(r, 'HC 0%')),
+      hc_10: toNum(pick(r, 'HC 10%')),
+      hours_exc_sunday: toNum(pick(r, 'Heures exceptionnelles (dimanche)')),
+      hours_exc_holiday: toNum(pick(r, 'Heures exceptionnelles (jour férié)', 'Heures exceptionnelles (jour ferie)')),
+      hours_exc_night: toNum(pick(r, 'Heures exceptionnelles (nuit)')),
+    };
+    const weeks = (byMat[mat] = byMat[mat] || {});
+    const key = `${isoYear}-${isoWeek}`;
+    weeks[key] = weeks[key] ? pickBetterWeekRow(row, weeks[key]) : row;
+  }
+  const out = {};
+  for (const [mat, weeks] of Object.entries(byMat)) out[mat] = Object.values(weeks);
+  return out;
+}
+
+/** Catégorie ERP d'un libellé d'absence Malibou (aligné enum work_hours). */
+function categorizeLeaveType(label) {
+  const s = stripAccents(label || '').toLowerCase();
+  if (/conges? paye|rtt|repos compensateur/.test(s)) return 'holiday';
+  if (/maladie|enfant malade/.test(s)) return 'sick';
+  return 'absence';
+}
+
+/** Feuille « Congés & Télétravail » → { matricule: [absences] }. */
+function parseLeavesSheet(sheet) {
+  const byMat = {};
+  for (const r of sheetToObjects(sheet)) {
+    const mat = cleanStr(pick(r, 'Matricule'));
+    const leaveType = cleanStr(pick(r, 'Type'));
+    const startDate = toISODate(pick(r, 'Date de début', 'Date de debut'));
+    if (!mat || !leaveType || !startDate) continue;
+    const validator = [cleanStr(pick(r, 'Prénom du validateur', 'Prenom du validateur')), cleanStr(pick(r, 'Nom du validateur'))]
+      .filter(Boolean).join(' ') || null;
+    (byMat[mat] = byMat[mat] || []).push({
+      leave_type: leaveType,
+      type_category: categorizeLeaveType(leaveType),
+      request_date: toISODate(pick(r, 'Date de la demande')),
+      start_date: startDate,
+      end_date: toISODate(pick(r, 'Date de fin')),
+      half_day_start: toBool(pick(r, 'Demi-journée début', 'Demi-journee debut')),
+      half_day_end: toBool(pick(r, 'Demi-journée fin', 'Demi-journee fin')),
+      duration_days: toNum(pick(r, 'Durée', 'Duree')),
+      duration_working_days: toNum(pick(r, 'Durée (jour ouvré)', 'Duree (jour ouvre)')),
+      statut: cleanStr(pick(r, 'Statut')),
+      validator_name: validator,
+      validated_at: toISODate(pick(r, 'Date de validation')),
+    });
+  }
+  return byMat;
+}
+
+/**
+ * Parse un buffer .xlsx (export complet Malibou) → toutes les données
+ * exploitables du classeur :
+ *   { collaborators, contractsByMatricule, weekHoursByMatricule, leavesByMatricule }
+ *  - collaborators : fusion « Informations salariés » + dernier avenant « Contrats » ;
+ *  - contractsByMatricule : HISTORIQUE COMPLET des contrats/avenants chaînés
+ *    (buildContractChain — périodes effectives reconstituées) ;
+ *  - weekHoursByMatricule : feuille « Heures travaillées » (hebdo ISO, dédoublonnée) ;
+ *  - leavesByMatricule : feuille « Congés & Télétravail ».
+ * NB : la feuille « Jours travaillés » de l'export est vide (en-tête seule) —
+ * elle sera lue le jour où Malibou l'alimentera (forfait jours).
+ */
+async function parseWorkbookFull(buffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
 
   const infoSheet = findSheet(wb, 'Informations salariés', 'Informations salaries', 'Salariés', 'Salaries');
   const contractSheet = findSheet(wb, 'Contrats', 'Contrat');
+  const hoursSheet = findSheet(wb, 'Heures travaillées', 'Heures travaillees');
+  const leavesSheet = findSheet(wb, 'Congés & Télétravail', 'Conges & Teletravail', 'Congés', 'Conges');
 
   if (!infoSheet) {
     throw new Error("Feuille « Informations salariés » introuvable dans le classeur.");
   }
 
-  // Index des contrats par matricule → on garde le plus récent
-  // (max date d'avenant, sinon date de début).
+  // Historique complet des contrats par matricule (chaîné par date d'avenant).
+  const contractRowsByMat = {};
+  if (contractSheet) {
+    for (const c of sheetToObjects(contractSheet)) {
+      const row = normalizeContractRow(c);
+      if (!row.matricule) continue;
+      (contractRowsByMat[row.matricule] = contractRowsByMat[row.matricule] || []).push(row);
+    }
+  }
+  const contractsByMatricule = {};
+  for (const [mat, rows] of Object.entries(contractRowsByMat)) {
+    contractsByMatricule[mat] = buildContractChain(rows);
+  }
+
+  // Index « dernier contrat » par matricule (lignes brutes) pour la fiche
+  // collaborateur — comportement historique conservé (max date d'avenant).
   const contractByMatricule = {};
   if (contractSheet) {
     for (const c of sheetToObjects(contractSheet)) {
@@ -290,6 +535,9 @@ async function parseWorkbookBuffer(buffer) {
       }
     }
   }
+
+  const weekHoursByMatricule = hoursSheet ? parseWeekHoursSheet(hoursSheet) : {};
+  const leavesByMatricule = leavesSheet ? parseLeavesSheet(leavesSheet) : {};
 
   const collaborators = [];
   for (const r of sheetToObjects(infoSheet)) {
@@ -343,6 +591,15 @@ async function parseWorkbookBuffer(buffer) {
       manager_malibou_id: cleanStr(pick(r, 'Matricule du responsable')),
       manager_name: [cleanStr(pick(r, 'Prénom du responsable', 'Prenom du responsable')), cleanStr(pick(r, 'Nom du responsable'))]
         .filter(Boolean).join(' ') || null,
+      // Lot 3 — contacts d'urgence (obligation de sécurité employeur)
+      emergency_contact_name: [cleanStr(pick(r, "Prénom contact d'urgence 1", "Prenom contact d'urgence 1")), cleanStr(pick(r, "Nom contact d'urgence 1"))]
+        .filter(Boolean).join(' ') || null,
+      emergency_contact_phone: cleanStr(pick(r, "Téléphone contact d'urgence 1", "Telephone contact d'urgence 1")),
+      emergency_contact_email: cleanStr(pick(r, "Email contact d'urgence 1")),
+      emergency_contact2_name: [cleanStr(pick(r, "Prénom contact d'urgence 2", "Prenom contact d'urgence 2")), cleanStr(pick(r, "Nom contact d'urgence 2"))]
+        .filter(Boolean).join(' ') || null,
+      emergency_contact2_phone: cleanStr(pick(r, "Téléphone contact d'urgence 2", "Telephone contact d'urgence 2")),
+      emergency_contact2_email: cleanStr(pick(r, "Email contact d'urgence 2")),
       is_active: toBool(pick(r, 'Contrat actif')),
       equipe_label: cleanStr(pick(r, 'Équipe', 'Equipe')),
       // Contrat (dernier connu)
@@ -363,6 +620,12 @@ async function parseWorkbookBuffer(buffer) {
     });
   }
 
+  return { collaborators, contractsByMatricule, weekHoursByMatricule, leavesByMatricule };
+}
+
+/** Rétro-compatibilité : renvoie la seule liste de collaborateurs (voie historique). */
+async function parseWorkbookBuffer(buffer) {
+  const { collaborators } = await parseWorkbookFull(buffer);
   return collaborators;
 }
 
@@ -418,15 +681,24 @@ async function checkCddiDerogationWarning(db, employeeId, label, warnings) {
  * Applique une liste de collaborateurs normalisés.
  * @param {import('pg').PoolClient|import('pg').Pool} db  client OU pool
  * @param {Array<object>} collaborators
- * @param {{ userId?: number }} opts
- * @returns {{ created: [], updated: [], errors: [], warnings: [] }}
+ * @param {{ userId?: number, contracts?: object, weekHours?: object, leaves?: object }} opts
+ *   contracts/weekHours/leaves : données Lot 3 par matricule (parseWorkbookFull) —
+ *   absentes sur la voie CSV historique, l'import garde alors son comportement
+ *   « contrat courant » d'origine.
+ * @returns {{ created: [], updated: [], errors: [], warnings: [], historique: object }}
  *   warnings = signalements non bloquants (ex. dérogation CDDI à régulariser)
+ *   historique = compteurs Lot 3 { contracts, week_hours, leaves } (created/updated)
  */
-async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
+async function upsertCollaborators(db, collaborators, { userId = null, contracts = null, weekHours = null, leaves = null } = {}) {
   const created = [];
   const updated = [];
   const errors = [];
   const warnings = [];
+  const historique = {
+    contracts: { created: 0, updated: 0 },
+    week_hours: { created: 0, updated: 0 },
+    leaves: { created: 0, updated: 0 },
+  };
 
   // Cache des équipes (type → id)
   const teamRows = await db.query('SELECT id, type FROM teams');
@@ -509,6 +781,12 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
              establishment = COALESCE($36, establishment),
              team_id = COALESCE($37, team_id),
              is_active = $38,
+             emergency_contact_name = COALESCE($39, emergency_contact_name),
+             emergency_contact_phone = COALESCE($40, emergency_contact_phone),
+             emergency_contact_email = COALESCE($41, emergency_contact_email),
+             emergency_contact2_name = COALESCE($42, emergency_contact2_name),
+             emergency_contact2_phone = COALESCE($43, emergency_contact2_phone),
+             emergency_contact2_email = COALESCE($44, emergency_contact2_email),
              updated_at = NOW()
            WHERE id = $1`,
           [
@@ -521,9 +799,14 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
             c.position, c.qualification, contractType, c.contract_start, c.contract_end,
             c.weekly_hours, c.work_time_type, c.gross_salary, c.siret, c.establishment,
             teamId, isActive,
+            c.emergency_contact_name, c.emergency_contact_phone, c.emergency_contact_email,
+            c.emergency_contact2_name, c.emergency_contact2_phone, c.emergency_contact2_email,
           ]
         );
-        await upsertCurrentContract(db, existing.id, { contractType, teamId, c });
+        const chain = contracts ? contracts[c.malibou_id] : null;
+        await applyContractData(db, existing.id, { contractType, teamId, c }, chain, historique);
+        if (weekHours && weekHours[c.malibou_id]) await upsertWeekHours(db, existing.id, weekHours[c.malibou_id], historique.week_hours);
+        if (leaves && leaves[c.malibou_id]) await upsertLeaves(db, existing.id, leaves[c.malibou_id], historique.leaves);
         await applyMedicalVisit(db, existing.id, c);
         // Item 41 : si l'échéance de contrat a été prolongée, recaler les jalons
         // d'insertion non réalisés (no-op si parcours non initialisé/terminé).
@@ -538,8 +821,10 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
           console.warn('[IMPORT] resyncMilestones ignoré :', e.message);
         }
         // EXG-03 / RES-08 : signaler (sans bloquer) un cumul CDDI > 24 mois
-        // sans motif de dérogation saisi sur la fiche.
-        if (String(contractType).toUpperCase() === 'CDDI') {
+        // sans motif de dérogation saisi sur la fiche (Lot 3 : les CDDI sont
+        // aussi détectés depuis l'historique de contrats — poste « … Cddi »).
+        if (String(contractType).toUpperCase() === 'CDDI'
+            || (chain || []).some((r) => String(r.contract_type || '').toUpperCase() === 'CDDI')) {
           await checkCddiDerogationWarning(db, existing.id, `${c.first_name} ${c.last_name}`, warnings);
         }
         updated.push({ id: existing.id, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
@@ -563,10 +848,13 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
              manager_malibou_id, manager_name,
              position, qualification, contract_type, contract_start, contract_end,
              weekly_hours, work_time_type, gross_salary, siret, establishment,
-             team_id, is_active, insertion_status, insertion_start_date
+             team_id, is_active, insertion_status, insertion_start_date,
+             emergency_contact_name, emergency_contact_phone, emergency_contact_email,
+             emergency_contact2_name, emergency_contact2_phone, emergency_contact2_email
            ) VALUES (
              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-             $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41
+             $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,
+             $42,$43,$44,$45,$46,$47
            ) RETURNING id`,
           [
             c.first_name, c.last_name, c.malibou_id, c.birth_name, c.email, c.personal_email, c.phone,
@@ -578,10 +866,15 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
             c.position, c.qualification, contractType, c.contract_start, c.contract_end,
             c.weekly_hours, c.work_time_type, c.gross_salary, c.siret, c.establishment,
             teamId, isActive, insertionStatus, insertionStart,
+            c.emergency_contact_name, c.emergency_contact_phone, c.emergency_contact_email,
+            c.emergency_contact2_name, c.emergency_contact2_phone, c.emergency_contact2_email,
           ]
         );
         const newId = ins.rows[0].id;
-        await upsertCurrentContract(db, newId, { contractType, teamId, c });
+        const chain = contracts ? contracts[c.malibou_id] : null;
+        await applyContractData(db, newId, { contractType, teamId, c }, chain, historique);
+        if (weekHours && weekHours[c.malibou_id]) await upsertWeekHours(db, newId, weekHours[c.malibou_id], historique.week_hours);
+        if (leaves && leaves[c.malibou_id]) await upsertLeaves(db, newId, leaves[c.malibou_id], historique.leaves);
         await applyMedicalVisit(db, newId, c);
         // Extension 2026-07 (PR1) : l'initialisation des jalons se fait au
         // DÉCLENCHEUR (import paie / liaison candidat), plus en lecture — les
@@ -599,7 +892,8 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
         }
         // EXG-03 / RES-08 : même signalement sur une fiche créée (cas d'un
         // historique de contrats CDDI repris par l'export paie).
-        if (String(contractType).toUpperCase() === 'CDDI') {
+        if (String(contractType).toUpperCase() === 'CDDI'
+            || (chain || []).some((r) => String(r.contract_type || '').toUpperCase() === 'CDDI')) {
           await checkCddiDerogationWarning(db, newId, `${c.first_name} ${c.last_name}`, warnings);
         }
         created.push({ id: newId, malibou_id: c.malibou_id, first_name: c.first_name, last_name: c.last_name, position: c.position, contract_type: contractType });
@@ -625,7 +919,207 @@ async function upsertCollaborators(db, collaborators, { userId = null } = {}) {
     `);
   } catch (err) { /* colonne éventuellement absente sur ancienne base — non bloquant */ }
 
-  return { created, updated, errors, warnings };
+  return { created, updated, errors, warnings, historique };
+}
+
+// ── Lot 3 — application des données de contrat (historique ou voie legacy) ──
+
+/**
+ * Applique les données de contrat d'un collaborateur :
+ *  - historique complet disponible (voie .xlsx, feuille « Contrats ») →
+ *    upsertContractHistory (toutes les lignes d'avenant, périodes chaînées) +
+ *    déduction des indisponibilités hebdo depuis le planning contractuel courant ;
+ *  - sinon (voie CSV historique, sans feuille Contrats) → comportement d'origine
+ *    « un contrat courant » (upsertCurrentContract).
+ */
+async function applyContractData(db, employeeId, { contractType, teamId, c }, chain, historique) {
+  if (chain && chain.length > 0) {
+    await upsertContractHistory(db, employeeId, chain, teamId, historique.contracts);
+    const current = chain[chain.length - 1];
+    if (current.weekly_schedule) await applyScheduleAvailability(db, employeeId, current.weekly_schedule);
+  } else {
+    await upsertCurrentContract(db, employeeId, { contractType, teamId, c });
+  }
+}
+
+/**
+ * Upsert IDEMPOTENT de l'historique des contrats/avenants d'un salarié.
+ * Clé d'appariement : (malibou_contract_id, avenant_date) — index unique partiel.
+ * Adoption : une ligne héritée de l'ancien mécanisme « contrat courant » (sans
+ * identifiant Malibou, même date de début) est REQUALIFIÉE plutôt que doublée.
+ * start_date/end_date reçoivent la PÉRIODE EFFECTIVE chaînée et sont ÉCRASÉES
+ * au réimport (un nouvel avenant recale la fin effective de la ligne précédente).
+ * Termine en recalculant is_current : EXACTEMENT UNE ligne par salarié (les
+ * JOIN `is_current = true` de l'application en dépendent) = dernier avenant
+ * dont la date d'effet est <= aujourd'hui.
+ */
+async function upsertContractHistory(db, employeeId, chain, teamId, counters) {
+  const adopted = new Set();
+  for (const row of chain) {
+    if (!row.effective_start) continue; // ligne inexploitable (aucune date)
+    const ecType = safeContractType(row.contract_type);
+    const weekly = resolveWeeklyHours(row.weekly_hours);
+
+    let existingId = null;
+    if (row.contract_uid && row.avenant_date) {
+      const r = await db.query(
+        'SELECT id FROM employee_contracts WHERE malibou_contract_id = $1 AND avenant_date = $2 LIMIT 1',
+        [row.contract_uid, row.avenant_date]
+      );
+      existingId = r.rows[0] ? r.rows[0].id : null;
+    }
+    if (!existingId) {
+      const r = await db.query(
+        `SELECT id FROM employee_contracts
+         WHERE employee_id = $1 AND malibou_contract_id IS NULL AND start_date = $2
+         ORDER BY is_current DESC, id DESC LIMIT 1`,
+        [employeeId, row.official_start || row.effective_start]
+      );
+      if (r.rows[0] && !adopted.has(r.rows[0].id)) {
+        existingId = r.rows[0].id;
+        adopted.add(existingId);
+      }
+    }
+
+    const params = [
+      employeeId, ecType, row.effective_start, row.effective_end, row.origin, weekly, teamId,
+      row.contract_uid, row.avenant_date, row.official_start, row.official_end,
+      row.trial_period_end, row.motif_cdd, row.statut_cadre, row.qualification,
+      row.position, row.gross_salary, row.work_time_type, row.work_time_category,
+      row.days_per_week, row.hours_per_year, row.days_per_year,
+      row.weekly_schedule ? JSON.stringify(row.weekly_schedule) : null,
+      row.dpae_reference, row.dpae_date, row.siret, row.establishment,
+    ];
+
+    if (existingId) {
+      await db.query(
+        `UPDATE employee_contracts SET
+           employee_id = $1, contract_type = $2, start_date = $3, end_date = $4, origin = $5,
+           weekly_hours = $6, team_id = COALESCE($7, team_id),
+           malibou_contract_id = $8, avenant_date = $9,
+           official_start_date = $10, official_end_date = $11,
+           trial_period_end = $12, motif_cdd = $13, statut_cadre = $14, qualification = $15,
+           position_title = $16, gross_salary = $17, work_time_type = $18, work_time_category = $19,
+           days_per_week = $20, hours_per_year = $21, days_per_year = $22,
+           weekly_schedule = $23, dpae_reference = $24, dpae_date = $25,
+           siret = $26, establishment = $27, source = 'malibou', updated_at = NOW()
+         WHERE id = $28`,
+        [...params, existingId]
+      );
+      counters.updated++;
+    } else {
+      await db.query(
+        `INSERT INTO employee_contracts (
+           employee_id, contract_type, start_date, end_date, origin, weekly_hours, team_id,
+           malibou_contract_id, avenant_date, official_start_date, official_end_date,
+           trial_period_end, motif_cdd, statut_cadre, qualification,
+           position_title, gross_salary, work_time_type, work_time_category,
+           days_per_week, hours_per_year, days_per_year, weekly_schedule,
+           dpae_reference, dpae_date, siret, establishment, source, is_current
+         ) VALUES (
+           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+           $21,$22,$23,$24,$25,$26,$27,'malibou',false
+         )`,
+        params
+      );
+      counters.created++;
+    }
+  }
+
+  // « Contrat courant » = dernier avenant à date d'effet <= aujourd'hui ;
+  // si tout est futur, la 1re ligne. Toujours EXACTEMENT une ligne is_current.
+  await db.query(
+    `WITH ranked AS (
+       SELECT id, ROW_NUMBER() OVER (
+         ORDER BY (start_date <= CURRENT_DATE) DESC,
+                  CASE WHEN start_date <= CURRENT_DATE THEN start_date END DESC NULLS LAST,
+                  CASE WHEN start_date > CURRENT_DATE THEN start_date END ASC NULLS LAST,
+                  id DESC
+       ) AS rn
+       FROM employee_contracts WHERE employee_id = $1
+     )
+     UPDATE employee_contracts ec SET is_current = (r.rn = 1)
+     FROM ranked r WHERE ec.id = r.id`,
+    [employeeId]
+  );
+}
+
+/**
+ * Indisponibilités hebdomadaires déduites du planning contractuel courant
+ * (RÈGLE MÉTIER : jour absent du planning = jour non travaillé → day_off).
+ * FILL-IF-EMPTY strict : ne s'applique QUE si le salarié n'a AUCUNE
+ * indisponibilité déjà saisie (on n'écrase jamais une saisie RH manuelle).
+ */
+async function applyScheduleAvailability(db, employeeId, weeklySchedule) {
+  const existing = await db.query('SELECT 1 FROM employee_availability WHERE employee_id = $1 LIMIT 1', [employeeId]);
+  if (existing.rows.length > 0) return;
+  for (const day of DAYS_FR) {
+    if (!weeklySchedule[day]) {
+      await db.query(
+        'INSERT INTO employee_availability (employee_id, day_off) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [employeeId, day]
+      );
+    }
+  }
+}
+
+/** Upsert idempotent des semaines d'heures (clé employé + année + semaine ISO). */
+async function upsertWeekHours(db, employeeId, weeks, counters) {
+  for (const w of weeks) {
+    const r = await db.query(
+      `INSERT INTO employee_week_hours (
+         employee_id, iso_year, iso_week, week_start, week_end, statut,
+         hours_worked, hours_expected, hours_contract, hours_absence,
+         hs_0, hs_25, hs_50, h_inf, hc_0, hc_10,
+         hours_exc_sunday, hours_exc_holiday, hours_exc_night, source
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'malibou')
+       ON CONFLICT (employee_id, iso_year, iso_week) DO UPDATE SET
+         week_start = EXCLUDED.week_start, week_end = EXCLUDED.week_end, statut = EXCLUDED.statut,
+         hours_worked = EXCLUDED.hours_worked, hours_expected = EXCLUDED.hours_expected,
+         hours_contract = EXCLUDED.hours_contract, hours_absence = EXCLUDED.hours_absence,
+         hs_0 = EXCLUDED.hs_0, hs_25 = EXCLUDED.hs_25, hs_50 = EXCLUDED.hs_50,
+         h_inf = EXCLUDED.h_inf, hc_0 = EXCLUDED.hc_0, hc_10 = EXCLUDED.hc_10,
+         hours_exc_sunday = EXCLUDED.hours_exc_sunday, hours_exc_holiday = EXCLUDED.hours_exc_holiday,
+         hours_exc_night = EXCLUDED.hours_exc_night, source = EXCLUDED.source, updated_at = NOW()
+       RETURNING (xmax = 0) AS inserted`,
+      [
+        employeeId, w.iso_year, w.iso_week, w.week_start, w.week_end, w.statut,
+        w.hours_worked, w.hours_expected, w.hours_contract, w.hours_absence,
+        w.hs_0, w.hs_25, w.hs_50, w.h_inf, w.hc_0, w.hc_10,
+        w.hours_exc_sunday, w.hours_exc_holiday, w.hours_exc_night,
+      ]
+    );
+    if (r.rows[0] && r.rows[0].inserted) counters.created++;
+    else counters.updated++;
+  }
+}
+
+/** Upsert idempotent des absences/congés (clé employé + type + date de début). */
+async function upsertLeaves(db, employeeId, leaveRows, counters) {
+  for (const l of leaveRows) {
+    const r = await db.query(
+      `INSERT INTO employee_leaves (
+         employee_id, leave_type, type_category, request_date, start_date, end_date,
+         half_day_start, half_day_end, duration_days, duration_working_days,
+         statut, validator_name, validated_at, source
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'malibou')
+       ON CONFLICT (employee_id, leave_type, start_date) DO UPDATE SET
+         type_category = EXCLUDED.type_category, request_date = EXCLUDED.request_date,
+         end_date = EXCLUDED.end_date,
+         half_day_start = EXCLUDED.half_day_start, half_day_end = EXCLUDED.half_day_end,
+         duration_days = EXCLUDED.duration_days, duration_working_days = EXCLUDED.duration_working_days,
+         statut = EXCLUDED.statut, validator_name = EXCLUDED.validator_name,
+         validated_at = EXCLUDED.validated_at, source = EXCLUDED.source, updated_at = NOW()
+       RETURNING (xmax = 0) AS inserted`,
+      [
+        employeeId, l.leave_type, l.type_category, l.request_date, l.start_date, l.end_date,
+        l.half_day_start, l.half_day_end, l.duration_days, l.duration_working_days,
+        l.statut, l.validator_name, l.validated_at,
+      ]
+    );
+    if (r.rows[0] && r.rows[0].inserted) counters.created++;
+    else counters.updated++;
+  }
 }
 
 /**
@@ -707,6 +1201,7 @@ async function upsertCurrentContract(db, employeeId, { contractType, teamId, c }
 
 module.exports = {
   parseWorkbookBuffer,
+  parseWorkbookFull,
   upsertCollaborators,
   // exportés pour tests / réutilisation
   toISODate,
@@ -718,4 +1213,13 @@ module.exports = {
   computeMedicalDueDate,
   resolveWeeklyHours,
   POSITION_TO_TEAM,
+  // Lot 3 (2026-08) — historique contrats / planning / heures / congés
+  buildContractChain,
+  normalizeContractRow,
+  parseWeeklySchedule,
+  pickBetterWeekRow,
+  categorizeLeaveType,
+  cleanTime,
+  dayBeforeISO,
+  toNum,
 };

@@ -2922,7 +2922,7 @@ async function initDatabase() {
         'Salariés (permanents et parcours d''insertion)',
         'Identité et coordonnées, données contractuelles (dates, quotité, salaire brut contractuel, période d''essai, DPAE), heures et absences hebdomadaires, type d''absence (dont maladie — durée seulement, aucun motif médical), contacts d''urgence (nom, téléphone, email). MINIMISATION : le NIR, l''IBAN et le BIC présents dans l''export ne sont PAS importés.',
         'Service RH, direction ; agrégats non nominatifs pour le reporting',
-        'Durée du contrat + prescriptions légales (bulletins/temps de travail) ; anonymisation ERP au même rythme que la fiche salarié',
+        'Durée du contrat + prescriptions légales ; anonymisation au rythme de la fiche salarié',
         'Accès restreint ADMIN/RH (import), lecture RH/MANAGER selon rôles, upsert idempotent non destructif, journalisation applicative'
       WHERE NOT EXISTS (
         SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Import du logiciel de paie (contrats, heures, absences, contacts d''urgence)'

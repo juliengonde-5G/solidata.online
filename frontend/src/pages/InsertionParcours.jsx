@@ -707,7 +707,7 @@ function CohortePanel({ onSelect }) {
               {stats.salaries_a_risque.map((c) => (
                 <button key={c.id} onClick={() => onSelect(c.id)}
                   className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-orange-50 text-sm">
-                  <span>{c.first_name} {c.last_name}</span>
+                  <span>{formatEmployeeName(c.last_name, c.first_name)}</span>
                   <span className={`text-xs font-medium ${c.days <= 15 ? 'text-red-600' : 'text-orange-600'}`}>
                     {c.days < 0 ? 'échu' : c.days + ' j'} — {frDate(c.contract_end)}
                   </span>

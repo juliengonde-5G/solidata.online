@@ -16,6 +16,7 @@ import {
   FREINS, ENTRETIEN_STATUS_LABELS, ENTRETIEN_TYPE_LABELS, SORTIE_CLASS_LABELS,
   ACTION_STATUS_LABELS, ACTION_CATEGORY_LABELS, COMPETENCE_FILIERE_LABELS, entretienLabel,
 } from './freins';
+import { formatEmployeeName } from '../../utils/names';
 
 export const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 export const frDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
@@ -100,7 +101,7 @@ const DIAG_RUBRIQUES_DOSSIER = [
  * @param {object} p { employee, diagnostic, variante: 'salarie'|'dossier' }
  */
 export function exportDiagnosticPDF({ employee = {}, diagnostic = {}, variante = 'dossier' }) {
-  const nom = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+  const nom = formatEmployeeName(employee.last_name, employee.first_name);
   const d = diagnostic || {};
   const axes = freinsForDoc(d, variante);
 
@@ -166,7 +167,7 @@ export function exportDiagnosticPDF({ employee = {}, diagnostic = {}, variante =
  *   previousFreins : ligne (diagnostic ou bilan précédent) pour les pictos d'évolution.
  */
 export function exportEntretienPDF({ employee = {}, milestone = {}, previousFreins = null, actions = [], variante = 'dossier' }) {
-  const nom = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+  const nom = formatEmployeeName(employee.last_name, employee.first_name);
   const ms = milestone || {};
   const titre = entretienLabel(ms);
   const axes = freinsForDoc(ms, variante);
@@ -315,7 +316,7 @@ const PMSMP_OBJET_LABELS = { decouvrir_metier: 'Découvrir un métier', confirme
 export function exportBilanProlongationPassIae(data) {
   const d = data || {};
   const sal = d.salarie || {};
-  const nom = `${sal.first_name || ''} ${sal.last_name || ''}`.trim();
+  const nom = formatEmployeeName(sal.last_name, sal.first_name);
   const pass = d.pass_iae || {};
   const presc = d.prescripteur || {};
   const parcours = d.parcours || {};
@@ -466,7 +467,7 @@ function competencesSection(competences) {
 
 export function exportFicheParcoursPDF(analysis, diagnostic, competences = []) {
   const e = analysis.employee || {};
-  const nom = (e.first_name || '') + ' ' + (e.last_name || '');
+  const nom = formatEmployeeName(e.last_name, e.first_name);
   const today = new Date().toLocaleDateString('fr-FR');
   const d = diagnostic || {};
   const axes = freinsForDoc(d, 'dossier');
