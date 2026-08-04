@@ -1,7 +1,10 @@
 // Tests du service partagé de sauvegarde BDD (Lot 11) :
 //  - décision jour/heure du job auto (fonction pure shouldRunAutoBackup —
-//    mardi & vendredi 04h, heure locale du conteneur = UTC en prod) ;
-//  - format des noms de fichiers (auto_ / manuel, whitelist) ;
+//    mardi & vendredi 04h HEURE DE PARIS, évaluée en Europe/Paris via Intl,
+//    indépendamment du TZ du processus : les dates de test sont construites en
+//    UTC EXPLICITE (Date.UTC) pour prouver les deux saisons — hiver CET UTC+1,
+//    été CEST UTC+2) ;
+//  - format des noms de fichiers (auto_ libellé en heure Paris / manuel, whitelist) ;
 //  - rétention glissante : ne supprime QUE les auto_*.sql au-delà de 8,
 //    jamais les sauvegardes manuelles.
 // Aucun accès DB ni pg_dump : uniquement la logique pure + fs sur un tmpdir.
@@ -11,6 +14,7 @@ const path = require('path');
 
 const {
   shouldRunAutoBackup,
+  getParisParts,
   autoBackupFilename,
   manualBackupFilename,
   pruneAutoBackups,
@@ -21,35 +25,55 @@ const {
   SAFE_BACKUP_NAME,
 } = require('../../../src/services/db-backup');
 
-// Rappel calendrier : 2026-08-04 = mardi, 2026-08-05 = mercredi,
-// 2026-08-07 = vendredi, 2026-08-09 = dimanche (constructeur Date local,
-// même convention que now.getDay()/getHours() dans le scheduler).
-const d = (y, m, day, h) => new Date(y, m - 1, day, h, 0, 0);
+// Instant UTC explicite (indépendant du TZ du runner de test).
+// Rappel calendrier : 2026-01-06 = mardi, 2026-01-09 = vendredi (hiver, UTC+1) ;
+// 2026-08-04 = mardi, 2026-08-05 = mercredi, 2026-08-07 = vendredi,
+// 2026-08-09 = dimanche (été, UTC+2).
+const utc = (y, m, day, h) => new Date(Date.UTC(y, m - 1, day, h, 0, 0));
 
-describe('shouldRunAutoBackup — décision jour/heure (mardi & vendredi 04h)', () => {
-  it('vrai le mardi à 04h', () => {
-    const t = d(2026, 8, 4, 4);
-    expect(t.getDay()).toBe(2); // sanity : bien un mardi
-    expect(shouldRunAutoBackup(t)).toBe(true);
+describe('shouldRunAutoBackup — mardi & vendredi 04h HEURE DE PARIS', () => {
+  it('HIVER (UTC+1) : mardi 03:00 UTC = 04h Paris → true', () => {
+    expect(shouldRunAutoBackup(utc(2026, 1, 6, 3))).toBe(true);
   });
 
-  it('vrai le vendredi à 04h', () => {
-    const t = d(2026, 8, 7, 4);
-    expect(t.getDay()).toBe(5); // sanity : bien un vendredi
-    expect(shouldRunAutoBackup(t)).toBe(true);
+  it('HIVER (UTC+1) : vendredi 03:00 UTC = 04h Paris → true', () => {
+    expect(shouldRunAutoBackup(utc(2026, 1, 9, 3))).toBe(true);
   });
 
-  it('faux un mercredi à 04h (mauvais jour)', () => {
-    expect(shouldRunAutoBackup(d(2026, 8, 5, 4))).toBe(false);
+  it('HIVER (UTC+1) : mardi 04:00 UTC = 05h Paris → false (le piège UTC)', () => {
+    expect(shouldRunAutoBackup(utc(2026, 1, 6, 4))).toBe(false);
   });
 
-  it('faux un dimanche à 04h (mauvais jour)', () => {
-    expect(shouldRunAutoBackup(d(2026, 8, 9, 4))).toBe(false);
+  it('HIVER (UTC+1) : mardi 02:00 UTC = 03h Paris → false', () => {
+    expect(shouldRunAutoBackup(utc(2026, 1, 6, 2))).toBe(false);
   });
 
-  it('faux le mardi à 03h et 05h (mauvaise heure)', () => {
-    expect(shouldRunAutoBackup(d(2026, 8, 4, 3))).toBe(false);
-    expect(shouldRunAutoBackup(d(2026, 8, 4, 5))).toBe(false);
+  it('ÉTÉ (UTC+2) : vendredi 02:00 UTC = 04h Paris → true', () => {
+    expect(shouldRunAutoBackup(utc(2026, 8, 7, 2))).toBe(true);
+  });
+
+  it('ÉTÉ (UTC+2) : mardi 02:00 UTC = 04h Paris → true', () => {
+    expect(shouldRunAutoBackup(utc(2026, 8, 4, 2))).toBe(true);
+  });
+
+  it('ÉTÉ (UTC+2) : mardi 03:00 UTC = 05h Paris → false', () => {
+    expect(shouldRunAutoBackup(utc(2026, 8, 4, 3))).toBe(false);
+  });
+
+  it('mauvais jour Paris : mercredi et dimanche 04h Paris → false', () => {
+    expect(shouldRunAutoBackup(utc(2026, 8, 5, 2))).toBe(false); // mercredi 04h Paris (été)
+    expect(shouldRunAutoBackup(utc(2026, 8, 9, 2))).toBe(false); // dimanche 04h Paris (été)
+  });
+
+  it('bascule de jour : lundi 23:00 UTC (hiver) = mardi 00h Paris → false (jour Paris OK, heure ≠ 4)', () => {
+    const t = utc(2026, 1, 5, 23); // lundi 23h UTC = mardi 00h Paris
+    expect(getParisParts(t)).toMatchObject({ day: 6, hour: 0, weekday: 2 });
+    expect(shouldRunAutoBackup(t)).toBe(false);
+  });
+
+  it('getParisParts : décomposition Paris correcte dans les deux saisons', () => {
+    expect(getParisParts(utc(2026, 1, 6, 3))).toMatchObject({ year: 2026, month: 1, day: 6, hour: 4, weekday: 2 });
+    expect(getParisParts(utc(2026, 8, 7, 2))).toMatchObject({ year: 2026, month: 8, day: 7, hour: 4, weekday: 5 });
   });
 
   it('constantes de planification : jours {mardi, vendredi}, heure 4', () => {
@@ -59,14 +83,18 @@ describe('shouldRunAutoBackup — décision jour/heure (mardi & vendredi 04h)', 
 });
 
 describe('noms de fichiers', () => {
-  it('autoBackupFilename → auto_solidata_YYYY-MM-DD_HH00.sql (whitelist OK)', () => {
-    const name = autoBackupFilename(d(2026, 8, 4, 4));
+  it('autoBackupFilename libellé en HEURE PARIS — été : run à 02:00 UTC → _0400', () => {
+    const name = autoBackupFilename(utc(2026, 8, 4, 2));
     expect(name).toBe('auto_solidata_2026-08-04_0400.sql');
     expect(name.startsWith(AUTO_PREFIX)).toBe(true);
     expect(SAFE_BACKUP_NAME.test(name)).toBe(true);
   });
 
-  it('manualBackupFilename garde le format historique de la route (whitelist OK)', () => {
+  it('autoBackupFilename libellé en HEURE PARIS — hiver : run à 03:00 UTC → _0400', () => {
+    expect(autoBackupFilename(utc(2026, 1, 6, 3))).toBe('auto_solidata_2026-01-06_0400.sql');
+  });
+
+  it('manualBackupFilename garde le format historique de la route (ISO UTC, whitelist OK)', () => {
     const name = manualBackupFilename(new Date('2026-08-04T04:00:00.000Z'));
     expect(name).toMatch(/^solidata_backup_2026-08-04T04-00-00-000Z\.sql$/);
     expect(name.startsWith(AUTO_PREFIX)).toBe(false);

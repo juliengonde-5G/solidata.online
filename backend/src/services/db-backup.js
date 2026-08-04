@@ -81,21 +81,50 @@ function manualBackupFilename(now = new Date()) {
   return `solidata_backup_${timestamp}.sql`;
 }
 
-/** Nom des sauvegardes AUTOMATIQUES, ex. auto_solidata_2026-08-04_0400.sql. */
+/**
+ * Décompose un instant dans le calendrier EUROPE/PARIS, indépendamment du TZ
+ * du processus : année/mois/jour/heure civils parisiens + jour de semaine
+ * (0 = dimanche … 6 = samedi, convention getDay). Le jour de semaine est
+ * calculé en reconstruisant la date civile Paris en UTC (getUTCDay) plutôt
+ * qu'en comparant des libellés localisés (« mar. », « ven. ») — plus robuste.
+ */
+function getParisParts(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat('fr-FR', {
+    timeZone: PARIS_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', hourCycle: 'h23',
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(date).map((p) => [p.type, p.value]));
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  const hour = Number(parts.hour);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return { year, month, day, hour, weekday };
+}
+
+/**
+ * Nom des sauvegardes AUTOMATIQUES, ex. auto_solidata_2026-08-04_0400.sql.
+ * Date et heure encodées en HEURE DE PARIS (cohérent avec la planification
+ * affichée au client : un run d'été à 02:00 UTC est bien libellé _0400).
+ */
 function autoBackupFilename(now = new Date()) {
+  const p = getParisParts(now);
   const pad = (n) => String(n).padStart(2, '0');
-  const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  return `${AUTO_PREFIX}solidata_${day}_${pad(now.getHours())}00.sql`;
+  return `${AUTO_PREFIX}solidata_${p.year}-${pad(p.month)}-${pad(p.day)}_${pad(p.hour)}00.sql`;
 }
 
 /**
  * FONCTION PURE (testée) — le job auto doit-il tourner à ce tick horaire ?
- * Vrai uniquement mardi & vendredi à 04h (heure du conteneur = UTC en prod).
- * Le scheduler tickant une fois par top d'heure, l'égalité stricte sur l'heure
- * garantit une exécution et une seule par jour planifié.
+ * Vrai uniquement mardi & vendredi à 04h HEURE DE PARIS (Europe/Paris via
+ * Intl, indifférent au TZ du conteneur) : 03h UTC en hiver, 02h UTC en été.
+ * Le scheduler tickant une fois par top d'heure (l'offset Paris est toujours
+ * un nombre entier d'heures), l'égalité stricte sur l'heure garantit une
+ * exécution et une seule par jour planifié.
  */
 function shouldRunAutoBackup(now = new Date()) {
-  return AUTO_BACKUP_DAYS.includes(now.getDay()) && now.getHours() === AUTO_BACKUP_HOUR;
+  const p = getParisParts(now);
+  return AUTO_BACKUP_DAYS.includes(p.weekday) && p.hour === AUTO_BACKUP_HOUR;
 }
 
 /**
@@ -199,6 +228,8 @@ module.exports = {
   AUTO_RETENTION,
   AUTO_BACKUP_DAYS,
   AUTO_BACKUP_HOUR,
+  PARIS_TZ,
+  getParisParts,
   buildPgEnv,
   execHint,
   manualBackupFilename,

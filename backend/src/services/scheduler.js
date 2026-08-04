@@ -1229,16 +1229,17 @@ async function hourlyTick() {
       console.log('[SCHEDULER] Lancement sync factures clients Pennylane...');
       await runInstrumented('syncPennylaneInvoicesDaily', syncPennylaneInvoicesDaily);
     }
-    // Sauvegarde automatique de la base — MARDI & VENDREDI à 04h (Lot 11).
-    // Convention horaire identique aux autres jobs : heure LOCALE du conteneur,
-    // soit UTC en prod (aucun TZ dans docker-compose — comme la sync Pennylane
-    // « 2h du matin (UTC) » ci-dessus). Fichiers auto_*.sql dans /app/backups,
-    // rétention 8 sauvegardes auto (les manuelles ne sont jamais purgées).
-    // Décision jour+heure = fonction pure shouldRunAutoBackup (testée).
+    // Sauvegarde automatique de la base — MARDI & VENDREDI à 04h HEURE DE
+    // PARIS (Lot 11). Contrairement aux autres jobs (heure locale conteneur =
+    // UTC en prod), la décision est évaluée en Europe/Paris via Intl dans
+    // shouldRunAutoBackup (fonction pure, testée) : 04h Paris = 03h UTC en
+    // hiver / 02h UTC en été, toujours sur un top d'heure → le tick horaire la
+    // capte sans changer le TZ du conteneur. Fichiers auto_*.sql dans
+    // /app/backups, rétention 8 sauvegardes auto (manuelles jamais purgées).
     {
       const { shouldRunAutoBackup, runAutoBackup } = require('./db-backup');
       if (shouldRunAutoBackup(now)) {
-        console.log('[SCHEDULER] Sauvegarde automatique de la base (mardi/vendredi 04h)...');
+        console.log('[SCHEDULER] Sauvegarde automatique de la base (mardi/vendredi 04h Europe/Paris)...');
         await runInstrumented('autoDatabaseBackup', () => runAutoBackup(now));
       }
     }

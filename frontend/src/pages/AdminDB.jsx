@@ -177,7 +177,7 @@ export default function AdminDB() {
             {tab === 'backups' && (
               <div className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900">
-                  <p className="font-semibold">Sauvegarde automatique : mardi et vendredi à 04:00 (heure serveur, UTC)</p>
+                  <p className="font-semibold">Sauvegarde automatique : mardi et vendredi à 04:00 (heure de Paris)</p>
                   <p className="text-xs mt-1 text-blue-800">
                     Fichiers préfixés <span className="font-mono">auto_</span> — les 8 sauvegardes automatiques
                     les plus récentes sont conservées (les sauvegardes manuelles ne sont jamais supprimées automatiquement).

@@ -23,6 +23,7 @@ import CompetencesETI from '../components/insertion/CompetencesETI';
 import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
 import QuickActionButton, { pushRecent } from '../components/insertion/QuickActionButton';
 import { exportFicheParcoursPDF, exportBilanProlongationPassIae } from '../components/insertion/pdf-insertion';
+import { formatEmployeeName, compareByName } from '../utils/names';
 
 // Les endpoints IA (Claude) génèrent 1500-2500 tokens et peuvent dépasser le
 // timeout axios global de 30 s. Délai dédié de 2 min (nginx autorise 300 s).

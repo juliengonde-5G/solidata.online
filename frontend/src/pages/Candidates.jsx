@@ -685,7 +685,7 @@ function LinkEmployeeModal({ candidate, onClose, onLinked }) {
   };
 
   return (
-    <Modal isOpen onClose={onClose} title={`Lier ${candidate.first_name} ${candidate.last_name} à un collaborateur`} size="md">
+    <Modal isOpen onClose={onClose} title={`Lier ${formatEmployeeName(candidate.last_name, candidate.first_name)} à un collaborateur`} size="md">
       <div className="space-y-3">
         <p className="text-xs text-slate-500">
           Sélectionnez le collaborateur (importé depuis le logiciel de paye) correspondant à ce candidat.
@@ -711,7 +711,7 @@ function LinkEmployeeModal({ candidate, onClose, onLinked }) {
               <li key={e.id} className="flex items-center justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-slate-800 truncate">
-                    {e.first_name} {e.last_name}
+                    {formatEmployeeName(e.last_name, e.first_name)}
                     {e.match_score >= 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">correspondance exacte</span>}
                     {e.match_score >= 40 && e.match_score < 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">nom proche</span>}
                     {!e.is_active && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold">inactif</span>}
@@ -751,7 +751,7 @@ function InfoView({ s, skills, positions, onMove, onLink, onUnlink }) {
   return (
     <div className="space-y-3 text-sm">
       <div className="grid grid-cols-2 gap-3">
-        <Field l="Prénom" v={s.first_name} /><Field l="Nom" v={s.last_name} />
+        <Field l="Prénom" v={s.first_name} /><Field l="Nom" v={formatLastName(s.last_name)} />
         <Field l="Email" v={s.email} /><Field l="Téléphone" v={s.phone} />
         <Field l="Poste" v={pos?.title} />
       </div>
