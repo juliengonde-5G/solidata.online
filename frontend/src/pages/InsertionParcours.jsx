@@ -1040,7 +1040,7 @@ export default function InsertionParcours() {
                 <div className="bg-white rounded-lg border p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div className="min-w-0">
-                      <h2 className="text-lg font-bold text-gray-800">{emp.first_name} {emp.last_name}</h2>
+                      <h2 className="text-lg font-bold text-gray-800">{formatEmployeeName(emp.last_name, emp.first_name)}</h2>
                       <div className="text-sm text-gray-500">
                         {emp.position} - {emp.team_name}
                         {emp.insertion_start_date && ` | Début : ${frDate(emp.insertion_start_date)}`}
@@ -1079,7 +1079,7 @@ export default function InsertionParcours() {
                             >
                               <option value="">— non affecté —</option>
                               {referents.map((rf) => (
-                                <option key={rf.id} value={rf.id}>{rf.first_name} {rf.last_name}</option>
+                                <option key={rf.id} value={rf.id}>{formatEmployeeName(rf.last_name, rf.first_name)}</option>
                               ))}
                             </select>
                           </label>
@@ -1091,7 +1091,7 @@ export default function InsertionParcours() {
                     <div className="flex flex-col gap-2 items-end">
                       <div className="flex gap-2 flex-wrap justify-end">
                         <QuickActionButton defaultEmployeeId={selectedEmployee.id}
-                          defaultEmployeeName={`${emp.first_name || ''} ${emp.last_name || ''}`}
+                          defaultEmployeeName={formatEmployeeName(emp.last_name, emp.first_name)}
                           onCreated={() => reloadSelected()} className="!py-1.5 !text-xs" />
                         <button onClick={() => { setNewEntretienOpen(true); }}
                           className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 whitespace-nowrap">
@@ -1333,7 +1333,7 @@ export default function InsertionParcours() {
                     </div>
                     <div className="bg-white rounded-lg border p-4">
                       <ActionsPanel employeeId={selectedEmployee.id}
-                        employeeName={`${emp.first_name || ''} ${emp.last_name || ''}`} />
+                        employeeName={formatEmployeeName(emp.last_name, emp.first_name)} />
                     </div>
                   </div>
                 )}
