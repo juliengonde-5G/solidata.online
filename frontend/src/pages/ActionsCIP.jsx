@@ -9,6 +9,7 @@ import {
   ACTION_STATUS_LABELS, ACTION_CATEGORY_LABELS, ACTION_PRIORITY_LABELS,
   ACTION_PRIORITY_COLORS, frDate,
 } from '../components/insertion/freins';
+import { formatEmployeeName, compareByName } from '../utils/names';
 
 /**
  * Actions CIP — tableau transversal de toutes les actions, tous salariés
@@ -27,12 +28,9 @@ const csvEscape = (v) => {
   return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 
-// Règles de gestion des noms : « NOM Prénom » (nom de famille en MAJUSCULES),
-// tri alphabétique nom de famille puis prénom.
-const formatName = (p) => `${String(p?.last_name || '').toUpperCase()} ${p?.first_name || ''}`.trim();
-const compareByName = (a, b) =>
-  String(a?.last_name || '').localeCompare(String(b?.last_name || ''), 'fr', { sensitivity: 'base' })
-  || String(a?.first_name || '').localeCompare(String(b?.first_name || ''), 'fr', { sensitivity: 'base' });
+// Règles de gestion des noms (Lot 1) : « NOM Prénom » + tri NOM puis PRÉNOM —
+// helpers partagés utils/names.js (formatEmployeeName / compareByName).
+const formatName = (p) => formatEmployeeName(p?.last_name, p?.first_name);
 
 export default function ActionsCIP() {
   const [data, setData] = useState(null);

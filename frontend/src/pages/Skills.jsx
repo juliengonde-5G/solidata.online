@@ -5,6 +5,7 @@ import { Star } from 'lucide-react';
 import useAsyncData from '../hooks/useAsyncData';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
+import { formatEmployeeName, compareByName } from '../utils/names';
 
 const SKILL_CATEGORIES = {
   permis_b: { label: 'Permis B', icon: '🚗', color: 'bg-blue-100 text-blue-700' },
@@ -28,12 +29,9 @@ const SKILL_CATEGORIES = {
 // source du planning hebdo chauffeur/cariste) → colonne = champ employees.
 const OPERATIONAL = { permis_b: 'has_permis_b', caces: 'has_caces' };
 
-// Règles de gestion des noms : « NOM Prénom » (nom de famille en MAJUSCULES),
-// tri alphabétique nom de famille puis prénom.
-const formatName = (p) => `${String(p?.last_name || '').toUpperCase()} ${p?.first_name || ''}`.trim();
-const compareByName = (a, b) =>
-  String(a?.last_name || '').localeCompare(String(b?.last_name || ''), 'fr', { sensitivity: 'base' })
-  || String(a?.first_name || '').localeCompare(String(b?.first_name || ''), 'fr', { sensitivity: 'base' });
+// Règles de gestion des noms (Lot 1) : « NOM Prénom » + tri NOM puis PRÉNOM —
+// helpers partagés utils/names.js (formatEmployeeName / compareByName).
+const formatName = (p) => formatEmployeeName(p?.last_name, p?.first_name);
 
 export default function Skills() {
   const { user } = useAuth();
