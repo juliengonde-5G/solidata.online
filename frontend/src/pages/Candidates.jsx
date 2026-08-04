@@ -311,10 +311,23 @@ export default function Candidates() {
       if (activePosition === 'all') return true;
       return String(c.position_id || '') === String(activePosition);
     };
+    // Arbitrage client 04/08 : chronologique (dossier le plus récent d'abord, au jour près)
+    // puis alphabétique NOM/prénom entre dossiers du même jour.
+    const dayOf = (c) => {
+      const raw = c.updated_at || c.created_at;
+      if (!raw) return '';
+      const d = new Date(raw);
+      return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+    };
+    const chronoThenName = (a, b) => {
+      const da = dayOf(a);
+      const db = dayOf(b);
+      if (da !== db) return da < db ? 1 : -1;
+      return compareByName(a, b);
+    };
     const out = {};
     for (const s of STATUSES) {
-      // Tri alphabétique NOM puis PRÉNOM (Lot 1 « Règles de gestion des noms »).
-      out[s] = (kanban[s] || []).filter((c) => matchesSearch(c) && matchesView(c) && matchesPosition(c)).sort(compareByName);
+      out[s] = (kanban[s] || []).filter((c) => matchesSearch(c) && matchesView(c) && matchesPosition(c)).sort(chronoThenName);
     }
     return out;
   }, [kanban, searchQuery, activeView, activePosition]);
