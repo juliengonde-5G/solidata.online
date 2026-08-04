@@ -5,37 +5,15 @@ const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+// Logique de sauvegarde factorisée (Lot 11) — partagée avec le job scheduler
+// `autoDatabaseBackup` (mardi & vendredi 04h). Comportement de la route inchangé.
+const dbBackup = require('../services/db-backup');
 
 router.use(authenticate);
 router.use(authorize('ADMIN'));
 
-// Whitelist stricte pour les noms de fichiers de sauvegarde (évite path
-// traversal et caractères shell inattendus même si `path.basename` est
-// déjà utilisé en amont).
-const SAFE_BACKUP_NAME = /^[A-Za-z0-9._-]+$/;
-
-// Construit l'environnement pg_dump / psql à partir des variables dédiées
-// pour éviter l'interpolation de credentials dans une ligne de commande shell.
-function buildPgEnv() {
-  return {
-    ...process.env,
-    PGHOST: process.env.DB_HOST || 'localhost',
-    PGPORT: process.env.DB_PORT || '5432',
-    PGUSER: process.env.DB_USER || 'postgres',
-    PGPASSWORD: process.env.DB_PASSWORD || '',
-    PGDATABASE: process.env.DB_NAME || 'solidata',
-  };
-}
-
-// Indice lisible pour une erreur pg_dump / psql (endpoint ADMIN-only → on peut
-// exposer un message technique tronqué, ça rend le 500 diagnosticable).
-function execHint(err) {
-  if (err.code === 'ENOENT') {
-    return "Client PostgreSQL absent du conteneur API — reconstruire l'image (postgresql-client).";
-  }
-  const stderr = (err.stderr && err.stderr.toString ? err.stderr.toString() : '').trim();
-  return stderr ? stderr.split('\n').filter(Boolean).slice(-2).join(' ') : (err.message || undefined);
-}
+// Alias locaux vers le service partagé (même sémantique qu'avant la factorisation).
+const { SAFE_BACKUP_NAME, buildPgEnv, execHint } = dbBackup;
 
 // ══════════════════════════════════════════
 // INFORMATIONS BASE DE DONNÉES
@@ -87,35 +65,22 @@ router.get('/info', async (req, res) => {
 // SAUVEGARDE (Backup)
 // ══════════════════════════════════════════
 
-// POST /api/admin-db/backup — Créer une sauvegarde
+// POST /api/admin-db/backup — Créer une sauvegarde (manuelle)
 router.post('/backup', async (req, res) => {
   try {
-    const backupDir = path.join(__dirname, '..', '..', 'backups');
-    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `solidata_backup_${timestamp}.sql`;
-    const filepath = path.join(backupDir, filename);
-
-    // execFileSync évite l'interprétation shell. pg_dump écrit directement
-    // dans le fichier via l'option -f, aucune redirection shell nécessaire.
-    execFileSync('pg_dump', ['--no-owner', '--no-acl', '-f', filepath], {
-      env: buildPgEnv(),
-      timeout: 120000,
-    });
-
-    const stats = fs.statSync(filepath);
+    // pg_dump via le service partagé — mêmes options/nom/timeout qu'historiquement.
+    const { filename, size_bytes } = dbBackup.createBackup(dbBackup.manualBackupFilename());
 
     // Log audit
     await pool.query(
       'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
-      [req.user.id, 'DB_BACKUP', 'database', 0, JSON.stringify({ filename, size_bytes: stats.size })]
+      [req.user.id, 'DB_BACKUP', 'database', 0, JSON.stringify({ filename, size_bytes })]
     );
 
     res.json({
       message: 'Sauvegarde créée',
       filename,
-      size: `${(stats.size / 1024 / 1024).toFixed(2)} Mo`,
+      size: `${(size_bytes / 1024 / 1024).toFixed(2)} Mo`,
       created_at: new Date().toISOString(),
     });
   } catch (err) {
@@ -124,21 +89,11 @@ router.post('/backup', async (req, res) => {
   }
 });
 
-// GET /api/admin-db/backups — Lister les sauvegardes
+// GET /api/admin-db/backups — Lister les sauvegardes (manuelles + automatiques ;
+// champ additif `auto` pour le badge côté /admin-db, forme historique conservée)
 router.get('/backups', async (req, res) => {
   try {
-    const backupDir = path.join(__dirname, '..', '..', 'backups');
-    if (!fs.existsSync(backupDir)) return res.json([]);
-
-    const files = fs.readdirSync(backupDir)
-      .filter(f => f.endsWith('.sql'))
-      .map(f => {
-        const stats = fs.statSync(path.join(backupDir, f));
-        return { filename: f, size: `${(stats.size / 1024 / 1024).toFixed(2)} Mo`, created_at: stats.mtime };
-      })
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-    res.json(files);
+    res.json(dbBackup.listBackups());
   } catch (err) {
     console.error('[ADMIN-DB] Erreur liste backups :', err);
     res.status(500).json({ error: 'Erreur serveur' });

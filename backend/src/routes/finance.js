@@ -722,15 +722,19 @@ router.get('/gl/:year/bilan', async (req, res) => {
         total_actif: rd(totalActif),
         capitaux_propres: rd(capitaux),
         resultat_net: rd(resultat),
-        actif_variation: totalActifN1 !== 0 ? Math.round((totalActif - totalActifN1) / Math.abs(totalActifN1) * 100 * 10) / 10 : null,
-        cp_variation: capitauxN1 !== 0 ? Math.round((capitaux - capitauxN1) / Math.abs(capitauxN1) * 100 * 10) / 10 : null,
-        resultat_variation: resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null,
+        actif_variation: n1Disponible && totalActifN1 !== 0 ? Math.round((totalActif - totalActifN1) / Math.abs(totalActifN1) * 100 * 10) / 10 : null,
+        cp_variation: n1Disponible && capitauxN1 !== 0 ? Math.round((capitaux - capitauxN1) / Math.abs(capitauxN1) * 100 * 10) / 10 : null,
+        resultat_variation: n1Disponible && resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null,
       },
       sig,
       actif: actifRows,
       passif: passifRows,
       ratios,
       breakeven,
+      // Traçabilité N-1 : les données comparatives proviennent du Grand Livre
+      // Pennylane de l'exercice précédent importé en base (financial_gl_entries).
+      n1_annee: year - 1,
+      n1_disponible: n1Disponible,
     });
   } catch (err) {
     console.error('[FINANCE] Erreur bilan :', err);

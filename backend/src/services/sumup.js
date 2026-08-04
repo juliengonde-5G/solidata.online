@@ -401,12 +401,22 @@ function mapSumUpTransaction(tx, detail = tx) {
     for (const it of items) {
       const desc = (it.description || it.name || '').trim();
       const qtyMag = Math.abs(Number(it.quantity || 1));
-      const unitPrice = Math.abs(Number(it.price_per_unit || it.unit_price || 0));
+      // Les produits API/webhook SumUp exposent `price` (prix unitaire), pas
+      // `price_per_unit` — repli en cascade pour couvrir les deux formes.
+      const unitPrice = Math.abs(Number(it.price_per_unit || it.unit_price || it.price || 0));
       const lineTTCmag = Math.abs(Number(it.total_price || it.total_with_vat || qtyMag * unitPrice));
       const tvaMag = Math.abs(Number(it.vat_amount || (lineTTCmag - lineTTCmag / 1.2)));
       const htMag = Math.abs(Number(it.subtotal || (lineTTCmag - tvaMag)));
       const taux = Number(it.vat_rate || 20);
-      const unite = (it.unit || 'pce').toLowerCase();
+      // BUG « poids à zéro » (Lot 6) : les produits des transactions API et des
+      // webhooks n'ont pas de champ `unit` → l'unité tombait à 'pce' et le
+      // poids restait 0 pour TOUTES les ventes synchronisées. On infère « kg »
+      // depuis le libellé (mapping textile au kilo, cf. isKgItem) quand
+      // l'unité est absente, et on STOCKE l'unité inférée pour que les
+      // agrégats SQL (`unite ILIKE '%kg%'` dans routes/vak.js) suivent.
+      const rawUnite = (it.unit || '').trim().toLowerCase();
+      const kg = isKgItem(desc, rawUnite);
+      const unite = rawUnite || (kg ? 'kg' : 'pce');
       const segment = getSegment(desc);
       lignes.push({
         description: desc, segment, unite,
@@ -419,7 +429,7 @@ function mapSumUpTransaction(tx, detail = tx) {
       });
       totalHT += sign * htMag;
       totalTVA += sign * tvaMag;
-      if (unite.includes('kg')) poidsTicket += sign * qtyMag;
+      if (kg) poidsTicket += sign * qtyMag;
       nbArticles += 1;
     }
     // Si le montant n'est pas donné au header, recalcul depuis les lignes (déjà signées)
@@ -583,6 +593,12 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       const tauxTVA = parseNumberFR((tauxTVAStr || '').replace(/[%\s]/g, ''));
       const remise = parseNumberFR(remiseStr);
       const segment = getSegment(description);
+      // Unité kg : la colonne « Unité » du CSV fait foi quand elle est
+      // renseignée ; si elle est vide, inférence par le libellé (mapping
+      // textile au kilo) — même helper que le chemin API/webhook (isKgItem).
+      // L'unité inférée est STOCKÉE pour garder les agrégats SQL cohérents.
+      const ligneKg = isKgItem(description, unite);
+      const uniteNorm = (unite || '').trim().toLowerCase() || (ligneKg ? 'kg' : '');
       // Remboursement (colonne « Type » = Remboursement) → lignes en négatif,
       // même sémantique que les voies API/webhook. Voir isRefundTransaction.
       const sign = isRefundTransaction({ type }) ? -1 : 1;
@@ -605,7 +621,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
         moyen_paiement: moyenPaiementNorm,
         description: (description || '').trim(),
         segment,
-        unite: (unite || '').trim().toLowerCase(),
+        unite: uniteNorm,
         quantite: sign * quantite,
         prix_unitaire_ttc: sign * (totalTTC / Math.max(1, Math.abs(quantite || 1))),
         remise,
@@ -617,7 +633,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       });
 
       caTotal += sign * totalTTC;
-      const poidsLigne = (unite || '').toLowerCase().includes('kg') ? sign * quantite : 0;
+      const poidsLigne = ligneKg ? sign * quantite : 0;
       poidsTotal += poidsLigne;
 
       if (!dateDebutISO || isoDate < dateDebutISO) dateDebutISO = isoDate;
