@@ -442,6 +442,59 @@ function mapSumUpTransaction(tx, detail = tx) {
   };
 }
 
+// ── Fuseau Europe/Paris (sans librairie externe) ──
+// Doctrine du module (Lot 12 « heure de Paris ») : le STOCKAGE reste en UTC
+// (les timestamps SumUp API/webhook sont déjà en UTC) ; l'INTERPRÉTATION du
+// CSV (horodaté en heure locale française) et les regroupements par JOUR
+// CIVIL raisonnent en Europe/Paris. Offset calculé via Intl (tzdata du
+// runtime), donc correct hiver (+1 h) / été (+2 h) sans librairie externe.
+const PARIS_TZ = 'Europe/Paris';
+
+// Décalage (minutes) de Europe/Paris par rapport à UTC à l'instant donné.
+function parisOffsetMinutes(instant) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: PARIS_TZ, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = {};
+  for (const p of dtf.formatToParts(instant)) parts[p.type] = p.value;
+  const asUTC = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour) % 24, Number(parts.minute), Number(parts.second),
+  );
+  return Math.round((asUTC - instant.getTime()) / 60000);
+}
+
+// Convertit une heure « murale » Paris (année/mois/jour/h/m/s) en instant UTC.
+// Deux passes : on estime l'offset en traitant l'heure comme UTC, on ajuste,
+// puis on re-vérifie l'offset à l'instant ajusté (bascules d'heure d'été).
+function parisWallClockToUTC(year, monthIdx, day, hh, mm, ss) {
+  const naive = Date.UTC(year, monthIdx, day, hh, mm, ss);
+  let offset = parisOffsetMinutes(new Date(naive));
+  let ts = naive - offset * 60000;
+  const offset2 = parisOffsetMinutes(new Date(ts));
+  if (offset2 !== offset) ts = naive - offset2 * 60000;
+  return new Date(ts);
+}
+
+// Date civile 'YYYY-MM-DD' d'un instant, vue depuis Europe/Paris.
+// Remplace les `toISOString().slice(0, 10)` (date UTC : fausse entre minuit
+// Paris et 01:00/02:00 du matin) pour le rattachement d'un ticket à sa VAK.
+function parisDateStr(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: PARIS_TZ }).format(date);
+}
+
+// 'YYYY-MM-DD' d'une colonne SQL DATE parsée par node-postgres (qui la
+// matérialise à minuit LOCAL du process Node) : les composantes locales
+// redonnent la date civile quel que soit le fuseau du conteneur — là où
+// `toISOString()` reculait d'un jour si le conteneur tournait à l'est d'UTC.
+function dateOnlyStr(d) {
+  const dd = d instanceof Date ? d : new Date(d);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${dd.getFullYear()}-${p(dd.getMonth() + 1)}-${p(dd.getDate())}`;
+}
+
 // ── Parse date FR "15 mai 2026 10:15" ──
 const MOIS_FR = {
   'janv.': 0, janvier: 0, 'janv': 0,
@@ -471,12 +524,14 @@ function parseFRDate(str) {
   const hh = parseInt(m[4], 10);
   const mm = parseInt(m[5], 10);
   const ss = m[6] ? parseInt(m[6], 10) : 0;
-  // L'export SumUp est horodaté en GMT/UTC. On interprète l'heure comme UTC
-  // (Date.UTC) — et NON dans le fuseau local du serveur — pour que l'heure
-  // stockée soit identique quel que soit le fuseau du conteneur, et cohérente
-  // avec le flux API (`tx.timestamp` déjà en UTC). Évite le décalage de ±1-2 h
-  // entre les ventes importées par CSV et celles synchronisées par l'API.
-  return new Date(Date.UTC(year, moisIdx, day, hh, mm, ss));
+  // Lot 12 « heure de Paris » : l'export CSV SumUp est horodaté en heure
+  // LOCALE française (Europe/Paris) — l'interprétation UTC de v2.6.0 décalait
+  // l'instant réel de −1 h/−2 h. On convertit ce « mur d'horloge » Paris en
+  // instant UTC pour le stockage (offset hiver/été via Intl, indépendant du
+  // fuseau du conteneur) : l'heure STOCKÉE reste en UTC, cohérente avec le
+  // flux API (`tx.timestamp` déjà en UTC), et l'agrégation/affichage se fait
+  // en Europe/Paris partout (routes/vak.js + pages Vak*).
+  return parisWallClockToUTC(year, moisIdx, day, hh, mm, ss);
 }
 
 function parseNumberFR(str) {
@@ -579,9 +634,12 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       const dateVente = parseFRDate(dateStr);
       if (!dateVente) throw new Error(`Date invalide: "${dateStr}"`);
 
-      // Vérification rattachement VAK
-      const isoDate = dateVente.toISOString().slice(0, 10);
-      if (isoDate < vak.date_debut.toISOString().slice(0, 10) || isoDate > vak.date_fin.toISOString().slice(0, 10)) {
+      // Vérification rattachement VAK — en date CIVILE Paris (une vente à
+      // 00:30 Paris stockée 22:30/23:30 UTC la veille compte sur le bon jour),
+      // comparée aux bornes DATE de la VAK lues par leurs composantes locales
+      // (dateOnlyStr) et non par toISOString (dérive d'un jour possible).
+      const isoDate = parisDateStr(dateVente);
+      if (isoDate < dateOnlyStr(vak.date_debut) || isoDate > dateOnlyStr(vak.date_fin)) {
         dateRangeRejets.push({ line: i + 2, date: isoDate });
         continue;
       }
@@ -746,7 +804,10 @@ async function captureWeatherForVak(vakId) {
   const start = new Date(vak.date_debut);
   const end = new Date(vak.date_fin);
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const dateStr = d.toISOString().slice(0, 10);
+    // dateOnlyStr (composantes locales) et non toISOString : node-postgres
+    // matérialise une colonne DATE à minuit LOCAL — toISOString reculerait
+    // d'un jour (météo du mauvais jour) si le conteneur tournait à l'est d'UTC.
+    const dateStr = dateOnlyStr(d);
     const data = await fetchOpenMeteoDaily(lat, lng, dateStr).catch(() => null);
     if (!data) continue;
     await pool.query(`
@@ -882,7 +943,10 @@ async function fetchTransactionDetail(tx) {
 async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = {}) {
   try {
     const txDate = new Date(tx.timestamp || tx.transaction_date || tx.created_at || Date.now());
-    const isoDate = txDate.toISOString().slice(0, 10);
+    // Rattachement à la VAK par date CIVILE Paris (les bornes date_debut /
+    // date_fin d'une VAK sont des jours civils français) — la date UTC
+    // reculait d'un jour pour une transaction entre minuit et 01:00/02:00 Paris.
+    const isoDate = parisDateStr(txDate);
 
     // Trouver la VAK couvrant cette date
     const vakRow = await pool.query(
@@ -978,13 +1042,15 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
 
 async function emitLiveUpdate(io, vakId, ticket) {
   if (!io) return;
-  // Compteurs jour courant et VAK
-  const today = new Date().toISOString().slice(0, 10);
+  // Compteurs jour courant et VAK — « aujourd'hui » = jour civil PARIS, et
+  // date_ticket (TIMESTAMP stocké en UTC) est ramené au jour civil Paris via
+  // la double conversion AT TIME ZONE (même règle que routes/vak.js).
+  const today = parisDateStr(new Date());
   const counters = await pool.query(`
     SELECT
-      COALESCE(SUM(CASE WHEN DATE(date_ticket) = $1::DATE THEN total_ttc END), 0)::FLOAT AS ca_jour,
-      COALESCE(SUM(CASE WHEN DATE(date_ticket) = $1::DATE THEN poids_kg END), 0)::FLOAT AS poids_jour,
-      COUNT(CASE WHEN DATE(date_ticket) = $1::DATE THEN 1 END)::INT AS tickets_jour,
+      COALESCE(SUM(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN total_ttc END), 0)::FLOAT AS ca_jour,
+      COALESCE(SUM(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN poids_kg END), 0)::FLOAT AS poids_jour,
+      COUNT(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN 1 END)::INT AS tickets_jour,
       COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_vak,
       COALESCE(SUM(poids_kg), 0)::FLOAT AS poids_vak,
       COUNT(*)::INT AS tickets_vak
@@ -1054,6 +1120,10 @@ module.exports = {
   // CSV fallback
   importCSVContent,
   parseFRDate,
+  // Fuseau Europe/Paris (réutilisés par les scripts de correction + tests)
+  parisOffsetMinutes,
+  parisWallClockToUTC,
+  parisDateStr,
   getSegment,
   isKgItem,
   normalizePaymentMethod,

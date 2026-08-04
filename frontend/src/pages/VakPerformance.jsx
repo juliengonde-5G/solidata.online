@@ -253,7 +253,7 @@ export default function VakPerformance() {
             {/* Bloc 2 : activité horaire */}
             {hourly.by_hour?.length > 0 && (
               <div className="bg-white rounded-card shadow-card p-4 mb-6">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Activité par tranche horaire <span className="text-xs font-normal text-slate-400">(heures GMT)</span></h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Activité par tranche horaire <span className="text-xs font-normal text-slate-400">(heure de Paris)</span></h3>
                 <ResponsiveContainer width="100%" height={280}>
                   <ComposedChart data={hourly.by_hour.map((h) => ({ ...h, heure: `${h.heure}h` }))}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -277,7 +277,7 @@ export default function VakPerformance() {
             {/* Bloc 3 : heatmap jour × heure (utile pour VAK 2-3 jours) */}
             {hourly.heatmap?.length > 0 && (
               <div className="bg-white rounded-card shadow-card p-4 mb-6">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Activité jour × heure (heatmap CA) <span className="text-xs font-normal text-slate-400">(heures GMT)</span></h3>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Activité jour × heure (heatmap CA) <span className="text-xs font-normal text-slate-400">(heure de Paris)</span></h3>
                 <DayHourHeatmap data={hourly.heatmap} />
               </div>
             )}
