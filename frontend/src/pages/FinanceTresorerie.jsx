@@ -129,7 +129,7 @@ export default function FinanceTresorerie() {
           <KPICard title="Variation" value={fmtK(kpis.variation)} unit="EUR" icon={ArrowUpDown} accent="amber" loading={loading} />
         </div>
 
-        {/* Solde initial au 01/01 — cascade honnête : saisie ADMIN > GL N-1 > 0 */}
+        {/* Solde initial au 01/01 — cascade honnête : saisie ADMIN > à-nouveaux 512 du GL courant > GL N-1 > 0 */}
         {!loading && soldeInitial && (
           <div className={`p-4 rounded-xl border ${
             soldeInitial.source === 'aucune'
@@ -148,6 +148,7 @@ export default function FinanceTresorerie() {
                   </p>
                   <p className={`text-xs mt-1 ${soldeInitial.source === 'aucune' ? 'text-amber-700' : 'text-slate-500'}`}>
                     {soldeInitial.source === 'setting' && `Source : ${soldeInitial.detail || 'saisie manuelle (paramètre ADMIN)'}`}
+                    {soldeInitial.source === 'gl_an' && `Source : ${soldeInitial.detail || `écritures d'à-nouveaux des comptes 512 (solde d'ouverture comptable) du Grand Livre Pennylane ${year} importé — exclues des flux mensuels pour éviter tout double comptage`}`}
                     {soldeInitial.source === 'gl_n1' && `Source : ${soldeInitial.detail || `solde des comptes 512 (banque) au 31/12/${year - 1} d'après le Grand Livre Pennylane importé`}`}
                     {soldeInitial.source === 'aucune' && `${soldeInitial.detail || `Aucun solde d'origine : la courbe part de 0, ce qui fausse le solde bancaire disponible.`} ${isAdmin ? 'Saisissez le solde réel au 1er janvier, ou importez le Grand Livre ' + (year - 1) + ' depuis la page Pennylane.' : 'Demandez à un administrateur de le saisir.'}`}
                     {' '}Le solde affiché = solde initial + flux cumulés.
@@ -169,7 +170,7 @@ export default function FinanceTresorerie() {
                       onClick={() => saveSoldeInitial(null)}
                       disabled={savingSolde}
                       className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs font-medium hover:bg-slate-100 disabled:opacity-50"
-                      title="Effacer la saisie manuelle et revenir au calcul automatique (Grand Livre N-1, sinon 0)"
+                      title="Effacer la saisie manuelle et revenir au calcul automatique (à-nouveaux 512 du Grand Livre courant, sinon Grand Livre N-1, sinon 0)"
                     >
                       Effacer la saisie
                     </button>

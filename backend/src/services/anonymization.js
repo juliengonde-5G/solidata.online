@@ -144,6 +144,15 @@ async function anonymizeEmployee(client, id) {
     { col: 'city', value: null },
     { col: 'postal_code', value: null },
     { col: 'country', value: null },
+    // Contacts d'urgence (import paie 2.20.0 lot 3) — données personnelles de
+    // TIERS (nom/téléphone/email de proches) : effacement intégral, aucune
+    // valeur d'agrégat (revue Codex PR#85).
+    { col: 'emergency_contact_name', value: null },
+    { col: 'emergency_contact_phone', value: null },
+    { col: 'emergency_contact_email', value: null },
+    { col: 'emergency_contact2_name', value: null },
+    { col: 'emergency_contact2_phone', value: null },
+    { col: 'emergency_contact2_email', value: null },
     // Santé (catégorie particulière art. 9) + titres de séjour
     { col: 'disability_status', value: null },
     { col: 'residence_permit_type', value: null },

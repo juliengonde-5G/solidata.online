@@ -13,6 +13,9 @@ const TABLE_COLUMNS = {
     // extension 2026-07 : identifiants IAE nominatifs
     'pass_iae_number', 'pass_iae_start', 'pass_iae_end', 'france_travail_id',
     'eligibilite_criteres', 'eligibilite_justificatifs_ref',
+    // extension 2026-08 (import paie lot 3) : contacts d'urgence (tiers)
+    'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_email',
+    'emergency_contact2_name', 'emergency_contact2_phone', 'emergency_contact2_email',
     // colonnes conservées (agrégats)
     'contract_type', 'contract_start', 'contract_end', 'weekly_hours', 'team_id', 'position',
     'insertion_status', 'insertion_start_date', 'insertion_end_date', 'prescripteur_id', 'date_prescription', 'user_id',
@@ -158,6 +161,24 @@ describe('anonymization — anonymizeEmployee (item 42)', () => {
     expect(satUpdate).toContain('suggestions = NULL');
     expect(satUpdate).toContain("reponses = '{}'::jsonb");
     expect(satUpdate).not.toContain('satisfaction_globale');
+  });
+
+  // ── Revue Codex PR#85 (2026-08) ──────────────────────────────────────────
+  it('efface les 6 colonnes de contacts d’urgence (données personnelles de TIERS) — valeur liée = NULL', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const call = client.calls.find((c) => /^UPDATE employees SET/i.test(c.sql));
+    expect(call).toBeTruthy();
+    for (const col of [
+      'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_email',
+      'emergency_contact2_name', 'emergency_contact2_phone', 'emergency_contact2_email',
+    ]) {
+      // La colonne est bien dans le SET…
+      const m = call.sql.match(new RegExp(`${col} = \\$(\\d+)`));
+      expect(m).toBeTruthy();
+      // …et la valeur paramétrée est NULL (effacement réel, pas un placeholder)
+      expect(call.params[parseInt(m[1], 10) - 1]).toBeNull();
+    }
   });
 
   it('purge resultat des actions et les identifiants IAE nominatifs du salarié (pass_iae_number, france_travail_id)', async () => {

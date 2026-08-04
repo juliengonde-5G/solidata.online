@@ -746,17 +746,51 @@ router.get('/gl/:year/bilan', async (req, res) => {
 // TRESORERIE — Données structurées pour la page trésorerie
 // ══════════════════════════════════════════
 
+// ── Détection des écritures d'À-NOUVEAUX (reprise du solde d'ouverture) ────
+// Une écriture d'à-nouveaux sur un compte 512 est un SOLDE D'OUVERTURE au
+// 01/01, pas un flux de trésorerie : elle doit être exclue des flux mensuels
+// et peut servir de solde initial (revue Codex PR#85 — double comptage).
+// Colonnes réellement disponibles dans financial_gl_entries (cf.
+// scripts/migrate-finance.js) : `journal` (code journal Pennylane),
+// `piece_label` et `line_label` (libellés de pièce/ligne). Critères retenus :
+//  (a) code journal 'AN' ou 'RAN' (codes usuels du journal des à-nouveaux /
+//      report à nouveau), comparaison après trim + majuscules ;
+//  (b) OU libellé de pièce/ligne contenant « à nouveau(x) » / « à-nouveaux » /
+//      « report à nouveau », comparaison insensible à la casse ET aux accents
+//      (normalisation NFD + retrait des diacritiques) — couvre les exports où
+//      le journal est générique (ex. 'OD') mais le libellé explicite.
+// `account_label` n'est volontairement PAS utilisé : il qualifie le compte
+// (ex. « Banque »), jamais la nature de l'écriture.
+const AN_JOURNAL_CODES = new Set(['AN', 'RAN']);
+// Après retrait des accents : « a nouveau », « a nouveaux », « a-nouveaux »,
+// « report a nouveau »… Le \b évite les faux positifs sur d'autres mots.
+const AN_LABEL_RE = /\ba[\s-]*nouveaux?\b/;
+const foldAccents = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+function isEcritureANouveaux(entry) {
+  if (!entry) return false;
+  if (AN_JOURNAL_CODES.has(String(entry.journal || '').trim().toUpperCase())) return true;
+  return AN_LABEL_RE.test(foldAccents(entry.piece_label)) || AN_LABEL_RE.test(foldAccents(entry.line_label));
+}
+
 // Résolution du SOLDE INITIAL de trésorerie au 1er janvier (cascade honnête,
 // même doctrine que energie.resolveCA — « jamais de valeur inventée ») :
 //   (1) setting explicite `finance.tresorerie_solde_initial_<annee>` (table
 //       settings, saisi par un ADMIN via PUT /gl/:year/solde-initial) ;
-//   (2) sinon, si le Grand Livre Pennylane N-1 est importé : solde des comptes
+//   (2) sinon, si le Grand Livre Pennylane de l'ANNÉE COURANTE contient des
+//       écritures d'à-nouveaux sur les comptes 512 (journal AN/RAN ou libellé
+//       « à nouveau », cf. isEcritureANouveaux) : leur solde EST le solde
+//       d'ouverture comptable au 01/01 → source 'gl_an'. Ces écritures sont
+//       par ailleurs EXCLUES des flux mensuels du GET /gl/:year/tresorerie,
+//       pour ne jamais compter deux fois le même montant ;
+//   (3) sinon, si le Grand Livre Pennylane N-1 est importé : solde des comptes
 //       512* (banque) au 31/12 N-1 (somme débit-crédit de l'exercice N-1,
 //       à-nouveaux inclus dans l'export Pennylane) ;
-//   (3) sinon 0 avec source 'aucune' → le front affiche l'avertissement
+//   (4) sinon 0 avec source 'aucune' → le front affiche l'avertissement
 //       « solde initial non renseigné ».
 // La source retenue est exposée dans la réponse API (traçabilité).
-async function resolveSoldeInitialTresorerie(year) {
+// options.glRows512 : lignes 512 de l'année courante déjà chargées par
+// l'appelant (avec journal/piece_label/line_label) — évite une relecture.
+async function resolveSoldeInitialTresorerie(year, options = {}) {
   const rd2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
   // (1) Setting explicite saisi par un ADMIN
@@ -779,7 +813,35 @@ async function resolveSoldeInitialTresorerie(year) {
     console.error('[FINANCE] solde initial — lecture settings indisponible :', e.code || e.message);
   }
 
-  // (2) Grand Livre Pennylane N-1 : solde des comptes 512* (banque) au 31/12
+  // (2) À-nouveaux 512 de l'ANNÉE COURANTE : si le GL importé contient la
+  // reprise du solde au 01/01 (journal AN/RAN ou libellé « à nouveau »),
+  // c'est LE solde d'ouverture comptable — prioritaire sur la reconstruction
+  // depuis le GL N-1.
+  try {
+    let rows = options.glRows512;
+    if (!rows) {
+      const r = await pool.query(`
+        SELECT g.journal, g.piece_label, g.line_label, g.debit, g.credit
+        FROM financial_gl_entries g
+        JOIN financial_exercises e ON g.exercise_id = e.id
+        WHERE e.year = $1 AND g.account LIKE '512%'
+      `, [year]);
+      rows = r.rows;
+    }
+    const anRows = rows.filter(isEcritureANouveaux);
+    if (anRows.length > 0) {
+      const solde = anRows.reduce((s, e) => s + ((parseFloat(e.debit) || 0) - (parseFloat(e.credit) || 0)), 0);
+      return {
+        montant: rd2(solde),
+        source: 'gl_an',
+        detail: `Écritures d'à-nouveaux des comptes 512 (journal AN / report à nouveau) au 01/01/${year} d'après le Grand Livre Pennylane importé`,
+      };
+    }
+  } catch (e) {
+    console.error('[FINANCE] solde initial — lecture à-nouveaux GL indisponible :', e.code || e.message);
+  }
+
+  // (3) Grand Livre Pennylane N-1 : solde des comptes 512* (banque) au 31/12
   try {
     const r = await pool.query(`
       SELECT COUNT(*)::int AS nb, COALESCE(SUM(g.debit - g.credit), 0) AS solde
@@ -798,11 +860,11 @@ async function resolveSoldeInitialTresorerie(year) {
     console.error('[FINANCE] solde initial — lecture GL N-1 indisponible :', e.code || e.message);
   }
 
-  // (3) Rien : 0 assumé + avertissement côté UI
+  // (4) Rien : 0 assumé + avertissement côté UI
   return {
     montant: 0,
     source: 'aucune',
-    detail: `Solde initial non renseigné : aucun paramètre saisi et Grand Livre ${year - 1} non importé. La courbe part de 0.`,
+    detail: `Solde initial non renseigné : aucun paramètre saisi, pas d'à-nouveaux 512 dans le Grand Livre ${year} et Grand Livre ${year - 1} non importé. La courbe part de 0.`,
   };
 }
 
@@ -811,20 +873,31 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
     const year = parseInt(req.params.year);
     const MONTHS_FR = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
 
-    // Solde initial au 01/01 : toute la courbe (solde mensuel, position,
-    // cascade) part de ce montant au lieu de 0 (demande client lot 8).
-    const soldeInitial = await resolveSoldeInitialTresorerie(year);
-
-    // Source 1 : Écritures GL 512 (banque/trésorerie) pour les totaux mensuels
+    // Source 1 : Écritures GL 512 (banque/trésorerie) pour les totaux mensuels.
+    // journal + libellés remontés pour distinguer les à-nouveaux (solde
+    // d'ouverture) des vrais flux.
     const r = await pool.query(`
-      SELECT g.date, g.debit, g.credit
+      SELECT g.date, g.debit, g.credit, g.journal, g.piece_label, g.line_label
       FROM financial_gl_entries g
       JOIN financial_exercises e ON g.exercise_id = e.id
       WHERE e.year = $1 AND g.account LIKE '512%'
       ORDER BY g.date, g.id
     `, [year]);
 
-    const glEntries = r.rows;
+    // Solde initial au 01/01 : toute la courbe (solde mensuel, position,
+    // waterfall) part de ce montant au lieu de 0 (demande client lot 8).
+    // Les lignes 512 déjà chargées alimentent l'étage « à-nouveaux » de la
+    // cascade (setting → gl_an → gl_n1 → 0) sans relecture du GL.
+    const soldeInitial = await resolveSoldeInitialTresorerie(year, { glRows512: r.rows });
+
+    // FLUX mensuels = écritures 512 HORS à-nouveaux. Une écriture d'à-nouveaux
+    // (reprise du solde au 01/01) est un solde d'ouverture, pas un flux : la
+    // compter dans janvier alors que le solde initial est déjà porté par la
+    // cascade (setting / gl_an / gl_n1) surévaluerait le solde du montant du
+    // solde initial (revue Codex PR#85). Exclusion SYSTÉMATIQUE, quelle que
+    // soit la source retenue ; monthly, KPIs, waterfall et position dérivent
+    // tous de ces flux filtrés.
+    const glEntries = r.rows.filter((e) => !isEcritureANouveaux(e));
 
     // Mensuel : encaissements (debit), décaissements (credit), solde cumulé
     // — le cumul démarre au solde initial du 01/01 (et non plus à 0).
@@ -924,8 +997,9 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
         variation: Math.round((totalEncaissements - totalDecaissements) * 100) / 100,
         position_trend: prevPosition !== 0 ? Math.round((position - prevPosition) / Math.abs(prevPosition) * 100) : 0,
       },
-      // Solde initial au 01/01 + source utilisée (setting | gl_n1 | aucune) —
-      // le solde affiché = solde initial + flux cumulés.
+      // Solde initial au 01/01 + source utilisée (setting | gl_an | gl_n1 |
+      // aucune) — le solde affiché = solde initial + flux cumulés (hors
+      // écritures d'à-nouveaux, exclues des flux).
       solde_initial: { ...soldeInitial, annee: year },
       monthly,
       waterfall,
@@ -943,7 +1017,8 @@ router.get('/gl/:year/tresorerie', async (req, res) => {
 // PUT /gl/:year/solde-initial { montant } — enregistre le solde de trésorerie
 // au 1er janvier de l'exercice dans la table settings (clé
 // finance.tresorerie_solde_initial_<annee>). Un montant null/'' efface la
-// saisie et rend la main à la cascade (GL N-1, sinon 0 + avertissement).
+// saisie et rend la main à la cascade (à-nouveaux 512 du GL courant, sinon
+// GL N-1, sinon 0 + avertissement).
 // ADMIN uniquement (le garde-fou par méthode du routeur ferme déjà FINANCE ;
 // authorize('ADMIN') resserre ici au-delà de ADMIN/MANAGER).
 router.put('/gl/:year/solde-initial', authorize('ADMIN'), async (req, res) => {

@@ -10,9 +10,13 @@
 //     « exercice N-1 non importé ».
 //  B) /finance/gl/:year/tresorerie — solde initial au 01/01 résolu en cascade
 //     honnête : (1) setting finance.tresorerie_solde_initial_<annee> saisi
-//     ADMIN, (2) sinon solde des comptes 512* du GL N-1 importé, (3) sinon 0
-//     avec source 'aucune'. Le solde mensuel/position/waterfall partent de ce
-//     montant. PUT /gl/:year/solde-initial réservé ADMIN.
+//     ADMIN, (2) sinon à-nouveaux 512 du GL de l'année courante (journal
+//     AN/RAN ou libellé « à nouveau » — source 'gl_an', revue Codex PR#85),
+//     (3) sinon solde des comptes 512* du GL N-1 importé, (4) sinon 0 avec
+//     source 'aucune'. Le solde mensuel/position/waterfall partent de ce
+//     montant, et les écritures d'à-nouveaux sont SYSTÉMATIQUEMENT exclues
+//     des flux mensuels (sinon le solde serait surévalué du montant du solde
+//     initial). PUT /gl/:year/solde-initial réservé ADMIN.
 // Écrans consommateurs : FinanceBilan.jsx (bandeau n1_disponible, colonnes
 // N-1) et FinanceTresorerie.jsx (bandeau solde_initial + formulaire ADMIN).
 // ═══════════════════════════════════════════════════════════════════════════
@@ -129,14 +133,17 @@ describe('CONTRAT GET /finance/gl/:year/tresorerie → solde_initial (FinanceTre
   // Aiguillage par contenu SQL. ATTENTION à l'ordre : la requête GL N-1 de la
   // cascade contient aussi « account LIKE '512%' » mais se distingue par
   // « AS nb » — elle doit être testée AVANT la requête 512 de l'exercice N.
-  const wireTreso = ({ settingRows = [], glN1Rows = [] } = {}) => (sql) => {
+  // glRows = lignes 512 de l'exercice N (avec journal/piece_label/line_label
+  // depuis la revue Codex PR#85 — détection des à-nouveaux).
+  const FLUX_512 = [
+    { date: '2026-01-15', debit: 1000, credit: 0 },
+    { date: '2026-02-10', debit: 0, credit: 400 },
+  ];
+  const wireTreso = ({ settingRows = [], glN1Rows = [], glRows = FLUX_512 } = {}) => (sql) => {
     const s = String(sql);
     if (/FROM settings WHERE key = \$1/.test(s)) return Promise.resolve({ rows: settingRows });
     if (/AS nb/.test(s)) return Promise.resolve({ rows: glN1Rows });
-    if (/account LIKE '512%'/.test(s)) return Promise.resolve({ rows: [
-      { date: '2026-01-15', debit: 1000, credit: 0 },
-      { date: '2026-02-10', debit: 0, credit: 400 },
-    ] });
+    if (/account LIKE '512%'/.test(s)) return Promise.resolve({ rows: glRows });
     if (/FROM financial_transactions/.test(s)) return Promise.resolve({ rows: [] });
     return Promise.resolve({ rows: [] });
   };
@@ -154,7 +161,50 @@ describe('CONTRAT GET /finance/gl/:year/tresorerie → solde_initial (FinanceTre
     expect(res.body.waterfall[0]).toMatchObject({ label: 'Solde initial', value: 12346, type: 'total' });
   });
 
-  it('priorité 2 : pas de setting mais GL N-1 importé → source=gl_n1 (comptes 512 au 31/12 N-1)', async () => {
+  // ── Revue Codex PR#85 : à-nouveaux 512 du GL courant (anti double comptage)
+  const AN_ROW = { date: '2026-01-01', debit: 10000, credit: 0, journal: 'AN', piece_label: 'À nouveaux', line_label: null };
+
+  it('priorité 2 : GL courant avec à-nouveaux (journal AN) → source=gl_an ET flux de janvier SANS l’à-nouveau (pas de double comptage)', async () => {
+    // Le GL N-1 est aussi disponible (nb=42) : gl_an doit primer sur gl_n1.
+    mockQuery.mockImplementation(wireTreso({ glRows: [AN_ROW, ...FLUX_512], glN1Rows: [{ nb: 42, solde: 5000 }] }));
+    const res = await get('/api/finance/gl/2026/tresorerie');
+    expect(res.status).toBe(200);
+    // L'à-nouveau EST le solde d'ouverture comptable…
+    expect(res.body.solde_initial).toMatchObject({ montant: 10000, source: 'gl_an', annee: 2026 });
+    expect(typeof res.body.solde_initial.detail).toBe('string');
+    // …et n'apparaît PLUS dans les flux : janvier = +1 000 seulement
+    expect(res.body.monthly[0].encaissements).toBe(1000);
+    expect(res.body.monthly[0].solde).toBe(11000); // 10 000 + 1 000 (et non 21 000)
+    expect(res.body.monthly[1].solde).toBe(10600);
+    expect(res.body.kpis.encaissements).toBe(1000); // total annuel hors à-nouveaux
+    // Waterfall aligné sur les mêmes flux corrigés
+    expect(res.body.waterfall[0]).toMatchObject({ label: 'Solde initial', value: 10000, type: 'total' });
+    expect(res.body.waterfall[1]).toMatchObject({ value: 1000 });
+  });
+
+  it('détection par LIBELLÉ (journal générique) : « REPORT A NOUVEAU » / « à-Nouveaux » — insensible casse et accents', async () => {
+    const anByPiece = { date: '2026-01-02', debit: 0, credit: 2000, journal: 'OD', piece_label: 'REPORT A NOUVEAU', line_label: null };
+    const anByLine = { date: '2026-01-02', debit: 5000, credit: 0, journal: 'BQ1', piece_label: null, line_label: 'Solde à-Nouveaux exercice' };
+    mockQuery.mockImplementation(wireTreso({ glRows: [anByPiece, anByLine, ...FLUX_512] }));
+    const res = await get('/api/finance/gl/2026/tresorerie');
+    expect(res.status).toBe(200);
+    expect(res.body.solde_initial).toMatchObject({ montant: 3000, source: 'gl_an' }); // 5 000 − 2 000
+    // Aucun des deux à-nouveaux ne pollue les flux de janvier
+    expect(res.body.monthly[0].encaissements).toBe(1000);
+    expect(res.body.monthly[0].decaissements).toBe(0);
+    expect(res.body.monthly[0].solde).toBe(4000);
+  });
+
+  it('setting prioritaire sur gl_an, MAIS les à-nouveaux restent exclus des flux (exclusion systématique)', async () => {
+    mockQuery.mockImplementation(wireTreso({ settingRows: [{ value: '10000' }], glRows: [AN_ROW, ...FLUX_512] }));
+    const res = await get('/api/finance/gl/2026/tresorerie');
+    expect(res.status).toBe(200);
+    expect(res.body.solde_initial).toMatchObject({ montant: 10000, source: 'setting' });
+    expect(res.body.monthly[0].encaissements).toBe(1000);
+    expect(res.body.monthly[0].solde).toBe(11000); // jamais 21 000
+  });
+
+  it('priorité 3 : pas de setting, pas d’à-nouveaux, GL N-1 importé → source=gl_n1 (comportement inchangé)', async () => {
     mockQuery.mockImplementation(wireTreso({ settingRows: [], glN1Rows: [{ nb: 42, solde: '5000.5' }] }));
     const res = await get('/api/finance/gl/2026/tresorerie');
     expect(res.status).toBe(200);
@@ -163,7 +213,7 @@ describe('CONTRAT GET /finance/gl/:year/tresorerie → solde_initial (FinanceTre
     expect(res.body.waterfall[0].value).toBe(5001);
   });
 
-  it('priorité 3 : ni setting ni GL N-1 → source=aucune, montant 0 (avertissement côté UI)', async () => {
+  it('priorité 4 : ni setting, ni à-nouveaux, ni GL N-1 → source=aucune, montant 0 (avertissement côté UI)', async () => {
     mockQuery.mockImplementation(wireTreso({}));
     const res = await get('/api/finance/gl/2026/tresorerie');
     expect(res.status).toBe(200);
