@@ -665,23 +665,23 @@ router.get('/gl/:year/bilan', async (req, res) => {
     // Actif/Passif
     const rd = (v) => Math.round(v * 100) / 100;
     const actifRows = [
-      { label: 'ACTIF IMMOBILISE', n: rd(immobilisations), n1: rd(immobilisationsN1), bold: true },
-      { label: 'Immobilisations', n: rd(immobilisations), n1: rd(immobilisationsN1), indent: true },
-      { label: 'ACTIF CIRCULANT', n: rd(stocks + clients + Math.max(0, autresCreances)), n1: rd(sn1('3') + sn1('41')), bold: true },
-      { label: 'Stocks', n: rd(stocks), n1: rd(sn1('3')), indent: true },
-      { label: 'Clients', n: rd(clients), n1: rd(sn1('41')), indent: true },
-      { label: 'TRESORERIE ACTIVE', n: rd(Math.max(0, tresorerie)), n1: rd(Math.max(0, sn1('5'))), bold: true },
-      { label: 'TOTAL ACTIF', n: rd(totalActif), n1: rd(totalActifN1), bold: true },
+      { label: 'ACTIF IMMOBILISE', n: rd(immobilisations), n1: n1v(rd(immobilisationsN1)), bold: true },
+      { label: 'Immobilisations', n: rd(immobilisations), n1: n1v(rd(immobilisationsN1)), indent: true },
+      { label: 'ACTIF CIRCULANT', n: rd(stocks + clients + Math.max(0, autresCreances)), n1: n1v(rd(sn1('3') + sn1('41'))), bold: true },
+      { label: 'Stocks', n: rd(stocks), n1: n1v(rd(sn1('3'))), indent: true },
+      { label: 'Clients', n: rd(clients), n1: n1v(rd(sn1('41'))), indent: true },
+      { label: 'TRESORERIE ACTIVE', n: rd(Math.max(0, tresorerie)), n1: n1v(rd(Math.max(0, sn1('5')))), bold: true },
+      { label: 'TOTAL ACTIF', n: rd(totalActif), n1: n1v(rd(totalActifN1)), bold: true },
     ];
 
     const passifRows = [
-      { label: 'CAPITAUX PROPRES', n: rd(capitaux), n1: rd(capitauxN1), bold: true },
-      { label: 'Resultat de l\'exercice', n: rd(resultat), n1: rd(resultatN1), indent: true },
-      { label: 'DETTES', n: rd(fournisseurs + social + Math.max(0, autresDettes)), n1: rd(-(sn1('40')) - sn1('43')), bold: true },
-      { label: 'Fournisseurs', n: rd(fournisseurs), n1: rd(-(sn1('40'))), indent: true },
-      { label: 'Dettes sociales et fiscales', n: rd(social), n1: rd(-(sn1('43'))), indent: true },
-      { label: 'TRESORERIE PASSIVE', n: rd(Math.max(0, -tresorerie)), n1: rd(Math.max(0, -sn1('5'))), bold: true },
-      { label: 'TOTAL PASSIF', n: rd(totalPassif), n1: rd(totalActifN1), bold: true },
+      { label: 'CAPITAUX PROPRES', n: rd(capitaux), n1: n1v(rd(capitauxN1)), bold: true },
+      { label: 'Resultat de l\'exercice', n: rd(resultat), n1: n1v(rd(resultatN1)), indent: true },
+      { label: 'DETTES', n: rd(fournisseurs + social + Math.max(0, autresDettes)), n1: n1v(rd(-(sn1('40')) - sn1('43'))), bold: true },
+      { label: 'Fournisseurs', n: rd(fournisseurs), n1: n1v(rd(-(sn1('40')))), indent: true },
+      { label: 'Dettes sociales et fiscales', n: rd(social), n1: n1v(rd(-(sn1('43')))), indent: true },
+      { label: 'TRESORERIE PASSIVE', n: rd(Math.max(0, -tresorerie)), n1: n1v(rd(Math.max(0, -sn1('5')))), bold: true },
+      { label: 'TOTAL PASSIF', n: rd(totalPassif), n1: n1v(rd(totalActifN1)), bold: true },
     ];
 
     // Ratios
