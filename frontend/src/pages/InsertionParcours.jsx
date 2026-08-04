@@ -382,7 +382,7 @@ function RenouvellementsBloc({ onSelect }) {
             return (
               <div key={`${r.employee_id}-${r.contract_id}`} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-100 hover:bg-amber-50/40 flex-wrap">
                 <button onClick={() => onSelect(r.employee_id)} className="text-left text-sm min-w-0">
-                  <span className="font-medium text-gray-800">{r.first_name} {r.last_name}</span>
+                  <span className="font-medium text-gray-800">{formatEmployeeName(r.last_name, r.first_name)}</span>
                   <span className="text-xs text-gray-500 ml-2">
                     fin de contrat {frDate(r.contract_end)}
                     {r.jours_restants != null && <span className={r.jours_restants <= 15 ? 'text-red-600 font-medium' : 'text-amber-700'}> · J-{r.jours_restants}</span>}
@@ -671,7 +671,7 @@ function CohortePanel({ onSelect }) {
               {stats.jalons_en_retard.map((j) => (
                 <button key={j.id} onClick={() => onSelect(j.employee_id)}
                   className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-red-50 text-sm">
-                  <span>{j.first_name} {j.last_name} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+                  <span>{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
                   <span className="text-xs text-red-600 font-medium">{Math.abs(j.days_until)} j</span>
                 </button>
               ))}
@@ -689,7 +689,7 @@ function CohortePanel({ onSelect }) {
               {stats.jalons_a_venir_7j.map((j) => (
                 <button key={j.id} onClick={() => onSelect(j.employee_id)}
                   className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-amber-50 text-sm">
-                  <span>{j.first_name} {j.last_name} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+                  <span>{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
                   <span className="text-xs text-amber-600 font-medium">J-{j.days_until}</span>
                 </button>
               ))}
