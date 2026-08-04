@@ -132,7 +132,8 @@ export default function Pennylane() {
     setLoadingBalances(true);
     setBalances(null);
     try {
-      const res = await api.get('/pennylane/sync/balances');
+      // Balance de l'exercice sélectionné (calculée depuis le GL importé en base)
+      const res = await api.get('/pennylane/sync/balances', { params: { year: syncYear } });
       setBalances(res.data);
     } catch (err) {
       alert(err.response?.data?.error || 'Erreur chargement balances');
@@ -362,7 +363,7 @@ export default function Pennylane() {
         {balances && (
           <div className="card-modern p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-slate-800">Balances comptables Pennylane</h2>
+              <h2 className="font-bold text-slate-800">Balances comptables Pennylane{balances.year ? ` — exercice ${balances.year}` : ''}</h2>
               <div className="flex items-center gap-4 text-xs text-slate-500">
                 <span>{balances.total_accounts} compte(s)</span>
                 <span>Mis a jour : {formatDate(balances.fetched_at)}</span>

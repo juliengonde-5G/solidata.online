@@ -127,7 +127,7 @@ export default function Candidates() {
   const handleUnlink = async (candidate) => {
     const ok = await confirm({
       title: 'Délier le collaborateur',
-      message: `Retirer le lien entre ${candidate.first_name} ${candidate.last_name} et le collaborateur ${candidate.linked_employee_name || ''} ? La fiche RH n'est pas supprimée.`,
+      message: `Retirer le lien entre ${formatEmployeeName(candidate.last_name, candidate.first_name)} et le collaborateur ${candidate.linked_employee_name || ''} ? La fiche RH n'est pas supprimée.`,
       confirmLabel: 'Délier',
       confirmVariant: 'danger',
     });
@@ -145,7 +145,7 @@ export default function Candidates() {
     setLinkModal(null);
     loadAll();
     if (selected?.id === candidateId) {
-      setSelected(prev => ({ ...prev, linked_employee_id: employee.id, linked_employee_name: `${employee.first_name} ${employee.last_name}` }));
+      setSelected(prev => ({ ...prev, linked_employee_id: employee.id, linked_employee_name: formatEmployeeName(employee.last_name, employee.first_name) }));
     }
   };
 
@@ -663,6 +663,10 @@ function LinkEmployeeModal({ candidate, onClose, onLinked }) {
   }, [candidate.id]);
 
   const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  // Ordre par proximité de correspondance (match_score, déjà trié par le
+  // backend) conservé tel quel — non alphabétique par conception (meilleure
+  // correspondance en premier). Seul l'affichage du nom suit la règle « NOM
+  // Prénom » (voir rendu ci-dessous).
   const filtered = useMemo(() => {
     const q = norm(search).trim();
     if (!q) return suggestions;

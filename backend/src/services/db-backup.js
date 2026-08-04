@@ -9,13 +9,14 @@
  *  - le job scheduler `autoDatabaseBackup` (mardi & vendredi 04h, fichiers
  *    préfixés `auto_`, rétention glissante — voir shouldRunAutoBackup).
  *
- * FUSEAU HORAIRE : la décision jour/heure suit la convention des autres jobs du
- * scheduler (`now.getDay()` / `now.getHours()` = heure LOCALE du conteneur).
- * Aucun TZ n'étant défini dans docker-compose*.yml, le conteneur backend tourne
- * en UTC en production (node:20-alpine) — « 04h » signifie donc 04:00 UTC,
- * soit 05h/06h heure de Paris selon la saison (même convention que la sync
- * Pennylane « 2h du matin (UTC) »). Pour un déclenchement à 04:00 heure de
- * Paris exactement, définir TZ=Europe/Paris sur le conteneur backend.
+ * FUSEAU HORAIRE : contrairement aux autres jobs du scheduler (qui testent
+ * l'heure LOCALE du conteneur, = UTC en prod), la décision jour/heure de CE job
+ * est évaluée dans le fuseau EUROPE/PARIS via Intl.DateTimeFormat — exigence
+ * client : « mardi et vendredi 04h du matin » en heure française, sans changer
+ * le TZ du conteneur (ce qui décalerait tous les autres jobs). 04h Paris
+ * = 03h UTC en hiver (CET, UTC+1) / 02h UTC en été (CEST, UTC+2) — toujours
+ * aligné sur un top d'heure UTC, donc le tick horaire du scheduler le capte
+ * exactement une fois par jour planifié, quel que soit le TZ du conteneur.
  *
  * RÉTENTION : seules les sauvegardes AUTOMATIQUES (`auto_*.sql`) sont soumises
  * à la rétention (8 fichiers par défaut, surchargeable via
@@ -41,8 +42,9 @@ const AUTO_PREFIX = 'auto_';
 // Nombre de sauvegardes automatiques conservées (les plus récentes).
 const AUTO_RETENTION = Math.max(1, Number(process.env.AUTO_BACKUP_RETENTION) || 8);
 
-// Planification du job auto : mardi (2) et vendredi (5) à 04h — heure du
-// conteneur (cf. bloc FUSEAU HORAIRE ci-dessus).
+// Planification du job auto : mardi (2) et vendredi (5) à 04h — jour de
+// semaine et heure du calendrier EUROPE/PARIS (cf. bloc FUSEAU HORAIRE).
+const PARIS_TZ = 'Europe/Paris';
 const AUTO_BACKUP_DAYS = [2, 5];
 const AUTO_BACKUP_HOUR = 4;
 
