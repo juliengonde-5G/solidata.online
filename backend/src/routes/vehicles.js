@@ -192,7 +192,7 @@ router.get('/', async (req, res) => {
     query += ' ORDER BY COALESCE(v.is_archived, false), v.name';
     const result = await pool.query(query, params);
     // qr_token est une clé d'auth physique — jamais dans les listings.
-    // Récupération dédiée via GET /:id/access-info (ADMIN).
+    // Récupération dédiée via GET /:id/access-info (ADMIN + MANAGER lecture).
     res.json(result.rows.map((r) => { delete r.qr_token; return r; }));
   } catch (err) {
     console.error('[VEHICLES] Erreur liste :', err);
@@ -263,8 +263,15 @@ router.patch('/:id/restore', authorize('ADMIN', 'MANAGER'), async (req, res) => 
 // URL d'accès chauffeur (« 1 URL = 1 véhicule »)
 //
 // `qr_token` est traité comme une clé physique du véhicule : exposé UNIQUEMENT
-// via ces deux endpoints (ADMIN). Les routes GET / et GET /:id strippent ce
-// champ avant réponse (defense in depth).
+// via ces deux endpoints. Les routes GET / et GET /:id strippent ce champ
+// avant réponse (defense in depth).
+//
+// Bug Lot 9 : le pairing D3 (CLAUDE.md §7) est explicitement fait « en
+// personne » par le MANAGER au dépôt — or la lecture était réservée ADMIN
+// (front ET back), donc invisible pour tout MANAGER ouvrant la fiche
+// véhicule. Lecture ouverte à ADMIN + MANAGER ; la RÉGÉNÉRATION (révocation
+// immédiate de l'ancien raccourci) reste ADMIN seul — action plus sensible,
+// pas requise par le pairing initial.
 //
 // Base URL mobile via env var MOBILE_BASE_URL (défaut prod). Permet de
 // pointer vers un sous-domaine de staging sans rebuilder.
@@ -272,8 +279,8 @@ router.patch('/:id/restore', authorize('ADMIN', 'MANAGER'), async (req, res) => 
 const MOBILE_BASE_URL = process.env.MOBILE_BASE_URL || 'https://m.solidata.online';
 const buildVehicleUrl = (token) => `${MOBILE_BASE_URL}/v/${token}`;
 
-// GET /api/vehicles/:id/access-info — Récupérer l'URL d'accès courante (ADMIN)
-router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
+// GET /api/vehicles/:id/access-info — Récupérer l'URL d'accès courante (ADMIN + MANAGER lecture)
+router.get('/:id/access-info', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT id, registration, name, qr_token FROM vehicles WHERE id = $1',
@@ -296,7 +303,8 @@ router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
 
 // POST /api/vehicles/:id/regenerate-token — Régénérer l'URL (révoque l'ancienne)
 //
-// À utiliser par le manager quand : changement de chauffeur titulaire,
+// Réservé ADMIN (action de révocation, plus sensible que la simple lecture
+// de l'URL courante). À déclencher quand : changement de chauffeur titulaire,
 // téléphone perdu/volé, ou suspicion de compromission. L'ancien raccourci
 // devient immédiatement invalide → tap-renvoi 401 côté chauffeur.
 router.post('/:id/regenerate-token', authorize('ADMIN'), async (req, res) => {
@@ -1166,7 +1174,7 @@ router.get('/:id', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Véhicule non trouvé' });
     const row = result.rows[0];
     // qr_token est une clé d'auth physique — jamais dans le détail générique.
-    // Récupération dédiée via GET /:id/access-info (ADMIN).
+    // Récupération dédiée via GET /:id/access-info (ADMIN + MANAGER lecture).
     delete row.qr_token;
     res.json(row);
   } catch (err) {

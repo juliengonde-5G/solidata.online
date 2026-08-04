@@ -143,9 +143,9 @@ export default function Skills() {
                   {selectedSkill === key && (
                     <div className="mt-3 pt-3 border-t space-y-1">
                       {employees.filter((e) => hasSkill(e, key)).map((e) => (
-                        <p key={e.id} className="text-xs text-gray-600">{e.first_name} {e.last_name}</p>
+                        <p key={e.id} className="text-xs text-gray-600">{formatName(e)}</p>
                       ))}
-                      {skillCounts[key] === 0 && <p className="text-xs text-gray-400">Aucun collaborateur</p>}
+                      {skillCounts[key] === 0 && <p className="text-xs text-gray-400">Aucun salarié en parcours</p>}
                     </div>
                   )}
                 </div>
@@ -202,7 +202,7 @@ export default function Skills() {
                     </tr>
                   ))}
                   {employees.length === 0 && (
-                    <tr><td colSpan={Object.keys(SKILL_CATEGORIES).length + 1} className="p-8 text-center text-gray-400">Aucun collaborateur</td></tr>
+                    <tr><td colSpan={Object.keys(SKILL_CATEGORIES).length + 1} className="p-8 text-center text-gray-400">Aucun salarié actif en parcours d'insertion</td></tr>
                   )}
                 </tbody>
               </table>

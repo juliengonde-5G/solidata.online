@@ -593,6 +593,14 @@ router.get('/gl/:year/bilan', async (req, res) => {
       GROUP BY SUBSTRING(g.account, 1, 2), SUBSTRING(g.account, 1, 1)
     `, [year - 1]);
 
+    // Honnêteté N-1 (doctrine « jamais de valeur inventée ») : si l'exercice
+    // N-1 n'a AUCUNE écriture importée (Pennylane non synchronisé pour cette
+    // année), les colonnes N-1 sont renvoyées à null — pas à 0 — et le front
+    // affiche « exercice N-1 non importé » au lieu de faux zéros.
+    const n1Disponible = rn1.rows.length > 0;
+    // n1v : ne laisse passer une valeur N-1 que si l'exercice N-1 est importé.
+    const n1v = (v) => (n1Disponible ? v : null);
+
     const n1Map = {};
     for (const row of rn1.rows) n1Map[row.sub] = parseFloat(row.solde) || 0;
 
@@ -641,16 +649,17 @@ router.get('/gl/:year/bilan', async (req, res) => {
     const totalActifN1 = immobilisationsN1 + sn1('3') + sn1('41') + sn1('5');
     const capitauxN1 = -(sn1('1'));
 
-    // SIG
+    // SIG — les valeurs N-1 sont issues du Grand Livre Pennylane de l'exercice
+    // précédent lorsqu'il est importé ; null (jamais 0 inventé) sinon.
     const sig = [
-      { label: 'Produits d\'exploitation (cl. 7)', n: Math.round(produits), n1: Math.round(produitsN1), highlight: false },
-      { label: 'Charges d\'exploitation (cl. 6)', n: -Math.round(charges), n1: -Math.round(chargesN1), highlight: false },
-      { label: 'RESULTAT D\'EXPLOITATION', n: Math.round(resultat), n1: Math.round(resultatN1), highlight: true,
-        variation: resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null },
-      { label: 'Produits financiers', n: Math.round(-(s('76'))), n1: Math.round(-(sn1('76'))), highlight: false },
-      { label: 'Charges financieres', n: -Math.round(s('66')), n1: -Math.round(sn1('66')), highlight: false },
-      { label: 'RESULTAT NET', n: Math.round(resultat), n1: Math.round(resultatN1), highlight: true,
-        variation: resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null },
+      { label: 'Produits d\'exploitation (cl. 7)', n: Math.round(produits), n1: n1v(Math.round(produitsN1)), highlight: false },
+      { label: 'Charges d\'exploitation (cl. 6)', n: -Math.round(charges), n1: n1v(-Math.round(chargesN1)), highlight: false },
+      { label: 'RESULTAT D\'EXPLOITATION', n: Math.round(resultat), n1: n1v(Math.round(resultatN1)), highlight: true,
+        variation: n1Disponible && resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null },
+      { label: 'Produits financiers', n: Math.round(-(s('76'))), n1: n1v(Math.round(-(sn1('76')))), highlight: false },
+      { label: 'Charges financieres', n: -Math.round(s('66')), n1: n1v(-Math.round(sn1('66'))), highlight: false },
+      { label: 'RESULTAT NET', n: Math.round(resultat), n1: n1v(Math.round(resultatN1)), highlight: true,
+        variation: n1Disponible && resultatN1 !== 0 ? Math.round((resultat - resultatN1) / Math.abs(resultatN1) * 100 * 10) / 10 : null },
     ];
 
     // Actif/Passif

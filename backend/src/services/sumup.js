@@ -284,6 +284,26 @@ function getSegment(description) {
   return 'autre';
 }
 
+// ── Détection « vendu au kilo » (unifie CSV + API/webhook) ──
+// L'export CSV SumUp porte une colonne « Unité » (kg / pce) : elle FAIT FOI
+// quand elle est renseignée. En revanche, les transactions remontées par l'API
+// (/v0.1/me/transactions) et par les webhooks n'ont PAS d'unité sur leurs
+// produits (name/description + quantity + price seulement) — sans inférence,
+// tout le flux API/webhook restait à `unite = 'pce'` et le poids vendu sortait
+// à 0 (bug « les poids des ventes sont tous à zéro »). Règle partagée :
+//   1. unité explicite non vide → au kilo ssi elle contient « kg »
+//      (comportement du chemin CSV, inchangé) ;
+//   2. sinon, un produit dont le libellé matche le mapping textile au kilo
+//      (« Vente moins de 5 kg », « Vente plus de 5 kilos »… → segment
+//      textile_vrac) est vendu AU KG → poids = quantité (la caisse SumUp
+//      saisit le poids pesé dans le champ quantité pour ces articles).
+// Chaussures et consommables (sacs) restent à la pièce (poids 0).
+function isKgItem(description, unite = '') {
+  const u = String(unite || '').trim().toLowerCase();
+  if (u) return u.includes('kg');
+  return getSegment(description) === 'textile_vrac';
+}
+
 // ── Normalisation moyen de paiement → libellé métier ('CB' / 'Espèces') ──
 // SumUp expose des types techniques : `payment_type` = 'POS' (carte présentée
 // sur le terminal en boutique), 'ECOM' (carte en ligne), et/ou une marque via
@@ -357,12 +377,14 @@ function mapSumUpTransaction(tx, detail = tx) {
   const lignes = [];
 
   if (items.length === 0) {
-    // Ticket sans détail de lignes (rare) : 1 ligne globale
+    // Ticket sans détail de lignes (rare) : 1 ligne globale. Le poids reste 0
+    // (quantité inconnue — jamais de valeur inventée), mais le segment est
+    // dérivé du libellé s'il existe pour ne pas fausser les analyses.
     const magTTC = Math.abs(Number(detail.amount || 0));
     const ht = magTTC / 1.2;
     lignes.push({
       description: detail.description || (refund ? 'Remboursement' : 'Vente'),
-      segment: 'autre',
+      segment: getSegment(detail.description),
       unite: 'pce',
       quantite: sign * 1,
       prix_unitaire_ttc: sign * magTTC,
