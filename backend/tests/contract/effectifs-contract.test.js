@@ -311,6 +311,29 @@ describe('CONTRAT /effectifs/grille', () => {
     expect(res.body.sections).toEqual([]);
   });
 
+  it('données héritées : un CDD porté par un salarié en parcours est requalifié CDDI (grille non vide)', async () => {
+    // Base non réimportée depuis 2.20.0 : l'ancien import stockait le type brut
+    // Malibou « CDD » — sans requalification de lecture, la grille sortait vide.
+    installMocks({
+      employees: [{
+        id: 30, first_name: 'Fatou', last_name: 'Cisse', team_id: 1, team_name: 'Tri',
+        insertion_status: 'en_parcours', cddi_derogation_motif: null,
+        pass_iae_end: '2024-12-31',
+        fiche_contract_type: 'CDD', fiche_contract_start: null, fiche_contract_end: null, fiche_weekly_hours: 26,
+      }],
+      contracts: [{ employee_id: 30, contract_type: 'CDD', start_date: '2024-01-01', end_date: '2024-06-30', official_start_date: '2024-01-01', weekly_hours: 26 }],
+    });
+    const res = await get('/api/effectifs/grille?annee=2024');
+    expect(res.body.sections).toHaveLength(1);
+    const fatou = res.body.sections[0].personnes[0];
+    expect(fatou.nom).toBe('CISSE Fatou');
+    // S10 (jeudi 07/03/2024) couverte par le CDD requalifié → 26 h = 0.74 signé.
+    expect(fatou.quotites.find((c) => c.s === 10)).toEqual({ s: 10, q: 0.74, statut: 'signe' });
+    // Renouvellement présumé après le 30/06 (en_parcours, borne pass IAE 31/12) :
+    // le CDD hérité alimente aussi la borne « 1er CDDI + 24 mois ».
+    expect(fatou.quotites.find((c) => c.s === 30)).toEqual({ s: 30, q: 0.74, statut: 'presume' });
+  });
+
   it('validation : vue inconnue → 400 ; annee hors bornes → 400', async () => {
     installMocks();
     expect((await get('/api/effectifs/grille?annee=2026&vue=mensuelle')).status).toBe(400);
