@@ -114,9 +114,21 @@ async function readConvention(annee) {
 
 const isCddi = (t) => String(t || '').toUpperCase() === 'CDDI';
 const isCdi = (t) => String(t || '').toUpperCase() === 'CDI';
-/** CDI « Inclusion » : CDI porté par un salarié flagué cdi_inclusion ou en parcours. */
+const isCdd = (t) => String(t || '').toUpperCase() === 'CDD';
+/** Le salarié a (ou a eu) un parcours d'insertion dans l'ERP. */
+const hasParcours = (emp) => !!emp.insertion_status && emp.insertion_status !== 'none';
+/**
+ * Contrats retenus pour la grille ETP :
+ * - CDDI : toujours ;
+ * - CDI « Inclusion » : CDI porté par un salarié flagué cdi_inclusion ou en parcours ;
+ * - CDD porté par un salarié avec parcours d'insertion : requalifié CDDI de fait
+ *   (données HÉRITÉES d'avant l'import 2.20.0, qui stockait le type brut Malibou
+ *   « CDD » — la requalification « poste … Cddi » n'existe qu'au réimport). Sans
+ *   cette lecture, une base non réimportée affiche une grille vide.
+ */
 function keepContractForInsertion(contractType, emp) {
   if (isCddi(contractType)) return true;
+  if (isCdd(contractType)) return hasParcours(emp);
   if (!isCdi(contractType)) return false;
   return emp.cddi_derogation_motif === 'cdi_inclusion' || emp.insertion_status === 'en_parcours';
 }
@@ -229,9 +241,11 @@ async function buildGrilleData(annee, today) {
 
     // Borne légale des 24 mois : début du 1er CDDI = date d'embauche OFFICIELLE
     // du premier contrat CDDI (official_start_date lot 3, repli période effective).
+    // Les CDD retenus par keepContractForInsertion sont des CDDI de fait
+    // (données héritées) : ils portent la même borne.
     let premierCddiDebut = null;
     for (const c of contrats) {
-      if (c.type !== 'CDDI' || !c.official) continue;
+      if ((c.type !== 'CDDI' && c.type !== 'CDD') || !c.official) continue;
       if (premierCddiDebut == null || c.official < premierCddiDebut) premierCddiDebut = c.official;
     }
 
