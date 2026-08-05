@@ -109,6 +109,10 @@ const sortByName = (list) => [...(list || [])].sort((a, b) => {
 });
 
 // ── Bandeau « convention non paramétrée » ───────────────────────────────────
+// L'API renvoie toujours un objet convention (valeurs null + source 'defaut'
+// quand rien n'est saisi) : le manque se détecte sur etp_conventionnes, pas
+// sur la présence de l'objet (revue Codex PR#86).
+const conventionMissing = (c) => !c || c.etp_conventionnes == null;
 function ConventionWarning() {
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-xs px-3 py-2 flex items-start gap-2 mb-4" role="note">
@@ -299,7 +303,7 @@ function SyntheseTab({ annee, setAnnee, canWrite }) {
         </button>
       </div>
 
-      {!convention && <ConventionWarning />}
+      {conventionMissing(convention) && <ConventionWarning />}
 
       {/* KPI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -579,7 +583,7 @@ function GrilleETP({ annee, vue }) {
 
   return (
     <div>
-      {!convention && <ConventionWarning />}
+      {conventionMissing(convention) && <ConventionWarning />}
 
       <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <p className="text-xs text-slate-500">
