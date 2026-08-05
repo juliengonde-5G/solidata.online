@@ -284,6 +284,26 @@ function getSegment(description) {
   return 'autre';
 }
 
+// ── Détection « vendu au kilo » (unifie CSV + API/webhook) ──
+// L'export CSV SumUp porte une colonne « Unité » (kg / pce) : elle FAIT FOI
+// quand elle est renseignée. En revanche, les transactions remontées par l'API
+// (/v0.1/me/transactions) et par les webhooks n'ont PAS d'unité sur leurs
+// produits (name/description + quantity + price seulement) — sans inférence,
+// tout le flux API/webhook restait à `unite = 'pce'` et le poids vendu sortait
+// à 0 (bug « les poids des ventes sont tous à zéro »). Règle partagée :
+//   1. unité explicite non vide → au kilo ssi elle contient « kg »
+//      (comportement du chemin CSV, inchangé) ;
+//   2. sinon, un produit dont le libellé matche le mapping textile au kilo
+//      (« Vente moins de 5 kg », « Vente plus de 5 kilos »… → segment
+//      textile_vrac) est vendu AU KG → poids = quantité (la caisse SumUp
+//      saisit le poids pesé dans le champ quantité pour ces articles).
+// Chaussures et consommables (sacs) restent à la pièce (poids 0).
+function isKgItem(description, unite = '') {
+  const u = String(unite || '').trim().toLowerCase();
+  if (u) return u.includes('kg');
+  return getSegment(description) === 'textile_vrac';
+}
+
 // ── Normalisation moyen de paiement → libellé métier ('CB' / 'Espèces') ──
 // SumUp expose des types techniques : `payment_type` = 'POS' (carte présentée
 // sur le terminal en boutique), 'ECOM' (carte en ligne), et/ou une marque via
@@ -357,12 +377,14 @@ function mapSumUpTransaction(tx, detail = tx) {
   const lignes = [];
 
   if (items.length === 0) {
-    // Ticket sans détail de lignes (rare) : 1 ligne globale
+    // Ticket sans détail de lignes (rare) : 1 ligne globale. Le poids reste 0
+    // (quantité inconnue — jamais de valeur inventée), mais le segment est
+    // dérivé du libellé s'il existe pour ne pas fausser les analyses.
     const magTTC = Math.abs(Number(detail.amount || 0));
     const ht = magTTC / 1.2;
     lignes.push({
       description: detail.description || (refund ? 'Remboursement' : 'Vente'),
-      segment: 'autre',
+      segment: getSegment(detail.description),
       unite: 'pce',
       quantite: sign * 1,
       prix_unitaire_ttc: sign * magTTC,
@@ -379,12 +401,22 @@ function mapSumUpTransaction(tx, detail = tx) {
     for (const it of items) {
       const desc = (it.description || it.name || '').trim();
       const qtyMag = Math.abs(Number(it.quantity || 1));
-      const unitPrice = Math.abs(Number(it.price_per_unit || it.unit_price || 0));
+      // Les produits API/webhook SumUp exposent `price` (prix unitaire), pas
+      // `price_per_unit` — repli en cascade pour couvrir les deux formes.
+      const unitPrice = Math.abs(Number(it.price_per_unit || it.unit_price || it.price || 0));
       const lineTTCmag = Math.abs(Number(it.total_price || it.total_with_vat || qtyMag * unitPrice));
       const tvaMag = Math.abs(Number(it.vat_amount || (lineTTCmag - lineTTCmag / 1.2)));
       const htMag = Math.abs(Number(it.subtotal || (lineTTCmag - tvaMag)));
       const taux = Number(it.vat_rate || 20);
-      const unite = (it.unit || 'pce').toLowerCase();
+      // BUG « poids à zéro » (Lot 6) : les produits des transactions API et des
+      // webhooks n'ont pas de champ `unit` → l'unité tombait à 'pce' et le
+      // poids restait 0 pour TOUTES les ventes synchronisées. On infère « kg »
+      // depuis le libellé (mapping textile au kilo, cf. isKgItem) quand
+      // l'unité est absente, et on STOCKE l'unité inférée pour que les
+      // agrégats SQL (`unite ILIKE '%kg%'` dans routes/vak.js) suivent.
+      const rawUnite = (it.unit || '').trim().toLowerCase();
+      const kg = isKgItem(desc, rawUnite);
+      const unite = rawUnite || (kg ? 'kg' : 'pce');
       const segment = getSegment(desc);
       lignes.push({
         description: desc, segment, unite,
@@ -397,7 +429,7 @@ function mapSumUpTransaction(tx, detail = tx) {
       });
       totalHT += sign * htMag;
       totalTVA += sign * tvaMag;
-      if (unite.includes('kg')) poidsTicket += sign * qtyMag;
+      if (kg) poidsTicket += sign * qtyMag;
       nbArticles += 1;
     }
     // Si le montant n'est pas donné au header, recalcul depuis les lignes (déjà signées)
@@ -408,6 +440,59 @@ function mapSumUpTransaction(tx, detail = tx) {
     refTx, moyenPaiement, entryMode, isRefund: refund,
     totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes,
   };
+}
+
+// ── Fuseau Europe/Paris (sans librairie externe) ──
+// Doctrine du module (Lot 12 « heure de Paris ») : le STOCKAGE reste en UTC
+// (les timestamps SumUp API/webhook sont déjà en UTC) ; l'INTERPRÉTATION du
+// CSV (horodaté en heure locale française) et les regroupements par JOUR
+// CIVIL raisonnent en Europe/Paris. Offset calculé via Intl (tzdata du
+// runtime), donc correct hiver (+1 h) / été (+2 h) sans librairie externe.
+const PARIS_TZ = 'Europe/Paris';
+
+// Décalage (minutes) de Europe/Paris par rapport à UTC à l'instant donné.
+function parisOffsetMinutes(instant) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: PARIS_TZ, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = {};
+  for (const p of dtf.formatToParts(instant)) parts[p.type] = p.value;
+  const asUTC = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour) % 24, Number(parts.minute), Number(parts.second),
+  );
+  return Math.round((asUTC - instant.getTime()) / 60000);
+}
+
+// Convertit une heure « murale » Paris (année/mois/jour/h/m/s) en instant UTC.
+// Deux passes : on estime l'offset en traitant l'heure comme UTC, on ajuste,
+// puis on re-vérifie l'offset à l'instant ajusté (bascules d'heure d'été).
+function parisWallClockToUTC(year, monthIdx, day, hh, mm, ss) {
+  const naive = Date.UTC(year, monthIdx, day, hh, mm, ss);
+  let offset = parisOffsetMinutes(new Date(naive));
+  let ts = naive - offset * 60000;
+  const offset2 = parisOffsetMinutes(new Date(ts));
+  if (offset2 !== offset) ts = naive - offset2 * 60000;
+  return new Date(ts);
+}
+
+// Date civile 'YYYY-MM-DD' d'un instant, vue depuis Europe/Paris.
+// Remplace les `toISOString().slice(0, 10)` (date UTC : fausse entre minuit
+// Paris et 01:00/02:00 du matin) pour le rattachement d'un ticket à sa VAK.
+function parisDateStr(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: PARIS_TZ }).format(date);
+}
+
+// 'YYYY-MM-DD' d'une colonne SQL DATE parsée par node-postgres (qui la
+// matérialise à minuit LOCAL du process Node) : les composantes locales
+// redonnent la date civile quel que soit le fuseau du conteneur — là où
+// `toISOString()` reculait d'un jour si le conteneur tournait à l'est d'UTC.
+function dateOnlyStr(d) {
+  const dd = d instanceof Date ? d : new Date(d);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${dd.getFullYear()}-${p(dd.getMonth() + 1)}-${p(dd.getDate())}`;
 }
 
 // ── Parse date FR "15 mai 2026 10:15" ──
@@ -439,12 +524,14 @@ function parseFRDate(str) {
   const hh = parseInt(m[4], 10);
   const mm = parseInt(m[5], 10);
   const ss = m[6] ? parseInt(m[6], 10) : 0;
-  // L'export SumUp est horodaté en GMT/UTC. On interprète l'heure comme UTC
-  // (Date.UTC) — et NON dans le fuseau local du serveur — pour que l'heure
-  // stockée soit identique quel que soit le fuseau du conteneur, et cohérente
-  // avec le flux API (`tx.timestamp` déjà en UTC). Évite le décalage de ±1-2 h
-  // entre les ventes importées par CSV et celles synchronisées par l'API.
-  return new Date(Date.UTC(year, moisIdx, day, hh, mm, ss));
+  // Lot 12 « heure de Paris » : l'export CSV SumUp est horodaté en heure
+  // LOCALE française (Europe/Paris) — l'interprétation UTC de v2.6.0 décalait
+  // l'instant réel de −1 h/−2 h. On convertit ce « mur d'horloge » Paris en
+  // instant UTC pour le stockage (offset hiver/été via Intl, indépendant du
+  // fuseau du conteneur) : l'heure STOCKÉE reste en UTC, cohérente avec le
+  // flux API (`tx.timestamp` déjà en UTC), et l'agrégation/affichage se fait
+  // en Europe/Paris partout (routes/vak.js + pages Vak*).
+  return parisWallClockToUTC(year, moisIdx, day, hh, mm, ss);
 }
 
 function parseNumberFR(str) {
@@ -547,9 +634,12 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       const dateVente = parseFRDate(dateStr);
       if (!dateVente) throw new Error(`Date invalide: "${dateStr}"`);
 
-      // Vérification rattachement VAK
-      const isoDate = dateVente.toISOString().slice(0, 10);
-      if (isoDate < vak.date_debut.toISOString().slice(0, 10) || isoDate > vak.date_fin.toISOString().slice(0, 10)) {
+      // Vérification rattachement VAK — en date CIVILE Paris (une vente à
+      // 00:30 Paris stockée 22:30/23:30 UTC la veille compte sur le bon jour),
+      // comparée aux bornes DATE de la VAK lues par leurs composantes locales
+      // (dateOnlyStr) et non par toISOString (dérive d'un jour possible).
+      const isoDate = parisDateStr(dateVente);
+      if (isoDate < dateOnlyStr(vak.date_debut) || isoDate > dateOnlyStr(vak.date_fin)) {
         dateRangeRejets.push({ line: i + 2, date: isoDate });
         continue;
       }
@@ -561,6 +651,12 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       const tauxTVA = parseNumberFR((tauxTVAStr || '').replace(/[%\s]/g, ''));
       const remise = parseNumberFR(remiseStr);
       const segment = getSegment(description);
+      // Unité kg : la colonne « Unité » du CSV fait foi quand elle est
+      // renseignée ; si elle est vide, inférence par le libellé (mapping
+      // textile au kilo) — même helper que le chemin API/webhook (isKgItem).
+      // L'unité inférée est STOCKÉE pour garder les agrégats SQL cohérents.
+      const ligneKg = isKgItem(description, unite);
+      const uniteNorm = (unite || '').trim().toLowerCase() || (ligneKg ? 'kg' : '');
       // Remboursement (colonne « Type » = Remboursement) → lignes en négatif,
       // même sémantique que les voies API/webhook. Voir isRefundTransaction.
       const sign = isRefundTransaction({ type }) ? -1 : 1;
@@ -583,7 +679,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
         moyen_paiement: moyenPaiementNorm,
         description: (description || '').trim(),
         segment,
-        unite: (unite || '').trim().toLowerCase(),
+        unite: uniteNorm,
         quantite: sign * quantite,
         prix_unitaire_ttc: sign * (totalTTC / Math.max(1, Math.abs(quantite || 1))),
         remise,
@@ -595,7 +691,7 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       });
 
       caTotal += sign * totalTTC;
-      const poidsLigne = (unite || '').toLowerCase().includes('kg') ? sign * quantite : 0;
+      const poidsLigne = ligneKg ? sign * quantite : 0;
       poidsTotal += poidsLigne;
 
       if (!dateDebutISO || isoDate < dateDebutISO) dateDebutISO = isoDate;
@@ -708,7 +804,10 @@ async function captureWeatherForVak(vakId) {
   const start = new Date(vak.date_debut);
   const end = new Date(vak.date_fin);
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const dateStr = d.toISOString().slice(0, 10);
+    // dateOnlyStr (composantes locales) et non toISOString : node-postgres
+    // matérialise une colonne DATE à minuit LOCAL — toISOString reculerait
+    // d'un jour (météo du mauvais jour) si le conteneur tournait à l'est d'UTC.
+    const dateStr = dateOnlyStr(d);
     const data = await fetchOpenMeteoDaily(lat, lng, dateStr).catch(() => null);
     if (!data) continue;
     await pool.query(`
@@ -807,11 +906,47 @@ async function syncTransactionsFromApi({ io, triggeredBy = null, sinceOverride =
   }
 }
 
+// ── Détail d'une transaction SumUp (lignes produits) ──
+// Le résumé renvoyé par /v0.1/me/transactions/history et la charge webhook ne
+// portent PAS le détail produits — or c'est lui qui contient les quantités
+// (donc le poids vendu). La forme DOCUMENTÉE du « retrieve » SumUp est
+// GET /v0.1/me/transactions?id=<id> (paramètre de requête) ; l'ancienne forme
+// par chemin /v0.1/me/transactions/<id> est conservée en dernier repli.
+// Sans détail exploitable, on retombe sur le résumé (ticket 1 ligne globale,
+// poids 0 — jamais de valeur inventée) en le JOURNALISANT : un ticket sans
+// lignes n'est plus un échec silencieux.
+async function fetchTransactionDetail(tx) {
+  if (!tx) return tx;
+  const hasItems = (Array.isArray(tx.line_items) && tx.line_items.length > 0)
+    || (Array.isArray(tx.products) && tx.products.length > 0);
+  if (hasItems) return tx;
+  const txId = tx.id || tx.transaction_id;
+  const txCode = tx.transaction_code;
+  if (!txId && !txCode) return tx;
+  const attempts = [];
+  if (txId) attempts.push(['/v0.1/me/transactions', { id: txId }]);
+  if (txCode) attempts.push(['/v0.1/me/transactions', { transaction_code: txCode }]);
+  if (txId) attempts.push([`/v0.1/me/transactions/${txId}`, {}]);
+  for (const [p, params] of attempts) {
+    try {
+      const d = await sumupApiGet(p, params);
+      if (d && (d.id || d.transaction_code || d.transaction_id || d.amount != null)) return d;
+    } catch (_) { /* essaie la forme suivante */ }
+  }
+  logger.warn('SumUp détail transaction indisponible — résumé utilisé (lignes produits absentes, poids non calculable)', {
+    transaction_id: txId || txCode,
+  });
+  return tx;
+}
+
 // ── Ingest une transaction SumUp en BDD (lookup VAK, UPSERT ticket + ventes) ──
 async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = {}) {
   try {
     const txDate = new Date(tx.timestamp || tx.transaction_date || tx.created_at || Date.now());
-    const isoDate = txDate.toISOString().slice(0, 10);
+    // Rattachement à la VAK par date CIVILE Paris (les bornes date_debut /
+    // date_fin d'une VAK sont des jours civils français) — la date UTC
+    // reculait d'un jour pour une transaction entre minuit et 01:00/02:00 Paris.
+    const isoDate = parisDateStr(txDate);
 
     // Trouver la VAK couvrant cette date
     const vakRow = await pool.query(
@@ -821,13 +956,10 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
     if (vakRow.rows.length === 0) return false; // hors VAK
     const vakId = vakRow.rows[0].id;
 
-    // SumUp peut fournir le détail produits (line_items) sur /transactions/{id} (richer)
-    let detail = tx;
+    // Détail produits (quantités → poids) : ni le résumé history ni le webhook
+    // ne portent les lignes ; on va le chercher (cf. fetchTransactionDetail).
     const txId = tx.id || tx.transaction_id;
-    if (txId && !tx.line_items) {
-      try { detail = await sumupApiGet(`/v0.1/me/transactions/${txId}`); }
-      catch (_) { /* keep summary */ }
-    }
+    const detail = await fetchTransactionDetail(tx);
     // Mapping pur : montants, quantités et poids signés (négatifs pour un
     // remboursement, cf. mapSumUpTransaction/isRefundTransaction) → le ticket
     // de remboursement nette la vente d'origine dans tous les agrégats et
@@ -910,13 +1042,15 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
 
 async function emitLiveUpdate(io, vakId, ticket) {
   if (!io) return;
-  // Compteurs jour courant et VAK
-  const today = new Date().toISOString().slice(0, 10);
+  // Compteurs jour courant et VAK — « aujourd'hui » = jour civil PARIS, et
+  // date_ticket (TIMESTAMP stocké en UTC) est ramené au jour civil Paris via
+  // la double conversion AT TIME ZONE (même règle que routes/vak.js).
+  const today = parisDateStr(new Date());
   const counters = await pool.query(`
     SELECT
-      COALESCE(SUM(CASE WHEN DATE(date_ticket) = $1::DATE THEN total_ttc END), 0)::FLOAT AS ca_jour,
-      COALESCE(SUM(CASE WHEN DATE(date_ticket) = $1::DATE THEN poids_kg END), 0)::FLOAT AS poids_jour,
-      COUNT(CASE WHEN DATE(date_ticket) = $1::DATE THEN 1 END)::INT AS tickets_jour,
+      COALESCE(SUM(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN total_ttc END), 0)::FLOAT AS ca_jour,
+      COALESCE(SUM(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN poids_kg END), 0)::FLOAT AS poids_jour,
+      COUNT(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN 1 END)::INT AS tickets_jour,
       COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_vak,
       COALESCE(SUM(poids_kg), 0)::FLOAT AS poids_vak,
       COUNT(*)::INT AS tickets_vak
@@ -979,13 +1113,19 @@ module.exports = {
   sumupApiGet,
   syncTransactionsFromApi,
   ingestSumUpTransaction,
+  fetchTransactionDetail,
   // Webhooks
   validateWebhookSignature,
   registerWebhook,
   // CSV fallback
   importCSVContent,
   parseFRDate,
+  // Fuseau Europe/Paris (réutilisés par les scripts de correction + tests)
+  parisOffsetMinutes,
+  parisWallClockToUTC,
+  parisDateStr,
   getSegment,
+  isKgItem,
   normalizePaymentMethod,
   // Remboursements (sémantique partagée CSV / API / webhook)
   isRefundTransaction,

@@ -433,7 +433,7 @@ export default function Vehicles() {
               </div>
             </div>
 
-            {/* Accès chauffeur — URL unique « 1 URL = 1 véhicule » (ADMIN seul) */}
+            {/* Accès chauffeur — URL unique « 1 URL = 1 véhicule » (lecture ADMIN + MANAGER, régénération ADMIN) */}
             <VehicleAccessPanel
               vehicleId={selectedVehicle.id}
               registration={selectedVehicle.registration}

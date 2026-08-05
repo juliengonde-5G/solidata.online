@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle, Filter, Calendar } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
+import { formatEmployeeName } from '../utils/names';
 
 const FILIERE_COLORS = {
   tri: { bg: 'bg-green-50', border: 'border-green-300', badge: 'bg-green-100 text-green-800', header: 'bg-green-600', badgeProv: 'bg-yellow-100 text-yellow-800 border border-dashed border-yellow-400' },
@@ -371,7 +372,7 @@ export default function PlanningHebdo() {
                                           a.is_provisional ? colors.badgeProv : colors.badge
                                         }`}
                                         onClick={() => desaffecter(a.employee_id, d, a.periode)}
-                                        title={`${a.first_name} ${a.last_name} — cliquer pour retirer`}
+                                        title={`${formatEmployeeName(a.last_name, a.first_name)} — cliquer pour retirer`}
                                       >
                                         {a.first_name} {a.last_name?.charAt(0)}.
                                       </div>
@@ -477,7 +478,7 @@ export default function PlanningHebdo() {
                         {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{emp.first_name} {emp.last_name}</p>
+                        <p className="text-sm font-medium truncate">{formatEmployeeName(emp.last_name, emp.first_name)}</p>
                         <p className="text-[10px] text-gray-500">
                           {emp.team_name || 'Sans équipe'} {emp.position ? `— ${emp.position}` : ''}
                         </p>

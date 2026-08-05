@@ -187,9 +187,15 @@ router.get('/tri-distribution', async (req, res) => {
 // ══════════════════════════════════════════
 router.get('/activity-heatmap', async (req, res) => {
   try {
+    // Heure de PARIS (Lot 12) : tours.created_at est un TIMESTAMP rempli par
+    // NOW() d'une base en UTC (aucun TZ posé dans les compose) → stocké en UTC.
+    // Double conversion AT TIME ZONE pour afficher l'heure murale française.
+    // Le repli `date::timestamp` (tours sans created_at) est une DATE civile à
+    // minuit : il reste NON converti (le convertir déplacerait ce seau
+    // conventionnel de 0 h vers 1-2 h).
     const result = await pool.query(`
       SELECT EXTRACT(DOW FROM date)::int as day_of_week,
-        EXTRACT(HOUR FROM COALESCE(created_at, date::timestamp))::int as hour,
+        EXTRACT(HOUR FROM COALESCE((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris', date::timestamp))::int as hour,
         COUNT(*)::int as count
       FROM tours
       WHERE date >= NOW() - INTERVAL '3 months'

@@ -3,6 +3,7 @@ import Layout from '../components/Layout';
 import { DataTable, StatusBadge, Modal, PageHeader, Section } from '../components';
 import { Clock } from 'lucide-react';
 import api from '../services/api';
+import { formatEmployeeName } from '../utils/names';
 
 export default function WorkHours() {
   const [employees, setEmployees] = useState([]);
@@ -95,7 +96,7 @@ export default function WorkHours() {
         <div className="flex gap-3 mb-6">
           <select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} className="select-modern w-auto">
             <option value="">Sélectionner un collaborateur</option>
-            {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
+            {employees.map(emp => <option key={emp.id} value={emp.id}>{formatEmployeeName(emp.last_name, emp.first_name)}</option>)}
           </select>
           <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input-modern w-auto" />
         </div>
@@ -141,7 +142,7 @@ export default function WorkHours() {
           <form id="workhours-form" onSubmit={createHours} className="space-y-3">
             <select value={form.employee_id} onChange={e => setForm({ ...form, employee_id: e.target.value })} className="select-modern" required>
               <option value="">Collaborateur *</option>
-              {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
+              {employees.map(emp => <option key={emp.id} value={emp.id}>{formatEmployeeName(emp.last_name, emp.first_name)}</option>)}
             </select>
             <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="input-modern" required />
             <div className="grid grid-cols-2 gap-3">

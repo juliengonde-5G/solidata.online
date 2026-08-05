@@ -6,13 +6,21 @@ import { useAuth } from '../contexts/AuthContext';
 /**
  * Panel d'accès véhicule (« 1 URL = 1 véhicule »).
  *
- * Affiché dans la fiche véhicule (onglet Détail). Réservé ADMIN — pour les
- * autres rôles le composant ne rend rien.
+ * Affiché dans la fiche véhicule (onglet Détail).
+ *
+ * Bug Lot 9 : le panel était réservé ADMIN alors que le pairing D3
+ * (CLAUDE.md §7) est explicitement fait « en personne » par le MANAGER
+ * au dépôt — un MANAGER ouvrant /vehicles (rôle pourtant admis sur la
+ * page, cf App.jsx) ne voyait donc rien du tout, sans aucune erreur.
+ * Lecture ouverte à ADMIN + MANAGER (aligné sur le backend, y compris
+ * un rôle personnalisé dont le `base_role` résout vers MANAGER — cf.
+ * ProtectedRoute dans App.jsx pour le même pattern). La régénération
+ * (révocation immédiate de l'ancien raccourci) reste réservée ADMIN.
  *
  * Fonctions :
  *   - Affiche l'URL d'accès courante (à copier sur le téléphone du chauffeur).
  *   - Bouton Copier (clipboard API + feedback visuel).
- *   - Bouton Régénérer (révoque l'ancienne URL — confirme avant).
+ *   - Bouton Régénérer (ADMIN seul — révoque l'ancienne URL, confirme avant).
  *   - Mode d'emploi manager pour le pairing physique au dépôt (D3).
  */
 export default function VehicleAccessPanel({ vehicleId, registration, name }) {
@@ -23,11 +31,14 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
-  // Garde-fou côté UI : le backend rejette aussi (403) si non-ADMIN.
+  // Lecture : ADMIN + MANAGER (le backend authorize('ADMIN','MANAGER')
+  // résout aussi les rôles personnalisés via base_role — même garde ici).
   const isAdmin = user?.role === 'ADMIN';
+  const isManager = user?.role === 'MANAGER' || user?.base_role === 'MANAGER';
+  const canView = isAdmin || isManager;
 
   useEffect(() => {
-    if (!vehicleId || !isAdmin) {
+    if (!vehicleId || !canView) {
       setLoading(false);
       return;
     }
@@ -43,9 +54,9 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [vehicleId, isAdmin]);
+  }, [vehicleId, canView]);
 
-  if (!isAdmin) return null;
+  if (!canView) return null;
 
   const copyUrl = async () => {
     if (!accessInfo?.mobile_url) return;
@@ -136,16 +147,22 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={regenerate}
-            disabled={regenerating}
-            className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-red-600 px-3 py-2 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50"
-            title="Génère une nouvelle URL et invalide l'ancienne immédiatement"
-          >
-            <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} strokeWidth={1.8} />
-            {regenerating ? 'Régénération…' : "Régénérer l'URL (révoque l'ancien raccourci)"}
-          </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={regenerate}
+              disabled={regenerating}
+              className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-red-600 px-3 py-2 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50"
+              title="Génère une nouvelle URL et invalide l'ancienne immédiatement"
+            >
+              <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} strokeWidth={1.8} />
+              {regenerating ? 'Régénération…' : "Régénérer l'URL (révoque l'ancien raccourci)"}
+            </button>
+          ) : (
+            <p className="text-xs text-slate-400 px-3">
+              La régénération de l'URL (en cas de perte du téléphone ou de changement de chauffeur) est réservée à un administrateur.
+            </p>
+          )}
         </>
       ) : null}
     </div>

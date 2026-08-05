@@ -38,6 +38,25 @@ const crypto = require('crypto');
 // entrée utilisateur → pas d'injection.
 // ══════════════════════════════════════════
 const payIsEspeces = (col) => `(${col} ILIKE '%esp%' OR ${col} ILIKE '%cash%' OR ${col} ILIKE '%numer%' OR ${col} ILIKE '%numér%' OR ${col} ILIKE '%liquide%')`;
+
+// ══════════════════════════════════════════
+// Agrégation en heure de Paris (Lot 12)
+// Les colonnes date_ticket / date_vente sont des TIMESTAMP (sans fuseau)
+// STOCKÉS EN UTC (timestamps SumUp API/webhook déjà UTC ; CSV converti
+// Paris→UTC à l'import, cf. services/sumup.parseFRDate). Le client veut tous
+// les horaires en heure de Paris : le stockage reste UTC, seuls les
+// regroupements par HEURE et par JOUR CIVIL convertissent via la double
+// conversion `(col AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris'`
+// (timestamp naïf → instant UTC → heure murale Paris, hiver +1 h / été +2 h
+// gérés par la tzdata de PostgreSQL). `col` est un nom de colonne contrôlé
+// (constantes internes), jamais une entrée utilisateur → pas d'injection.
+// ══════════════════════════════════════════
+const parisTs = (col) => `((${col} AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')`;
+const parisHour = (col) => `EXTRACT(HOUR FROM ${parisTs(col)})::INT`;
+const parisDay = (col) => `${parisTs(col)}::date`;
+// « Aujourd'hui » = jour civil vu de Paris (en-CA → YYYY-MM-DD), et non la
+// date UTC (fausse entre minuit Paris et 01:00/02:00 du matin).
+const todayParis = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date());
 const payIsCb = (col) => `(${col} ILIKE '%cb%' OR ${col} ILIKE '%pos%' OR ${col} ILIKE '%carte%' OR ${col} ILIKE '%card%' OR ${col} ILIKE '%visa%' OR ${col} ILIKE '%master%' OR ${col} ILIKE '%maestro%' OR ${col} ILIKE '%amex%' OR ${col} ILIKE '%ecom%' OR ${col} ILIKE '%contact%' OR ${col} ILIKE '%bancaire%')`;
 const payLabel = (col) => `CASE WHEN ${payIsEspeces(col)} THEN 'Espèces' WHEN ${payIsCb(col)} THEN 'CB' ELSE COALESCE(NULLIF(TRIM(${col}), ''), 'Autre') END`;
 const payCategorie = (col) => `CASE WHEN ${payIsEspeces(col)} THEN 'especes' WHEN ${payIsCb(col)} THEN 'cb' ELSE 'autre' END`;
@@ -326,7 +345,7 @@ router.get('/:id/analytics/hourly', authorize('ADMIN', 'MANAGER'), async (req, r
   try {
     const vakId = req.params.id;
     const byHour = await pool.query(`
-      SELECT EXTRACT(HOUR FROM date_ticket)::INT AS heure,
+      SELECT ${parisHour('date_ticket')} AS heure,
              COUNT(*)::INT AS nb_tickets,
              COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
              COALESCE(SUM(poids_kg),0)::FLOAT AS poids_kg,
@@ -335,8 +354,8 @@ router.get('/:id/analytics/hourly', authorize('ADMIN', 'MANAGER'), async (req, r
       GROUP BY heure ORDER BY heure
     `, [vakId]);
     const heatmap = await pool.query(`
-      SELECT DATE(date_ticket) AS jour,
-             EXTRACT(HOUR FROM date_ticket)::INT AS heure,
+      SELECT ${parisDay('date_ticket')} AS jour,
+             ${parisHour('date_ticket')} AS heure,
              COUNT(*)::INT AS nb_tickets,
              COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc
       FROM vak_tickets WHERE vak_id = $1
@@ -476,7 +495,7 @@ router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, r
     const vakId = req.params.id;
     const [days, hourly, segments, payments, meteo] = await Promise.all([
       pool.query(`
-        SELECT DATE(t.date_ticket) AS jour,
+        SELECT ${parisDay('t.date_ticket')} AS jour,
                COUNT(*)::INT                                              AS nb_tickets,
                COALESCE(SUM(t.total_ttc),0)::FLOAT                        AS ca_ttc,
                COALESCE(SUM(t.total_ht),0)::FLOAT                         AS ca_ht,
@@ -491,11 +510,11 @@ router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, r
                MIN(t.date_ticket) AS premiere_vente,
                MAX(t.date_ticket) AS derniere_vente
         FROM vak_tickets t WHERE t.vak_id = $1
-        GROUP BY DATE(t.date_ticket) ORDER BY DATE(t.date_ticket)
+        GROUP BY 1 ORDER BY 1
       `, [vakId]),
       pool.query(`
-        SELECT DATE(date_ticket) AS jour,
-               EXTRACT(HOUR FROM date_ticket)::INT AS heure,
+        SELECT ${parisDay('date_ticket')} AS jour,
+               ${parisHour('date_ticket')} AS heure,
                COUNT(*)::INT AS nb_tickets,
                COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
                COALESCE(SUM(poids_kg),0)::FLOAT AS poids_kg
@@ -503,14 +522,14 @@ router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, r
         GROUP BY jour, heure ORDER BY jour, heure
       `, [vakId]),
       pool.query(`
-        SELECT DATE(date_vente) AS jour, segment,
+        SELECT ${parisDay('date_vente')} AS jour, segment,
                COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
                COALESCE(SUM(quantite),0)::FLOAT AS quantite
         FROM vak_ventes WHERE vak_id = $1
         GROUP BY jour, segment ORDER BY jour, segment
       `, [vakId]),
       pool.query(`
-        SELECT DATE(date_ticket) AS jour, ${payLabel('moyen_paiement')} AS moyen_paiement,
+        SELECT ${parisDay('date_ticket')} AS jour, ${payLabel('moyen_paiement')} AS moyen_paiement,
                COUNT(*)::INT AS nb_tickets,
                COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc
         FROM vak_tickets WHERE vak_id = $1
@@ -595,7 +614,7 @@ router.get('/annual/hourly-heatmap', authorize('ADMIN', 'MANAGER'), async (req, 
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const r = await pool.query(`
-      SELECT EXTRACT(HOUR FROM t.date_ticket)::INT AS heure,
+      SELECT ${parisHour('t.date_ticket')} AS heure,
              COUNT(*)::INT AS nb_tickets,
              COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc,
              COALESCE(SUM(t.poids_kg),0)::FLOAT AS poids_kg
@@ -650,7 +669,9 @@ router.get('/annual/payment-mix', authorize('ADMIN', 'MANAGER'), async (req, res
 // ──────────────────────────────────────────
 router.get('/live/current', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    // Jour civil PARIS (une VAK est bornée en jours civils français) — la date
+    // UTC faisait basculer l'écran live sur la veille entre minuit et 01:00/02:00.
+    const today = todayParis();
     const r = await pool.query(`
       SELECT v.* FROM vaks v
       WHERE $1::DATE BETWEEN v.date_debut AND v.date_fin
@@ -666,9 +687,9 @@ router.get('/live/current', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     const vak = r.rows[0];
     const counters = await pool.query(`
       SELECT
-        COALESCE(SUM(CASE WHEN DATE(date_ticket) = $1::DATE THEN total_ttc END), 0)::FLOAT AS ca_jour,
-        COALESCE(SUM(CASE WHEN DATE(date_ticket) = $1::DATE THEN poids_kg END), 0)::FLOAT AS poids_jour,
-        COUNT(CASE WHEN DATE(date_ticket) = $1::DATE THEN 1 END)::INT AS tickets_jour,
+        COALESCE(SUM(CASE WHEN ${parisDay('date_ticket')} = $1::DATE THEN total_ttc END), 0)::FLOAT AS ca_jour,
+        COALESCE(SUM(CASE WHEN ${parisDay('date_ticket')} = $1::DATE THEN poids_kg END), 0)::FLOAT AS poids_jour,
+        COUNT(CASE WHEN ${parisDay('date_ticket')} = $1::DATE THEN 1 END)::INT AS tickets_jour,
         COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_vak,
         COALESCE(SUM(poids_kg), 0)::FLOAT AS poids_vak,
         COUNT(*)::INT AS tickets_vak

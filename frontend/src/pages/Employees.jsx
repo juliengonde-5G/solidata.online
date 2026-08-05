@@ -5,6 +5,7 @@ import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader, Section, Err
 import { Users } from 'lucide-react';
 import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
+import { formatEmployeeName, formatLastName } from '../utils/names';
 import AlertesBloc from '../components/insertion/AlertesBloc';
 import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
 import ActionsPanel from '../components/insertion/ActionsPanel';
@@ -318,7 +319,7 @@ export default function Employees() {
                 return (
                   <button key={e.id} onClick={() => openDetail(e)}
                     className="text-left rounded-lg bg-white border border-amber-200 px-3 py-1.5 text-xs hover:border-amber-400">
-                    <span className="font-medium">{e.first_name} {e.last_name}</span>
+                    <span className="font-medium">{formatEmployeeName(e.last_name, e.first_name)}</span>
                     <span className="text-amber-700"> · fin {new Date(e.contract_end).toLocaleDateString('fr-FR')} ({days} j)</span>
                   </button>
                 );
@@ -347,7 +348,7 @@ export default function Employees() {
                   {emp.first_name?.[0]}{emp.last_name?.[0]}
                 </div>
                 <div>
-                  <p className="font-medium text-sm">{emp.first_name} {emp.last_name}</p>
+                  <p className="font-medium text-sm">{formatEmployeeName(emp.last_name, emp.first_name)}</p>
                   {emp.email && <p className="text-xs text-gray-400">{emp.email}</p>}
                 </div>
               </div>
@@ -381,7 +382,7 @@ export default function Employees() {
                     {selected.first_name?.[0]}{selected.last_name?.[0]}
                   </div>
                   <div>
-                    <h2 className="font-bold text-lg">{selected.first_name} {selected.last_name}</h2>
+                    <h2 className="font-bold text-lg">{formatEmployeeName(selected.last_name, selected.first_name)}</h2>
                     <p className="text-sm text-gray-500">{selected.position_name || 'Poste non défini'}</p>
                   </div>
                 </div>
@@ -414,7 +415,7 @@ export default function Employees() {
                       <>
                         <div className="grid grid-cols-2 gap-3">
                           <Field label="Prénom" value={selected.first_name} />
-                          <Field label="Nom" value={selected.last_name} />
+                          <Field label="Nom" value={formatLastName(selected.last_name)} />
                           <Field label="Email" value={selected.email} />
                           <Field label="Téléphone" value={selected.phone} />
                           <Field label="Équipe" value={selected.team_name} />
@@ -880,7 +881,7 @@ function LinkCandidateModal({ employee, onClose, onLink }) {
     : suggestions;
 
   return (
-    <Modal isOpen onClose={onClose} title={`Lier une fiche de recrutement à ${employee.first_name} ${employee.last_name}`} size="md">
+    <Modal isOpen onClose={onClose} title={`Lier une fiche de recrutement à ${formatEmployeeName(employee.last_name, employee.first_name)}`} size="md">
       <div className="space-y-3">
         <p className="text-xs text-slate-500">
           Sélectionnez la fiche de recrutement (candidat) correspondant à ce collaborateur.
@@ -899,7 +900,7 @@ function LinkCandidateModal({ employee, onClose, onLink }) {
               <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-slate-800 truncate">
-                    {c.first_name} {c.last_name}
+                    {formatEmployeeName(c.last_name, c.first_name)}
                     {c.match_score >= 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">correspondance exacte</span>}
                     {c.match_score >= 40 && c.match_score < 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">nom proche</span>}
                     {c.has_pcm && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-semibold">PCM</span>}

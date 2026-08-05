@@ -209,8 +209,11 @@ export default function AdminCollaboratorsImport() {
         {mode === 'xlsx' ? (
           <Section title="Importer l'export complet (.xlsx)" icon={FileSpreadsheet}>
             <p className="text-sm text-slate-600 mb-3">
-              Déposez le classeur exporté depuis Malibou tel quel. Les feuilles <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">Informations salariés</code>
-              {' '}et <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">Contrats</code> sont lues automatiquement (identité, coordonnées, naissance, poste, contrat, horaires, conformité IAE).
+              Déposez le classeur exporté depuis Malibou tel quel. Quatre feuilles sont lues automatiquement :{' '}
+              <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">Informations salariés</code> (identité, coordonnées, contacts d'urgence, conformité IAE),{' '}
+              <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">Contrats</code> (<strong>historique complet</strong> : contrat d'origine et avenants chaînés par date d'avenant, planning hebdomadaire contractuel),{' '}
+              <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">Heures travaillées</code> (semaines ISO) et{' '}
+              <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">Congés &amp; Télétravail</code> (absences validées).
             </p>
             <div className="flex items-center gap-3 flex-wrap">
               <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium cursor-pointer">
@@ -277,6 +280,50 @@ export default function AdminCollaboratorsImport() {
                 <StatCard label="Erreurs" value={result.errors?.length || 0} tone={result.errors?.length ? 'red' : 'slate'} />
                 <StatCard label="Total traité" value={result.total || 0} tone="slate" />
               </div>
+
+              {result.historique && (
+                <div>
+                  <h3 className="font-semibold text-sm mb-2 text-slate-700">Historique paie synchronisé</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <StatCard
+                      label="Contrats & avenants"
+                      value={(result.historique.contracts?.created || 0) + (result.historique.contracts?.updated || 0)}
+                      tone="blue"
+                      detail={`${result.historique.contracts?.created || 0} créé(s) · ${result.historique.contracts?.updated || 0} mis à jour`}
+                    />
+                    <StatCard
+                      label="Semaines d'heures"
+                      value={(result.historique.week_hours?.created || 0) + (result.historique.week_hours?.updated || 0)}
+                      tone="blue"
+                      detail={`${result.historique.week_hours?.created || 0} créée(s) · ${result.historique.week_hours?.updated || 0} mise(s) à jour`}
+                    />
+                    <StatCard
+                      label="Absences / congés"
+                      value={(result.historique.leaves?.created || 0) + (result.historique.leaves?.updated || 0)}
+                      tone="blue"
+                      detail={`${result.historique.leaves?.created || 0} créée(s) · ${result.historique.leaves?.updated || 0} mise(s) à jour`}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {result.warnings && result.warnings.length > 0 && (
+                <div>
+                  <h3 className="font-semibold text-sm mb-2 text-amber-700">Avertissements ({result.warnings.length})</h3>
+                  <div className="max-h-52 overflow-y-auto border border-amber-200 rounded-lg">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {result.warnings.map((w, i) => (
+                          <tr key={i} className="border-b border-slate-100">
+                            <td className="p-2 font-medium whitespace-nowrap align-top">{w.collaborator}</td>
+                            <td className="p-2 text-amber-700">{w.warning || w.code}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {(nbCreated > 0 || nbUpdated > 0) && (
                 <div>
@@ -357,7 +404,7 @@ export default function AdminCollaboratorsImport() {
   );
 }
 
-function StatCard({ label, value, tone }) {
+function StatCard({ label, value, tone, detail }) {
   const tones = {
     green: 'bg-green-50 border-green-200 text-green-700',
     blue: 'bg-blue-50 border-blue-200 text-blue-700',
@@ -368,6 +415,7 @@ function StatCard({ label, value, tone }) {
     <div className={`rounded-lg border p-3 ${tones[tone] || tones.slate}`}>
       <div className="text-2xl font-bold">{value}</div>
       <div className="text-xs uppercase tracking-wide">{label}</div>
+      {detail && <div className="text-xs mt-1 opacity-75">{detail}</div>}
     </div>
   );
 }

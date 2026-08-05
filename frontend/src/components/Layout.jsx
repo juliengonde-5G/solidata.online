@@ -12,7 +12,7 @@ import {
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
   TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, ShoppingCart,
-  GraduationCap,
+  GraduationCap, Shirt,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -109,44 +109,6 @@ const NAV_TREE = [
       { label: 'Saisie exécution', path: '/tri/execution', icon: ScanLine, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Étiquettes', path: '/tri/etiquettes', icon: Tag, roles: ['ADMIN', 'MANAGER', 'COLLABORATEUR'] },
       { label: 'Référentiel tri', path: '/admin/tri', icon: ListChecks, roles: ['ADMIN'] },
-    ],
-  },
-  {
-    id: 'boutiques',
-    label: 'Boutiques',
-    icon: ShoppingBag,
-    children: [
-      { label: 'Tableau de bord', path: '/boutiques', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
-      { label: 'Ventes', path: '/boutiques/ventes', icon: ShoppingBag, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
-      { label: 'Commandes', path: '/boutiques/commandes', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
-      { label: 'Planning', path: '/boutiques/planning', icon: Calendar, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
-      {
-        label: 'Réglages',
-        icon: Settings,
-        children: [
-          { label: 'Objectifs', path: '/boutiques/objectifs', icon: Target, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Import CSV', path: '/boutiques/import', icon: Upload, roles: ['ADMIN', 'MANAGER'] },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'vak',
-    label: 'Vente au Kilo',
-    icon: Scale,
-    children: [
-      { label: 'Performance VAK', path: '/vak', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'Vue par jour', path: '/vak/jours', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'Performance annuelle', path: '/vak/annuel', icon: TrendingUp, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'Sessions & Import', path: '/vak/sessions', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
-      { label: 'Écran Live', path: '/vak/live', icon: Activity, roles: ['ADMIN', 'MANAGER'] },
-      {
-        label: 'Réglages',
-        icon: Settings,
-        children: [
-          { label: 'Config SumUp', path: '/admin/vak/sumup-config', icon: Sparkles, roles: ['ADMIN'] },
-        ],
-      },
     ],
   },
   {
@@ -371,6 +333,56 @@ const NAV_TREE = [
       },
     ],
   },
+  {
+    // Module « Frip » — regroupe Boutiques et Vente au Kilo (Lot 4, demande
+    // client). Les deux anciennes sections de 1er niveau ('boutiques'/'vak')
+    // deviennent des sous-branches ici, chacune conservant son id historique
+    // pour la rétrocompatibilité des habilitations existantes
+    // (backend/src/routes/permissions.js MODULE_CATALOG + role_module_access).
+    id: 'frip',
+    label: 'Frip',
+    icon: Shirt,
+    children: [
+      {
+        id: 'boutiques',
+        label: 'Boutiques',
+        icon: ShoppingBag,
+        children: [
+          { label: 'Tableau de bord', path: '/boutiques', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+          { label: 'Ventes', path: '/boutiques/ventes', icon: ShoppingBag, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+          { label: 'Commandes', path: '/boutiques/commandes', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+          { label: 'Planning', path: '/boutiques/planning', icon: Calendar, roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'] },
+          {
+            label: 'Réglages',
+            icon: Settings,
+            children: [
+              { label: 'Objectifs', path: '/boutiques/objectifs', icon: Target, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Import CSV', path: '/boutiques/import', icon: Upload, roles: ['ADMIN', 'MANAGER'] },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'vak',
+        label: 'Vente au Kilo',
+        icon: Scale,
+        children: [
+          { label: 'Performance VAK', path: '/vak', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Vue par jour', path: '/vak/jours', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Performance annuelle', path: '/vak/annuel', icon: TrendingUp, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Sessions & Import', path: '/vak/sessions', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Écran Live', path: '/vak/live', icon: Activity, roles: ['ADMIN', 'MANAGER'] },
+          {
+            label: 'Réglages',
+            icon: Settings,
+            children: [
+              { label: 'Config SumUp', path: '/admin/vak/sumup-config', icon: Sparkles, roles: ['ADMIN'] },
+            ],
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 // Filtre récursif par rôle ; un nœud "groupe" disparaît si tous ses enfants disparaissent.
@@ -383,6 +395,27 @@ function filterByRole(tree, role) {
         return { ...node, children: kids };
       }
       if (node.roles && !node.roles.includes(role)) return null;
+      return node;
+    })
+    .filter(Boolean);
+}
+
+// Filtre récursif par habilitation module. Historiquement seules les sections de
+// 1er niveau portaient un `id` (module_key de role_module_access). Depuis le
+// regroupement « Frip » (Boutiques + Vente au Kilo), des sous-branches portent
+// aussi leur `id` legacy ('boutiques'/'vak') pour rester restreignables
+// individuellement — un nœud disparaît si SON id est refusé (le module 'frip'
+// masque les deux d'un coup ; 'boutiques' ou 'vak' masque uniquement sa branche)
+// ou si tous ses enfants disparaissent.
+function filterByModuleAccess(tree, canAccessModule) {
+  return tree
+    .map((node) => {
+      if (node.id && !canAccessModule(node.id)) return null;
+      if (node.children) {
+        const kids = filterByModuleAccess(node.children, canAccessModule);
+        if (kids.length === 0) return null;
+        return { ...node, children: kids };
+      }
       return node;
     })
     .filter(Boolean);
@@ -408,12 +441,13 @@ export default function Layout({ children }) {
     try { localStorage.setItem('solidata_sidebar_collapsed', collapsed ? '1' : '0'); } catch { /* noop */ }
   }, [collapsed]);
 
-  // Arbre filtré par rôle PUIS par habilitation module (une section de 1er
-  // niveau refusée au rôle est masquée ; l'ADMIN voit tout).
+  // Arbre filtré par rôle PUIS par habilitation module (un nœud — section de
+  // 1er niveau ou sous-branche legacy comme 'boutiques'/'vak' sous 'frip' —
+  // refusé au rôle est masqué ; l'ADMIN voit tout).
   // base_role : un rôle personnalisé hérite des accès de son rôle intégré.
   const filteredTree = useMemo(() => {
     const byRole = filterByRole(NAV_TREE, user?.base_role || user?.role);
-    return byRole.filter((section) => !section.id || canAccessModule(section.id));
+    return filterByModuleAccess(byRole, canAccessModule);
   }, [user?.base_role, user?.role, canAccessModule]);
 
   // Charger alertes + compteurs sidebar (best-effort)

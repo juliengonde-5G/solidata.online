@@ -9,13 +9,16 @@ import {
   ACTION_STATUS_LABELS, ACTION_CATEGORY_LABELS, ACTION_PRIORITY_LABELS,
   ACTION_PRIORITY_COLORS, frDate,
 } from '../components/insertion/freins';
+import { formatEmployeeName, compareByName } from '../utils/names';
 
 /**
  * Actions CIP — tableau transversal de toutes les actions, tous salariés
  * (GET /insertion/actions-overview : { total, limit, offset, actions[] }).
  * Filtres : salarié, catégorie, criticité, partenaire, statut, en retard,
- * « mes salariés ». Tri serveur par échéance. Pagination. Édition rapide du
- * statut. « + Action » global. Export CSV client du tableau filtré.
+ * « mes salariés », gestionnaire (CIP référent du salarié s'il existe, sinon
+ * créateur de l'action — résolu côté serveur). Tri serveur par échéance.
+ * Pagination. Édition rapide du statut. « + Action » global. Export CSV
+ * client du tableau filtré.
  */
 
 const PAGE_SIZE = 50;
@@ -25,6 +28,10 @@ const csvEscape = (v) => {
   return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 
+// Règles de gestion des noms (Lot 1) : « NOM Prénom » + tri NOM puis PRÉNOM —
+// helpers partagés utils/names.js (formatEmployeeName / compareByName).
+const formatName = (p) => formatEmployeeName(p?.last_name, p?.first_name);
+
 export default function ActionsCIP() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -32,13 +39,16 @@ export default function ActionsCIP() {
   const [page, setPage] = useState(0);
   const [employees, setEmployees] = useState([]);
   const [partenaires, setPartenaires] = useState([]);
+  const [gestionnaires, setGestionnaires] = useState([]);
   const [filters, setFilters] = useState({
-    employee_id: '', category: '', priority: '', partenaire_id: '', statut: '', retard: false, mine: false,
+    employee_id: '', category: '', priority: '', partenaire_id: '', statut: '', retard: false, mine: false, gestionnaire_id: '',
   });
 
   useEffect(() => {
-    api.get('/insertion').then((r) => setEmployees(Array.isArray(r.data) ? r.data : [])).catch(() => setEmployees([]));
+    api.get('/insertion').then((r) => setEmployees((Array.isArray(r.data) ? r.data : []).sort(compareByName))).catch(() => setEmployees([]));
     api.get('/insertion/partenaires').then((r) => setPartenaires(Array.isArray(r.data) ? r.data : [])).catch(() => setPartenaires([]));
+    // Gestionnaires = utilisateurs ADMIN/RH actifs (mêmes personnes que le sélecteur de CIP référent)
+    api.get('/insertion/cip-referents').then((r) => setGestionnaires((Array.isArray(r.data) ? r.data : []).sort(compareByName))).catch(() => setGestionnaires([]));
   }, []);
 
   const load = useCallback(() => {
@@ -52,6 +62,7 @@ export default function ActionsCIP() {
     if (filters.statut) params.append('statut', filters.statut);
     if (filters.retard) params.append('retard', '1');
     if (filters.mine) params.append('mine', '1');
+    if (filters.gestionnaire_id) params.append('gestionnaire_id', filters.gestionnaire_id);
     params.append('limit', String(PAGE_SIZE));
     params.append('offset', String(page * PAGE_SIZE));
     api.get(`/insertion/actions-overview?${params}`)
@@ -78,7 +89,7 @@ export default function ActionsCIP() {
     const rows = data?.actions || [];
     const header = ['Salarié', 'Action', 'Catégorie', 'Criticité', 'Statut', 'Échéance', 'En retard', 'Partenaire', 'Objectif lié', 'Entretien lié', 'Résultat'];
     const lines = rows.map((a) => [
-      `${a.first_name} ${a.last_name}`, a.action_label,
+      formatName(a), a.action_label,
       ACTION_CATEGORY_LABELS[a.category] || a.category || '',
       ACTION_PRIORITY_LABELS[a.priority] || a.priority || '',
       ACTION_STATUS_LABELS[a.status] || a.status || '',
@@ -101,7 +112,7 @@ export default function ActionsCIP() {
   const total = data?.total || 0;
   const nbPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const actions = data?.actions || [];
-  const hasFilters = filters.employee_id || filters.category || filters.priority || filters.partenaire_id || filters.statut || filters.retard || filters.mine;
+  const hasFilters = filters.employee_id || filters.category || filters.priority || filters.partenaire_id || filters.statut || filters.retard || filters.mine || filters.gestionnaire_id;
 
   return (
     <Layout>
@@ -126,7 +137,13 @@ export default function ActionsCIP() {
         <div className="bg-white rounded-lg border p-3 mb-4 flex items-center gap-2 flex-wrap">
           <select value={filters.employee_id} onChange={(e) => setFilter('employee_id', e.target.value)} className="input-modern py-1.5 text-sm w-auto">
             <option value="">Tous les salariés</option>
-            {employees.map((e) => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}
+            {employees.map((e) => <option key={e.id} value={e.id}>{formatName(e)}</option>)}
+          </select>
+          <select value={filters.gestionnaire_id} onChange={(e) => setFilter('gestionnaire_id', e.target.value)}
+            className="input-modern py-1.5 text-sm w-auto"
+            title="Gestionnaire : CIP référent du salarié s'il est renseigné, sinon créateur de l'action">
+            <option value="">Tous les gestionnaires</option>
+            {gestionnaires.map((g) => <option key={g.id} value={g.id}>{formatName(g)}</option>)}
           </select>
           <select value={filters.category} onChange={(e) => setFilter('category', e.target.value)} className="input-modern py-1.5 text-sm w-auto">
             <option value="">Toutes catégories</option>
@@ -153,7 +170,7 @@ export default function ActionsCIP() {
             Mes salariés
           </label>
           {hasFilters && (
-            <button onClick={() => { setPage(0); setFilters({ employee_id: '', category: '', priority: '', partenaire_id: '', statut: '', retard: false, mine: false }); }}
+            <button onClick={() => { setPage(0); setFilters({ employee_id: '', category: '', priority: '', partenaire_id: '', statut: '', retard: false, mine: false, gestionnaire_id: '' }); }}
               className="text-xs text-teal-700 underline">Réinitialiser</button>
           )}
           <span className="ml-auto text-xs text-gray-400">{total} action{total > 1 ? 's' : ''}</span>
@@ -201,7 +218,7 @@ export default function ActionsCIP() {
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <Link to={`/insertion?employee=${a.employee_id}`} className="text-teal-700 hover:underline font-medium">
-                        {a.first_name} {a.last_name}
+                        {formatName(a)}
                       </Link>
                     </td>
                     <td className="px-3 py-2 min-w-[220px]">

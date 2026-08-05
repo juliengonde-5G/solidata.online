@@ -5,6 +5,7 @@ import { Star } from 'lucide-react';
 import useAsyncData from '../hooks/useAsyncData';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
+import { formatEmployeeName, compareByName } from '../utils/names';
 
 const SKILL_CATEGORIES = {
   permis_b: { label: 'Permis B', icon: '🚗', color: 'bg-blue-100 text-blue-700' },
@@ -28,6 +29,10 @@ const SKILL_CATEGORIES = {
 // source du planning hebdo chauffeur/cariste) → colonne = champ employees.
 const OPERATIONAL = { permis_b: 'has_permis_b', caces: 'has_caces' };
 
+// Règles de gestion des noms (Lot 1) : « NOM Prénom » + tri NOM puis PRÉNOM —
+// helpers partagés utils/names.js (formatEmployeeName / compareByName).
+const formatName = (p) => formatEmployeeName(p?.last_name, p?.first_name);
+
 export default function Skills() {
   const { user } = useAuth();
   const canEdit = ['ADMIN', 'RH'].includes(user?.base_role || user?.role);
@@ -40,9 +45,15 @@ export default function Skills() {
   // Part des EMPLOYÉS (et non plus d'un mauvais id candidat). Les compétences
   // du candidat lié sont chargées UNIQUEMENT quand candidate_id existe (bon
   // identifiant), ce qui corrige la jointure fautive et réduit les appels.
+  // Périmètre : uniquement les salariés ACTIFS et EN PARCOURS D'INSERTION
+  // (is_active = true ET insertion_status = 'en_parcours') — filtre appliqué
+  // côté front, la page consommant l'endpoint générique GET /employees.
+  // Tri : nom de famille puis prénom.
   const fetchData = useCallback(async () => {
-    const res = await api.get('/employees');
-    const emps = res.data || [];
+    const res = await api.get('/employees?is_active=true');
+    const emps = (res.data || [])
+      .filter((e) => e.is_active === true && e.insertion_status === 'en_parcours')
+      .sort(compareByName);
     return Promise.all(emps.map(async (emp) => {
       let candSkills = [];
       if (emp.candidate_id) {
@@ -89,7 +100,7 @@ export default function Skills() {
       <div className="p-4 sm:p-6">
         <PageHeader
           title="Compétences"
-          subtitle={`Matrice des compétences — ${employees.length} collaborateurs`}
+          subtitle={`Matrice des compétences — ${employees.length} salarié${employees.length > 1 ? 's' : ''} actif${employees.length > 1 ? 's' : ''} en parcours d'insertion`}
           icon={Star}
           actions={
             <div className="flex gap-2">
@@ -130,9 +141,9 @@ export default function Skills() {
                   {selectedSkill === key && (
                     <div className="mt-3 pt-3 border-t space-y-1">
                       {employees.filter((e) => hasSkill(e, key)).map((e) => (
-                        <p key={e.id} className="text-xs text-gray-600">{e.first_name} {e.last_name}</p>
+                        <p key={e.id} className="text-xs text-gray-600">{formatName(e)}</p>
                       ))}
-                      {skillCounts[key] === 0 && <p className="text-xs text-gray-400">Aucun collaborateur</p>}
+                      {skillCounts[key] === 0 && <p className="text-xs text-gray-400">Aucun salarié en parcours</p>}
                     </div>
                   )}
                 </div>
@@ -148,9 +159,11 @@ export default function Skills() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="text-left p-2 font-semibold text-gray-500 sticky left-0 bg-gray-50 min-w-[160px]">Collaborateur</th>
+                    {/* Nom de la compétence affiché sous chaque logo (icône) */}
                     {Object.entries(SKILL_CATEGORIES).map(([key, cat]) => (
-                      <th key={key} className="p-2 font-semibold text-gray-500 text-center min-w-[40px]" title={`${cat.label}${OPERATIONAL[key] ? ' (éditable)' : ''}`}>
-                        <span className="text-sm">{cat.icon}</span>
+                      <th key={key} className="p-2 font-semibold text-gray-500 text-center min-w-[64px] align-bottom" title={`${cat.label}${OPERATIONAL[key] ? ' (éditable)' : ''}`}>
+                        <span className="block text-sm">{cat.icon}</span>
+                        <span className="block text-[9px] font-medium text-gray-400 leading-tight mt-0.5">{cat.label}</span>
                       </th>
                     ))}
                   </tr>
@@ -158,7 +171,7 @@ export default function Skills() {
                 <tbody>
                   {employees.map((emp) => (
                     <tr key={emp.id} className="border-t hover:bg-gray-50">
-                      <td className="p-2 font-medium sticky left-0 bg-white">{emp.first_name} {emp.last_name}</td>
+                      <td className="p-2 font-medium sticky left-0 bg-white">{formatName(emp)}</td>
                       {Object.keys(SKILL_CATEGORIES).map((key) => {
                         const on = hasSkill(emp, key);
                         const editable = canEdit && OPERATIONAL[key];
@@ -187,7 +200,7 @@ export default function Skills() {
                     </tr>
                   ))}
                   {employees.length === 0 && (
-                    <tr><td colSpan={Object.keys(SKILL_CATEGORIES).length + 1} className="p-8 text-center text-gray-400">Aucun collaborateur</td></tr>
+                    <tr><td colSpan={Object.keys(SKILL_CATEGORIES).length + 1} className="p-8 text-center text-gray-400">Aucun salarié actif en parcours d'insertion</td></tr>
                   )}
                 </tbody>
               </table>

@@ -10,7 +10,7 @@ const { validate } = require('../middleware/validate');
 const { monthBounds } = require('../utils/month-range');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const { imageFilter, spreadsheetFilter } = require('../utils/upload-filters');
-const { parseWorkbookBuffer, upsertCollaborators } = require('../services/collaborator-import');
+const { parseWorkbookFull, upsertCollaborators } = require('../services/collaborator-import');
 const { computeCddiCumulativeMonths, resyncMilestones } = require('./insertion/engine');
 
 // Upload photo
@@ -58,7 +58,10 @@ router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
     if (is_active !== undefined) { params.push(is_active === 'true'); query += ` AND e.is_active = $${params.length}`; }
     if (search) { params.push(`%${search}%`); query += ` AND (e.first_name ILIKE $${params.length} OR e.last_name ILIKE $${params.length})`; }
 
-    query += ' ORDER BY e.last_name, e.first_name';
+    // Tri alphabétique par NOM de famille puis PRÉNOM (Lot 1 « Règles de gestion
+    // des noms »), insensible à la casse via UPPER() — le nom de famille est
+    // affiché en majuscules côté front (formatEmployeeName).
+    query += ' ORDER BY UPPER(e.last_name), UPPER(e.first_name)';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
@@ -234,7 +237,7 @@ router.get('/:id/candidate-matches', authorize('ADMIN', 'RH'), async (req, res) 
                     WHERE ps.candidate_id = c.id) AS has_pcm
       FROM candidates c
       WHERE NOT EXISTS (SELECT 1 FROM employees em WHERE em.candidate_id = c.id)
-      ORDER BY c.last_name, c.first_name`);
+      ORDER BY UPPER(c.last_name), UPPER(c.first_name)`);
 
     const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
     const ef = norm(e.first_name); const el = norm(e.last_name);
@@ -300,7 +303,7 @@ router.get('/schedule/planning', authorize('ADMIN', 'RH', 'MANAGER'), async (req
     if (team_id) { params.push(team_id); query += ` AND e.team_id = $${params.length}`; }
     if (employee_id) { params.push(employee_id); query += ` AND s.employee_id = $${params.length}`; }
 
-    query += ' ORDER BY s.date, e.last_name';
+    query += ' ORDER BY s.date, UPPER(e.last_name), UPPER(e.first_name)';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
@@ -541,7 +544,7 @@ router.get('/work-hours/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
     if (employee_id) { params.push(employee_id); query += ` AND wh.employee_id = $${params.length}`; }
     if (team_id) { params.push(team_id); query += ` AND e.team_id = $${params.length}`; }
 
-    query += ' ORDER BY wh.date, e.last_name';
+    query += ' ORDER BY wh.date, UPPER(e.last_name), UPPER(e.first_name)';
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
@@ -617,7 +620,7 @@ router.get('/work-hours/summary', authorize('ADMIN', 'RH', 'MANAGER'), async (re
        LEFT JOIN teams t ON e.team_id = t.id
        WHERE e.is_active = true
        GROUP BY e.id, e.first_name, e.last_name, e.weekly_hours, e.team_id, t.name
-       ORDER BY e.last_name`,
+       ORDER BY UPPER(e.last_name), UPPER(e.first_name)`,
       monthBounds(month)
     );
 
@@ -745,7 +748,8 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 router.get('/:id/contracts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT ec.*, t.name as team_name, p.title as position_title
+      `SELECT ec.*, t.name as team_name,
+              COALESCE(ec.position_title, p.title) as position_title
        FROM employee_contracts ec
        LEFT JOIN teams t ON ec.team_id = t.id
        LEFT JOIN positions p ON ec.position_id = p.id
@@ -915,9 +919,12 @@ router.post('/import/csv', authorize('ADMIN', 'RH'), async (req, res) => {
 
 // POST /api/employees/import/xlsx — Import direct de l'export complet Malibou (.xlsx)
 //
-// Accepte le classeur tel quel (feuilles « Informations salariés » + « Contrats »)
-// via multipart/form-data (champ `file`). Parse côté serveur avec exceljs puis
-// applique le même upsert idempotent que la voie CSV.
+// Accepte le classeur tel quel via multipart/form-data (champ `file`). Parse
+// côté serveur avec exceljs puis applique le même upsert idempotent que la
+// voie CSV. Lot 3 (2026-08) : lit désormais les 4 feuilles exploitables —
+// « Informations salariés », « Contrats » (HISTORIQUE COMPLET des avenants,
+// périodes effectives chaînées par date d'avenant), « Heures travaillées »
+// (hebdo ISO) et « Congés & Télétravail ».
 router.post('/import/xlsx', authorize('ADMIN', 'RH'), runUpload(uploadSpreadsheet.single('file')), async (req, res) => {
   const client = await pool.connect();
   try {
@@ -925,21 +932,30 @@ router.post('/import/xlsx', authorize('ADMIN', 'RH'), runUpload(uploadSpreadshee
       return res.status(400).json({ error: 'Fichier .xlsx requis (champ « file »)' });
     }
 
-    const collaborators = await parseWorkbookBuffer(req.file.buffer);
+    const parsed = await parseWorkbookFull(req.file.buffer);
+    const collaborators = parsed.collaborators;
     if (!collaborators.length) {
       return res.status(400).json({ error: 'Aucun collaborateur exploitable trouvé dans le classeur (feuille « Informations salariés »).' });
     }
 
     await client.query('BEGIN');
-    const { created, updated, errors, warnings } = await upsertCollaborators(client, collaborators, { userId: req.user.id });
+    const { created, updated, errors, warnings, historique } = await upsertCollaborators(client, collaborators, {
+      userId: req.user.id,
+      contracts: parsed.contractsByMatricule,
+      weekHours: parsed.weekHoursByMatricule,
+      leaves: parsed.leavesByMatricule,
+    });
     await client.query('COMMIT');
 
+    const h = historique || { contracts: {}, week_hours: {}, leaves: {} };
+    const fmt = (o) => `${o.created || 0} créé(s) / ${o.updated || 0} mis à jour`;
     res.json({
-      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''}${warnings && warnings.length ? `, ${warnings.length} avertissement(s)` : ''} — ${collaborators.length} ligne(s) lue(s)`,
+      message: `${created.length} créé(s), ${updated.length} mis à jour${errors.length ? `, ${errors.length} erreur(s)` : ''}${warnings && warnings.length ? `, ${warnings.length} avertissement(s)` : ''} — ${collaborators.length} ligne(s) lue(s) ; contrats/avenants : ${fmt(h.contracts)} ; semaines d'heures : ${fmt(h.week_hours)} ; absences : ${fmt(h.leaves)}`,
       created,
       updated,
       errors,
       warnings: warnings || [],
+      historique: h,
       total: created.length + updated.length + errors.length,
     });
   } catch (err) {

@@ -23,6 +23,7 @@ import CompetencesETI from '../components/insertion/CompetencesETI';
 import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
 import QuickActionButton, { pushRecent } from '../components/insertion/QuickActionButton';
 import { exportFicheParcoursPDF, exportBilanProlongationPassIae } from '../components/insertion/pdf-insertion';
+import { formatEmployeeName, compareByName } from '../utils/names';
 
 // Les endpoints IA (Claude) génèrent 1500-2500 tokens et peuvent dépasser le
 // timeout axios global de 30 s. Délai dédié de 2 min (nginx autorise 300 s).
@@ -236,7 +237,7 @@ function AgendaBloc({ stats, onSelect }) {
   // Retards regroupés par salarié : une ligne = un salarié, badges cumulés.
   const retardsParSalarie = new Map();
   for (const j of stats.jalons_en_retard || []) {
-    const cur = retardsParSalarie.get(j.employee_id) || { id: j.employee_id, nom: `${j.first_name} ${j.last_name}`, items: [] };
+    const cur = retardsParSalarie.get(j.employee_id) || { id: j.employee_id, nom: formatEmployeeName(j.last_name, j.first_name), items: [] };
     cur.items.push(j);
     retardsParSalarie.set(j.employee_id, cur);
   }
@@ -273,7 +274,7 @@ function AgendaBloc({ stats, onSelect }) {
           {today.length ? today.map((j) => (
             <button key={j.id} onClick={() => onSelect(j.employee_id)}
               className="w-full text-left flex items-center justify-between gap-2 p-2 rounded hover:bg-teal-50 text-sm">
-              <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+              <span className="truncate">{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
               <span className="flex items-center gap-1.5 flex-shrink-0">
                 <IaPretBadge ready={j.ia_preparation_ready} />
                 <span className="text-xs text-teal-700 font-medium">{heureRdv(j.interview_date) || "aujourd'hui"}</span>
@@ -286,7 +287,7 @@ function AgendaBloc({ stats, onSelect }) {
           {week.length ? week.map((j) => (
             <button key={j.id} onClick={() => onSelect(j.employee_id)}
               className="w-full text-left flex items-center justify-between gap-2 p-2 rounded hover:bg-slate-50 text-sm">
-              <span className="truncate">{j.first_name} {j.last_name} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+              <span className="truncate">{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
               <span className="flex items-center gap-1.5 flex-shrink-0">
                 <IaPretBadge ready={j.ia_preparation_ready} />
                 <span className="text-xs text-slate-500 font-medium">
@@ -381,7 +382,7 @@ function RenouvellementsBloc({ onSelect }) {
             return (
               <div key={`${r.employee_id}-${r.contract_id}`} className="flex items-center justify-between gap-2 p-2 rounded border border-gray-100 hover:bg-amber-50/40 flex-wrap">
                 <button onClick={() => onSelect(r.employee_id)} className="text-left text-sm min-w-0">
-                  <span className="font-medium text-gray-800">{r.first_name} {r.last_name}</span>
+                  <span className="font-medium text-gray-800">{formatEmployeeName(r.last_name, r.first_name)}</span>
                   <span className="text-xs text-gray-500 ml-2">
                     fin de contrat {frDate(r.contract_end)}
                     {r.jours_restants != null && <span className={r.jours_restants <= 15 ? 'text-red-600 font-medium' : 'text-amber-700'}> · J-{r.jours_restants}</span>}
@@ -670,7 +671,7 @@ function CohortePanel({ onSelect }) {
               {stats.jalons_en_retard.map((j) => (
                 <button key={j.id} onClick={() => onSelect(j.employee_id)}
                   className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-red-50 text-sm">
-                  <span>{j.first_name} {j.last_name} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+                  <span>{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
                   <span className="text-xs text-red-600 font-medium">{Math.abs(j.days_until)} j</span>
                 </button>
               ))}
@@ -688,7 +689,7 @@ function CohortePanel({ onSelect }) {
               {stats.jalons_a_venir_7j.map((j) => (
                 <button key={j.id} onClick={() => onSelect(j.employee_id)}
                   className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-amber-50 text-sm">
-                  <span>{j.first_name} {j.last_name} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+                  <span>{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
                   <span className="text-xs text-amber-600 font-medium">J-{j.days_until}</span>
                 </button>
               ))}
@@ -706,7 +707,7 @@ function CohortePanel({ onSelect }) {
               {stats.salaries_a_risque.map((c) => (
                 <button key={c.id} onClick={() => onSelect(c.id)}
                   className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-orange-50 text-sm">
-                  <span>{c.first_name} {c.last_name}</span>
+                  <span>{formatEmployeeName(c.last_name, c.first_name)}</span>
                   <span className={`text-xs font-medium ${c.days <= 15 ? 'text-red-600' : 'text-orange-600'}`}>
                     {c.days < 0 ? 'échu' : c.days + ' j'} — {frDate(c.contract_end)}
                   </span>
@@ -798,7 +799,10 @@ export default function InsertionParcours() {
     try {
       setLoadError(null);
       const res = await api.get('/insertion');
-      setEmployees(Array.isArray(res.data) ? res.data : []);
+      // Tri alphabétique NOM puis PRÉNOM (Lot 1 « Règles de gestion des noms »)
+      // — filet de sécurité côté front en complément du tri backend.
+      const list = Array.isArray(res.data) ? res.data : [];
+      setEmployees([...list].sort(compareByName));
     } catch (err) {
       console.error('[InsertionParcours] Erreur chargement:', err);
       setLoadError(err.response?.data?.detail || err.message || 'Erreur de chargement');
@@ -1002,7 +1006,7 @@ export default function InsertionParcours() {
                 className={`w-full text-left p-2 rounded mb-1 text-sm transition ${
                   selectedEmployee?.id === e.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'
                 }`}>
-                <div className="font-medium">{e.first_name} {e.last_name}</div>
+                <div className="font-medium">{formatEmployeeName(e.last_name, e.first_name)}</div>
                 <div className="text-xs text-gray-500">{e.team_name || 'Équipe ?'} - {e.position || 'Poste ?'}</div>
                 <div className="flex gap-1 mt-1">
                   {e.has_pcm && <span className="text-xs px-1 rounded bg-purple-100 text-purple-700">PCM</span>}
@@ -1036,7 +1040,7 @@ export default function InsertionParcours() {
                 <div className="bg-white rounded-lg border p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div className="min-w-0">
-                      <h2 className="text-lg font-bold text-gray-800">{emp.first_name} {emp.last_name}</h2>
+                      <h2 className="text-lg font-bold text-gray-800">{formatEmployeeName(emp.last_name, emp.first_name)}</h2>
                       <div className="text-sm text-gray-500">
                         {emp.position} - {emp.team_name}
                         {emp.insertion_start_date && ` | Début : ${frDate(emp.insertion_start_date)}`}
@@ -1075,7 +1079,7 @@ export default function InsertionParcours() {
                             >
                               <option value="">— non affecté —</option>
                               {referents.map((rf) => (
-                                <option key={rf.id} value={rf.id}>{rf.first_name} {rf.last_name}</option>
+                                <option key={rf.id} value={rf.id}>{formatEmployeeName(rf.last_name, rf.first_name)}</option>
                               ))}
                             </select>
                           </label>
@@ -1087,7 +1091,7 @@ export default function InsertionParcours() {
                     <div className="flex flex-col gap-2 items-end">
                       <div className="flex gap-2 flex-wrap justify-end">
                         <QuickActionButton defaultEmployeeId={selectedEmployee.id}
-                          defaultEmployeeName={`${emp.first_name || ''} ${emp.last_name || ''}`}
+                          defaultEmployeeName={formatEmployeeName(emp.last_name, emp.first_name)}
                           onCreated={() => reloadSelected()} className="!py-1.5 !text-xs" />
                         <button onClick={() => { setNewEntretienOpen(true); }}
                           className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 whitespace-nowrap">
@@ -1329,7 +1333,7 @@ export default function InsertionParcours() {
                     </div>
                     <div className="bg-white rounded-lg border p-4">
                       <ActionsPanel employeeId={selectedEmployee.id}
-                        employeeName={`${emp.first_name || ''} ${emp.last_name || ''}`} />
+                        employeeName={formatEmployeeName(emp.last_name, emp.first_name)} />
                     </div>
                   </div>
                 )}

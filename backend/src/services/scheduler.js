@@ -1229,6 +1229,20 @@ async function hourlyTick() {
       console.log('[SCHEDULER] Lancement sync factures clients Pennylane...');
       await runInstrumented('syncPennylaneInvoicesDaily', syncPennylaneInvoicesDaily);
     }
+    // Sauvegarde automatique de la base — MARDI & VENDREDI à 04h HEURE DE
+    // PARIS (Lot 11). Contrairement aux autres jobs (heure locale conteneur =
+    // UTC en prod), la décision est évaluée en Europe/Paris via Intl dans
+    // shouldRunAutoBackup (fonction pure, testée) : 04h Paris = 03h UTC en
+    // hiver / 02h UTC en été, toujours sur un top d'heure → le tick horaire la
+    // capte sans changer le TZ du conteneur. Fichiers auto_*.sql dans
+    // /app/backups, rétention 8 sauvegardes auto (manuelles jamais purgées).
+    {
+      const { shouldRunAutoBackup, runAutoBackup } = require('./db-backup');
+      if (shouldRunAutoBackup(now)) {
+        console.log('[SCHEDULER] Sauvegarde automatique de la base (mardi/vendredi 04h Europe/Paris)...');
+        await runInstrumented('autoDatabaseBackup', () => runAutoBackup(now));
+      }
+    }
     // Génération quotidienne des prédictions de remplissage J..J+7 à 5h (résidu 8).
     // Calcul LOCAL (heuristique, sans appel LLM). Alimente ml_fill_predictions pour
     // que la boucle de feedback capteur (liveobjects-processor) puisse se refermer.

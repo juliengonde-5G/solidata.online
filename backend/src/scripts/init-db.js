@@ -1653,14 +1653,14 @@ async function initDatabase() {
     await client.query(`ALTER TABLE refashion_taux_subvention ADD COLUMN IF NOT EXISTS justificatif_original_name TEXT`);
     await client.query(`ALTER TABLE refashion_taux_subvention ADD COLUMN IF NOT EXISTS justificatif_mime VARCHAR(120)`);
 
-    // -- Référentiel communes INSEE (Métropole Rouen)
+    // -- Référentiel communes INSEE (Métropole Rouen + EPCI limitrophes — Lot 10 2026-08)
     await client.query(`
       CREATE TABLE IF NOT EXISTS referentiel_communes (
         code_insee VARCHAR(5) PRIMARY KEY,
         nom VARCHAR(150) NOT NULL,
         code_postal VARCHAR(5),
-        epci_code VARCHAR(10),
-        epci_nom VARCHAR(150),
+        epci_code VARCHAR(20),
+        epci_nom TEXT,
         population_insee INTEGER,
         is_metropole_rouen BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
@@ -1668,6 +1668,33 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_ref_communes_epci ON referentiel_communes(epci_code) WHERE is_metropole_rouen = true;
       CREATE INDEX IF NOT EXISTS idx_ref_communes_cp ON referentiel_communes(code_postal);
     `);
+    // Lot 10 (2026-08) — élargissement du référentiel aux EPCI limitrophes (Eure 27 /
+    // Seine-Maritime 76). Sur les bases EXISTANTES, epci_code/epci_nom datent du sprint
+    // P0 05/2026 en VARCHAR(10)/VARCHAR(150) : on garantit leur existence (ADD IF NOT
+    // EXISTS, no-op si présentes) puis on élargit les types (code EPCI = SIREN 9
+    // chiffres, marge à 20 ; nom libre en TEXT). Idempotent : l'ALTER TYPE n'est joué
+    // que si le type courant est plus étroit. AUCUN backfill SQL de epci_code ici :
+    // les communes déjà présentes sans EPCI recevront 200023414 (Métropole Rouen) au
+    // prochain POST /api/communes/refresh-metropole (upsert via l'API geo.api.gouv.fr).
+    await client.query(`ALTER TABLE referentiel_communes ADD COLUMN IF NOT EXISTS epci_code VARCHAR(20)`);
+    await client.query(`ALTER TABLE referentiel_communes ADD COLUMN IF NOT EXISTS epci_nom TEXT`);
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'referentiel_communes' AND column_name = 'epci_code'
+                     AND character_maximum_length IS NOT NULL AND character_maximum_length < 20) THEN
+          ALTER TABLE referentiel_communes ALTER COLUMN epci_code TYPE VARCHAR(20);
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'referentiel_communes' AND column_name = 'epci_nom'
+                     AND data_type <> 'text') THEN
+          ALTER TABLE referentiel_communes ALTER COLUMN epci_nom TYPE TEXT;
+        END IF;
+      END $$;
+    `);
+    // Index plein (le partiel idx_ref_communes_epci ne couvre que la Métropole) pour
+    // le filtre par EPCI de la page Admin > Communes.
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_ref_communes_epci_all ON referentiel_communes(epci_code)`);
     await client.query(`DO $$ BEGIN ALTER TABLE cav ADD COLUMN code_insee_commune VARCHAR(5) REFERENCES referentiel_communes(code_insee) ON DELETE SET NULL; EXCEPTION WHEN duplicate_column THEN NULL; END $$;`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_cav_code_insee ON cav(code_insee_commune);`);
 
@@ -2785,6 +2812,149 @@ async function initDatabase() {
     await client.query('ALTER TABLE employee_contracts DROP CONSTRAINT IF EXISTS employee_contracts_weekly_hours_check');
     await client.query(`ALTER TABLE employee_contracts ADD CONSTRAINT employee_contracts_weekly_hours_check
       CHECK (weekly_hours > 0 AND weekly_hours <= 48)`);
+
+    // ── Lot 3 (2026-08) — Import paie Malibou : HISTORIQUE DES CONTRATS ──────
+    // L'export fournit TOUTES les lignes de la feuille « Contrats » : une ligne
+    // par AVENANT, l'« ID contrat » (ctr_…) étant partagé par les avenants d'un
+    // même contrat. Colonnes d'accueil (idempotentes) :
+    //  • malibou_contract_id + avenant_date = clé d'upsert (index unique partiel) ;
+    //  • start_date / end_date portent la PÉRIODE EFFECTIVE reconstituée (règle
+    //    métier : la ligne précédente, triée par date d'avenant, s'arrête la
+    //    VEILLE de la suivante) ;
+    //  • official_start_date / official_end_date = dates brutes du contrat
+    //    (la date de début officielle = date d'embauche UNIQUE, répétée sur
+    //    chaque ligne d'avenant du même contrat).
+    await client.query(`
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS malibou_contract_id TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS avenant_date DATE;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS official_start_date DATE;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS official_end_date DATE;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS trial_period_end DATE;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS motif_cdd TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS statut_cadre BOOLEAN;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS qualification TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS position_title TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS gross_salary TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS work_time_type TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS work_time_category TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS days_per_week DOUBLE PRECISION;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS hours_per_year DOUBLE PRECISION;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS days_per_year DOUBLE PRECISION;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS weekly_schedule JSONB;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS dpae_reference TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS dpae_date DATE;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS siret TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS establishment TEXT;
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS source VARCHAR(20);
+      ALTER TABLE employee_contracts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_contracts_malibou
+      ON employee_contracts(malibou_contract_id, avenant_date)
+      WHERE malibou_contract_id IS NOT NULL AND avenant_date IS NOT NULL;
+    `);
+    // Une ligne d'avenant n'est ni une embauche ni un renouvellement de contrat :
+    // le CHECK origin s'élargit (superset — drop-then-add, pattern du fichier).
+    await client.query('ALTER TABLE employee_contracts DROP CONSTRAINT IF EXISTS employee_contracts_origin_check');
+    await client.query(`ALTER TABLE employee_contracts ADD CONSTRAINT employee_contracts_origin_check
+      CHECK (origin IN ('embauche', 'renouvellement', 'avenant'))`);
+
+    // Contacts d'urgence (feuille « Informations salariés ») — intérêt légitime
+    // employeur (obligation de sécurité). La doctrine de minimisation demeure :
+    // NIR, IBAN et BIC de l'export restent volontairement NON importés.
+    await client.query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS emergency_contact_name TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS emergency_contact_phone TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS emergency_contact_email TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS emergency_contact2_name TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS emergency_contact2_phone TEXT;
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS emergency_contact2_email TEXT;
+    `);
+
+    // Heures hebdomadaires de l'export paie (feuille « Heures travaillées »,
+    // une ligne par salarié × semaine ISO). work_hours est JOURNALIER
+    // (UNIQUE(employee_id, date)) : répartir des heures hebdo sur des jours
+    // inventerait de la donnée → stockage HEBDO dédié, fidèle à la granularité
+    // source (la paie fait foi ; work_hours reste la saisie ERP quotidienne).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS employee_week_hours (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        iso_year INTEGER NOT NULL,
+        iso_week INTEGER NOT NULL CHECK (iso_week BETWEEN 1 AND 53),
+        week_start DATE,
+        week_end DATE,
+        statut VARCHAR(40),
+        hours_worked DOUBLE PRECISION,
+        hours_expected DOUBLE PRECISION,
+        hours_contract DOUBLE PRECISION,
+        hours_absence DOUBLE PRECISION,
+        hs_0 DOUBLE PRECISION,
+        hs_25 DOUBLE PRECISION,
+        hs_50 DOUBLE PRECISION,
+        h_inf DOUBLE PRECISION,
+        hc_0 DOUBLE PRECISION,
+        hc_10 DOUBLE PRECISION,
+        hours_exc_sunday DOUBLE PRECISION,
+        hours_exc_holiday DOUBLE PRECISION,
+        hours_exc_night DOUBLE PRECISION,
+        source VARCHAR(20) DEFAULT 'malibou',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id, iso_year, iso_week)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_week_hours_year_week ON employee_week_hours(iso_year, iso_week);');
+
+    // Absences/congés de l'export paie (feuille « Congés & Télétravail »).
+    // On n'écrit PAS dans work_hours (journalier, hours_worked NOT NULL,
+    // collision avec la saisie RH réelle et sémantique inventée) : table dédiée
+    // à la période native [début → fin], catégorisée vers l'enum ERP
+    // (holiday/sick/absence) pour les restitutions.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS employee_leaves (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        leave_type TEXT NOT NULL,
+        type_category VARCHAR(20) CHECK (type_category IN ('holiday', 'sick', 'absence')),
+        request_date DATE,
+        start_date DATE NOT NULL,
+        end_date DATE,
+        half_day_start BOOLEAN,
+        half_day_end BOOLEAN,
+        duration_days DOUBLE PRECISION,
+        duration_working_days DOUBLE PRECISION,
+        statut VARCHAR(40),
+        validator_name TEXT,
+        validated_at DATE,
+        source VARCHAR(20) DEFAULT 'malibou',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(employee_id, leave_type, start_date)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employee_leaves_dates ON employee_leaves(start_date, end_date);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_employee_leaves_employee ON employee_leaves(employee_id);');
+
+    // Registre RGPD (art. 30) — le traitement « gestion administrative RH »
+    // s'étend aux données rapatriées de la paie (historique contractuel, heures
+    // hebdomadaires, absences, contacts d'urgence). Seed idempotent.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Import du logiciel de paie (contrats, heures, absences, contacts d''urgence)',
+        'Synchronisation de la base RH depuis l''export du logiciel de paie : historique contractuel (contrat d''origine et avenants, planning hebdomadaire contractuel), heures hebdomadaires travaillées/attendues/supplémentaires, absences et congés validés, contacts d''urgence. Sert le suivi des parcours (CDDI, renouvellements), le planning et le reporting RH agrégé.',
+        'Exécution du contrat de travail et obligation légale (Code du travail)',
+        'Salariés (permanents et parcours d''insertion)',
+        'Identité et coordonnées, données contractuelles (dates, quotité, salaire brut contractuel, période d''essai, DPAE), heures et absences hebdomadaires, type d''absence (dont maladie — durée seulement, aucun motif médical), contacts d''urgence (nom, téléphone, email). MINIMISATION : le NIR, l''IBAN et le BIC présents dans l''export ne sont PAS importés.',
+        'Service RH, direction ; agrégats non nominatifs pour le reporting',
+        'Durée du contrat + prescriptions légales ; anonymisation au rythme de la fiche salarié',
+        'Accès restreint ADMIN/RH (import), lecture RH/MANAGER selon rôles, upsert idempotent non destructif, journalisation applicative'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Import du logiciel de paie (contrats, heures, absences, contacts d''urgence)'
+      );
+    `);
 
     // ── Item 40 — Recopie des compétences opérationnelles (permis B / CACES)
     // depuis la fiche candidat liée. Ces booléens conditionnent l'affectation

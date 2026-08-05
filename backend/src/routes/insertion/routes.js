@@ -110,7 +110,7 @@ router.get('/', async (req, res) => {
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       WHERE e.is_active = true
-      ORDER BY e.last_name, e.first_name
+      ORDER BY UPPER(e.last_name), UPPER(e.first_name)
     `);
 
     const now = new Date();
@@ -1373,11 +1373,16 @@ router.put('/partenaires/:id', authorize('ADMIN', 'RH'), [
 // ══════════════════════════════════════════════════════════════
 // TABLEAU TRANSVERSAL DES ACTIONS (Lot 3) — toutes-actions, tous salariés
 // Filtres : employee_id / category / priority / partenaire_id / retard / mine /
-// statut. Tri échéance. Pagination LIMIT/OFFSET. AVANT /:employeeId.
+// gestionnaire_id / statut. Tri échéance. Pagination LIMIT/OFFSET. AVANT /:employeeId.
+// Sémantique « gestionnaire » (filtre gestionnaire_id) : le CIP référent du
+// salarié (employees.cip_referent_user_id) s'il est renseigné, SINON le
+// créateur de l'action (cip_action_plans.created_by) — un CIP retrouve ainsi
+// toutes les actions dont il a la charge, même pour les salariés sans référent.
 // ══════════════════════════════════════════════════════════════
 router.get('/actions-overview', [
   query('employee_id').optional().isInt().withMessage('employee_id invalide'),
   query('partenaire_id').optional().isInt().withMessage('partenaire_id invalide'),
+  query('gestionnaire_id').optional().isInt().withMessage('gestionnaire_id invalide'),
   query('limit').optional().isInt({ min: 1, max: 500 }).withMessage('limit invalide (1-500)'),
   query('offset').optional().isInt({ min: 0 }).withMessage('offset invalide'),
 ], validate, async (req, res) => {
@@ -1394,6 +1399,10 @@ router.get('/actions-overview', [
     }
     if (req.query.mine === '1' || req.query.mine === 'true') {
       params.push(req.user.id); where.push(`e.cip_referent_user_id = $${params.length}`);
+    }
+    if (req.query.gestionnaire_id) {
+      params.push(req.query.gestionnaire_id);
+      where.push(`COALESCE(e.cip_referent_user_id, a.created_by) = $${params.length}`);
     }
     const whereSql = 'WHERE ' + where.join(' AND ');
 
@@ -2028,7 +2037,7 @@ router.get('/renouvellements', async (req, res) => {
          AND ec.end_date IS NOT NULL
          AND ec.end_date >= CURRENT_DATE
          AND ec.end_date < CURRENT_DATE + make_interval(days => $1)
-       ORDER BY ec.end_date, e.last_name`,
+       ORDER BY ec.end_date, UPPER(e.last_name), UPPER(e.first_name)`,
       [jours]
     );
     const renouvellements = rows.rows.map((r) => ({
@@ -2622,7 +2631,7 @@ router.get('/cip-referents', async (req, res) => {
       `SELECT id, first_name, last_name, role
        FROM users
        WHERE COALESCE(is_active, true) = true
-       ORDER BY last_name NULLS LAST, first_name NULLS LAST`
+       ORDER BY UPPER(last_name) NULLS LAST, UPPER(first_name) NULLS LAST`
     );
     res.json(r.rows.filter((u) => ['ADMIN', 'RH'].includes(resolveBaseRole(u.role))));
   } catch (err) {
@@ -3361,7 +3370,10 @@ router.get('/:employeeId', async (req, res) => {
     let contractsRes = { rows: [] };
     try {
       contractsRes = await pool.query(
-        'SELECT ec.*, t.name as team_name, p.title as position_title FROM employee_contracts ec LEFT JOIN teams t ON ec.team_id = t.id LEFT JOIN positions p ON ec.position_id = p.id WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC',
+        // COALESCE : ec.position_title (poste importé de la paie, Lot 3) prime —
+        // sans lui, l'alias homonyme p.title écrasait la colonne de ec.* (avec
+        // node-postgres, la dernière colonne homonyme gagne) et masquait le poste.
+        'SELECT ec.*, t.name as team_name, COALESCE(ec.position_title, p.title) as position_title FROM employee_contracts ec LEFT JOIN teams t ON ec.team_id = t.id LEFT JOIN positions p ON ec.position_id = p.id WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC',
         [empId]
       );
     } catch (err) { /* table might not exist */ }

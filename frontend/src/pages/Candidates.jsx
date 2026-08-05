@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import { Modal, KanbanBoard, StatusBadge } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
+import { formatEmployeeName, formatLastName, compareByName } from '../utils/names';
 
 const STATUSES = ['received', 'interview', 'hired', 'rejected'];
 
@@ -126,7 +127,7 @@ export default function Candidates() {
   const handleUnlink = async (candidate) => {
     const ok = await confirm({
       title: 'Délier le collaborateur',
-      message: `Retirer le lien entre ${candidate.first_name} ${candidate.last_name} et le collaborateur ${candidate.linked_employee_name || ''} ? La fiche RH n'est pas supprimée.`,
+      message: `Retirer le lien entre ${formatEmployeeName(candidate.last_name, candidate.first_name)} et le collaborateur ${candidate.linked_employee_name || ''} ? La fiche RH n'est pas supprimée.`,
       confirmLabel: 'Délier',
       confirmVariant: 'danger',
     });
@@ -144,7 +145,7 @@ export default function Candidates() {
     setLinkModal(null);
     loadAll();
     if (selected?.id === candidateId) {
-      setSelected(prev => ({ ...prev, linked_employee_id: employee.id, linked_employee_name: `${employee.first_name} ${employee.last_name}` }));
+      setSelected(prev => ({ ...prev, linked_employee_id: employee.id, linked_employee_name: formatEmployeeName(employee.last_name, employee.first_name) }));
     }
   };
 
@@ -310,9 +311,23 @@ export default function Candidates() {
       if (activePosition === 'all') return true;
       return String(c.position_id || '') === String(activePosition);
     };
+    // Arbitrage client 04/08 : chronologique (dossier le plus récent d'abord, au jour près)
+    // puis alphabétique NOM/prénom entre dossiers du même jour.
+    const dayOf = (c) => {
+      const raw = c.updated_at || c.created_at;
+      if (!raw) return '';
+      const d = new Date(raw);
+      return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+    };
+    const chronoThenName = (a, b) => {
+      const da = dayOf(a);
+      const db = dayOf(b);
+      if (da !== db) return da < db ? 1 : -1;
+      return compareByName(a, b);
+    };
     const out = {};
     for (const s of STATUSES) {
-      out[s] = (kanban[s] || []).filter((c) => matchesSearch(c) && matchesView(c) && matchesPosition(c));
+      out[s] = (kanban[s] || []).filter((c) => matchesSearch(c) && matchesView(c) && matchesPosition(c)).sort(chronoThenName);
     }
     return out;
   }, [kanban, searchQuery, activeView, activePosition]);
@@ -358,7 +373,7 @@ export default function Candidates() {
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-sm text-slate-800 leading-tight truncate">
-            {c.first_name || '?'} {c.last_name || '?'}
+            {formatEmployeeName(c.last_name, c.first_name) || '?'}
           </p>
           {(c.position_title || c.email) && (
             <p className="text-[11px] text-slate-500 mt-0.5 truncate">
@@ -491,7 +506,7 @@ export default function Candidates() {
                     {(selected.first_name?.[0] || '?').toUpperCase()}{(selected.last_name?.[0] || '').toUpperCase()}
                   </span>
                   <div className="min-w-0">
-                    <h2 className="font-extrabold text-lg text-slate-800 truncate">{selected.first_name || '?'} {selected.last_name || '?'}</h2>
+                    <h2 className="font-extrabold text-lg text-slate-800 truncate">{formatEmployeeName(selected.last_name, selected.first_name) || '?'}</h2>
                     <div className="mt-1">
                       <StatusBadge status={selected.status} type="candidat" size="sm" />
                     </div>
@@ -661,6 +676,10 @@ function LinkEmployeeModal({ candidate, onClose, onLinked }) {
   }, [candidate.id]);
 
   const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  // Ordre par proximité de correspondance (match_score, déjà trié par le
+  // backend) conservé tel quel — non alphabétique par conception (meilleure
+  // correspondance en premier). Seul l'affichage du nom suit la règle « NOM
+  // Prénom » (voir rendu ci-dessous).
   const filtered = useMemo(() => {
     const q = norm(search).trim();
     if (!q) return suggestions;
@@ -679,7 +698,7 @@ function LinkEmployeeModal({ candidate, onClose, onLinked }) {
   };
 
   return (
-    <Modal isOpen onClose={onClose} title={`Lier ${candidate.first_name} ${candidate.last_name} à un collaborateur`} size="md">
+    <Modal isOpen onClose={onClose} title={`Lier ${formatEmployeeName(candidate.last_name, candidate.first_name)} à un collaborateur`} size="md">
       <div className="space-y-3">
         <p className="text-xs text-slate-500">
           Sélectionnez le collaborateur (importé depuis le logiciel de paye) correspondant à ce candidat.
@@ -705,7 +724,7 @@ function LinkEmployeeModal({ candidate, onClose, onLinked }) {
               <li key={e.id} className="flex items-center justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-slate-800 truncate">
-                    {e.first_name} {e.last_name}
+                    {formatEmployeeName(e.last_name, e.first_name)}
                     {e.match_score >= 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">correspondance exacte</span>}
                     {e.match_score >= 40 && e.match_score < 100 && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">nom proche</span>}
                     {!e.is_active && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold">inactif</span>}
@@ -745,7 +764,7 @@ function InfoView({ s, skills, positions, onMove, onLink, onUnlink }) {
   return (
     <div className="space-y-3 text-sm">
       <div className="grid grid-cols-2 gap-3">
-        <Field l="Prénom" v={s.first_name} /><Field l="Nom" v={s.last_name} />
+        <Field l="Prénom" v={s.first_name} /><Field l="Nom" v={formatLastName(s.last_name)} />
         <Field l="Email" v={s.email} /><Field l="Téléphone" v={s.phone} />
         <Field l="Poste" v={pos?.title} />
       </div>

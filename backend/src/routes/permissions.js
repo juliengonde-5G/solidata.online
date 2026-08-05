@@ -48,8 +48,15 @@ const MODULE_CATALOG = [
   { key: 'accueil', label: 'Accueil' },
   { key: 'operations', label: 'Opérations (Collecte / Logistique)' },
   { key: 'tri', label: 'Tri' },
-  { key: 'boutiques', label: 'Boutiques' },
-  { key: 'vak', label: 'Vente au Kilo' },
+  // Lot 4 : Boutiques + Vente au Kilo regroupés dans la section de 1er niveau
+  // « Frip » (Layout.jsx, sous Administration). 'frip' masque les deux sous-
+  // branches d'un coup ; 'boutiques'/'vak' restent au catalogue pour restreindre
+  // UNE SEULE des deux sous-branches (rétrocompatibilité des lignes
+  // role_module_access déjà enregistrées sur ces clés — le filtre récursif de
+  // Layout.jsx honore l'id de n'importe quel nœud, plus seulement le 1er niveau).
+  { key: 'frip', label: 'Frip (Boutiques & Vente au Kilo)' },
+  { key: 'boutiques', label: 'Frip › Boutiques' },
+  { key: 'vak', label: 'Frip › Vente au Kilo' },
   { key: 'rh', label: 'RH et Insertion' },
   { key: 'equipe', label: "Gestion d'équipe" },
   // Vague 2 : nouvelles sections de 1er niveau (Layout.jsx filtre sur section.id).

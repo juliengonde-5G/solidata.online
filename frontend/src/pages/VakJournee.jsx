@@ -306,20 +306,21 @@ function DayCard({ index, date, data, allDays }) {
               footer="articles / ticket" />
           </div>
 
-          {/* Bandeau premières / dernières ventes — horaires en GMT/UTC (cohérent
-              avec l'export SumUp et les graphes par heure, qui extraient l'heure UTC). */}
+          {/* Bandeau premières / dernières ventes — timestamps stockés en UTC,
+              affichés en heure de Paris (Lot 12), cohérent avec les graphes par
+              heure (agrégés Europe/Paris côté SQL). */}
           {(k.premiere_vente || k.derniere_vente) && (
             <div className="bg-slate-50 rounded-lg px-3 py-2 mb-4 text-xs text-slate-600 flex justify-between">
               <span>
                 Première vente :{' '}
                 <strong className="text-slate-800">
-                  {k.premiere_vente ? new Date(k.premiere_vente).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) : '—'}
+                  {k.premiere_vente ? new Date(k.premiere_vente).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }) : '—'}
                 </strong>
               </span>
               <span>
                 Dernière vente :{' '}
                 <strong className="text-slate-800">
-                  {k.derniere_vente ? new Date(k.derniere_vente).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) : '—'}
+                  {k.derniere_vente ? new Date(k.derniere_vente).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }) : '—'}
                 </strong>
               </span>
             </div>
@@ -327,7 +328,7 @@ function DayCard({ index, date, data, allDays }) {
 
           {/* Activité horaire compacte */}
           <div className="mb-4">
-            <h4 className="text-xs uppercase tracking-wider text-slate-500 mb-1">Activité par heure <span className="normal-case text-slate-400">(GMT)</span></h4>
+            <h4 className="text-xs uppercase tracking-wider text-slate-500 mb-1">Activité par heure <span className="normal-case text-slate-400">(heure de Paris)</span></h4>
             <ResponsiveContainer width="100%" height={140}>
               <ComposedChart data={hourly} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />

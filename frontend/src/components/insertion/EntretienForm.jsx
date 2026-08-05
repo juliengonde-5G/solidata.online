@@ -12,6 +12,7 @@ import { SatisfactionModal } from './SatisfactionForm';
 import { exportEntretienPDF } from './pdf-insertion';
 import { getInsertionParametres, PARAMETRES_DEFAUTS, plusMois } from './parametres';
 import { useAuth } from '../../contexts/AuthContext';
+import { formatEmployeeName } from '../../utils/names';
 
 /**
  * Formulaire d'entretien (tout type) — sections dans l'ordre de la trame papier
@@ -666,7 +667,7 @@ export default function EntretienForm({
           )}
 
           {cur.id === 'actions' && (
-            <ActionsPanel employeeId={employeeId} employeeName={`${employee.first_name || ''} ${employee.last_name || ''}`}
+            <ActionsPanel employeeId={employeeId} employeeName={formatEmployeeName(employee.last_name, employee.first_name)}
               milestoneId={milestone.id} readOnly={readOnly}
               onChanged={() => api.get(`/insertion/action-plans/${employeeId}`).then((r) => setActions(Array.isArray(r.data) ? r.data : [])).catch(() => {})} />
           )}

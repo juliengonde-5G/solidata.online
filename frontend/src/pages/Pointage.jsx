@@ -3,6 +3,7 @@ import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, DateRangePicker } from '../components';
 import { Fingerprint } from 'lucide-react';
 import api from '../services/api';
+import { formatEmployeeName } from '../utils/names';
 
 const TABS = ['daily', 'badges', 'manual', 'alerts', 'log', 'monthly'];
 const TAB_LABELS = { daily: 'Journée', badges: 'Badges', manual: 'Saisie manuelle', alerts: 'Alertes', log: 'Registre', monthly: 'Mensuel' };
@@ -172,7 +173,7 @@ export default function Pointage() {
                       const badgeCount = parseInt(row.badge_count) || 0;
                       return (
                         <tr key={row.employee_id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium">{row.first_name} {row.last_name}</td>
+                          <td className="px-4 py-3 font-medium">{formatEmployeeName(row.last_name, row.first_name)}</td>
                           <td className="px-4 py-3 text-gray-500">{row.team_name || '-'}</td>
                           <td className="px-4 py-3 text-center">{formatTime(entryEvents[0]?.event_time)}</td>
                           <td className="px-4 py-3 text-center">{formatTime(exitEvents[0]?.event_time)}</td>
@@ -207,7 +208,7 @@ export default function Pointage() {
                   onChange={e => setBadgeForm({ ...badgeForm, badge_uid: e.target.value })} className="input-modern" required />
                 <select value={badgeForm.employee_id} onChange={e => setBadgeForm({ ...badgeForm, employee_id: e.target.value })} className="select-modern">
                   <option value="">Non affecté</option>
-                  {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
+                  {employees.map(emp => <option key={emp.id} value={emp.id}>{formatEmployeeName(emp.last_name, emp.first_name)}</option>)}
                 </select>
                 <input type="text" placeholder="Libellé (optionnel)" value={badgeForm.label}
                   onChange={e => setBadgeForm({ ...badgeForm, label: e.target.value })} className="input-modern" />
@@ -235,11 +236,11 @@ export default function Pointage() {
                       <td className="px-4 py-3">{badge.label || '-'}</td>
                       <td className="px-4 py-3">
                         {badge.employee_id ? (
-                          <span className="font-medium">{badge.first_name} {badge.last_name}</span>
+                          <span className="font-medium">{formatEmployeeName(badge.last_name, badge.first_name)}</span>
                         ) : (
                           <select onChange={e => e.target.value && handleBadgeAssign(badge.id, e.target.value)} className="select-modern py-1 text-xs" defaultValue="">
                             <option value="">Affecter...</option>
-                            {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
+                            {employees.map(emp => <option key={emp.id} value={emp.id}>{formatEmployeeName(emp.last_name, emp.first_name)}</option>)}
                           </select>
                         )}
                       </td>
@@ -278,7 +279,7 @@ export default function Pointage() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Collaborateur</label>
                     <select value={manualForm.employee_id} onChange={e => setManualForm({ ...manualForm, employee_id: e.target.value })} className="select-modern" required>
                       <option value="">Sélectionner...</option>
-                      {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
+                      {employees.map(emp => <option key={emp.id} value={emp.id}>{formatEmployeeName(emp.last_name, emp.first_name)}</option>)}
                     </select>
                   </div>
                   <div>
@@ -347,7 +348,7 @@ export default function Pointage() {
                   <tbody className="divide-y divide-gray-100">
                     {alerts.map(alert => (
                       <tr key={alert.employee_id} className="hover:bg-red-50/50">
-                        <td className="px-4 py-3 font-medium">{alert.first_name} {alert.last_name}</td>
+                        <td className="px-4 py-3 font-medium">{formatEmployeeName(alert.last_name, alert.first_name)}</td>
                         <td className="px-4 py-3 text-gray-500">{alert.team_name || '-'}</td>
                         <td className="px-4 py-3 text-center">
                           {alert.alert_type === 'absent'
@@ -388,7 +389,7 @@ export default function Pointage() {
                   {movementLog.map(ev => (
                     <tr key={ev.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-mono text-xs">{formatTime(ev.event_time)}</td>
-                      <td className="px-4 py-3">{ev.first_name ? `${ev.first_name} ${ev.last_name}` : <span className="text-gray-400">Inconnu ({ev.badge_uid})</span>}</td>
+                      <td className="px-4 py-3">{ev.first_name ? formatEmployeeName(ev.last_name, ev.first_name) : <span className="text-gray-400">Inconnu ({ev.badge_uid})</span>}</td>
                       <td className="px-4 py-3 text-center">
                         {ev.event_type === 'entry' && <span className="text-green-600 font-medium">Entrée</span>}
                         {ev.event_type === 'exit' && <span className="text-blue-600 font-medium">Sortie</span>}
@@ -438,7 +439,7 @@ export default function Pointage() {
                 <tbody className="divide-y divide-gray-100">
                   {monthlySummary.map(row => (
                     <tr key={row.employee_id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{row.first_name} {row.last_name}</td>
+                      <td className="px-4 py-3 font-medium">{formatEmployeeName(row.last_name, row.first_name)}</td>
                       <td className="px-4 py-3 text-gray-500">{row.team_name || '-'}</td>
                       <td className="px-4 py-3 text-center">{row.weekly_hours}h</td>
                       <td className="px-4 py-3 text-center">{row.days_badged}</td>
