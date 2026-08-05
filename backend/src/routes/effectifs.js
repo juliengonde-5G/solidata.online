@@ -441,10 +441,12 @@ router.get('/grille', READ, [
 
 /**
  * Écarts mensuels par personne, calculés sur les semaines OBSERVÉES (entièrement
- * écoulées) du mois : previsionnel = moyenne des quotités prévues (0 si non
- * couvert), realise = moyenne des quotités réalisées (le présumé compte 0 en
- * réalisé), ecart = realise − previsionnel, jours_absence = somme des jours
- * ouvrés déduits. Mois sans semaine observée → valeurs null.
+ * écoulées) du mois : previsionnel = moyenne des quotités prévues des contrats
+ * SIGNÉS (0 si non couvert — le renouvellement PRÉSUMÉ est NEUTRALISÉ ici, car
+ * il ne produit jamais de réalisé : le comparer créerait des écarts artificiels
+ * non liés à l'absentéisme), realise = moyenne des quotités réalisées,
+ * ecart = realise − previsionnel, jours_absence = somme des jours ouvrés
+ * déduits. Mois sans semaine observée → valeurs null.
  */
 function computeEcartsPersonne(semaines, p, today) {
   const parMois = new Map();
@@ -453,7 +455,7 @@ function computeEcartsPersonne(semaines, p, today) {
     if (dimanche >= today) return; // semaine non écoulée : pas d'écart mesurable
     if (!parMois.has(w.mois)) parMois.set(w.mois, { prev: [], real: [], ja: 0 });
     const bucket = parMois.get(w.mois);
-    bucket.prev.push(p.prev[i].q != null ? p.prev[i].q : 0);
+    bucket.prev.push(p.prev[i].statut === 'signe' && p.prev[i].q != null ? p.prev[i].q : 0);
     bucket.real.push(p.real[i].q != null ? p.real[i].q : 0);
     bucket.ja += p.real[i].jours_absence || 0;
   });
