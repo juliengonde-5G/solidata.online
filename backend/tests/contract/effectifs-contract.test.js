@@ -334,6 +334,26 @@ describe('CONTRAT /effectifs/grille', () => {
     expect(fatou.quotites.find((c) => c.s === 30)).toEqual({ s: 30, q: 0.74, statut: 'presume' });
   });
 
+  it('données héritées : un CDD d\'un parcours CLÔTURÉ (termine) apparaît dans la grille historique, sans présomption', async () => {
+    // Revue Codex PR#87 : la sélection SQL des salariés reflète hasParcours()
+    // (tout insertion_status ≠ none, y compris termine/abandon) — sinon les
+    // parcours passés en CDD hérité disparaissaient des grilles historiques.
+    installMocks({
+      employees: [{
+        id: 31, first_name: 'Dany', last_name: 'Pean', team_id: 1, team_name: 'Tri',
+        insertion_status: 'termine', cddi_derogation_motif: null, pass_iae_end: null,
+        fiche_contract_type: 'CDD', fiche_contract_start: null, fiche_contract_end: null, fiche_weekly_hours: 26,
+      }],
+      contracts: [{ employee_id: 31, contract_type: 'CDD', start_date: '2024-01-01', end_date: '2024-06-30', official_start_date: '2024-01-01', weekly_hours: 26 }],
+    });
+    const res = await get('/api/effectifs/grille?annee=2024');
+    expect(res.body.sections).toHaveLength(1);
+    const dany = res.body.sections[0].personnes[0];
+    expect(dany.quotites.find((c) => c.s === 10)).toEqual({ s: 10, q: 0.74, statut: 'signe' });
+    // Parcours clôturé → jamais de renouvellement présumé après la fin du contrat.
+    expect(dany.quotites.find((c) => c.s === 30)).toEqual({ s: 30, q: null, statut: null });
+  });
+
   it('validation : vue inconnue → 400 ; annee hors bornes → 400', async () => {
     installMocks();
     expect((await get('/api/effectifs/grille?annee=2026&vue=mensuelle')).status).toBe(400);
