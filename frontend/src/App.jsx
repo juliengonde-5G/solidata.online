@@ -34,6 +34,7 @@ const AdminCommunes = lazy(() => import('./pages/AdminCommunes'));
 const ReportingCollecte = lazy(() => import('./pages/ReportingCollecte'));
 const ReportingRH = lazy(() => import('./pages/ReportingRH'));
 const PlanFormation = lazy(() => import('./pages/PlanFormation'));
+const EffectifsETP = lazy(() => import('./pages/EffectifsETP'));
 const ReportingProduction = lazy(() => import('./pages/ReportingProduction'));
 const Refashion = lazy(() => import('./pages/Refashion'));
 const Users = lazy(() => import('./pages/Users'));
@@ -184,6 +185,7 @@ function App() {
               <Route path="/employees" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Employees /></ProtectedRoute>} />
               <Route path="/work-hours" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><WorkHours /></ProtectedRoute>} />
               <Route path="/rh/formation" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><PlanFormation /></ProtectedRoute>} />
+              <Route path="/rh/effectifs" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><EffectifsETP /></ProtectedRoute>} />
               <Route path="/skills" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Skills /></ProtectedRoute>} />
               <Route path="/prescripteurs" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Prescripteurs /></ProtectedRoute>} />
               <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><InsertionParcours /></ProtectedRoute>} />
