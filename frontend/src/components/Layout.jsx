@@ -133,6 +133,7 @@ const NAV_TREE = [
           { label: 'Espace CIP (insertion)', path: '/insertion', icon: Heart, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Actions CIP', path: '/insertion/actions', icon: ListChecks, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Pilotage & indicateurs', path: '/insertion/audit', icon: ClipboardList, roles: ['ADMIN', 'RH', 'MANAGER'] },
+          { label: 'Effectifs ETP', path: '/rh/effectifs', icon: Gauge, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Compétences', path: '/skills', icon: Star, roles: ['ADMIN', 'RH'] },
           { label: 'Plan de formation', path: '/rh/formation', icon: GraduationCap, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Prescripteurs', path: '/prescripteurs', icon: Building2, roles: ['ADMIN', 'RH'] },

@@ -174,6 +174,8 @@ app.use('/api/pcm', require('./routes/pcm'));
 app.use('/api/teams', require('./routes/teams'));
 app.use('/api/employees', require('./routes/employees'));
 app.use('/api/prescripteurs', require('./routes/prescripteurs'));
+// Effectifs conventionnés (ETP) — grille hebdo prévisionnel/réalisé vs convention ACI.
+app.use('/api/effectifs', require('./routes/effectifs'));
 
 // Lot 3 : Collecte + Tournées IA + GPS
 app.use('/api/cav', require('./routes/cav'));

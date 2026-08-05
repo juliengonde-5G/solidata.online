@@ -6732,6 +6732,33 @@ async function initDatabase() {
     console.log('[INIT-DB] Module Achats responsables (RSEI-17) — 3 tables + 8 critères + registre RGPD ✓');
 
     // ══════════════════════════════════════════
+    // MODULE « EFFECTIFS CONVENTIONNÉS (ETP) » — validation ASP mensuelle
+    //
+    // Suivi prévisionnel/réalisé des ETP d'insertion vs convention ACI
+    // (routes/effectifs.js + services/effectifs-engine.js). La CIP saisit ici
+    // le chiffre ASP mensuel officiel (états mensuels de présence) : validation
+    // horodatée, journalisée dans rgpd_audit_log par la route — ce chiffre FAIT
+    // FOI dans la synthèse. Les PARAMÈTRES DE CONVENTION (ETP conventionnés,
+    // dont CDI Inclusion, heures/ETP, période) vivent dans `settings` sous la
+    // clé `effectifs.convention_<annee>` (JSON) — AUCUN seed : jamais de valeur
+    // inventée (repli lecture sur insertion.cible_etp_conventionnes).
+    // ══════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS etp_asp_mensuel (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        mois INTEGER NOT NULL CHECK (mois BETWEEN 1 AND 12),
+        etp_asp NUMERIC(6,2) NOT NULL,
+        commentaire TEXT,
+        saisi_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        valide_le TIMESTAMP DEFAULT NOW(),
+        UNIQUE(annee, mois)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_etp_asp_annee ON etp_asp_mensuel(annee);');
+    console.log('[INIT-DB] Module Effectifs conventionnés (ETP) — table etp_asp_mensuel ✓');
+
+    // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL
     //
     // Symptôme observé en prod : INSERT INTO employees échoue avec
@@ -6769,7 +6796,7 @@ async function initDatabase() {
       'carburant_pleins', 'ges_facteurs',
       'enquete_modeles', 'enquete_questions', 'enquete_campagnes', 'enquete_reponses',
       'achats_fournisseurs', 'achats_criteres', 'achats_fds',
-      'qhse_documents', 'formation_actions',
+      'qhse_documents', 'formation_actions', 'etp_asp_mensuel',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une
