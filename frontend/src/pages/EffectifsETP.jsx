@@ -276,7 +276,9 @@ function SyntheseTab({ annee, setAnnee, canWrite }) {
 
   const kpiPrev = avgOf(mois, 'etp_previsionnel');
   const kpiRealise = avgRealiseADate(mois, annee);
-  const kpiTaux = avgOf(mois, 'taux_realisation');
+  // Le backend renvoie un RATIO (round3, ex. 0.914) — affichage en % (×100).
+  const kpiTauxRatio = avgOf(mois, 'taux_realisation');
+  const kpiTaux = kpiTauxRatio != null ? kpiTauxRatio * 100 : null;
 
   const chartData = mois.map((m) => ({
     label: moisLabel(m.mois),
@@ -404,7 +406,7 @@ function SyntheseTab({ annee, setAnnee, canWrite }) {
                       )}
                     </td>
                     <td className="py-2 px-2 text-right"><EcartCell m={m} convention={convention} /></td>
-                    <td className="py-2 px-2 text-right">{m.taux_realisation != null ? `${fmtNum(m.taux_realisation, 1)} %` : '—'}</td>
+                    <td className="py-2 px-2 text-right">{m.taux_realisation != null ? `${fmtNum(Number(m.taux_realisation) * 100, 1)} %` : '—'}</td>
                     <td className="py-2 pl-2 text-center">
                       <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
                     </td>
