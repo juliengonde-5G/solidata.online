@@ -162,7 +162,10 @@ async function buildGrilleData(annee, today) {
     LEFT JOIN teams t ON t.id = e.team_id
     WHERE UPPER(COALESCE(e.contract_type, '')) = 'CDDI'
        OR e.cddi_derogation_motif = 'cdi_inclusion'
-       OR e.insertion_status = 'en_parcours'
+       -- Miroir SQL de hasParcours() : tout parcours d'insertion, y compris
+       -- clôturé (termine/abandon) — un CDD hérité d'un parcours passé doit
+       -- apparaître dans les grilles historiques (revue Codex PR#87).
+       OR (e.insertion_status IS NOT NULL AND e.insertion_status <> 'none')
        OR EXISTS (
             SELECT 1 FROM employee_contracts ec
             WHERE ec.employee_id = e.id AND UPPER(ec.contract_type) = 'CDDI'
