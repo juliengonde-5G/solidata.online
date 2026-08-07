@@ -41,7 +41,7 @@
  */
 
 const pool = require('../config/database');
-const { isKgItem } = require('../services/sumup');
+const { isKgItem, parseKgPrefix, getSegment } = require('../services/sumup');
 
 const API_SOURCES = ['api_sumup', 'webhook_sumup'];
 
@@ -75,21 +75,73 @@ const API_SOURCES = ['api_sumup', 'webhook_sumup'];
  * vrai 1,000 kg pesé → requalifiée 'kg' (sinon elle tombait entre les deux
  * filets, resync-vak-details ne sélectionnant que les tickets à 0/1 ligne).
  * `nb_lignes_ticket` = nombre TOTAL de lignes du ticket (défaut 1 si absent).
+ *
+ * POIDS DANS LE TEXTE (2.21.3 — forme RÉELLE de l'API en prod, transaction
+ * TAAA4NPRDAC) : la caisse SumUp nomme les articles pesés « X kg <libellé> »
+ * (name produit « 3,88 kg Vente Moins de 5 Kg », quantity toujours 1 ;
+ * product_summary « 1 x 3,88 kg Vente… » recopié dans la description des
+ * lignes synthétiques). Quand la description stockée porte ce préfixe MONO-
+ * article (parseKgPrefix), le poids RÉEL est LISIBLE dans le texte → verdict
+ * 'kg_texte' : unite = 'kg' ET quantite = poids extrait (signé). La garde
+ * d'ambiguïté |qté| = 1 NE S'APPLIQUE PLUS ici — le texte fait foi, il n'y a
+ * plus rien à inventer. Un résumé synthétique MULTI-articles (« …, 2 x … »)
+ * n'est jamais parsé (poids par article inconnu) : c'est le script
+ * repair-vak-from-report.js (rapport CSV) ou resync-vak-details.js (API) qui
+ * reconstruit ses vraies lignes. Réservé aux sources API/webhook : côté CSV,
+ * les colonnes Quantité/Unité explicites font foi, jamais le libellé.
  */
 function classifierRequalification(ligne) {
   const apiSource = API_SOURCES.includes(String(ligne.source || '').trim());
+  const uniteKg = String(ligne.unite || '').toLowerCase().includes('kg');
   if (apiSource) {
-    // API/webhook : le 'pce' stocké était un défaut du code (SumUp ne fournit
-    // pas d'unité) → inférence par le libellé seul (segments au poids
-    // KG_SEGMENTS = textile_vrac + chaussures, cf. services/sumup.js).
+    // 1. Poids encodé dans le texte de la description (prioritaire — lisible,
+    //    donc la garde d'ambiguïté ne s'applique pas).
+    const prefix = parseKgPrefix(ligne.description);
+    if (prefix) {
+      if (!uniteKg) return 'kg_texte';
+      // Déjà 'kg' mais quantité ≠ poids du texte (ex. requalifiée qté 1 par le
+      // backfill v2.20.0 alors que le texte dit 3,88 kg) → corrigée. Tolérance
+      // 0,0005 : quantite est un NUMERIC(10,3) arrondi en base.
+      const q = Math.abs(Number(ligne.quantite) || 0);
+      return Math.abs(q - prefix.poids) > 0.0005 ? 'kg_texte' : 'inchangee';
+    }
+    if (uniteKg) return 'inchangee'; // déjà au kilo, rien dans le texte
+    // 2. API/webhook : le 'pce' stocké était un défaut du code (SumUp ne
+    //    fournit pas d'unité) → inférence par le libellé seul (segments au
+    //    poids KG_SEGMENTS = textile_vrac + chaussures, cf. services/sumup.js).
     if (!isKgItem(ligne.description, '')) return 'inchangee';
     const nbLignes = Number(ligne.nb_lignes_ticket) || 1;
     if (nbLignes <= 1 && Math.abs(Number(ligne.quantite) || 0) === 1) return 'ambigue';
     return 'kg';
   }
+  if (uniteKg) return 'inchangee';
   // CSV (et autres) : l'unité stockée fait foi (isKgItem ne requalifie que si
   // elle est vide et que le libellé tombe dans un segment au poids).
   return isKgItem(ligne.description, ligne.unite) ? 'kg' : 'inchangee';
+}
+
+/**
+ * Nouvelle valeur d'une ligne 'kg_texte' (PURE) : quantité = poids extrait du
+ * texte, SIGNÉE comme la ligne d'origine (un remboursement synthétique stocké
+ * quantité −1 redevient −poids), segment recalculé sur le libellé débarrassé
+ * du préfixe, prix unitaire = €/kg réel (total TTC ÷ poids) quand calculable.
+ * La description stockée n'est PAS réécrite (le texte est la preuve du poids).
+ */
+function valeursDepuisTexte(ligne) {
+  const prefix = parseKgPrefix(ligne.description);
+  if (!prefix) return null;
+  const q = Number(ligne.quantite) || 0;
+  const ttc = Number(ligne.total_ttc) || 0;
+  const sign = q < 0 || (q === 0 && ttc < 0) ? -1 : 1;
+  const quantite = sign * prefix.poids;
+  const prixKg = prefix.poids > 0 && ttc !== 0
+    ? Math.round((Math.abs(ttc) / prefix.poids) * 100) / 100 * sign
+    : null;
+  return {
+    quantite,
+    segment: getSegment(prefix.libelle),
+    prix_unitaire_ttc: prixKg,
+  };
 }
 
 function fmt(n, dec = 3) {

@@ -5176,6 +5176,7 @@ async function initDatabase() {
         ca_objectif_ttc NUMERIC(10,2),
         poids_objectif_kg NUMERIC(10,2),
         kg_approvisionnes NUMERIC(10,2),
+        compte_caisse VARCHAR(200),
         notes TEXT,
         created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT NOW(),
@@ -5190,6 +5191,15 @@ async function initDatabase() {
     // au kilo au siège). Base du KPI « taux d'écoulement » = kg vendus / kg approvisionnés.
     // ADD COLUMN IF NOT EXISTS : no-op sur base neuve (colonne déjà créée), migre les bases existantes.
     await client.query('ALTER TABLE vaks ADD COLUMN IF NOT EXISTS kg_approvisionnes NUMERIC(10,2)');
+    // Filtre de périmètre par caisse (2.21.3) : plusieurs caisses SumUp
+    // encaissent sur le même compte marchand (« Caissier Frip & Co » = la VAK,
+    // « Caisse Vintiz » = ventes à la pièce toute l'année qui polluent les KPI
+    // de l'événement). `compte_caisse` = un ou PLUSIEURS alias séparés par des
+    // virgules (nom d'affichage de la colonne « Compte » du rapport CSV et/ou
+    // `username` API — les deux formes existent). NULL/vide = pas de filtre.
+    // SÉMANTIQUE (services/sumup.sqlPerimetreCaisse) : on n'exclut que les
+    // tickets dont le compte est CONNU ET DIFFÉRENT ; compte NULL = compté.
+    await client.query('ALTER TABLE vaks ADD COLUMN IF NOT EXISTS compte_caisse VARCHAR(200)');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS vak_import_batches (
@@ -5229,6 +5239,7 @@ async function initDatabase() {
         total_ttc NUMERIC(10,2) DEFAULT 0,
         total_ht NUMERIC(10,2) DEFAULT 0,
         total_tva NUMERIC(10,2) DEFAULT 0,
+        compte VARCHAR(120),
         batch_id INTEGER REFERENCES vak_import_batches(id) ON DELETE SET NULL,
         source VARCHAR(16) NOT NULL DEFAULT 'csv_manuel',
         created_at TIMESTAMP DEFAULT NOW(),
@@ -5237,6 +5248,12 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_vak_tickets_vak_date ON vak_tickets(vak_id, date_ticket)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_vak_tickets_sumup_id ON vak_tickets(sumup_transaction_id) WHERE sumup_transaction_id IS NOT NULL');
+    // Compte de caisse du ticket (2.21.3) : colonne « Compte » du rapport CSV
+    // (nom d'affichage) ou `username` de l'API SumUp (login/email) — NULL si
+    // la source ne l'expose pas (webhook minimal). Base du filtre de périmètre
+    // par caisse (vaks.compte_caisse ci-dessus) : les agrégats excluent les
+    // tickets au compte CONNU ET DIFFÉRENT, jamais les NULL.
+    await client.query('ALTER TABLE vak_tickets ADD COLUMN IF NOT EXISTS compte VARCHAR(120)');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS vak_ventes (

@@ -335,6 +335,97 @@ function isKgItem(description, unite = '') {
   return KG_SEGMENTS.includes(getSegment(description));
 }
 
+// ── Poids encodé dans le NOM du produit (forme RÉELLE de l'API SumUp en prod) ──
+// Diagnostic production (endpoint /sumup/diagnostic-transaction, transaction
+// TAAA4NPRDAC du marchand FRIP & CO) : pour un article PESÉ, la caisse SumUp
+// crée un produit dont le NOM est préfixé du poids —
+//   products[0] = { name: « 3,88 kg Vente Moins de 5 Kg », quantity: 1,
+//                   price: 22.63 (HT), total_price: 22.63 (HT),
+//                   price_with_vat: 27.16, total_with_vat: 27.16 (TTC),
+//                   vat_rate: 0.2, vat_amount: 4.53 }
+// → `quantity` vaut TOUJOURS 1 pour ces articles : le poids n'est PAS dans la
+// quantité mais DANS LE TEXTE du nom (décimale à virgule française). Le résumé
+// `product_summary` porte la même forme préfixée « 1 x 3,88 kg Vente… ».
+// parseKgPrefix extrait ce poids : « 3,88 kg Vente Moins de 5 Kg » →
+// { poids: 3.88, libelle: 'Vente Moins de 5 Kg' } ; null si pas de préfixe
+// (« Sacs », « Vente Vintiz #12 », « Vente moins de 5 kg » sans nombre…) ou si
+// le texte est un résumé MULTI-articles (« 1 x 3,88 kg Vente…, 2 x Sacs ») —
+// dans ce cas seul le détail produits (API), le resync ou le rapport CSV
+// peuvent reconstruire les lignes, jamais une regex sur le résumé.
+function parseKgPrefix(name) {
+  const s = String(name || '');
+  // Résumé multi-articles : « …, N x … » — jamais parsé (poids par article inconnu).
+  if (/,\s*\d+(?:[.,]\d+)?\s*[x×]\s/.test(s)) return null;
+  const m = s.match(/^\s*(?:1\s*[x×]\s*)?(\d+(?:[.,]\d+)?)\s*kg\s+(.+)$/i);
+  if (!m) return null;
+  const poids = toNumber(m[1]);
+  if (!poids || poids <= 0) return null;
+  return { poids, libelle: m[2].trim() };
+}
+
+// ── Identifiant de caisse/employé d'une transaction (filtre de périmètre VAK) ──
+// Ce que l'API expose RÉELLEMENT (constaté en production via le diagnostic) :
+// le détail de transaction porte un champ TOP-LEVEL `username` (login/email du
+// sous-compte SumUp qui a encaissé). Les autres formes (`user` chaîne ou objet
+// { email, username, name }) sont couvertes en repli défensif. La charge
+// webhook minimale n'en porte généralement pas → compte NULL (honnête : on ne
+// sait pas qui a encaissé, le ticket reste compté dans les KPI — cf.
+// sqlPerimetreCaisse). ATTENTION : ce `username` API (email/login) n'est PAS
+// le même libellé que la colonne « Compte » du rapport CSV (nom d'affichage
+// « Caissier Frip & Co ») — d'où `vaks.compte_caisse` en liste d'ALIAS.
+function extractCompteCaisse(...objs) {
+  for (const o of objs) {
+    if (!o || typeof o !== 'object') continue;
+    for (const k of ['username', 'user', 'user_name', 'operator', 'cashier']) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 120);
+      if (v && typeof v === 'object') {
+        const nested = v.email || v.username || v.name;
+        if (typeof nested === 'string' && nested.trim()) return nested.trim().slice(0, 120);
+      }
+    }
+  }
+  return null;
+}
+
+// ── Filtre de périmètre par caisse (SÉMANTIQUE — doctrine honnête) ──────────
+// Constat prod (VAK 10-11/07/2026) : une DEUXIÈME caisse SumUp (« Caisse
+// Vintiz », ventes à la pièce toute l'année) encaisse sur le même compte
+// marchand — ses tickets tombent dans la fenêtre de dates de la VAK et
+// polluent les KPI (62 tickets / 798 € sur l'exemple).
+// RÈGLE : quand `vaks.compte_caisse` est renseigné (un ou PLUSIEURS alias
+// séparés par des virgules — le nom d'affichage de la colonne « Compte » du
+// rapport CSV ET/OU le `username` API, qui diffèrent), les agrégats de la VAK
+// EXCLUENT les tickets dont le compte est CONNU ET DIFFÉRENT de tous les
+// alias. Les tickets à compte NULL/vide (API/webhook sans info) RESTENT
+// comptés : on n'exclut que ce qu'on SAIT étranger — sinon le live API (qui
+// n'expose pas toujours l'identifiant) disparaîtrait de l'écran TV.
+// Le RATTACHEMENT ticket→VAK n'est jamais modifié : on rattache tout, on
+// filtre à la LECTURE (le filtre est réversible en vidant compte_caisse).
+// Comparaison insensible à la casse et aux espaces de bord.
+//
+// Version SQL (consommée par routes/vak.js et emitLiveUpdate) : `vakAlias` et
+// `ticketAlias` sont des alias de table CONTRÔLÉS par le code appelant (jamais
+// une entrée utilisateur) → pas d'injection.
+function sqlPerimetreCaisse(vakAlias, ticketAlias) {
+  const caisse = `NULLIF(TRIM(${vakAlias}.compte_caisse), '')`;
+  const compte = `NULLIF(TRIM(${ticketAlias}.compte), '')`;
+  // Alias normalisés : minuscules + espaces autour des virgules retirés, puis
+  // comparaison `= ANY(tableau)` (expression corrélée simple, pas de LATERAL).
+  const aliases = `string_to_array(REGEXP_REPLACE(TRIM(LOWER(${vakAlias}.compte_caisse)), '\\s*,\\s*', ',', 'g'), ',')`;
+  return `(${caisse} IS NULL OR ${compte} IS NULL OR LOWER(${compte}) = ANY(${aliases}))`;
+}
+
+// Miroir JS PUR de sqlPerimetreCaisse (testé, réutilisable hors SQL).
+function compteDansPerimetre(compteCaisse, compteTicket) {
+  const caisse = String(compteCaisse ?? '').trim();
+  if (!caisse) return true; // pas de filtre configuré
+  const compte = String(compteTicket ?? '').trim();
+  if (!compte) return true; // compte inconnu → jamais exclu (doctrine honnête)
+  const aliases = caisse.split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
+  return aliases.includes(compte.toLowerCase());
+}
+
 // ── Normalisation moyen de paiement → libellé métier ('CB' / 'Espèces') ──
 // SumUp expose des types techniques : `payment_type` = 'POS' (carte présentée
 // sur le terminal en boutique), 'ECOM' (carte en ligne), et/ou une marque via
@@ -400,6 +491,9 @@ function mapSumUpTransaction(tx, detail = tx) {
   const entryMode = detail.entry_mode || null;
   const items = detail.line_items || detail.products || [];
   const hasRealItems = items.length > 0;
+  // Identifiant de caisse/employé (top-level `username` constaté en prod) —
+  // renseigne vak_tickets.compte pour le filtre de périmètre par caisse.
+  const compte = extractCompteCaisse(detail, tx);
 
   let totalTTC = sign * Math.abs(toNumber(detail.amount) ?? 0);
   let totalHT = 0;
@@ -425,47 +519,96 @@ function mapSumUpTransaction(tx, detail = tx) {
     const descGlobal = detail.description || detail.product_summary || '';
     const magTTC = Math.abs(toNumber(detail.amount) ?? 0);
     const ht = magTTC / 1.2;
-    lignes.push({
-      description: descGlobal || (refund ? 'Remboursement' : 'Vente'),
-      segment: getSegment(descGlobal),
-      unite: 'pce',
-      quantite: sign * 1,
-      prix_unitaire_ttc: sign * magTTC,
-      total_ttc: sign * magTTC,
-      total_ht: sign * ht,
-      total_tva: sign * (magTTC - ht),
-      taux_tva: 20,
-      synthetic: true,
-    });
+    // « Le texte fait foi » : un résumé MONO-article de forme « 1 x 3,88 kg
+    // Vente Moins de 5 Kg » porte le poids RÉEL dans son libellé (la forme
+    // constatée de product_summary en prod) → on crée une vraie ligne kg au
+    // lieu de la ligne synthétique quantité 1 (le poids n'est plus perdu même
+    // quand le « retrieve » du détail échoue). Un résumé multi-articles reste
+    // synthétique (poids par article inconnu — jamais de valeur inventée).
+    const summaryKg = parseKgPrefix(descGlobal);
+    if (summaryKg) {
+      lignes.push({
+        description: descGlobal,
+        segment: getSegment(summaryKg.libelle),
+        unite: 'kg',
+        quantite: sign * summaryKg.poids,
+        prix_unitaire_ttc: sign * (summaryKg.poids > 0 ? magTTC / summaryKg.poids : magTTC),
+        total_ttc: sign * magTTC,
+        total_ht: sign * ht,
+        total_tva: sign * (magTTC - ht),
+        taux_tva: 20,
+      });
+      poidsTicket = sign * summaryKg.poids;
+    } else {
+      lignes.push({
+        description: descGlobal || (refund ? 'Remboursement' : 'Vente'),
+        segment: getSegment(descGlobal),
+        unite: 'pce',
+        quantite: sign * 1,
+        prix_unitaire_ttc: sign * magTTC,
+        total_ttc: sign * magTTC,
+        total_ht: sign * ht,
+        total_tva: sign * (magTTC - ht),
+        taux_tva: 20,
+        synthetic: true,
+      });
+    }
     totalTTC = sign * magTTC;
     totalHT = sign * ht;
     totalTVA = sign * (magTTC - ht);
     nbArticles = 1;
   } else {
     for (const it of items) {
-      const desc = (it.description || it.name || '').trim();
+      const nameRaw = (it.description || it.name || '').trim();
+      const rawUnite = (it.unit || '').trim().toLowerCase();
+      // ── CASCADE DE DÉTECTION DU POIDS D'UNE LIGNE (source de vérité) ──
+      //  1. unité EXPLICITE (colonne « Unité » du CSV) → elle fait foi,
+      //     quantité = poids si kg (comportement historique inchangé) ;
+      //  2. préfixe « X kg » du NOM produit (forme RÉELLE de l'API en prod,
+      //     transaction TAAA4NPRDAC : name « 3,88 kg Vente Moins de 5 Kg »,
+      //     quantity toujours 1) → poids = préfixe, quantité SumUp ignorée ;
+      //  3. inférence par segment sur `quantity` (KG_SEGMENTS via isKgItem,
+      //     forme legacy « Vente plus de 5 kilos » quantity 10.575) conservée.
+      const kgPrefix = rawUnite ? null : parseKgPrefix(nameRaw);
+      const desc = kgPrefix ? kgPrefix.libelle : nameRaw;
       // toNumber : préserve les quantités DÉCIMALES (3.2) y compris reçues en
-      // chaîne à virgule ("3,2") — jamais de parseInt/arrondi (le poids pesé
-      // est saisi dans `quantity` sur la caisse pour les articles au kilo).
-      const qtyMag = Math.abs(toNumber(it.quantity) ?? 1);
+      // chaîne à virgule ("3,2") — jamais de parseInt/arrondi (forme legacy où
+      // le poids pesé est saisi dans `quantity`).
+      const sumupQty = Math.abs(toNumber(it.quantity) ?? 1);
+      const qtyMag = kgPrefix ? Math.abs(kgPrefix.poids) : sumupQty;
       // Les produits API/webhook SumUp exposent `price` (prix unitaire), pas
       // `price_per_unit` — repli en cascade pour couvrir les deux formes.
-      const unitPrice = Math.abs(toNumber(it.price_per_unit) ?? toNumber(it.unit_price) ?? toNumber(it.price) ?? 0);
-      const lineTTCmag = Math.abs(toNumber(it.total_price) ?? toNumber(it.total_with_vat) ?? (qtyMag * unitPrice));
+      const unitPriceRaw = Math.abs(toNumber(it.price_per_unit) ?? toNumber(it.unit_price) ?? toNumber(it.price) ?? 0);
+      // TTC de ligne : les charges API réelles portent total_with_vat /
+      // price_with_vat (TTC) ET total_price / price (HT — piège : sans cette
+      // préférence, le HT passait pour le TTC sur la forme prod). Les formes
+      // legacy (total_price seul) restent lues comme TTC (comportement
+      // historique conservé, fixtures TAAA4NKXTDV).
+      const lineTTCmag = Math.abs(
+        toNumber(it.total_with_vat)
+        ?? (toNumber(it.price_with_vat) != null ? toNumber(it.price_with_vat) * sumupQty : null)
+        ?? toNumber(it.total_price)
+        ?? (sumupQty * unitPriceRaw),
+      );
       const tvaMag = Math.abs(toNumber(it.vat_amount) ?? (lineTTCmag - lineTTCmag / 1.2));
       const htMag = Math.abs(toNumber(it.subtotal) ?? (lineTTCmag - tvaMag));
-      const taux = toNumber(it.vat_rate) ?? 20;
-      // BUG « poids à zéro » (Lot 6) : les produits des transactions API et des
-      // webhooks n'ont pas de champ `unit` → l'unité tombait à 'pce' et le
-      // poids restait 0 pour TOUTES les ventes synchronisées. On infère « kg »
-      // depuis le libellé (segments au poids KG_SEGMENTS = textile_vrac +
-      // chaussures, cf. isKgItem) quand l'unité est absente, et on STOCKE
-      // l'unité inférée pour que les agrégats SQL (`unite ILIKE '%kg%'` dans
-      // routes/vak.js) suivent.
-      const rawUnite = (it.unit || '').trim().toLowerCase();
-      const kg = isKgItem(desc, rawUnite);
+      // Taux de TVA : l'API prod le renvoie FRACTIONNAIRE (vat_rate: 0.2) là
+      // où le CSV utilise 20 — normalisation en pourcentage (0.2 → 20).
+      let taux = toNumber(it.vat_rate) ?? 20;
+      if (taux > 0 && taux <= 1) taux = taux * 100;
+      // BUG « poids à zéro » (Lot 6) : les produits API/webhook n'ont pas de
+      // champ `unit` → sans inférence, tout restait à 'pce' et poids 0.
+      // L'unité retenue est STOCKÉE pour que les agrégats SQL
+      // (`unite ILIKE '%kg%'` dans routes/vak.js) suivent.
+      const kg = kgPrefix ? true : isKgItem(desc, rawUnite);
       const unite = rawUnite || (kg ? 'kg' : 'pce');
       const segment = getSegment(desc);
+      // Prix unitaire d'un article pesé « au nom préfixé » : un €/kg réel
+      // (TTC ÷ poids — TAAA4NPRDAC : 27,16 / 3,88 = 7,00 €/kg), le `price`
+      // SumUp étant le total HT de la ligne (pas un prix unitaire).
+      const unitPrice = kgPrefix
+        ? (qtyMag > 0 ? lineTTCmag / qtyMag : unitPriceRaw)
+        : unitPriceRaw;
       lignes.push({
         description: desc, segment, unite,
         quantite: sign * qtyMag,
@@ -485,11 +628,12 @@ function mapSumUpTransaction(tx, detail = tx) {
   }
 
   return {
-    refTx, moyenPaiement, entryMode, isRefund: refund,
+    refTx, moyenPaiement, entryMode, isRefund: refund, compte,
     totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes,
-    // false = ligne globale synthétique (résumé sans produits) : le poids est
-    // inconnu, le ticket doit être compté « sans détail » et jamais écraser un
-    // ticket déjà détaillé (cf. ingestSumUpTransaction).
+    // false = résumé sans produits (ligne globale — synthétique, ou kg déduite
+    // du product_summary mono-article) : le ticket est compté « sans détail »
+    // et ne doit jamais écraser un ticket déjà détaillé (cf. garde
+    // anti-dégradation d'ingestSumUpTransaction).
     hasRealItems,
   };
 }
@@ -785,22 +929,27 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
     const totalTTC = tk.lignes.reduce((s, l) => s + l.total_ttc, 0);
     const totalHT = tk.lignes.reduce((s, l) => s + l.total_ht, 0);
     const totalTVA = tk.lignes.reduce((s, l) => s + l.total_tva, 0);
+    // Compte de caisse du ticket = colonne « Compte » du CSV (1re ligne non
+    // vide) — alimente le filtre de périmètre par caisse (vaks.compte_caisse).
+    const compteTicket = tk.lignes.map((l) => (l.compte || '').trim()).find((c) => c) || null;
 
     const tickRes = await client.query(`
       INSERT INTO vak_tickets
         (vak_id, ref_transaction, date_ticket, moyen_paiement, nb_articles,
-         poids_kg, total_ttc, total_ht, total_tva, batch_id, source)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         poids_kg, total_ttc, total_ht, total_tva, compte, batch_id, source)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT (vak_id, ref_transaction) DO UPDATE SET
         nb_articles = EXCLUDED.nb_articles,
         poids_kg = EXCLUDED.poids_kg,
         total_ttc = EXCLUDED.total_ttc,
         total_ht = EXCLUDED.total_ht,
         total_tva = EXCLUDED.total_tva,
+        compte = COALESCE(EXCLUDED.compte, vak_tickets.compte),
         batch_id = EXCLUDED.batch_id
       RETURNING id
     `, [vakId, ref, tk.date_ticket.toISOString(), tk.moyen_paiement, nbArticles,
-        poidsTicket, totalTTC, totalHT, totalTVA, batchId, source]);
+        poidsTicket, totalTTC, totalHT, totalTVA, compteTicket ? compteTicket.slice(0, 120) : null,
+        batchId, source]);
     const ticketId = tickRes.rows[0].id;
 
     // Reset des lignes avant réinsertion — un ré-import CSV du même ticket crée
@@ -1091,7 +1240,7 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
     // dans les compteurs live. `payment_type` = 'POS' (carte terminal) est
     // ramené à 'CB' par normalizePaymentMethod.
     const {
-      refTx, moyenPaiement, entryMode,
+      refTx, moyenPaiement, entryMode, compte,
       totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes, hasRealItems,
     } = mapSumUpTransaction(tx, detail);
 
@@ -1128,8 +1277,8 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
       const tickRes = await client.query(`
         INSERT INTO vak_tickets
           (vak_id, sumup_transaction_id, ref_transaction, date_ticket, moyen_paiement,
-           entry_mode, nb_articles, poids_kg, total_ttc, total_ht, total_tva, source)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           entry_mode, nb_articles, poids_kg, total_ttc, total_ht, total_tva, compte, source)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         ON CONFLICT (vak_id, ref_transaction) DO UPDATE SET
           sumup_transaction_id = COALESCE(EXCLUDED.sumup_transaction_id, vak_tickets.sumup_transaction_id),
           moyen_paiement = EXCLUDED.moyen_paiement,
@@ -1139,10 +1288,11 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
           total_ttc = EXCLUDED.total_ttc,
           total_ht = EXCLUDED.total_ht,
           total_tva = EXCLUDED.total_tva,
+          compte = COALESCE(EXCLUDED.compte, vak_tickets.compte),
           source = EXCLUDED.source
         RETURNING id, (xmax = 0) AS inserted
       `, [vakId, txId || null, refTx, txDate.toISOString(), moyenPaiement, entryMode,
-          nbArticles, poidsTicket, totalTTC, totalHT, totalTVA, source]);
+          nbArticles, poidsTicket, totalTTC, totalHT, totalTVA, compte, source]);
       ticketId = tickRes.rows[0].id;
       wasInserted = tickRes.rows[0].inserted;
 
@@ -1177,6 +1327,7 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
         total_ttc: totalTTC,
         poids_kg: poidsTicket,
         nb_articles: nbArticles,
+        compte,
       }).catch((err) => logger.warn('emitLiveUpdate failed', { error: err.message }));
     }
 
@@ -1193,21 +1344,30 @@ async function emitLiveUpdate(io, vakId, ticket) {
   // date_ticket (TIMESTAMP stocké en UTC) est ramené au jour civil Paris via
   // la double conversion AT TIME ZONE (même règle que routes/vak.js).
   const today = parisDateStr(new Date());
+  // Filtre de périmètre par caisse (cf. sqlPerimetreCaisse) : les compteurs
+  // live excluent les tickets d'une AUTRE caisse connue (ex. Vintiz) quand la
+  // session a un compte_caisse ; les tickets sans compte restent comptés.
   const counters = await pool.query(`
     SELECT
-      COALESCE(SUM(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN total_ttc END), 0)::FLOAT AS ca_jour,
-      COALESCE(SUM(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN poids_kg END), 0)::FLOAT AS poids_jour,
-      COUNT(CASE WHEN ((date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN 1 END)::INT AS tickets_jour,
-      COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_vak,
-      COALESCE(SUM(poids_kg), 0)::FLOAT AS poids_vak,
+      COALESCE(SUM(CASE WHEN ((t.date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN t.total_ttc END), 0)::FLOAT AS ca_jour,
+      COALESCE(SUM(CASE WHEN ((t.date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN t.poids_kg END), 0)::FLOAT AS poids_jour,
+      COUNT(CASE WHEN ((t.date_ticket AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date = $1::DATE THEN 1 END)::INT AS tickets_jour,
+      COALESCE(SUM(t.total_ttc), 0)::FLOAT AS ca_vak,
+      COALESCE(SUM(t.poids_kg), 0)::FLOAT AS poids_vak,
       COUNT(*)::INT AS tickets_vak
-    FROM vak_tickets WHERE vak_id = $2
+    FROM vak_tickets t
+    JOIN vaks vk ON vk.id = t.vak_id
+    WHERE t.vak_id = $2 AND ${sqlPerimetreCaisse('vk', 't')}
   `, [today, vakId]);
-  const objRow = await pool.query('SELECT ca_objectif_ttc, poids_objectif_kg FROM vaks WHERE id = $1', [vakId]);
+  const objRow = await pool.query('SELECT ca_objectif_ttc, poids_objectif_kg, compte_caisse FROM vaks WHERE id = $1', [vakId]);
   const c = counters.rows[0];
   const obj = objRow.rows[0] || {};
   const room = `vak:live:${vakId}`;
-  io.to(room).emit('vak:live:transaction', ticket);
+  // Le ticker ne montre pas une vente d'une AUTRE caisse connue (miroir JS du
+  // filtre SQL) ; les compteurs (déjà filtrés) sont toujours réémis.
+  if (compteDansPerimetre(obj.compte_caisse, ticket?.compte)) {
+    io.to(room).emit('vak:live:transaction', ticket);
+  }
   io.to(room).emit('vak:live:counters', {
     ...c,
     objectif_ca: Number(obj.ca_objectif_ttc || 0),
@@ -1272,6 +1432,8 @@ module.exports = {
   // CSV fallback
   importCSVContent,
   parseFRDate,
+  parseNumberFR,
+  splitCSVLine,
   // Fuseau Europe/Paris (réutilisés par les scripts de correction + tests)
   parisOffsetMinutes,
   parisWallClockToUTC,
@@ -1279,7 +1441,12 @@ module.exports = {
   getSegment,
   KG_SEGMENTS,
   isKgItem,
+  parseKgPrefix,
   normalizePaymentMethod,
+  // Filtre de périmètre par caisse (SQL partagé + miroir JS + extraction)
+  extractCompteCaisse,
+  sqlPerimetreCaisse,
+  compteDansPerimetre,
   // Remboursements (sémantique partagée CSV / API / webhook)
   isRefundTransaction,
   isSyncEligibleTransaction,
