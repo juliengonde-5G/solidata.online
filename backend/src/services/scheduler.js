@@ -1188,6 +1188,71 @@ let schedulerInterval = null;   // legacy (conservé pour compat, remplacé par 
 let schedulerTimeout = null;
 let tickRunning = false;
 
+// ══════════════════════════════════════════
+// SYNC SUMUP « LIVE » — timer dédié 5 minutes, LES JOURS DE VAK uniquement
+// ══════════════════════════════════════════
+// Demande client : « les jours de VAK, synchronisation automatique toutes les
+// 5 minutes ; les autres jours, une synchronisation par 24 h ». Le webhook
+// SumUp reste la voie temps réel ; cette sync 5 min rattrape les webhooks
+// manqués ET les tickets ingérés sans détail (cf. services/sumup.js).
+//
+// Mécanique :
+//  - setInterval 5 min (VAK_LIVE_SYNC_INTERVAL_MS surchargeable) ;
+//  - chaque tick fait D'ABORD une requête LÉGÈRE « une VAK est-elle active à
+//    la date civile de PARIS ? » (les bornes date_debut/date_fin sont des
+//    jours civils français — CURRENT_DATE serait la date UTC du conteneur,
+//    fausse entre minuit et 01:00/02:00 Paris) puis vérifie la connexion
+//    SumUp ; hors VAK ou non connecté → no-op silencieux (aucune ligne
+//    job_runs : zéro bruit ~27 jours/mois) ;
+//  - GARDE DE RÉENTRANCE (vakLiveSyncRunning) : un run qui dure > 5 min ne
+//    s'empile pas, les ticks suivants sont simplement sautés ;
+//  - INSTRUMENTATION : chaque run EFFECTIF est journalisé sous le nom dédié
+//    `syncVakSumUpLive` (runInstrumented → job_runs). Volume assumé : ~288
+//    runs/jour × 2-3 jours de VAK/mois ≈ 600-900 lignes/mois, bornées par la
+//    purge purgeOldJobRuns (rétention 30 j) — négligeable, et la supervision
+//    voit chaque échec. Le registre JOB_SCHEDULE (routes/monitoring.js) donne
+//    à ce job une tolérance MENSUELLE pour ne pas crier « en retard » entre
+//    deux VAK ; la sync quotidienne `syncVakSumUp` (3h) garde sa tolérance
+//    26 h et reste le filet de fraîcheur quotidien.
+// Verrou : par process uniquement (pas de verrou distribué — prod mono
+// instance, même hypothèse que l'ancien rattrapage horaire).
+const VAK_LIVE_SYNC_INTERVAL_MS = Number(process.env.VAK_LIVE_SYNC_INTERVAL_MS) || 5 * 60 * 1000;
+let vakLiveSyncTimer = null;
+let vakLiveSyncRunning = false;
+
+// Une VAK couvre-t-elle AUJOURD'HUI (jour civil Europe/Paris) ? Requête légère
+// (index implicite sur la petite table vaks), exécutée toutes les 5 min.
+async function isVakActiveToday() {
+  const r = await pool.query(
+    `SELECT 1 FROM vaks WHERE (NOW() AT TIME ZONE 'Europe/Paris')::date BETWEEN date_debut AND date_fin LIMIT 1`,
+  );
+  return r.rows.length > 0;
+}
+
+async function vakLiveSyncTick() {
+  if (vakLiveSyncRunning) {
+    // Un run > 5 min est en cours : on ne s'empile pas (garde de réentrance).
+    return { skipped: 'already_running' };
+  }
+  vakLiveSyncRunning = true;
+  try {
+    // (a) une VAK active aujourd'hui (date civile Paris) ?
+    if (!(await isVakActiveToday())) return { skipped: 'no_active_vak' };
+    // (b) SumUp connecté ?
+    const sumup = require('./sumup');
+    const status = await sumup.getConnectionStatus();
+    if (!status.connected) return { skipped: 'not_connected' };
+    // Sync incrémentale effective, journalisée sous un nom dédié.
+    await runInstrumented('syncVakSumUpLive', syncVakSumUp);
+    return { ran: true };
+  } catch (err) {
+    console.error('[SCHEDULER] vakLiveSyncTick:', err.message);
+    return { error: err.message };
+  } finally {
+    vakLiveSyncRunning = false;
+  }
+}
+
 /**
  * Délai jusqu'au prochain top d'heure (+ petit offset pour tomber à HH:00:xx et
  * non HH:59:59 à cause de l'imprécision des timers). CORRIGE LA DÉRIVE « minute
@@ -1269,20 +1334,12 @@ async function hourlyTick() {
       await runInstrumented('scanBoutiqueCSVFolders', scanBoutiqueCSVFolders);
     }
 
-    // VAK SumUp — catch-up horaire pendant une VAK active (les webhooks
-    // alimentent normalement le live, ce job rattrape les éventuels manqués).
-    // Hors VAK, sync 1×/jour à 3h.
-    try {
-      const inVak = await pool.query(
-        `SELECT 1 FROM vaks WHERE CURRENT_DATE BETWEEN date_debut AND date_fin LIMIT 1`,
-      );
-      if (inVak.rows.length > 0) {
-        await runInstrumented('syncVakSumUp', syncVakSumUp);
-      } else if (now.getHours() === 3) {
-        await runInstrumented('syncVakSumUp', syncVakSumUp);
-      }
-    } catch (err) {
-      console.error('[SCHEDULER] VAK SumUp scheduling:', err.message);
+    // VAK SumUp — sync quotidienne UNIQUE à 3h (demande client : hors jour de
+    // VAK, UNE synchronisation par 24 h). L'ancien rattrapage HORAIRE pendant
+    // une VAK est retiré : les jours de VAK, le timer dédié 5 minutes
+    // (vakLiveSyncTick, démarré par startScheduler) prend le relais.
+    if (now.getHours() === 3) {
+      await runInstrumented('syncVakSumUp', syncVakSumUp);
     }
 
     // QHSE — alerte hebdomadaire des habilitations à échéance (lundi 8h, item 58)
@@ -1347,6 +1404,14 @@ function startScheduler() {
 
   // Puis à chaque top d'heure (setTimeout ré-aligné → pas de dérive minute)
   scheduleNextTick();
+
+  // Timer dédié SumUp « live » : toutes les 5 min, ne synchronise QUE si une
+  // VAK est active (date civile Paris) ET SumUp connecté — no-op sinon.
+  vakLiveSyncTimer = setInterval(() => {
+    vakLiveSyncTick().catch((e) => console.error('[SCHEDULER] vakLiveSyncTick rejeté:', e.message));
+  }, VAK_LIVE_SYNC_INTERVAL_MS);
+  if (vakLiveSyncTimer && vakLiveSyncTimer.unref) vakLiveSyncTimer.unref();
+  console.log(`[SCHEDULER] Sync SumUp live armée (toutes les ${Math.round(VAK_LIVE_SYNC_INTERVAL_MS / 60000)} min les jours de VAK)`);
 }
 
 // ══════════════════════════════════════════
@@ -1502,7 +1567,9 @@ async function runAllJobs() {
     await runInstrumented('refreshMaterializedViews', refreshMaterializedViews);
     await runInstrumented('scanBoutiqueCSVFolders', scanBoutiqueCSVFolders);
     await runInstrumented('collectBoutiqueWeather', collectBoutiqueWeather);
-    await runInstrumented('syncVakSumUp', syncVakSumUp);
+    // syncVakSumUp volontairement RETIRÉ de runAllJobs (3×/jour) : hors jour
+    // de VAK la sync est quotidienne UNIQUE (3h, cf. hourlyTick) ; les jours
+    // de VAK c'est le timer 5 min vakLiveSyncTick qui synchronise.
     await runInstrumented('captureVakWeather', captureVakWeather);
     await runInstrumented('purgeOldJobRuns', purgeOldJobRuns);
     console.log('[SCHEDULER] Tous les jobs executes');
@@ -1523,6 +1590,10 @@ function stopScheduler() {
     clearTimeout(schedulerTimeout);
     schedulerTimeout = null;
   }
+  if (vakLiveSyncTimer) {
+    clearInterval(vakLiveSyncTimer);
+    vakLiveSyncTimer = null;
+  }
 }
 
 module.exports = {
@@ -1535,4 +1606,7 @@ module.exports = {
   checkRseEcheances,
   checkEnergieSaisie,
   checkQhseDocuments,
+  // Sync SumUp live 5 min (jours de VAK) — exposés pour les tests.
+  vakLiveSyncTick,
+  isVakActiveToday,
 };

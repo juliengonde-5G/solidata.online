@@ -284,6 +284,21 @@ function getSegment(description) {
   return 'autre';
 }
 
+// ── Nombre robuste (voies API/webhook) ──
+// SumUp renvoie normalement des nombres JSON, mais certaines charges (webhook,
+// détails de transaction) peuvent porter des CHAÎNES, parfois à virgule
+// décimale française ("3,2"). Number("3,2") donne NaN → la quantité (donc le
+// POIDS pesé saisi en caisse dans le champ quantité) serait perdue ou
+// corromprait l'insertion. Jamais de parseInt ni d'arrondi ici : les quantités
+// des articles au kilo sont DÉCIMALES (3,2 kg) et doivent survivre telles
+// quelles jusqu'à vak_ventes.quantite (NUMERIC(10,3)).
+function toNumber(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const n = parseFloat(String(v).trim().replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
 // ── Détection « vendu au kilo » (unifie CSV + API/webhook) ──
 // L'export CSV SumUp porte une colonne « Unité » (kg / pce) : elle FAIT FOI
 // quand elle est renseignée. En revanche, les transactions remontées par l'API
@@ -368,23 +383,35 @@ function mapSumUpTransaction(tx, detail = tx) {
     detail.payment_type || detail.card?.type || detail.payment_method || 'Inconnu');
   const entryMode = detail.entry_mode || null;
   const items = detail.line_items || detail.products || [];
+  const hasRealItems = items.length > 0;
 
-  let totalTTC = sign * Math.abs(Number(detail.amount || 0));
+  let totalTTC = sign * Math.abs(toNumber(detail.amount) ?? 0);
   let totalHT = 0;
   let totalTVA = 0;
   let poidsTicket = 0;
   let nbArticles = 0;
   const lignes = [];
 
-  if (items.length === 0) {
-    // Ticket sans détail de lignes (rare) : 1 ligne globale. Le poids reste 0
-    // (quantité inconnue — jamais de valeur inventée), mais le segment est
-    // dérivé du libellé s'il existe pour ne pas fausser les analyses.
-    const magTTC = Math.abs(Number(detail.amount || 0));
+  if (!hasRealItems) {
+    // Ticket SANS détail de lignes (le résumé /transactions/history et la
+    // charge webhook n'en portent pas, et le « retrieve » a échoué ou n'en a
+    // pas renvoyé) : 1 ligne GLOBALE SYNTHÉTIQUE, marquée `synthetic`.
+    // RÈGLES STRICTES (bug « poids trop faibles ») :
+    //  - unite = 'pce' TOUJOURS, jamais 'kg' : la quantité 1 est un artefact
+    //    de facturation (1 ticket), PAS un poids pesé — la marquer kg ferait
+    //    compter ~1 kg par vente au lieu du poids réel (3,2 kg…) ;
+    //  - le poids du ticket reste 0 (quantité inconnue — jamais de valeur
+    //    inventée) ; le ticket est signalé « sans détail » à l'appelant
+    //    (hasRealItems=false) pour alimenter l'indicateur de supervision et
+    //    le script de resynchronisation resync-vak-details.js ;
+    //  - le segment est dérivé du libellé s'il existe pour ne pas fausser
+    //    les analyses par segment.
+    const descGlobal = detail.description || detail.product_summary || '';
+    const magTTC = Math.abs(toNumber(detail.amount) ?? 0);
     const ht = magTTC / 1.2;
     lignes.push({
-      description: detail.description || (refund ? 'Remboursement' : 'Vente'),
-      segment: getSegment(detail.description),
+      description: descGlobal || (refund ? 'Remboursement' : 'Vente'),
+      segment: getSegment(descGlobal),
       unite: 'pce',
       quantite: sign * 1,
       prix_unitaire_ttc: sign * magTTC,
@@ -392,6 +419,7 @@ function mapSumUpTransaction(tx, detail = tx) {
       total_ht: sign * ht,
       total_tva: sign * (magTTC - ht),
       taux_tva: 20,
+      synthetic: true,
     });
     totalTTC = sign * magTTC;
     totalHT = sign * ht;
@@ -400,14 +428,17 @@ function mapSumUpTransaction(tx, detail = tx) {
   } else {
     for (const it of items) {
       const desc = (it.description || it.name || '').trim();
-      const qtyMag = Math.abs(Number(it.quantity || 1));
+      // toNumber : préserve les quantités DÉCIMALES (3.2) y compris reçues en
+      // chaîne à virgule ("3,2") — jamais de parseInt/arrondi (le poids pesé
+      // est saisi dans `quantity` sur la caisse pour les articles au kilo).
+      const qtyMag = Math.abs(toNumber(it.quantity) ?? 1);
       // Les produits API/webhook SumUp exposent `price` (prix unitaire), pas
       // `price_per_unit` — repli en cascade pour couvrir les deux formes.
-      const unitPrice = Math.abs(Number(it.price_per_unit || it.unit_price || it.price || 0));
-      const lineTTCmag = Math.abs(Number(it.total_price || it.total_with_vat || qtyMag * unitPrice));
-      const tvaMag = Math.abs(Number(it.vat_amount || (lineTTCmag - lineTTCmag / 1.2)));
-      const htMag = Math.abs(Number(it.subtotal || (lineTTCmag - tvaMag)));
-      const taux = Number(it.vat_rate || 20);
+      const unitPrice = Math.abs(toNumber(it.price_per_unit) ?? toNumber(it.unit_price) ?? toNumber(it.price) ?? 0);
+      const lineTTCmag = Math.abs(toNumber(it.total_price) ?? toNumber(it.total_with_vat) ?? (qtyMag * unitPrice));
+      const tvaMag = Math.abs(toNumber(it.vat_amount) ?? (lineTTCmag - lineTTCmag / 1.2));
+      const htMag = Math.abs(toNumber(it.subtotal) ?? (lineTTCmag - tvaMag));
+      const taux = toNumber(it.vat_rate) ?? 20;
       // BUG « poids à zéro » (Lot 6) : les produits des transactions API et des
       // webhooks n'ont pas de champ `unit` → l'unité tombait à 'pce' et le
       // poids restait 0 pour TOUTES les ventes synchronisées. On infère « kg »
@@ -439,7 +470,25 @@ function mapSumUpTransaction(tx, detail = tx) {
   return {
     refTx, moyenPaiement, entryMode, isRefund: refund,
     totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes,
+    // false = ligne globale synthétique (résumé sans produits) : le poids est
+    // inconnu, le ticket doit être compté « sans détail » et jamais écraser un
+    // ticket déjà détaillé (cf. ingestSumUpTransaction).
+    hasRealItems,
   };
+}
+
+// ── Forme d'une ligne globale synthétique déjà STOCKÉE ──
+// Sert au diagnostic et au script resync-vak-details.js pour repérer les
+// tickets api_sumup/webhook_sumup ingérés SANS détail produits : exactement
+// UNE ligne de |quantité| = 1 (la forme produite par le fallback de
+// mapSumUpTransaction — et, pour l'historique, requalifiée à tort en 'kg' par
+// le backfill v2.20.0 : chaque vente au kilo comptait alors ~1 kg au lieu du
+// poids pesé). Un vrai ticket mono-article de quantité 1 peut matcher : c'est
+// assumé, le resync re-lit la VÉRITÉ chez SumUp (reconstruction idempotente).
+function isProbablySyntheticLines(lignes) {
+  if (!Array.isArray(lignes) || lignes.length !== 1) return false;
+  const q = Math.abs(toNumber(lignes[0].quantite ?? lignes[0].quantity) ?? 0);
+  return q === 1;
 }
 
 // ── Fuseau Europe/Paris (sans librairie externe) ──
@@ -846,6 +895,7 @@ async function syncTransactionsFromApi({ io, triggeredBy = null, sinceOverride =
     let received = 0;
     let inserted = 0;
     let skipped = 0;
+    let sansDetail = 0; // tickets ingérés SANS détail produits (poids inconnu)
     let newestTime = since;
 
     // Pagination paginated. L'API SumUp v0.1 retourne items dans `items` ou `transactions`
@@ -878,8 +928,9 @@ async function syncTransactionsFromApi({ io, triggeredBy = null, sinceOverride =
           skipped++;
           continue;
         }
-        const ok = await ingestSumUpTransaction(tx, { io, source: 'api_sumup' });
-        if (ok) inserted++; else skipped++;
+        const r = await ingestSumUpTransaction(tx, { io, source: 'api_sumup' });
+        if (r.inserted) inserted++; else skipped++;
+        if (r.sans_detail && !r.preserved) sansDetail++;
         const txDate = new Date(tx.timestamp || tx.transaction_date || tx.created_at);
         if (txDate > newestTime) newestTime = txDate;
       }
@@ -892,11 +943,13 @@ async function syncTransactionsFromApi({ io, triggeredBy = null, sinceOverride =
       UPDATE vak_sumup_sync_log SET
         ended_at = NOW(), status = 'success',
         nb_transactions_received = $1, nb_transactions_inserted = $2, nb_transactions_skipped = $3,
-        oldest_time = $4, newest_time = $5
-      WHERE id = $6
-    `, [received, inserted, skipped, since, newestTime, logId]);
+        oldest_time = $4, newest_time = $5,
+        details = COALESCE(details, '{}'::jsonb) || $6::jsonb
+      WHERE id = $7
+    `, [received, inserted, skipped, since, newestTime,
+        JSON.stringify({ sans_detail: sansDetail }), logId]);
 
-    return { received, inserted, skipped, newest_time: newestTime };
+    return { received, inserted, skipped, sans_detail: sansDetail, newest_time: newestTime };
   } catch (err) {
     await pool.query(`
       UPDATE vak_sumup_sync_log SET ended_at = NOW(), status = 'error', error_message = $1
@@ -915,31 +968,86 @@ async function syncTransactionsFromApi({ io, triggeredBy = null, sinceOverride =
 // Sans détail exploitable, on retombe sur le résumé (ticket 1 ligne globale,
 // poids 0 — jamais de valeur inventée) en le JOURNALISANT : un ticket sans
 // lignes n'est plus un échec silencieux.
+// Un objet transaction porte-t-il un détail produits exploitable ?
+function hasProductItems(d) {
+  return !!d && ((Array.isArray(d.line_items) && d.line_items.length > 0)
+    || (Array.isArray(d.products) && d.products.length > 0));
+}
+
+// Déballe une réponse « liste » : `GET /v0.1/me/transactions?id=…` peut, selon
+// la forme servie, renvoyer l'objet transaction directement, un tableau, ou un
+// wrapper `{ items: [...] }` — on ramène tout à l'objet transaction.
+function unwrapTransactionResponse(resp) {
+  if (Array.isArray(resp)) return resp[0] || null;
+  if (resp && Array.isArray(resp.items)) return resp.items[0] || null;
+  return resp || null;
+}
+
+// Version STRUCTURÉE du « retrieve » : essaie les 3 formes d'appel (paramètre
+// `?id=` documenté, `?transaction_code=`, ancien chemin `/<id>`), déballe les
+// réponses liste, et PRÉFÈRE une réponse portant les produits (c'est elle qui
+// contient les quantités, donc le poids pesé) à une réponse valide mais
+// résumée. Retourne { ok, has_products, via, detail, attempts[] } — consommée
+// par l'endpoint de diagnostic ADMIN et le script resync-vak-details.js pour
+// trancher en production la forme réellement servie par l'API.
+// `apiGet` est injectable pour les tests (aucun réseau ici en environnement de dev).
+async function fetchTransactionDetailStrict({ id, transactionCode } = {}, { apiGet = sumupApiGet } = {}) {
+  const attempts = [];
+  if (id) attempts.push({ via: 'query_id', path: '/v0.1/me/transactions', params: { id } });
+  if (transactionCode) attempts.push({ via: 'query_transaction_code', path: '/v0.1/me/transactions', params: { transaction_code: transactionCode } });
+  if (id) attempts.push({ via: 'path_id', path: `/v0.1/me/transactions/${encodeURIComponent(id)}`, params: {} });
+
+  const journal = [];
+  let fallback = null; // 1re réponse valide SANS produits (si aucune forme n'en renvoie)
+  for (const a of attempts) {
+    try {
+      const raw = await apiGet(a.path, a.params);
+      const d = unwrapTransactionResponse(raw);
+      const valid = !!(d && (d.id || d.transaction_code || d.transaction_id || d.amount != null));
+      const withProducts = valid && hasProductItems(d);
+      journal.push({ via: a.via, ok: valid, has_products: withProducts, error: valid ? null : 'réponse vide ou de forme inattendue' });
+      if (withProducts) {
+        return { ok: true, has_products: true, via: a.via, detail: d, attempts: journal };
+      }
+      if (valid && !fallback) fallback = { via: a.via, detail: d };
+    } catch (err) {
+      journal.push({ via: a.via, ok: false, has_products: false, error: String(err.message || err).slice(0, 300) });
+    }
+  }
+  if (fallback) return { ok: true, has_products: false, via: fallback.via, detail: fallback.detail, attempts: journal };
+  return { ok: false, has_products: false, via: null, detail: null, attempts: journal };
+}
+
 async function fetchTransactionDetail(tx) {
   if (!tx) return tx;
-  const hasItems = (Array.isArray(tx.line_items) && tx.line_items.length > 0)
-    || (Array.isArray(tx.products) && tx.products.length > 0);
-  if (hasItems) return tx;
+  if (hasProductItems(tx)) return tx;
   const txId = tx.id || tx.transaction_id;
   const txCode = tx.transaction_code;
   if (!txId && !txCode) return tx;
-  const attempts = [];
-  if (txId) attempts.push(['/v0.1/me/transactions', { id: txId }]);
-  if (txCode) attempts.push(['/v0.1/me/transactions', { transaction_code: txCode }]);
-  if (txId) attempts.push([`/v0.1/me/transactions/${txId}`, {}]);
-  for (const [p, params] of attempts) {
-    try {
-      const d = await sumupApiGet(p, params);
-      if (d && (d.id || d.transaction_code || d.transaction_id || d.amount != null)) return d;
-    } catch (_) { /* essaie la forme suivante */ }
+  const r = await fetchTransactionDetailStrict({ id: txId, transactionCode: txCode });
+  if (r.ok && r.has_products) return r.detail;
+  if (r.ok) {
+    logger.warn('SumUp détail transaction SANS lignes produits — résumé utilisé (poids non calculable, ticket marqué « sans détail »)', {
+      transaction_id: txId || txCode, via: r.via,
+    });
+    return r.detail;
   }
   logger.warn('SumUp détail transaction indisponible — résumé utilisé (lignes produits absentes, poids non calculable)', {
     transaction_id: txId || txCode,
+    attempts: r.attempts,
   });
   return tx;
 }
 
 // ── Ingest une transaction SumUp en BDD (lookup VAK, UPSERT ticket + ventes) ──
+// Retourne un objet { inserted, sans_detail, preserved } :
+//  - inserted    : true si un NOUVEAU ticket a été créé (false = mise à jour,
+//    hors VAK, préservation ou erreur) ;
+//  - sans_detail : true si SumUp n'a pas fourni le détail produits (ligne
+//    globale synthétique, poids inconnu → 0) — alimente l'indicateur
+//    « tickets sans détail » de la supervision et du diagnostic ;
+//  - preserved   : true si un ticket déjà détaillé a été PROTÉGÉ contre
+//    l'écrasement par un résumé (cf. garde ci-dessous).
 async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = {}) {
   try {
     const txDate = new Date(tx.timestamp || tx.transaction_date || tx.created_at || Date.now());
@@ -953,7 +1061,7 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
       'SELECT id FROM vaks WHERE $1::DATE BETWEEN date_debut AND date_fin ORDER BY date_debut DESC LIMIT 1',
       [isoDate],
     );
-    if (vakRow.rows.length === 0) return false; // hors VAK
+    if (vakRow.rows.length === 0) return { inserted: false, sans_detail: false, preserved: false, hors_vak: true };
     const vakId = vakRow.rows[0].id;
 
     // Détail produits (quantités → poids) : ni le résumé history ni le webhook
@@ -967,8 +1075,30 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
     // ramené à 'CB' par normalizePaymentMethod.
     const {
       refTx, moyenPaiement, entryMode,
-      totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes,
+      totalTTC, totalHT, totalTVA, poidsTicket, nbArticles, lignes, hasRealItems,
     } = mapSumUpTransaction(tx, detail);
+
+    // ── GARDE ANTI-DÉGRADATION (cause de sous-évaluation des poids) ──
+    // Un résumé SANS produits (webhook arrivé après une sync détaillée, ou
+    // « retrieve » momentanément en échec) ne doit JAMAIS écraser un ticket
+    // déjà ingéré avec ses vraies lignes : l'upsert + DELETE/INSERT ci-dessous
+    // remplacerait le détail réel (quantités pesées) par la ligne globale
+    // synthétique quantité 1 → poids retombé à 0/1 kg. Si le ticket existe et
+    // possède déjà des lignes, on le préserve tel quel.
+    if (!hasRealItems) {
+      const existing = await pool.query(`
+        SELECT t.id, COUNT(v.id)::INT AS nb_lignes
+        FROM vak_tickets t
+        LEFT JOIN vak_ventes v ON v.ticket_id = t.id
+        WHERE t.vak_id = $1
+          AND (t.ref_transaction = $2 OR ($3::VARCHAR IS NOT NULL AND t.sumup_transaction_id = $3))
+        GROUP BY t.id
+        LIMIT 1
+      `, [vakId, refTx, txId || null]);
+      if (existing.rows.length > 0 && existing.rows[0].nb_lignes > 0) {
+        return { inserted: false, sans_detail: true, preserved: true };
+      }
+    }
 
     // ── Écriture ATOMIQUE : upsert ticket + reset lignes + réinsertion (vague 3, item 3.B) ──
     // Auparavant hors transaction : un échec entre le DELETE et les INSERT laissait un
@@ -1033,10 +1163,10 @@ async function ingestSumUpTransaction(tx, { io = null, source = 'api_sumup' } = 
       }).catch((err) => logger.warn('emitLiveUpdate failed', { error: err.message }));
     }
 
-    return wasInserted;
+    return { inserted: !!wasInserted, sans_detail: !hasRealItems, preserved: false };
   } catch (err) {
     logger.error('ingestSumUpTransaction', { error: err.message });
-    return false;
+    return { inserted: false, sans_detail: false, preserved: false, error: err.message };
   }
 }
 
@@ -1114,6 +1244,11 @@ module.exports = {
   syncTransactionsFromApi,
   ingestSumUpTransaction,
   fetchTransactionDetail,
+  fetchTransactionDetailStrict,
+  hasProductItems,
+  unwrapTransactionResponse,
+  isProbablySyntheticLines,
+  toNumber,
   // Webhooks
   validateWebhookSignature,
   registerWebhook,
