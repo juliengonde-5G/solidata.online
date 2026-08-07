@@ -140,16 +140,22 @@ router.post('/sumup/webhook', async (req, res) => {
     }
 
     const io = req.app.get('io');
-    const inserted = await sumup.ingestSumUpTransaction(txData, { io, source: 'webhook_sumup' });
+    // ingestSumUpTransaction renvoie { inserted, sans_detail, preserved } :
+    // sans_detail = détail produits SumUp indisponible (poids inconnu → 0),
+    // preserved = ticket déjà détaillé protégé contre l'écrasement par un résumé.
+    const result = await sumup.ingestSumUpTransaction(txData, { io, source: 'webhook_sumup' });
     await pool.query(`
       UPDATE vak_sumup_sync_log SET
         ended_at = NOW(), status = 'success',
         nb_transactions_received = 1,
-        nb_transactions_inserted = $1, nb_transactions_skipped = $2
-      WHERE id = $3
-    `, [inserted ? 1 : 0, inserted ? 0 : 1, logRes.rows[0].id]);
+        nb_transactions_inserted = $1, nb_transactions_skipped = $2,
+        details = COALESCE(details, '{}'::jsonb) || $3::jsonb
+      WHERE id = $4
+    `, [result.inserted ? 1 : 0, result.inserted ? 0 : 1,
+        JSON.stringify({ sans_detail: !!result.sans_detail, preserved: !!result.preserved }),
+        logRes.rows[0].id]);
 
-    return res.status(200).json({ received: true, inserted });
+    return res.status(200).json({ received: true, inserted: result.inserted, sans_detail: !!result.sans_detail });
   } catch (err) {
     logger.error('SumUp webhook handler', { error: err.message });
     return res.status(500).json({ error: 'Erreur webhook' });
@@ -866,6 +872,161 @@ router.post('/sumup/register-webhook', authorize('ADMIN'), async (req, res) => {
     res.json({ success: !!result, result });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ──────────────────────────────────────────
+// DIAGNOSTIC TRANSACTION (ADMIN) — « voir ce que SumUp renvoie réellement »
+// Outil de terrain pour trancher la forme de l'API en production :
+//  (a) les N dernières transactions STOCKÉES côté ERP (sources API/webhook)
+//      avec leurs lignes (description, quantité, unité, poids) + détection de
+//      la ligne globale synthétique (ticket ingéré sans détail produits) ;
+//  (b) pour la plus récente : appel LIVE du détail SumUp (cascade ?id= /
+//      ?transaction_code= / chemin) → JSON brut FILTRÉ (produits/quantités
+//      uniquement, jamais de données de carte) + quelle forme d'appel a réussi.
+// ──────────────────────────────────────────
+
+// Ne conserve du JSON SumUp que les champs utiles au diagnostic poids/produits
+// (liste blanche) — jamais card/links/events ni données personnelles. La clé
+// `_champs_presents` liste les noms de champs réellement renvoyés par SumUp
+// (sans leurs valeurs) pour voir la forme exacte de l'API en production.
+function sanitizeSumUpDetail(detail) {
+  if (!detail || typeof detail !== 'object') return null;
+  const TOP_FIELDS = ['id', 'transaction_id', 'transaction_code', 'type', 'status',
+    'amount', 'currency', 'timestamp', 'payment_type', 'entry_mode',
+    'description', 'product_summary', 'vat_amount', 'tip_amount'];
+  const PRODUCT_FIELDS = ['name', 'description', 'quantity', 'unit', 'price',
+    'unit_price', 'price_per_unit', 'price_with_vat', 'total_price',
+    'total_with_vat', 'subtotal', 'vat_rate', 'vat_amount'];
+  const out = {};
+  for (const f of TOP_FIELDS) if (detail[f] !== undefined) out[f] = detail[f];
+  out._champs_presents = Object.keys(detail);
+  for (const key of ['products', 'line_items']) {
+    if (Array.isArray(detail[key])) {
+      out[key] = detail[key].map((p) => {
+        const item = {};
+        for (const f of PRODUCT_FIELDS) if (p && p[f] !== undefined) item[f] = p[f];
+        item._champs_presents = p && typeof p === 'object' ? Object.keys(p) : [];
+        return item;
+      });
+    }
+  }
+  return out;
+}
+
+router.get('/sumup/diagnostic-transaction', authorize('ADMIN'), async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 20);
+
+    // (a) Dernières transactions stockées (API/webhook — celles qui peuvent
+    // être re-testées en live ; le CSV n'a pas d'identifiant SumUp requêtable).
+    const ticketsRes = await pool.query(`
+      SELECT t.id, t.vak_id, vk.libelle AS vak_libelle,
+             t.ref_transaction, t.sumup_transaction_id, t.date_ticket,
+             t.moyen_paiement, t.source, t.nb_articles,
+             t.poids_kg::FLOAT AS poids_kg, t.total_ttc::FLOAT AS total_ttc
+      FROM vak_tickets t
+      JOIN vaks vk ON vk.id = t.vak_id
+      WHERE t.source IN ('api_sumup', 'webhook_sumup')
+      ORDER BY t.date_ticket DESC
+      LIMIT $1
+    `, [limit]);
+    const tickets = ticketsRes.rows;
+
+    let lignesByTicket = new Map();
+    if (tickets.length > 0) {
+      const lignesRes = await pool.query(`
+        SELECT ticket_id, description, segment, unite,
+               quantite::FLOAT AS quantite, prix_unitaire_ttc::FLOAT AS prix_unitaire_ttc,
+               total_ttc::FLOAT AS total_ttc, source
+        FROM vak_ventes
+        WHERE ticket_id = ANY($1::int[])
+        ORDER BY id
+      `, [tickets.map((t) => t.id)]);
+      lignesByTicket = lignesRes.rows.reduce((m, l) => {
+        if (!m.has(l.ticket_id)) m.set(l.ticket_id, []);
+        m.get(l.ticket_id).push(l);
+        return m;
+      }, new Map());
+    }
+
+    const ticketsStockes = tickets.map((t) => {
+      const lignes = lignesByTicket.get(t.id) || [];
+      const synthetique = sumup.isProbablySyntheticLines(lignes);
+      return {
+        ...t,
+        lignes,
+        nb_lignes: lignes.length,
+        poids_lignes_kg: lignes
+          .filter((l) => (l.unite || '').toLowerCase().includes('kg'))
+          .reduce((s, l) => s + (Number.isFinite(l.quantite) ? l.quantite : 0), 0),
+        // Ligne unique |quantité| = 1 : forme de la ligne globale synthétique
+        // (ticket ingéré sans détail produits — poids probablement faux).
+        lignes_synthetiques_probables: synthetique,
+        nb_lignes_synthetiques: synthetique ? lignes.length : 0,
+      };
+    });
+    const nbSansDetailProbables = ticketsStockes.filter((t) => t.nb_lignes === 0 || t.lignes_synthetiques_probables).length;
+
+    // (b) Test LIVE sur la transaction la plus récente identifiable chez SumUp.
+    let testLive = null;
+    const cible = tickets.find((t) => t.sumup_transaction_id || t.ref_transaction);
+    if (!cible) {
+      testLive = { ok: false, error: 'Aucune transaction API/webhook stockée — rien à tester en live.' };
+    } else {
+      const status = await sumup.getConnectionStatus();
+      if (!status.connected) {
+        testLive = {
+          ok: false,
+          error: 'SumUp non connecté (tokens absents ou révoqués) — impossible d\'appeler le détail en live. Reconnecter depuis cette page.',
+          ticket_teste: { id: cible.id, ref_transaction: cible.ref_transaction, sumup_transaction_id: cible.sumup_transaction_id },
+        };
+      } else {
+        try {
+          const r = await sumup.fetchTransactionDetailStrict({
+            id: cible.sumup_transaction_id,
+            transactionCode: cible.ref_transaction,
+          });
+          let poidsRecalcule = null;
+          if (r.ok && r.has_products) {
+            // Poids que donnerait l'ingestion actuelle sur ce détail (comparaison
+            // directe avec le poids stocké → mise en évidence d'un écart).
+            poidsRecalcule = sumup.mapSumUpTransaction(r.detail, r.detail).poidsTicket;
+          }
+          testLive = {
+            ok: r.ok,
+            via: r.via,
+            has_products: r.has_products,
+            attempts: r.attempts,
+            ticket_teste: {
+              id: cible.id,
+              ref_transaction: cible.ref_transaction,
+              sumup_transaction_id: cible.sumup_transaction_id,
+              poids_stocke_kg: cible.poids_kg,
+            },
+            poids_recalcule_kg: poidsRecalcule,
+            detail_sumup: r.detail ? sanitizeSumUpDetail(r.detail) : null,
+          };
+        } catch (err) {
+          testLive = {
+            ok: false,
+            error: `Appel SumUp en échec : ${String(err.message || err).slice(0, 300)}`,
+            ticket_teste: { id: cible.id, ref_transaction: cible.ref_transaction, sumup_transaction_id: cible.sumup_transaction_id },
+          };
+        }
+      }
+    }
+
+    res.json({
+      tickets_stockes: ticketsStockes,
+      nb_tickets_sans_detail_probables: nbSansDetailProbables,
+      test_live: testLive,
+      note: 'Ligne synthétique = ticket ingéré sans détail produits SumUp (1 ligne, quantité 1) : son poids est inconnu. '
+        + 'Utiliser src/scripts/resync-vak-details.js pour récupérer les vraies quantités.',
+    });
+  } catch (err) {
+    logger.error('VAK sumup diagnostic-transaction', { error: err.message });
+    res.status(500).json({ error: 'Erreur diagnostic transaction SumUp' });
   }
 });
 

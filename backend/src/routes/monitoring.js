@@ -109,7 +109,15 @@ const JOB_SCHEDULE = {
   refreshMaterializedViews:       { label: 'Refresh vues matérialisées',        cadence: '3×/jour',            maxAgeHours: DAILY },
   scanBoutiqueCSVFolders:         { label: 'Scan CSV caisse boutiques',         cadence: '3×/jour + 20h',      maxAgeHours: DAILY },
   collectBoutiqueWeather:         { label: 'Collecte météo boutiques',          cadence: '3×/jour',            maxAgeHours: DAILY },
-  syncVakSumUp:                   { label: 'Sync SumUp (VAK)',                  cadence: '3×/jour + horaire en VAK', maxAgeHours: DAILY },
+  // Sync SumUp quotidienne (hors VAK : UNE sync par 24 h, à 3h — demande
+  // client). Retirée de runAllJobs 3×/jour et du rattrapage horaire.
+  syncVakSumUp:                   { label: 'Sync SumUp (VAK) — quotidienne',    cadence: 'quotidien 3h',       maxAgeHours: DAILY },
+  // Sync SumUp « live » : timer dédié 5 min qui ne s'exécute (et ne se
+  // journalise) QUE les jours de VAK avec SumUp connecté. Tolérance MENSUELLE :
+  // entre deux VAK (mensuelles, 2-3 j) le dernier succès a plusieurs semaines —
+  // un maxAge court crierait « en retard » à tort tout le mois ; la fraîcheur
+  // quotidienne reste garantie par syncVakSumUp (26 h ci-dessus).
+  syncVakSumUpLive:               { label: 'Sync SumUp live (5 min, jours de VAK)', cadence: 'toutes les 5 min pendant une VAK', maxAgeHours: MONTHLY },
   captureVakWeather:              { label: 'Météo VAK',                         cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeOldJobRuns:                { label: 'Purge journal des jobs > 30 j',     cadence: '3×/jour',            maxAgeHours: DAILY },
   // ── quotidiens ciblés ──

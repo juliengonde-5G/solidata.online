@@ -69,16 +69,33 @@ async function main() {
     const avant = await snapshotParVak(client);
 
     // ── 1. Requalification des lignes vendues au kilo ────────────────────────
-    // Chargement des lignes candidates (unité ne contenant pas déjà 'kg').
+    // Chargement des lignes candidates (unité ne contenant pas déjà 'kg'),
+    // avec la forme de leur ticket (nb de lignes) pour repérer les lignes
+    // GLOBALES SYNTHÉTIQUES.
     const lignes = await client.query(`
-      SELECT id, description, unite, source
-      FROM vak_ventes
-      WHERE COALESCE(unite, '') NOT ILIKE '%kg%'
+      SELECT vv.id, vv.description, vv.unite, vv.source, vv.quantite::FLOAT AS quantite,
+             CASE WHEN vv.ticket_id IS NULL THEN NULL
+                  ELSE COUNT(*) OVER (PARTITION BY vv.ticket_id) END AS nb_lignes_ticket
+      FROM vak_ventes vv
+      WHERE COALESCE(vv.unite, '') NOT ILIKE '%kg%'
     `);
 
     const idsAKg = [];
     for (const l of lignes.rows) {
       const apiSource = API_SOURCES.includes(String(l.source || '').trim());
+      // GARDE (correctif « poids trop faibles ») : une ligne API/webhook qui
+      // est la SEULE ligne de son ticket avec |quantité| = 1 est très
+      // probablement la LIGNE GLOBALE SYNTHÉTIQUE créée quand SumUp n'a pas
+      // fourni le détail produits (fallback d'ingestion). Sa quantité 1 est un
+      // artefact (1 ticket), PAS un poids pesé : la requalifier en 'kg' ferait
+      // compter ~1 kg par vente au lieu du poids réel (cause de la
+      // sous-évaluation constatée après le backfill v2.20.0). On la LAISSE en
+      // 'pce' (poids honnête 0) — c'est resync-vak-details.js qui ira chercher
+      // les vraies quantités chez SumUp.
+      const formeSynthetique = apiSource
+        && Number(l.nb_lignes_ticket) === 1
+        && Math.abs(Number(l.quantite) || 0) === 1;
+      if (formeSynthetique) continue;
       // API/webhook : le 'pce' stocké était un défaut du code (SumUp ne fournit
       // pas d'unité) → on infère depuis le libellé seul. CSV : l'unité stockée
       // fait foi (isKgItem ne requalifie que si elle est vide).

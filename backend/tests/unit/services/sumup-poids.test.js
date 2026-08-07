@@ -17,7 +17,11 @@
  * (`unite ILIKE '%kg%'` dans routes/vak.js) restent cohérents.
  */
 
-const { isKgItem, mapSumUpTransaction, getSegment } = require('../../../src/services/sumup');
+const {
+  isKgItem, mapSumUpTransaction, getSegment,
+  toNumber, isProbablySyntheticLines, fetchTransactionDetailStrict,
+  hasProductItems, unwrapTransactionResponse,
+} = require('../../../src/services/sumup');
 
 describe('sumup — isKgItem (détection vendu au kilo)', () => {
   test('unité explicite kg → au kilo (chemin CSV, insensible à la casse)', () => {
@@ -204,6 +208,48 @@ describe('sumup — mapSumUpTransaction : poids depuis les remontées API (produ
     expect(m.totalTTC).toBeCloseTo(7.5, 2);
   });
 
+  test('ticket sans détail → indicateur « sans détail » : hasRealItems=false, ligne synthétique JAMAIS en kg', () => {
+    // Bug « poids trop faibles » : la ligne globale synthétique quantité 1 ne
+    // doit JAMAIS être marquée 'kg' (elle compterait ~1 kg par vente au lieu
+    // du poids pesé). Le ticket doit être signalé sans détail à l'appelant.
+    const detail = {
+      id: 'tx-api-8', transaction_code: 'NODETAIL02', type: 'PAYMENT',
+      amount: 12.8, payment_type: 'POS', description: 'Vente plus de 5 kilos',
+    };
+    const m = mapSumUpTransaction(detail, detail);
+    expect(m.hasRealItems).toBe(false);          // → compté « ticket sans détail »
+    expect(m.lignes[0].synthetic).toBe(true);    // ligne globale marquée
+    expect(m.lignes[0].unite).toBe('pce');       // jamais 'kg' par défaut
+    expect(m.lignes[0].quantite).toBe(1);        // artefact (1 ticket), pas un poids
+    expect(m.poidsTicket).toBe(0);               // poids inconnu → 0, jamais 1 kg
+  });
+
+  test('ticket AVEC produits → hasRealItems=true, aucune ligne synthetic', () => {
+    const detail = {
+      id: 'tx-api-9', transaction_code: 'REALDETAIL', type: 'PAYMENT', amount: 8,
+      payment_type: 'POS',
+      products: [{ name: 'Vente moins de 5 kg', price: 2.5, quantity: 3.2, total_price: 8 }],
+    };
+    const m = mapSumUpTransaction(detail, detail);
+    expect(m.hasRealItems).toBe(true);
+    expect(m.lignes[0].synthetic).toBeUndefined();
+  });
+
+  test('quantité décimale reçue en CHAÎNE ("3.2" et "3,2" FR) → préservée, jamais tronquée', () => {
+    // SumUp renvoie normalement des nombres, mais une quantité en chaîne à
+    // virgule décimale donnait NaN (Number("3,2")) → poids perdu/corrompu.
+    for (const q of [3.2, '3.2', '3,2']) {
+      const detail = {
+        id: 'tx-str', transaction_code: 'STRQTY0001', type: 'PAYMENT', amount: 8,
+        payment_type: 'POS',
+        products: [{ name: 'Vente moins de 5 kg', price: 2.5, quantity: q, total_price: 8 }],
+      };
+      const m = mapSumUpTransaction(detail, detail);
+      expect(m.poidsTicket).toBeCloseTo(3.2, 3);
+      expect(m.lignes[0].quantite).toBeCloseTo(3.2, 3);
+    }
+  });
+
   test('régression : line_items AVEC unité kg explicite (fixtures historiques) inchangés', () => {
     const detail = {
       transaction_code: 'LEGACY0001',
@@ -225,5 +271,107 @@ describe('sumup — cohérence segment/poids', () => {
       expect(getSegment(d)).toBe('textile_vrac');
       expect(isKgItem(d, '')).toBe(true);
     });
+  });
+});
+
+describe('sumup — toNumber (parsing robuste des quantités/prix)', () => {
+  test('nombres et chaînes point/virgule décimale', () => {
+    expect(toNumber(3.2)).toBe(3.2);
+    expect(toNumber('3.2')).toBe(3.2);
+    expect(toNumber('3,2')).toBe(3.2);
+    expect(toNumber('1 234,5')).toBe(1234.5);
+    expect(toNumber(0)).toBe(0); // 0 n'est pas « absent »
+  });
+
+  test('valeurs invalides → null (jamais NaN)', () => {
+    expect(toNumber(null)).toBeNull();
+    expect(toNumber(undefined)).toBeNull();
+    expect(toNumber('')).toBeNull();
+    expect(toNumber('abc')).toBeNull();
+    expect(toNumber(NaN)).toBeNull();
+  });
+});
+
+describe('sumup — isProbablySyntheticLines (forme de la ligne globale stockée)', () => {
+  test('1 ligne |quantité| = 1 → synthétique probable (vente OU remboursement)', () => {
+    expect(isProbablySyntheticLines([{ quantite: 1 }])).toBe(true);
+    expect(isProbablySyntheticLines([{ quantite: -1 }])).toBe(true);
+    expect(isProbablySyntheticLines([{ quantite: '1' }])).toBe(true);
+  });
+
+  test('quantité décimale réelle ou plusieurs lignes → PAS synthétique', () => {
+    expect(isProbablySyntheticLines([{ quantite: 3.2 }])).toBe(false);
+    expect(isProbablySyntheticLines([{ quantite: 1 }, { quantite: 1 }])).toBe(false);
+    expect(isProbablySyntheticLines([])).toBe(false);
+    expect(isProbablySyntheticLines(null)).toBe(false);
+  });
+});
+
+describe('sumup — fetchTransactionDetailStrict (cascade des formes du « retrieve »)', () => {
+  const detailAvecProduits = {
+    id: 'tx-1', transaction_code: 'CODE1', amount: 8,
+    products: [{ name: 'Vente moins de 5 kg', quantity: 3.2, price: 2.5 }],
+  };
+  const resumeSansProduits = { id: 'tx-1', transaction_code: 'CODE1', amount: 8 };
+
+  test('1re forme (?id=) échoue → 2e forme (?transaction_code=) avec produits retenue', async () => {
+    const apiGet = jest.fn()
+      .mockRejectedValueOnce(new Error('SumUp 404 /v0.1/me/transactions'))
+      .mockResolvedValueOnce(detailAvecProduits);
+    const r = await fetchTransactionDetailStrict({ id: 'tx-1', transactionCode: 'CODE1' }, { apiGet });
+    expect(r.ok).toBe(true);
+    expect(r.has_products).toBe(true);
+    expect(r.via).toBe('query_transaction_code');
+    expect(r.detail.products[0].quantity).toBe(3.2);
+    expect(r.attempts).toHaveLength(2);
+    expect(r.attempts[0].ok).toBe(false);
+  });
+
+  test('préfère une forme AVEC produits à une forme valide sans produits', async () => {
+    // ?id= répond un RÉSUMÉ valide sans produits ; ?transaction_code= répond
+    // le détail complet → c'est lui qui doit être retenu (le résumé ferait
+    // retomber le poids à 0).
+    const apiGet = jest.fn()
+      .mockResolvedValueOnce(resumeSansProduits)
+      .mockResolvedValueOnce(detailAvecProduits);
+    const r = await fetchTransactionDetailStrict({ id: 'tx-1', transactionCode: 'CODE1' }, { apiGet });
+    expect(r.ok).toBe(true);
+    expect(r.has_products).toBe(true);
+    expect(r.via).toBe('query_transaction_code');
+  });
+
+  test('toutes les formes valides mais SANS produits → ok, has_products=false (ticket « sans détail »)', async () => {
+    const apiGet = jest.fn().mockResolvedValue(resumeSansProduits);
+    const r = await fetchTransactionDetailStrict({ id: 'tx-1', transactionCode: 'CODE1' }, { apiGet });
+    expect(r.ok).toBe(true);
+    expect(r.has_products).toBe(false);
+    expect(r.detail).toEqual(resumeSansProduits);
+  });
+
+  test('réponse LISTE ({ items: [...] } ou tableau) déballée', async () => {
+    const apiGet = jest.fn().mockResolvedValueOnce({ items: [detailAvecProduits] });
+    const r = await fetchTransactionDetailStrict({ id: 'tx-1' }, { apiGet });
+    expect(r.ok).toBe(true);
+    expect(r.has_products).toBe(true);
+    expect(r.detail.id).toBe('tx-1');
+    expect(unwrapTransactionResponse([detailAvecProduits]).id).toBe('tx-1');
+    expect(unwrapTransactionResponse({ items: [] })).toBeNull();
+  });
+
+  test('tout échoue → ok=false avec le journal des tentatives (diagnostic prod)', async () => {
+    const apiGet = jest.fn().mockRejectedValue(new Error('SumUp 401 — token révoqué'));
+    const r = await fetchTransactionDetailStrict({ id: 'tx-1', transactionCode: 'CODE1' }, { apiGet });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toBeNull();
+    expect(r.attempts).toHaveLength(3); // ?id=, ?transaction_code=, chemin /<id>
+    expect(r.attempts.every((a) => /401/.test(a.error))).toBe(true);
+  });
+
+  test('hasProductItems : line_items OU products non vides', () => {
+    expect(hasProductItems({ products: [{}] })).toBe(true);
+    expect(hasProductItems({ line_items: [{}] })).toBe(true);
+    expect(hasProductItems({ products: [] })).toBe(false);
+    expect(hasProductItems({})).toBe(false);
+    expect(hasProductItems(null)).toBe(false);
   });
 });
