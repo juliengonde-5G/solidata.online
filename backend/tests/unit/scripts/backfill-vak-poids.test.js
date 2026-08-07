@@ -57,6 +57,26 @@ describe('backfill-vak-poids — classifierRequalification (extension chaussures
     })).toBe('kg'); // remboursement : quantité signée, requalification identique
   });
 
+  test('ticket MULTI-lignes : une ligne au poids qté 1 exactement est un VRAI 1,000 kg → requalifiée (revue Codex PR#91)', () => {
+    // La ligne globale synthétique n'a jamais produit de ticket multi-lignes :
+    // dans un ticket multi-lignes, le détail vient de vrais produits SumUp —
+    // sans cette règle, la ligne tombait entre les deux filets (le resync ne
+    // sélectionne que les tickets à 0/1 ligne).
+    expect(classifierRequalification({
+      description: 'Chaussures', unite: 'pce', source: 'api_sumup', quantite: 1,
+      nb_lignes_ticket: 2,
+    })).toBe('kg');
+    expect(classifierRequalification({
+      description: 'Vente plus de 5 kilos', unite: 'pce', source: 'webhook_sumup', quantite: -1,
+      nb_lignes_ticket: 3,
+    })).toBe('kg'); // remboursement multi-lignes : signé, requalifié aussi
+    // Mono-ligne explicite : la garde d'ambiguïté reste entière.
+    expect(classifierRequalification({
+      description: 'Chaussures', unite: 'pce', source: 'api_sumup', quantite: 1,
+      nb_lignes_ticket: 1,
+    })).toBe('ambigue');
+  });
+
   test('forme SYNTHÉTIQUE (ligne globale qté 1 du fallback) → couverte par la garde ambiguë', () => {
     // Ancienne garde PR#90 (1 ligne, |qté| = 1) : englobée par la garde |qté|=1.
     expect(classifierRequalification({

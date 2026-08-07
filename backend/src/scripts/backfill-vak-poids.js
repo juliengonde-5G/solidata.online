@@ -66,9 +66,15 @@ const API_SOURCES = ['api_sumup', 'webhook_sumup'];
  * pas ; c'est resync-vak-details.js qui re-lit la vérité chez SumUp. Le seuil
  * est bien === 1 STRICT et non ≤ 1 : une quantité décimale (« 0.92 x Vente
  * Moins de 5 Kg », « 1.595 x Chaussures ») est un poids pesé RÉEL qui doit
- * être requalifié. Cette garde englobe l'ancienne détection de forme
- * synthétique (ligne unique |qté| = 1) et la généralise aux tickets
- * multi-lignes pour les segments au poids.
+ * être requalifié.
+ *
+ * PORTÉE DE LA GARDE (revue Codex PR#91) : l'ambiguïté ne concerne que les
+ * tickets MONO-ligne — la ligne globale synthétique du fallback d'ingestion
+ * n'a JAMAIS produit de ticket multi-lignes. Dans un ticket multi-lignes, les
+ * lignes viennent d'un VRAI détail produits SumUp : une quantité 1 y est un
+ * vrai 1,000 kg pesé → requalifiée 'kg' (sinon elle tombait entre les deux
+ * filets, resync-vak-details ne sélectionnant que les tickets à 0/1 ligne).
+ * `nb_lignes_ticket` = nombre TOTAL de lignes du ticket (défaut 1 si absent).
  */
 function classifierRequalification(ligne) {
   const apiSource = API_SOURCES.includes(String(ligne.source || '').trim());
@@ -77,7 +83,8 @@ function classifierRequalification(ligne) {
     // pas d'unité) → inférence par le libellé seul (segments au poids
     // KG_SEGMENTS = textile_vrac + chaussures, cf. services/sumup.js).
     if (!isKgItem(ligne.description, '')) return 'inchangee';
-    if (Math.abs(Number(ligne.quantite) || 0) === 1) return 'ambigue';
+    const nbLignes = Number(ligne.nb_lignes_ticket) || 1;
+    if (nbLignes <= 1 && Math.abs(Number(ligne.quantite) || 0) === 1) return 'ambigue';
     return 'kg';
   }
   // CSV (et autres) : l'unité stockée fait foi (isKgItem ne requalifie que si
@@ -121,7 +128,10 @@ async function main() {
     // d'ambiguïté |qté| = 1 sur les sources API/webhook (englobe l'ancienne
     // détection de la ligne GLOBALE SYNTHÉTIQUE du fallback d'ingestion).
     const lignes = await client.query(`
-      SELECT vv.id, vv.description, vv.unite, vv.source, vv.quantite::FLOAT AS quantite
+      SELECT vv.id, vv.description, vv.unite, vv.source, vv.quantite::FLOAT AS quantite,
+             COALESCE((
+               SELECT COUNT(*) FROM vak_ventes x WHERE x.ticket_id = vv.ticket_id
+             ), 1)::INT AS nb_lignes_ticket
       FROM vak_ventes vv
       WHERE COALESCE(vv.unite, '') NOT ILIKE '%kg%'
     `);
