@@ -10,15 +10,21 @@
  *
  * Correctif testé : helper partagé isKgItem(description, unite) —
  *   1. unité explicite non vide → 'kg' ssi elle contient « kg » (chemin CSV) ;
- *   2. unité absente → produit au kilo ssi le libellé matche le mapping
- *      textile au kilo (« Vente moins de 5 kg », « Vente plus de 5 kilos »…),
- *      la caisse SumUp saisissant le poids pesé dans `quantity`.
+ *   2. unité absente → produit au kilo ssi le libellé tombe dans un segment
+ *      au poids (KG_SEGMENTS = textile_vrac + chaussures : « Vente moins de
+ *      5 kg », « Vente plus de 5 kilos », « Chaussures »…), la caisse SumUp
+ *      saisissant le poids pesé (décimal) dans `quantity` et le €/kg en prix.
  * L'unité inférée est stockée ('kg') pour que les agrégats SQL
  * (`unite ILIKE '%kg%'` dans routes/vak.js) restent cohérents.
+ *
+ * Extension chaussures (données réelles marchand FRIP & CO, 07/08/2026) :
+ * la liste des ventes SumUp affiche « 1.595 x Chaussures » = 1,595 kg pesé
+ * × 3,00 €/kg — les chaussures sont vendues AU POIDS, comme le textile en
+ * vrac ; seuls les consommables (sacs) restent à la pièce.
  */
 
 const {
-  isKgItem, mapSumUpTransaction, getSegment,
+  isKgItem, mapSumUpTransaction, getSegment, KG_SEGMENTS,
   toNumber, isProbablySyntheticLines, fetchTransactionDetailStrict,
   hasProductItems, unwrapTransactionResponse,
 } = require('../../../src/services/sumup');
@@ -42,10 +48,20 @@ describe('sumup — isKgItem (détection vendu au kilo)', () => {
     expect(isKgItem('VENTE MOINS DE 5 KG', undefined)).toBe(true);
   });
 
-  test('unité absente + chaussures / consommables → à la pièce', () => {
-    expect(isKgItem('Chaussures', '')).toBe(false);
+  test('unité absente + chaussures → AU KILO (quantité SumUp = poids pesé, prix = €/kg)', () => {
+    expect(isKgItem('Chaussures', '')).toBe(true);
+    expect(isKgItem('chaussures', null)).toBe(true);
+    expect(isKgItem('CHAUSSURES', undefined)).toBe(true);
+  });
+
+  test('unité absente + consommables (sacs) → à la pièce', () => {
     expect(isKgItem('Sacs', '')).toBe(false);
     expect(isKgItem('Sac', null)).toBe(false);
+  });
+
+  test('KG_SEGMENTS = source unique de la règle « au poids » (textile_vrac + chaussures)', () => {
+    expect(KG_SEGMENTS).toEqual(['textile_vrac', 'chaussures']);
+    expect(KG_SEGMENTS).not.toContain('consommables');
   });
 
   test('unité absente + libellé inconnu → à la pièce (jamais de poids inventé)', () => {
@@ -126,7 +142,7 @@ describe('sumup — mapSumUpTransaction : poids depuis les remontées API (produ
     expect(m.moyenPaiement).toBe('Espèces');
   });
 
-  test('chaussures sans unité → poids 0 (vendues à la pièce)', () => {
+  test('chaussures sans unité → AU KILO (quantité décimale = poids pesé)', () => {
     const detail = {
       id: 'tx-api-4',
       transaction_code: 'CHAUSAMPLE',
@@ -136,8 +152,73 @@ describe('sumup — mapSumUpTransaction : poids depuis les remontées API (produ
       products: [{ name: 'Chaussures', price: 3.0, quantity: 2, total_price: 6.0 }],
     };
     const m = mapSumUpTransaction(detail, detail);
-    expect(m.poidsTicket).toBe(0);
+    expect(m.poidsTicket).toBeCloseTo(2, 3); // 2,000 kg de chaussures à 3 €/kg
+    expect(m.lignes[0].unite).toBe('kg');
     expect(m.lignes[0].segment).toBe('chaussures');
+  });
+
+  test('FIXTURE RÉELLE TAAA4NKXTDV (FRIP & CO, 07/08/2026 12:10) — chaussures + textile au poids → 12,17 kg', () => {
+    // Captures SumUp de production : ticket 64,00 € en espèces, 2 articles.
+    // La liste des ventes affiche « 1.595 x Chaussures, 10.575 x Vente Plus de
+    // 5 kilos » : la quantité EST le poids en kg, le prix unitaire un €/kg.
+    //  - Chaussures            : 1,595 kg × 3,00 €/kg = 4,78 € (HT 3,98, TVA 20 % 0,80)
+    //  - Vente Plus de 5 kilos : 10,575 kg × 5,60 €/kg = 59,22 € (HT 49,35, TVA 9,87)
+    // AVANT l'extension chaussures, le ticket comptait 10,575 kg (le poids des
+    // chaussures était PERDU) au lieu des 12,17 kg lus dans SumUp.
+    const detail = {
+      id: 'tx-frip-1',
+      transaction_code: 'TAAA4NKXTDV',
+      type: 'PAYMENT',
+      status: 'SUCCESSFUL',
+      amount: 64.0,
+      currency: 'EUR',
+      timestamp: '2026-08-07T10:10:00.000Z', // 12:10 heure de Paris (été, UTC+2)
+      payment_type: 'CASH',
+      products: [
+        { name: 'Chaussures', price: 3.0, quantity: 1.595, total_price: 4.78, vat_amount: 0.80, vat_rate: 20 },
+        { name: 'Vente Plus de 5 kilos', price: 5.6, quantity: 10.575, total_price: 59.22, vat_amount: 9.87, vat_rate: 20 },
+      ],
+    };
+    const m = mapSumUpTransaction(detail, detail);
+    expect(m.refTx).toBe('TAAA4NKXTDV');
+    expect(m.isRefund).toBe(false);
+    expect(m.moyenPaiement).toBe('Espèces');
+    expect(m.totalTTC).toBeCloseTo(64.0, 2);           // CA du ticket
+    expect(m.poidsTicket).toBeCloseTo(12.17, 3);       // 1,595 + 10,575 kg — lecture équivalente à SumUp
+    expect(m.nbArticles).toBe(2);
+    // Ligne chaussures : au kilo, quantité décimale préservée.
+    expect(m.lignes[0].description).toBe('Chaussures');
+    expect(m.lignes[0].segment).toBe('chaussures');
+    expect(m.lignes[0].unite).toBe('kg');
+    expect(m.lignes[0].quantite).toBeCloseTo(1.595, 3);
+    expect(m.lignes[0].prix_unitaire_ttc).toBeCloseTo(3.0, 2);   // €/kg
+    expect(m.lignes[0].total_ttc).toBeCloseTo(4.78, 2);
+    // Ligne textile vrac.
+    expect(m.lignes[1].segment).toBe('textile_vrac');
+    expect(m.lignes[1].unite).toBe('kg');
+    expect(m.lignes[1].quantite).toBeCloseTo(10.575, 3);
+    expect(m.lignes[1].prix_unitaire_ttc).toBeCloseTo(5.6, 2);   // €/kg
+    expect(m.lignes[1].total_ttc).toBeCloseTo(59.22, 2);
+  });
+
+  test('« 2 x Sacs » (quantité entière, à la pièce) → poids 0, unité pce (données réelles)', () => {
+    // Ligne réelle observée : « 2 x Sacs, 2.755 x Vente Moins de 5 Kg » —
+    // les sacs sont bien à la pièce, seul le textile pèse.
+    const detail = {
+      id: 'tx-frip-2',
+      transaction_code: 'SACSFRIP01',
+      type: 'PAYMENT',
+      amount: 15.98,
+      payment_type: 'POS',
+      products: [
+        { name: 'Sacs', price: 0.5, quantity: 2, total_price: 1.0 },
+        { name: 'Vente Moins de 5 Kg', price: 5.44, quantity: 2.755, total_price: 14.98 },
+      ],
+    };
+    const m = mapSumUpTransaction(detail, detail);
+    expect(m.lignes[0].unite).toBe('pce');
+    expect(m.lignes[0].segment).toBe('consommables');
+    expect(m.poidsTicket).toBeCloseTo(2.755, 3); // les 2 sacs ne pèsent pas
   });
 
   test('ticket mixte textile + sacs → seul le textile pèse', () => {
@@ -271,6 +352,20 @@ describe('sumup — cohérence segment/poids', () => {
       expect(getSegment(d)).toBe('textile_vrac');
       expect(isKgItem(d, '')).toBe(true);
     });
+  });
+
+  test('les chaussures passent par getSegment (pas de liste de libellés dupliquée)', () => {
+    ['Chaussures', 'chaussure', 'CHAUSSURES ENFANT'].forEach((d) => {
+      expect(getSegment(d)).toBe('chaussures');
+      expect(isKgItem(d, '')).toBe(true);
+    });
+  });
+
+  test('tout segment de KG_SEGMENTS est au kilo via isKgItem, les autres non', () => {
+    // isKgItem doit refléter exactement KG_SEGMENTS via getSegment.
+    expect(isKgItem('Chaussures', '')).toBe(KG_SEGMENTS.includes('chaussures'));
+    expect(isKgItem('Vente moins de 5 kg', '')).toBe(KG_SEGMENTS.includes('textile_vrac'));
+    expect(isKgItem('Sacs', '')).toBe(KG_SEGMENTS.includes('consommables'));
   });
 });
 
