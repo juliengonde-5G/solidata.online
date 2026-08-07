@@ -51,6 +51,20 @@ const payIsEspeces = (col) => `(${col} ILIKE '%esp%' OR ${col} ILIKE '%cash%' OR
 // gérés par la tzdata de PostgreSQL). `col` est un nom de colonne contrôlé
 // (constantes internes), jamais une entrée utilisateur → pas d'injection.
 // ══════════════════════════════════════════
+// ══════════════════════════════════════════
+// Filtre de périmètre par caisse (2.21.3)
+// Quand `vaks.compte_caisse` est renseigné (un ou plusieurs alias séparés par
+// des virgules : nom de la colonne « Compte » du rapport CSV et/ou `username`
+// API SumUp), les agrégats de la VAK EXCLUENT les tickets dont le compte est
+// CONNU ET DIFFÉRENT (ex. « Caisse Vintiz » encaissant à la pièce pendant la
+// VAK) ; les tickets à compte NULL (API/webhook sans info) RESTENT comptés —
+// on n'exclut que ce qu'on SAIT étranger, sinon le live API disparaîtrait.
+// Le rattachement ticket→VAK n'est PAS modifié : on filtre à la LECTURE.
+// SQL généré par services/sumup.sqlPerimetreCaisse (source unique, alias de
+// tables contrôlés par le code → pas d'injection).
+// ══════════════════════════════════════════
+const perimetreCaisse = sumup.sqlPerimetreCaisse;
+
 const parisTs = (col) => `((${col} AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')`;
 const parisHour = (col) => `EXTRACT(HOUR FROM ${parisTs(col)})::INT`;
 const parisDay = (col) => `${parisTs(col)}::date`;
@@ -199,9 +213,9 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT v.*,
-        COALESCE((SELECT SUM(total_ttc) FROM vak_tickets WHERE vak_id = v.id), 0)::FLOAT AS ca_realise,
-        COALESCE((SELECT SUM(poids_kg) FROM vak_tickets WHERE vak_id = v.id), 0)::FLOAT AS poids_realise,
-        COALESCE((SELECT COUNT(*) FROM vak_tickets WHERE vak_id = v.id), 0)::INT AS nb_tickets
+        COALESCE((SELECT SUM(t.total_ttc) FROM vak_tickets t WHERE t.vak_id = v.id AND ${perimetreCaisse('v', 't')}), 0)::FLOAT AS ca_realise,
+        COALESCE((SELECT SUM(t.poids_kg) FROM vak_tickets t WHERE t.vak_id = v.id AND ${perimetreCaisse('v', 't')}), 0)::FLOAT AS poids_realise,
+        COALESCE((SELECT COUNT(*) FROM vak_tickets t WHERE t.vak_id = v.id AND ${perimetreCaisse('v', 't')}), 0)::INT AS nb_tickets
       FROM vaks v
       ORDER BY v.date_debut DESC
     `);
@@ -214,18 +228,19 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
 router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { libelle, date_debut, date_fin, lieu, latitude, longitude, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, notes } = req.body;
+    const { libelle, date_debut, date_fin, lieu, latitude, longitude, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, compte_caisse, notes } = req.body;
     if (!libelle || !date_debut || !date_fin) {
       return res.status(400).json({ error: 'libelle, date_debut et date_fin requis' });
     }
     const r = await pool.query(`
       INSERT INTO vaks (libelle, date_debut, date_fin, lieu, latitude, longitude,
-                        ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, notes, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                        ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, compte_caisse, notes, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *
     `, [libelle, date_debut, date_fin, lieu || 'Siège - Rouen',
         latitude || 49.4231, longitude || 1.0993,
-        ca_objectif_ttc || null, poids_objectif_kg || null, kg_approvisionnes || null, notes || null, req.user.id]);
+        ca_objectif_ttc || null, poids_objectif_kg || null, kg_approvisionnes || null,
+        (compte_caisse || '').trim().slice(0, 200) || null, notes || null, req.user.id]);
     // Préparer la météo en best effort
     sumup.captureWeatherForVak(r.rows[0].id).catch(() => {});
     res.status(201).json(r.rows[0]);
@@ -247,7 +262,7 @@ router.get('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 
 router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, notes } = req.body;
+    const { libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, compte_caisse, notes } = req.body;
     const r = await pool.query(`
       UPDATE vaks SET libelle = COALESCE($1, libelle),
                       date_debut = COALESCE($2, date_debut),
@@ -255,9 +270,11 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
                       lieu = COALESCE($4, lieu),
                       ca_objectif_ttc = $5, poids_objectif_kg = $6,
                       kg_approvisionnes = $7,
-                      notes = $8, updated_at = NOW()
-      WHERE id = $9 RETURNING *
-    `, [libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, notes, req.params.id]);
+                      compte_caisse = $8,
+                      notes = $9, updated_at = NOW()
+      WHERE id = $10 RETURNING *
+    `, [libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes,
+        (compte_caisse || '').trim().slice(0, 200) || null, notes, req.params.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'VAK introuvable' });
     res.json(r.rows[0]);
   } catch (err) {
@@ -283,30 +300,38 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const vakId = req.params.id;
+    // Filtre de périmètre par caisse : les lignes suivent le compte de LEUR
+    // ticket (LEFT JOIN — une ligne orpheline de ticket a un compte inconnu →
+    // comptée, doctrine « on n'exclut que le connu-différent »).
     const v = await pool.query(`
       SELECT
-        COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
-        COALESCE(SUM(total_ht),0)::FLOAT  AS ca_ht,
-        COALESCE(SUM(total_tva),0)::FLOAT AS tva_collectee,
-        COUNT(*)::INT                     AS nb_lignes,
-        COALESCE(SUM(CASE WHEN unite ILIKE '%kg%' THEN quantite END), 0)::FLOAT AS poids_kg,
-        COALESCE(SUM(CASE WHEN segment = 'textile_vrac' THEN total_ttc END), 0)::FLOAT AS ca_textile,
-        COALESCE(SUM(CASE WHEN segment = 'chaussures'   THEN total_ttc END), 0)::FLOAT AS ca_chaussures,
-        COALESCE(SUM(CASE WHEN segment = 'consommables' THEN total_ttc END), 0)::FLOAT AS ca_sacs,
-        COALESCE(SUM(CASE WHEN segment = 'consommables' THEN quantite END), 0)::INT AS nb_sacs,
-        COALESCE(SUM(remise), 0)::FLOAT AS remise_totale
-      FROM vak_ventes WHERE vak_id = $1
+        COALESCE(SUM(vv.total_ttc),0)::FLOAT AS ca_ttc,
+        COALESCE(SUM(vv.total_ht),0)::FLOAT  AS ca_ht,
+        COALESCE(SUM(vv.total_tva),0)::FLOAT AS tva_collectee,
+        COUNT(*)::INT                        AS nb_lignes,
+        COALESCE(SUM(CASE WHEN vv.unite ILIKE '%kg%' THEN vv.quantite END), 0)::FLOAT AS poids_kg,
+        COALESCE(SUM(CASE WHEN vv.segment = 'textile_vrac' THEN vv.total_ttc END), 0)::FLOAT AS ca_textile,
+        COALESCE(SUM(CASE WHEN vv.segment = 'chaussures'   THEN vv.total_ttc END), 0)::FLOAT AS ca_chaussures,
+        COALESCE(SUM(CASE WHEN vv.segment = 'consommables' THEN vv.total_ttc END), 0)::FLOAT AS ca_sacs,
+        COALESCE(SUM(CASE WHEN vv.segment = 'consommables' THEN vv.quantite END), 0)::INT AS nb_sacs,
+        COALESCE(SUM(vv.remise), 0)::FLOAT AS remise_totale
+      FROM vak_ventes vv
+      LEFT JOIN vak_tickets tk ON tk.id = vv.ticket_id
+      JOIN vaks vk ON vk.id = vv.vak_id
+      WHERE vv.vak_id = $1 AND ${perimetreCaisse('vk', 'tk')}
     `, [vakId]);
     const t = await pool.query(`
       SELECT
-        COUNT(*)::INT                                  AS nb_tickets,
-        COALESCE(AVG(total_ttc), 0)::FLOAT             AS panier_moyen,
-        COALESCE(SUM(nb_articles), 0)::INT             AS total_articles,
-        COALESCE(SUM(CASE WHEN ${payIsEspeces('moyen_paiement')} THEN total_ttc END), 0)::FLOAT AS ca_especes,
-        COALESCE(SUM(CASE WHEN ${payIsCb('moyen_paiement')} THEN total_ttc END), 0)::FLOAT AS ca_cb,
-        COUNT(CASE WHEN ${payIsEspeces('moyen_paiement')} THEN 1 END)::INT AS nb_especes,
-        COUNT(CASE WHEN ${payIsCb('moyen_paiement')} THEN 1 END)::INT AS nb_cb
-      FROM vak_tickets WHERE vak_id = $1
+        COUNT(*)::INT                                    AS nb_tickets,
+        COALESCE(AVG(t.total_ttc), 0)::FLOAT             AS panier_moyen,
+        COALESCE(SUM(t.nb_articles), 0)::INT             AS total_articles,
+        COALESCE(SUM(CASE WHEN ${payIsEspeces('t.moyen_paiement')} THEN t.total_ttc END), 0)::FLOAT AS ca_especes,
+        COALESCE(SUM(CASE WHEN ${payIsCb('t.moyen_paiement')} THEN t.total_ttc END), 0)::FLOAT AS ca_cb,
+        COUNT(CASE WHEN ${payIsEspeces('t.moyen_paiement')} THEN 1 END)::INT AS nb_especes,
+        COUNT(CASE WHEN ${payIsCb('t.moyen_paiement')} THEN 1 END)::INT AS nb_cb
+      FROM vak_tickets t
+      JOIN vaks vk ON vk.id = t.vak_id
+      WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
     `, [vakId]);
     // Approvisionnement saisi manuellement sur la session (base du taux d'écoulement)
     const meta = await pool.query('SELECT kg_approvisionnes FROM vaks WHERE id = $1', [vakId]);
@@ -351,20 +376,22 @@ router.get('/:id/analytics/hourly', authorize('ADMIN', 'MANAGER'), async (req, r
   try {
     const vakId = req.params.id;
     const byHour = await pool.query(`
-      SELECT ${parisHour('date_ticket')} AS heure,
+      SELECT ${parisHour('t.date_ticket')} AS heure,
              COUNT(*)::INT AS nb_tickets,
-             COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
-             COALESCE(SUM(poids_kg),0)::FLOAT AS poids_kg,
-             COALESCE(AVG(total_ttc),0)::FLOAT AS panier_moyen
-      FROM vak_tickets WHERE vak_id = $1
+             COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc,
+             COALESCE(SUM(t.poids_kg),0)::FLOAT AS poids_kg,
+             COALESCE(AVG(t.total_ttc),0)::FLOAT AS panier_moyen
+      FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+      WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
       GROUP BY heure ORDER BY heure
     `, [vakId]);
     const heatmap = await pool.query(`
-      SELECT ${parisDay('date_ticket')} AS jour,
-             ${parisHour('date_ticket')} AS heure,
+      SELECT ${parisDay('t.date_ticket')} AS jour,
+             ${parisHour('t.date_ticket')} AS heure,
              COUNT(*)::INT AS nb_tickets,
-             COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc
-      FROM vak_tickets WHERE vak_id = $1
+             COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc
+      FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+      WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
       GROUP BY jour, heure ORDER BY jour, heure
     `, [vakId]);
     res.json({ by_hour: byHour.rows, heatmap: heatmap.rows });
@@ -377,12 +404,15 @@ router.get('/:id/analytics/hourly', authorize('ADMIN', 'MANAGER'), async (req, r
 router.get('/:id/analytics/segments', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const r = await pool.query(`
-      SELECT segment,
-             COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
-             COALESCE(SUM(quantite),0)::FLOAT AS quantite,
+      SELECT vv.segment,
+             COALESCE(SUM(vv.total_ttc),0)::FLOAT AS ca_ttc,
+             COALESCE(SUM(vv.quantite),0)::FLOAT AS quantite,
              COUNT(*)::INT AS nb_lignes
-      FROM vak_ventes WHERE vak_id = $1
-      GROUP BY segment ORDER BY ca_ttc DESC
+      FROM vak_ventes vv
+      LEFT JOIN vak_tickets tk ON tk.id = vv.ticket_id
+      JOIN vaks vk ON vk.id = vv.vak_id
+      WHERE vv.vak_id = $1 AND ${perimetreCaisse('vk', 'tk')}
+      GROUP BY vv.segment ORDER BY ca_ttc DESC
     `, [req.params.id]);
     res.json(r.rows);
   } catch (err) {
@@ -398,13 +428,14 @@ router.get('/:id/analytics/payments', authorize('ADMIN', 'MANAGER'), async (req,
     // Regroupe sur le libellé normalisé : les tickets historiques stockés 'POS'
     // et les nouveaux stockés 'CB' fusionnent dans une seule tranche 'CB'.
     const r = await pool.query(`
-      SELECT ${payLabel('moyen_paiement')} AS moyen_paiement,
+      SELECT ${payLabel('t.moyen_paiement')} AS moyen_paiement,
              COUNT(*)::INT AS nb_tickets,
-             COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
-             COALESCE(SUM(poids_kg),0)::FLOAT AS poids_kg,
-             COALESCE(AVG(total_ttc),0)::FLOAT AS panier_moyen,
-             MAX(entry_mode) AS entry_mode_sample
-      FROM vak_tickets WHERE vak_id = $1
+             COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc,
+             COALESCE(SUM(t.poids_kg),0)::FLOAT AS poids_kg,
+             COALESCE(AVG(t.total_ttc),0)::FLOAT AS panier_moyen,
+             MAX(t.entry_mode) AS entry_mode_sample
+      FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+      WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
       GROUP BY 1 ORDER BY ca_ttc DESC
     `, [req.params.id]);
     res.json(r.rows);
@@ -423,7 +454,7 @@ router.get('/:id/analytics/comparison', authorize('ADMIN', 'MANAGER'), async (re
              COALESCE(SUM(t.poids_kg),0)::FLOAT  AS poids_kg,
              COUNT(t.id)::INT                    AS nb_tickets,
              COALESCE(AVG(t.total_ttc),0)::FLOAT AS panier_moyen
-      FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id
+      FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id AND ${perimetreCaisse('v', 't')}
       WHERE v.id = $1 GROUP BY v.id
     `, [vakId]);
     if (current.rows.length === 0) return res.status(404).json({ error: 'VAK introuvable' });
@@ -440,7 +471,7 @@ router.get('/:id/analytics/comparison', authorize('ADMIN', 'MANAGER'), async (re
              COALESCE(SUM(t.poids_kg),0)::FLOAT  AS poids_kg,
              COUNT(t.id)::INT                    AS nb_tickets,
              COALESCE(AVG(t.total_ttc),0)::FLOAT AS panier_moyen
-      FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id
+      FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id AND ${perimetreCaisse('v', 't')}
       WHERE v.date_debut >= $1 AND v.date_debut < $2
       GROUP BY v.id ORDER BY v.date_debut DESC LIMIT 1
     `, [dateNM1.toISOString().slice(0, 10), dateNM1Plus.toISOString().slice(0, 10)]);
@@ -460,7 +491,7 @@ router.get('/:id/analytics/comparison', authorize('ADMIN', 'MANAGER'), async (re
                COALESCE(SUM(t.poids_kg),0)  AS poids,
                COUNT(t.id)                  AS tickets,
                COALESCE(AVG(t.total_ttc),0) AS panier
-        FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id
+        FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id AND ${perimetreCaisse('v', 't')}
         WHERE v.id != $1
           AND v.date_debut >= $2
           AND v.date_debut <= $3
@@ -515,30 +546,36 @@ router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, r
                COUNT(CASE WHEN ${payIsCb('t.moyen_paiement')} THEN 1 END)::INT AS nb_cb,
                MIN(t.date_ticket) AS premiere_vente,
                MAX(t.date_ticket) AS derniere_vente
-        FROM vak_tickets t WHERE t.vak_id = $1
+        FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+        WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
         GROUP BY 1 ORDER BY 1
       `, [vakId]),
       pool.query(`
-        SELECT ${parisDay('date_ticket')} AS jour,
-               ${parisHour('date_ticket')} AS heure,
+        SELECT ${parisDay('t.date_ticket')} AS jour,
+               ${parisHour('t.date_ticket')} AS heure,
                COUNT(*)::INT AS nb_tickets,
-               COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
-               COALESCE(SUM(poids_kg),0)::FLOAT AS poids_kg
-        FROM vak_tickets WHERE vak_id = $1
+               COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc,
+               COALESCE(SUM(t.poids_kg),0)::FLOAT AS poids_kg
+        FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+        WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
         GROUP BY jour, heure ORDER BY jour, heure
       `, [vakId]),
       pool.query(`
-        SELECT ${parisDay('date_vente')} AS jour, segment,
-               COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc,
-               COALESCE(SUM(quantite),0)::FLOAT AS quantite
-        FROM vak_ventes WHERE vak_id = $1
-        GROUP BY jour, segment ORDER BY jour, segment
+        SELECT ${parisDay('vv.date_vente')} AS jour, vv.segment,
+               COALESCE(SUM(vv.total_ttc),0)::FLOAT AS ca_ttc,
+               COALESCE(SUM(vv.quantite),0)::FLOAT AS quantite
+        FROM vak_ventes vv
+        LEFT JOIN vak_tickets tk ON tk.id = vv.ticket_id
+        JOIN vaks vk ON vk.id = vv.vak_id
+        WHERE vv.vak_id = $1 AND ${perimetreCaisse('vk', 'tk')}
+        GROUP BY jour, vv.segment ORDER BY jour, vv.segment
       `, [vakId]),
       pool.query(`
-        SELECT ${parisDay('date_ticket')} AS jour, ${payLabel('moyen_paiement')} AS moyen_paiement,
+        SELECT ${parisDay('t.date_ticket')} AS jour, ${payLabel('t.moyen_paiement')} AS moyen_paiement,
                COUNT(*)::INT AS nb_tickets,
-               COALESCE(SUM(total_ttc),0)::FLOAT AS ca_ttc
-        FROM vak_tickets WHERE vak_id = $1
+               COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc
+        FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+        WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
         GROUP BY 1, 2 ORDER BY jour, ca_ttc DESC
       `, [vakId]),
       pool.query(`SELECT * FROM vak_meteo_quotidien WHERE vak_id = $1 ORDER BY date`, [vakId]),
@@ -581,7 +618,7 @@ router.get('/annual/overview', authorize('ADMIN', 'MANAGER'), async (req, res) =
              COALESCE(SUM(t.poids_kg),0)::FLOAT AS poids_kg,
              COUNT(t.id)::INT AS nb_tickets,
              COALESCE(AVG(t.total_ttc),0)::FLOAT AS panier_moyen
-      FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id
+      FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id AND ${perimetreCaisse('v', 't')}
       WHERE EXTRACT(YEAR FROM v.date_debut) = $1
       GROUP BY v.id ORDER BY v.date_debut
     `, [annee]);
@@ -597,7 +634,7 @@ router.get('/annual/overview', authorize('ADMIN', 'MANAGER'), async (req, res) =
                COALESCE(SUM(t.poids_kg),0)  AS poids,
                COUNT(t.id)                  AS tickets,
                COALESCE(AVG(t.total_ttc),0) AS panier
-        FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id
+        FROM vaks v LEFT JOIN vak_tickets t ON t.vak_id = v.id AND ${perimetreCaisse('v', 't')}
         WHERE EXTRACT(YEAR FROM v.date_debut) = $1
         GROUP BY v.id
       ) x
@@ -625,7 +662,7 @@ router.get('/annual/hourly-heatmap', authorize('ADMIN', 'MANAGER'), async (req, 
              COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc,
              COALESCE(SUM(t.poids_kg),0)::FLOAT AS poids_kg
       FROM vak_tickets t JOIN vaks v ON v.id = t.vak_id
-      WHERE EXTRACT(YEAR FROM v.date_debut) = $1
+      WHERE EXTRACT(YEAR FROM v.date_debut) = $1 AND ${perimetreCaisse('v', 't')}
       GROUP BY heure ORDER BY heure
     `, [annee]);
     res.json(r.rows);
@@ -642,7 +679,9 @@ router.get('/annual/segments-trend', authorize('ADMIN', 'MANAGER'), async (req, 
              COALESCE(SUM(vv.total_ttc),0)::FLOAT AS ca_ttc
       FROM vaks v
       LEFT JOIN vak_ventes vv ON vv.vak_id = v.id
+      LEFT JOIN vak_tickets vt ON vt.id = vv.ticket_id
       WHERE EXTRACT(YEAR FROM v.date_debut) = $1
+        AND ${perimetreCaisse('v', 'vt')}
       GROUP BY v.id, vv.segment
       ORDER BY v.date_debut, vv.segment
     `, [annee]);
@@ -661,7 +700,7 @@ router.get('/annual/payment-mix', authorize('ADMIN', 'MANAGER'), async (req, res
              COUNT(*)::INT AS nb_tickets,
              COALESCE(SUM(t.total_ttc),0)::FLOAT AS ca_ttc
       FROM vak_tickets t JOIN vaks v ON v.id = t.vak_id
-      WHERE EXTRACT(YEAR FROM v.date_debut) = $1
+      WHERE EXTRACT(YEAR FROM v.date_debut) = $1 AND ${perimetreCaisse('v', 't')}
       GROUP BY v.id, categorie ORDER BY v.date_debut
     `, [annee]);
     res.json(r.rows);
@@ -693,17 +732,20 @@ router.get('/live/current', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     const vak = r.rows[0];
     const counters = await pool.query(`
       SELECT
-        COALESCE(SUM(CASE WHEN ${parisDay('date_ticket')} = $1::DATE THEN total_ttc END), 0)::FLOAT AS ca_jour,
-        COALESCE(SUM(CASE WHEN ${parisDay('date_ticket')} = $1::DATE THEN poids_kg END), 0)::FLOAT AS poids_jour,
-        COUNT(CASE WHEN ${parisDay('date_ticket')} = $1::DATE THEN 1 END)::INT AS tickets_jour,
-        COALESCE(SUM(total_ttc), 0)::FLOAT AS ca_vak,
-        COALESCE(SUM(poids_kg), 0)::FLOAT AS poids_vak,
+        COALESCE(SUM(CASE WHEN ${parisDay('t.date_ticket')} = $1::DATE THEN t.total_ttc END), 0)::FLOAT AS ca_jour,
+        COALESCE(SUM(CASE WHEN ${parisDay('t.date_ticket')} = $1::DATE THEN t.poids_kg END), 0)::FLOAT AS poids_jour,
+        COUNT(CASE WHEN ${parisDay('t.date_ticket')} = $1::DATE THEN 1 END)::INT AS tickets_jour,
+        COALESCE(SUM(t.total_ttc), 0)::FLOAT AS ca_vak,
+        COALESCE(SUM(t.poids_kg), 0)::FLOAT AS poids_vak,
         COUNT(*)::INT AS tickets_vak
-      FROM vak_tickets WHERE vak_id = $2
+      FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+      WHERE t.vak_id = $2 AND ${perimetreCaisse('vk', 't')}
     `, [today, vak.id]);
     const recent = await pool.query(`
-      SELECT id, ref_transaction, date_ticket, moyen_paiement, nb_articles, poids_kg, total_ttc
-      FROM vak_tickets WHERE vak_id = $1 ORDER BY date_ticket DESC LIMIT 10
+      SELECT t.id, t.ref_transaction, t.date_ticket, t.moyen_paiement, t.nb_articles, t.poids_kg, t.total_ttc
+      FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+      WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
+      ORDER BY t.date_ticket DESC LIMIT 10
     `, [vak.id]);
     const meteo = await pool.query(`
       SELECT * FROM vak_meteo_quotidien WHERE vak_id = $1 AND date = $2::DATE
@@ -724,10 +766,14 @@ router.get('/live/current', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // ──────────────────────────────────────────
 // Tickets et ventes brutes (debug + export)
 // ──────────────────────────────────────────
+// Le périmètre par caisse s'applique aussi à ces listes brutes (export) : ce
+// que l'utilisateur exporte correspond à ce que les KPI comptent.
 router.get('/:id/tickets', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const r = await pool.query(`
-      SELECT * FROM vak_tickets WHERE vak_id = $1 ORDER BY date_ticket DESC LIMIT 1000
+      SELECT t.* FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+      WHERE t.vak_id = $1 AND ${perimetreCaisse('vk', 't')}
+      ORDER BY t.date_ticket DESC LIMIT 1000
     `, [req.params.id]);
     res.json(r.rows);
   } catch (err) {
@@ -739,8 +785,11 @@ router.get('/:id/ventes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { limit = 500, offset = 0 } = req.query;
     const r = await pool.query(`
-      SELECT * FROM vak_ventes WHERE vak_id = $1
-      ORDER BY date_vente DESC LIMIT $2 OFFSET $3
+      SELECT vv.* FROM vak_ventes vv
+      LEFT JOIN vak_tickets tk ON tk.id = vv.ticket_id
+      JOIN vaks vk ON vk.id = vv.vak_id
+      WHERE vv.vak_id = $1 AND ${perimetreCaisse('vk', 'tk')}
+      ORDER BY vv.date_vente DESC LIMIT $2 OFFSET $3
     `, [req.params.id, parseInt(limit), parseInt(offset)]);
     res.json(r.rows);
   } catch (err) {

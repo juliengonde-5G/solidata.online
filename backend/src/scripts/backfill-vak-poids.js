@@ -41,7 +41,7 @@
  */
 
 const pool = require('../config/database');
-const { isKgItem } = require('../services/sumup');
+const { isKgItem, parseKgPrefix, getSegment } = require('../services/sumup');
 
 const API_SOURCES = ['api_sumup', 'webhook_sumup'];
 
@@ -75,21 +75,73 @@ const API_SOURCES = ['api_sumup', 'webhook_sumup'];
  * vrai 1,000 kg pesé → requalifiée 'kg' (sinon elle tombait entre les deux
  * filets, resync-vak-details ne sélectionnant que les tickets à 0/1 ligne).
  * `nb_lignes_ticket` = nombre TOTAL de lignes du ticket (défaut 1 si absent).
+ *
+ * POIDS DANS LE TEXTE (2.21.3 — forme RÉELLE de l'API en prod, transaction
+ * TAAA4NPRDAC) : la caisse SumUp nomme les articles pesés « X kg <libellé> »
+ * (name produit « 3,88 kg Vente Moins de 5 Kg », quantity toujours 1 ;
+ * product_summary « 1 x 3,88 kg Vente… » recopié dans la description des
+ * lignes synthétiques). Quand la description stockée porte ce préfixe MONO-
+ * article (parseKgPrefix), le poids RÉEL est LISIBLE dans le texte → verdict
+ * 'kg_texte' : unite = 'kg' ET quantite = poids extrait (signé). La garde
+ * d'ambiguïté |qté| = 1 NE S'APPLIQUE PLUS ici — le texte fait foi, il n'y a
+ * plus rien à inventer. Un résumé synthétique MULTI-articles (« …, 2 x … »)
+ * n'est jamais parsé (poids par article inconnu) : c'est le script
+ * repair-vak-from-report.js (rapport CSV) ou resync-vak-details.js (API) qui
+ * reconstruit ses vraies lignes. Réservé aux sources API/webhook : côté CSV,
+ * les colonnes Quantité/Unité explicites font foi, jamais le libellé.
  */
 function classifierRequalification(ligne) {
   const apiSource = API_SOURCES.includes(String(ligne.source || '').trim());
+  const uniteKg = String(ligne.unite || '').toLowerCase().includes('kg');
   if (apiSource) {
-    // API/webhook : le 'pce' stocké était un défaut du code (SumUp ne fournit
-    // pas d'unité) → inférence par le libellé seul (segments au poids
-    // KG_SEGMENTS = textile_vrac + chaussures, cf. services/sumup.js).
+    // 1. Poids encodé dans le texte de la description (prioritaire — lisible,
+    //    donc la garde d'ambiguïté ne s'applique pas).
+    const prefix = parseKgPrefix(ligne.description);
+    if (prefix) {
+      if (!uniteKg) return 'kg_texte';
+      // Déjà 'kg' mais quantité ≠ poids du texte (ex. requalifiée qté 1 par le
+      // backfill v2.20.0 alors que le texte dit 3,88 kg) → corrigée. Tolérance
+      // 0,0005 : quantite est un NUMERIC(10,3) arrondi en base.
+      const q = Math.abs(Number(ligne.quantite) || 0);
+      return Math.abs(q - prefix.poids) > 0.0005 ? 'kg_texte' : 'inchangee';
+    }
+    if (uniteKg) return 'inchangee'; // déjà au kilo, rien dans le texte
+    // 2. API/webhook : le 'pce' stocké était un défaut du code (SumUp ne
+    //    fournit pas d'unité) → inférence par le libellé seul (segments au
+    //    poids KG_SEGMENTS = textile_vrac + chaussures, cf. services/sumup.js).
     if (!isKgItem(ligne.description, '')) return 'inchangee';
     const nbLignes = Number(ligne.nb_lignes_ticket) || 1;
     if (nbLignes <= 1 && Math.abs(Number(ligne.quantite) || 0) === 1) return 'ambigue';
     return 'kg';
   }
+  if (uniteKg) return 'inchangee';
   // CSV (et autres) : l'unité stockée fait foi (isKgItem ne requalifie que si
   // elle est vide et que le libellé tombe dans un segment au poids).
   return isKgItem(ligne.description, ligne.unite) ? 'kg' : 'inchangee';
+}
+
+/**
+ * Nouvelle valeur d'une ligne 'kg_texte' (PURE) : quantité = poids extrait du
+ * texte, SIGNÉE comme la ligne d'origine (un remboursement synthétique stocké
+ * quantité −1 redevient −poids), segment recalculé sur le libellé débarrassé
+ * du préfixe, prix unitaire = €/kg réel (total TTC ÷ poids) quand calculable.
+ * La description stockée n'est PAS réécrite (le texte est la preuve du poids).
+ */
+function valeursDepuisTexte(ligne) {
+  const prefix = parseKgPrefix(ligne.description);
+  if (!prefix) return null;
+  const q = Number(ligne.quantite) || 0;
+  const ttc = Number(ligne.total_ttc) || 0;
+  const sign = q < 0 || (q === 0 && ttc < 0) ? -1 : 1;
+  const quantite = sign * prefix.poids;
+  const prixKg = prefix.poids > 0 && ttc !== 0
+    ? Math.round((Math.abs(ttc) / prefix.poids) * 100) / 100 * sign
+    : null;
+  return {
+    quantite,
+    segment: getSegment(prefix.libelle),
+    prix_unitaire_ttc: prixKg,
+  };
 }
 
 function fmt(n, dec = 3) {
@@ -122,26 +174,36 @@ async function main() {
     const avant = await snapshotParVak(client);
 
     // ── 1. Requalification des lignes vendues au kilo ────────────────────────
-    // Chargement des lignes candidates (unité ne contenant pas déjà 'kg') ;
-    // la décision par ligne est portée par classifierRequalification (pure,
-    // testée) : segments au poids textile_vrac + chaussures, garde
-    // d'ambiguïté |qté| = 1 sur les sources API/webhook (englobe l'ancienne
-    // détection de la ligne GLOBALE SYNTHÉTIQUE du fallback d'ingestion).
+    // Candidates : (a) unité ne contenant pas déjà 'kg' (règles historiques),
+    // (b) lignes API/webhook dont la DESCRIPTION porte un préfixe « X kg »
+    // (2.21.3 — y compris déjà 'kg' : une ligne requalifiée qté 1 par le
+    // backfill v2.20.0 alors que le texte dit « 3,88 kg » doit être corrigée).
+    // La décision par ligne est portée par classifierRequalification (pure,
+    // testée) : 'kg_texte' (poids lisible dans le texte, prioritaire),
+    // 'kg' (inférence segments au poids textile_vrac + chaussures), 'ambigue'
+    // (|qté| = 1 mono-ligne API — jamais touchée), 'inchangee'.
     const lignes = await client.query(`
-      SELECT vv.id, vv.description, vv.unite, vv.source, vv.quantite::FLOAT AS quantite,
+      SELECT vv.id, vv.description, vv.unite, vv.source,
+             vv.quantite::FLOAT AS quantite, vv.total_ttc::FLOAT AS total_ttc,
              COALESCE((
                SELECT COUNT(*) FROM vak_ventes x WHERE x.ticket_id = vv.ticket_id
              ), 1)::INT AS nb_lignes_ticket
       FROM vak_ventes vv
       WHERE COALESCE(vv.unite, '') NOT ILIKE '%kg%'
-    `);
+         OR (vv.source = ANY($1)
+             AND vv.description ~* '^\\s*(1\\s*[x×]\\s*)?[0-9]+([.,][0-9]+)?\\s*kg\\s')
+    `, [API_SOURCES]);
 
     const idsAKg = [];
+    const lignesTexte = []; // { id, quantite, segment, prix_unitaire_ttc }
     let lignesAmbigues = 0;
     for (const l of lignes.rows) {
       const verdict = classifierRequalification(l);
       if (verdict === 'kg') idsAKg.push(l.id);
-      else if (verdict === 'ambigue') lignesAmbigues++;
+      else if (verdict === 'kg_texte') {
+        const v = valeursDepuisTexte(l);
+        if (v) lignesTexte.push({ id: l.id, ...v });
+      } else if (verdict === 'ambigue') lignesAmbigues++;
     }
 
     let lignesRequalifiees = 0;
@@ -151,6 +213,23 @@ async function main() {
         [idsAKg],
       );
       lignesRequalifiees = upd.rowCount;
+    }
+
+    // 'kg_texte' : le poids RÉEL est lu dans la description (« 3,88 kg Vente
+    // Moins de 5 Kg ») → unité kg + quantité = poids signé + €/kg recalculé.
+    // La description est conservée telle quelle (preuve du poids) ; idempotent
+    // (au run suivant, quantité == poids du texte → 'inchangee').
+    let lignesTexteCorrigees = 0;
+    for (const lt of lignesTexte) {
+      const upd = await client.query(`
+        UPDATE vak_ventes SET
+          unite = 'kg',
+          quantite = $1,
+          segment = $2,
+          prix_unitaire_ttc = COALESCE($3, prix_unitaire_ttc)
+        WHERE id = $4
+      `, [lt.quantite, lt.segment, lt.prix_unitaire_ttc, lt.id]);
+      lignesTexteCorrigees += upd.rowCount;
     }
 
     // ── 2. Recalcul du poids des tickets depuis leurs lignes (somme signée) ──
@@ -194,6 +273,7 @@ async function main() {
     console.log(`BACKFILL POIDS VAK ${dryRun ? '— MODE SIMULATION (--dry-run, aucun écrit)' : ''}`);
     console.log('─'.repeat(78));
     console.log(`Lignes vak_ventes requalifiées en 'kg' : ${lignesRequalifiees}`);
+    console.log(`Lignes corrigées depuis le TEXTE (« X kg <libellé> », poids réel lu dans la description) : ${lignesTexteCorrigees}`);
     if (lignesAmbigues > 0) {
       console.log(`Lignes AMBIGUËS non touchées (|qté|=1) : ${lignesAmbigues} — libellé au poids mais quantité 1 pile sur source API/webhook (forme synthétique, vente à la pièce historique ou vraie vente de 1,000 kg — indistinguables) ; resync-vak-details.js relit la vérité chez SumUp.`);
     }
@@ -234,8 +314,8 @@ async function main() {
   }
 }
 
-// Exporte la fonction PURE de décision pour les tests (aucune DB dedans).
-module.exports = { classifierRequalification };
+// Exporte les fonctions PURES de décision pour les tests (aucune DB dedans).
+module.exports = { classifierRequalification, valeursDepuisTexte };
 
 if (require.main === module) {
   main();

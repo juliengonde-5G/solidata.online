@@ -470,3 +470,184 @@ describe('sumup — fetchTransactionDetailStrict (cascade des formes du « retri
     expect(hasProductItems(null)).toBe(false);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 2.21.3 — Poids encodé dans le NOM du produit (forme RÉELLE de l'API en prod)
+// Diagnostic production, transaction TAAA4NPRDAC (marchand FRIP & CO) : pour
+// un article pesé, le produit s'appelle « 3,88 kg Vente Moins de 5 Kg » avec
+// quantity = 1 — le poids est dans le TEXTE, pas dans la quantité. Les prix
+// portent le HT dans price/total_price et le TTC dans *_with_vat ; vat_rate
+// est FRACTIONNAIRE (0.2).
+// ══════════════════════════════════════════════════════════════════════════
+const { parseKgPrefix, extractCompteCaisse, compteDansPerimetre, sqlPerimetreCaisse } = require('../../../src/services/sumup');
+
+describe('sumup — parseKgPrefix (poids dans le nom du produit)', () => {
+  test('« 3,88 kg Vente Moins de 5 Kg » → 3,88 kg + libellé nettoyé', () => {
+    expect(parseKgPrefix('3,88 kg Vente Moins de 5 Kg'))
+      .toEqual({ poids: 3.88, libelle: 'Vente Moins de 5 Kg' });
+    expect(parseKgPrefix('10.575 kg Vente Plus de 5 kilos'))
+      .toEqual({ poids: 10.575, libelle: 'Vente Plus de 5 kilos' });
+    expect(parseKgPrefix('1,595 kg Chaussures'))
+      .toEqual({ poids: 1.595, libelle: 'Chaussures' });
+  });
+
+  test('forme product_summary « 1 x 3,88 kg Vente… » → même extraction', () => {
+    expect(parseKgPrefix('1 x 3,88 kg Vente Moins de 5 Kg'))
+      .toEqual({ poids: 3.88, libelle: 'Vente Moins de 5 Kg' });
+  });
+
+  test('résumé MULTI-articles → null (poids par article inconnu, jamais parsé)', () => {
+    expect(parseKgPrefix('1 x 3,88 kg Vente Moins de 5 Kg, 2 x Sacs')).toBeNull();
+  });
+
+  test('libellés sans préfixe poids → null (Sacs, Vintiz, libellés legacy)', () => {
+    expect(parseKgPrefix('Sacs')).toBeNull();
+    expect(parseKgPrefix('Vente Vintiz #12')).toBeNull();
+    expect(parseKgPrefix('Vente moins de 5 kg')).toBeNull(); // pas de nombre en tête
+    expect(parseKgPrefix('')).toBeNull();
+    expect(parseKgPrefix(null)).toBeNull();
+    expect(parseKgPrefix('0 kg Vente')).toBeNull(); // poids nul → pas un poids
+  });
+});
+
+describe('sumup — mapSumUpTransaction (fixture réelle TAAA4NPRDAC : poids au nom, HT/TTC, vat_rate 0.2)', () => {
+  const detail = {
+    id: 'tx-prd-1', transaction_code: 'TAAA4NPRDAC', type: 'PAYMENT', status: 'SUCCESSFUL',
+    amount: 27.16, payment_type: 'POS', username: 'caisse@fripandco.fr',
+    products: [{
+      name: '3,88 kg Vente Moins de 5 Kg', quantity: 1,
+      price: 22.63, total_price: 22.63,
+      price_with_vat: 27.16, total_with_vat: 27.16,
+      vat_rate: 0.2, vat_amount: 4.53,
+    }],
+  };
+
+  test('poids = 3,88 kg lu dans le NOM (quantity 1 ignorée), unité kg stockée', () => {
+    const m = mapSumUpTransaction(detail, detail);
+    expect(m.poidsTicket).toBeCloseTo(3.88, 3);
+    expect(m.lignes).toHaveLength(1);
+    expect(m.lignes[0].unite).toBe('kg');
+    expect(m.lignes[0].quantite).toBeCloseTo(3.88, 3);
+    expect(m.lignes[0].description).toBe('Vente Moins de 5 Kg');
+    expect(m.lignes[0].segment).toBe('textile_vrac');
+  });
+
+  test('TTC = total_with_vat (27,16 — pas le HT 22,63), HT/TVA réels, taux 0.2 → 20', () => {
+    const m = mapSumUpTransaction(detail, detail);
+    expect(m.totalTTC).toBeCloseTo(27.16, 2);
+    expect(m.totalHT).toBeCloseTo(22.63, 2);
+    expect(m.totalTVA).toBeCloseTo(4.53, 2);
+    expect(m.lignes[0].total_ttc).toBeCloseTo(27.16, 2);
+    expect(m.lignes[0].taux_tva).toBeCloseTo(20, 2);
+  });
+
+  test('prix unitaire = €/kg réel (27,16 ÷ 3,88 = 7,00)', () => {
+    const m = mapSumUpTransaction(detail, detail);
+    expect(m.lignes[0].prix_unitaire_ttc).toBeCloseTo(7.0, 2);
+  });
+
+  test('compte = username top-level (identifiant de caisse pour le filtre de périmètre)', () => {
+    const m = mapSumUpTransaction(detail, detail);
+    expect(m.compte).toBe('caisse@fripandco.fr');
+  });
+
+  test('fallback SANS produits : product_summary mono-article « 1 x 3,88 kg… » → vraie ligne kg', () => {
+    const resume = {
+      transaction_code: 'TAAA4NPRDAC', type: 'PAYMENT', amount: 27.16,
+      payment_type: 'POS', product_summary: '1 x 3,88 kg Vente Moins de 5 Kg',
+    };
+    const m = mapSumUpTransaction(resume, resume);
+    expect(m.hasRealItems).toBe(false); // reste « sans détail » (garde anti-dégradation)
+    expect(m.poidsTicket).toBeCloseTo(3.88, 3);
+    expect(m.lignes[0].unite).toBe('kg');
+    expect(m.lignes[0].quantite).toBeCloseTo(3.88, 3);
+    expect(m.lignes[0].synthetic).toBeUndefined(); // poids réel lu, pas un artefact
+  });
+
+  test('fallback SANS produits : résumé multi-articles → ligne synthétique pce (jamais de poids inventé)', () => {
+    const resume = {
+      transaction_code: 'TX-MULTI', type: 'PAYMENT', amount: 30,
+      product_summary: '1 x 3,88 kg Vente Moins de 5 Kg, 2 x Sacs',
+    };
+    const m = mapSumUpTransaction(resume, resume);
+    expect(m.poidsTicket).toBe(0);
+    expect(m.lignes[0].unite).toBe('pce');
+    expect(m.lignes[0].synthetic).toBe(true);
+  });
+
+  test('remboursement au nom préfixé → poids et montants négatifs', () => {
+    const refund = { ...detail, id: 'tx-prd-2', transaction_code: 'RF-PRD', type: 'REFUND' };
+    const m = mapSumUpTransaction(refund, refund);
+    expect(m.poidsTicket).toBeCloseTo(-3.88, 3);
+    expect(m.totalTTC).toBeCloseTo(-27.16, 2);
+    expect(m.lignes[0].quantite).toBeCloseTo(-3.88, 3);
+  });
+
+  test('régression : forme legacy (poids dans quantity, total_price = TTC) inchangée', () => {
+    const legacy = {
+      transaction_code: 'OK-LEG', type: 'PAYMENT', amount: 8, payment_type: 'POS',
+      products: [{ name: 'Vente moins de 5 kg', price: 2.5, quantity: 3.2, total_price: 8, vat_rate: 20 }],
+    };
+    const m = mapSumUpTransaction(legacy, legacy);
+    expect(m.poidsTicket).toBeCloseTo(3.2, 3);
+    expect(m.lignes[0].total_ttc).toBeCloseTo(8, 2);
+    expect(m.lignes[0].taux_tva).toBe(20);
+  });
+});
+
+describe('sumup — extractCompteCaisse (ce que l\'API expose comme identifiant de caisse)', () => {
+  test('username top-level (forme constatée en prod) prioritaire', () => {
+    expect(extractCompteCaisse({ username: 'caisse@fripandco.fr' })).toBe('caisse@fripandco.fr');
+  });
+
+  test('replis défensifs : user chaîne ou objet { email }', () => {
+    expect(extractCompteCaisse({ user: 'operateur@x.fr' })).toBe('operateur@x.fr');
+    expect(extractCompteCaisse({ user: { email: 'e@x.fr', name: 'E' } })).toBe('e@x.fr');
+    expect(extractCompteCaisse({}, { username: 'second@x.fr' })).toBe('second@x.fr');
+  });
+
+  test('charge webhook minimale sans identifiant → null (compte inconnu, ticket compté)', () => {
+    expect(extractCompteCaisse({ id: 'tx', amount: 5 })).toBeNull();
+    expect(extractCompteCaisse(null, undefined)).toBeNull();
+    expect(extractCompteCaisse({ username: '   ' })).toBeNull();
+  });
+});
+
+describe('sumup — compteDansPerimetre (sémantique du filtre par caisse)', () => {
+  test('pas de filtre configuré → tout compté', () => {
+    expect(compteDansPerimetre(null, 'Caisse Vintiz')).toBe(true);
+    expect(compteDansPerimetre('', 'Caisse Vintiz')).toBe(true);
+  });
+
+  test('compte inconnu (NULL/vide) → JAMAIS exclu (sinon le live API disparaîtrait)', () => {
+    expect(compteDansPerimetre('Caissier Frip & Co', null)).toBe(true);
+    expect(compteDansPerimetre('Caissier Frip & Co', '')).toBe(true);
+    expect(compteDansPerimetre('Caissier Frip & Co', '  ')).toBe(true);
+  });
+
+  test('compte CONNU ET DIFFÉRENT → exclu (Vintiz hors KPI VAK)', () => {
+    expect(compteDansPerimetre('Caissier Frip & Co', 'Caisse Vintiz')).toBe(false);
+    expect(compteDansPerimetre('Caissier Frip & Co', 'Delestre Antoine')).toBe(false);
+  });
+
+  test('compte égal (insensible casse/espaces) → compté', () => {
+    expect(compteDansPerimetre('Caissier Frip & Co', 'caissier frip & co')).toBe(true);
+    expect(compteDansPerimetre(' Caissier Frip & Co ', 'Caissier Frip & Co')).toBe(true);
+  });
+
+  test('liste d\'ALIAS (nom du rapport CSV + username API, séparés par des virgules)', () => {
+    const aliases = 'Caissier Frip & Co, caisse@fripandco.fr';
+    expect(compteDansPerimetre(aliases, 'Caissier Frip & Co')).toBe(true);
+    expect(compteDansPerimetre(aliases, 'caisse@fripandco.fr')).toBe(true);
+    expect(compteDansPerimetre(aliases, 'Caisse Vintiz')).toBe(false);
+    expect(compteDansPerimetre(aliases, null)).toBe(true);
+  });
+
+  test('sqlPerimetreCaisse : prédicat SQL miroir (NULL passe, connu-différent exclu)', () => {
+    const sql = sqlPerimetreCaisse('vk', 't');
+    expect(sql).toContain('vk.compte_caisse');
+    expect(sql).toContain('t.compte');
+    expect(sql).toContain('IS NULL OR'); // pas de filtre / compte inconnu → compté
+    expect(sql).toContain('= ANY');      // liste d'alias
+  });
+});
