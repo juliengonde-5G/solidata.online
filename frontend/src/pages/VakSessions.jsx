@@ -43,6 +43,7 @@ export default function VakSessions() {
       ca_objectif_ttc: '',
       poids_objectif_kg: '',
       kg_approvisionnes: '',
+      compte_caisse: '',
       notes: '',
     });
     setModalOpen(true);
@@ -56,6 +57,7 @@ export default function VakSessions() {
       ca_objectif_ttc: v.ca_objectif_ttc || '',
       poids_objectif_kg: v.poids_objectif_kg || '',
       kg_approvisionnes: v.kg_approvisionnes || '',
+      compte_caisse: v.compte_caisse || '',
     });
     setModalOpen(true);
   }
@@ -74,6 +76,7 @@ export default function VakSessions() {
         ca_objectif_ttc: editing.ca_objectif_ttc || null,
         poids_objectif_kg: editing.poids_objectif_kg || null,
         kg_approvisionnes: editing.kg_approvisionnes || null,
+        compte_caisse: (editing.compte_caisse || '').trim() || null,
         notes: editing.notes,
       };
       if (editing.id) {
@@ -172,6 +175,17 @@ export default function VakSessions() {
                 Kilos de textile préparés/mis en rayon pour cette VAK. Sert au calcul du <strong>taux d'écoulement</strong> (kg vendus ÷ kg approvisionnés). Saisie manuelle : aucune source stock n'est rattachée à une VAK de détail.
               </p>
             </div>
+            <div>
+              <FormField label="Caisse SumUp de l'événement (colonne Compte du rapport)" value={editing.compte_caisse || ''}
+                onChange={(e) => setEditing({ ...editing, compte_caisse: e.target.value })} />
+              <p className="text-xs text-slate-500 mt-1">
+                Optionnel — filtre les KPI de la session sur cette caisse. Saisir la valeur de la colonne <strong>« Compte »</strong> du
+                rapport des ventes SumUp (ex. <em>Caissier Frip &amp; Co</em>) ; plusieurs alias possibles séparés par des virgules
+                (nom de caisse du rapport et/ou identifiant employé SumUp). Les tickets encaissés par une <strong>autre</strong> caisse
+                connue (ex. <em>Caisse Vintiz</em>) sont exclus des indicateurs ; les tickets sans compte (API sans info) restent comptés.
+                Laisser vide = aucune exclusion.
+              </p>
+            </div>
             <FormField type="textarea" label="Notes" value={editing.notes || ''}
               onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
             <div className="flex justify-end gap-2 pt-2">
@@ -217,6 +231,7 @@ function SessionsTab({ vaks, onCreate, onEdit, onDelete }) {
                 <th className="text-left py-3 px-4">Libellé</th>
                 <th className="text-left py-3 px-4">Période</th>
                 <th className="text-left py-3 px-4">Lieu</th>
+                <th className="text-left py-3 px-4">Caisse</th>
                 <th className="text-right py-3 px-4">CA réalisé</th>
                 <th className="text-right py-3 px-4">Objectif</th>
                 <th className="text-right py-3 px-4">% atteinte</th>
@@ -237,6 +252,9 @@ function SessionsTab({ vaks, onCreate, onEdit, onDelete }) {
                       {formatDate(v.date_debut)} → {formatDate(v.date_fin)}
                     </td>
                     <td className="py-3 px-4 text-slate-500">{v.lieu}</td>
+                    <td className="py-3 px-4 text-slate-500 text-xs" title={v.compte_caisse ? `KPI filtrés sur : ${v.compte_caisse}` : 'Pas de filtre par caisse'}>
+                      {v.compte_caisse || '—'}
+                    </td>
                     <td className="py-3 px-4 text-right font-semibold">{formatEuro(real)}</td>
                     <td className="py-3 px-4 text-right text-slate-500">{obj > 0 ? formatEuro(obj) : '—'}</td>
                     <td className={`py-3 px-4 text-right font-medium ${pct === null ? 'text-slate-400' : pct >= 100 ? 'text-green-600' : pct >= 80 ? 'text-amber-600' : 'text-red-600'}`}>

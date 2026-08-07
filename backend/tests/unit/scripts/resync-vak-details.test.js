@@ -147,3 +147,44 @@ describe('resync-vak-details — parseArgs', () => {
     expect(parseArgs(['--rate=0.1']).rate).toBe(0.5);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 2.21.3 — reconstruction depuis la forme RÉELLE de l'API en prod (diagnostic
+// TAAA4NPRDAC) : poids dans le NOM du produit (« 3,88 kg Vente Moins de 5 Kg »,
+// quantity 1), HT dans price/total_price, TTC dans *_with_vat, vat_rate 0.2.
+// computeRebuildFromDetail passe par mapSumUpTransaction → doit lire le poids
+// du texte et le TTC réel.
+// ══════════════════════════════════════════════════════════════════════════
+describe('resync-vak-details — fixture réelle TAAA4NPRDAC (poids au nom du produit)', () => {
+  const ticket = {
+    id: 77, vak_id: 3, batch_id: null, source: 'api_sumup',
+    ref_transaction: 'TAAA4NPRDAC', sumup_transaction_id: 'tx-prd-1',
+    date_ticket: new Date('2026-07-10T09:30:00Z'),
+    poids_kg: 1, // ligne synthétique requalifiée kg qté 1 (poids faux)
+    total_ttc: 27.16,
+  };
+  const detail = {
+    id: 'tx-prd-1', transaction_code: 'TAAA4NPRDAC', type: 'PAYMENT', status: 'SUCCESSFUL',
+    amount: 27.16, payment_type: 'POS', username: 'caisse@fripandco.fr',
+    products: [{
+      name: '3,88 kg Vente Moins de 5 Kg', quantity: 1,
+      price: 22.63, total_price: 22.63,
+      price_with_vat: 27.16, total_with_vat: 27.16,
+      vat_rate: 0.2, vat_amount: 4.53,
+    }],
+  };
+
+  test('poids 1 → 3,88 kg (texte du nom), TTC 27,16 (pas le HT), €/kg 7,00', () => {
+    const r = computeRebuildFromDetail(ticket, detail);
+    expect(r.hasRealItems).toBe(true);
+    expect(r.poids_kg).toBeCloseTo(3.88, 3);
+    expect(r.total_ttc).toBeCloseTo(27.16, 2);
+    expect(r.total_ht).toBeCloseTo(22.63, 2);
+    expect(r.total_tva).toBeCloseTo(4.53, 2);
+    expect(r.lignes[0].unite).toBe('kg');
+    expect(r.lignes[0].quantite).toBeCloseTo(3.88, 3);
+    expect(r.lignes[0].prix_unitaire_ttc).toBeCloseTo(7.0, 2);
+    expect(r.lignes[0].segment).toBe('textile_vrac');
+    expect(r.moyen_paiement).toBe('CB');
+  });
+});

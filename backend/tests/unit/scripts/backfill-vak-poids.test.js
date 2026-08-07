@@ -107,3 +107,66 @@ describe('backfill-vak-poids — classifierRequalification (extension chaussures
     })).toBe('kg');
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 2.21.3 — verdict 'kg_texte' : le poids RÉEL est LISIBLE dans la description
+// (forme API prod TAAA4NPRDAC : name « 3,88 kg Vente Moins de 5 Kg »,
+// product_summary « 1 x 3,88 kg… » recopié dans les lignes synthétiques).
+// La garde d'ambiguïté |qté| = 1 ne s'applique plus : le texte fait foi.
+// ══════════════════════════════════════════════════════════════════════════
+const { valeursDepuisTexte } = require('../../../src/scripts/backfill-vak-poids');
+
+describe('backfill-vak-poids — kg_texte (poids lisible dans la description)', () => {
+  test('ligne synthétique « 1 x 3,88 kg Vente… » pce qté 1 (api) → kg_texte (plus d\'ambiguïté)', () => {
+    expect(classifierRequalification({
+      description: '1 x 3,88 kg Vente Moins de 5 Kg', unite: 'pce', source: 'api_sumup', quantite: 1,
+    })).toBe('kg_texte');
+  });
+
+  test('ligne requalifiée kg qté 1 par le backfill v2.20.0 mais texte « 3,88 kg » → kg_texte (corrigée)', () => {
+    expect(classifierRequalification({
+      description: '3,88 kg Vente Moins de 5 Kg', unite: 'kg', source: 'api_sumup', quantite: 1,
+    })).toBe('kg_texte');
+  });
+
+  test('idempotence : quantité déjà égale au poids du texte → inchangée', () => {
+    expect(classifierRequalification({
+      description: '3,88 kg Vente Moins de 5 Kg', unite: 'kg', source: 'api_sumup', quantite: 3.88,
+    })).toBe('inchangee');
+    expect(classifierRequalification({
+      description: '3,88 kg Vente Moins de 5 Kg', unite: 'kg', source: 'webhook_sumup', quantite: -3.88,
+    })).toBe('inchangee'); // remboursement déjà corrigé (comparaison en |valeur|)
+  });
+
+  test('résumé synthétique MULTI-articles → jamais parsé, retombe sur la garde ambiguë', () => {
+    // « …, 2 x Sacs » : poids par article inconnu — c'est repair-vak-from-report.js
+    // (rapport CSV) ou resync-vak-details.js qui reconstruit les vraies lignes.
+    expect(classifierRequalification({
+      description: '1 x 3,88 kg Vente Moins de 5 Kg, 2 x Sacs', unite: 'pce', source: 'api_sumup', quantite: 1,
+    })).toBe('ambigue');
+  });
+
+  test('source CSV : les colonnes Quantité/Unité explicites font foi, jamais le libellé', () => {
+    expect(classifierRequalification({
+      description: '3,88 kg Vente Moins de 5 Kg', unite: 'pce', source: 'csv_manuel', quantite: 1,
+    })).toBe('inchangee');
+  });
+
+  test('valeursDepuisTexte : quantité signée, segment recalculé, €/kg réel', () => {
+    expect(valeursDepuisTexte({
+      description: '3,88 kg Vente Moins de 5 Kg', unite: 'kg', quantite: 1, total_ttc: 27.16,
+    })).toEqual({ quantite: 3.88, segment: 'textile_vrac', prix_unitaire_ttc: 7 });
+    // Remboursement synthétique stocké qté −1 → poids négatif, €/kg négatif
+    const remb = valeursDepuisTexte({
+      description: '1 x 2 kg Vente Moins de 5 Kg', unite: 'pce', quantite: -1, total_ttc: -5,
+    });
+    expect(remb.quantite).toBeCloseTo(-2, 3);
+    expect(remb.prix_unitaire_ttc).toBeCloseTo(-2.5, 2);
+    // Chaussures au nom préfixé → segment chaussures
+    expect(valeursDepuisTexte({
+      description: '1,595 kg Chaussures', unite: 'pce', quantite: 1, total_ttc: 4.79,
+    }).segment).toBe('chaussures');
+    // Pas de préfixe → null (aucune valeur inventée)
+    expect(valeursDepuisTexte({ description: 'Sacs', unite: 'pce', quantite: 2, total_ttc: 0.3 })).toBeNull();
+  });
+});

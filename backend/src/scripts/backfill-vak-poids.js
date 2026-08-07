@@ -174,26 +174,36 @@ async function main() {
     const avant = await snapshotParVak(client);
 
     // ── 1. Requalification des lignes vendues au kilo ────────────────────────
-    // Chargement des lignes candidates (unité ne contenant pas déjà 'kg') ;
-    // la décision par ligne est portée par classifierRequalification (pure,
-    // testée) : segments au poids textile_vrac + chaussures, garde
-    // d'ambiguïté |qté| = 1 sur les sources API/webhook (englobe l'ancienne
-    // détection de la ligne GLOBALE SYNTHÉTIQUE du fallback d'ingestion).
+    // Candidates : (a) unité ne contenant pas déjà 'kg' (règles historiques),
+    // (b) lignes API/webhook dont la DESCRIPTION porte un préfixe « X kg »
+    // (2.21.3 — y compris déjà 'kg' : une ligne requalifiée qté 1 par le
+    // backfill v2.20.0 alors que le texte dit « 3,88 kg » doit être corrigée).
+    // La décision par ligne est portée par classifierRequalification (pure,
+    // testée) : 'kg_texte' (poids lisible dans le texte, prioritaire),
+    // 'kg' (inférence segments au poids textile_vrac + chaussures), 'ambigue'
+    // (|qté| = 1 mono-ligne API — jamais touchée), 'inchangee'.
     const lignes = await client.query(`
-      SELECT vv.id, vv.description, vv.unite, vv.source, vv.quantite::FLOAT AS quantite,
+      SELECT vv.id, vv.description, vv.unite, vv.source,
+             vv.quantite::FLOAT AS quantite, vv.total_ttc::FLOAT AS total_ttc,
              COALESCE((
                SELECT COUNT(*) FROM vak_ventes x WHERE x.ticket_id = vv.ticket_id
              ), 1)::INT AS nb_lignes_ticket
       FROM vak_ventes vv
       WHERE COALESCE(vv.unite, '') NOT ILIKE '%kg%'
-    `);
+         OR (vv.source = ANY($1)
+             AND vv.description ~* '^\\s*(1\\s*[x×]\\s*)?[0-9]+([.,][0-9]+)?\\s*kg\\s')
+    `, [API_SOURCES]);
 
     const idsAKg = [];
+    const lignesTexte = []; // { id, quantite, segment, prix_unitaire_ttc }
     let lignesAmbigues = 0;
     for (const l of lignes.rows) {
       const verdict = classifierRequalification(l);
       if (verdict === 'kg') idsAKg.push(l.id);
-      else if (verdict === 'ambigue') lignesAmbigues++;
+      else if (verdict === 'kg_texte') {
+        const v = valeursDepuisTexte(l);
+        if (v) lignesTexte.push({ id: l.id, ...v });
+      } else if (verdict === 'ambigue') lignesAmbigues++;
     }
 
     let lignesRequalifiees = 0;
@@ -203,6 +213,23 @@ async function main() {
         [idsAKg],
       );
       lignesRequalifiees = upd.rowCount;
+    }
+
+    // 'kg_texte' : le poids RÉEL est lu dans la description (« 3,88 kg Vente
+    // Moins de 5 Kg ») → unité kg + quantité = poids signé + €/kg recalculé.
+    // La description est conservée telle quelle (preuve du poids) ; idempotent
+    // (au run suivant, quantité == poids du texte → 'inchangee').
+    let lignesTexteCorrigees = 0;
+    for (const lt of lignesTexte) {
+      const upd = await client.query(`
+        UPDATE vak_ventes SET
+          unite = 'kg',
+          quantite = $1,
+          segment = $2,
+          prix_unitaire_ttc = COALESCE($3, prix_unitaire_ttc)
+        WHERE id = $4
+      `, [lt.quantite, lt.segment, lt.prix_unitaire_ttc, lt.id]);
+      lignesTexteCorrigees += upd.rowCount;
     }
 
     // ── 2. Recalcul du poids des tickets depuis leurs lignes (somme signée) ──
@@ -246,6 +273,7 @@ async function main() {
     console.log(`BACKFILL POIDS VAK ${dryRun ? '— MODE SIMULATION (--dry-run, aucun écrit)' : ''}`);
     console.log('─'.repeat(78));
     console.log(`Lignes vak_ventes requalifiées en 'kg' : ${lignesRequalifiees}`);
+    console.log(`Lignes corrigées depuis le TEXTE (« X kg <libellé> », poids réel lu dans la description) : ${lignesTexteCorrigees}`);
     if (lignesAmbigues > 0) {
       console.log(`Lignes AMBIGUËS non touchées (|qté|=1) : ${lignesAmbigues} — libellé au poids mais quantité 1 pile sur source API/webhook (forme synthétique, vente à la pièce historique ou vraie vente de 1,000 kg — indistinguables) ; resync-vak-details.js relit la vérité chez SumUp.`);
     }
@@ -286,8 +314,8 @@ async function main() {
   }
 }
 
-// Exporte la fonction PURE de décision pour les tests (aucune DB dedans).
-module.exports = { classifierRequalification };
+// Exporte les fonctions PURES de décision pour les tests (aucune DB dedans).
+module.exports = { classifierRequalification, valeursDepuisTexte };
 
 if (require.main === module) {
   main();
