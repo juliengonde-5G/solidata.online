@@ -299,6 +299,21 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// ── Segments vendus AU POIDS (source unique de la règle « au kilo ») ──
+// Constaté sur les données réelles de la caisse (marchand FRIP & CO, ex.
+// transaction TAAA4NKXTDV du 07/08/2026, 64,00 €) : la liste des ventes SumUp
+// affiche « 1.595 x Chaussures, 10.575 x Vente Plus de 5 kilos » — pour ces
+// articles, la QUANTITÉ saisie en caisse est le POIDS pesé en kg (décimale) et
+// le prix unitaire est un €/kg (Chaussures 1,595 kg × 3,00 €/kg = 4,78 €).
+// Les articles au poids sont donc le textile en vrac ET les chaussures.
+// Les consommables (« Sacs », quantités entières) et les libellés inconnus
+// restent à la pièce (poids 0 — jamais de poids inventé).
+// Cette constante est LA source de vérité : consommée par isKgItem (ingestion
+// API/webhook/CSV, resync-vak-details.js via mapSumUpTransaction) et par le
+// backfill backfill-vak-poids.js — jamais de liste de libellés dupliquée,
+// l'inférence passe par getSegment (mapping libellé → segment ci-dessus).
+const KG_SEGMENTS = ['textile_vrac', 'chaussures'];
+
 // ── Détection « vendu au kilo » (unifie CSV + API/webhook) ──
 // L'export CSV SumUp porte une colonne « Unité » (kg / pce) : elle FAIT FOI
 // quand elle est renseignée. En revanche, les transactions remontées par l'API
@@ -308,15 +323,16 @@ function toNumber(v) {
 // à 0 (bug « les poids des ventes sont tous à zéro »). Règle partagée :
 //   1. unité explicite non vide → au kilo ssi elle contient « kg »
 //      (comportement du chemin CSV, inchangé) ;
-//   2. sinon, un produit dont le libellé matche le mapping textile au kilo
-//      (« Vente moins de 5 kg », « Vente plus de 5 kilos »… → segment
-//      textile_vrac) est vendu AU KG → poids = quantité (la caisse SumUp
-//      saisit le poids pesé dans le champ quantité pour ces articles).
-// Chaussures et consommables (sacs) restent à la pièce (poids 0).
+//   2. sinon, un produit dont le libellé tombe dans un segment au poids
+//      (KG_SEGMENTS : « Vente moins de 5 kg », « Vente plus de 5 kilos »…
+//      → textile_vrac ; « Chaussures » → chaussures) est vendu AU KG →
+//      poids = quantité (la caisse SumUp saisit le poids pesé, décimal, dans
+//      le champ quantité pour ces articles ; le prix unitaire est un €/kg).
+// Les consommables (sacs) restent à la pièce (poids 0).
 function isKgItem(description, unite = '') {
   const u = String(unite || '').trim().toLowerCase();
   if (u) return u.includes('kg');
-  return getSegment(description) === 'textile_vrac';
+  return KG_SEGMENTS.includes(getSegment(description));
 }
 
 // ── Normalisation moyen de paiement → libellé métier ('CB' / 'Espèces') ──
@@ -442,9 +458,10 @@ function mapSumUpTransaction(tx, detail = tx) {
       // BUG « poids à zéro » (Lot 6) : les produits des transactions API et des
       // webhooks n'ont pas de champ `unit` → l'unité tombait à 'pce' et le
       // poids restait 0 pour TOUTES les ventes synchronisées. On infère « kg »
-      // depuis le libellé (mapping textile au kilo, cf. isKgItem) quand
-      // l'unité est absente, et on STOCKE l'unité inférée pour que les
-      // agrégats SQL (`unite ILIKE '%kg%'` dans routes/vak.js) suivent.
+      // depuis le libellé (segments au poids KG_SEGMENTS = textile_vrac +
+      // chaussures, cf. isKgItem) quand l'unité est absente, et on STOCKE
+      // l'unité inférée pour que les agrégats SQL (`unite ILIKE '%kg%'` dans
+      // routes/vak.js) suivent.
       const rawUnite = (it.unit || '').trim().toLowerCase();
       const kg = isKgItem(desc, rawUnite);
       const unite = rawUnite || (kg ? 'kg' : 'pce');
@@ -701,8 +718,8 @@ async function importCSVContent(vakId, content, filename, userId, source = 'csv_
       const remise = parseNumberFR(remiseStr);
       const segment = getSegment(description);
       // Unité kg : la colonne « Unité » du CSV fait foi quand elle est
-      // renseignée ; si elle est vide, inférence par le libellé (mapping
-      // textile au kilo) — même helper que le chemin API/webhook (isKgItem).
+      // renseignée ; si elle est vide, inférence par le libellé (segments au
+      // poids KG_SEGMENTS) — même helper que le chemin API/webhook (isKgItem).
       // L'unité inférée est STOCKÉE pour garder les agrégats SQL cohérents.
       const ligneKg = isKgItem(description, unite);
       const uniteNorm = (unite || '').trim().toLowerCase() || (ligneKg ? 'kg' : '');
@@ -1260,6 +1277,7 @@ module.exports = {
   parisWallClockToUTC,
   parisDateStr,
   getSegment,
+  KG_SEGMENTS,
   isKgItem,
   normalizePaymentMethod,
   // Remboursements (sémantique partagée CSV / API / webhook)

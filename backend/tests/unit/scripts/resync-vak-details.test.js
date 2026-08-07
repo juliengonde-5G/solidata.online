@@ -83,6 +83,29 @@ describe('resync-vak-details — computeRebuildFromDetail', () => {
     expect(r.hasRealItems).toBe(false);
     expect(r.poids_kg).toBe(0); // jamais de valeur inventée
   });
+
+  test('PROPAGATION extension chaussures : détail chaussures + textile → les deux pèsent (fixture réelle TAAA4NKXTDV)', () => {
+    // Le resync passe par mapSumUpTransaction : la règle « segments au poids
+    // KG_SEGMENTS = textile_vrac + chaussures » s'applique donc aussi à la
+    // reconstruction des tickets synthétiques (poids ticket 12,17 kg, pas 10,575).
+    const detail = {
+      id: 'tx-abc', transaction_code: 'TAAA4NKXTDV', type: 'PAYMENT', status: 'SUCCESSFUL',
+      amount: 64.0, payment_type: 'CASH',
+      products: [
+        { name: 'Chaussures', price: 3.0, quantity: 1.595, total_price: 4.78, vat_rate: 20 },
+        { name: 'Vente Plus de 5 kilos', price: 5.6, quantity: 10.575, total_price: 59.22, vat_rate: 20 },
+      ],
+    };
+    const r = computeRebuildFromDetail(ticket, detail);
+    expect(r.hasRealItems).toBe(true);
+    expect(r.poids_kg).toBeCloseTo(12.17, 3);
+    expect(r.total_ttc).toBeCloseTo(64.0, 2);
+    expect(r.lignes[0].unite).toBe('kg');
+    expect(r.lignes[0].segment).toBe('chaussures');
+    expect(r.lignes[0].quantite).toBeCloseTo(1.595, 3);
+    expect(r.lignes[1].unite).toBe('kg');
+    expect(r.lignes[1].segment).toBe('textile_vrac');
+  });
 });
 
 describe('resync-vak-details — doitDegraderLigneKgSynthetique', () => {

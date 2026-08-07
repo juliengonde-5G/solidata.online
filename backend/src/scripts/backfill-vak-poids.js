@@ -7,18 +7,24 @@
  * `unite = 'pce'` et le poids (vak_tickets.poids_kg + agrégat SQL
  * `unite ILIKE '%kg%'` sur vak_ventes) sortait à 0. Corrigé à l'ingestion
  * (services/sumup.js — helper isKgItem : inférence « kg » par le libellé
- * produit via le mapping textile au kilo). Ce script répare l'HISTORIQUE déjà
- * en base SANS re-synchroniser SumUp, à partir des descriptions/quantités
- * stockées dans vak_ventes.
+ * produit via les segments au poids KG_SEGMENTS). Ce script répare
+ * l'HISTORIQUE déjà en base SANS re-synchroniser SumUp, à partir des
+ * descriptions/quantités stockées dans vak_ventes.
  *
  * CE QU'IL FAIT (idempotent, transactionnel) :
- *   1. Requalifie en 'kg' l'unité des lignes vak_ventes vendues au kilo :
+ *   1. Requalifie en 'kg' l'unité des lignes vak_ventes vendues au kilo —
+ *      segments au poids KG_SEGMENTS = textile_vrac ET chaussures (données
+ *      réelles FRIP & CO : « 1.595 x Chaussures » = 1,595 kg × 3,00 €/kg ;
+ *      les « Sacs » restent à la pièce). Relancer ce script après le
+ *      déploiement de la règle chaussures requalifie l'HISTORIQUE des lignes
+ *      « Chaussures » stockées 'pce' avec quantité décimale :
  *      - sources api_sumup / webhook_sumup : le 'pce' stocké était un DÉFAUT
  *        synthétique (jamais une donnée SumUp) → requalification par le
- *        libellé seul (isKgItem(description)) ;
+ *        libellé seul (isKgItem(description)), SAUF |quantité| = 1 EXACTEMENT
+ *        (garde d'ambiguïté, voir classifierRequalification) ;
  *      - source csv_manuel (et autres) : la colonne « Unité » du CSV fait
  *        foi → requalification UNIQUEMENT si l'unité stockée est vide et que
- *        le libellé matche le mapping textile au kilo.
+ *        le libellé tombe dans un segment au poids.
  *      Jamais de déclassement (une unité 'kg' existante n'est pas touchée).
  *   2. Recalcule vak_tickets.poids_kg = somme SIGNÉE des quantités des lignes
  *      kg du ticket (les remboursements pèsent négatif, comme à l'ingestion).
@@ -38,6 +44,46 @@ const pool = require('../config/database');
 const { isKgItem } = require('../services/sumup');
 
 const API_SOURCES = ['api_sumup', 'webhook_sumup'];
+
+/**
+ * Classification PURE d'une ligne vak_ventes candidate (unité stockée ne
+ * contenant pas déjà 'kg') — exportée pour les tests, aucune DB ici.
+ * Retourne :
+ *   - 'kg'        → la ligne doit être requalifiée unite = 'kg' ;
+ *   - 'ambigue'   → libellé au poids MAIS |quantité| = 1 exactement sur une
+ *                   source API/webhook : JAMAIS requalifiée (comptée au récap) ;
+ *   - 'inchangee' → rien à faire (article à la pièce, unité CSV qui fait foi…).
+ *
+ * GARDE D'AMBIGUÏTÉ |qté| = 1 (doctrine PR#90 « jamais de valeur inventée ») :
+ * sur les sources API/webhook, une ligne de |quantité| = 1 EXACTEMENT est
+ * indistinguable a posteriori de :
+ *   - la LIGNE GLOBALE SYNTHÉTIQUE du fallback d'ingestion (1 ligne, qté ±1 :
+ *     un artefact « 1 ticket », pas un poids — l'ancienne garde PR#90) ;
+ *   - une vente À LA PIÈCE historique (ex. « Chaussures » = 1 paire, prix à
+ *     la paire, avant le passage de la caisse au €/kg) ;
+ *   - une vraie vente de 1,000 kg pile.
+ * La requalifier en 'kg' inventerait potentiellement un poids → on n'y touche
+ * pas ; c'est resync-vak-details.js qui re-lit la vérité chez SumUp. Le seuil
+ * est bien === 1 STRICT et non ≤ 1 : une quantité décimale (« 0.92 x Vente
+ * Moins de 5 Kg », « 1.595 x Chaussures ») est un poids pesé RÉEL qui doit
+ * être requalifié. Cette garde englobe l'ancienne détection de forme
+ * synthétique (ligne unique |qté| = 1) et la généralise aux tickets
+ * multi-lignes pour les segments au poids.
+ */
+function classifierRequalification(ligne) {
+  const apiSource = API_SOURCES.includes(String(ligne.source || '').trim());
+  if (apiSource) {
+    // API/webhook : le 'pce' stocké était un défaut du code (SumUp ne fournit
+    // pas d'unité) → inférence par le libellé seul (segments au poids
+    // KG_SEGMENTS = textile_vrac + chaussures, cf. services/sumup.js).
+    if (!isKgItem(ligne.description, '')) return 'inchangee';
+    if (Math.abs(Number(ligne.quantite) || 0) === 1) return 'ambigue';
+    return 'kg';
+  }
+  // CSV (et autres) : l'unité stockée fait foi (isKgItem ne requalifie que si
+  // elle est vide et que le libellé tombe dans un segment au poids).
+  return isKgItem(ligne.description, ligne.unite) ? 'kg' : 'inchangee';
+}
 
 function fmt(n, dec = 3) {
   return Number(n || 0).toFixed(dec);
@@ -69,38 +115,23 @@ async function main() {
     const avant = await snapshotParVak(client);
 
     // ── 1. Requalification des lignes vendues au kilo ────────────────────────
-    // Chargement des lignes candidates (unité ne contenant pas déjà 'kg'),
-    // avec la forme de leur ticket (nb de lignes) pour repérer les lignes
-    // GLOBALES SYNTHÉTIQUES.
+    // Chargement des lignes candidates (unité ne contenant pas déjà 'kg') ;
+    // la décision par ligne est portée par classifierRequalification (pure,
+    // testée) : segments au poids textile_vrac + chaussures, garde
+    // d'ambiguïté |qté| = 1 sur les sources API/webhook (englobe l'ancienne
+    // détection de la ligne GLOBALE SYNTHÉTIQUE du fallback d'ingestion).
     const lignes = await client.query(`
-      SELECT vv.id, vv.description, vv.unite, vv.source, vv.quantite::FLOAT AS quantite,
-             CASE WHEN vv.ticket_id IS NULL THEN NULL
-                  ELSE COUNT(*) OVER (PARTITION BY vv.ticket_id) END AS nb_lignes_ticket
+      SELECT vv.id, vv.description, vv.unite, vv.source, vv.quantite::FLOAT AS quantite
       FROM vak_ventes vv
       WHERE COALESCE(vv.unite, '') NOT ILIKE '%kg%'
     `);
 
     const idsAKg = [];
+    let lignesAmbigues = 0;
     for (const l of lignes.rows) {
-      const apiSource = API_SOURCES.includes(String(l.source || '').trim());
-      // GARDE (correctif « poids trop faibles ») : une ligne API/webhook qui
-      // est la SEULE ligne de son ticket avec |quantité| = 1 est très
-      // probablement la LIGNE GLOBALE SYNTHÉTIQUE créée quand SumUp n'a pas
-      // fourni le détail produits (fallback d'ingestion). Sa quantité 1 est un
-      // artefact (1 ticket), PAS un poids pesé : la requalifier en 'kg' ferait
-      // compter ~1 kg par vente au lieu du poids réel (cause de la
-      // sous-évaluation constatée après le backfill v2.20.0). On la LAISSE en
-      // 'pce' (poids honnête 0) — c'est resync-vak-details.js qui ira chercher
-      // les vraies quantités chez SumUp.
-      const formeSynthetique = apiSource
-        && Number(l.nb_lignes_ticket) === 1
-        && Math.abs(Number(l.quantite) || 0) === 1;
-      if (formeSynthetique) continue;
-      // API/webhook : le 'pce' stocké était un défaut du code (SumUp ne fournit
-      // pas d'unité) → on infère depuis le libellé seul. CSV : l'unité stockée
-      // fait foi (isKgItem ne requalifie que si elle est vide).
-      const kg = apiSource ? isKgItem(l.description, '') : isKgItem(l.description, l.unite);
-      if (kg) idsAKg.push(l.id);
+      const verdict = classifierRequalification(l);
+      if (verdict === 'kg') idsAKg.push(l.id);
+      else if (verdict === 'ambigue') lignesAmbigues++;
     }
 
     let lignesRequalifiees = 0;
@@ -153,6 +184,9 @@ async function main() {
     console.log(`BACKFILL POIDS VAK ${dryRun ? '— MODE SIMULATION (--dry-run, aucun écrit)' : ''}`);
     console.log('─'.repeat(78));
     console.log(`Lignes vak_ventes requalifiées en 'kg' : ${lignesRequalifiees}`);
+    if (lignesAmbigues > 0) {
+      console.log(`Lignes AMBIGUËS non touchées (|qté|=1) : ${lignesAmbigues} — libellé au poids mais quantité 1 pile sur source API/webhook (forme synthétique, vente à la pièce historique ou vraie vente de 1,000 kg — indistinguables) ; resync-vak-details.js relit la vérité chez SumUp.`);
+    }
     console.log(`Tickets vak_tickets recalculés         : ${updTickets.rowCount}`);
     console.log(`Batches vak_import_batches recalculés  : ${updBatches.rowCount}`);
     console.log('');
@@ -190,4 +224,9 @@ async function main() {
   }
 }
 
-main();
+// Exporte la fonction PURE de décision pour les tests (aucune DB dedans).
+module.exports = { classifierRequalification };
+
+if (require.main === module) {
+  main();
+}
