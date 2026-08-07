@@ -60,10 +60,11 @@ function sleep(ms) {
 }
 
 function parseArgs(argv) {
-  const args = { apply: false, vakId: null, limit: null, rate: 5 };
+  const args = { apply: false, vakId: null, limit: null, rate: 5, degradeAmbigus: false };
   for (const a of argv) {
     if (a === '--apply') args.apply = true;
     else if (a === '--dry-run') args.apply = false;
+    else if (a === '--degrade-ambigus') args.degradeAmbigus = true;
     else if (a.startsWith('--vak=')) args.vakId = parseInt(a.slice(6), 10) || null;
     else if (a.startsWith('--limit=')) args.limit = parseInt(a.slice(8), 10) || null;
     else if (a.startsWith('--rate=')) args.rate = Math.max(0.5, parseFloat(a.slice(7)) || 5);
@@ -98,9 +99,13 @@ function computeRebuildFromDetail(ticket, detail) {
 }
 
 /**
- * Le ticket porte-t-il une ligne 'kg' de |quantité| = 1 fabriquée par le
- * backfill (poids inventé) qu'il faut requalifier en 'pce' quand SumUp
- * confirme ne pas avoir de détail produits ? (PUR, testé.)
+ * Le ticket porte-t-il une ligne 'kg' de |quantité| = 1 — forme AMBIGUË
+ * (revue Codex PR#89) : elle peut venir du backfill v2.20.0 (poids inventé
+ * sur ligne synthétique) OU d'une vraie vente de 1,000 kg pesée. Aucun
+ * marqueur persisté ne permet de les distinguer a posteriori ; ce critère
+ * ne doit donc JAMAIS déclencher d'écriture destructive par défaut — la
+ * dégradation en 'pce' n'est appliquée que sous le drapeau explicite
+ * --degrade-ambigus. (PUR, testé.)
  */
 function doitDegraderLigneKgSynthetique(lignes) {
   return Array.isArray(lignes)
@@ -261,6 +266,7 @@ async function main() {
     let reconstruits = 0;
     let sansDetail = 0;
     let degrades = 0;
+    const ambigus = []; // tickets kg |qté|=1 sans détail SumUp, laissés intacts
     let echecsFetch = 0;
     let echecsConsecutifs = 0;
     let deltaPoidsTotal = 0;
@@ -304,12 +310,20 @@ async function main() {
         sansDetail++;
         const lignes = await lignesDuTicket(t.id);
         if (doitDegraderLigneKgSynthetique(lignes)) {
-          const deltaDegrade = -(t.poids_kg || 0);
-          console.log(`  ∅ Ticket #${t.id} (${t.ref_transaction}) : aucun détail chez SumUp — ligne 'kg' qté 1 requalifiée 'pce' (poids ${fmt(t.poids_kg)} → 0.000, ${dryRun ? 'simulé' : 'appliqué'})`);
-          if (!dryRun) await degraderTicketSansDetail(t);
-          degrades++;
-          deltaPoidsTotal += deltaDegrade;
-          deltaParVak.set(t.vak_id, (deltaParVak.get(t.vak_id) || 0) + deltaDegrade);
+          // Forme AMBIGUË (kg, |qté| = 1) : backfill v2.20.0 OU vraie vente de
+          // 1,000 kg — indistinguables. Par défaut on ne touche à RIEN (revue
+          // Codex PR#89) ; la dégradation exige le drapeau --degrade-ambigus.
+          if (args.degradeAmbigus) {
+            const deltaDegrade = -(t.poids_kg || 0);
+            console.log(`  ∅ Ticket #${t.id} (${t.ref_transaction}) : aucun détail chez SumUp — ligne 'kg' qté 1 requalifiée 'pce' (poids ${fmt(t.poids_kg)} → 0.000, ${dryRun ? 'simulé' : 'appliqué'}) [--degrade-ambigus]`);
+            if (!dryRun) await degraderTicketSansDetail(t);
+            degrades++;
+            deltaPoidsTotal += deltaDegrade;
+            deltaParVak.set(t.vak_id, (deltaParVak.get(t.vak_id) || 0) + deltaDegrade);
+          } else {
+            ambigus.push(t.id);
+            console.log(`  ? Ticket #${t.id} (${t.ref_transaction}) : aucun détail chez SumUp — ligne 'kg' qté 1 AMBIGUË (backfill ou vraie vente 1,000 kg), poids inchangé (${fmt(t.poids_kg)} kg)`);
+          }
         } else {
           console.log(`  ∅ Ticket #${t.id} (${t.ref_transaction}) : aucun détail chez SumUp — poids inchangé (${fmt(t.poids_kg)} kg), compté « sans détail »`);
         }
@@ -346,6 +360,7 @@ async function main() {
             reconstruits,
             sans_detail: sansDetail,
             degrades,
+            ambigus_non_modifies: ambigus.length,
             echecs_fetch: echecsFetch,
             delta_poids_kg: Number(deltaPoidsTotal.toFixed(3)),
           })]);
@@ -358,6 +373,10 @@ async function main() {
     console.log(`Tickets examinés          : ${candidats.length}`);
     console.log(`Reconstruits (détail OK)  : ${reconstruits}`);
     console.log(`Sans détail chez SumUp    : ${sansDetail} (dont ${degrades} ligne(s) 'kg' qté 1 requalifiée(s) 'pce')`);
+    if (ambigus.length > 0) {
+      console.log(`Ambigus NON modifiés      : ${ambigus.length} ticket(s) 'kg' qté 1 sans détail SumUp — backfill OU vraie vente de 1,000 kg, indistinguables (tickets #${ambigus.slice(0, 20).join(', #')}${ambigus.length > 20 ? ', …' : ''}).`);
+      console.log('                            → Pour les requalifier en 0 kg APRÈS vérification métier (aucune vraie vente de 1 kg pile), relancer avec --degrade-ambigus.');
+    }
     console.log(`Échecs d'appel (reprise)  : ${echecsFetch}`);
     if (!dryRun) console.log(`Batches recalculés        : ${batchesRecalcules}`);
     console.log('');

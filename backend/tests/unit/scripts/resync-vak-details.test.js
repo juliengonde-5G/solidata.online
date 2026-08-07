@@ -106,6 +106,12 @@ describe('resync-vak-details — parseArgs', () => {
     expect(parseArgs(['--apply']).apply).toBe(true);
   });
 
+  it('--degrade-ambigus est OPT-IN (revue Codex PR#89 : une ligne kg qté 1 peut être une vraie vente de 1,000 kg)', () => {
+    expect(parseArgs([]).degradeAmbigus).toBe(false);
+    expect(parseArgs(['--apply']).degradeAmbigus).toBe(false);
+    expect(parseArgs(['--apply', '--degrade-ambigus']).degradeAmbigus).toBe(true);
+  });
+
   test('--vak / --limit / --rate', () => {
     const a = parseArgs(['--apply', '--vak=12', '--limit=200', '--rate=3']);
     expect(a.vakId).toBe(12);
