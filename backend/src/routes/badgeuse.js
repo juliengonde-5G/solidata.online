@@ -29,7 +29,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
 const { query: q, param, body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
@@ -881,8 +881,10 @@ router.post('/feuilles-temps/:employeeId/valider', CORRECTION, [
     const employeeId = parseInt(req.params.employeeId, 10);
     const { periode, niveau } = req.body;
 
-    // La validation RH est réservée à ADMIN/RH (le MANAGER s'arrête à l'encadrant).
-    if (niveau === 'rh' && !['ADMIN', 'RH'].includes(req.user.role)) {
+    // La validation RH est réservée à ADMIN/RH (le MANAGER s'arrête à
+    // l'encadrant). Résolution custom→base comme `authorize` : un rôle
+    // personnalisé dupliqué de RH valide aussi (revue Codex PR#93).
+    if (niveau === 'rh' && !['ADMIN', 'RH'].includes(resolveBaseRole(req.user.role))) {
       return res.status(403).json({ error: 'La validation RH est réservée aux profils ADMIN/RH' });
     }
 
@@ -908,13 +910,16 @@ router.post('/feuilles-temps/:employeeId/valider', CORRECTION, [
       upd = await client.query(
         `UPDATE badgeuse_feuilles_temps
          SET statut = 'validee_rh', heures_validees = $4, valide_rh_par = $3, valide_rh_le = NOW(), updated_at = NOW()
-         WHERE employee_id = $1 AND periode = $2 AND statut <> 'validee_rh'
+         WHERE employee_id = $1 AND periode = $2 AND statut = 'validee_encadrant'
          RETURNING *`,
         [employeeId, periode, req.user.id, heures]
       );
       if (upd.rows.length === 0) {
         await client.query('ROLLBACK');
-        return res.status(409).json({ error: 'Feuille absente ou déjà validée par le RH' });
+        // Le circuit encadrant → RH est OBLIGATOIRE (NOTE_RH §5.1, revue
+        // Codex PR#93) : le RH ne clôt pas un brouillon jamais revu par
+        // l'encadrant, même en passant par l'API directement.
+        return res.status(409).json({ error: 'La feuille doit d\'abord être validée par l\'encadrant (ou est déjà validée par le RH)' });
       }
     }
 
