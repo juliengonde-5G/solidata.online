@@ -65,6 +65,13 @@ Réponse `200` — **toujours par élément**, jamais d'échec silencieux (PST-0
   `alerte` du heartbeat ; le serveur le journalise. Un `uid_hmac` de valeur `-`
   (pointage manuel/import, CONTRAT_INTEGRITE §2) est **VALIDE** et ne doit jamais
   produire `invalid` — il est stocké `NULL` en base, `-` restant sa forme canonique.
+- `retry` (amendement v1.2, QA-13) : l'élément n'a PAS pu être traité pour une cause
+  **transitoire** (erreur base passagère : timeout, ressource, connexion, sérialisation).
+  Ce n'est **pas** un accusé de réception : le poste le CONSERVE dans sa file et le
+  représentera au prochain lot. Côté serveur, seule une erreur de DONNÉES définitivement
+  invalide (SQLSTATE classes 22 et 23, hors 23505 = doublon → `duplicate`) produit
+  `invalid` ; toute autre erreur SQL produit `retry`. Un incident d'infrastructure ne
+  détruit jamais une heure.
 - `400` uniquement pour un lot syntaxiquement invalide dans son ENVELOPPE (le poste
   conserve alors sa file et lève une alerte heartbeat).
 - `server_time_utc` sert au poste à mesurer sa dérive d'horloge (PST-07).

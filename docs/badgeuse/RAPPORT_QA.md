@@ -1,27 +1,38 @@
 # Rapport QA — Module « Temps & Présence » (badgeuse)
 
 **Agent A4 (QA/Debug) — barrière bloquante avant mise en production**
-**Date :** 15 août 2026 · **Périmètre :** commits `b233f6b`, `064e846`, `b726f08`
-**Posture :** adversariale. Aucune affirmation d'un rapport d'agent de développement n'a été
-reprise sans vérification dans le code. Aucun correctif n'a été appliqué : ce document constate.
+**Itération 2 — re-vérification après boucle de correction n°1 (1/3)**
+**Date :** 15 août 2026 · **Périmètre re-vérifié :** HEAD `89f6310` (correctifs serveur+front) et
+`1b45d03` (correctifs poste embarqué), sur amendements `CONTRAT_API_DEVICE.md v1.1` et
+`adr/0002` addendum.
+**Posture :** adversariale et inchangée. Aucun statut « corrigé » n'a été accordé sur la foi d'un
+rapport de correction : chaque défaut a été re-vérifié dans le code (fichier:ligne) et, quand la
+règle est numérique, re-prouvé par exécution. Aucun correctif n'a été appliqué par le présent
+agent : ce document constate.
 
 ---
 
-## 1. Résultats des trois suites — exécutées réellement
+## 1. Résultats des trois suites — ré-exécutées réellement (itération 2)
 
-| Suite | Commande | Résultat | Code de sortie |
+| Suite | Commande | Résultat | Sortie |
 |---|---|---|---|
-| Backend Jest | `cd backend && npx jest --forceExit` | **93 suites, 1502 tests : 1498 passés, 4 ignorés, 0 échec** — 5,5 s | 0 |
-| Frontend build | `cd frontend && npx vite build` | **Succès, 10,07 s** — chunk `TempsPresence-r7tC4ijD.js` 79,41 kB (gzip 18,37 kB) | 0 |
-| Agent Python | `python3 -m pytest badgeuse/agent/tests/ -q` | **166 tests passés** — 0,84 s | 0 |
+| Backend Jest | `cd backend && npx jest --forceExit` | **93 suites, 1583 tests : 1579 passés, 4 ignorés, 0 échec** — 5,6 s | 0 |
+| Frontend build | `cd frontend && npx vite build` | **Succès, 9,95 s** | 0 |
+| Agent Python | `python3 -m pytest badgeuse/agent/tests/ -q` | **179 tests passés** — 1,17 s | 0 |
 
-**Dont badgeuse (Jest) : 334 tests** répartis en 6 fichiers —
-`badgeuse-contract.test.js` (125), `badgeuse-device.test.js` (59), `badgeuse-engine.test.js` (46),
-`badgeuse-scheduler.test.js` (39), `badgeuse-schema.test.js` (34), `badgeuse-crypto.test.js` (31).
+**Évolution depuis l'itération 1 :** Jest **1498 → 1579** passés (**+81**, 0 régression, suites
+toujours 93/93) · Python **166 → 179** (**+13**) · build toujours vert.
 
-> Réserve : Jest signale `A worker process has failed to exit gracefully`. Le `--forceExit` masque
-> une fuite de handle (timer ou pool non fermé). Sans incidence sur les verdicts, à traiter en
+> Réserve maintenue : Jest signale toujours `A worker process has failed to exit gracefully` ;
+> le `--forceExit` masque une fuite de handle. Sans incidence sur les verdicts, à traiter en
 > hygiène de test.
+
+<details>
+<summary>Chiffres de l'itération 1 (avant correction), pour mémoire</summary>
+
+Jest 93 suites / 1502 tests (1498 passés, 4 ignorés) · vite build OK 10,07 s · pytest 166 passés.
+Dont badgeuse : 334 tests (contract 125, device 59, engine 46, scheduler 39, schema 34, crypto 31).
+</details>
 
 ---
 
@@ -38,12 +49,12 @@ sans test, ou exigence à moitié couverte · **ABSENT** = non trouvé dans le c
 | PST-02 — anti-rebond 8 s, message « déjà enregistré » | `debounce.py` (module dédié) ; seuil serveur `badgeuse-settings.js:40` (`anti_rebond_sec: 8`) ; message `ui/app.js` | `tests/test_debounce.py` | **OK** |
 | PST-03 — sens par alternance depuis le dernier pointage du jour | `sens.py` (`determine_sens`, `ENTREE`/`INCONNU`) ; appel `app.py:159` | `tests/test_sens.py` | **OK** |
 | PST-04 — badge inconnu → écran d'erreur + pointage orphelin, jamais de rejet silencieux | `badgeuse-device.js:188-196` (`badge_inconnu`, `badge_inactif`), `:201-204` (`hors_plage`) — stocké en `statut='orphelin'`, jamais rejeté | `badgeuse-device.test.js`, `badgeuse-contract.test.js` | **OK** |
-| PST-05 — file SQLite persistante, purge sur accusé serveur uniquement | `store.py:229` (`ack`), `ACK_STATUSES` `store.py:37` = `{ok, duplicate, orphan}` | `tests/test_store.py` | **PARTIEL** — le serveur peut émettre un 4ᵉ statut `invalid` qui n'a **aucune voie de purge** (**QA-01**) |
+| PST-05 — file SQLite persistante, purge sur accusé serveur uniquement | `store.py:271-309` (`ack`), `ACK_STATUSES` `store.py:53` = `{ok, duplicate, orphan, invalid}` + compteur persistant | `tests/test_store.py` | **PARTIEL** — les 4 statuts sont désormais purgeables (QA-01 corrigé), mais une erreur SQL **transitoire** est accusée à tort et détruit le pointage (**QA-13**) |
 | PST-06 — cache badges 5 min / playlist 15 min, ETag | `sync.py:191/207/219` ; ETag serveur `badgeuse-device.js:92-103` ; cadences `badgeuse-settings.js:44-45` (300 s / 900 s) | `badgeuse-device.test.js` (304), `tests/test_store.py` | **OK** |
-| PST-07 — heartbeat 60 s (version, dérive, file, température, disque) | `sync.py:235-258` ; réception `badgeuse-device.js:372-422` ; télémétrie `sync.py:322-364` | `badgeuse-device.test.js` | **PARTIEL** — le champ `alerte` émis par le poste est **écarté** par la liste blanche serveur (**QA-02**) |
+| PST-07 — heartbeat 60 s (version, dérive, file, température, disque) | `sync.py:235-258` ; réception `badgeuse-device.js:434-452` (dont `alerte`) ; télémétrie `sync.py:322-364` | `badgeuse-device.test.js` | **OK** (QA-02 corrigé) |
 | PST-08 — bandeau discret « hors ligne » | `ui/app.js:46` (`hors_ligne`), élément `#bandeau-hors-ligne` `:65` | non testé (UI kiosque) | **PARTIEL** (implémenté, non couvert par un test automatisé) |
-| PST-09 — watchdog matériel + redémarrage systemd + arrêt propre bouton | `badgeuse-agent.service:29` `WatchdogSec=90` (+ `sd_notify`), `Restart=always` sur les 2 unités | `badgeuse-schema.test.js` (unités) | **PARTIEL** — watchdog **logiciel** seulement ; aucun `RuntimeWatchdogSec` / `dtparam=watchdog` (**QA-09**) |
-| PST-10 — aucune saisie clavier, pas de bureau, sans barre d'outils, curseur masqué | `cage` (compositeur mono-app) `badgeuse-kiosk.service:35` ; flags `install.sh:249-251` ; curseur `ui/style.css:36` (`cursor:none`) ; lecteur grabbé `reader.py:107` | — | **PARTIEL** — **DevTools non verrouillés** (**QA-07**) |
+| PST-09 — watchdog matériel + redémarrage systemd + arrêt propre bouton | `badgeuse-agent.service:29` `WatchdogSec=90` (+ `sd_notify`), `Restart=always` ; **watchdog matériel** `install.sh:322` `RuntimeWatchdogSec=15s` | `badgeuse-schema.test.js` (unités) | **OK** (QA-09 corrigé) — arrêt propre par bouton à confirmer en recette (RP-1) |
+| PST-10 — aucune saisie clavier, pas de bureau, sans barre d'outils, curseur masqué | `cage` `badgeuse-kiosk.service:35` ; flags `install.sh:249-251` ; **politique gérée** `deploy/chromium-policy.json` (`DeveloperToolsAvailability:2`) déployée sur les 2 arborescences `install.sh:254-256` ; curseur `ui/style.css:36` ; lecteur grabbé `reader.py:107` | — | **OK** (QA-07 corrigé) |
 
 ### 2.2 Affichage (AFF-01 → AFF-08)
 
@@ -65,16 +76,21 @@ sans test, ou exigence à moitié couverte · **ABSENT** = non trouvé dans le c
 | BO-01 — badges : attribution, restitution, perte/vol, historique | `routes/badgeuse.js:191` (liste), `:230` (POST), `:271` (PATCH statut), `:317` (historique) ; tables `init-db.js:6707` + `:6731` ; UI `GestionBadges.jsx` | `badgeuse-contract.test.js`, `badgeuse-schema.test.js` | **OK** |
 | BO-02 — journal des pointages, filtres salarié/date/site/statut + indicateur d'anomalie | `routes/badgeuse.js:340-359` (filtres `employee_id`, `statut`, `du`, `au`, tous paramétrés `$n`) ; UI `JournalPointages.jsx` | `badgeuse-contract.test.js` | **OK** |
 | BO-03 — corrections additives, motif obligatoire, auteur tracé, brut conservé | `routes/badgeuse.js:546` (POST) ; moteur `badgeuse-engine.js:142-202` (`buildEffectiveEvents` — le brut n'est jamais modifié) ; table `init-db.js:6790` (motif liste fermée, `auteur_id` `ON DELETE RESTRICT`) | `badgeuse-engine.test.js`, `badgeuse-contract.test.js` | **OK** |
-| BO-04 — feuille mensuelle **théorique / pointé / écart** + circuit encadrant → RH | `routes/badgeuse.js:674, 731, 777, 841` ; table `init-db.js:6812` ; circuit `:787` (RH réservé ADMIN/RH) | `badgeuse-contract.test.js` | **PARTIEL** — **`heures_theoriques` n'est écrit nulle part** : « théorique » et « écart » restent vides à vie (**QA-03**) |
+| BO-04 — feuille mensuelle **théorique / pointé / écart** + circuit encadrant → RH | `routes/badgeuse.js:729-757` (théorique contractuel figé à la validation), `:121` (écart), circuit `:787` ; table `init-db.js:6812` | `badgeuse-contract.test.js` | **OK** (QA-03 corrigé) — `source_theorique` exposé, `null` honnête si aucun contrat |
 | BO-05 — anomalies : oubli sortie, journée > 10 h, hors plage, orphelin, absence | `badgeuse-engine.js:214-256` (`oubli_sortie`, `sequence_impaire`, `sortie_sans_entree`, `double_pointage`), `:365` (`journee_longue`), `:473` (`detectAnomalies`) ; route `:884` ; ingestion `badgeuse-device.js:201` | `badgeuse-engine.test.js` (46 tests) | **PARTIEL** — « absence non justifiée » non implémentée (aucun croisement planning/`employee_leaves`) |
 | BO-06 — export paie CSV paramétrable (colonnes, décimal/sexagésimal) | `routes/badgeuse.js:950` ; helpers `badgeuse-engine.js:121` (`minutesToHms`) / `:127` (`minutesToDecimal`) ; UI `FeuillesTemps.jsx:164` (`&heures=`) | `badgeuse-contract.test.js` | **OK** |
 | BO-07 — export heures IAE (ASP / extranet) | `routes/badgeuse.js:1011` ; UI `FeuillesTemps.jsx:165` | `badgeuse-contract.test.js` | **OK** |
 | BO-08 — playlist : éditeur, prévisualisation 16:9, publication immédiate/programmée | `routes/badgeuse.js:1067-1148` (CRUD) ; UI `PlaylistAffichage.jsx:102-112` (`aspect-video`), `:226` | `badgeuse-contract.test.js` | **OK** |
-| BO-09 — supervision : en ligne/hors ligne, dernière remontée, version, **alerte e-mail si silence > 15 min** | `scheduler.js` `checkBadgeuseDevices` (détection 15 min) ; route `routes/badgeuse.js:1150` ; UI `SupervisionPostes.jsx` | `badgeuse-scheduler.test.js` | **PARTIEL** — **aucune alerte e-mail** ; salle Socket.IO sans abonné ; page sans rafraîchissement (**QA-04**) |
+| BO-09 — supervision : en ligne/hors ligne, dernière remontée, version, **alerte e-mail si silence > seuil** | `scheduler.js:817` (seuil paramétré), `:870` (e-mail via `sendNotification`), `:907` (compteurs) ; `/devices` → `{silence_minutes, devices}` ; UI `SupervisionPostes.jsx:236-242, 318-319` | `badgeuse-scheduler.test.js` | **OK** (QA-04 corrigé) |
 | BO-10 — purge automatique mensuelle, journalisée | `scheduler.js` `badgeusePurgeRetention` (6 tables + journal), mode `dryRun`, trace `AUTO_PURGE_BADGEUSE` ; durées `badgeuse-settings.js:49-53` | `badgeuse-scheduler.test.js` (39 tests) | **OK** |
 | BO-11 — rôles salarié / encadrant / RH / admin + journalisation des consultations RH | `routes/badgeuse.js:49-52` (`READ`/`WRITE`/`CORRECTION`/`ADMIN_ONLY`) ; salarié `:1352` (`/mes-pointages`, borné par `user_id`) ; journal `:86` (`logConsultation` → `rgpd_audit_log`), purgé `scheduler.js` | `badgeuse-contract.test.js` (matrice de rôles) | **PARTIEL** — l'encadrant (MANAGER) **n'est pas restreint à son équipe** (écart assumé et documenté `routes/badgeuse.js:12-13`, précédent v2.12.0) |
 
-**Synthèse :** 29 exigences — **17 OK**, **12 PARTIEL**, **0 ABSENT**.
+**Synthèse itération 1 :** 29 exigences — 17 OK, 12 PARTIEL, 0 ABSENT.
+**Synthèse itération 2 (après boucle 1) :** 29 exigences — **22 OK**, **7 PARTIEL**, **0 ABSENT**.
+Restent PARTIEL : PST-05 (QA-13), PST-08/AFF-04/AFF-06 (implémentés, non couverts par un test
+automatisé), AFF-03 (borne basse 38 px < 48 px, contraste à mesurer en recette), BO-05 (« absence
+non justifiée » non implémentée), BO-11 (MANAGER non restreint à son équipe — écart assumé et
+documenté).
 
 ---
 
@@ -158,9 +174,140 @@ Il existe une **zone morte de 45 minutes** (]6 h 00 ; 6 h 45]) où travailler da
 autant ou moins. Avec pause badgée (2 paires), 361 min sont payées 361 min — la déduction ne
 s'applique pas, ce qui est conforme. Voir **QA-06**.
 
+### 4.4bis — Re-preuves après correction (itération 2)
+
+**QA-06 — monotonie rétablie.** Même protocole, 10 points de mesure, seuil 6 h / pause 45 min :
+
+| Travail réel | Payé (avant) | Payé (**après**) |
+|---|---|---|
+| 359 min | 359 | **359** |
+| 360 min | 360 | **360** |
+| **361 min** | **316** ⚠️ | **360** ✅ |
+| 370 min | 325 | **360** |
+| 405 min | 360 | **360** |
+| 406 min | 361 | **361** |
+| 480 min | 435 | **435** |
+
+La fonction de paie est désormais **non décroissante sur toute la plage mesurée** (contrôle
+programmatique : `MONOTONE : OUI`). La déduction est plafonnée à l'excédent au-dessus du seuil,
+si bien qu'un salarié ne peut plus être payé moins en travaillant plus. Le comportement au-delà de
+6 h 45 est inchangé (déduction pleine de 45 min), conforme à NOTE_RH §3.
+
+**QA-10 — sortie comptée au réel.** Entrée 08:07 / sortie 16:52, pas 5 min, `avantage_salarie` :
+
+| | Réel | Compté (avant) | Compté (**après**) |
+|---|---|---|---|
+| Entrée | 08:07 | 08:05 | **08:05** (recul au pas — toujours en faveur) |
+| Sortie | 16:52 | 16:55 (plafond) | **16:52** (au réel) ✅ |
+| Durée | 8 h 45 | 8 h 50 | **8 h 47 (527 min)** |
+
+L'arrondi ne peut plus **retirer** de temps au salarié (l'entrée recule toujours) ni lui en
+**ajouter** en fin de journée : la sortie comptée est la sortie badgée, exactement ce qu'écrit
+NOTE_RH §3 (« sortie arrondie au réel »).
+
+**Non-régression du moteur.** Minuit et les deux bascules DST ont été re-vérifiés implicitement par
+la suite `badgeuse-engine.test.js` (46 → tests étendus, 0 échec) ; les résultats §4.2 et §4.3
+restent valides, le calcul portant toujours sur les instants.
+
 ---
 
-## 5. Tableau des défauts
+## 5. Statut des défauts après la boucle de correction n°1
+
+**Verdict de re-vérification : 12 / 12 corrigés et prouvés — 1 défaut NOUVEAU introduit par le
+correctif de QA-01 (QA-13, bloquant).**
+
+| Id | Sévérité initiale | Statut | Preuve de la correction (re-vérifiée dans le code) |
+|---|---|---|---|
+| QA-01 | BLOQUANT | ✅ **CORRIGÉ** | Symétrie rétablie **dans les deux sens** : serveur `badgeuse-device.js:124` (`isSansBadge` : `null`/`''`/`-` valides) + `:193` (stocké `NULL`, `-` en forme canonique) ; poste `store.py:53` (`ACK_STATUSES` inclut `invalid`), purge + compteur persistant `store.py:283-309`, alerte `store.py:113-121`. Contrat aligné `CONTRAT_API_DEVICE.md:59-67`. |
+| QA-02 | majeur | ✅ **CORRIGÉ** | `alerte` entre dans la liste blanche `badgeuse-device.js:439-452` (borné 300 car.), et ressort par poste dans `/devices` (`badgeuse.js`, `alerte: heartbeat_info.alerte`). Contrat `:143-148`. |
+| QA-03 | majeur | ✅ **CORRIGÉ** | `heuresHebdoContractuelles()` + `engine.heuresTheoriquesMois()` alimentent la feuille (`badgeuse.js:729-757`), figées à la validation. Doctrine préservée : `source_theorique` exposé (`:803`, `:846`) et `ecart_heures` reste `null` si le théorique est nul (`:121`). |
+| QA-04 | majeur | ✅ **CORRIGÉ** | E-mail réellement envoyé via `sendNotification` (`scheduler.js:870`), compteurs `emails`/`email_statut` retournés (`:907`) ; seuil lu en base (`:817`). `/devices` renvoie `{ silence_minutes, devices }` et le front consomme la nouvelle forme (`SupervisionPostes.jsx:318-319`), l'alerte (`:242,257`) et la vraie télémétrie (`:236-237`). |
+| QA-05 | majeur | ✅ **CORRIGÉ** | Les deux paramètres produisent désormais un effet : `pointages_par_jour` alimente une détection d'anomalie (`badgeuse-engine.js:584-624`), `regularisation_delai_jours` un signalement de délai (`badgeuse.js:641-666`). |
+| QA-06 | majeur | ✅ **CORRIGÉ** | Déduction plafonnée `badgeuse-engine.js:456` : `min(pause, max(0, brut − seuil))`. **Monotonie re-prouvée par exécution** (§4.4bis) : plus aucune régression sur 10 points de mesure. |
+| QA-07 | majeur | ✅ **CORRIGÉ** | `deploy/chromium-policy.json` (`DeveloperToolsAvailability: 2`) installé dans **les deux arborescences de paquet** `/etc/chromium/policies/managed` et `/etc/chromium-browser/policies/managed` (`install.sh:254-256`) — couvre le chemin `cage` comme le repli X11. |
+| QA-08 | mineur | ✅ **CORRIGÉ** | `canonicalPointage` lève sur champ vide ou séparateur (`badgeuse-crypto.js:143-146`), alignant le JS sur le Python. La levée est **captée par élément** (`badgeuse-device.js:213-216`) → accusé `invalid`, jamais un 503 de lot. |
+| QA-09 | mineur | ✅ **CORRIGÉ** | `RuntimeWatchdogSec=15s` posé par `install.sh:322` (watchdog matériel), en complément du `WatchdogSec=90` applicatif. `README.md` corrigé. |
+| QA-10 | mineur | ✅ **CORRIGÉ** | `arrondirInstant` (`badgeuse-engine.js:362`) : en `avantage_salarie`, l'entrée recule au pas, **la sortie est intouchée**. Re-prouvé (§4.4bis) : sortie 16:52 → comptée 16:52. Conforme à NOTE_RH §3. |
+| QA-11 | mineur | ✅ **CORRIGÉ** | Seuil lu dans `badgeuse.supervision_silence_minutes` (`scheduler.js:817`, `badgeuse.js` `/devices`), défaut 15 min. |
+| QA-12 | mineur | ✅ **CORRIGÉ** | Normalisation explicite en minuscules avant chaînage côté poste (`store.py:204` : `(uid_hmac or NO_BADGE).lower()`, `-` inchangé), + `:358`, `:385`. |
+| **QA-13** | **BLOQUANT** | 🔴 **NOUVEAU** | **Régression introduite par le correctif de QA-01** — voir ci-dessous. |
+
+### Symétrie du contrat amendé — re-vérifiée par exécution
+
+Les vecteurs croisés Node ↔ Python ont été **ré-exécutés** après modification de
+`badgeuse-crypto.js` (ajout des levées QA-08) et de `store.py` (normalisation QA-12) :
+
+| Vecteur | `chain_hash` Node | `chain_hash` Python | Identique ? |
+|---|---|---|---|
+| Badge, séq. 42 | `57e62b8f…17bd` | `57e62b8f…17bd` | **✅** |
+| **Sans badge** (`-`), séq. 1, `manuel` | `e02d1475…46f4` | `e02d1475…46f4` | **✅** |
+| Import, séq. 7 | `ba48fc9e…1546` | `ba48fc9e…1546` | **✅** |
+
+Les trois condensats sont **inchangés** par rapport à l'itération 1 : les correctifs n'ont introduit
+**aucune régression cryptographique**. La symétrie du cas amendé est vérifiée dans les deux sens :
+le poste émet `uid_hmac: "-"` (`store.py:204`), le serveur l'accepte (`isSansBadge`), le stocke
+`NULL` et **le recanonise en `-`** — donc `chainHash` serveur = `chain_hash` poste sur le pointage
+sans badge, qui était le cas cassé de l'itération 1.
+
+### QA-13 — BLOQUANT — Une erreur SQL **transitoire** détruit désormais le pointage
+
+**Reproduction minimale.** Provoquer une erreur SQL non-`23505` **transitoire** sur l'`INSERT` d'un
+élément de lot — le cas le plus réaliste étant un `57014 query_canceled` (dépassement de
+`statement_timeout` sous contention, typiquement lors d'une salve type RP-5) ou un `53100 disk_full`.
+
+`badgeuse-device.js:299-313` :
+```js
+} catch (e) {
+  await client.query('ROLLBACK TO SAVEPOINT badgeuse_item');
+  await client.query('RELEASE SAVEPOINT badgeuse_item');
+  if (e.code === '23505') { … status: 'duplicate' … }
+  else {
+    console.error(…);
+    rejeter(resultats, p.uuid, 'erreur_stockage');   // → status: 'invalid'
+  }
+}
+```
+`rejeter` (`:157-161`) émet `status: 'invalid'`. Or, depuis l'amendement v1.1, `invalid` est un
+**accusé TERMINAL que le poste purge** (`store.py:53`, `:292`). Le pointage est donc **supprimé de
+la file et jamais retransmis** : **l'heure est perdue définitivement et silencieusement.**
+
+**Cause racine.** Le correctif de QA-01 a changé la sémantique de `invalid` (de « bloqué en file »
+à « détruit »), mais la branche `erreur_stockage` a été conservée telle quelle. Le commentaire du
+code (`:308-310`) ne raisonne que sur des causes **permanentes** (« FK d'un salarié supprimé,
+dépassement de BIGINT ») ; le `else` capte en réalité **toutes** les autres classes de SQLSTATE,
+y compris les transitoires `08*` (connexion), `40*` (deadlock/sérialisation), `53*` (ressources),
+`57*` (annulation/timeout). Le raisonnement n'a pas couvert la classe d'erreurs où le rejeu
+**réussirait**.
+
+**Pourquoi c'est plus grave que QA-01.** QA-01 provoquait un encombrement de file **sans perte**
+(l'heure restait sur le poste). QA-13 provoque une **perte sèche et silencieuse**, sur un
+dispositif dont toute la doctrine affichée est « aucune heure ne se perd » et dont la finalité est
+probatoire. La probabilité est faible mais la conséquence est irréversible et non détectable
+a posteriori (le pointage n'existe plus nulle part).
+
+**Correctif proposé (non appliqué).** N'accuser réception que des erreurs **déterministes** :
+```js
+const PERMANENTES = new Set(['22P02','22003','22007','22008','23502','23503','23514','23505']);
+…
+} else if (PERMANENTES.has(e.code)) {
+  rejeter(resultats, p.uuid, 'erreur_stockage');      // terminal assumé
+} else {
+  // Transitoire : NE PAS accuser réception. L'élément est simplement omis de
+  // `resultats` → le poste le conserve et le rejouera (PST-05).
+  transitoires += 1;
+}
+```
+L'omission de `resultats` est déjà correctement gérée par le poste : `ack` ne purge que les `uuid`
+présents avec un statut d'accusé (`store.py:289`), et si aucun élément n'est acquitté,
+`sync.py:167-172` lève l'alerte et cesse de boucler. Ajouter le compteur `transitoires` au log de
+fin de lot et au heartbeat.
+
+---
+
+## 5bis. Tableau des défauts (itération 1 — historique)
+
+> Les fiches détaillées ci-dessous sont celles de l'itération 1, conservées pour la traçabilité de
+> l'audit. Leur statut après correction est donné au §5.
 
 | Id | Sévérité | Titre |
 |---|---|---|
@@ -499,60 +646,64 @@ thermomètre d'ambiance, chronomètre vidéo, accès `journalctl` et `sqlite3` s
 
 ---
 
-## 7. Avis final
+## 7. Avis final — itération 2 (après boucle de correction n°1)
 
-# ⛔ NO-GO
+# ⛔ NO-GO (logiciel)
 
-**Motif :** un défaut **BLOQUANT** subsiste — **QA-01** : le serveur émet un statut `invalid` non
-prévu par `CONTRAT_API_DEVICE.md §2.1`, terminal de son côté, que le poste n'a **aucun moyen de
-purger**. Le pointage concerné est retransmis indéfiniment, l'indicateur `taille_file` est
-durablement faussé, et l'alerte que le poste lève à cette occasion **n'atteint jamais le serveur**
-(QA-02) : la panne est invisible depuis le back-office. C'est précisément la classe d'échec
-silencieux que les contrats du module déclarent avoir éliminée.
+**Motif : un défaut BLOQUANT subsiste — mais ce n'est plus le même.** Les **12 défauts de
+l'itération 1 sont corrigés et prouvés** (§5), y compris le bloquant QA-01. Le correctif de QA-01 a
+toutefois **introduit une régression de sévérité supérieure** :
 
-Conformément au mandat, **un seul défaut bloquant suffit à prononcer le NO-GO.**
+> **QA-13** — la branche `erreur_stockage` (`badgeuse-device.js:311`) accuse réception en `invalid`
+> de **toute** erreur SQL non-`23505`, y compris les **transitoires** (`57014` timeout, `53100`
+> disque plein, `40*`, `08*`). Depuis l'amendement v1.1, `invalid` est un accusé **terminal que le
+> poste purge** : un incident de base de données passager **détruit désormais définitivement et
+> silencieusement un pointage**.
 
-### Ce qui est solide et ne doit pas être remis en cause
+L'itération 1 avait un défaut qui **bloquait** une heure sur le poste ; l'itération 2 a un défaut
+qui **détruit** cette heure. La régression est donc plus grave que le défaut qu'elle corrige, sur
+un dispositif dont la finalité est probatoire et dont la doctrine affichée est « aucune heure ne se
+perd ». Conformément au mandat, **un seul défaut bloquant suffit à prononcer le NO-GO.**
 
-- **Cœur cryptographique inter-piles : identique au caractère près**, prouvé par exécution
-  croisée Node/Python sur 3 vecteurs couvrant badge, manuel (`-`) et import (§3). Le risque
-  principal du projet — « pointage rejeté en production » — est **écarté**.
-- **Moteur RH exact** sur les cas difficiles : minuit, **DST dans les deux sens** (9 h et 7 h
-  réelles correctement comptées), arrondi **effectivement à l'avantage** du salarié (+5 min
-  démontrées), corrections additives sans altération du brut.
-- **Doctrine « jamais de valeur inventée » respectée** partout où elle est en jeu
-  (`heures_theoriques`/`ecart` à `null` plutôt que zéro trompeur).
-- **Sécurité de l'API device** : clé jamais stockée en clair, comparaison à temps constant, 401
-  générique, limitation par poste, `api_key_hash` jamais exposé, **aucune SQL non paramétrée**,
-  **aucun UID en clair** nulle part (logs, réponses, exceptions), idempotence par `uuid` vérifiée.
-- **Aucun `catch`/`except` vide** dans le code backend du module ; les `pass` Python sont tous des
-  arrêts de tâche légitimes.
+### Ce que la boucle 1 a réellement acquis
 
-### Conditions de levée du NO-GO
+- **12/12 défauts corrigés**, dont les 6 majeurs à effet RH, juridique et exploitation.
+- **Symétrie du contrat amendé vérifiée dans les deux sens** et par exécution : le poste émet
+  `uid_hmac:"-"`, le serveur l'accepte, le stocke `NULL` et le recanonise en `-` ; les trois
+  condensats de chaîne restent **identiques au bit près** entre Node et Python malgré les
+  modifications des deux piles (aucune régression cryptographique).
+- **Règles de paie désormais saines et prouvées** : monotonie rétablie (361 min ne sont plus payées
+  moins que 360), sortie comptée au réel conformément à NOTE_RH §3, heures théoriques enfin
+  calculées depuis les contrats avec `source_theorique` honnête.
+- **+81 tests backend et +13 tests poste**, 0 régression, 3 suites vertes.
+- **Traçabilité : 22 OK / 7 PARTIEL / 0 ABSENT** (contre 17/12/0 à l'itération 1).
 
-**Bloquant — à corriger avant tout déploiement :**
-1. **QA-01** — supprimer la voie sans issue du statut `invalid` (correctif 1 recommandé :
-   stocker en `orphelin` et répondre `orphan`), avec test de contrat inter-piles.
+### Condition unique de levée du NO-GO logiciel
 
-**À corriger avant la première paie réelle (majeurs à effet RH/juridique) :**
-2. **QA-06** — arbitrer et corriger la non-monotonicité de la pause (6 h 01 < 6 h 00).
-3. **QA-03** — alimenter `heures_theoriques`, sans quoi BO-04 n'est pas rendu.
-4. **QA-05** — implémenter ou retirer les deux paramètres RH sans effet.
-5. **QA-10** — trancher l'arrondi de sortie et aligner NOTE_RH.
+1. **QA-13** — distinguer les SQLSTATE **permanents** (accusé `invalid` assumé) des **transitoires**
+   (aucun accusé : omettre l'élément de `resultats`, le poste le conservera et le rejouera).
+   Correctif proposé au §5, environ dix lignes, sans changement de contrat : le comportement de
+   non-accusé est **déjà** correctement implémenté côté poste (`store.py:289`, `sync.py:167-172`).
+   À couvrir par un test de contrat dédié (erreur transitoire simulée ⇒ élément **absent** de
+   `resultats` ⇒ file conservée).
 
-**À corriger avant l'exploitation autonome (majeurs à effet exploitation/sécurité) :**
-6. **QA-02** et **QA-04** — rendre la supervision réellement alertante (e-mail + remontée
-   d'alerte du poste) ; sans cela, personne ne saura qu'un poste est muet.
-7. **QA-07** — politique Chromium gérée verrouillant les DevTools.
+**Aucun autre correctif n'est requis pour le GO logiciel.** Les 7 exigences restées PARTIEL sont
+soit des couvertures de test manquantes sur l'UI kiosque (PST-08, AFF-04, AFF-06), soit des écarts
+assumés et documentés (BO-11), soit des points de recette matérielle (AFF-03), soit une exigence
+mineure non implémentée (BO-05 « absence non justifiée ») — aucun n'est bloquant.
 
-**Puis :** QA-08, QA-09, QA-11, QA-12 en traitement courant.
+### GO définitif sur site
 
-**Enfin :** la recette matérielle **RP-1 à RP-6** (§6) doit être exécutée et tracée. Aucun de ces
-six tests n'est substituable par du logiciel ; **RP-6 (RTC)** et **RP-1 (coupures secteur)**
-conditionnent la valeur probante du dispositif et ne peuvent pas être écartés.
+Le GO logiciel ne vaut pas GO de mise en service. La **recette matérielle RP-1 → RP-6** (§6) reste
+intégralement à exécuter et à tracer : aucun de ces six tests n'est substituable par du logiciel.
+**RP-6 (RTC pile vide)** et **RP-1 (coupures secteur ×20)** conditionnent la valeur probante du
+dispositif. **RP-5 (charge 30 badges/60 s)** prend une importance particulière après cette
+itération : c'est le scénario qui met la base sous contention et donc **le plus susceptible de
+déclencher QA-13** — il devra être rejoué après correction, en vérifiant explicitement qu'aucun
+pointage n'a disparu (comptage contradictoire contre feuille de présence papier).
 
 ---
 
-*Rapport établi par l'Agent A4 (QA/Debug). Les trois suites ont été exécutées ; les vecteurs
-cryptographiques et les preuves numériques du moteur ont été produits par exécution réelle du code
-du dépôt. Aucun fichier de code n'a été modifié, aucun commit n'a été créé.*
+*Rapport établi par l'Agent A4 (QA/Debug). Itération 2 : les trois suites ont été ré-exécutées, les
+vecteurs cryptographiques croisés et les règles de paie re-prouvés par exécution réelle du code du
+dépôt à HEAD `89f6310`. Aucun fichier de code n'a été modifié, aucun commit n'a été créé.*
