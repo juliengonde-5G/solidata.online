@@ -247,6 +247,23 @@ describe('seeds idempotents et registre RGPD', () => {
   test('un log de clôture annonce la section', () => {
     expect(src).toMatch(/\[INIT-DB\] Module 33 Temps & Présence \(badgeuse\) — 8 tables/);
   });
+
+  // Hotfix prod v2.22.1 — la fiche art. 30 badgeuse porte une base légale de
+  // 136 car. et une durée de conservation de 312 car. : le VARCHAR(100)
+  // historique de rgpd_registre la refusait (« value too long ») sur les bases
+  // ANCIENNES, que CREATE TABLE IF NOT EXISTS ne re-type jamais. Ce test
+  // verrouille les deux verrous : définition moderne en TEXT ET migration
+  // d'élargissement idempotente pour les bases déjà déployées.
+  test('rgpd_registre accepte les fiches longues (TEXT + élargissement idempotent)', () => {
+    const create = src.slice(
+      src.indexOf('CREATE TABLE IF NOT EXISTS rgpd_registre'),
+      src.indexOf(');', src.indexOf('CREATE TABLE IF NOT EXISTS rgpd_registre'))
+    );
+    expect(create).toMatch(/base_legale TEXT NOT NULL/);
+    expect(create).toMatch(/duree_conservation TEXT/);
+    expect(src).toMatch(/ALTER TABLE rgpd_registre ALTER COLUMN base_legale TYPE TEXT/);
+    expect(src).toMatch(/ALTER TABLE rgpd_registre ALTER COLUMN duree_conservation TYPE TEXT/);
+  });
 });
 
 describe('ADR-0003 — coexistence avec le module 25 « Pointage » (aucune régression)', () => {

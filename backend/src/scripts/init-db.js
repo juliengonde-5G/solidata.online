@@ -1282,17 +1282,25 @@ async function initDatabase() {
         id SERIAL PRIMARY KEY,
         nom_traitement VARCHAR(255) NOT NULL,
         finalite TEXT NOT NULL,
-        base_legale VARCHAR(100) NOT NULL,
+        base_legale TEXT NOT NULL,
         categories_personnes TEXT,
         categories_donnees TEXT,
         destinataires TEXT,
-        duree_conservation VARCHAR(100),
+        duree_conservation TEXT,
         mesures_securite TEXT,
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    // Hotfix prod v2.22.1 — les fiches art. 30 récentes (badgeuse notamment)
+    // portent des bases légales et des durées de conservation DÉTAILLÉES
+    // (136 et 312 caractères mesurés), au-delà du VARCHAR(100) historique.
+    // CREATE TABLE IF NOT EXISTS ne re-type jamais une base ancienne :
+    // élargissement idempotent explicite (prouvé rejouable sur PostgreSQL 16).
+    await client.query('ALTER TABLE rgpd_registre ALTER COLUMN base_legale TYPE TEXT;');
+    await client.query('ALTER TABLE rgpd_registre ALTER COLUMN duree_conservation TYPE TEXT;');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS rgpd_consents (
