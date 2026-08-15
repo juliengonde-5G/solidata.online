@@ -219,8 +219,8 @@ sont tronqués à 12 caractères.
 | PST-06 | Badges 5 min / playlist 15 min, ETag | `sync.py`, `app.py` |
 | PST-07 | Heartbeat 60 s (dérive, file, température, disque) | `sync.send_heartbeat` |
 | PST-08 | Bandeau hors ligne | `ui/app.js`, `ws_server.status` |
-| PST-09 | Watchdog systemd, arrêt propre | `app.sd_notify`, unités |
-| PST-10 | Aucune saisie utilisateur, curseur masqué | `EVIOCGRAB`, `ui/style.css` |
+| PST-09 | Watchdog **logiciel** (service, `WatchdogSec=90` + `sd_notify`) **et watchdog matériel** (puce, `RuntimeWatchdogSec=15s`), arrêt propre | `app.sd_notify` + unités ; `/etc/systemd/system.conf.d/badgeuse-watchdog.conf` (écrit par `deploy/install.sh`) |
+| PST-10 | Aucune saisie utilisateur, curseur masqué, DevTools verrouillés | `EVIOCGRAB`, `ui/style.css`, `deploy/chromium-policy.json` (politique Chromium gérée, installée par `deploy/install.sh`) |
 | AFF-01 | Overlay 3–8 s, plafond re-vérifié | serveur → `ws_server.clamp_overlay` → `ui/app.js` |
 | AFF-02 | Cumul hebdo seulement si activé | `app._cumul_hebdo` |
 | AFF-03 | Contraste ≥ 7:1, police ≥ 48 px | `ui/style.css` |
@@ -228,3 +228,25 @@ sont tronqués à 12 caractères.
 | AFF-05/07 | Playlist typée, rejouée hors ligne | `ui/app.js`, `store` |
 | AFF-06 | Fondus, aucun clignotement | `ui/style.css` |
 | AFF-08 | Extinction hors plage d'ouverture | `deploy/dpms.sh` |
+
+**PST-09 — deux chiens de garde, pas un seul.** `WatchdogSec=90` sur
+`badgeuse-agent.service` ne surveille QUE ce service : si l'agent cesse
+d'envoyer `WATCHDOG=1` (cf. `app._loop_watchdog`), systemd le redémarre. Cela
+ne couvre pas un gel du noyau ou de systemd (PID1) lui-même. Le watchdog
+**matériel** de la puce (`bcm2835_wdt`) comble ce trou : `deploy/install.sh`
+écrit `/etc/systemd/system.conf.d/badgeuse-watchdog.conf`
+(`RuntimeWatchdogSec=15s`, section `[Manager]`) — si PID1 gèle à son tour,
+c'est le matériel qui redémarre le Pi.
+
+**PST-10 — limite résiduelle du verrouillage kiosque.** La politique Chromium
+gérée (`deploy/chromium-policy.json`, installée dans
+`/etc/chromium/policies/managed/` **et** `/etc/chromium-browser/policies/managed/`
+selon le paquet présent) verrouille les DevTools de façon non contournable
+par un flag de ligne de commande. Cela ferme l'accès applicatif (page kiosque
+**et** serveur local de l'agent, `127.0.0.1:8766`/`8765`), mais ne remplace
+pas une protection physique : le **premier rideau** reste le boîtier fermé
+(`cage`, aucun bureau exposé) et l'accès exclusif au lecteur (`EVIOCGRAB`,
+`reader.py`), qui empêche un clavier USB branché en aval du lecteur
+d'atteindre le système au-delà de Chromium. Un accès physique prolongé au
+poste (ouverture du boîtier, autre vecteur que le clavier/souris) reste hors
+du périmètre logiciel de ce document.

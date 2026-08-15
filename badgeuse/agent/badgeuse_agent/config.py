@@ -30,6 +30,16 @@ SITE_KEY_HEX_LENGTH = 64
 #: Longueur minimale d'une clé d'appareil (256 bits hex attendus).
 DEVICE_KEY_MIN_LENGTH = 32
 
+#: Double geste explicite requis pour accepter ``verify_tls = false``
+#: (note juridique §4, SPEC §7.1 : « certificat vérifié » ; réserve de
+#: conformité R3). Sans cette variable d'environnement AUSSI posée, la
+#: configuration est refusée au démarrage — jamais de repli silencieux.
+ENV_ALLOW_INSECURE_TLS = "BADGEUSE_ALLOW_INSECURE_TLS"
+
+#: Message d'alerte heartbeat permanent tant que le poste tourne en TLS non
+#: vérifié (réserve R3) — concaténé aux alertes ponctuelles par sync.py.
+TLS_INSECURE_ALERT = "TLS non verifie — poste en configuration de test"
+
 
 class ConfigError(RuntimeError):
     """Configuration absente, incomplète ou invalide — démarrage impossible."""
@@ -151,6 +161,16 @@ def load(path: Optional[str] = None) -> Config:
 
     verify_tls = parser.getboolean("server", "verify_tls", fallback=True)
     if not verify_tls:
+        # Reserve de conformite R3 : verify_tls=false ne doit jamais partir
+        # en exploitation par erreur. Double geste explicite obligatoire :
+        # le fichier ET la variable d'environnement, jamais l'un sans l'autre.
+        if os.environ.get(ENV_ALLOW_INSECURE_TLS) != "1":
+            raise ConfigError(
+                "server.verify_tls = false est refuse : poser AUSSI la "
+                f"variable d'environnement {ENV_ALLOW_INSECURE_TLS}=1 (double "
+                "geste explicite, reserve au banc de test — jamais en "
+                "exploitation, note juridique §4 / SPEC §7.1)."
+            )
         warnings.append(
             "verification TLS DESACTIVEE — reservee a un banc de test, "
             "jamais en exploitation"

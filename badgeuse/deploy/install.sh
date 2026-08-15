@@ -246,7 +246,18 @@ fi
 # ------------------------------------------------------------- 7. kiosque
 etape "7/9 Options d'affichage (${CIBLE})"
 
-BASE_FLAGS="--kiosk --noerrdialogs --disable-translate --disable-features=Translate"
+# Politique Chromium GEREE (QA-07) : verrouille les DevTools de facon non
+# contournable par un flag de ligne de commande ou un clavier branche sur le
+# poste. Les deux chemins possibles selon le paquet installe (chromium vs
+# chromium-browser) sont renseignes : celui qui ne correspond pas au
+# navigateur present est simplement ignore par Chromium.
+for repertoire_politique in /etc/chromium/policies/managed /etc/chromium-browser/policies/managed; do
+  install -d -m 0755 "$repertoire_politique"
+  install -m 0644 "${SOURCE}/deploy/chromium-policy.json" "${repertoire_politique}/badgeuse.json"
+done
+info "politique Chromium geree installee (DevTools verrouilles, cf. README §7)"
+
+BASE_FLAGS="--kiosk --noerrdialogs --disable-translate --disable-features=Translate,TranslateUI"
 BASE_FLAGS="${BASE_FLAGS} --disable-session-crashed-bubble --disable-infobars"
 BASE_FLAGS="${BASE_FLAGS} --no-first-run --disable-pinch --overscroll-history-navigation=0"
 BASE_FLAGS="${BASE_FLAGS} --check-for-update-interval=31536000"
@@ -295,6 +306,23 @@ cat > /etc/systemd/system/badgeuse-agent.service.d/cible.conf <<FIN
 MemoryMax=${MEMOIRE_AGENT}
 FIN
 
+# Chien de garde MATERIEL (QA-09). Le WatchdogSec=90 de badgeuse-agent.service
+# ne surveille QUE ce service (sd_notify) : un gel du noyau ou de PID1
+# lui-meme n'est pas couvert. RuntimeWatchdogSec pilote le chien de garde
+# materiel de la puce (bcm2835_wdt) via systemd : si PID1 gele a son tour,
+# c'est le materiel qui redemarre le Pi. Idempotent (fichier reecrit a
+# l'identique a chaque passage).
+install -d -m 0755 /etc/systemd/system.conf.d
+cat > /etc/systemd/system.conf.d/badgeuse-watchdog.conf <<'FIN'
+# Genere par install.sh — watchdog MATERIEL (bcm2835_wdt). Complementaire
+# du WatchdogSec= de badgeuse-agent.service : celui-ci ne surveille que le
+# service applicatif, celui-la couvre un gel du systeme tout entier
+# (y compris PID1). Voir README.md §7 (PST-09).
+[Manager]
+RuntimeWatchdogSec=15s
+FIN
+info "watchdog materiel configure : /etc/systemd/system.conf.d/badgeuse-watchdog.conf"
+
 # Repli X11 : cage indisponible, on remplace la commande de lancement.
 install -d -m 0755 /etc/systemd/system/badgeuse-kiosk.service.d
 if [ "$COMPOSITEUR" = "x11" ]; then
@@ -311,6 +339,11 @@ else
 fi
 
 systemctl daemon-reload
+# daemon-reload ne relit que les unites : le watchdog materiel (RuntimeWatchdogSec,
+# option [Manager] de system.conf.d) exige que PID1 se re-execute pour en tenir
+# compte immediatement. Best-effort : sans cela, actif au prochain redemarrage.
+systemctl daemon-reexec 2>/dev/null \
+  || avert "daemon-reexec impossible — watchdog materiel actif au prochain redemarrage"
 systemctl enable badgeuse-agent.service >/dev/null
 systemctl enable badgeuse-kiosk.service >/dev/null
 systemctl enable badgeuse-dpms.timer >/dev/null 2>&1 || true

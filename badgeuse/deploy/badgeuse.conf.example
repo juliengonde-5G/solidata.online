@@ -25,7 +25,14 @@ device_key = CHANGE_ME_CLE_APPAREIL_FOURNIE_A_L_APPAIRAGE
 ; Chemin de l'API device. À ne modifier que sur instruction.
 ;api_path = /api/badgeuse/device/v1
 
-; Vérification du certificat TLS. Ne jamais désactiver en exploitation.
+; Vérification du certificat TLS. NE JAMAIS DÉSACTIVER EN EXPLOITATION —
+; réservé à un banc de test isolé. Poser "verify_tls = false" ici NE SUFFIT
+; PAS : l'agent refuse de démarrer tant que la variable d'environnement
+; BADGEUSE_ALLOW_INSECURE_TLS=1 n'est pas AUSSI posée (double geste
+; explicite). Quand actif : log CRITICAL au démarrage + alerte permanente
+; dans le heartbeat de supervision ("TLS non vérifié — poste en
+; configuration de test"), visible en back-office tant que l'option reste
+; active.
 ;verify_tls = true
 ; Autorité de certification interne, le cas échéant.
 ;ca_bundle = /etc/ssl/certs/ca-certificates.crt

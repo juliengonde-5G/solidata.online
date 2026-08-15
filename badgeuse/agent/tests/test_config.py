@@ -145,8 +145,32 @@ def test_vue_journalisable_sans_secret(tmp_path):
     assert "<defini>" in vue
 
 
-def test_tls_desactive_signale(tmp_path):
+def test_tls_desactive_sans_variable_environnement_refuse(tmp_path, monkeypatch):
+    """Réserve de conformité R3 : verify_tls=false seul ne suffit pas — sans
+    le double geste explicite (variable d'environnement), l'agent refuse de
+    démarrer plutôt que de tourner sans vérification TLS par erreur."""
+    monkeypatch.delenv("BADGEUSE_ALLOW_INSECURE_TLS", raising=False)
+    contenu = VALIDE.replace("[site]", "verify_tls = false\n\n[site]")
+    with pytest.raises(ConfigError, match="BADGEUSE_ALLOW_INSECURE_TLS"):
+        load(ecrire(tmp_path, contenu))
+
+
+def test_tls_desactive_avec_variable_environnement_signale(tmp_path, monkeypatch):
+    """Le double geste explicite (fichier + variable d'environnement) est
+    accepté, et reste signalé par un avertissement — jamais silencieux."""
+    monkeypatch.setenv("BADGEUSE_ALLOW_INSECURE_TLS", "1")
     contenu = VALIDE.replace("[site]", "verify_tls = false\n\n[site]")
     config = load(ecrire(tmp_path, contenu))
     assert config.verify_tls is False
     assert any("TLS" in avertissement for avertissement in config.warnings)
+
+
+def test_tls_desactive_variable_environnement_valeur_incorrecte_refuse(
+    tmp_path, monkeypatch
+):
+    """Seule la valeur exacte ``1`` vaut double geste explicite — une valeur
+    approchante (ex. ``true``, chaîne vide) ne doit pas ouvrir la porte."""
+    monkeypatch.setenv("BADGEUSE_ALLOW_INSECURE_TLS", "true")
+    contenu = VALIDE.replace("[site]", "verify_tls = false\n\n[site]")
+    with pytest.raises(ConfigError, match="BADGEUSE_ALLOW_INSECURE_TLS"):
+        load(ecrire(tmp_path, contenu))

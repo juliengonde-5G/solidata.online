@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from badgeuse_agent.chain import canonical, chain_hash, genesis_hash
-from badgeuse_agent.store import Store, StoreError
+from badgeuse_agent.store import Store, StoreError, alerte_invalides
 
 DEVICE = "LH-P1"
 UID_A = "6af79677ac212277ce9caf53668e1561c75c43aaba28c6588da17c55915551d8"
@@ -78,7 +78,9 @@ def test_purge_sur_accuses_ok_duplicate_orphan(store):
     assert store.queue_size() == 0
 
 
-@pytest.mark.parametrize("statut", ["error", "invalid_payload", "", "rejected", None])
+@pytest.mark.parametrize(
+    "statut", ["error", "invalid_payload", "", "rejected", None, "weird"]
+)
 def test_aucune_purge_sans_accuse(store, statut):
     payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
     store.ack([{"uuid": payload["uuid"], "status": statut}])
@@ -106,6 +108,80 @@ def test_accuse_inconnu_sans_effet(store):
     store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
     store.ack([{"uuid": "uuid-jamais-emis", "status": "ok"}])
     assert store.queue_size() == 1
+
+
+# ------------------------------------------------- accusé terminal 'invalid' (QA-01)
+
+
+def test_purge_sur_accuse_invalid(store):
+    """CONTRAT_API_DEVICE §2.1 v1.1 : ``invalid`` est un accusé TERMINAL —
+    l'élément est purgé comme ok/duplicate/orphan, jamais retransmis en
+    boucle indéfiniment (c'était le défaut bloquant QA-01)."""
+    payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+    store.ack(
+        [{"uuid": payload["uuid"], "status": "invalid", "raison": "champs_invalides"}]
+    )
+    assert store.queue_size() == 0
+
+
+def test_statut_inconnu_jamais_purge_ni_compte(store):
+    """Un statut hors contrat (ex. futur défaut serveur, 'weird') n'est ni un
+    accusé ok/duplicate/orphan, ni 'invalid' : il ne purge rien et n'alimente
+    pas le compteur d'invalides."""
+    payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+    store.ack([{"uuid": payload["uuid"], "status": "weird"}])
+    assert store.queue_size() == 1
+    assert store.invalid_count() == 0
+
+
+def test_compteur_invalides_zero_par_defaut(store):
+    assert store.invalid_count() == 0
+
+
+def test_compteur_invalides_incremente_a_chaque_purge(store):
+    for _ in range(3):
+        payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+        store.ack([{"uuid": payload["uuid"], "status": "invalid"}])
+    assert store.invalid_count() == 3
+
+
+def test_lot_mixte_purge_tout_ne_compte_que_les_invalides(store):
+    a = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+    b = store.enqueue_pointage(uid_hmac=UID_B, sens="entree", salarie_id=2)
+    store.ack(
+        [
+            {"uuid": a["uuid"], "status": "ok"},
+            {"uuid": b["uuid"], "status": "invalid"},
+        ]
+    )
+    assert store.queue_size() == 0
+    assert store.invalid_count() == 1
+
+
+def test_compteur_invalides_persiste_apres_reouverture(tmp_path):
+    """Le compteur est une table d'état SQLite : il survit à un redémarrage
+    du poste, contrairement à la file elle-même qui, elle, se vide."""
+    with Store(str(tmp_path), DEVICE) as store:
+        payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+        store.ack([{"uuid": payload["uuid"], "status": "invalid"}])
+        assert store.invalid_count() == 1
+
+    repris = Store(str(tmp_path), DEVICE)
+    try:
+        assert repris.invalid_count() == 1
+        # Le compteur continue de s'incrementer apres reouverture.
+        payload = repris.enqueue_pointage(uid_hmac=UID_A, sens="sortie", salarie_id=1)
+        repris.ack([{"uuid": payload["uuid"], "status": "invalid"}])
+        assert repris.invalid_count() == 2
+    finally:
+        repris.close()
+
+
+def test_alerte_invalides_message_pur():
+    """Gabarit du message d'alerte heartbeat (fonction pure, sans httpx) —
+    utilisé par sync.py pour peupler le champ ``alerte`` du contrat §2.5."""
+    assert alerte_invalides(1) == "1 pointage(s) invalide(s) purge(s) — verifier le poste"
+    assert alerte_invalides(3) == "3 pointage(s) invalide(s) purge(s) — verifier le poste"
 
 
 # ----------------------------------------------------------- séquence et chaîne
@@ -254,6 +330,42 @@ def test_badge_inconnu(store):
 
 def test_badges_incomplets_ignores(store):
     assert store.replace_badges([{"prenom": "Sans identifiant"}, {"uid_hmac": UID_A}]) == 0
+
+
+# --------------------------------------------------- casse du uid_hmac (QA-12)
+
+
+def test_cache_seede_en_majuscules_retrouve_en_minuscules(store):
+    """``hexdigest()`` produit toujours des minuscules côté agent, mais on ne
+    fait pas confiance à la source : un cache serveur envoyé en MAJUSCULES
+    doit quand même être retrouvé par une recherche en minuscules."""
+    store.replace_badges(
+        [
+            {
+                "uid_hmac": UID_A.upper(),
+                "salarie_id": 123,
+                "prenom": "Karim",
+                "initiale_nom": "B",
+            }
+        ]
+    )
+    badge = store.find_badge(UID_A)
+    assert badge is not None
+    assert badge["uid_hmac"] == UID_A  # stocke normalise en minuscules
+
+
+def test_find_badge_normalise_aussi_en_lecture(store):
+    """Défense symétrique : un appelant qui chercherait en MAJUSCULES
+    retrouve quand même un badge stocké en minuscules."""
+    store.replace_badges(
+        [{"uid_hmac": UID_A, "salarie_id": 1, "prenom": "Karim", "initiale_nom": "B"}]
+    )
+    assert store.find_badge(UID_A.upper()) is not None
+
+
+def test_enqueue_pointage_normalise_la_casse_du_condensat(store):
+    payload = store.enqueue_pointage(uid_hmac=UID_A.upper(), sens="entree", salarie_id=1)
+    assert payload["uid_hmac"] == UID_A
 
 
 # --------------------------------------------------------------- alternance

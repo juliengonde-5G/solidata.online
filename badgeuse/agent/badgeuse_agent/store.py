@@ -6,11 +6,22 @@ Contenu, et rien d'autre :
 
 - ``chain_state`` : séquence du poste et dernier hash de la chaîne d'intégrité ;
 - ``queue`` : file d'attente des pointages à transmettre, **purgée uniquement
-  sur accusé de réception serveur** (``ok`` / ``duplicate`` / ``orphan``) ;
+  sur accusé de réception serveur** (``ok`` / ``duplicate`` / ``orphan`` /
+  ``invalid`` — CONTRAT_API_DEVICE §2.1, amendement v1.1 : ``invalid`` est un
+  accusé TERMINAL, l'élément est purgé et compté, jamais retransmis en
+  boucle et jamais un rejet silencieux) ;
 - ``badges`` : cache des badges actifs — ``uid_hmac``, identifiant technique,
   prénom, initiale. Ni nom complet, ni statut, ni équipe (exigence A5) ;
 - ``pointages_locaux`` : les pointages récents, pour l'alternance entrée/sortie ;
-- ``cache`` : dernières config / playlist reçues et leurs ETag.
+- ``cache`` : dernières config / playlist reçues et leurs ETag ;
+- ``compteurs`` : compteurs persistants d'exploitation (ex. pointages
+  ``invalid`` purgés depuis l'appairage), survivent aux redémarrages.
+
+Frontière de casse : un ``uid_hmac`` est toujours un hexadécimal **minuscule**
+(``hashlib``/``hmac`` produisent des ``hexdigest()`` en minuscules). Ce module
+normalise systématiquement en minuscules à l'écriture et à la lecture du
+cache badges, par défense en profondeur contre une source externe (serveur,
+import) qui enverrait une casse différente — cf. CONTRAT_HMAC, QA-12.
 
 L'UID brut n'apparaît dans aucune de ces tables : seul le condensat y entre.
 
@@ -33,8 +44,17 @@ from . import chain as chain_mod
 from .hmac_uid import NO_BADGE
 from .sens import PARIS, PointageLocal
 
-#: Statuts serveur valant accusé de réception (CONTRAT_API_DEVICE §2.1).
-ACK_STATUSES = frozenset({"ok", "duplicate", "orphan"})
+#: Statuts serveur valant accusé de réception TERMINAL (CONTRAT_API_DEVICE
+#: §2.1, amendement v1.1). ``invalid`` en fait partie depuis l'amendement :
+#: un élément malformé ne sera jamais réparé par une retransmission, donc le
+#: poste le purge comme les autres — mais le compte et alerte (cf. ``ack``).
+#: Tout statut hors de cet ensemble (y compris inconnu/futur) laisse
+#: l'élément en file : aucune heure ne se perd, quitte à être retransmise.
+ACK_STATUSES = frozenset({"ok", "duplicate", "orphan", "invalid"})
+
+#: Clé du compteur persistant de pointages ``invalid`` purgés (table
+#: ``compteurs``), exposé par :meth:`Store.invalid_count`.
+COMPTEUR_INVALIDES = "invalides"
 
 #: Taille maximale d'un lot déposé (CONTRAT_API_DEVICE §2.1).
 MAX_BATCH = 100
@@ -82,7 +102,23 @@ CREATE TABLE IF NOT EXISTS cache (
     etag       TEXT,
     maj_le     TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS compteurs (
+    cle    TEXT PRIMARY KEY,
+    valeur INTEGER NOT NULL DEFAULT 0
+);
 """
+
+
+def alerte_invalides(nombre: int) -> str:
+    """Message d'alerte heartbeat pour un lot de pointages ``invalid`` purgés.
+
+    Fonction PURE (aucune E/S) : gabarit partagé, utilisé par ``sync.py`` pour
+    peupler le champ ``alerte`` du heartbeat (CONTRAT_API_DEVICE §2.5) sans
+    dupliquer le texte. Extraite ici — plutôt que dans ``sync.py``, qui
+    dépend de ``httpx`` — pour rester testable sans dépendance HTTP.
+    """
+    return f"{nombre} pointage(s) invalide(s) purge(s) — verifier le poste"
 
 
 class StoreError(RuntimeError):
@@ -163,6 +199,9 @@ class Store:
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=_dt.timezone.utc)
         record_uuid = pointage_uuid or str(_uuid.uuid4())
+        # Frontière de casse (QA-12) : un uid_hmac est toujours un hexadécimal
+        # minuscule (hexdigest) ; "-" (NO_BADGE) est inchangé par .lower().
+        uid_hmac_normalise = (uid_hmac or NO_BADGE).lower()
 
         conn = self._conn
         conn.execute("BEGIN IMMEDIATE")
@@ -176,7 +215,7 @@ class Store:
             payload = {
                 "uuid": record_uuid,
                 "sequence_device": sequence,
-                "uid_hmac": uid_hmac or NO_BADGE,
+                "uid_hmac": uid_hmac_normalise,
                 "horodatage_utc": chain_mod.utc_iso_ms(moment),
                 "horodatage_local": moment.astimezone(PARIS).strftime(
                     "%Y-%m-%dT%H:%M:%S"
@@ -229,17 +268,30 @@ class Store:
     def ack(self, resultats: Iterable[Mapping[str, Any]]) -> int:
         """Purge les pointages **accusés** par le serveur.
 
-        Seuls ``ok``, ``duplicate`` et ``orphan`` valent accusé de réception
-        (PST-05). Tout autre statut laisse l'élément en file : aucune heure ne
-        se perd, quitte à être retransmise.
+        ``ok``, ``duplicate``, ``orphan`` et ``invalid`` valent tous accusé de
+        réception TERMINAL (PST-05, CONTRAT_API_DEVICE §2.1 amendement v1.1) :
+        un élément ``invalid`` est malformé au point de ne jamais pouvoir être
+        réparé par une retransmission, donc il est purgé comme les autres —
+        mais son passage est tracé (compteur persistant ``invalides`` +
+        journal WARNING côté appelant, cf. ``sync.py``) pour que la perte
+        reste visible en exploitation au lieu de disparaître. Tout autre
+        statut (y compris un statut inconnu, ex. futur défaut serveur) laisse
+        l'élément en file : aucune heure ne se perd, quitte à être
+        retransmise.
         """
-        purgeables = [
-            str(item["uuid"])
-            for item in resultats
-            if isinstance(item, Mapping)
-            and item.get("uuid")
-            and str(item.get("status")) in ACK_STATUSES
-        ]
+        purgeables: List[str] = []
+        invalides = 0
+        for item in resultats:
+            if not isinstance(item, Mapping):
+                continue
+            uuid = item.get("uuid")
+            statut = str(item.get("status"))
+            if not uuid or statut not in ACK_STATUSES:
+                continue
+            purgeables.append(str(uuid))
+            if statut == "invalid":
+                invalides += 1
+
         if not purgeables:
             return 0
 
@@ -250,11 +302,28 @@ class Store:
                 "DELETE FROM queue WHERE uuid = ?", [(u,) for u in purgeables]
             )
             deleted = cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+            if invalides:
+                conn.execute(
+                    "INSERT INTO compteurs (cle, valeur) VALUES (?, ?)"
+                    " ON CONFLICT(cle) DO UPDATE SET valeur = valeur + excluded.valeur",
+                    (COMPTEUR_INVALIDES, invalides),
+                )
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
             raise
         return deleted
+
+    def invalid_count(self) -> int:
+        """Nombre total de pointages ``invalid`` purgés depuis l'appairage.
+
+        Persistant (table ``compteurs``) : survit à un redémarrage du poste,
+        contrairement à la file elle-même qui, elle, se vide sur purge.
+        """
+        row = self._conn.execute(
+            "SELECT valeur FROM compteurs WHERE cle = ?", (COMPTEUR_INVALIDES,)
+        ).fetchone()
+        return int(row["valeur"]) if row else 0
 
     def queue_size(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM queue").fetchone()
@@ -282,7 +351,11 @@ class Store:
                 continue
             rows.append(
                 (
-                    str(uid_hmac),
+                    # Frontière de casse (QA-12) : le serveur normalise déjà en
+                    # minuscules, mais on ne fait pas confiance à la source —
+                    # un condensat local (toujours minuscule, hexdigest) doit
+                    # retrouver ce badge quelle que soit la casse transmise.
+                    str(uid_hmac).lower(),
                     int(salarie_id),
                     str(badge.get("prenom") or ""),
                     str(badge.get("initiale_nom") or badge.get("initiale") or ""),
@@ -305,10 +378,11 @@ class Store:
         return len(rows)
 
     def find_badge(self, uid_hmac: str) -> Optional[Dict[str, Any]]:
+        # Frontière de casse (QA-12) : normalise en miroir de replace_badges.
         row = self._conn.execute(
             "SELECT uid_hmac, salarie_id, prenom, initiale FROM badges"
             " WHERE uid_hmac = ?",
-            (uid_hmac,),
+            ((uid_hmac or "").lower(),),
         ).fetchone()
         return dict(row) if row else None
 

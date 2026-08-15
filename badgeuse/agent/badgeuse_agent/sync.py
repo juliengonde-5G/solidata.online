@@ -22,8 +22,8 @@ import httpx
 
 from . import __version__
 from .chain import utc_iso_ms
-from .config import Config
-from .store import MAX_BATCH, Store
+from .config import Config, TLS_INSECURE_ALERT
+from .store import MAX_BATCH, Store, alerte_invalides
 
 LOGGER = logging.getLogger("badgeuse.sync")
 
@@ -162,7 +162,7 @@ class Syncer:
             purges = self._store.ack(resultats)
             acquittes += purges
 
-            self._log_resultats(resultats)
+            alerte_levee = self._log_resultats(resultats)
 
             if purges == 0:
                 # Aucun accusé exploitable : inutile de boucler sur le même lot.
@@ -171,20 +171,42 @@ class Syncer:
                 )
                 break
 
-            self.clear_alert()
+            # QA-01 : si des invalides viennent d'etre purges dans CE lot,
+            # l'alerte qu'ils viennent de lever ne doit pas etre effacee
+            # aussitot par le succes du reste du lot.
+            if not alerte_levee:
+                self.clear_alert()
             if len(lot) < MAX_BATCH:
                 break
 
         return acquittes
 
-    def _log_resultats(self, resultats: List[Mapping[str, Any]]) -> None:
+    def _log_resultats(self, resultats: List[Mapping[str, Any]]) -> bool:
+        """Journalise les statuts remarquables d'un lot.
+
+        :returns: ``True`` si une alerte heartbeat a été levée (QA-01, cas
+            ``invalid``) — l'appelant ne doit alors pas l'effacer aussitôt.
+        """
         orphelins = sum(1 for r in resultats if r.get("status") == "orphan")
+        invalides = sum(1 for r in resultats if r.get("status") == "invalid")
         ruptures = sum(1 for r in resultats if r.get("avertissement") == "chain_broken")
         if orphelins:
             LOGGER.warning("%d pointage(s) orphelin(s) transmis pour traitement RH",
                            orphelins)
         if ruptures:
             LOGGER.error("%d rupture(s) de chaine signalee(s) par le serveur", ruptures)
+        if invalides:
+            # QA-01 : invalid est un accuse terminal purge comme les autres,
+            # mais jamais en silence — compteur persistant + alerte heartbeat.
+            LOGGER.warning(
+                "%d pointage(s) invalide(s) purge(s) (%d au total depuis "
+                "l'appairage) — verifier le poste",
+                invalides,
+                self._store.invalid_count(),
+            )
+            self._raise_alert(alerte_invalides(invalides))
+            return True
+        return False
 
     # ------------------------------------------------------------- caches ETag
 
@@ -250,10 +272,19 @@ class Syncer:
             "reader_mode": reader_mode,
             "throttled": read_throttled(),
         }
+
+        # Extension au contrat : l'anomalie remonte avec l'état du poste,
+        # jamais en silence. Deux sources concatenées si necessaire :
+        # (1) reserve de conformite R3 — TLS non verifie, alerte permanente
+        #     tant que verify_tls=false (double geste explicite, config.py) ;
+        # (2) derniere anomalie ponctuelle (lot refuse, invalides purges...).
+        alertes = []
+        if not self._config.verify_tls:
+            alertes.append(TLS_INSECURE_ALERT)
         if self._last_alert:
-            # Extension au contrat : l'anomalie remonte avec l'état du poste,
-            # jamais en silence.
-            payload["alerte"] = self._last_alert
+            alertes.append(self._last_alert)
+        if alertes:
+            payload["alerte"] = " | ".join(alertes)
 
         return await self._post("heartbeat", payload)
 

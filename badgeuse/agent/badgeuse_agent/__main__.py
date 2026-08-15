@@ -50,6 +50,14 @@ def main(argv: list[str] | None = None) -> int:
     for avertissement in config.warnings:
         logger.warning(avertissement)
 
+    if not config.verify_tls:
+        # Reserve de conformite R3 : ne doit jamais passer inapercu au
+        # demarrage, y compris en ``--check``.
+        logger.critical(
+            "verification TLS DESACTIVEE — poste en configuration de test, "
+            "JAMAIS en exploitation"
+        )
+
     if args.check:
         logger.info("configuration valide : %s", config.redacted())
         return 0
