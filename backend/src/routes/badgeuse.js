@@ -59,6 +59,12 @@ const ADMIN_ONLY = authorize('ADMIN');
 
 const MOTIFS = ['oubli_badge', 'badge_defaillant', 'mission_exterieure', 'rdv_accompagnement', 'formation', 'autre'];
 
+// Marge de CHARGEMENT autour d'une période (revue Codex — correctif C2) : une
+// journée de travail peut enjamber la frontière de mois. Ce n'est pas une règle
+// de gestion RH (elle ne change aucun calcul, ADR-0002), c'est la fenêtre de
+// lecture qui permet à l'appariement de voir la paire entière.
+const MARGE_CHARGEMENT_MS = 24 * 3600 * 1000;
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /** « NOM Prénom » (nom de famille en MAJUSCULES — règle 2.20.0). */
@@ -129,12 +135,24 @@ function trioHeures(feuille, mois) {
  */
 async function computeEmployeePeriod(employeeId, debut, fin, params, client = null) {
   const runner = client || pool;
+  const debutMs = engine.toMs(debut);
+  const finMs = engine.toMs(fin);
+  // FENÊTRE DE CHARGEMENT ÉLARGIE de 24 h de part et d'autre. Une journée de
+  // travail peut enjamber la frontière (nuit du 31/08 23:50 au 01/09 00:10) :
+  // sans cette marge, la période de destination ne verrait que la moitié de la
+  // paire. 24 h suffisent — la journée est bornée par les règles (au-delà de
+  // `journee_max_heures`, défaut 10 h, l'anomalie « journée longue » part). La
+  // marge sert au CALCUL ; la période est tranchée plus bas, par JOURNÉE.
+  const debutCharge = new Date(debutMs - MARGE_CHARGEMENT_MS);
+  const finCharge = new Date(finMs + MARGE_CHARGEMENT_MS);
 
-  // (1) Pointages de la fenêtre par leur horodatage d'ORIGINE, PLUS ceux qu'une
-  //     correction DÉPLACE dans la fenêtre (revue Codex C2). Sans le EXISTS, un
-  //     pointage du 31/07 23:50 recalé au 01/08 restait invisible pour août :
+  // (1) Pointages de la fenêtre élargie par leur horodatage d'ORIGINE, PLUS
+  //     ceux qu'une correction DÉPLACE dedans (revue Codex C2). Sans le EXISTS,
+  //     un pointage du 31/07 23:50 recalé au 01/08 restait invisible pour août :
   //     la période de destination ne chargeait pas le brut, donc ignorait la
-  //     correction et perdait purement et simplement l'heure travaillée.
+  //     correction et perdait purement et simplement l'heure travaillée. Le
+  //     EXISTS couvre AUSSI les déplacements de plus de 24 h (correction d'une
+  //     date saisie à côté), que la marge seule ne rattraperait pas.
   const pts = await runner.query(
     `SELECT p.id, p.employee_id, p.horodatage_utc, p.sens, p.source, p.statut
      FROM badgeuse_pointages p
@@ -148,7 +166,7 @@ async function computeEmployeePeriod(employeeId, debut, fin, params, client = nu
          )
        )
      ORDER BY p.horodatage_utc`,
-    [employeeId, debut, fin]
+    [employeeId, debutCharge, finCharge]
   );
 
   // (2) Corrections de la fenêtre par leur horodatage CORRIGÉ, PLUS toutes
@@ -166,22 +184,48 @@ async function computeEmployeePeriod(employeeId, debut, fin, params, client = nu
          OR c.pointage_id = ANY($4::bigint[])
        )
      ORDER BY c.id`,
-    [employeeId, debut, fin, idsCharges]
+    [employeeId, debutCharge, finCharge, idsCharges]
   );
 
-  // (3) La fenêtre s'applique aux événements EFFECTIFS, jamais aux bruts :
-  //     un pointage corrigé hors fenêtre en sort, un pointage corrigé dans la
-  //     fenêtre y entre. C'est ce filtre qui garantit qu'une heure déplacée est
-  //     comptée UNE fois, du bon côté de la frontière.
-  const events = engine.filterEventsToWindow(
-    engine.buildEffectiveEvents(pts.rows, corr.rows), debut, fin
+  // (3) Appariement SANS filtre préalable — c'est le point du correctif : une
+  //     paire coupée avant l'appariement perd ses minutes des DEUX côtés
+  //     (l'entrée reste orpheline dans son mois, la sortie tombe seule dans le
+  //     suivant). On calcule les journées sur l'ensemble chargé…
+  const events = engine.buildEffectiveEvents(pts.rows, corr.rows);
+  //     …puis on tranche la période par JOURNÉE : le moteur rattache une paire
+  //     au jour civil de son ENTRÉE, donc une nuit du 31/08 appartient à août
+  //     tout entière, sortie comprise. Bornes civiles Paris, fin exclue.
+  const jours = engine.filterDaysToPeriod(
+    engine.computeDays(events, params),
+    engine.parisDateStr(debut), engine.parisDateStr(fin)
   );
-  const jours = engine.computeDays(events, params);
-  // `pointages` / `corrections` sont rendus TELS QUE CHARGÉS (donc avec le brut
-  // venu de l'autre mois et sa correction) : /mes-pointages et le relevé
-  // individuel doivent montrer au salarié la pièce d'origine qui explique
-  // l'heure comptée — la transparence prime (NOTE_RH §5.2).
-  return { pointages: pts.rows, corrections: corr.rows, events, jours };
+
+  // (4) AFFICHAGE : les lignes de la marge ne doivent pas apparaître dans le
+  //     relevé du salarié ni dans /mes-pointages. On y restitue donc la fenêtre
+  //     STRICTE, avec la même définition qu'avant le correctif : pointage dont
+  //     l'origine est dans la période OU qu'une correction y amène ; correction
+  //     dont l'horodatage corrigé y tombe OU qui porte sur un pointage affiché
+  //     (la pièce qui explique une heure reste visible — NOTE_RH §5.2).
+  const dansPeriode = (v) => {
+    const t = engine.toMs(v);
+    return t != null && t >= debutMs && t < finMs;
+  };
+  const amenesDansPeriode = new Set(
+    corr.rows.filter((c) => dansPeriode(c.horodatage_corrige))
+      .map((c) => Number(c.pointage_id)).filter((n) => Number.isFinite(n))
+  );
+  const pointages = pts.rows.filter(
+    (p) => dansPeriode(p.horodatage_utc) || amenesDansPeriode.has(Number(p.id))
+  );
+  const idsAffiches = new Set(pointages.map((p) => Number(p.id)));
+  const corrections = corr.rows.filter(
+    (c) => dansPeriode(c.horodatage_corrige)
+      || (c.pointage_id != null && idsAffiches.has(Number(c.pointage_id)))
+  );
+
+  // `events` = événements effectifs AYANT SERVI AU CALCUL (marge comprise) ;
+  // l'appartenance à la période se lit sur `jours`, jamais sur cette liste.
+  return { pointages, corrections, events, jours };
 }
 
 /**

@@ -327,13 +327,148 @@ describe('C2 — une correction qui franchit la frontière de mois', () => {
     const appel = mockQuery.mock.calls
       .find((c) => /FROM badgeuse_corrections c\s+WHERE c\.employee_id = \$1/.test(String(c[0])));
     expect(String(appel[0])).toMatch(/c\.pointage_id = ANY\(\$4::bigint\[\]\)/);
-    expect(appel[1][3]).toEqual([1]);                  // le pointage de juillet est chargé
+    // Le pointage de juillet (déplacé en août) est chargé, donc sa correction
+    // aussi ; le pointage du 01/08 04:00 entre par la marge de chargement.
+    expect(appel[1][3]).toContain(1);
+  });
+
+  test('la fenêtre de CHARGEMENT est élargie de 24 h de part et d\'autre', async () => {
+    installDb({ employees: SALARIES, pointages: POINTAGES, corrections: DEPLACEMENT });
+    await feuille('2026-08');
+    const appel = mockQuery.mock.calls
+      .find((c) => /FROM badgeuse_pointages p\s+WHERE p\.employee_id = \$1/.test(String(c[0])));
+    // Bornes strictes d'août : 2026-07-31T22:00Z → 2026-08-31T22:00Z.
+    expect(new Date(appel[1][1]).toISOString()).toBe('2026-07-30T22:00:00.000Z');
+    expect(new Date(appel[1][2]).toISOString()).toBe('2026-09-01T22:00:00.000Z');
   });
 
   test('l\'heure déplacée est comptée UNE seule fois (juillet + août = la seule journée réelle)', async () => {
     installDb({ employees: SALARIES, pointages: POINTAGES, corrections: DEPLACEMENT });
     const total = (await feuille('2026-07')).heures_pointees + (await feuille('2026-08')).heures_pointees;
     expect(total).toBeCloseTo(5.83, 2);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// Revue Codex (correctif C2) — LA PAIRE NOCTURNE À LA FRONTIÈRE DE MOIS.
+// Entrée 31/08 23:50 Paris (21:50 UTC) ; sortie badgée 23:58 (21:58 UTC) puis
+// CORRIGÉE au 01/09 00:10 Paris (22:10 UTC). Filtrer les ÉVÉNEMENTS avant
+// l'appariement perdait les 20 minutes des deux côtés ; le filtrage par
+// JOURNÉE (jour civil de l'entrée) les conserve, du côté d'août.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('C2 — nuit à cheval sur la frontière de mois (scénario Codex)', () => {
+  const POINTAGES_NUIT = [
+    { id: 1, employee_id: 5, horodatage_utc: '2026-08-31T21:50:00Z', sens: 'entree', source: 'badge', statut: 'traite' },
+    { id: 2, employee_id: 5, horodatage_utc: '2026-08-31T21:58:00Z', sens: 'sortie', source: 'badge', statut: 'traite' },
+  ];
+  const SORTIE_REPORTEE = [{
+    id: 20, pointage_id: 2, employee_id: 5, type: 'modification',
+    horodatage_corrige: '2026-08-31T22:10:00Z', sens_corrige: 'sortie', motif_code: 'oubli_badge',
+  }];
+  const feuille = async (periode) => (await get(`/api/badgeuse/feuilles-temps/5?periode=${periode}`)).body;
+
+  test('AOÛT compte les 20 minutes sur la journée du 31/08 (entrée + sortie corrigée)', async () => {
+    installDb({ employees: SALARIES, pointages: POINTAGES_NUIT, corrections: SORTIE_REPORTEE });
+    const f = await feuille('2026-08');
+    const nuit = f.detail.find((j) => j.date === '2026-08-31');
+    expect(nuit).toBeDefined();
+    expect(nuit.minutes).toBe(20);                      // 23:50 → 00:10
+    expect(f.heures_pointees).toBeCloseTo(0.33, 2);
+    expect(nuit.anomalies).toEqual([]);                 // paire complète
+  });
+
+  test('SEPTEMBRE ne compte rien ET ne fabrique pas d\'anomalie « sortie sans entrée »', async () => {
+    installDb({ employees: SALARIES, pointages: POINTAGES_NUIT, corrections: SORTIE_REPORTEE });
+    const f = await feuille('2026-09');
+    expect(f.heures_pointees).toBe(0);
+    expect(f.detail).toEqual([]);
+    expect(f.nb_anomalies).toBe(0);
+  });
+
+  test('les minutes ne sont comptées qu\'UNE fois (août + septembre)', async () => {
+    installDb({ employees: SALARIES, pointages: POINTAGES_NUIT, corrections: SORTIE_REPORTEE });
+    const total = (await feuille('2026-08')).heures_pointees + (await feuille('2026-09')).heures_pointees;
+    expect(total).toBeCloseTo(0.33, 2);
+  });
+
+  /** Ramène les bornes de CHARGEMENT à la fenêtre stricte (avant correctif). */
+  function sansMarge() {
+    const base = mockQuery.getMockImplementation();
+    const MARGE = 24 * 3600 * 1000;
+    mockQuery.mockImplementation((sql, params) => {
+      const s = String(sql);
+      if (/FROM badgeuse_pointages p\s+WHERE p\.employee_id = \$1/.test(s)
+        || /FROM badgeuse_corrections c\s+WHERE c\.employee_id = \$1/.test(s)) {
+        const stricts = [...params];
+        stricts[1] = new Date(new Date(params[1]).getTime() + MARGE);
+        stricts[2] = new Date(new Date(params[2]).getTime() - MARGE);
+        return base(sql, stricts);
+      }
+      return base(sql, params);
+    });
+  }
+
+  test('CONTRE-ÉPREUVE (1) : sans la marge, septembre fabrique l\'anomalie fantôme « sortie sans entrée »', async () => {
+    installDb({ employees: SALARIES, pointages: POINTAGES_NUIT, corrections: SORTIE_REPORTEE });
+    sansMarge();
+    const septembre = await feuille('2026-09');
+    expect(septembre.nb_anomalies).toBeGreaterThan(0);  // la sortie tombe seule
+    expect(septembre.detail.length).toBeGreaterThan(0);
+    // (Août est ici rattrapé par la clause « corrections des pointages
+    // chargés » : c'est septembre que la marge assainit.)
+  });
+
+  test('CONTRE-ÉPREUVE (2) : une nuit ORDINAIRE à cheval — sans marge, les minutes sont perdues des DEUX côtés', async () => {
+    // Aucune correction : simple nuit du 31/08 23:50 au 01/09 06:00. C'est le
+    // cas que la seule marge de chargement sauve.
+    const nuitOrdinaire = [
+      { id: 1, employee_id: 5, horodatage_utc: '2026-08-31T21:50:00Z', sens: 'entree', source: 'badge', statut: 'traite' },
+      { id: 2, employee_id: 5, horodatage_utc: '2026-09-01T04:00:00Z', sens: 'sortie', source: 'badge', statut: 'traite' },
+    ];
+    installDb({ employees: SALARIES, pointages: nuitOrdinaire });
+    sansMarge();
+    expect((await feuille('2026-08')).heures_pointees).toBe(0);      // entrée orpheline
+    expect((await feuille('2026-09')).heures_pointees).toBe(0);      // sortie orpheline
+
+    installDb({ employees: SALARIES, pointages: nuitOrdinaire });    // avec la marge
+    const aout = await feuille('2026-08');
+    expect(aout.detail.map((j) => j.date)).toEqual(['2026-08-31']);
+    // 23:50 → 06:00 = 6 h 10 brutes, ramenées à 6 h 00 par la pause MONOTONE
+    // (déduction plafonnée au dépassement du seuil de 6 h — ADR-0002/QA-06).
+    expect(aout.heures_pointees).toBe(6);
+    expect((await feuille('2026-09')).heures_pointees).toBe(0);      // comptée UNE fois
+  });
+
+  test('ANOMALIES : une journée hors période ne remonte pas dans la fenêtre demandée', async () => {
+    // Entrée orpheline du 31/07 (oubli de sortie) : chargée par la marge d'août,
+    // sa journée est datée du 31/07 → elle ne pollue pas les anomalies d'août.
+    installDb({
+      employees: SALARIES,
+      pointages: [{ id: 1, employee_id: 5, horodatage_utc: '2026-07-31T06:00:00Z', sens: 'entree', source: 'badge', statut: 'traite' }],
+    });
+    const r = await get('/api/badgeuse/anomalies?du=2026-08-01&au=2026-08-31');
+    expect(r.status).toBe(200);
+    expect(r.body.anomalies).toEqual([]);
+  });
+
+  test('COMPORTEMENT DOCUMENTÉ : la frontière de mois n\'est plus un reset — une sortie badgée après un oubli reste rattachée au jour de l\'entrée', async () => {
+    // Oubli de sortie le 31/08, sortie badgée le 01/09 : le moteur apparie (il
+    // le fait déjà entre deux jours d'un même mois) et date la journée du 31/08,
+    // avec ses anomalies. Août la porte, septembre non — la frontière de mois
+    // se comporte comme n'importe quelle frontière de jour.
+    installDb({
+      employees: SALARIES,
+      pointages: [
+        { id: 1, employee_id: 5, horodatage_utc: '2026-08-31T06:00:00Z', sens: 'entree', source: 'badge', statut: 'traite' },
+        { id: 2, employee_id: 5, horodatage_utc: '2026-09-01T05:00:00Z', sens: 'sortie', source: 'badge', statut: 'traite' },
+      ],
+    });
+    const aout = await feuille('2026-08');
+    expect(aout.detail.map((j) => j.date)).toEqual(['2026-08-31']);
+    expect(aout.nb_anomalies).toBeGreaterThan(0);       // journée longue signalée
+    const septembre = await feuille('2026-09');
+    expect(septembre.detail).toEqual([]);
   });
 });
 

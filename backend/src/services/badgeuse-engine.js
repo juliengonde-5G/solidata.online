@@ -289,28 +289,28 @@ function buildEffectiveEvents(pointages, corrections) {
 }
 
 /**
- * Restreint des événements EFFECTIFS à une fenêtre `[debut, fin[` (revue Codex
- * C2). À appliquer APRÈS `buildEffectiveEvents` : c'est l'horodatage **corrigé**
- * qui décide de la période d'appartenance, jamais l'horodatage brut. Sans ce
- * filtre, une correction franchissant une frontière de jour ou de mois comptait
- * l'événement DEUX fois (dans le mois d'origine par son heure brute, dans le
- * mois de destination par son heure corrigée) — ou zéro fois.
+ * Restreint des JOURNÉES calculées à une période, par leur jour civil Paris
+ * (revue Codex — correctif du filtrage C2). C'est la JOURNÉE, et non
+ * l'événement, qui appartient à une période : le moteur rattache une paire au
+ * jour civil de son ENTRÉE (`computeDays`), si bien qu'une nuit du 31/08 23:50
+ * au 01/09 00:10 est une journée du 31/08 — elle appartient à août ENTIÈRE.
+ * Filtrer les événements avant l'appariement coupait la paire en deux et
+ * perdait les minutes des deux côtés ; filtrer après le calcul les conserve.
  *
- * Une borne absente (`null`) est une fenêtre ouverte de ce côté-là.
+ * Comparaison de chaînes ISO 'YYYY-MM-DD' (ordre lexicographique = ordre
+ * chronologique), donc aucun aléa de fuseau à ce stade.
  *
- * @param {Array} events sortie de buildEffectiveEvents
- * @param {Date|string|null} debut borne INCLUSE
- * @param {Date|string|null} fin borne EXCLUE
- * @returns {Array} événements de la fenêtre, ordre conservé
+ * @param {Array} jours sortie de computeDays (chaque journée porte `date`)
+ * @param {string|null} dateDebut jour civil INCLUS ('YYYY-MM-DD')
+ * @param {string|null} dateFinExclue premier jour civil EXCLU
+ * @returns {Array} journées de la période, ordre conservé
  */
-function filterEventsToWindow(events, debut, fin) {
-  const d = debut == null ? null : toDate(debut);
-  const f = fin == null ? null : toDate(fin);
-  return (events || []).filter((e) => {
-    const t = toDate(e && e.horodatage_utc);
-    if (!t) return false;
-    if (d && t.getTime() < d.getTime()) return false;
-    if (f && t.getTime() >= f.getTime()) return false;
+function filterDaysToPeriod(jours, dateDebut, dateFinExclue) {
+  return (jours || []).filter((j) => {
+    const d = j && j.date;
+    if (!d) return false;
+    if (dateDebut && d < dateDebut) return false;
+    if (dateFinExclue && d >= dateFinExclue) return false;
     return true;
   });
 }
@@ -714,7 +714,7 @@ module.exports = {
   heuresTheoriquesMois,
   // moteur
   buildEffectiveEvents,
-  filterEventsToWindow,
+  filterDaysToPeriod,
   pairEvents,
   arrondirInstant,
   ajusterEntree,

@@ -111,13 +111,33 @@ modifié « par l'autre bout ». Les deux périodes sont lues en une requête pa
 d'origine introuvable ne fait pas inventer de période — la clé étrangère tranche à
 l'insertion). La réponse 409 porte `periodes_concernees`.
 
-**Appartenance à une période.** Un événement appartient à la période de son horodatage
-**effectif** (corrigé), jamais de son horodatage brut : le calcul charge les pointages de la
-fenêtre **plus** ceux qu'une correction y fait entrer, charge les corrections de la fenêtre
-**plus** celles des pointages chargés, puis restreint les événements effectifs à la fenêtre
-(`badgeuse-engine.filterEventsToWindow`). Une heure déplacée est ainsi comptée **une** fois,
-du bon côté de la frontière — et ni perdue par la période de destination, ni comptée deux
-fois.
+**Appartenance à une période — c'est la JOURNÉE qui appartient, pas l'événement.** Le moteur
+rattache une paire entrée→sortie au **jour civil Paris de son ENTRÉE** (`computeDays`) : une
+nuit du 31/08 23:50 au 01/09 00:10 est une journée du 31/08, elle appartient donc **entière**
+à août, sortie comprise. Le calcul procède en trois temps :
+
+1. **chargement élargi de 24 h** de part et d'autre de la période — une journée peut enjamber
+   la frontière ; 24 h suffisent, la journée étant bornée par les règles (au-delà de
+   `badgeuse.journee_max_heures`, défaut 10 h, l'anomalie « journée longue » part). S'y
+   ajoutent, hors marge, les pointages qu'une correction **déplace** dans la fenêtre
+   (`EXISTS`, pour les recalages de plus de 24 h) et les corrections portant sur les
+   pointages chargés (`pointage_id = ANY(...)`, pour celles qui en **sortent** un) ;
+2. **appariement sans filtre préalable** (`buildEffectiveEvents` + `computeDays`) : filtrer
+   les événements avant l'appariement coupait la paire nocturne en deux et perdait ses
+   minutes des **deux** côtés (entrée orpheline d'un côté, « sortie sans entrée » fantôme de
+   l'autre) ;
+3. **filtrage des journées** sur les bornes civiles `[premier jour ; premier jour du mois
+   suivant[` (`badgeuse-engine.filterDaysToPeriod`). Une heure est ainsi comptée **une** fois,
+   du bon côté de la frontière, et `GET /anomalies` ne remonte aucune anomalie d'une journée
+   hors fenêtre.
+
+Corollaire : la frontière de mois se comporte comme n'importe quelle frontière de jour — une
+sortie badgée le 1ᵉʳ après un oubli le 31 est appariée et **datée du 31** (avec ses anomalies
+de séquence), au lieu d'être remise à zéro par le changement de mois.
+
+Les tableaux `pointages` / `corrections` rendus par `/mes-pointages` et le relevé individuel
+restent bornés à la fenêtre **stricte** (origine dans la période, ou correction l'y amenant) :
+les lignes de la marge servent au calcul, pas à l'affichage.
 
 ### `badgeuse_feuilles_temps` (BO-04)
 `id SERIAL, employee_id INTEGER NOT NULL REFERENCES employees(id), periode VARCHAR(7) NOT
