@@ -61,6 +61,27 @@ réel. Quatre écarts corrigés :
 Divers : `PUT /parametres` marque l'arbitrage à tout enregistrement réussi (le drapeau
 `marquer_arbitrees` envoyé par le front est ignoré sans effet — comportement voulu ADR-0002 §3).
 
+## Barrières A4/A5 et boucle de correction n°1
+
+- **A5 Conformité : CONFORME SOUS RÉSERVE** (`RAPPORT_CONFORMITE.md`) — tous les points
+  « Obligatoires » de la note juridique prouvés dans le code. 1 écart majeur (E1 : lecture
+  MANAGER non cloisonnée par équipe — précédent v2.12.0 du dépôt, **à arbitrer par la
+  Direction/référent RGPD avant mise en service**) + 6 réserves (R1-R6) documentées.
+- **A4 QA : NO-GO** (`RAPPORT_QA.md`) — 1 bloquant (QA-01), 6 majeurs, 5 mineurs ;
+  cohérence crypto inter-piles PROUVÉE par exécution croisée ; 3 suites exécutées vertes.
+- **Boucle de correction n°1 (en application de la règle « max 3 itérations »)** :
+  - Amendements de spécification actés par A0 : contrat device v1.1 (statut `invalid`
+    terminal, `uid_hmac:'-'` valide, heartbeat `alerte`) + ADR-0002 addendum
+    (pause monotone, sortie au réel, heures théoriques contractuelles, consommation
+    de `pointages_par_jour`/`regularisation_delai_jours`, seuil de silence paramétré).
+  - Agent de correction serveur+front : QA-01/02/03/04/05/06/08/10/11.
+  - Agent de correction poste : QA-01 (purge `invalid` + compteur + alerte), QA-07
+    (politique Chromium DevTools), QA-09 (watchdog matériel RuntimeWatchdogSec),
+    QA-12 (casse hmac), + réserve R3 d'A5 (verrouillage `verify_tls`).
+  - QA-06 et QA-10 sont des corrections de RÈGLE : consignées dans l'ADR-0002 addendum,
+    **à confirmer par la Direction avec le reste de la grille** (écran Paramètres).
+  - Re-vérification A4 demandée après correctifs (itération 1/3).
+
 ## Écarts assumés à la lettre du dossier de prompts
 
 - OpenAPI YAML remplacé par un contrat Markdown (ADR-0001) — même fonction, pile différente.

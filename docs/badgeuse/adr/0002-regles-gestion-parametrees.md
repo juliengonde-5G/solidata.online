@@ -44,6 +44,35 @@ autonome : l'arbitrage de la Direction (NOTE_RH §3, colonne « Décision » ☐
    (`badgeuse.retention_*`) mais préremplies aux valeurs de la note juridique, et la purge
    automatique les applique (BO-10).
 
+## Addendum — arbitrages de la boucle QA n°1 (rapport A4, défauts QA-03/05/06/10/11)
+
+Corrections de **spécification** actées par l'Agent 0 après la revue adversariale, toujours
+dans la limite « défauts = recommandations RH écrites, jamais de règle inventée » :
+
+1. **QA-06 — déduction de pause rendue MONOTONE.** La lettre de NOTE_RH §3 (« 45 min si
+   journée > 6 h sans pointage intermédiaire ») crée une falaise : 6 h 01 travaillées
+   payées 5 h 16, quand 6 h 00 sont payées 6 h 00. Règle retenue :
+   `déduction = min(pause_deduite, max(0, travaillé − seuil))` — la déduction ne fait
+   jamais passer la journée sous le seuil. 6 h 00 → 6 h 00 ; 6 h 01 → 6 h 00 ;
+   7 h 00 → 6 h 15. Strictement favorable au salarié par rapport à la lettre,
+   monotone, à confirmer par la Direction avec le reste de la grille.
+2. **QA-10 — la sortie est comptée AU RÉEL** (lettre exacte de NOTE_RH §3 : « sortie
+   arrondie au réel »), jamais arrondie au pas supérieur. L'arrondi `arrondi_minutes`
+   s'applique : à l'**entrée seule**, au pas inférieur (8 h 03 → 8 h 00, avantage
+   salarié) ; et, quand une heure planifiée est fournie, arrivée en avance → heure
+   planifiée, retard ≤ tolérance → heure planifiée (tolérance sans effet paie).
+3. **QA-03 — heures théoriques de la feuille de temps** : heures hebdomadaires
+   contractuelles effectives au 1ᵉʳ du mois (`employee_contracts`, repli
+   `employees.weekly_hours`) × jours ouvrés du mois ÷ 5, arrondi 2 déc. ;
+   **null si aucune heure contractuelle connue** (« jamais de valeur inventée »).
+4. **QA-05 — consommation effective des paramètres arbitrés** :
+   `badgeuse.pointages_par_jour` alimente l'anomalie `pointages_incomplets` et le taux
+   de pointages complets (indicateur NOTE_RH §9) ; `badgeuse.regularisation_delai_jours`
+   déclenche un avertissement **non bloquant** quand une correction est saisie au-delà du
+   délai de signalement.
+5. **QA-11 — seuil de silence de supervision paramétré** :
+   `badgeuse.supervision_silence_minutes`, défaut `15` (BO-09).
+
 ## Conséquences
 
 - Le pilote à blanc peut démarrer sans re-livraison de code : l'arbitrage Direction est une

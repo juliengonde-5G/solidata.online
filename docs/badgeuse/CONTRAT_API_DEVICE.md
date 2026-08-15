@@ -56,11 +56,17 @@ Réponse `200` — **toujours par élément**, jamais d'échec silencieux (PST-0
   "server_time_utc": "2026-08-17T06:58:13.412Z"
 }
 ```
-- `ok` / `duplicate` / `orphan` sont tous des **accusés de réception** : le poste purge
-  l'élément de sa file (PST-05). Un pointage `orphan` est stocké côté serveur en statut
-  `orphelin` pour traitement RH (BO-05) — jamais rejeté.
-- `400` uniquement pour un lot syntaxiquement invalide (le poste conserve alors sa file et
-  lève une alerte heartbeat).
+- `ok` / `duplicate` / `orphan` / `invalid` sont tous des **accusés de réception
+  terminaux** : le poste purge l'élément de sa file (PST-05). Un pointage `orphan` est
+  stocké côté serveur en statut `orphelin` pour traitement RH (BO-05) — jamais rejeté.
+- `invalid` (amendement v1.1, QA-01) : l'élément est malformé au point de ne pas pouvoir
+  être stocké (UUID invalide, horodatage illisible…). Le rejouer ne le réparera jamais :
+  le poste le purge, incrémente un compteur local `invalides` et le signale dans le champ
+  `alerte` du heartbeat ; le serveur le journalise. Un `uid_hmac` de valeur `-`
+  (pointage manuel/import, CONTRAT_INTEGRITE §2) est **VALIDE** et ne doit jamais
+  produire `invalid` — il est stocké `NULL` en base, `-` restant sa forme canonique.
+- `400` uniquement pour un lot syntaxiquement invalide dans son ENVELOPPE (le poste
+  conserve alors sa file et lève une alerte heartbeat).
 - `server_time_utc` sert au poste à mesurer sa dérive d'horloge (PST-07).
 
 ### 2.2 `GET /devices/:code/badges` — cache des badges actifs (ETag)
@@ -130,12 +136,17 @@ reçue est rejouée hors ligne (AFF-07). Aucune donnée personnelle dans ces con
   "disque_libre_mo": 180432,
   "cible": "pi5",
   "reader_mode": "hex",
-  "throttled": false
+  "throttled": false,
+  "alerte": null
 }
 ```
+`alerte` (amendement v1.1, QA-02) : chaîne courte ou `null` — signal d'exploitation émis par
+le poste (lot refusé 400, éléments `invalid` purgés, lecteur débranché…). Le serveur
+l'accepte, le stocke dans `heartbeat_info` et l'affiche en supervision.
 Réponse : `{ "status": "ok", "server_time_utc": "…" }`. Le serveur met à jour
 `dernier_heartbeat`, `version_logicielle`, journalise les anomalies (dérive > 2 s, throttling,
-file qui gonfle) et alimente la supervision BO-09 (alerte si silence > 15 min).
+file qui gonfle) et alimente la supervision BO-09 (alerte si silence > seuil paramétré
+`badgeuse.supervision_silence_minutes`, défaut 15 min).
 
 ## 3. Codes d'erreur
 
