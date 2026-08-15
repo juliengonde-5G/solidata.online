@@ -50,8 +50,10 @@ function AttribuerModal({ open, onClose, employees, onDone }) {
           <label className="block text-xs font-medium text-slate-600 mb-1">Empreinte du badge (uid_hmac)</label>
           <input value={form.uid_hmac} onChange={(e) => setForm({ ...form, uid_hmac: e.target.value })} className="input-modern py-2 text-sm w-full font-mono" placeholder="ex. 4f3a9c2b1e..." required />
           <p className="text-xs text-slate-400 mt-1">
-            Présentez le badge sur un poste appairé et collez l'empreinte affichée dans l'onglet Supervision (mode enrôlement),
-            ou saisissez l'empreinte fournie. L'identifiant du badge n'est jamais stocké en clair.
+            Enrôlement : présentez le badge NEUF sur un poste appairé — il apparaît en « pointage orphelin »
+            dans l'onglet Journal, avec son empreinte et un bouton copier. Collez cette empreinte ici.
+            Le pointage orphelin d'essai, lui, reste simplement non rattaché (aucune heure n'est comptée).
+            L'identifiant du badge n'est jamais stocké en clair.
           </p>
         </div>
         <div>

@@ -107,6 +107,25 @@ Divers : `PUT /parametres` marque l'arbitrage à tout enregistrement réussi (le
 - **Chiffres finaux** : Jest 93 suites / 1605 tests (1601 ✓, 4 skipped pré-existants),
   build Vite OK, pytest 191/191.
 
+## Passe de complétion UI (après A6)
+
+En documentant le système réel, A6 a détecté 5 écarts UI. Traitement :
+
+1. **Enrôlement d'un badge** (bloquant opérationnel — l'empreinte n'était visible nulle part) :
+   **corrigé** — l'encart « Pointages orphelins » du Journal affiche l'empreinte avec bouton
+   copier ; l'aide de « + Attribuer un badge » décrit le flux réel.
+2. **Rotation de la clé HMAC de site absente** : **backlog V1.1** (rotation annuelle §7.1 —
+   procédure documentée comme manquante dans EXPLOITATION.md, pas de procédure inventée).
+3. **Relevé individuel sans bouton** : **corrigé** — bouton « Relevé » sur chaque ligne des
+   feuilles de temps (impression A4 charte SOLIDATA, consultation journalisée côté serveur).
+4. **Dévalidation de feuille sans bouton** : **corrigé** — bouton « Dévalider » (ADMIN,
+   ConfirmDialog, journalisé).
+5. **Playlist type « image » sans champ** : **corrigé honnêtement** — champ media_url ajouté
+   (form + prévisualisation), avec la limite RÉELLE documentée dans l'aide : la CSP du kiosque
+   (validée par les barrières) n'affiche que des images hébergées sur le poste
+   (`img-src 'self'`) ; l'ouverture à `https://solidata.online` est une évolution V1.1 à
+   arbitrer (elle toucherait la CSP du poste, donc re-passage barrière).
+
 ## Écarts assumés à la lettre du dossier de prompts
 
 - OpenAPI YAML remplacé par un contrat Markdown (ADR-0001) — même fonction, pile différente.

@@ -374,6 +374,7 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
                 <tr>
                   <th className="text-left py-2 px-2">Date / heure (Paris)</th>
                   <th className="text-left py-2 px-2">Motif</th>
+                  <th className="text-left py-2 px-2">Empreinte badge</th>
                   <th className="text-left py-2 px-2">Poste</th>
                   {canWriteRh && <th className="text-right py-2 px-2">Action</th>}
                 </tr>
@@ -383,6 +384,20 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
                   <tr key={o.id} className="border-b border-slate-50">
                     <td className="py-2 px-2 whitespace-nowrap">{fmtDateTimeParis(o.horodatage_utc)}</td>
                     <td className="py-2 px-2 text-amber-700">{ORPHELIN_RAISON_LABELS[o.orphelin_raison] || o.orphelin_raison || '—'}</td>
+                    {/* Empreinte (uid_hmac) : sert à l'ENRÔLEMENT d'un badge neuf —
+                        on la copie ici puis on la colle dans « + Attribuer un badge »
+                        (onglet Badges). Jamais d'UID en clair : c'est le condensat. */}
+                    <td className="py-2 px-2 font-mono text-xs text-slate-500 whitespace-nowrap">
+                      {o.uid_hmac ? (
+                        <span className="inline-flex items-center gap-1.5" title={o.uid_hmac}>
+                          {o.uid_hmac.slice(0, 12)}…
+                          <button type="button" onClick={() => { navigator.clipboard?.writeText(o.uid_hmac).then(() => toast.success('Empreinte copiée.')).catch(() => {}); }}
+                            className="text-teal-700 hover:text-teal-900 font-sans font-medium" title="Copier l'empreinte complète (enrôlement d'un badge neuf)">
+                            Copier
+                          </button>
+                        </span>
+                      ) : '—'}
+                    </td>
                     <td className="py-2 px-2 text-slate-500">{o.device_code || o.device_libelle || '—'}</td>
                     {canWriteRh && (
                       <td className="py-2 px-2 text-right">

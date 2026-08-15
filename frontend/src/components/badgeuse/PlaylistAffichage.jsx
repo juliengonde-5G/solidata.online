@@ -7,7 +7,7 @@ import { apiErr, fmtDateParis, TYPE_CONTENU_LABELS } from './badgeuseShared';
 const TYPES = Object.entries(TYPE_CONTENU_LABELS).map(([value, label]) => ({ value, label }));
 
 function emptyForm() {
-  return { type: 'message', titre: '', corps: '', duree_sec: 10, ordre: 0, visible_du: '', visible_au: '', actif: true };
+  return { type: 'message', titre: '', corps: '', media_url: '', duree_sec: 10, ordre: 0, visible_du: '', visible_au: '', actif: true };
 }
 
 // ── Modale de création/édition d'un contenu ──────────────────────────────────
@@ -21,6 +21,7 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
     if (!open) return;
     setForm(editing ? {
       type: editing.type || 'message', titre: editing.titre || '', corps: editing.corps || '',
+      media_url: editing.media_url || '',
       duree_sec: editing.duree_sec ?? 10, ordre: editing.ordre ?? 0,
       visible_du: editing.visible_du ? String(editing.visible_du).slice(0, 10) : '',
       visible_au: editing.visible_au ? String(editing.visible_au).slice(0, 10) : '',
@@ -38,6 +39,7 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
     try {
       const payload = {
         type: form.type, titre: form.titre.trim(), corps: form.corps.trim() || null,
+        media_url: form.type === 'image' ? (form.media_url.trim() || null) : null,
         duree_sec: duree, ordre: parseInt(form.ordre, 10) || 0,
         visible_du: form.visible_du || null, visible_au: form.visible_au || null,
         actif: form.actif,
@@ -77,6 +79,19 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
           <label className="block text-xs font-medium text-slate-600 mb-1">Corps du message</label>
           <textarea value={form.corps} onChange={(e) => setForm({ ...form, corps: e.target.value })} rows={3} className="input-modern py-2 text-sm w-full" />
         </div>
+        {form.type === 'image' && (
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">URL de l'image</label>
+            <input type="text" value={form.media_url} onChange={(e) => setForm({ ...form, media_url: e.target.value })}
+              className="input-modern py-2 text-sm w-full" maxLength={300} placeholder="consignes-tri.png (fichier déployé sur le poste)" required />
+            <p className="text-[11px] text-slate-400 mt-1">
+              V1 : le kiosque n'affiche que des images HÉBERGÉES SUR LE POSTE (CSP verrouillée
+              <code className="mx-1">img-src 'self'</code> — défense en profondeur) : chemin relatif d'un fichier
+              déployé dans <code className="mx-1">ui/</code> (ex. <code>consignes-tri.png</code>). Une URL distante
+              ne s'affichera pas. Aucune donnée personnelle, aucune photo de personne — exigence de conformité.
+            </p>
+          </div>
+        )}
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Durée (s)</label>
@@ -112,6 +127,10 @@ function Previsualisation16x9({ contenu }) {
     <div className="aspect-video w-full rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 flex flex-col items-center justify-center text-center px-10 py-8 overflow-hidden">
       <span className="text-[11px] uppercase tracking-widest text-teal-400 font-semibold mb-3">{TYPE_CONTENU_LABELS[contenu.type] || contenu.type}</span>
       <h2 className="text-white font-bold leading-tight" style={{ fontSize: 'clamp(1.5rem, 4vw, 2.75rem)' }}>{contenu.titre || 'Sans titre'}</h2>
+      {contenu.type === 'image' && contenu.media_url && (
+        <img src={contenu.media_url} alt={contenu.titre || 'Contenu image'}
+          className="mt-4 max-h-[45%] max-w-[80%] object-contain rounded-lg" />
+      )}
       {contenu.corps && (
         <p className="text-slate-300 mt-4 max-w-2xl" style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.25rem)' }}>{contenu.corps}</p>
       )}
