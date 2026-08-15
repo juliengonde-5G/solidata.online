@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Pointage — Solidarité Textiles</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src ws://127.0.0.1:8765 ws://localhost:8765; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ------------------------------------------------------------------ VEILLE -->
+<main id="veille" class="veille" aria-live="off">
+
+  <header class="bandeau-haut">
+    <div class="marque">
+      <span class="pastille" aria-hidden="true"></span>
+      <span>Pointage</span>
+    </div>
+    <div class="horloge">
+      <span id="horloge-heure">--:--</span>
+      <span id="horloge-date" class="horloge-date"></span>
+    </div>
+  </header>
+
+  <section id="playlist" class="playlist">
+    <article id="diapo-a" class="diapo visible"></article>
+    <article id="diapo-b" class="diapo"></article>
+  </section>
+
+  <footer class="bandeau-bas">
+    <p class="consigne">Présentez votre badge devant le lecteur</p>
+    <p id="bandeau-hors-ligne" class="hors-ligne" hidden>
+      Hors ligne — vos pointages sont enregistrés
+    </p>
+  </footer>
+
+</main>
+
+<!-- ----------------------------------------------------------------- OVERLAY -->
+<div id="overlay" class="overlay" role="status" aria-live="assertive" hidden>
+  <div class="overlay-carte">
+    <div id="overlay-picto" class="picto" aria-hidden="true"></div>
+    <p id="overlay-identite" class="identite"></p>
+    <p id="overlay-message" class="message"></p>
+    <p id="overlay-heure" class="heure"></p>
+    <p id="overlay-cumul" class="cumul" hidden></p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

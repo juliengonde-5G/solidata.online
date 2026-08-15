@@ -11,3 +11,8 @@ backend/uploads/*
 deploy/backups/
 /opt/solidata-backups/
 .claude/skills/deploy-prod/SKILL.md
+
+# Python (badgeuse/ agent embarqué)
+__pycache__/
+*.pyc
+.pytest_cache/

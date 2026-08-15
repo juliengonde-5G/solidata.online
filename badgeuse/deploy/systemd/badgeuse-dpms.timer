@@ -1,0 +1,13 @@
+[Unit]
+Description=Verification periodique de la plage d'allumage de l'ecran (AFF-08)
+
+[Timer]
+# Au demarrage, puis toutes les 5 minutes : la bascule tombe au pire 5 min
+# apres l'heure, ce qui est sans consequence pour une dalle.
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=1min
+Unit=badgeuse-dpms.service
+
+[Install]
+WantedBy=timers.target

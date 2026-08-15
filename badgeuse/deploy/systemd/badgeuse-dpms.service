@@ -1,0 +1,10 @@
+[Unit]
+Description=Mise en veille de l'ecran du poste de pointage hors plage d'ouverture
+Documentation=file:/opt/badgeuse/README.md
+
+[Service]
+Type=oneshot
+# Root : vcgencmd et les sockets Wayland de la session kiosque.
+ExecStart=/opt/badgeuse/deploy/dpms.sh
+Environment=BADGEUSE_CONFIG=/etc/badgeuse/badgeuse.conf
+Environment=KIOSK_USER=badgeuse

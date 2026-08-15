@@ -1,0 +1,77 @@
+; ---------------------------------------------------------------------------
+; Poste de pointage SOLIDATA — configuration de l'agent
+;
+; Emplacement d'exploitation : /etc/badgeuse/badgeuse.conf
+; Permissions OBLIGATOIRES  : 0600, propriétaire badgeuse:badgeuse
+; Ce fichier ne doit JAMAIS être versionné : il porte deux secrets.
+;
+; Les deux clés ci-dessous sont fournies UNE SEULE FOIS par le back-office
+; SOLIDATA : Supervision -> Appairage. Aucune n'a de valeur par défaut :
+; l'agent refuse de démarrer si l'une manque (aucun repli silencieux).
+; ---------------------------------------------------------------------------
+
+[server]
+; Racine HTTPS de SOLIDATA. Le HTTP en clair est refusé au démarrage.
+url = https://solidata.online
+
+; Code du poste, tel que déclaré au back-office (ex. LH-P1 pour Le Houlme,
+; poste 1). Il identifie la chaîne d'intégrité : ne jamais le modifier sur un
+; poste déjà en service, la base locale refuserait de s'ouvrir.
+device_code = LH-P1
+
+; Clé d'appareil (256 bits hex) — en-tête X-Device-Key.
+device_key = CHANGE_ME_CLE_APPAREIL_FOURNIE_A_L_APPAIRAGE
+
+; Chemin de l'API device. À ne modifier que sur instruction.
+;api_path = /api/badgeuse/device/v1
+
+; Vérification du certificat TLS. NE JAMAIS DÉSACTIVER EN EXPLOITATION —
+; réservé à un banc de test isolé. Poser "verify_tls = false" ici NE SUFFIT
+; PAS : l'agent refuse de démarrer tant que la variable d'environnement
+; BADGEUSE_ALLOW_INSECURE_TLS=1 n'est pas AUSSI posée (double geste
+; explicite). Quand actif : log CRITICAL au démarrage + alerte permanente
+; dans le heartbeat de supervision ("TLS non vérifié — poste en
+; configuration de test"), visible en back-office tant que l'option reste
+; active.
+;verify_tls = true
+; Autorité de certification interne, le cas échéant.
+;ca_bundle = /etc/ssl/certs/ca-certificates.crt
+
+[site]
+; Clé HMAC du SITE (256 bits hex, 64 caractères) : pseudonymise les UID de
+; badge. Elle est partagée par tous les postes du site, jamais par deux sites.
+; Sa rotation invalide le cache local (resynchronisation complète).
+hmac_key = CHANGE_ME_CLE_HMAC_SITE_64_CARACTERES_HEXADECIMAUX
+
+[reader]
+; Lecteur RFID en émulation clavier. Ces identifiants sont facultatifs :
+; sans eux, l'agent détecte le lecteur par ses capacités (chiffres + Entrée).
+; Les relever avec : lsusb  (format « ID 1234:5678 »)
+;vendor_id = 0xffff
+;product_id = 0x0035
+; Filtre complémentaire sur le nom du périphérique (sous-chaîne, insensible
+; à la casse) — utile si plusieurs claviers HID sont branchés.
+;name = rfid
+
+[system]
+; Répertoire de données : base SQLite, file d'attente, caches.
+; Seul répertoire inscriptible quand le rootfs est en lecture seule.
+data_dir = /var/lib/badgeuse
+
+; Cible matérielle : pi5 (principale) ou pi3 (repli).
+; Le code applicatif est identique ; seule l'installation diffère.
+target = pi5
+
+[ui]
+; Écoutes strictement locales (127.0.0.1). Ne pas exposer sur le réseau.
+;ws_port = 8765
+;http_port = 8766
+; Répertoire de l'interface kiosque (défaut : /opt/badgeuse/ui).
+;dir = /opt/badgeuse/ui
+
+[dpms]
+; Plage d'ouverture de l'écran (AFF-08). En dehors, l'écran est éteint par le
+; minuteur badgeuse-dpms.timer. Format HH:MM, heure locale du poste.
+; Laisser vide pour un écran allumé en permanence.
+allumage = 05:30
+extinction = 21:30

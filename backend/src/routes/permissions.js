@@ -79,6 +79,9 @@ const MODULE_CATALOG = [
   // RSEI-17 : module « Achats responsables » (31e module) — référentiel fournisseurs,
   // critères d'achat, registre des FDS. Accordable/masquable par rôle (REF_RSE, QHSE).
   { key: 'achats', label: 'Achats responsables' },
+  // Module 33 : « Temps & Présence » (badgeuse). Clé d'habilitation propre —
+  // le module 25 « Pointage » legacy garde la sienne (ADR-0003).
+  { key: 'badgeuse', label: 'Temps & Présence (badgeuse)' },
   { key: 'admin', label: 'Administration' },
 ];
 const MODULE_KEYS = MODULE_CATALOG.map((m) => m.key);

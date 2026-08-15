@@ -12,7 +12,7 @@ import {
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
   TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, ShoppingCart,
-  GraduationCap, Shirt,
+  GraduationCap, Shirt, Fingerprint,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -382,6 +382,21 @@ const NAV_TREE = [
           },
         ],
       },
+    ],
+  },
+  {
+    // Module « Temps & Présence » (badgeuse) — 33e module. Pointage par badge
+    // RFID (poste Raspberry Pi au Houlme) : journal, feuilles de temps,
+    // corrections, badges, affichage, supervision, paramètres. READ = ADMIN/
+    // MANAGER (encadrant technique)/RH ; certaines écritures (validation RH,
+    // exports, appairage des postes) sont resserrées côté page/API. L'id
+    // 'badgeuse' est la clé d'habilitation (backend/src/routes/permissions.js
+    // MODULE_CATALOG) ; la visibilité fine se règle dans /admin/permissions.
+    id: 'badgeuse',
+    label: 'Temps & Présence',
+    icon: Fingerprint,
+    children: [
+      { label: 'Temps & Présence', path: '/badgeuse', icon: Fingerprint, roles: ['ADMIN', 'RH', 'MANAGER'] },
     ],
   },
 ];

@@ -243,8 +243,16 @@ app.use('/api/pennylane', require('./routes/pennylane'));
 // génération quotidienne de prédictions (ml_fill_predictions) est assurée par
 // routes/tours/predictions.js (heuristique), indépendante de ce module.
 
-// Lot 6 : Pointage / Badgeage
+// Lot 6 : Pointage / Badgeage (module 25 — LEGACY, cf. ADR-0003 : conservé
+// inchangé, remplacé par le module 33 ci-dessous pour tout nouveau déploiement)
 app.use('/api/pointage', require('./routes/pointage'));
+
+// Module 33 : Temps & Présence (badgeuse). L'API DEVICE est une surface PUBLIQUE
+// (authentifiée par X-Device-Key, pas par JWT) : elle doit donc être montée
+// AVANT le back-office, dont le routeur applique `authenticate` à tout son
+// périmètre — sans quoi le préfixe /api/badgeuse capterait les appels du poste.
+app.use('/api/badgeuse/device', require('./routes/badgeuse-device'));
+app.use('/api/badgeuse', require('./routes/badgeuse'));
 
 // Module Finance : Tableau de bord financier (GL Pennylane, budget, KPIs)
 app.use('/api/finance', require('./routes/finance'));
@@ -334,6 +342,19 @@ io.on('connection', (socket) => {
   socket.on('vak:leave', (vakId) => {
     if (vakId == null) return;
     socket.leave(`vak:live:${vakId}`);
+  });
+
+  // Supervision des postes de pointage (BO-09) : la page « Temps & Présence »
+  // rejoint la salle vers laquelle l'API device et le job checkBadgeuseDevices
+  // émettent déjà. Sans ce handler, les deux `emit` partaient dans le vide
+  // (QA-04). AUCUNE donnée personnelle ne transite par cette salle : code du
+  // poste, sens, statut et compteurs uniquement.
+  socket.on('badgeuse:join-supervision', () => {
+    socket.join('badgeuse:supervision');
+    logger.debug(`Socket ${socket.id} rejoint badgeuse:supervision`);
+  });
+  socket.on('badgeuse:leave-supervision', () => {
+    socket.leave('badgeuse:supervision');
   });
 
   // Position GPS du chauffeur — avec détection proximité CAV pour historiser le temps de collecte
