@@ -261,6 +261,15 @@ async function run() {
     await checkEndpoint('T-BTQ-01', '/api/boutiques', 'Boutiques — listing', { authH });
   }
 
+  // ═══ §11bis Temps & Présence (badgeuse — module 33) ═══
+  if (authH) {
+    console.log('\n─── §11bis Temps & Présence (badgeuse) ───');
+    // /parametres est le point d'entrée du module : il touche settings + les
+    // défauts documentés. S'il répond, le routeur est monté et la grille lisible.
+    await checkEndpoint('T-BDG-01', '/api/badgeuse/parametres', 'Badgeuse — grille de paramètres', { authH });
+    await checkEndpoint('T-BDG-02', '/api/badgeuse/devices',    'Badgeuse — supervision des postes', { authH });
+  }
+
   // ═══ §12 Référentiels & Admin (a planté — positions ORDER BY name) ═══
   if (authH) {
     console.log('\n─── §12 Référentiels & Admin ───');

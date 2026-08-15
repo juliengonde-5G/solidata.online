@@ -243,8 +243,16 @@ app.use('/api/pennylane', require('./routes/pennylane'));
 // génération quotidienne de prédictions (ml_fill_predictions) est assurée par
 // routes/tours/predictions.js (heuristique), indépendante de ce module.
 
-// Lot 6 : Pointage / Badgeage
+// Lot 6 : Pointage / Badgeage (module 25 — LEGACY, cf. ADR-0003 : conservé
+// inchangé, remplacé par le module 33 ci-dessous pour tout nouveau déploiement)
 app.use('/api/pointage', require('./routes/pointage'));
+
+// Module 33 : Temps & Présence (badgeuse). L'API DEVICE est une surface PUBLIQUE
+// (authentifiée par X-Device-Key, pas par JWT) : elle doit donc être montée
+// AVANT le back-office, dont le routeur applique `authenticate` à tout son
+// périmètre — sans quoi le préfixe /api/badgeuse capterait les appels du poste.
+app.use('/api/badgeuse/device', require('./routes/badgeuse-device'));
+app.use('/api/badgeuse', require('./routes/badgeuse'));
 
 // Module Finance : Tableau de bord financier (GL Pennylane, budget, KPIs)
 app.use('/api/finance', require('./routes/finance'));

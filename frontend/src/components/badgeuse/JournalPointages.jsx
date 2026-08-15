@@ -5,6 +5,7 @@ import { LoadingSpinner, ErrorState, Modal, DataTable, useToast } from '../../co
 import { formatEmployeeName, compareByName } from '../../utils/names';
 import {
   apiErr, fmtDateTimeParis, employeeName, todayISO, offsetDaysISO,
+  parisDateISO, parisTimeHM,
   SOURCE_LABELS, STATUT_POINTAGE_LABELS, ORPHELIN_RAISON_LABELS,
   MOTIFS_CORRECTION,
   SensBadge, StatutPointageBadge, ChaineWarning,
@@ -61,7 +62,7 @@ function RattacherModal({ open, onClose, pointage, employees, onDone }) {
 // ── Modale « + Correction » ──────────────────────────────────────────────────
 function CorrectionModal({ open, onClose, employees, prefill, onDone }) {
   const toast = useToast();
-  const [form, setForm] = useState({ employee_id: '', type: 'ajout', date: todayISO(), heure: '08:00', sens_corrige: 'entree', motif_code: 'oubli_badge', motif_detail: '' });
+  const [form, setForm] = useState({ employee_id: '', type: 'ajout', pointage_id: '', date: todayISO(), heure: '08:00', sens_corrige: 'entree', motif_code: 'oubli_badge', motif_detail: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [errorHint, setErrorHint] = useState(null);
@@ -70,10 +71,11 @@ function CorrectionModal({ open, onClose, employees, prefill, onDone }) {
     if (!open) return;
     setForm({
       employee_id: prefill?.employee_id ? String(prefill.employee_id) : '',
-      type: 'ajout',
+      type: prefill?.type || 'ajout',
+      pointage_id: prefill?.pointage_id ? String(prefill.pointage_id) : '',
       date: prefill?.date || todayISO(),
       heure: prefill?.heure || '08:00',
-      sens_corrige: 'entree',
+      sens_corrige: prefill?.sens_corrige || 'entree',
       motif_code: 'oubli_badge',
       motif_detail: '',
     });
@@ -83,17 +85,23 @@ function CorrectionModal({ open, onClose, employees, prefill, onDone }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!form.employee_id) { setError('Le salarié est requis.'); return; }
+    if (form.type !== 'ajout' && !form.pointage_id) { setError('Indiquez le pointage d\'origine — le plus simple est d\'utiliser les actions « Corriger » / « Annuler » d\'une ligne du journal.'); return; }
     if (form.motif_code === 'autre' && !form.motif_detail.trim()) { setError('Précisez le motif (« autre »).'); return; }
     setSaving(true); setError(null); setErrorHint(null);
     try {
       const payload = {
         employee_id: parseInt(form.employee_id, 10),
         type: form.type,
-        horodatage_corrige: `${form.date}T${form.heure}:00`,
         motif_code: form.motif_code,
         motif_detail: form.motif_code === 'autre' ? form.motif_detail.trim() : null,
       };
-      if (form.type !== 'annulation') payload.sens_corrige = form.sens_corrige;
+      if (form.type !== 'ajout') payload.pointage_id = parseInt(form.pointage_id, 10);
+      // L'heure saisie est une heure MURALE Paris : le backend interprète tout
+      // horodatage sans fuseau comme telle. L'annulation n'a pas d'horaire.
+      if (form.type !== 'annulation') {
+        payload.horodatage_corrige = `${form.date}T${form.heure}:00`;
+        payload.sens_corrige = form.sens_corrige;
+      }
       await api.post('/badgeuse/corrections', payload);
       toast.success('Correction enregistrée.');
       onDone();
@@ -150,16 +158,25 @@ function CorrectionModal({ open, onClose, employees, prefill, onDone }) {
             </div>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        {form.type !== 'ajout' && (
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Date</label>
-            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="input-modern py-2 text-sm w-full" required />
+            <label className="block text-xs font-medium text-slate-600 mb-1">N° du pointage d'origine</label>
+            <input type="number" min={1} value={form.pointage_id} onChange={(e) => setForm({ ...form, pointage_id: e.target.value })} className="input-modern py-2 text-sm w-full" required />
+            <p className="text-[11px] text-slate-400 mt-1">Pré-rempli quand la correction est ouverte depuis une ligne du journal (actions « Corriger » / « Annuler »).</p>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Heure</label>
-            <input type="time" value={form.heure} onChange={(e) => setForm({ ...form, heure: e.target.value })} className="input-modern py-2 text-sm w-full" required />
+        )}
+        {form.type !== 'annulation' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Date</label>
+              <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="input-modern py-2 text-sm w-full" required />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Heure (heure de Paris)</label>
+              <input type="time" value={form.heure} onChange={(e) => setForm({ ...form, heure: e.target.value })} className="input-modern py-2 text-sm w-full" required />
+            </div>
           </div>
-        </div>
+        )}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Motif</label>
           <select value={form.motif_code} onChange={(e) => setForm({ ...form, motif_code: e.target.value })} className="input-modern py-2 text-sm w-full">
@@ -254,6 +271,21 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPrefill]);
 
+  // Ouvre la modale de correction pré-remplie depuis une ligne du journal :
+  // c'est la seule voie ergonomique pour porter le pointage_id d'origine
+  // qu'exigent les types « modification » et « annulation ».
+  const openRowCorrection = (r, type) => {
+    setCorrectionPrefill({
+      pointage_id: r.id,
+      employee_id: r.employee_id,
+      type,
+      date: parisDateISO(r.horodatage_utc) || todayISO(),
+      heure: parisTimeHM(r.horodatage_utc) || '08:00',
+      sens_corrige: r.sens === 'sortie' ? 'sortie' : 'entree',
+    });
+    setCorrectionOpen(true);
+  };
+
   const columns = [
     {
       key: 'horodatage_utc', label: 'Date / heure (Paris)',
@@ -267,6 +299,15 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
       key: 'anomalie', label: 'Chaîne', align: 'center',
       render: (r) => <ChaineWarning chaineValide={r.chaine_valide} />,
     },
+    ...(canCorrect ? [{
+      key: 'actions', label: 'Correction', align: 'right',
+      render: (r) => (r.statut === 'orphelin' || !r.employee_id ? null : (
+        <span className="inline-flex gap-2 whitespace-nowrap">
+          <button onClick={() => openRowCorrection(r, 'modification')} className="text-xs text-teal-700 hover:text-teal-900 font-medium" title="Corriger ce pointage (l'enregistrement d'origine est conservé)">Corriger</button>
+          <button onClick={() => openRowCorrection(r, 'annulation')} className="text-xs text-red-600 hover:text-red-800 font-medium" title="Annuler ce pointage (l'enregistrement d'origine est conservé)">Annuler</button>
+        </span>
+      )),
+    }] : []),
   ];
 
   return (

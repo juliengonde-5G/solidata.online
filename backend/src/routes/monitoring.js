@@ -101,6 +101,12 @@ const JOB_SCHEDULE = {
   checkRseEcheances:              { label: 'Échéances plan RSE (actions/preuves)', cadence: '3×/jour',          maxAgeHours: DAILY },
   checkEnergieSaisie:             { label: 'Relevés énergie mensuels manquants', cadence: '3×/jour',           maxAgeHours: DAILY },
   checkQhseDocuments:             { label: 'Documents QHSE à réviser (DUERP…)',  cadence: '3×/jour',           maxAgeHours: DAILY },
+  // Module 33 — Temps & Présence (badgeuse). La supervision des postes est le
+  // filet BO-09 (silence > 15 min) ; la purge est l'application effective des
+  // durées de conservation du registre RGPD (BO-10) — une purge « en retard »
+  // est un manquement de conformité, d'où sa présence ici.
+  checkBadgeuseDevices:           { label: 'Postes badgeuse silencieux (> 15 min)', cadence: '3×/jour',        maxAgeHours: DAILY },
+  badgeusePurgeRetention:         { label: 'Purge RGPD badgeuse (conservation)', cadence: '3×/jour',           maxAgeHours: DAILY },
   checkVehicleMaintenance:        { label: 'Maintenance préventive véhicules',  cadence: '3×/jour',            maxAgeHours: DAILY },
   autoFeedNews:                   { label: 'Veille sectorielle (fil actu)',     cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredCandidates:         { label: 'Purge RGPD candidats > 24 mois',    cadence: '3×/jour',            maxAgeHours: DAILY },

@@ -39,6 +39,28 @@ Tenu par l'Agent 0 (chef d'orchestre). Convention : les questions **ouvertes** s
    RGPD de SOLIDATA — à faire relire par le référent RGPD) et les contrats art. 28.
 6. La sonorité/duree overlay et la plage DPMS sont paramétrables — valider en réunion atelier.
 
+## Passe de réconciliation front ↔ back (A0, après livraison des 3 agents parallèles)
+
+Vérification point à point des hypothèses prises par l'agent frontend contre le code backend
+réel. Quatre écarts corrigés :
+
+1. **Clé HMAC d'appairage** : `POST /devices` renvoie `hmac_key` ; le front ne testait que
+   `hmac_key_site`/`site_hmac_key` → clé jamais affichée à l'appairage. Corrigé
+   (SupervisionPostes, chaîne de replis complétée).
+2. **Corrections `modification`/`annulation`** : le backend exige `pointage_id` (400 sinon) ;
+   la modale n'en portait pas → actions « Corriger »/« Annuler » ajoutées sur chaque ligne du
+   journal (modale pré-remplie), champ « N° du pointage d'origine » en repli, l'annulation ne
+   demande plus date/heure.
+3. **Fuseau des corrections** : le front envoyait une heure murale Paris sans fuseau que
+   Postgres aurait interprétée en heure serveur (UTC) → décalage 1-2 h. Le backend interprète
+   désormais tout horodatage naïf comme heure murale Paris (`parisDateTimeToUTC`, doctrine
+   2.20.0 du dépôt), un horodatage avec fuseau restant pris tel quel.
+4. **Liste des sites** : le backend expose `GET /badgeuse/sites` (non prévu au contrat initial) ;
+   la modale d'appairage le consomme désormais au lieu de déduire les sites des postes existants.
+
+Divers : `PUT /parametres` marque l'arbitrage à tout enregistrement réussi (le drapeau
+`marquer_arbitrees` envoyé par le front est ignoré sans effet — comportement voulu ADR-0002 §3).
+
 ## Écarts assumés à la lettre du dossier de prompts
 
 - OpenAPI YAML remplacé par un contrat Markdown (ADR-0001) — même fonction, pile différente.

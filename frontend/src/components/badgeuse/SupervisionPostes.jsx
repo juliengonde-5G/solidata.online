@@ -44,7 +44,7 @@ function AppairerModal({ open, onClose, onSaved, sitesKnown }) {
       const d = res.data || {};
       setResult({
         deviceKey: d.device_key || d.api_key || d.key || d.device?.api_key || null,
-        siteKey: d.hmac_key_site || d.site_hmac_key || d.site_key || null,
+        siteKey: d.hmac_key || d.hmac_key_site || d.site_hmac_key || d.site_key || null,
       });
     } catch (err) { setError(apiErr(err, "Appairage du poste impossible.")); }
     finally { setSaving(false); }
@@ -291,11 +291,19 @@ export default function SupervisionPostes({ isAdmin }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const [sites, setSites] = useState([]);
+  useEffect(() => {
+    api.get('/badgeuse/sites')
+      .then((r) => setSites(Array.isArray(r.data) ? r.data : (r.data.sites || [])))
+      .catch(() => setSites([]));
+  }, []);
+
   const sitesKnown = useMemo(() => {
     const map = new Map();
+    sites.forEach((s) => { if (s.id != null) map.set(s.id, s.libelle || s.code || `Site #${s.id}`); });
     devices.forEach((d) => { if (d.site_id != null && !map.has(d.site_id)) map.set(d.site_id, d.site_libelle || d.site_code || `Site #${d.site_id}`); });
     return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
-  }, [devices]);
+  }, [devices, sites]);
 
   if (loading) return <LoadingSpinner size="lg" message="Chargement des postes…" />;
   if (error) return <ErrorState variant="card" title="Supervision indisponible" message={error} onRetry={load} />;

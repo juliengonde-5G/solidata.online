@@ -6624,6 +6624,259 @@ async function initDatabase() {
     console.log('[INIT-DB] Module Enquêtes (RSEI-13) — 4 tables + registre RGPD ✓');
 
     // ══════════════════════════════════════════
+    // MODULE 33 — TEMPS & PRÉSENCE (badgeuse)
+    //
+    // EMPLACEMENT : cette section est volontairement placée AVANT celle du
+    // module « Achats responsables » et non en fin de fichier. Le test
+    // tests/unit/scripts/achats-schema.test.js vérifie que la section Achats
+    // ne contient aucune table nominative en la délimitant jusqu'au bloc
+    // « HOTFIX 2026-05 — Resync » : un module inséré entre les deux tomberait
+    // dans ce périmètre et ferait échouer cette garde à tort (badgeuse_badges
+    // référence légitimement employees). Ne pas déplacer plus bas sans borner
+    // d'abord la tranche de ce test.
+    //
+    // Badgeuse physique (poste Raspberry Pi + lecteur RFID) et back-office de
+    // gestion du temps. Références : docs/badgeuse/MODELE_DONNEES.md,
+    // CONTRAT_API_DEVICE.md, CONTRAT_INTEGRITE.md, CONTRAT_HMAC.md,
+    // ADR-0001/0002/0003.
+    //
+    // MODULE NEUF ET DISTINCT (ADR-0003) : préfixe `badgeuse_`, routes
+    // /api/badgeuse/*. Le module 25 « Pointage » legacy (tables
+    // pointage_terminals / badges / pointage_events) n'est NI modifié NI
+    // supprimé — les deux coexistent sans interférence de données. Le module
+    // badgeuse n'écrit PAS dans work_hours ni employee_week_hours (pas de
+    // double comptage avec l'import paie ; l'export fichier est le seul
+    // livrable paie de la V1).
+    //
+    // EXIGENCES STRUCTURELLES portées par ce schéma :
+    //  - MINIMISATION : aucune colonne d'UID de badge en clair (uniquement
+    //    `uid_hmac`), AUCUNE colonne photo (NOTE_JURIDIQUE §3.4 : exclusion
+    //    absolue), aucune donnée de santé ni de statut IAE.
+    //  - INALTÉRABILITÉ : badgeuse_pointages porte une chaîne cryptographique
+    //    par poste (hash_precedent / hash_courant / chaine_valide). Les champs
+    //    couverts par la chaîne ne sont JAMAIS mis à jour ; aucun DELETE dans
+    //    le code applicatif (seule la purge RGPD planifiée supprime, BO-10).
+    //  - IDEMPOTENCE : uuid UNIQUE + (device_id, sequence_device) unique
+    //    partiel — le rejeu d'un lot ne duplique aucune heure.
+    //  - TRAÇABILITÉ DU TRAITEMENT : les corrections sont ADDITIVES (table
+    //    séparée), l'enregistrement brut reste intact.
+    // ══════════════════════════════════════════
+
+    // (a) Sites. Multi-site dès la V1 (risque « extension Vernon », SPEC §9).
+    //     La clé HMAC du site vit dans `settings` (badgeuse.hmac_key_site_<id>),
+    //     CHIFFRÉE AES-256-GCM — jamais en base en clair, jamais dans Git.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_sites (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(20) NOT NULL UNIQUE,
+        libelle VARCHAR(120),
+        actif BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      INSERT INTO badgeuse_sites (code, libelle)
+      SELECT 'LH', 'Le Houlme — atelier'
+      WHERE NOT EXISTS (SELECT 1 FROM badgeuse_sites WHERE code = 'LH');
+    `);
+
+    // (b) Postes de pointage. `api_key_hash` = SHA-256 hex de la clé device :
+    //     la clé elle-même n'est montrée qu'UNE FOIS à l'appairage et n'est
+    //     jamais stockée. Comparaison à temps constant côté route.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_devices (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(30) NOT NULL UNIQUE,
+        libelle VARCHAR(120),
+        site_id INTEGER REFERENCES badgeuse_sites(id) ON DELETE SET NULL,
+        api_key_hash VARCHAR(64),
+        actif BOOLEAN NOT NULL DEFAULT true,
+        version_logicielle VARCHAR(30),
+        cible VARCHAR(10),
+        dernier_heartbeat TIMESTAMPTZ,
+        heartbeat_info JSONB,
+        cree_le TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_devices_site ON badgeuse_devices(site_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_devices_actif ON badgeuse_devices(actif);');
+
+    // (c) Badges. `uid_hmac` UNIQUE = HMAC-SHA256(clé de site, UID normalisé) —
+    //     CONTRAT_HMAC : l'UID en clair n'existe NI côté poste NI côté serveur.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_badges (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        uid_hmac VARCHAR(64) NOT NULL UNIQUE,
+        statut VARCHAR(15) NOT NULL DEFAULT 'actif'
+          CHECK (statut IN ('actif', 'perdu', 'vole', 'restitue', 'desactive')),
+        attribue_le TIMESTAMPTZ DEFAULT NOW(),
+        restitue_le TIMESTAMPTZ,
+        commentaire VARCHAR(300),
+        cree_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    // Un seul badge ACTIF par salarié (index partiel unique) — un badge déclaré
+    // perdu/volé libère immédiatement la place pour son remplaçant.
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_badgeuse_badges_actif_unique
+      ON badgeuse_badges(employee_id) WHERE statut = 'actif';
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_badges_employee ON badgeuse_badges(employee_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_badges_statut ON badgeuse_badges(statut);');
+
+    // (d) Historique complet du cycle de vie d'un badge (BO-01).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_badge_historique (
+        id SERIAL PRIMARY KEY,
+        badge_id INTEGER REFERENCES badgeuse_badges(id) ON DELETE CASCADE,
+        evenement VARCHAR(30) NOT NULL
+          CHECK (evenement IN ('attribution', 'perte', 'vol', 'restitution', 'desactivation', 'reactivation')),
+        details JSONB,
+        auteur_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_badge_historique_badge ON badgeuse_badge_historique(badge_id);');
+
+    // (e) Pointages bruts — JAMAIS modifiés, JAMAIS supprimés.
+    //     employee_id NULL = orphelin non rattaché (badge inconnu / hors plage).
+    //     device_id NULL = saisie manuelle serveur.
+    //     La chaîne d'intégrité (hash_precedent/hash_courant) est calculée par le
+    //     POSTE à la capture (donc hors ligne compris) et VÉRIFIÉE par le serveur
+    //     à la réception : en cas de rupture le pointage est stocké quand même
+    //     avec chaine_valide=false — on n'efface jamais une preuve, même imparfaite.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_pointages (
+        id BIGSERIAL PRIMARY KEY,
+        uuid UUID NOT NULL UNIQUE,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+        device_id INTEGER REFERENCES badgeuse_devices(id) ON DELETE SET NULL,
+        uid_hmac VARCHAR(64),
+        horodatage_utc TIMESTAMPTZ NOT NULL,
+        horodatage_local VARCHAR(30),
+        fuseau VARCHAR(40) DEFAULT 'Europe/Paris',
+        sens VARCHAR(10) NOT NULL DEFAULT 'inconnu'
+          CHECK (sens IN ('entree', 'sortie', 'inconnu')),
+        source VARCHAR(10) NOT NULL DEFAULT 'badge'
+          CHECK (source IN ('badge', 'manuel', 'import')),
+        statut VARCHAR(10) NOT NULL DEFAULT 'brut'
+          CHECK (statut IN ('brut', 'traite', 'orphelin')),
+        orphelin_raison VARCHAR(30),
+        sequence_device BIGINT,
+        hash_precedent VARCHAR(64),
+        hash_courant VARCHAR(64),
+        chaine_valide BOOLEAN NOT NULL DEFAULT true,
+        recu_le TIMESTAMPTZ DEFAULT NOW(),
+        cree_par INTEGER REFERENCES users(id) ON DELETE SET NULL
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_pointages_employee_date ON badgeuse_pointages(employee_id, horodatage_utc);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_pointages_horodatage ON badgeuse_pointages(horodatage_utc);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_pointages_statut ON badgeuse_pointages(statut);');
+    // Idempotence forte : une séquence de poste ne peut être réutilisée.
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_badgeuse_pointages_device_sequence
+      ON badgeuse_pointages(device_id, sequence_device) WHERE device_id IS NOT NULL;
+    `);
+
+    // (f) Corrections ADDITIVES (BO-03). L'enregistrement brut est intouché :
+    //     une correction s'AJOUTE et porte son motif (liste FERMÉE — un champ
+    //     libre serait proscrit par la minimisation, NOTE_JURIDIQUE §3.4) et son
+    //     auteur. `motif_detail` n'est exigé que pour le motif 'autre'
+    //     (contrainte applicative, cf. routes/badgeuse.js).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_corrections (
+        id SERIAL PRIMARY KEY,
+        pointage_id BIGINT REFERENCES badgeuse_pointages(id) ON DELETE SET NULL,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        type VARCHAR(15) NOT NULL CHECK (type IN ('ajout', 'modification', 'annulation')),
+        horodatage_corrige TIMESTAMPTZ,
+        sens_corrige VARCHAR(10) CHECK (sens_corrige IN ('entree', 'sortie')),
+        motif_code VARCHAR(30) NOT NULL
+          CHECK (motif_code IN ('oubli_badge', 'badge_defaillant', 'mission_exterieure', 'rdv_accompagnement', 'formation', 'autre')),
+        motif_detail VARCHAR(200),
+        auteur_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_corrections_employee ON badgeuse_corrections(employee_id, horodatage_corrige);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_corrections_pointage ON badgeuse_corrections(pointage_id);');
+
+    // (g) Feuilles de temps mensuelles (BO-04) — circuit encadrant → RH.
+    //     `detail` JSONB = journées calculées par services/badgeuse-engine.js
+    //     (événements effectifs, heures, anomalies, règles appliquées) : la
+    //     feuille porte la TRACE des règles qui l'ont produite.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_feuilles_temps (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        periode VARCHAR(7) NOT NULL,
+        heures_theoriques NUMERIC(6,2),
+        heures_pointees NUMERIC(6,2),
+        heures_validees NUMERIC(6,2),
+        detail JSONB,
+        statut VARCHAR(20) NOT NULL DEFAULT 'brouillon'
+          CHECK (statut IN ('brouillon', 'validee_encadrant', 'validee_rh')),
+        valide_encadrant_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        valide_encadrant_le TIMESTAMPTZ,
+        valide_rh_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        valide_rh_le TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(employee_id, periode)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_feuilles_periode ON badgeuse_feuilles_temps(periode);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_feuilles_statut ON badgeuse_feuilles_temps(statut);');
+
+    // (h) Contenus de veille de l'écran (BO-08 / AFF-05).
+    //     AUCUNE donnée personnelle : finalité « communication interne »
+    //     DISSOCIÉE du décompte du temps (NOTE_JURIDIQUE §3.2) — d'où l'absence
+    //     volontaire de toute FK vers employees/users côté contenu diffusé, et
+    //     l'interdiction d'un message individuel en veille (§3.5).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_contenus (
+        id SERIAL PRIMARY KEY,
+        site_id INTEGER REFERENCES badgeuse_sites(id) ON DELETE CASCADE,
+        type VARCHAR(20) NOT NULL DEFAULT 'message'
+          CHECK (type IN ('message', 'image', 'planning', 'compte_a_rebours', 'meteo')),
+        titre VARCHAR(200),
+        corps TEXT,
+        media_url VARCHAR(300),
+        ordre INTEGER NOT NULL DEFAULT 0,
+        duree_sec INTEGER NOT NULL DEFAULT 10 CHECK (duree_sec BETWEEN 5 AND 60),
+        visible_du DATE,
+        visible_au DATE,
+        actif BOOLEAN NOT NULL DEFAULT true,
+        cree_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_contenus_site ON badgeuse_contenus(site_id, actif, ordre);');
+
+    // Registre RGPD — traitement « Temps & Présence (badgeuse) ». Fiche art. 30
+    // OBLIGATOIRE avant la mise en service (NOTE_JURIDIQUE §3.8). Idempotent.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Temps & Présence (badgeuse) — décompte du temps de travail',
+        'Décompter le temps de travail effectif des salariés au moyen d''un dispositif de badgeage sans contact, établir les feuilles de temps mensuelles, produire les états pour la paie et les déclarations de volumes d''heures aux financeurs de l''insertion (ASP). Une finalité SECONDE et DISSOCIÉE, sans donnée personnelle, est assurée par le même écran : la communication interne (consignes, informations collectives).',
+        'Obligation légale (art. L.3171-2 du code du travail : décompte de la durée du travail) et intérêt légitime pour la communication interne',
+        'Salariés de la structure (permanents et salariés en parcours d''insertion) porteurs d''un badge',
+        'Identifiant du salarié, nom et prénom (AFFICHAGE LIMITÉ AU PRÉNOM + INITIALE au point de passage), condensat cryptographique de l''identifiant technique du badge (HMAC-SHA256 — l''identifiant du badge n''est JAMAIS stocké en clair), horodatage et sens des passages, identifiant du poste et du site, motif de régularisation (LISTE FERMÉE). EXCLUSIONS ABSOLUES : aucune photographie, aucune donnée de santé, aucun motif d''absence, aucune géolocalisation, aucune mention du statut ou de la nature du parcours d''insertion.',
+        'Le salarié (ses propres données), l''encadrant technique, le service RH/paie, la direction (données agrégées). Volumes d''heures uniquement pour l''ASP et les financeurs. Aucun transfert hors Union européenne.',
+        'Pointages bruts et corrections, feuilles de temps : base active puis archivage intermédiaire selon les paramètres badgeuse.retention_* (défaut 60 mois) ; association badge-salarié : 90 jours après restitution ; journaux d''accès : 12 mois. Purge AUTOMATISÉE, planifiée et journalisée (job badgeusePurgeRetention).',
+        'Pseudonymisation de l''identifiant de badge par HMAC-SHA256 à clé de site (clé chiffrée AES-256-GCM dans settings, jamais en clair ni dans les journaux), chaînage cryptographique des enregistrements garantissant l''inaltérabilité de la capture, corrections ADDITIVES conservant l''enregistrement d''origine, authentification des postes par clé à condensat comparé à temps constant, requêtes SQL paramétrées, habilitations par rôle (lecture ADMIN/RH/MANAGER, écriture ADMIN/RH), JOURNALISATION DE TOUTE CONSULTATION INDIVIDUELLE et de tout export dans rgpd_audit_log, accès permanent du salarié à ses propres pointages (droit d''accès satisfait par construction)'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Temps & Présence (badgeuse) — décompte du temps de travail'
+      );
+    `);
+    console.log('[INIT-DB] Module 33 Temps & Présence (badgeuse) — 8 tables + site LH + registre RGPD ✓');
+
+    // ══════════════════════════════════════════
     // Module Achats responsables (RSEI-17) — 31e module
     //
     // Mini-module d'OUTILLAGE de la démarche d'achats responsables (critère RSEi
@@ -6775,6 +7028,7 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_etp_asp_annee ON etp_asp_mensuel(annee);');
     console.log('[INIT-DB] Module Effectifs conventionnés (ETP) — table etp_asp_mensuel ✓');
 
+
     // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL
     //
@@ -6814,6 +7068,11 @@ async function initDatabase() {
       'enquete_modeles', 'enquete_questions', 'enquete_campagnes', 'enquete_reponses',
       'achats_fournisseurs', 'achats_criteres', 'achats_fds',
       'qhse_documents', 'formation_actions', 'etp_asp_mensuel',
+      // Module 33 — Temps & Présence (badgeuse). badgeuse_pointages est en
+      // BIGSERIAL : pg_get_serial_sequence la couvre de la même façon.
+      'badgeuse_sites', 'badgeuse_devices', 'badgeuse_badges',
+      'badgeuse_badge_historique', 'badgeuse_pointages', 'badgeuse_corrections',
+      'badgeuse_feuilles_temps', 'badgeuse_contenus',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une

@@ -107,6 +107,22 @@ export function fmtDepuis(iso) {
   return `il y a ${Math.round(heures / 24)} j`;
 }
 
+// Date civile 'YYYY-MM-DD' d'un instant, vue depuis Paris (usage machine).
+export function parisDateISO(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(d);
+}
+
+// Heure murale 'HH:MM' d'un instant, vue depuis Paris (usage machine).
+export function parisTimeHM(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(d);
+}
+
 export const todayISO = () => new Date().toISOString().slice(0, 10);
 export const currentPeriode = () => new Date().toISOString().slice(0, 7); // YYYY-MM
 export function offsetDaysISO(n) {

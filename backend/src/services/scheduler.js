@@ -653,6 +653,154 @@ async function checkQhseDocuments() {
   }
 }
 
+// ══════════════════════════════════════════
+// MODULE 33 — TEMPS & PRÉSENCE (badgeuse)
+// ══════════════════════════════════════════
+
+/**
+ * BO-10 — Purge automatique conforme aux durées de conservation.
+ *
+ * « Une durée de conservation inscrite au registre mais non appliquée
+ * techniquement constitue un manquement caractérisé » (NOTE_JURIDIQUE §3.7) :
+ * ce job EST la mise en œuvre de la fiche de registre du module.
+ *
+ * Toutes les durées viennent des settings `badgeuse.retention_*` (défauts =
+ * valeurs de la note juridique). Périmètre :
+ *  - pointages et leurs corrections au-delà de retention_pointages_mois ;
+ *  - feuilles de temps au-delà de retention_feuilles_mois ;
+ *  - badges restitués/perdus/volés au-delà de
+ *    retention_badges_apres_restitution_jours (avec leur historique) ;
+ *  - contenus d'affichage expirés au-delà de
+ *    retention_contenus_apres_expiration_jours ;
+ *  - journaux d'accès du module (rgpd_audit_log, actions BADGEUSE_%) au-delà de
+ *    retention_journal_acces_mois.
+ *
+ * C'est le SEUL endroit du code qui supprime physiquement un pointage
+ * (inaltérabilité : aucun DELETE dans les routes). L'exécution est journalisée
+ * dès qu'elle supprime quelque chose.
+ *
+ * @param {object} options { dryRun } — en dry-run, RIEN n'est supprimé : le job
+ *   compte ce qu'il supprimerait (exposé pour les tests et pour un contrôle
+ *   avant première application en production).
+ */
+async function badgeusePurgeRetention(options = {}) {
+  const dryRun = !!options.dryRun;
+  const compte = {
+    pointages: 0, corrections: 0, feuilles: 0, badges: 0, badge_historique: 0,
+    contenus: 0, journal_acces: 0,
+  };
+  try {
+    const { readBadgeuseSetting } = require('../utils/badgeuse-settings');
+    const [moisPointages, moisFeuilles, joursBadges, joursContenus, moisJournal] = await Promise.all([
+      readBadgeuseSetting('badgeuse.retention_pointages_mois'),
+      readBadgeuseSetting('badgeuse.retention_feuilles_mois'),
+      readBadgeuseSetting('badgeuse.retention_badges_apres_restitution_jours'),
+      readBadgeuseSetting('badgeuse.retention_contenus_apres_expiration_jours'),
+      readBadgeuseSetting('badgeuse.retention_journal_acces_mois'),
+    ]);
+
+    // Helper : SELECT COUNT en dry-run, DELETE sinon. Chaque bloc est isolé —
+    // une table absente (base non migrée) ne fait pas tomber la purge entière.
+    const run = async (cle, table, where, params) => {
+      try {
+        if (dryRun) {
+          const r = await pool.query(`SELECT COUNT(*)::int AS n FROM ${table} WHERE ${where}`, params);
+          compte[cle] = r.rows[0] ? r.rows[0].n : 0;
+        } else {
+          const r = await pool.query(`DELETE FROM ${table} WHERE ${where}`, params);
+          compte[cle] = r.rowCount || 0;
+        }
+      } catch (err) {
+        console.error(`[SCHEDULER] badgeusePurgeRetention — ${table} ignorée : ${err.message}`);
+      }
+    };
+
+    // Corrections d'abord (elles référencent les pointages purgés).
+    await run('corrections', 'badgeuse_corrections',
+      `COALESCE(horodatage_corrige, created_at) < NOW() - ($1 || ' months')::interval`, [String(moisPointages)]);
+    await run('pointages', 'badgeuse_pointages',
+      `horodatage_utc < NOW() - ($1 || ' months')::interval`, [String(moisPointages)]);
+    await run('feuilles', 'badgeuse_feuilles_temps',
+      `to_date(periode || '-01', 'YYYY-MM-DD') < (NOW() - ($1 || ' months')::interval)::date`, [String(moisFeuilles)]);
+    // Historique d'abord : le CASCADE le ferait, mais on veut le compter.
+    await run('badge_historique', 'badgeuse_badge_historique',
+      `badge_id IN (SELECT id FROM badgeuse_badges
+                    WHERE statut IN ('restitue','perdu','vole','desactive')
+                      AND COALESCE(restitue_le, attribue_le) < NOW() - ($1 || ' days')::interval)`,
+      [String(joursBadges)]);
+    await run('badges', 'badgeuse_badges',
+      `statut IN ('restitue','perdu','vole','desactive')
+       AND COALESCE(restitue_le, attribue_le) < NOW() - ($1 || ' days')::interval`, [String(joursBadges)]);
+    await run('contenus', 'badgeuse_contenus',
+      `visible_au IS NOT NULL AND visible_au < (NOW() - ($1 || ' days')::interval)::date`, [String(joursContenus)]);
+    await run('journal_acces', 'rgpd_audit_log',
+      `action LIKE 'BADGEUSE_%' AND created_at < NOW() - ($1 || ' months')::interval`, [String(moisJournal)]);
+
+    const total = Object.values(compte).reduce((a, b) => a + b, 0);
+    if (total > 0) {
+      console.log(`[SCHEDULER] Badgeuse — purge RGPD${dryRun ? ' (SIMULATION)' : ''} : ${JSON.stringify(compte)}`);
+      if (!dryRun) {
+        // La purge est elle-même journalisée (BO-10 : « tâche planifiée,
+        // journalisée »). Cette entrée n'est pas une action BADGEUSE_% : elle
+        // ne s'auto-purge donc pas au run suivant.
+        await pool.query(
+          `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
+           VALUES (NULL, 'AUTO_PURGE_BADGEUSE', 'badgeuse_pointages', 0, $1)`,
+          [JSON.stringify({
+            ...compte,
+            retention_pointages_mois: moisPointages,
+            retention_feuilles_mois: moisFeuilles,
+            retention_badges_apres_restitution_jours: joursBadges,
+            retention_contenus_apres_expiration_jours: joursContenus,
+            retention_journal_acces_mois: moisJournal,
+          })]
+        ).catch((err) => console.error('[SCHEDULER] Journalisation purge badgeuse impossible :', err.message));
+      }
+    }
+    return { items: total, dry_run: dryRun, ...compte };
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur badgeusePurgeRetention:', err.message);
+    return { items: 0, dry_run: dryRun, ...compte };
+  }
+}
+
+/**
+ * BO-09 — Supervision des postes de pointage : un poste ACTIF silencieux depuis
+ * plus de 15 minutes (le heartbeat est censé battre toutes les 60 s) est
+ * signalé. Un poste hors ligne ne perd aucune heure (le poste met en file et
+ * rejoue), mais l'exploitant doit le savoir vite.
+ */
+async function checkBadgeuseDevices() {
+  const SILENCE_MINUTES = 15;
+  try {
+    const r = await pool.query(
+      `SELECT id, code, libelle, dernier_heartbeat
+       FROM badgeuse_devices
+       WHERE actif = true
+         AND (dernier_heartbeat IS NULL OR dernier_heartbeat < NOW() - ($1 || ' minutes')::interval)
+       ORDER BY code`,
+      [String(SILENCE_MINUTES)]
+    );
+    if (r.rows.length > 0) {
+      const codes = r.rows.map((x) => x.code).join(', ');
+      console.warn(`[SCHEDULER] Badgeuse — ${r.rows.length} poste(s) sans remontée depuis > ${SILENCE_MINUTES} min : ${codes}`);
+      const io = global.__io || null;
+      if (io) {
+        io.to('badgeuse:supervision').emit('badgeuse:device-offline', {
+          silence_minutes: SILENCE_MINUTES,
+          postes: r.rows.map((x) => ({
+            id: x.id, code: x.code, libelle: x.libelle, dernier_heartbeat: x.dernier_heartbeat,
+          })),
+        });
+      }
+    }
+    return { items: r.rows.length, silence_minutes: SILENCE_MINUTES };
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur checkBadgeuseDevices:', err.message);
+    return { items: 0 };
+  }
+}
+
 async function createInsertionAlert(milestone, alertType, targetDate) {
   try {
     // Eviter les doublons
@@ -1558,6 +1706,8 @@ async function runAllJobs() {
     await runInstrumented('checkRseEcheances', checkRseEcheances);
     await runInstrumented('checkEnergieSaisie', checkEnergieSaisie);
     await runInstrumented('checkQhseDocuments', checkQhseDocuments);
+    await runInstrumented('checkBadgeuseDevices', checkBadgeuseDevices);
+    await runInstrumented('badgeusePurgeRetention', badgeusePurgeRetention);
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
@@ -1606,6 +1756,11 @@ module.exports = {
   checkRseEcheances,
   checkEnergieSaisie,
   checkQhseDocuments,
+  // Module 33 — Temps & Présence. badgeusePurgeRetention accepte { dryRun }
+  // (simulation sans suppression) : exposé pour les tests et pour un contrôle
+  // avant première application en production.
+  badgeusePurgeRetention,
+  checkBadgeuseDevices,
   // Sync SumUp live 5 min (jours de VAK) — exposés pour les tests.
   vakLiveSyncTick,
   isVakActiveToday,
