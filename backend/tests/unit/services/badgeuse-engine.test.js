@@ -650,6 +650,73 @@ describe('ADR-0002 — AUCUNE règle de gestion en dur dans le moteur', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Revue Codex C2 — une correction qui FRANCHIT une frontière de période.
+// La fenêtre s'applique aux événements EFFECTIFS (après corrections), jamais
+// aux horodatages bruts : une heure déplacée est comptée UNE fois, du bon côté.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('C2 — filterEventsToWindow : la période suit l\'horodatage CORRIGÉ', () => {
+  // Bornes du mois d'août 2026 en jours civils Paris (UTC+2 en été).
+  const DEBUT_AOUT = new Date('2026-07-31T22:00:00Z');
+  const FIN_AOUT = new Date('2026-08-31T22:00:00Z');
+  const DEBUT_JUILLET = new Date('2026-06-30T22:00:00Z');
+
+  /** Pointage du 31/07 23:50 Paris (= 21:50 UTC), recalé au 01/08 00:10 Paris. */
+  const brut31Juillet = [pt(1, '2026-07-31T21:50:00Z', 'sortie')];
+  const versAout = [{
+    id: 1, pointage_id: 1, type: 'modification',
+    horodatage_corrige: '2026-07-31T22:10:00Z', sens_corrige: 'sortie', motif_code: 'oubli_badge',
+  }];
+
+  test('le pointage déplacé ENTRE dans le mois de destination', () => {
+    const events = engine.filterEventsToWindow(
+      engine.buildEffectiveEvents(brut31Juillet, versAout), DEBUT_AOUT, FIN_AOUT
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].horodatage_utc.toISOString()).toBe('2026-07-31T22:10:00.000Z');
+    expect(events[0].corrige).toBe(true);
+  });
+
+  test('et SORT du mois d\'origine (il n\'y est plus compté par son heure brute)', () => {
+    const events = engine.filterEventsToWindow(
+      engine.buildEffectiveEvents(brut31Juillet, versAout), DEBUT_JUILLET, DEBUT_AOUT
+    );
+    expect(events).toHaveLength(0);
+  });
+
+  test('sans correction, le pointage reste dans son mois d\'origine', () => {
+    const bruts = engine.buildEffectiveEvents(brut31Juillet, []);
+    expect(engine.filterEventsToWindow(bruts, DEBUT_JUILLET, DEBUT_AOUT)).toHaveLength(1);
+    expect(engine.filterEventsToWindow(bruts, DEBUT_AOUT, FIN_AOUT)).toHaveLength(0);
+  });
+
+  test('un AJOUT hors fenêtre ne s\'invite pas dans la période', () => {
+    const events = engine.buildEffectiveEvents([], [
+      { id: 1, pointage_id: null, type: 'ajout', horodatage_corrige: '2026-09-02T06:00:00Z', sens_corrige: 'entree', motif_code: 'mission_exterieure' },
+    ]);
+    expect(engine.filterEventsToWindow(events, DEBUT_AOUT, FIN_AOUT)).toHaveLength(0);
+  });
+
+  test('bornes : début INCLUS, fin EXCLUE (aucun double comptage à la frontière)', () => {
+    const events = [
+      { horodatage_utc: DEBUT_AOUT, sens: 'entree' },
+      { horodatage_utc: FIN_AOUT, sens: 'sortie' },
+    ];
+    const gardes = engine.filterEventsToWindow(events, DEBUT_AOUT, FIN_AOUT);
+    expect(gardes).toHaveLength(1);
+    expect(gardes[0].sens).toBe('entree');
+  });
+
+  test('borne absente = fenêtre ouverte de ce côté ; horodatage illisible écarté', () => {
+    const events = [
+      { horodatage_utc: new Date('2026-01-01T00:00:00Z'), sens: 'entree' },
+      { horodatage_utc: null, sens: 'sortie' },
+    ];
+    expect(engine.filterEventsToWindow(events, null, FIN_AOUT)).toHaveLength(1);
+    expect(engine.filterEventsToWindow([], DEBUT_AOUT, FIN_AOUT)).toEqual([]);
+  });
+});
+
 describe('utilitaires de format', () => {
   test('minutesToHms et minutesToDecimal', () => {
     expect(engine.minutesToHms(495)).toBe('08:15');

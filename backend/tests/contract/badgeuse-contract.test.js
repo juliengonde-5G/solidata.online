@@ -715,6 +715,10 @@ describe('validation des feuilles de temps (BO-04)', () => {
   test('la validation RH est journalisée DANS la transaction', async () => {
     mockQuery.mockImplementation((sql) => {
       const s = String(sql);
+      // Circuit réel : la feuille a déjà été validée par l'encadrant.
+      if (/SELECT \* FROM badgeuse_feuilles_temps WHERE employee_id/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 1, statut: 'validee_encadrant', heures_pointees: '120.00' }] });
+      }
       if (/INSERT INTO badgeuse_feuilles_temps/.test(s)) return Promise.resolve({ rows: [{ id: 1, statut: 'brouillon', heures_pointees: 0 }] });
       if (/UPDATE badgeuse_feuilles_temps/.test(s)) return Promise.resolve({ rows: [{ id: 1, statut: 'validee_rh' }] });
       return Promise.resolve({ rows: [] });
@@ -777,6 +781,40 @@ describe('validation des feuilles de temps (BO-04)', () => {
 
   test('niveau invalide → 400', async () => {
     expect((await post('/api/badgeuse/feuilles-temps/5/valider', 'RH', { periode: '2026-08', niveau: 'direction' })).status).toBe(400);
+  });
+
+  // Revue Codex PR#93 : le circuit encadrant → RH est OBLIGATOIRE — le RH ne
+  // peut pas clore un brouillon jamais revu par l'encadrant, même via l'API.
+  test('la validation RH d\'un BROUILLON est refusée (409) — séquence encadrant → RH obligatoire', async () => {
+    mockQuery.mockImplementation((sql) => {
+      const s = String(sql);
+      if (/SELECT \* FROM badgeuse_feuilles_temps WHERE employee_id/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 1, statut: 'brouillon', heures_pointees: '80.00' }] });
+      }
+      // Recalcul du brouillon (upsert) : la feuille reste en brouillon.
+      if (/INSERT INTO badgeuse_feuilles_temps/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 1, statut: 'brouillon', heures_pointees: '80.00' }] });
+      }
+      // Clause WHERE statut = 'validee_encadrant' : un brouillon ne matche pas.
+      if (/UPDATE badgeuse_feuilles_temps/.test(s)) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await post('/api/badgeuse/feuilles-temps/5/valider', 'RH', { periode: '2026-08', niveau: 'rh' });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/encadrant/i);
+    // Et la clause est bien dans le SQL (pas seulement dans le mock).
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'src', 'routes', 'badgeuse.js'), 'utf8');
+    const updRh = src.match(/SET statut = 'validee_rh'[\s\S]*?RETURNING/);
+    expect(updRh[0]).toMatch(/statut = 'validee_encadrant'/);
+  });
+
+  // Revue Codex PR#93 : un rôle personnalisé dupliqué de RH doit pouvoir
+  // valider au niveau RH — le garde-fou résout custom→base comme `authorize`.
+  test('le garde-fou RH résout les rôles personnalisés (resolveBaseRole, pas le rôle littéral)', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'src', 'routes', 'badgeuse.js'), 'utf8');
+    expect(src).toMatch(/\.includes\(resolveBaseRole\(req\.user\.role\)\)/);
+    // Plus aucun contrôle de rôle sur le rôle littéral dans ce fichier.
+    expect(src).not.toMatch(/\.includes\(req\.user\.role\)/);
   });
 });
 

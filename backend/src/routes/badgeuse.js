@@ -29,7 +29,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
 const { query: q, param, body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
@@ -129,26 +129,114 @@ function trioHeures(feuille, mois) {
  */
 async function computeEmployeePeriod(employeeId, debut, fin, params, client = null) {
   const runner = client || pool;
+
+  // (1) Pointages de la fenêtre par leur horodatage d'ORIGINE, PLUS ceux qu'une
+  //     correction DÉPLACE dans la fenêtre (revue Codex C2). Sans le EXISTS, un
+  //     pointage du 31/07 23:50 recalé au 01/08 restait invisible pour août :
+  //     la période de destination ne chargeait pas le brut, donc ignorait la
+  //     correction et perdait purement et simplement l'heure travaillée.
   const pts = await runner.query(
-    `SELECT id, employee_id, horodatage_utc, sens, source, statut
-     FROM badgeuse_pointages
-     WHERE employee_id = $1 AND horodatage_utc >= $2 AND horodatage_utc < $3
-     ORDER BY horodatage_utc`,
+    `SELECT p.id, p.employee_id, p.horodatage_utc, p.sens, p.source, p.statut
+     FROM badgeuse_pointages p
+     WHERE p.employee_id = $1
+       AND (
+         (p.horodatage_utc >= $2 AND p.horodatage_utc < $3)
+         OR EXISTS (
+           SELECT 1 FROM badgeuse_corrections c
+           WHERE c.pointage_id = p.id
+             AND c.horodatage_corrige >= $2 AND c.horodatage_corrige < $3
+         )
+       )
+     ORDER BY p.horodatage_utc`,
     [employeeId, debut, fin]
   );
+
+  // (2) Corrections de la fenêtre par leur horodatage CORRIGÉ, PLUS toutes
+  //     celles qui portent sur un pointage chargé en (1) — y compris quand
+  //     elles l'emmènent HORS de la fenêtre. Sans ce second membre, la période
+  //     d'origine continuait de compter l'événement brut non corrigé (défaut b).
+  //     Les `ajout` (pointage_id NULL) entrent par leur horodatage corrigé.
+  const idsCharges = pts.rows.map((p) => Number(p.id)).filter((n) => Number.isFinite(n));
   const corr = await runner.query(
     `SELECT c.id, c.pointage_id, c.type, c.horodatage_corrige, c.sens_corrige, c.motif_code, c.motif_detail, c.auteur_id
      FROM badgeuse_corrections c
-     LEFT JOIN badgeuse_pointages p ON p.id = c.pointage_id
      WHERE c.employee_id = $1
-       AND COALESCE(c.horodatage_corrige, p.horodatage_utc) >= $2
-       AND COALESCE(c.horodatage_corrige, p.horodatage_utc) < $3
+       AND (
+         (c.horodatage_corrige >= $2 AND c.horodatage_corrige < $3)
+         OR c.pointage_id = ANY($4::bigint[])
+       )
      ORDER BY c.id`,
-    [employeeId, debut, fin]
+    [employeeId, debut, fin, idsCharges]
   );
-  const events = engine.buildEffectiveEvents(pts.rows, corr.rows);
+
+  // (3) La fenêtre s'applique aux événements EFFECTIFS, jamais aux bruts :
+  //     un pointage corrigé hors fenêtre en sort, un pointage corrigé dans la
+  //     fenêtre y entre. C'est ce filtre qui garantit qu'une heure déplacée est
+  //     comptée UNE fois, du bon côté de la frontière.
+  const events = engine.filterEventsToWindow(
+    engine.buildEffectiveEvents(pts.rows, corr.rows), debut, fin
+  );
   const jours = engine.computeDays(events, params);
+  // `pointages` / `corrections` sont rendus TELS QUE CHARGÉS (donc avec le brut
+  // venu de l'autre mois et sa correction) : /mes-pointages et le relevé
+  // individuel doivent montrer au salarié la pièce d'origine qui explique
+  // l'heure comptée — la transparence prime (NOTE_RH §5.2).
   return { pointages: pts.rows, corrections: corr.rows, events, jours };
+}
+
+/**
+ * POPULATION d'une fenêtre : les salariés qui doivent y figurer. Membres réunis
+ * par UNION (revue Codex C1) :
+ *   1. pointages bruts de la fenêtre ;
+ *   2. feuille déjà ouverte — SEULEMENT quand la fenêtre est une période
+ *      'YYYY-MM' (`periode` non nul) : ne pas faire disparaître une feuille
+ *      existante. Une fenêtre libre (/anomalies) n'a pas de période, donc pas
+ *      ce membre ;
+ *   3. CORRECTIONS de la fenêtre — un salarié en mission extérieure toute la
+ *      période n'a QUE des corrections « ajout » : sans ce membre il
+ *      n'apparaissait nulle part, donc ne pouvait être ni validé ni exporté en
+ *      paie/IAE. Ses heures existaient en base et ne sortaient jamais.
+ * On ne crée toujours pas de feuille vide pour toute la boîte : la population
+ * reste bornée à ceux qui ont une trace sur la fenêtre.
+ */
+async function populationFenetre(debut, fin, periode, client = null) {
+  const runner = client || pool;
+  const vals = [debut, fin];
+  // Membres assemblés à partir de FRAGMENTS FIXES : aucune donnée utilisateur
+  // n'entre dans le texte SQL, tout passe par $1..$n.
+  const membres = [
+    `SELECT employee_id FROM badgeuse_pointages
+       WHERE employee_id IS NOT NULL AND horodatage_utc >= $1 AND horodatage_utc < $2`,
+  ];
+  if (periode) {
+    vals.push(periode);
+    membres.push(`SELECT employee_id FROM badgeuse_feuilles_temps WHERE periode = $${vals.length}`);
+  }
+  membres.push(
+    `SELECT c.employee_id FROM badgeuse_corrections c
+       LEFT JOIN badgeuse_pointages p ON p.id = c.pointage_id
+       WHERE (c.horodatage_corrige >= $1 AND c.horodatage_corrige < $2)
+          OR (p.horodatage_utc >= $1 AND p.horodatage_utc < $2)`
+  );
+
+  return runner.query(
+    // Pas de SELECT DISTINCT : le filtre porte sur la clé primaire, chaque
+    // salarié ne peut donc sortir qu'une fois. (PostgreSQL refuserait de
+    // toute façon « SELECT DISTINCT … ORDER BY UPPER(col) » : les expressions
+    // du ORDER BY doivent alors figurer dans la liste de sélection.)
+    `SELECT e.id, e.first_name, e.last_name, e.malibou_id, e.team_id
+     FROM employees e
+     WHERE e.id IN (
+       ${membres.join('\n       UNION\n       ')}
+     )
+     ORDER BY UPPER(e.last_name), UPPER(e.first_name)`,
+    vals
+  );
+}
+
+/** Population d'une période 'YYYY-MM' (les trois membres, feuille comprise). */
+async function populationPeriode(periode, bornes, client = null) {
+  return populationFenetre(bornes.debut, bornes.fin, periode, client);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -622,18 +710,32 @@ router.post('/corrections', CORRECTION, [
     }
 
     // ── Verrou 2 : aucune correction sur une période validée RH (NOTE_RH §5.2) ──
-    const dateRef = horodatage || (pointageId
+    // DOUBLE verrou (revue Codex C2) : une modification qui déplace un pointage
+    // d'un mois vers un autre touche DEUX périodes — celle qu'elle vide
+    // (origine) et celle qu'elle remplit (destination). Si l'UNE des deux est
+    // validée RH, la correction est refusée : sinon on modifierait un mois clos
+    // « par l'autre bout », sans que personne ne le voie.
+    const origine = pointageId
       ? (await client.query('SELECT horodatage_utc FROM badgeuse_pointages WHERE id = $1', [pointageId])).rows[0]?.horodatage_utc
-      : null);
+      : null;
+    const dateRef = horodatage || origine;
     if (!dateRef) return res.status(404).json({ error: 'Pointage d\'origine introuvable' });
-    const periode = engine.parisDateStr(dateRef).slice(0, 7);
+
+    // Périodes CONNUES seulement : un pointage d'origine introuvable ne fait pas
+    // inventer une période (la clé étrangère tranchera à l'insertion).
+    const periodes = [...new Set(
+      [horodatage, origine].filter(Boolean).map((d) => engine.parisDateStr(d).slice(0, 7))
+    )];
     const feuille = await client.query(
-      'SELECT statut FROM badgeuse_feuilles_temps WHERE employee_id = $1 AND periode = $2',
-      [employeeId, periode]
+      'SELECT periode, statut FROM badgeuse_feuilles_temps WHERE employee_id = $1 AND periode = ANY($2::varchar[])',
+      [employeeId, periodes]
     );
-    if (feuille.rows[0] && feuille.rows[0].statut === 'validee_rh') {
+    const bloquante = feuille.rows.find((x) => x.statut === 'validee_rh');
+    if (bloquante) {
+      const periodeBloquee = bloquante.periode || periodes.join(' / ');
       return res.status(409).json({
-        error: `La feuille de temps ${periode} est validée par le RH — aucune correction rétroactive (une contestation suit la procédure de réclamation)`,
+        error: `La feuille de temps ${periodeBloquee} est validée par le RH — aucune correction rétroactive (une contestation suit la procédure de réclamation)`,
+        periodes_concernees: periodes,
       });
     }
 
@@ -759,6 +861,39 @@ async function upsertFeuille(employeeId, periode, params, client) {
   return { feuille: r.rows[0], mois, recalculee: true, source_theorique: sourceTheorique };
 }
 
+/**
+ * Matérialise en BROUILLON les feuilles manquantes de la population d'une
+ * période (revue Codex C1). Les exports partent des feuilles : sans ce passage,
+ * un salarié qui n'a QUE des corrections sur le mois n'existait pour la paie
+ * qu'à la condition qu'un humain ait ouvert l'écran mensuel avant — dépendance
+ * invisible et silencieuse. L'export le voit désormais par lui-même :
+ *   - export paie : il apparaît en `non_validees` (409 tant qu'il n'est pas
+ *     validé RH) au lieu de disparaître du fichier ;
+ *   - export IAE : sa feuille existe et devient validable.
+ * IDEMPOTENT et non destructif : `upsertFeuille` ne réécrit JAMAIS une feuille
+ * déjà validée, et seules les feuilles ABSENTES sont calculées ici (aucun
+ * recalcul des brouillons existants, l'export ne doit pas être une passe de
+ * recalcul générale).
+ * @returns {number} nombre de feuilles créées
+ */
+async function materialiserFeuillesManquantes(periode, client) {
+  const bornes = bornesPeriode(periode);
+  if (!bornes) return 0;
+  const [pop, existantes] = await Promise.all([
+    populationPeriode(periode, bornes, client),
+    client.query('SELECT employee_id FROM badgeuse_feuilles_temps WHERE periode = $1', [periode]),
+  ]);
+  const deja = new Set(existantes.rows.map((x) => Number(x.employee_id)));
+  const manquants = pop.rows.filter((e) => !deja.has(Number(e.id)));
+  if (manquants.length === 0) return 0;
+
+  const params = await readBadgeuseParams();
+  for (const e of manquants) {
+    await upsertFeuille(e.id, periode, params, client);
+  }
+  return manquants.length;
+}
+
 router.get('/feuilles-temps', READ, [
   q('periode').matches(/^\d{4}-\d{2}$/).withMessage('periode « YYYY-MM » requise'),
 ], validate, async (req, res) => {
@@ -768,24 +903,9 @@ router.get('/feuilles-temps', READ, [
     const params = await readBadgeuseParams();
     const bornes = bornesPeriode(periode);
 
-    // Population : salariés actifs ayant des pointages sur la période OU une
-    // feuille déjà ouverte (on ne crée pas de feuille vide pour toute la boîte).
-    const pop = await client.query(
-      // Pas de SELECT DISTINCT : le filtre porte sur la clé primaire, chaque
-      // salarié ne peut donc sortir qu'une fois. (PostgreSQL refuserait de
-      // toute façon « SELECT DISTINCT … ORDER BY UPPER(col) » : les expressions
-      // du ORDER BY doivent alors figurer dans la liste de sélection.)
-      `SELECT e.id, e.first_name, e.last_name, e.malibou_id, e.team_id
-       FROM employees e
-       WHERE e.id IN (
-         SELECT employee_id FROM badgeuse_pointages
-         WHERE employee_id IS NOT NULL AND horodatage_utc >= $1 AND horodatage_utc < $2
-         UNION
-         SELECT employee_id FROM badgeuse_feuilles_temps WHERE periode = $3
-       )
-       ORDER BY UPPER(e.last_name), UPPER(e.first_name)`,
-      [bornes.debut, bornes.fin, periode]
-    );
+    // Population partagée avec les exports (pointages OU feuille OU corrections
+    // du mois) : la liste mensuelle et la paie voient exactement les mêmes gens.
+    const pop = await populationPeriode(periode, bornes, client);
 
     const feuilles = [];
     for (const e of pop.rows) {
@@ -881,8 +1001,10 @@ router.post('/feuilles-temps/:employeeId/valider', CORRECTION, [
     const employeeId = parseInt(req.params.employeeId, 10);
     const { periode, niveau } = req.body;
 
-    // La validation RH est réservée à ADMIN/RH (le MANAGER s'arrête à l'encadrant).
-    if (niveau === 'rh' && !['ADMIN', 'RH'].includes(req.user.role)) {
+    // La validation RH est réservée à ADMIN/RH (le MANAGER s'arrête à
+    // l'encadrant). Résolution custom→base comme `authorize` : un rôle
+    // personnalisé dupliqué de RH valide aussi (revue Codex PR#93).
+    if (niveau === 'rh' && !['ADMIN', 'RH'].includes(resolveBaseRole(req.user.role))) {
       return res.status(403).json({ error: 'La validation RH est réservée aux profils ADMIN/RH' });
     }
 
@@ -908,13 +1030,16 @@ router.post('/feuilles-temps/:employeeId/valider', CORRECTION, [
       upd = await client.query(
         `UPDATE badgeuse_feuilles_temps
          SET statut = 'validee_rh', heures_validees = $4, valide_rh_par = $3, valide_rh_le = NOW(), updated_at = NOW()
-         WHERE employee_id = $1 AND periode = $2 AND statut <> 'validee_rh'
+         WHERE employee_id = $1 AND periode = $2 AND statut = 'validee_encadrant'
          RETURNING *`,
         [employeeId, periode, req.user.id, heures]
       );
       if (upd.rows.length === 0) {
         await client.query('ROLLBACK');
-        return res.status(409).json({ error: 'Feuille absente ou déjà validée par le RH' });
+        // Le circuit encadrant → RH est OBLIGATOIRE (NOTE_RH §5.1, revue
+        // Codex PR#93) : le RH ne clôt pas un brouillon jamais revu par
+        // l'encadrant, même en passant par l'API directement.
+        return res.status(409).json({ error: 'La feuille doit d\'abord être validée par l\'encadrant (ou est déjà validée par le RH)' });
       }
     }
 
@@ -988,19 +1113,11 @@ router.get('/anomalies', READ, [
     const lendemain = engine.parisDateStr(new Date(engine.parisDateTimeToUTC(req.query.au, '12:00').getTime() + 24 * 3600 * 1000));
     const fin = engine.parisDateTimeToUTC(lendemain, '00:00');
 
-    const emps = await pool.query(
-      // Sous-requête plutôt que JOIN + DISTINCT : un salarié ne sort qu'une
-      // fois quel que soit son nombre de pointages, et le tri par UPPER() reste
-      // possible (PostgreSQL l'interdit sur un SELECT DISTINCT).
-      `SELECT e.id, e.first_name, e.last_name
-       FROM employees e
-       WHERE e.id IN (
-         SELECT employee_id FROM badgeuse_pointages
-         WHERE employee_id IS NOT NULL AND horodatage_utc >= $1 AND horodatage_utc < $2
-       )
-       ORDER BY UPPER(e.last_name), UPPER(e.first_name)`,
-      [debut, fin]
-    );
+    // MÊME population que la liste mensuelle (revue Codex C1), fenêtre libre
+    // donc sans le membre « feuille de la période » : les anomalies d'un
+    // salarié qui n'a que des corrections (ajout d'entrée sans sortie, par
+    // exemple) restaient elles aussi invisibles.
+    const emps = await populationFenetre(debut, fin, null);
 
     const anomalies = [];
     // Indicateur « taux de pointages complets » (NOTE_RH §9, QA-05), agrégé sur
@@ -1065,12 +1182,18 @@ router.get('/exports/paie', WRITE, [
   q('heures').optional().isIn(['decimal', 'hms']),
   q('force').optional().isIn(['0', '1']),
 ], validate, async (req, res) => {
+  const client = await pool.connect();
   try {
     const periode = req.query.periode;
     const format = req.query.heures === 'hms' ? 'hms' : 'decimal';
     const force = req.query.force === '1';
 
-    const r = await pool.query(
+    // L'export voit la population du mois par lui-même (C1) : un salarié qui
+    // n'a que des corrections obtient sa feuille (brouillon) et apparaît donc
+    // en `non_validees` au lieu de sortir silencieusement de la paie.
+    const creees = await materialiserFeuillesManquantes(periode, client);
+
+    const r = await client.query(
       `SELECT f.employee_id, f.statut, f.heures_validees, f.heures_pointees, f.detail,
               e.first_name, e.last_name, e.malibou_id
        FROM badgeuse_feuilles_temps f
@@ -1108,7 +1231,8 @@ router.get('/exports/paie', WRITE, [
     }
 
     logConsultation(req, 'BADGEUSE_EXPORT_PAIE', 'badgeuse_feuilles_temps', 0, {
-      periode, format, lignes: validees.length, non_validees: nonValidees.length, force, requested_by: req.user.id,
+      periode, format, lignes: validees.length, non_validees: nonValidees.length,
+      feuilles_creees: creees, force, requested_by: req.user.id,
     });
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -1117,6 +1241,8 @@ router.get('/exports/paie', WRITE, [
   } catch (err) {
     console.error('[BADGEUSE] Erreur export paie :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1124,9 +1250,15 @@ router.get('/exports/paie', WRITE, [
 router.get('/exports/iae', WRITE, [
   q('periode').matches(/^\d{4}-\d{2}$/).withMessage('periode « YYYY-MM » requise'),
 ], validate, async (req, res) => {
+  const client = await pool.connect();
   try {
     const periode = req.query.periode;
-    const r = await pool.query(
+    // Même population que la liste mensuelle et l'export paie (C1) : la feuille
+    // d'un salarié qui n'a que des corrections est créée si elle manque, donc
+    // il devient validable — puis exportable ici une fois validé RH.
+    await materialiserFeuillesManquantes(periode, client);
+
+    const r = await client.query(
       `SELECT f.employee_id, f.heures_validees, f.statut, e.first_name, e.last_name, e.malibou_id
        FROM badgeuse_feuilles_temps f
        JOIN employees e ON e.id = f.employee_id
@@ -1156,6 +1288,8 @@ router.get('/exports/iae', WRITE, [
   } catch (err) {
     console.error('[BADGEUSE] Erreur export IAE :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 
