@@ -1,0 +1,275 @@
+/* Interface kiosque du poste de pointage — SOLIDATA.
+ *
+ * Contraintes tenues ici :
+ *  - AFF-03 : contraste >= 7:1 et information principale >= 48 px, lisible a 3 m ;
+ *  - AFF-06 : transitions en fondu, aucune animation clignotante ;
+ *  - PST-10 : aucun curseur, aucune selection, aucune interaction possible ;
+ *  - aucune police distante, aucune ressource externe (page auto-portante).
+ *
+ * Contrastes mesures sur le fond #0f172a (luminance 0,0082) :
+ *   #ffffff 18,0:1   #4ade80 9,9:1   #fca5a5 9,1:1   #f59e0b 8,4:1   #94a3b8 6,5:1
+ * Les teintes vives #22c55e / #ef4444 ne servent qu'aux pictogrammes et aux
+ * bordures (element graphique : seuil 3:1), jamais au texte.
+ */
+
+:root {
+  --fond: #0f172a;
+  --fond-carte: #1e293b;
+  --texte: #ffffff;
+  --texte-doux: #cbd5e1;
+
+  --vert: #22c55e;
+  --vert-texte: #4ade80;
+  --orange: #f59e0b;
+  --rouge: #ef4444;
+  --rouge-texte: #fca5a5;
+
+  --fondu: 600ms;
+  --police: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+            Arial, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  cursor: none;                 /* PST-10 : pas de pointeur visible */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--fond);
+  color: var(--texte);
+  font-family: var(--police);
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+/* ------------------------------------------------------------------ VEILLE */
+
+.veille {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  padding: 2.2vh 3vw;
+  gap: 1.5vh;
+}
+
+.bandeau-haut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--texte-doux);
+}
+
+.marque {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: clamp(20px, 2.2vw, 34px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.pastille {
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  background: var(--vert);
+}
+
+.horloge {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+}
+
+#horloge-heure {
+  font-size: clamp(38px, 5vw, 84px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--texte);
+}
+
+.horloge-date {
+  font-size: clamp(16px, 1.5vw, 26px);
+  color: var(--texte-doux);
+}
+
+/* ---------------------------------------------------------------- PLAYLIST */
+
+.playlist {
+  position: relative;
+  min-height: 0;
+}
+
+.diapo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.4vh;
+  text-align: center;
+  padding: 2vh 2vw;
+  background: var(--fond-carte);
+  border-radius: 24px;
+
+  opacity: 0;
+  /* Fondu doux, jamais de clignotement (AFF-06). */
+  transition: opacity var(--fondu) ease-in-out;
+}
+
+.diapo.visible { opacity: 1; }
+
+.diapo-titre {
+  font-size: clamp(34px, 4vw, 68px);
+  font-weight: 700;
+  color: var(--texte);
+  max-width: 90%;
+}
+
+.diapo-corps {
+  font-size: clamp(24px, 2.6vw, 46px);
+  color: var(--texte-doux);
+  max-width: 88%;
+}
+
+.diapo-image {
+  max-width: 92%;
+  max-height: 72%;
+  object-fit: contain;
+  border-radius: 16px;
+}
+
+.diapo-compteur {
+  font-size: clamp(64px, 12vw, 220px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--vert-texte);
+  line-height: 1;
+}
+
+.diapo-unite {
+  font-size: clamp(22px, 2.4vw, 40px);
+  color: var(--texte-doux);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.diapo-vide {
+  font-size: clamp(24px, 2.4vw, 40px);
+  color: var(--texte-doux);
+}
+
+/* -------------------------------------------------------------- BANDEAU BAS */
+
+.bandeau-bas {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2vw;
+  min-height: 8vh;
+}
+
+.consigne {
+  font-size: clamp(26px, 2.6vw, 48px);
+  font-weight: 600;
+  color: var(--texte);
+}
+
+.hors-ligne {
+  font-size: clamp(16px, 1.5vw, 24px);
+  color: var(--texte-doux);
+  background: rgba(148, 163, 184, 0.16);
+  border: 1px solid rgba(203, 213, 225, 0.35);
+  border-radius: 999px;
+  padding: 0.5em 1.1em;
+  opacity: 0;
+  transition: opacity var(--fondu) ease-in-out;
+}
+
+.hors-ligne.visible { opacity: 1; }
+
+/* ------------------------------------------------------------------ OVERLAY */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fond);
+  opacity: 0;
+  transition: opacity 260ms ease-in-out;
+  z-index: 10;
+}
+
+.overlay.visible { opacity: 1; }
+
+.overlay-carte {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.6vh;
+  text-align: center;
+  padding: 4vh 6vw;
+  border-radius: 32px;
+  background: var(--fond-carte);
+  border: 6px solid var(--vert);
+  max-width: 92vw;
+}
+
+.overlay.erreur .overlay-carte { border-color: var(--rouge); }
+.overlay.neutre  .overlay-carte { border-color: #64748b; }
+
+.picto {
+  font-size: clamp(110px, 18vh, 260px);
+  line-height: 1;
+  color: var(--vert);
+}
+
+.overlay.erreur .picto { color: var(--rouge); }
+.overlay.neutre  .picto { color: var(--texte-doux); }
+
+/* Information principale : jamais sous 48 px (AFF-03). */
+.identite {
+  font-size: clamp(48px, 8vw, 140px);
+  font-weight: 800;
+  color: var(--texte);
+  line-height: 1.05;
+}
+
+.message {
+  font-size: clamp(32px, 4vw, 72px);
+  font-weight: 700;
+  color: var(--vert-texte);
+}
+
+.overlay.sortie  .message { color: var(--orange); }
+.overlay.erreur  .message { color: var(--rouge-texte); }
+.overlay.neutre  .message { color: var(--texte-doux); }
+
+.heure {
+  font-size: clamp(34px, 4.4vw, 84px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--texte);
+}
+
+.cumul {
+  font-size: clamp(20px, 2vw, 34px);
+  color: var(--texte-doux);
+}
+
+[hidden] { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 1ms !important; }
+}

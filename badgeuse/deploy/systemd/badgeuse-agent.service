@@ -1,0 +1,66 @@
+[Unit]
+Description=Agent du poste de pointage SOLIDATA
+Documentation=file:/opt/badgeuse/README.md
+# Le poste doit pointer SANS reseau et SANS serveur : on se contente d'un
+# ordonnancement souhaitable, jamais d'une dependance dure (PST-08).
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=badgeuse
+Group=badgeuse
+# Acces au lecteur RFID (/dev/input/event*) via EVIOCGRAB.
+SupplementaryGroups=input
+
+WorkingDirectory=/opt/badgeuse/agent
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/badgeuse/agent
+Environment=BADGEUSE_CONFIG=/etc/badgeuse/badgeuse.conf
+ExecStart=/opt/badgeuse/venv/bin/python -m badgeuse_agent
+
+# Redemarrage systematique (PST-09).
+Restart=always
+RestartSec=5
+
+# Chien de garde : l'agent envoie WATCHDOG=1 toutes les 30 s.
+WatchdogSec=90
+
+# Arret propre : SIGTERM, vidage SQLite, puis on laisse le temps a la file
+# de s'ecouler une derniere fois.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# --- Durcissement --------------------------------------------------------
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/badgeuse
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+# DeviceAllow : lecture des peripheriques d'entree uniquement.
+DevicePolicy=closed
+DeviceAllow=char-input rw
+
+# Empreinte memoire : marge large sur Pi 5 (4 Go), serree sur Pi 3 (1 Go).
+# L'agent tourne autour de 40 Mo ; la limite est un garde-fou, pas une cible.
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

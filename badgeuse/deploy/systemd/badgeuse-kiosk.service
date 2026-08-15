@@ -1,0 +1,45 @@
+[Unit]
+Description=Affichage kiosque du poste de pointage SOLIDATA
+Documentation=file:/opt/badgeuse/README.md
+# L'interface est servie par l'agent (http://127.0.0.1:8766) : sans agent,
+# rien a afficher.
+After=badgeuse-agent.service systemd-user-sessions.service
+Requires=badgeuse-agent.service
+
+[Service]
+User=badgeuse
+Group=badgeuse
+SupplementaryGroups=video render input tty
+
+# Session graphique minimale : cage (compositeur Wayland) sur la console 1.
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_RUNTIME_DIR=/run/badgeuse
+# Les options de Chromium propres a la cible (Pi 5 / Pi 3) sont ecrites par
+# install.sh : le code applicatif, lui, est identique sur les deux machines.
+EnvironmentFile=/etc/badgeuse/kiosk.env
+
+RuntimeDirectory=badgeuse
+RuntimeDirectoryMode=0700
+
+# L'attente laisse a l'agent le temps d'ouvrir son serveur local.
+ExecStartPre=/bin/sleep 3
+ExecStart=/usr/bin/cage -- /usr/bin/chromium $CHROMIUM_FLAGS http://127.0.0.1:8766
+
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=graphical.target multi-user.target

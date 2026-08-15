@@ -1,0 +1,13 @@
+# Dépendances de l'agent — versions épinglées, conservatrices.
+#
+# Cible : Python 3.11 (Raspberry Pi OS Bookworm 64 bits).
+# Préférer les paquets APT quand ils existent (python3-evdev), plus légers à
+# installer sur un Pi que la compilation d'une roue native ; install.sh le fait.
+#
+# Le reste de l'agent n'utilise que la bibliothèque standard (sqlite3, hmac,
+# hashlib, zoneinfo, asyncio, http.server, socket) : les modules purs — et donc
+# la totalité des tests — s'importent sans aucune de ces trois dépendances.
+
+evdev==1.7.1
+httpx==0.27.2
+websockets==12.0
