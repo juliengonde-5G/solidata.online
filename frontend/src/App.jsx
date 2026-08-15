@@ -109,6 +109,8 @@ const VakSessions = lazy(() => import('./pages/VakSessions'));
 const VakLive = lazy(() => import('./pages/VakLive'));
 const VakSumupConfig = lazy(() => import('./pages/VakSumupConfig'));
 
+const TempsPresence = lazy(() => import('./pages/TempsPresence'));
+
 function PageFallback() {
   return (
     <div role="status" aria-live="polite" className="flex items-center justify-center h-screen bg-[var(--color-bg)]">
@@ -272,6 +274,9 @@ function App() {
 
               {/* Enquêtes (RSEI-13 — 30e module) — administration ; la réponse publique /enquete/:token est hors auth */}
               <Route path="/enquetes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><Enquetes /></ProtectedRoute>} />
+
+              {/* Temps & Présence (badgeuse) — 33e module, pointage par badge RFID (Le Houlme) */}
+              <Route path="/badgeuse" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><TempsPresence /></ProtectedRoute>} />
 
               {/* QHSE (item 58 — accidents, habilitations, EPI) */}
               <Route path="/qhse" element={<Navigate to="/qhse/accidents" replace />} />
