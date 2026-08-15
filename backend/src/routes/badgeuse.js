@@ -51,9 +51,11 @@ const WRITE = authorize('ADMIN', 'RH');
 const CORRECTION = authorize('ADMIN', 'RH', 'MANAGER');
 const ADMIN_ONLY = authorize('ADMIN');
 
-// Un poste est « en ligne » si son heartbeat a moins de 5 min ; la supervision
-// alerte au-delà de 15 min de silence (BO-09, job checkBadgeuseDevices).
-const DEVICE_ONLINE_MS = 5 * 60 * 1000;
+// Seuil de silence d'un poste (BO-09) : il n'est plus codé en dur (QA-11), il
+// vient de `badgeuse.supervision_silence_minutes` (défaut 15 min). Le MÊME
+// seuil sert à l'affichage « en ligne / hors ligne » et à l'alerte du job
+// checkBadgeuseDevices : un poste ne peut plus être affiché « en ligne » alors
+// que la supervision le considère muet.
 
 const MOTIFS = ['oubli_badge', 'badge_defaillant', 'mission_exterieure', 'rdv_accompagnement', 'formation', 'autre'];
 
@@ -100,6 +102,24 @@ function csvCell(v) {
 /** Lignes → CSV `;` avec BOM UTF-8 (ouverture directe dans Excel FR). */
 function toCsv(rows) {
   return `﻿${rows.map((r) => r.map(csvCell).join(';')).join('\r\n')}\r\n`;
+}
+
+/**
+ * Trio « théorique / pointé / écart » d'une feuille (BO-04). L'écart est
+ * TOUJOURS dérivé des deux valeurs RÉELLEMENT exposées : sur une feuille
+ * validée ce sont les chiffres figés en base qui font foi, pas le recalcul.
+ * Théorique inconnu → écart `null` (jamais 0 : « — » à l'écran).
+ */
+function trioHeures(feuille, mois) {
+  const theoriques = feuille.heures_theoriques == null ? null : Number(feuille.heures_theoriques);
+  const pointees = feuille.statut === 'brouillon' || feuille.heures_pointees == null
+    ? mois.heures_pointees
+    : Number(feuille.heures_pointees);
+  return {
+    heures_theoriques: theoriques,
+    heures_pointees: pointees,
+    ecart_heures: theoriques == null || pointees == null ? null : engine.round2(pointees - theoriques),
+  };
 }
 
 /**
@@ -617,6 +637,19 @@ router.post('/corrections', CORRECTION, [
       });
     }
 
+    // ── Délai de signalement (ADR-0002 addendum §4, QA-05) ──
+    // `badgeuse.regularisation_delai_jours` (NOTE_RH §5.1 : « signalement sous
+    // 5 jours ouvrés ») était déclaré et arbitrable mais n'avait AUCUN effet.
+    // Il en produit un désormais — NON BLOQUANT : une régularisation tardive
+    // reste enregistrée (aucune heure ne se perd), elle est simplement signalée
+    // à celui qui la saisit et tracée dans la réponse.
+    const params = await readBadgeuseParams();
+    const delaiJours = Math.max(0, Number(params.regularisation_delai_jours) || 0);
+    const joursEcoules = engine.joursOuvresEcoules(
+      engine.parisDateStr(dateRef), engine.parisDateStr(new Date())
+    );
+    const horsDelai = delaiJours > 0 && joursEcoules != null && joursEcoules > delaiJours;
+
     await client.query('BEGIN');
     const ins = await client.query(
       `INSERT INTO badgeuse_corrections
@@ -625,7 +658,13 @@ router.post('/corrections', CORRECTION, [
       [pointageId, employeeId, type, horodatage, req.body.sens_corrige || null, motifCode, motifDetail, req.user.id]
     );
     await client.query('COMMIT');
-    res.status(201).json({ ...ins.rows[0], pointage_id: ins.rows[0].pointage_id == null ? null : Number(ins.rows[0].pointage_id) });
+    res.status(201).json({
+      ...ins.rows[0],
+      pointage_id: ins.rows[0].pointage_id == null ? null : Number(ins.rows[0].pointage_id),
+      avertissement: horsDelai ? 'hors_delai_signalement' : null,
+      jours_ouvres_ecoules: joursEcoules,
+      regularisation_delai_jours: delaiJours,
+    });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
     if (err.code === '23503') return res.status(404).json({ error: 'Salarié ou pointage introuvable' });
@@ -641,34 +680,83 @@ router.post('/corrections', CORRECTION, [
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
+ * Heures hebdomadaires CONTRACTUELLES d'un salarié au 1er jour de la période
+ * (ADR-0002 addendum §3, QA-03). Source : `employee_contracts` — le contrat
+ * dont la période effective couvre le 1er du mois, comme le fait le moteur ETP
+ * (routes/effectifs.js) ; REPLI documenté sur la fiche `employees.weekly_hours`
+ * quand aucun contrat ne couvre cette date (salarié sans historique importé,
+ * ou contrat démarrant en cours de mois).
+ *
+ * Rend `null` si aucune heure n'est connue : la feuille affichera « — », JAMAIS
+ * un théorique inventé (doctrine « jamais de valeur inventée »).
+ */
+async function heuresHebdoContractuelles(employeeId, periode, client) {
+  const runner = client || pool;
+  const premierDuMois = `${periode}-01`;
+  const c = await runner.query(
+    `SELECT ec.weekly_hours
+     FROM employee_contracts ec
+     WHERE ec.employee_id = $1
+       AND ec.weekly_hours IS NOT NULL
+       AND ec.start_date IS NOT NULL
+       AND ec.start_date <= $2::date
+       AND (ec.end_date IS NULL OR ec.end_date >= $2::date)
+     ORDER BY ec.start_date DESC
+     LIMIT 1`,
+    [employeeId, premierDuMois]
+  );
+  if (c.rows[0] && c.rows[0].weekly_hours != null) {
+    return { heures: Number(c.rows[0].weekly_hours), source: 'contrat' };
+  }
+  const f = await runner.query('SELECT weekly_hours FROM employees WHERE id = $1', [employeeId]);
+  if (f.rows[0] && f.rows[0].weekly_hours != null) {
+    return { heures: Number(f.rows[0].weekly_hours), source: 'fiche' };
+  }
+  return { heures: null, source: null };
+}
+
+/**
  * Recalcule (et met à jour en brouillon) la feuille d'un salarié pour une
  * période. Une feuille DÉJÀ VALIDÉE n'est jamais réécrite par le recalcul :
- * le chiffre validé fait foi (même doctrine que la validation ASP des effectifs).
+ * le chiffre validé fait foi (même doctrine que la validation ASP des effectifs)
+ * — y compris son `heures_theoriques`, figé à la validation.
  */
 async function upsertFeuille(employeeId, periode, params, client) {
   const bornes = bornesPeriode(periode);
   const { jours } = await computeEmployeePeriod(employeeId, bornes.debut, bornes.fin, params, client);
-  const mois = engine.computeMonth(jours, params, { periode });
 
+  // Théorique = heures hebdo contractuelles × jours ouvrés du mois ÷ 5 (BO-04).
+  const { heures: hebdo, source: sourceTheorique } = await heuresHebdoContractuelles(employeeId, periode, client);
+  const heuresTheoriques = engine.heuresTheoriquesMois(hebdo, periode);
+
+  const mois = engine.computeMonth(jours, params, { periode, heures_theoriques: heuresTheoriques });
+
+  // Ligne COMPLÈTE (et non `id, statut`) : sur une feuille déjà validée, ce
+  // sont SES chiffres qui font foi — heures pointées, théoriques, validées et
+  // dates de validation. Une projection partielle les rendait `undefined`, si
+  // bien que la feuille validée s'affichait sans date de validation et que la
+  // validation RH d'une feuille déjà validée par l'encadrant écrivait `NaN`
+  // dans `heures_validees`.
   const existante = await client.query(
-    'SELECT id, statut FROM badgeuse_feuilles_temps WHERE employee_id = $1 AND periode = $2',
+    'SELECT * FROM badgeuse_feuilles_temps WHERE employee_id = $1 AND periode = $2',
     [employeeId, periode]
   );
   if (existante.rows[0] && existante.rows[0].statut !== 'brouillon') {
-    return { feuille: existante.rows[0], mois, recalculee: false };
+    return { feuille: existante.rows[0], mois, recalculee: false, source_theorique: sourceTheorique };
   }
 
   const r = await client.query(
-    `INSERT INTO badgeuse_feuilles_temps (employee_id, periode, heures_pointees, detail, statut, updated_at)
-     VALUES ($1, $2, $3, $4, 'brouillon', NOW())
+    `INSERT INTO badgeuse_feuilles_temps (employee_id, periode, heures_theoriques, heures_pointees, detail, statut, updated_at)
+     VALUES ($1, $2, $3, $4, $5, 'brouillon', NOW())
      ON CONFLICT (employee_id, periode) DO UPDATE
-       SET heures_pointees = EXCLUDED.heures_pointees,
+       SET heures_theoriques = EXCLUDED.heures_theoriques,
+           heures_pointees = EXCLUDED.heures_pointees,
            detail = EXCLUDED.detail,
            updated_at = NOW()
      RETURNING *`,
-    [employeeId, periode, mois.heures_pointees, JSON.stringify(mois.detail)]
+    [employeeId, periode, heuresTheoriques, mois.heures_pointees, JSON.stringify(mois.detail)]
   );
-  return { feuille: r.rows[0], mois, recalculee: true };
+  return { feuille: r.rows[0], mois, recalculee: true, source_theorique: sourceTheorique };
 }
 
 router.get('/feuilles-temps', READ, [
@@ -701,7 +789,7 @@ router.get('/feuilles-temps', READ, [
 
     const feuilles = [];
     for (const e of pop.rows) {
-      const { feuille, mois } = await upsertFeuille(e.id, periode, params, client);
+      const { feuille, mois, source_theorique: sourceTheorique } = await upsertFeuille(e.id, periode, params, client);
       feuilles.push({
         employee_id: e.id,
         nom: formatNom(e.last_name, e.first_name),
@@ -709,12 +797,18 @@ router.get('/feuilles-temps', READ, [
         team_id: e.team_id,
         periode,
         statut: feuille.statut,
-        heures_pointees: feuille.statut === 'brouillon' ? mois.heures_pointees : Number(feuille.heures_pointees),
+        // Théorique / pointé / écart (BO-04). Le théorique n'est pas inventé :
+        // il reste null quand aucune heure contractuelle n'est connue.
+        ...trioHeures(feuille, mois),
+        source_theorique: sourceTheorique,
         heures_validees: feuille.heures_validees == null ? null : Number(feuille.heures_validees),
-        // heures_theoriques n'est pas inventé : null tant qu'il n'est pas fourni.
-        heures_theoriques: feuille.heures_theoriques == null ? null : Number(feuille.heures_theoriques),
         jours_travailles: mois.jours_travailles,
         nb_anomalies: mois.nb_anomalies,
+        // Indicateur NOTE_RH §9 (QA-05) : null si aucune journée n'est soumise
+        // à l'attendu de pointages sur la période.
+        taux_pointages_complets_pct: mois.taux_pointages_complets_pct,
+        jours_pointage_complet: mois.jours_pointage_complet,
+        jours_pointage_attendu: mois.jours_pointage_attendu,
         valide_encadrant_le: feuille.valide_encadrant_le || null,
         valide_rh_le: feuille.valide_rh_le || null,
       });
@@ -737,7 +831,7 @@ router.get('/feuilles-temps/:employeeId', READ, [
     const employeeId = parseInt(req.params.employeeId, 10);
     const periode = req.query.periode;
     const params = await readBadgeuseParams();
-    const { feuille, mois } = await upsertFeuille(employeeId, periode, params, client);
+    const { feuille, mois, source_theorique: sourceTheorique } = await upsertFeuille(employeeId, periode, params, client);
 
     // Consultation INDIVIDUELLE → journalisée (BO-11).
     logConsultation(req, 'BADGEUSE_CONSULTATION', 'badgeuse_feuilles_temps', employeeId, {
@@ -748,12 +842,15 @@ router.get('/feuilles-temps/:employeeId', READ, [
       employee_id: employeeId,
       periode,
       statut: feuille.statut,
-      heures_pointees: feuille.statut === 'brouillon' ? mois.heures_pointees : Number(feuille.heures_pointees),
+      ...trioHeures(feuille, mois),
+      source_theorique: sourceTheorique,
       heures_validees: feuille.heures_validees == null ? null : Number(feuille.heures_validees),
-      heures_theoriques: feuille.heures_theoriques == null ? null : Number(feuille.heures_theoriques),
       heures_hms: mois.heures_hms,
       jours_travailles: mois.jours_travailles,
       nb_anomalies: mois.nb_anomalies,
+      taux_pointages_complets_pct: mois.taux_pointages_complets_pct,
+      jours_pointage_complet: mois.jours_pointage_complet,
+      jours_pointage_attendu: mois.jours_pointage_attendu,
       detail: feuille.statut === 'brouillon' ? mois.detail : feuille.detail,
       valide_encadrant_le: feuille.valide_encadrant_le || null,
       valide_rh_le: feuille.valide_rh_le || null,
@@ -906,8 +1003,18 @@ router.get('/anomalies', READ, [
     );
 
     const anomalies = [];
+    // Indicateur « taux de pointages complets » (NOTE_RH §9, QA-05), agrégé sur
+    // la fenêtre : dénominateur = journées SOUMISES à l'attendu de pointages
+    // (celles qui dépassent le seuil de pause), jamais toutes les journées.
+    let joursSoumis = 0;
+    let joursComplets = 0;
     for (const e of emps.rows) {
       const { jours } = await computeEmployeePeriod(e.id, debut, fin, params);
+      for (const j of jours) {
+        if (!engine.journeeSoumiseAttenduPointages(j, params)) continue;
+        joursSoumis += 1;
+        if (!engine.pointagesIncomplets(j, params)) joursComplets += 1;
+      }
       for (const a of engine.detectAnomalies(jours, params, { employee_id: e.id })) {
         anomalies.push({ ...a, nom: formatNom(e.last_name, e.first_name) });
       }
@@ -929,6 +1036,12 @@ router.get('/anomalies', READ, [
       du: req.query.du,
       au: req.query.au,
       total: anomalies.length,
+      // null (et non 0 %) quand aucune journée n'est concernée sur la fenêtre.
+      taux_pointages_complets_pct: joursSoumis === 0
+        ? null
+        : engine.round2((joursComplets / joursSoumis) * 100),
+      jours_pointage_complet: joursComplets,
+      jours_pointage_attendu: joursSoumis,
       anomalies: anomalies.sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))),
     });
   } catch (err) {
@@ -1157,12 +1270,21 @@ router.get('/devices', READ, async (req, res) => {
        LEFT JOIN badgeuse_sites s ON s.id = d.site_id
        ORDER BY d.code`
     );
+    const params = await readBadgeuseParams();
+    const silenceMinutes = Math.max(1, Number(params.supervision_silence_minutes) || 15);
+    const silenceMs = silenceMinutes * 60 * 1000;
     const now = Date.now();
     // api_key_hash n'est JAMAIS exposé (même son condensat ne sort pas).
-    res.json(r.rows.map((x) => ({
-      ...x,
-      online: !!x.dernier_heartbeat && (now - new Date(x.dernier_heartbeat).getTime()) < DEVICE_ONLINE_MS,
-    })));
+    res.json({
+      silence_minutes: silenceMinutes,
+      devices: r.rows.map((x) => ({
+        ...x,
+        online: !!x.dernier_heartbeat && (now - new Date(x.dernier_heartbeat).getTime()) < silenceMs,
+        // Alerte remontée par le poste dans son heartbeat (QA-02) — remise à
+        // plat ici pour que la supervision n'ait pas à fouiller le JSONB.
+        alerte: (x.heartbeat_info && x.heartbeat_info.alerte) || null,
+      })),
+    });
   } catch (err) {
     console.error('[BADGEUSE] Erreur liste postes :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -1309,15 +1431,31 @@ router.get('/devices/:id/verify-chain', READ, [
       : genesisHash(dev.rows[0].code);
 
     for (const p of r.rows) {
-      const canonical = canonicalPointage({
-        uuid: p.uuid,
-        device_code: dev.rows[0].code,
-        sequence_device: p.sequence_device,
-        uid_hmac: p.uid_hmac,
-        horodatage_utc: p.horodatage_utc,
-        sens: p.sens,
-        source: p.source,
-      });
+      // `uid_hmac` NULL en base ⇔ `-` dans la charge canonique : la symétrie
+      // avec le poste est portée par canonicalPointage (QA-01).
+      let canonical;
+      try {
+        canonical = canonicalPointage({
+          uuid: p.uuid,
+          device_code: dev.rows[0].code,
+          sequence_device: p.sequence_device,
+          uid_hmac: p.uid_hmac,
+          horodatage_utc: p.horodatage_utc,
+          sens: p.sens,
+          source: p.source,
+        });
+      } catch (e) {
+        // Charge canonique impossible à reconstituer (champ vide / séparateur
+        // en base) : c'est une RUPTURE, pas un 500 — la vérification continue.
+        ruptures.push({
+          sequence: Number(p.sequence_device),
+          attendu: null,
+          trouve: p.hash_courant,
+          raison: 'canonique_impossible',
+        });
+        attenduPrecedent = p.hash_courant;
+        continue;
+      }
       const recalcule = chainHash(attenduPrecedent, canonical);
       if (recalcule !== String(p.hash_courant || '').toLowerCase()) {
         ruptures.push({

@@ -32,7 +32,7 @@ Vernon », SPEC §9). La clé HMAC du site vit dans `settings` (`badgeuse.hmac_k
 | version_logicielle | VARCHAR(30) | heartbeat |
 | cible | VARCHAR(10) | `pi5` / `pi3` |
 | dernier_heartbeat | TIMESTAMPTZ | |
-| heartbeat_info | JSONB | dernier heartbeat brut (dérive, temp, file, disque…) |
+| heartbeat_info | JSONB | dernier heartbeat brut, **liste blanche** : `version`, `horloge_utc`, `derive_estimee_sec`, `taille_file`, `temperature_cpu`, `disque_libre_mo`, `cible`, `reader_mode`, `throttled`, **`alerte`** (≤ 300 car. ou `null` — CONTRAT_API_DEVICE §2.5 v1.1, QA-02) |
 | cree_le | TIMESTAMPTZ DEFAULT NOW() | |
 
 ### `badgeuse_badges`
@@ -112,6 +112,19 @@ UNIQUE(employee_id, periode)`.
 Validation RH : transaction + `rgpd_audit_log` (`BADGEUSE_FEUILLE_VALIDATION`), pattern
 `effectifs.js` ETP_ASP. Dévalidation : ADMIN uniquement, journalisée.
 
+**`heures_theoriques` — alimentation (ADR-0002 addendum §3, QA-03).** La colonne est écrite
+à chaque recalcul de feuille en **brouillon** (`upsertFeuille`) :
+`heures hebdomadaires contractuelles au 1ᵉʳ du mois × jours ouvrés du mois ÷ 5`, arrondi
+2 décimales. Les heures hebdo viennent d'`employee_contracts` (contrat dont la période
+effective couvre le 1ᵉʳ du mois — même lecture que le moteur ETP), **repli** documenté sur
+`employees.weekly_hours`. Aucune heure connue → `heures_theoriques = NULL` et
+`ecart_heures = NULL` : l'écran affiche « — », **jamais 0** (« jamais de valeur inventée »).
+« Jour ouvré » = lundi→vendredi, définition identique à `services/effectifs-engine.js` ; les
+jours fériés ne sont pas retranchés (l'addendum ne le prévoit pas). Une feuille **déjà
+validée** n'est jamais réécrite : son théorique reste figé à la validation, et son écart est
+calculé sur les chiffres qui font foi. Une feuille validée AVANT la livraison de QA-03 garde
+donc un théorique nul — état honnête, pas un défaut.
+
 ### `badgeuse_contenus` (playlist, BO-08)
 `id SERIAL, site_id INTEGER REFERENCES badgeuse_sites(id), type VARCHAR(20) CHECK IN
 ('message','image','planning','compte_a_rebours','meteo'), titre VARCHAR(200), corps TEXT,
@@ -130,6 +143,18 @@ Voir ADR-0002 (règles de gestion, défauts = recommandations RH) + conservation
 `badgeuse.retention_journal_acces_mois` (12) — valeurs NOTE_JURIDIQUE §3.7.
 Marqueur d'arbitrage : `badgeuse.regles_validees_le` (+ `badgeuse.regles_validees_par`).
 Secrets chiffrés : `badgeuse.hmac_key_site_<id>`.
+
+**Exploitation (BO-09 — ne sont PAS des règles de gestion RH, donc hors arbitrage, mais
+paramétrées pour qu'aucun seuil ne reste en dur, QA-11) :**
+`badgeuse.supervision_silence_minutes` (15) — au-delà, un poste est affiché « hors ligne »
+par `GET /devices` **et** l'alerte du job `checkBadgeuseDevices` part ; les deux consomment
+désormais la même valeur.
+`badgeuse.supervision_alerte_emails` (`''`) — destinataires de l'alerte, séparés par des
+virgules ; vide = repli sur les ADMIN actifs, pour que l'exigence « alerte e-mail » ne reste
+pas lettre morte faute de paramétrage.
+État interne (non arbitrable, non exposé par `PUT /parametres`) :
+`badgeuse.supervision_derniere_alerte` — JSON `{ code_poste: horodatage ISO }`, anti-spam
+d'un e-mail par poste toutes les 6 h.
 
 ## 3. API back-office `/api/badgeuse` (authentifiée)
 
@@ -153,6 +178,38 @@ individuelle) est journalisée dans `rgpd_audit_log` (`BADGEUSE_CONSULTATION`) �
 | GET `/devices`, POST `/devices`, PATCH `/devices/:id`, POST `/devices/:id/regenerate-key`, GET `/devices/:id/verify-chain` | READ (liste) / ADMIN_ONLY (écritures) | BO-09 + CONTRAT_INTEGRITE §4 |
 | GET `/mes-pointages` | tout rôle authentifié | droit d'accès art. 15 (lien `employees.user_id`) |
 | GET `/salaries/:employeeId/releve?periode=` | READ (journalisé) | récapitulatif remis au salarié (sortie, contestation) |
+
+### 3.1 Formes de réponse amendées (boucle QA n°1)
+
+**`GET /feuilles-temps?periode=` et `GET /feuilles-temps/:employeeId?periode=`** portent
+désormais le trio complet de BO-04 et l'indicateur NOTE_RH §9 :
+
+| Champ | Type | Sens |
+|---|---|---|
+| `heures_theoriques` | number \| **null** | cf. §1 `badgeuse_feuilles_temps` — `null` si aucune heure contractuelle connue |
+| `heures_pointees` | number | chiffre validé s'il existe, recalcul sinon |
+| `ecart_heures` | number \| **null** | `pointées − théoriques`, **`null`** dès que le théorique l'est (jamais 0) |
+| `source_theorique` | `'contrat'` \| `'fiche'` \| **null** | provenance de l'heure hebdo retenue |
+| `taux_pointages_complets_pct` | number \| **null** | % de journées **soumises** à l'attendu de pointages qui l'atteignent ; `null` si aucune journée n'est soumise |
+| `jours_pointage_attendu` / `jours_pointage_complet` | number | dénominateur / numérateur du taux ci-dessus |
+
+**`GET /anomalies?du=&au=`** : ajoute `taux_pointages_complets_pct`, `jours_pointage_attendu`
+et `jours_pointage_complet` (même définition, agrégés sur la fenêtre) ; le type d'anomalie
+**`pointages_incomplets`** (sévérité `info`) apparaît pour toute journée dépassant le seuil de
+pause avec moins de `badgeuse.pointages_par_jour` événements (ADR-0002 addendum §4, QA-05).
+
+**`POST /corrections`** (201) : ajoute `avertissement` (`'hors_delai_signalement'` \| `null`),
+`jours_ouvres_ecoules` et `regularisation_delai_jours`. L'avertissement est **informatif et
+non bloquant** — la correction est enregistrée dans tous les cas (NOTE_RH §5.1, QA-05).
+
+**`GET /devices`** : la réponse n'est plus un tableau nu mais l'enveloppe
+`{ silence_minutes, devices: [...] }` (QA-11). Chaque poste porte `online` (calculé sur
+`silence_minutes`, plus sur 5 min en dur) et `alerte` (remontée à plat depuis
+`heartbeat_info.alerte`, QA-02). `api_key_hash` n'est toujours **jamais** exposé.
+
+**`GET /devices/:id/verify-chain`** : une charge canonique impossible à reconstituer (champ
+vide ou contenant `|` en base — cf. QA-08) est rendue comme une **rupture**
+(`raison: 'canonique_impossible'`), jamais comme une erreur 500.
 
 ## 4. Matrice de couverture exigences → implémentation
 

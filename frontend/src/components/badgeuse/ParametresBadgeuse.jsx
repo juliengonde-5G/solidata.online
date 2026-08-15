@@ -6,10 +6,14 @@ import { apiErr, fmtDateTimeParis } from './badgeuseShared';
 
 // Grille de règles de gestion NOTE_RH §3 — défauts = recommandations RH
 // (ADR-0002). AUCUNE valeur n'est en dur ici : tout vient de GET /parametres.
-function splitPlage(v) {
-  const [debut, fin] = String(v || '05:00-21:00').split('-');
-  return { debut: (debut || '05:00').trim(), fin: (fin || '21:00').trim() };
-}
+//
+// CONTRAT (routes/badgeuse.js) : la réponse est
+// `{ parametres, defauts, regles_validees:{validees,le,par}, motifs_correction }`
+// et les bornes de plage sont DEUX clés distinctes (`plage_acceptation_debut`
+// et `plage_acceptation_fin`). L'écran lisait la racine de la réponse et
+// envoyait une clé `plage_acceptation` agrégée que le PUT filtrait : les
+// valeurs enregistrées n'étaient jamais relues, et la plage n'était jamais
+// écrite. C'est le même défaut que QA-05 (« paramètre affiché sans effet »).
 
 const RETENTIONS = [
   { key: 'retention_pointages_mois', label: 'Pointages bruts', unite: 'mois' },
@@ -19,8 +23,13 @@ const RETENTIONS = [
   { key: 'retention_journal_acces_mois', label: "Journal des accès RH", unite: 'mois' },
 ];
 
-function fromApi(d = {}) {
-  const plage = splitPlage(d.plage_acceptation);
+/**
+ * Réponse de GET /parametres → état du formulaire. On lit `data.parametres`
+ * (et non la racine), sinon TOUS les champs retombaient sur leurs valeurs de
+ * repli et l'écran n'affichait jamais la grille réellement enregistrée.
+ */
+function fromApi(data = {}) {
+  const d = data.parametres || data || {};
   return {
     pointages_par_jour: d.pointages_par_jour ?? 4,
     arrondi_minutes: d.arrondi_minutes ?? 5,
@@ -30,12 +39,14 @@ function fromApi(d = {}) {
     pause_deduite_minutes: d.pause_deduite_minutes ?? 45,
     pause_deduite_seuil_heures: d.pause_deduite_seuil_heures ?? 6,
     journee_max_heures: d.journee_max_heures ?? 10,
-    plage_debut: plage.debut,
-    plage_fin: plage.fin,
+    plage_debut: d.plage_acceptation_debut || '05:00',
+    plage_fin: d.plage_acceptation_fin || '21:00',
     affichage_cumul_hebdo: !!d.affichage_cumul_hebdo,
     overlay_duree_sec: d.overlay_duree_sec ?? 5,
     anti_rebond_sec: d.anti_rebond_sec ?? 8,
     regularisation_delai_jours: d.regularisation_delai_jours ?? 5,
+    supervision_silence_minutes: d.supervision_silence_minutes ?? 15,
+    supervision_alerte_emails: d.supervision_alerte_emails || '',
   };
 }
 
@@ -63,6 +74,9 @@ export default function ParametresBadgeuse({ canWrite }) {
   const save = async () => {
     setSaving(true); setSaveError(null);
     try {
+      // Les clés doivent correspondre EXACTEMENT au dictionnaire
+      // BADGEUSE_SETTING_DEFAULTS : le PUT ignore silencieusement toute clé
+      // inconnue (garde anti-« règle fantôme »).
       const payload = {
         pointages_par_jour: parseInt(form.pointages_par_jour, 10),
         arrondi_minutes: parseInt(form.arrondi_minutes, 10),
@@ -72,15 +86,18 @@ export default function ParametresBadgeuse({ canWrite }) {
         pause_deduite_minutes: parseInt(form.pause_deduite_minutes, 10),
         pause_deduite_seuil_heures: parseFloat(form.pause_deduite_seuil_heures),
         journee_max_heures: parseFloat(form.journee_max_heures),
-        plage_acceptation: `${form.plage_debut}-${form.plage_fin}`,
+        plage_acceptation_debut: form.plage_debut,
+        plage_acceptation_fin: form.plage_fin,
         affichage_cumul_hebdo: form.affichage_cumul_hebdo,
         overlay_duree_sec: parseInt(form.overlay_duree_sec, 10),
         anti_rebond_sec: parseInt(form.anti_rebond_sec, 10),
         regularisation_delai_jours: parseInt(form.regularisation_delai_jours, 10),
-        marquer_arbitrees: true,
+        supervision_silence_minutes: parseInt(form.supervision_silence_minutes, 10),
+        supervision_alerte_emails: String(form.supervision_alerte_emails || '').trim(),
       };
       const res = await api.put('/badgeuse/parametres', payload);
-      setRaw(res.data || { ...raw, ...payload, regles_validees_le: new Date().toISOString() });
+      setRaw(res.data || raw);
+      if (res.data) setForm(fromApi(res.data));
       toast.success('Paramètres enregistrés et marqués comme arbitrés.');
     } catch (err) { setSaveError(apiErr(err, 'Enregistrement impossible.')); }
     finally { setSaving(false); }
@@ -90,7 +107,11 @@ export default function ParametresBadgeuse({ canWrite }) {
   if (error) return <ErrorState variant="card" title="Paramètres indisponibles" message={error} onRetry={load} />;
   if (!form) return null;
 
-  const arbitrees = !!raw?.regles_validees_le;
+  // Le marqueur d'arbitrage vit dans `regles_validees:{validees,le,par}` — lu
+  // à plat, il était toujours indéfini et le bandeau « non arbitré » restait
+  // affiché même après validation par la Direction (ADR-0002 §3).
+  const regles = raw?.regles_validees || {};
+  const arbitrees = !!(regles.validees || regles.le);
   const disabled = !canWrite || saving;
 
   return (
@@ -98,7 +119,7 @@ export default function ParametresBadgeuse({ canWrite }) {
       {arbitrees ? (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm px-3 py-2 flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 flex-shrink-0" />
-          <span>Règles arbitrées par la Direction le {fmtDateTimeParis(raw.regles_validees_le)}{raw.regles_validees_par ? ` (${raw.regles_validees_par})` : ''}.</span>
+          <span>Règles arbitrées par la Direction le {fmtDateTimeParis(regles.le)}{regles.par ? ` (utilisateur n°${regles.par})` : ''}.</span>
         </div>
       ) : (
         <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm px-3 py-2 flex items-start gap-2">
@@ -186,7 +207,38 @@ export default function ParametresBadgeuse({ canWrite }) {
 
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Délai de signalement d'une régularisation (jours ouvrés)</label>
-            <input type="number" min={1} step={1} value={form.regularisation_delai_jours} onChange={(e) => set('regularisation_delai_jours', e.target.value)} disabled={disabled} className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
+            <input type="number" min={0} step={1} value={form.regularisation_delai_jours} onChange={(e) => set('regularisation_delai_jours', e.target.value)} disabled={disabled} className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
+            <p className="text-[11px] text-slate-400 mt-1">
+              Au-delà, une correction saisie est signalée « hors délai » à son auteur — sans jamais être refusée (NOTE_RH §5.1). 0 désactive le signalement.
+            </p>
+          </div>
+        </div>
+
+        {/* Exploitation (BO-09) — réglages techniques, PAS des règles de
+            gestion RH : ils ne sont pas soumis à l'arbitrage de la Direction,
+            mais ils ne doivent pas non plus rester codés en dur (QA-11). */}
+        <div className="mt-5 pt-4 border-t border-slate-100">
+          <h4 className="text-sm font-semibold text-slate-700 mb-3">Supervision des postes (exploitation)</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Seuil de silence d'un poste (min)</label>
+              <input type="number" min={1} step={1} value={form.supervision_silence_minutes}
+                onChange={(e) => set('supervision_silence_minutes', e.target.value)} disabled={disabled}
+                className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Au-delà, le poste est affiché « hors ligne » et l'alerte e-mail part (BO-09). Recommandation : 15 min.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Destinataires de l'alerte (e-mails séparés par des virgules)</label>
+              <input type="text" value={form.supervision_alerte_emails}
+                onChange={(e) => set('supervision_alerte_emails', e.target.value)} disabled={disabled}
+                placeholder="rh@exemple.fr, direction@exemple.fr"
+                className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Vide : l'alerte part aux administrateurs de SOLIDATA. Au plus un e-mail par poste toutes les 6 heures.
+              </p>
+            </div>
           </div>
         </div>
 

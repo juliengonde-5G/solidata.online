@@ -19,6 +19,17 @@ function normalizeDetail(detail) {
   return [];
 }
 
+/**
+ * Couleur de l'écart théorique/pointé. Un écart NULL (théorique inconnu) est
+ * neutre : ce n'est ni un excédent ni un déficit, c'est une inconnue.
+ */
+function ecartClass(ecart) {
+  if (ecart == null) return 'text-slate-400';
+  if (ecart > 0.01) return 'text-emerald-700';
+  if (ecart < -0.01) return 'text-amber-700';
+  return 'text-slate-600';
+}
+
 function DetailJour({ jour }) {
   const evenements = Array.isArray(jour.evenements) ? jour.evenements : (Array.isArray(jour.pointages) ? jour.pointages : []);
   const anomalies = Array.isArray(jour.anomalies) ? jour.anomalies : [];
@@ -89,6 +100,15 @@ function FeuilleRow({ row, periode, canValidateEncadrant, canValidateRh, onChang
         </td>
         <td className="py-2 px-2 text-right text-slate-600">{row.heures_theoriques != null ? fmtHeure(row.heures_theoriques) : '—'}</td>
         <td className="py-2 px-2 text-right font-medium text-slate-800">{fmtHeure(row.heures_pointees)}</td>
+        {/* Écart théorique/pointé (BO-04). Théorique inconnu → « — », JAMAIS 0 :
+            un écart nul et un écart inconnu ne se confondent pas. */}
+        <td className={`py-2 px-2 text-right font-medium ${ecartClass(row.ecart_heures)}`}>
+          {row.ecart_heures == null ? (
+            <span className="text-slate-300" title="Aucune heure contractuelle connue pour ce salarié sur la période">—</span>
+          ) : (
+            <>{row.ecart_heures > 0 ? '+' : ''}{fmtHeure(row.ecart_heures)}</>
+          )}
+        </td>
         <td className="py-2 px-2 text-right text-slate-600">{row.heures_validees != null ? fmtHeure(row.heures_validees) : '—'}</td>
         <td className="py-2 px-2 text-center"><StatutFeuilleChip statut={row.statut} /></td>
         <td className="py-2 px-2 text-right whitespace-nowrap">
@@ -108,7 +128,7 @@ function FeuilleRow({ row, periode, canValidateEncadrant, canValidateRh, onChang
       </tr>
       {open && (
         <tr className="border-b border-slate-100 bg-slate-50/60">
-          <td colSpan={6} className="px-4 py-2">
+          <td colSpan={7} className="px-4 py-2">
             {loadingDetail ? <LoadingSpinner size="sm" /> : jours.length === 0 ? (
               <p className="text-xs text-slate-400 py-2">Aucun détail journalier disponible.</p>
             ) : (
@@ -233,6 +253,7 @@ export default function FeuillesTemps({ canValidateEncadrant, canValidateRh, can
                   <th className="text-left py-2 px-2">Salarié</th>
                   <th className="text-right py-2 px-2">Théoriques</th>
                   <th className="text-right py-2 px-2">Pointées</th>
+                  <th className="text-right py-2 px-2">Écart</th>
                   <th className="text-right py-2 px-2">Validées</th>
                   <th className="text-center py-2 px-2">Statut</th>
                   <th className="text-right py-2 px-2">Circuit de validation</th>
@@ -250,6 +271,11 @@ export default function FeuillesTemps({ canValidateEncadrant, canValidateRh, can
         )}
         <p className="text-[11px] text-slate-400 mt-2">
           Statuts : {Object.entries(STATUT_FEUILLE_LABELS).map(([k, l]) => l).join(' → ')}. Une feuille dévalidée relève d'un ADMIN (journalisé).
+        </p>
+        <p className="text-[11px] text-slate-400 mt-1">
+          Heures théoriques = heures hebdomadaires contractuelles au 1<sup>er</sup> du mois × jours ouvrés du mois ÷ 5.
+          Un « — » signifie qu'aucune heure contractuelle n'est connue pour ce salarié sur la période : l'écart n'est alors
+          pas calculable et n'est jamais affiché comme nul.
         </p>
       </div>
     </div>

@@ -23,9 +23,12 @@
  *     au-delà c'est une séquence impaire. Sur `entree, entree`, on conserve la
  *     PREMIÈRE entrée ouverte : c'est l'heure d'arrivée réelle, donc la lecture
  *     à l'avantage du salarié — l'anomalie est signalée pour régularisation.
- *  3. ARRONDI « à l'avantage du salarié » (params.arrondi_sens) : entrée
- *     arrondie vers le BAS, sortie vers le HAUT, au pas params.arrondi_minutes
- *     (0 = pas d'arrondi). Autres sens supportés : 'reel' (aucun), 'proche'.
+ *  3. ARRONDI « à l'avantage du salarié » (params.arrondi_sens), au pas
+ *     params.arrondi_minutes (0 = pas d'arrondi) : l'ENTRÉE recule au pas
+ *     INFÉRIEUR ; la SORTIE est comptée AU RÉEL (ADR-0002 addendum §2, QA-10 —
+ *     lettre exacte de NOTE_RH §3 « sortie arrondie au réel »). Autres sens
+ *     supportés : 'reel' (aucun arrondi), 'proche' (au plus proche des deux
+ *     bornes — mode alternatif paramétrable, hors grille arbitrée).
  *  4. ENTRÉE EN AVANCE sur l'heure planifiée → ramenée à l'heure planifiée
  *     (le temps d'attente avant la prise de poste n'est pas du travail effectif,
  *     NOTE_RH §3), sauf si params.badge_avant_heure_compte est vrai.
@@ -33,10 +36,19 @@
  *     l'heure planifiée) ; au-delà → décompte réel.
  *  5. PAUSE : si la journée dépasse params.pause_deduite_seuil_heures SANS
  *     pointage intermédiaire (une seule paire), params.pause_deduite_minutes
- *     sont déduites. Avec 4 pointages, la pause est déjà hors comptage → aucune
- *     déduction (NOTE_RH §3 : « évite la déduction forfaitaire contestable »).
+ *     sont déduites — mais la déduction est PLAFONNÉE au dépassement du seuil
+ *     (ADR-0002 addendum §1, QA-06) : `min(pause, max(0, travaillé − seuil))`.
+ *     La fonction de paie est ainsi MONOTONE — 6 h 01 ne peut plus être payée
+ *     moins que 6 h 00. Avec 4 pointages, la pause est déjà hors comptage →
+ *     aucune déduction (NOTE_RH §3 : « évite la déduction forfaitaire
+ *     contestable »).
  *  6. ALERTE journée > params.journee_max_heures (anomalie, jamais un blocage :
  *     aucune heure n'est perdue, c'est un signalement à l'encadrant).
+ *  7. POINTAGES INCOMPLETS (ADR-0002 addendum §4, QA-05) : une journée qui
+ *     dépasse le seuil de pause est censée comporter params.pointages_par_jour
+ *     événements (NOTE_RH §3 : « 4 — permet de justifier la pause »). En
+ *     dessous, l'anomalie `pointages_incomplets` est levée et la journée sort
+ *     du taux de pointages complets (indicateur NOTE_RH §9).
  *
  * ══ FUSEAU ══
  * Les horodatages sont des instants UTC (colonne TIMESTAMPTZ) ; les journées
@@ -126,6 +138,81 @@ function minutesToHms(minutes) {
 /** Minutes → heures décimales arrondies 2 déc. */
 function minutesToDecimal(minutes) {
   return round2((Number(minutes) || 0) / 60);
+}
+
+// ── Jours ouvrés (calendrier) ──────────────────────────────────────────────
+// « Jour ouvré » = lundi→vendredi, MÊME DÉFINITION que services/effectifs-engine.js
+// (« Jours ouvrés lun→ven »). Ce n'est pas une règle de gestion arbitrable mais
+// un fait calendaire : la semaine de travail de référence compte 5 jours. Les
+// jours fériés ne sont PAS retranchés — l'ADR-0002 addendum §3 dit « jours
+// ouvrés du mois ÷ 5 » sans autre précision, et retrancher les fériés serait
+// inventer une règle que la Direction n'a pas arbitrée.
+const JOURS_OUVRES_SEMAINE = 5;
+
+/** Un jour civil 'YYYY-MM-DD' est-il un jour ouvré (lun→ven) ? */
+function estJourOuvre(dateISO) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateISO || ''));
+  if (!m) return false;
+  const jour = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+  return jour >= 1 && jour <= 5;
+}
+
+/** Nombre de jours ouvrés d'une période 'YYYY-MM' ; null si période invalide. */
+function joursOuvresDuMois(periode) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(periode || ''));
+  if (!m) return null;
+  const annee = +m[1];
+  const mois = +m[2];
+  if (mois < 1 || mois > 12) return null;
+  const nbJours = new Date(Date.UTC(annee, mois, 0)).getUTCDate();
+  let total = 0;
+  for (let d = 1; d <= nbJours; d += 1) {
+    const jour = new Date(Date.UTC(annee, mois - 1, d)).getUTCDay();
+    if (jour >= 1 && jour <= 5) total += 1;
+  }
+  return total;
+}
+
+/**
+ * Nombre de jours OUVRÉS écoulés entre deux jours civils, borne de départ
+ * EXCLUE et borne d'arrivée INCLUSE : `joursOuvresEcoules('2026-08-17',
+ * '2026-08-18')` = 1. Rend null si une borne est illisible, 0 si l'arrivée
+ * précède le départ (aucun délai écoulé — jamais un nombre négatif).
+ */
+function joursOuvresEcoules(debutISO, finISO) {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(debutISO || ''));
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(finISO || ''));
+  if (!a || !b) return null;
+  let curseur = Date.UTC(+a[1], +a[2] - 1, +a[3]);
+  const fin = Date.UTC(+b[1], +b[2] - 1, +b[3]);
+  if (fin <= curseur) return 0;
+  let total = 0;
+  const JOUR_MS = 24 * 3600 * 1000;
+  while (curseur < fin) {
+    curseur += JOUR_MS;
+    const jour = new Date(curseur).getUTCDay();
+    if (jour >= 1 && jour <= 5) total += 1;
+  }
+  return total;
+}
+
+/**
+ * Heures THÉORIQUES d'un mois (BO-04, ADR-0002 addendum §3, QA-03) :
+ *   heures hebdomadaires contractuelles × jours ouvrés du mois ÷ 5.
+ * Rend `null` si aucune heure hebdomadaire n'est connue ou si la période est
+ * illisible — « jamais de valeur inventée » : une feuille sans contrat connu
+ * affiche « — », pas 0.
+ *
+ * @param {number|string|null} heuresHebdo heures hebdo contractuelles
+ * @param {string} periode 'YYYY-MM'
+ * @returns {number|null} heures théoriques arrondies 2 décimales
+ */
+function heuresTheoriquesMois(heuresHebdo, periode) {
+  const h = Number(heuresHebdo);
+  if (!Number.isFinite(h) || h <= 0) return null;
+  const ouvres = joursOuvresDuMois(periode);
+  if (ouvres == null) return null;
+  return round2((h * ouvres) / JOURS_OUVRES_SEMAINE);
 }
 
 // ── 1. Événements effectifs (pointages bruts + corrections) ────────────────
@@ -259,16 +346,20 @@ function pairEvents(events, options = {}) {
 
 /**
  * Arrondit un instant au pas params.arrondi_minutes selon params.arrondi_sens.
- * 'avantage_salarie' : entrée vers le bas, sortie vers le haut.
- * 'proche' : au plus proche. 'reel'/'aucun' (ou pas = 0) : inchangé.
+ * 'avantage_salarie' : l'ENTRÉE recule au pas inférieur, la SORTIE est comptée
+ *   AU RÉEL (ADR-0002 addendum §2, QA-10). L'arrondi ne peut donc jamais
+ *   retirer une minute au salarié, et il ne lui en ajoute plus non plus en fin
+ *   de journée : la sortie affichée est la sortie badgée.
+ * 'proche' : au plus proche (les deux bornes). 'reel'/'aucun' (ou pas = 0) :
+ *   inchangé.
  */
 function arrondirInstant(ms, sens, params) {
   const pas = Math.max(0, Number(params.arrondi_minutes) || 0) * MS_MIN;
   const mode = String(params.arrondi_sens || 'reel');
   if (pas === 0 || mode === 'reel' || mode === 'aucun') return ms;
   if (mode === 'proche') return Math.round(ms / pas) * pas;
-  // avantage_salarie
-  return sens === 'entree' ? Math.floor(ms / pas) * pas : Math.ceil(ms / pas) * pas;
+  // avantage_salarie : entrée au pas inférieur, sortie intouchée (au réel).
+  return sens === 'entree' ? Math.floor(ms / pas) * pas : ms;
 }
 
 /** Ajuste une heure d'entrée (règles 3 et 4 en tête de fichier). */
@@ -283,7 +374,11 @@ function ajusterEntree(ms, planifieeMs, params) {
   return arrondirInstant(ms, 'entree', params);
 }
 
-/** Ajuste une heure de sortie : au réel, arrondie au pas à l'avantage. */
+/**
+ * Ajuste une heure de sortie. En grille arbitrée ('avantage_salarie') la sortie
+ * est comptée AU RÉEL : `arrondirInstant` la rend inchangée (QA-10). Le passage
+ * par l'helper est conservé pour que le mode alternatif 'proche' reste actif.
+ */
 function ajusterSortie(ms, params) {
   return arrondirInstant(ms, 'sortie', params);
 }
@@ -349,11 +444,16 @@ function computeDay(events, params = {}, options = {}) {
 
   // Règle 5 — pause déduite si la journée dépasse le seuil SANS pointage
   // intermédiaire (une seule paire : la pause n'a pas été badgée).
+  // MONOTONICITÉ (ADR-0002 addendum §1, QA-06) : la déduction est plafonnée au
+  // DÉPASSEMENT du seuil, elle ne fait donc jamais retomber la journée sous le
+  // seuil. 6 h 00 → 6 h 00 ; 6 h 01 → 6 h 00 ; 6 h 45 → 6 h 00 ; 7 h 00 →
+  // 6 h 15. Travailler une minute de plus ne peut plus rapporter 44 min de
+  // moins — la falaise de la lettre de NOTE_RH §3 est supprimée.
   const seuilPauseMin = Math.max(0, Number(params.pause_deduite_seuil_heures) || 0) * 60;
   const pauseMin = Math.max(0, Number(params.pause_deduite_minutes) || 0);
   let pauseDeduite = 0;
   if (pauseMin > 0 && seuilPauseMin > 0 && pairesCalculees.length === 1 && minutesBrutes > seuilPauseMin) {
-    pauseDeduite = Math.min(pauseMin, minutesBrutes);
+    pauseDeduite = Math.min(pauseMin, Math.max(0, minutesBrutes - seuilPauseMin));
     reglesAppliquees.push('pause_deduite');
   }
 
@@ -445,6 +545,14 @@ function computeMonth(days, params = {}, options = {}) {
   const heuresTheoriques = options.heures_theoriques == null ? null : round2(options.heures_theoriques);
   const heuresPointees = minutesToDecimal(minutes);
 
+  // Taux de pointages complets (indicateur NOTE_RH §9, ADR-0002 addendum §4).
+  // DÉNOMINATEUR : les seules journées SOUMISES à l'attendu (celles qui
+  // dépassent le seuil de pause) — une demi-journée n'a pas à porter 4
+  // pointages. Aucune journée concernée (ou paramètres absents) → `null`,
+  // jamais 0 % : « jamais de valeur inventée ».
+  const joursSoumis = jours.filter((d) => journeeSoumiseAttenduPointages(d, params));
+  const joursComplets = joursSoumis.filter((d) => !pointagesIncomplets(d, params));
+
   return {
     periode: options.periode || (jours[0] ? String(jours[0].date).slice(0, 7) : null),
     jours_travailles: jours.filter((d) => (Number(d.minutes) || 0) > 0).length,
@@ -455,6 +563,11 @@ function computeMonth(days, params = {}, options = {}) {
     ecart_heures: heuresTheoriques == null ? null : round2(heuresPointees - heuresTheoriques),
     pause_deduite_minutes: round2(jours.reduce((acc, d) => acc + (Number(d.pause_deduite_minutes) || 0), 0)),
     nb_anomalies: anomalies.length,
+    jours_pointage_attendu: joursSoumis.length,
+    jours_pointage_complet: joursComplets.length,
+    taux_pointages_complets_pct: joursSoumis.length === 0
+      ? null
+      : round2((joursComplets.length / joursSoumis.length) * 100),
     detail: jours,
   };
 }
@@ -462,9 +575,38 @@ function computeMonth(days, params = {}, options = {}) {
 // ── 6. Anomalies (BO-05) ───────────────────────────────────────────────────
 
 /**
+ * Une journée est-elle CONCERNÉE par l'attendu de pointages (règle 7) ?
+ * Seules les journées qui dépassent le seuil de pause le sont : exiger 4
+ * pointages d'une matinée de 4 h serait une règle inventée. Rend `false` si
+ * l'un des deux paramètres n'est pas fourni (aucune règle → aucun signalement).
+ */
+function journeeSoumiseAttenduPointages(day, params = {}) {
+  const attendus = Math.max(0, Number(params.pointages_par_jour) || 0);
+  const seuilMin = Math.max(0, Number(params.pause_deduite_seuil_heures) || 0) * 60;
+  if (attendus <= 0 || seuilMin <= 0 || !day) return false;
+  return (Number(day.minutes_brutes) || 0) > seuilMin;
+}
+
+/**
+ * La journée compte-t-elle MOINS d'événements que params.pointages_par_jour
+ * alors qu'elle y est soumise ? (ADR-0002 addendum §4, QA-05.)
+ */
+function pointagesIncomplets(day, params = {}) {
+  if (!journeeSoumiseAttenduPointages(day, params)) return false;
+  const attendus = Math.max(0, Number(params.pointages_par_jour) || 0);
+  return (Number(day.nb_pointages) || 0) < attendus;
+}
+
+/**
  * Aplatit les anomalies de journées calculées et y ajoute les anomalies
  * transverses fournies par l'appelant (orphelins, pointages hors plage — qui
  * sont détectés à l'INGESTION côté serveur, pas au calcul).
+ *
+ * Y ajoute `pointages_incomplets` (règle 7) : signalement de SÉVÉRITÉ `info`
+ * — la journée est payée (la déduction forfaitaire de pause s'applique déjà et
+ * est tracée dans `regles_appliquees`), mais la pause n'a pas été badgée, ce
+ * que l'encadrant doit pouvoir régulariser. Une sévérité `alerte` noierait la
+ * page d'anomalies, le cas étant le plus fréquent.
  *
  * @param {Array} days sorties de computeDay
  * @param {object} params grille badgeuse.*
@@ -473,6 +615,16 @@ function computeMonth(days, params = {}, options = {}) {
 function detectAnomalies(days, params = {}, options = {}) {
   const out = [];
   for (const d of days || []) {
+    if (pointagesIncomplets(d, params)) {
+      out.push({
+        employee_id: options.employee_id == null ? null : options.employee_id,
+        date: d.date,
+        type: 'pointages_incomplets',
+        severite: 'info',
+        detail: `${Number(d.nb_pointages) || 0} pointage(s) sur ${Math.max(0, Number(params.pointages_par_jour) || 0)} attendus`,
+        pointage_id: null,
+      });
+    }
     for (const a of d.anomalies || []) {
       out.push({
         employee_id: options.employee_id == null ? null : options.employee_id,
@@ -527,6 +679,12 @@ module.exports = {
   round2,
   minutesToHms,
   minutesToDecimal,
+  // jours ouvrés & heures théoriques (BO-04)
+  JOURS_OUVRES_SEMAINE,
+  estJourOuvre,
+  joursOuvresDuMois,
+  joursOuvresEcoules,
+  heuresTheoriquesMois,
   // moteur
   buildEffectiveEvents,
   pairEvents,
@@ -537,5 +695,7 @@ module.exports = {
   computeDays,
   computeMonth,
   detectAnomalies,
+  journeeSoumiseAttenduPointages,
+  pointagesIncomplets,
   estHorsPlage,
 };

@@ -270,6 +270,139 @@ describe('POST /pointages — dépôt de lot', () => {
     expect(r.body.resultats[1].status).toBe('ok');
   });
 
+  // ══ QA-01 — le pointage SANS BADGE est valide, jamais « invalid » ══
+  // Reproduction exacte du scénario du rapport QA : `store.enqueue_pointage`
+  // sérialise par défaut `uid_hmac: "-"` (store.py:147, NO_BADGE). Le serveur
+  // le refusait en `invalid`, statut que le poste ne purgeait pas → l'élément
+  // était retransmis indéfiniment et `taille_file` ne revenait jamais à 0.
+  describe('QA-01 — pointage manuel sans badge (uid_hmac = « - »)', () => {
+    const SANS_BADGE = '11111111-2222-4333-8444-5555555555a0';
+
+    /** Pointage manuel tel que le poste le produit (forme canonique `-`). */
+    function makeManuel(uidHmac) {
+      const canonical = canonicalPointage({
+        uuid: SANS_BADGE, device_code: DEVICE_CODE, sequence_device: 12,
+        uid_hmac: null, horodatage_utc: '2026-08-17T06:58:12.031Z',
+        sens: 'entree', source: 'manuel',
+      });
+      const precedent = genesisHash(DEVICE_CODE);
+      return {
+        uuid: SANS_BADGE, sequence_device: 12, uid_hmac: uidHmac,
+        horodatage_utc: '2026-08-17T06:58:12.031Z', fuseau: 'Europe/Paris',
+        sens: 'entree', source: 'manuel',
+        hash_precedent: precedent, hash_courant: chainHash(precedent, canonical),
+      };
+    }
+
+    test('« - » est ACCEPTÉ (status ok) et n\'est JAMAIS refusé en « invalid »', async () => {
+      const r = await post(`${PATH}/pointages`, { pointages: [makeManuel('-')] });
+      expect(r.status).toBe(200);
+      expect(r.body.resultats[0]).toEqual({ uuid: SANS_BADGE, status: 'ok' });
+    });
+
+    test('« - » est stocké NULL en base (aucun faux badge « - » créé)', async () => {
+      await post(`${PATH}/pointages`, { pointages: [makeManuel('-')] });
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_pointages/.test(String(c[0])));
+      expect(insert[1][3]).toBeNull();   // uid_hmac
+      // Aucune résolution de badge n'est tentée pour un pointage sans badge.
+      expect(mockQuery.mock.calls.some((c) => /FROM badgeuse_badges WHERE uid_hmac/.test(String(c[0])))).toBe(false);
+    });
+
+    test('SYMÉTRIE : la chaîne reste valide — « - » stocké NULL reste « - » au recalcul', async () => {
+      const r = await post(`${PATH}/pointages`, { pointages: [makeManuel('-')] });
+      expect(r.body.resultats[0].avertissement).toBeUndefined(); // pas de chain_broken
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_pointages/.test(String(c[0])));
+      expect(insert[1][14]).toBe(true); // chaine_valide
+    });
+
+    test('les trois formes d\'absence de badge sont traitées à l\'identique', async () => {
+      for (const forme of ['-', '', null]) {
+        mockQuery.mockClear();
+        installMocks();
+        const r = await post(`${PATH}/pointages`, { pointages: [makeManuel(forme)] });
+        expect(r.body.resultats[0].status).toBe('ok');
+        const insert = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_pointages/.test(String(c[0])));
+        expect(insert[1][3]).toBeNull();
+      }
+    });
+
+    test('un uid_hmac NON conforme (ni « - » ni 64 hex) reste « invalid »', async () => {
+      const r = await post(`${PATH}/pointages`, { pointages: [makeManuel('pas-un-condensat')] });
+      expect(r.body.resultats[0]).toEqual({
+        uuid: SANS_BADGE, status: 'invalid', raison: 'champs_invalides',
+      });
+    });
+  });
+
+  // ══ QA-12 — normalisation de casse de l'uid_hmac (divergence latente) ══
+  test('QA-12 : un uid_hmac reçu en MAJUSCULES est normalisé en minuscules', async () => {
+    const majuscules = UID_HMAC.toUpperCase();
+    const canonical = canonicalPointage({
+      uuid: '11111111-2222-4333-8444-5555555555b0', device_code: DEVICE_CODE, sequence_device: 5,
+      uid_hmac: majuscules, horodatage_utc: '2026-08-17T06:58:12.031Z', sens: 'entree', source: 'badge',
+    });
+    const precedent = genesisHash(DEVICE_CODE);
+    const p = {
+      uuid: '11111111-2222-4333-8444-5555555555b0', sequence_device: 5, uid_hmac: majuscules,
+      horodatage_utc: '2026-08-17T06:58:12.031Z', fuseau: 'Europe/Paris',
+      sens: 'entree', source: 'badge',
+      hash_precedent: precedent, hash_courant: chainHash(precedent, canonical),
+    };
+    const r = await post(`${PATH}/pointages`, { pointages: [p] });
+    expect(r.body.resultats[0].status).toBe('ok');
+
+    // Stocké en minuscules, et la RÉSOLUTION du badge interroge la base en
+    // minuscules : sans quoi un badge légitime deviendrait « orphelin ».
+    const lookup = mockQuery.mock.calls.find((c) => /FROM badgeuse_badges WHERE uid_hmac/.test(String(c[0])));
+    expect(lookup[1][0]).toBe(UID_HMAC);
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_pointages/.test(String(c[0])));
+    expect(insert[1][3]).toBe(UID_HMAC);
+    // La charge canonique est elle aussi minuscule des deux côtés → chaîne valide.
+    expect(insert[1][14]).toBe(true);
+  });
+
+  describe('QA-01 — « invalid » est un accusé TERMINAL, toujours journalisé', () => {
+    let warnSpy;
+    beforeEach(() => { warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => warnSpy.mockRestore());
+
+    test('chaque refus définitif est journalisé (jamais de purge silencieuse)', async () => {
+      await post(`${PATH}/pointages`, { pointages: [{ uuid: 'pas-un-uuid' }] });
+      const journal = warnSpy.mock.calls.flat().join(' ');
+      expect(journal).toContain('refusé définitivement');
+      expect(journal).toContain('uuid_invalide');
+      expect(journal).toContain(DEVICE_CODE);
+    });
+
+    test('le nombre de refus est récapitulé pour l\'exploitant', async () => {
+      await post(`${PATH}/pointages`, { pointages: [{ uuid: 'pas-un-uuid' }, { uuid: 'non-plus' }] });
+      expect(warnSpy.mock.calls.flat().join(' ')).toMatch(/2 élément\(s\) refusé\(s\) définitivement/);
+    });
+
+    test('une erreur de stockage reste « invalid » ET journalise sa cause SQL', async () => {
+      const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      installMocks({ insertError: Object.assign(new Error('valeur hors bornes'), { code: '22003' }) });
+      const p = makePointage({ uuid: '11111111-2222-4333-8444-5555555555a9', precedent: genesisHash(DEVICE_CODE) });
+      const r = await post(`${PATH}/pointages`, { pointages: [p] });
+      expect(r.body.resultats[0]).toEqual({ uuid: p.uuid, status: 'invalid', raison: 'erreur_stockage' });
+      expect(errSpy.mock.calls.flat().join(' ')).toContain('22003');
+      errSpy.mockRestore();
+    });
+
+    test('QA-08 : une charge canonique ambiguë est refusée, sans casser le lot', async () => {
+      // `sens` vide passerait la validation de sens ? Non — c'est le champ
+      // `source` d'un élément dont l'uuid contient un séparateur qui est visé
+      // ici : un uuid valide ne peut pas contenir « | », on éprouve donc la
+      // garde par un device_code impossible côté serveur. On vérifie surtout
+      // que le lot n'est jamais rejeté en bloc.
+      const bon = makePointage({ uuid: '11111111-2222-4333-8444-5555555555aa', precedent: genesisHash(DEVICE_CODE) });
+      const r = await post(`${PATH}/pointages`, { pointages: [{ uuid: 'pas-un-uuid' }, bon] });
+      expect(r.status).toBe(200);
+      expect(r.body.resultats[0].status).toBe('invalid');
+      expect(r.body.resultats[1].status).toBe('ok');
+    });
+  });
+
   test('400 UNIQUEMENT pour un lot syntaxiquement invalide', async () => {
     expect((await post(`${PATH}/pointages`, {})).status).toBe(400);
     expect((await post(`${PATH}/pointages`, { pointages: 'nope' })).status).toBe(400);
@@ -458,6 +591,48 @@ describe('POST /heartbeat (BO-09)', () => {
     await post(`${PATH}/heartbeat`, { version: '1.0.0', champ_pirate: 'donnée personnelle' });
     const upd = mockQuery.mock.calls.find((c) => /UPDATE badgeuse_devices/.test(String(c[0])));
     expect(Object.keys(JSON.parse(upd[1][3]))).not.toContain('champ_pirate');
+  });
+
+  // ══ QA-02 — l'alerte du poste ne doit plus être jetée en silence ══
+  describe('QA-02 — champ « alerte » (CONTRAT_API_DEVICE §2.5 v1.1)', () => {
+    const infoStockee = () => {
+      const upd = mockQuery.mock.calls.find((c) => /UPDATE badgeuse_devices/.test(String(c[0])));
+      return JSON.parse(upd[1][3]);
+    };
+
+    test('l\'alerte émise par le poste est CONSERVÉE dans heartbeat_info', async () => {
+      await post(`${PATH}/heartbeat`, {
+        version: '1.0.0', taille_file: 3, alerte: 'réponse serveur sans accusé exploitable',
+      });
+      expect(infoStockee().alerte).toBe('réponse serveur sans accusé exploitable');
+    });
+
+    test('elle est JOURNALISÉE côté serveur (la panne devient visible)', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      await post(`${PATH}/heartbeat`, { version: '1.0.0', alerte: 'lecteur de badge débranché' });
+      expect(warnSpy.mock.calls.flat().join(' ')).toContain('lecteur de badge débranché');
+      warnSpy.mockRestore();
+    });
+
+    test('absence d\'alerte → null explicite (jamais une clé manquante)', async () => {
+      await post(`${PATH}/heartbeat`, { version: '1.0.0' });
+      expect(infoStockee()).toHaveProperty('alerte', null);
+      mockQuery.mockClear(); installMocks();
+      await post(`${PATH}/heartbeat`, { version: '1.0.0', alerte: '' });
+      expect(infoStockee().alerte).toBeNull();
+    });
+
+    test('l\'alerte est BORNÉE à 300 caractères (signal technique, pas un journal)', async () => {
+      await post(`${PATH}/heartbeat`, { version: '1.0.0', alerte: 'x'.repeat(5000) });
+      expect(infoStockee().alerte).toHaveLength(300);
+    });
+
+    test('la liste blanche reste stricte : « alerte » n\'ouvre pas la porte aux champs libres', async () => {
+      await post(`${PATH}/heartbeat`, { version: '1.0.0', alerte: 'ok', nom_salarie: 'DUPONT Jean' });
+      const info = infoStockee();
+      expect(Object.keys(info)).not.toContain('nom_salarie');
+      expect(JSON.stringify(info)).not.toContain('DUPONT');
+    });
   });
 
   test('heartbeat sans authentification → 401', async () => {

@@ -14,9 +14,16 @@
  *    poste et des compteurs (un test vérifie qu'aucune sortie console ne laisse
  *    fuir d'identifiant).
  *  - JAMAIS D'ÉCHEC SILENCIEUX (PST-04/05) : chaque élément d'un lot reçoit son
- *    statut (`ok` / `duplicate` / `orphan`). Les trois valent accusé de
- *    réception — le poste purge sa file. Un badge inconnu ou un pointage hors
- *    plage est STOCKÉ en statut `orphelin` pour traitement RH, jamais rejeté.
+ *    statut (`ok` / `duplicate` / `orphan` / `invalid`). Les QUATRE valent
+ *    accusé de réception TERMINAL — le poste purge sa file (CONTRAT_API_DEVICE
+ *    §2.1, amendement v1.1). Un badge inconnu ou un pointage hors plage est
+ *    STOCKÉ en statut `orphelin` pour traitement RH, jamais rejeté.
+ *  - `invalid` est RÉSERVÉ à l'élément qu'aucun rejeu ne réparera (UUID
+ *    invalide, horodatage illisible, charge canonique ambiguë). Il est
+ *    JOURNALISÉ ici et remonte dans le champ `alerte` du heartbeat du poste :
+ *    une purge silencieuse serait le pire des cas. Un `uid_hmac` valant `-`
+ *    (pointage manuel/import, CONTRAT_INTEGRITE §2) est en revanche VALIDE :
+ *    il est stocké NULL en base et reste `-` dans le calcul de chaîne (QA-01).
  *  - AUCUNE HEURE NE SE PERD : une rupture de chaîne n'empêche pas le stockage
  *    (chaine_valide = false + avertissement `chain_broken`). On n'efface jamais
  *    une preuve, même imparfaite.
@@ -32,6 +39,7 @@ const { body, param } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const {
   canonicalPointage, genesisHash, chainHash, hashDeviceKey, timingSafeEqualHex, isoMillisUTC,
+  NO_BADGE,
 } = require('../utils/badgeuse-crypto');
 const { readBadgeuseParams } = require('../utils/badgeuse-settings');
 const engine = require('../services/badgeuse-engine');
@@ -105,6 +113,16 @@ function sendWithEtag(req, res, etag, payload) {
 const isUuid = (v) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(v || ''));
 const isHex64 = (v) => /^[0-9a-fA-F]{64}$/.test(String(v || ''));
 
+/**
+ * Un pointage SANS badge (manuel ou import) est identifié par un `uid_hmac`
+ * absent (`null`), vide, ou valant le `-` littéral — la forme canonique du
+ * CONTRAT_INTEGRITE §2, celle que le poste sérialise par défaut. Les trois
+ * formes sont ACCEPTÉES et stockées `NULL` en base ; `canonicalPointage`
+ * recanonise `NULL` → `-`, si bien que la chaîne reste vérifiable des deux
+ * côtés (QA-01).
+ */
+const isSansBadge = (v) => v == null || v === '' || String(v) === NO_BADGE;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /v1/devices/:code/pointages — dépôt d'un lot (idempotent)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -127,6 +145,20 @@ router.post('/v1/devices/:code/pointages',
     let inserts = 0;
     let orphelins = 0;
     let ruptures = 0;
+    let invalides = 0;
+
+    /**
+     * Accusé TERMINAL `invalid` (CONTRAT_API_DEVICE §2.1 v1.1) : le poste purge
+     * l'élément, il ne le rejouera jamais. Un rejet SILENCIEUX serait la pire
+     * des issues — chaque cas est donc journalisé ici (code du poste, uuid et
+     * raison : jamais d'UID de badge) et le poste le signale de son côté dans
+     * le champ `alerte` de son heartbeat (QA-01/QA-02).
+     */
+    const rejeter = (liste, uuid, raison) => {
+      invalides += 1;
+      console.warn(`[BADGEUSE-DEVICE] ${req.device.code} : pointage ${uuid || '(uuid absent)'} refusé définitivement — ${raison}`);
+      liste.push({ uuid: uuid || null, status: 'invalid', raison });
+    };
 
     try {
       const params = await readBadgeuseParams();
@@ -145,31 +177,44 @@ router.post('/v1/devices/:code/pointages',
         // Validation syntaxique par élément : un élément malformé n'invalide
         // pas le lot, il est signalé — le poste ne peut pas boucler dessus.
         if (!isUuid(p && p.uuid)) {
-          resultats.push({ uuid: (p && p.uuid) || null, status: 'invalid', raison: 'uuid_invalide' });
+          rejeter(resultats, (p && p.uuid) || null, 'uuid_invalide');
           continue;
         }
         const horodatage = isoMillisUTC(p.horodatage_utc);
         const sens = ['entree', 'sortie', 'inconnu'].includes(p.sens) ? p.sens : null;
         const source = ['badge', 'manuel', 'import'].includes(p.source) ? p.source : 'badge';
-        if (!horodatage || !sens || (p.uid_hmac != null && p.uid_hmac !== '' && !isHex64(p.uid_hmac))) {
-          resultats.push({ uuid: p.uuid, status: 'invalid', raison: 'champs_invalides' });
+        // Un uid_hmac absent / vide / `-` est VALIDE (pointage sans badge) ;
+        // toute AUTRE valeur doit être un condensat de 64 hex.
+        if (!horodatage || !sens || (!isSansBadge(p.uid_hmac) && !isHex64(p.uid_hmac))) {
+          rejeter(resultats, p.uuid, 'champs_invalides');
           continue;
         }
 
-        const uidHmac = p.uid_hmac ? String(p.uid_hmac).toLowerCase() : null;
+        const uidHmac = isSansBadge(p.uid_hmac) ? null : String(p.uid_hmac).toLowerCase();
         const sequence = Number.isFinite(parseInt(p.sequence_device, 10)) ? parseInt(p.sequence_device, 10) : null;
 
         // ── Vérification de la chaîne (CONTRAT_INTEGRITE §3) ──
+        // `canonicalPointage` LÈVE sur une charge ambiguë (champ vide, ou
+        // contenant le séparateur `|` — QA-08). C'est un payload que le rejeu
+        // ne réparera jamais : accusé terminal `invalid`, jamais une boucle.
         let chaineValide = true;
-        const canonical = canonicalPointage({
-          uuid: p.uuid,
-          device_code: req.device.code,
-          sequence_device: sequence,
-          uid_hmac: uidHmac,
-          horodatage_utc: horodatage,
-          sens,
-          source,
-        });
+        let canonical;
+        try {
+          canonical = canonicalPointage({
+            uuid: p.uuid,
+            device_code: req.device.code,
+            sequence_device: sequence,
+            // NULL en base ⇔ `-` dans la charge canonique : la symétrie avec
+            // le poste est assurée par la valeur de repli de l'helper.
+            uid_hmac: uidHmac,
+            horodatage_utc: horodatage,
+            sens,
+            source,
+          });
+        } catch (e) {
+          rejeter(resultats, p.uuid, 'canonique_invalide');
+          continue;
+        }
         const attendu = chainHash(p.hash_precedent || dernierHash, canonical);
         // 1. le hash reçu doit correspondre au recalcul (payload non altéré) ;
         // 2. le maillon précédent reçu doit être le dernier hash stocké.
@@ -259,7 +304,11 @@ router.post('/v1/devices/:code/pointages',
             // purge) — l'anomalie reste visible dans /devices/:id/verify-chain.
             resultats.push({ uuid: p.uuid, status: 'duplicate', avertissement: 'sequence_reutilisee' });
           } else {
-            resultats.push({ uuid: p.uuid, status: 'invalid', raison: 'erreur_stockage' });
+            // Erreur SQL non gérable par le poste (FK d'un salarié supprimé,
+            // dépassement de BIGINT sur la séquence…) : accusé terminal, mais
+            // la cause est journalisée côté serveur pour l'exploitant.
+            console.error(`[BADGEUSE-DEVICE] ${req.device.code} : échec de stockage (${e.code || 'sans code'}) — ${e.message}`);
+            rejeter(resultats, p.uuid, 'erreur_stockage');
           }
         }
       }
@@ -270,6 +319,9 @@ router.post('/v1/devices/:code/pointages',
       }
       if (inserts > 0 || orphelins > 0) {
         console.log(`[BADGEUSE-DEVICE] ${req.device.code} : ${inserts} pointage(s) enregistré(s), ${orphelins} orphelin(s)`);
+      }
+      if (invalides > 0) {
+        console.warn(`[BADGEUSE-DEVICE] ${req.device.code} : ${invalides} élément(s) refusé(s) définitivement sur ${lot.length} — à investiguer (le poste les purge et le signale par heartbeat)`);
       }
       res.json({ resultats, server_time_utc: new Date().toISOString() });
     } catch (err) {
@@ -379,6 +431,14 @@ router.post('/v1/devices/:code/heartbeat',
       const hb = req.body || {};
       // Liste blanche : on ne stocke que les champs du contrat (pas de champ
       // libre qui pourrait charrier une donnée personnelle).
+      // `alerte` (CONTRAT_API_DEVICE §2.5, amendement v1.1 — QA-02) : signal
+      // d'exploitation émis par le poste (lot refusé 400, éléments `invalid`
+      // purgés, lecteur débranché…). Il était jusqu'ici JETÉ par cette liste
+      // blanche, ce qui rendait la panne invisible depuis le back-office.
+      // Borné à 300 caractères : c'est un signal technique, pas un journal.
+      const alerte = hb.alerte == null || hb.alerte === ''
+        ? null
+        : String(hb.alerte).slice(0, 300);
       const info = {
         version: hb.version ?? null,
         horloge_utc: hb.horloge_utc ?? null,
@@ -389,6 +449,7 @@ router.post('/v1/devices/:code/heartbeat',
         cible: hb.cible ?? null,
         reader_mode: hb.reader_mode ?? null,
         throttled: hb.throttled ?? null,
+        alerte,
       };
 
       await pool.query(
@@ -412,6 +473,7 @@ router.post('/v1/devices/:code/heartbeat',
       if (derive > 2) console.warn(`[BADGEUSE-DEVICE] ${req.device.code} : dérive d'horloge ${derive}s`);
       if (info.throttled === true) console.warn(`[BADGEUSE-DEVICE] ${req.device.code} : throttling CPU signalé`);
       if (Number(info.taille_file) > 0) console.log(`[BADGEUSE-DEVICE] ${req.device.code} : file locale de ${info.taille_file} élément(s)`);
+      if (alerte) console.warn(`[BADGEUSE-DEVICE] ${req.device.code} : alerte du poste — ${alerte}`);
       if (info.reader_mode === 'decimal') console.warn(`[BADGEUSE-DEVICE] ${req.device.code} : lecteur en mode décimal — à reconfigurer en hexadécimal (SPEC §3.6)`);
 
       res.json({ status: 'ok', server_time_utc: new Date().toISOString() });

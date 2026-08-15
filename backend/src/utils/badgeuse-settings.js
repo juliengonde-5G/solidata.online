@@ -15,6 +15,9 @@
  * Les durées de conservation (`badgeuse.retention_*`) ne sont PAS des règles de
  * gestion arbitrables : ce sont des exigences de conformité (NOTE_JURIDIQUE §3.7)
  * préremplies aux valeurs de la note juridique et appliquées par la purge (BO-10).
+ * Les clés `badgeuse.supervision_*` ne le sont pas davantage : ce sont des
+ * réglages d'EXPLOITATION (BO-09), paramétrés ici pour qu'aucun seuil ne reste
+ * codé en dur (QA-11).
  *
  * PLAFOND CODÉ EN DUR ASSUMÉ : `overlay_duree_sec` est borné 3–8 s côté serveur.
  * Ce n'est pas une règle de gestion mais une EXIGENCE JURIDIQUE (NOTE_JURIDIQUE
@@ -45,6 +48,14 @@ const BADGEUSE_SETTING_DEFAULTS = {
   'badgeuse.sync_playlist_interval_sec': 900,
   'badgeuse.dpms_extinction': '21:30',
   'badgeuse.dpms_allumage': '05:30',
+  // ── Supervision des postes (BO-09 — EXPLOITATION, pas une règle RH) ──
+  // Seuil de silence au-delà duquel un poste est déclaré hors ligne et
+  // l'alerte e-mail part (QA-11 : il était codé en dur à 15 min dans le job).
+  'badgeuse.supervision_silence_minutes': 15,
+  // Destinataires de l'alerte, séparés par des virgules. VIDE = les
+  // administrateurs actifs de SOLIDATA (repli documenté : l'exigence BO-09
+  // « alerte e-mail » ne doit pas rester lettre morte faute de paramétrage).
+  'badgeuse.supervision_alerte_emails': '',
   // ── Conservation (NOTE_JURIDIQUE §3.7 — conformité, non arbitrable) ──
   'badgeuse.retention_pointages_mois': 60,
   'badgeuse.retention_feuilles_mois': 60,

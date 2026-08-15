@@ -29,6 +29,18 @@ const crypto = require('crypto');
 // octets (CONTRAT_HMAC §2.4). Toute autre longueur = lecture non conforme.
 const UID_HEX_LENGTHS = [8, 14, 20];
 
+// Forme canonique de l'ABSENCE de badge (pointage manuel ou import) —
+// CONTRAT_INTEGRITE §2. C'est un `-` LITTÉRAL, jamais une chaîne vide : les
+// deux piles (Node et Python) doivent produire le même condensat, et le
+// serveur stocke `NULL` en base tout en canonisant `-` (QA-01).
+const NO_BADGE = '-';
+
+// Séparateur et noms des 7 champs de la charge canonique (ordre figé).
+const CANONICAL_SEPARATOR = '|';
+const CANONICAL_FIELDS = [
+  'uuid', 'device_code', 'sequence_device', 'uid_hmac', 'horodatage_utc', 'sens', 'source',
+];
+
 // ── 1. Pseudonymisation de l'UID ───────────────────────────────────────────
 
 /**
@@ -101,21 +113,40 @@ function isoMillisUTC(value) {
  *   uuid | device_code | sequence_device | uid_hmac | horodatage_utc_iso | sens | source
  * `uid_hmac` vaut le `-` littéral pour un pointage manuel sans badge.
  *
+ * STRICTE COMME LE PYTHON (QA-08) : un champ VIDE ou contenant le séparateur
+ * `|` fait LEVER une erreur, exactement comme `chain.canonical` côté poste.
+ * Sans ce contrôle, deux pointages distincts pouvaient produire la même charge
+ * canonique (`uuid="a|b", device_code="c"` vs `uuid="a", device_code="b|c"`),
+ * ce qui affaiblissait la valeur probante de la chaîne. Les appelants traitent
+ * l'exception comme un payload malformé (statut `invalid` du contrat device).
+ *
  * @param {object} p { uuid, device_code, sequence_device, uid_hmac, horodatage_utc, sens, source }
  * @returns {string}
+ * @throws {Error} si un champ est vide/absent ou contient `|`
  */
 function canonicalPointage(p) {
   const o = p || {};
-  return [
-    String(o.uuid || ''),
-    String(o.device_code || ''),
-    // Entier base 10 sans zéros de tête.
-    String(parseInt(o.sequence_device, 10)),
-    o.uid_hmac ? String(o.uid_hmac).toLowerCase() : '-',
+  // Entier base 10 sans zéros de tête ; une séquence illisible est un champ
+  // ABSENT (et non la chaîne « NaN », qui aurait passé le contrôle de vacuité).
+  const seq = parseInt(o.sequence_device, 10);
+  const champs = [
+    String(o.uuid == null ? '' : o.uuid),
+    String(o.device_code == null ? '' : o.device_code),
+    Number.isFinite(seq) ? String(seq) : '',
+    o.uid_hmac ? String(o.uid_hmac).toLowerCase() : NO_BADGE,
     isoMillisUTC(o.horodatage_utc) || '',
-    String(o.sens || ''),
-    String(o.source || ''),
-  ].join('|');
+    String(o.sens == null ? '' : o.sens),
+    String(o.source == null ? '' : o.source),
+  ];
+  for (let i = 0; i < champs.length; i += 1) {
+    if (champs[i] === '') {
+      throw new Error(`canonicalPointage : champ « ${CANONICAL_FIELDS[i]} » vide ou absent`);
+    }
+    if (champs[i].includes(CANONICAL_SEPARATOR)) {
+      throw new Error(`canonicalPointage : champ « ${CANONICAL_FIELDS[i]} » contient le séparateur « ${CANONICAL_SEPARATOR} »`);
+    }
+  }
+  return champs.join(CANONICAL_SEPARATOR);
 }
 
 /** Genèse d'une chaîne de device : SHA256("genesis:" + device_code) → hex. */
@@ -200,6 +231,9 @@ function decryptSecret(payload) {
 
 module.exports = {
   UID_HEX_LENGTHS,
+  NO_BADGE,
+  CANONICAL_SEPARATOR,
+  CANONICAL_FIELDS,
   normalizeUid,
   hmacUid,
   generateSiteKey,

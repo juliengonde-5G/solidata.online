@@ -237,12 +237,16 @@ export function EnLigneBadge({ enLigne }) {
   );
 }
 
-// Un poste est considéré en ligne si le dernier heartbeat date de < 5 min
-// (BO-09). Préfère un champ `en_ligne` déjà calculé côté serveur s'il existe.
+// Un poste est « en ligne » si son dernier heartbeat est plus récent que le
+// seuil de silence PARAMÉTRÉ (`badgeuse.supervision_silence_minutes`, BO-09) —
+// c'est le serveur qui tranche, via le champ `online` de GET /devices. Le repli
+// local (15 min, valeur par défaut documentée de la grille) ne sert qu'aux
+// réponses anciennes qui ne portent pas ce champ.
 export function isDeviceOnline(device) {
+  if (typeof device?.online === 'boolean') return device.online;
   if (typeof device?.en_ligne === 'boolean') return device.en_ligne;
   if (!device?.dernier_heartbeat) return false;
   const d = new Date(device.dernier_heartbeat);
   if (Number.isNaN(d.getTime())) return false;
-  return (Date.now() - d.getTime()) / 1000 < 300;
+  return (Date.now() - d.getTime()) / 1000 < 15 * 60;
 }

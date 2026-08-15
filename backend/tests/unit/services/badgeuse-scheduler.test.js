@@ -16,6 +16,13 @@ jest.mock('../../../src/config/database', () => ({
   connect: jest.fn(async () => ({ query: (...a) => mockQuery(...a), release: () => {} })),
 }));
 
+// Service de notification (Brevo) mocké : l'alerte e-mail BO-09 est vérifiée
+// sans jamais sortir sur le réseau (QA-04).
+const mockNotify = jest.fn(async () => ({ dryRun: true }));
+jest.mock('../../../src/services/notification', () => ({
+  sendNotification: (...a) => mockNotify(...a),
+}));
+
 const { badgeusePurgeRetention, checkBadgeuseDevices } = require('../../../src/services/scheduler');
 
 /** Capture les requêtes émises, indexées par table visée. */
@@ -229,33 +236,67 @@ describe('badgeusePurgeRetention — exécution réelle', () => {
 });
 
 describe('checkBadgeuseDevices — supervision des postes (BO-09)', () => {
-  test('un poste silencieux depuis > 15 min est signalé', async () => {
-    mockQuery.mockResolvedValue({ rows: [{ id: 1, code: 'LH-P1', libelle: 'Atelier', dernier_heartbeat: null }] });
+  /**
+   * Mock ROUTÉ PAR REQUÊTE : le job lit maintenant ses seuils dans `settings`,
+   * consulte les destinataires et écrit son anti-spam — un `mockResolvedValue`
+   * global rendrait les assertions trompeuses.
+   */
+  function mockSupervision({ postes = [], settings = {}, admins = [], erreur = null } = {}) {
+    mockQuery.mockImplementation((sql, params) => {
+      const s = String(sql);
+      if (erreur && /FROM badgeuse_devices/.test(s)) return Promise.reject(new Error(erreur));
+      if (/SELECT value FROM settings/.test(s)) {
+        const key = params && params[0];
+        return Promise.resolve({ rows: settings[key] != null ? [{ value: settings[key] }] : [] });
+      }
+      if (/FROM badgeuse_devices/.test(s)) return Promise.resolve({ rows: postes });
+      if (/FROM users/.test(s)) return Promise.resolve({ rows: admins.map((email) => ({ email })) });
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+  }
+
+  const POSTE_MUET = { id: 1, code: 'LH-P1', libelle: 'Atelier', dernier_heartbeat: null };
+
+  test('un poste silencieux depuis > seuil est signalé', async () => {
+    mockSupervision({ postes: [POSTE_MUET] });
     const r = await checkBadgeuseDevices();
     expect(r).toMatchObject({ items: 1, silence_minutes: 15 });
     expect(warnSpy.mock.calls.flat().join(' ')).toContain('LH-P1');
   });
 
-  test('la requête ne vise que les postes ACTIFS et applique le seuil de 15 min', async () => {
-    mockQuery.mockResolvedValue({ rows: [] });
+  test('la requête ne vise que les postes ACTIFS et applique le seuil PARAMÉTRÉ', async () => {
+    mockSupervision({ postes: [] });
     await checkBadgeuseDevices();
-    const c = mockQuery.mock.calls[0];
-    expect(String(c[0])).toMatch(/actif = true/);
-    expect(String(c[0])).toMatch(/dernier_heartbeat IS NULL OR dernier_heartbeat < NOW\(\) - \(\$1 \|\| ' minutes'\)::interval/);
-    expect(c[1]).toEqual(['15']);
+    const c = sqlFor('badgeuse_devices')[0];
+    expect(c.sql).toMatch(/actif = true/);
+    expect(c.sql).toMatch(/dernier_heartbeat IS NULL OR dernier_heartbeat < NOW\(\) - \(\$1 \|\| ' minutes'\)::interval/);
+    expect(c.params).toEqual(['15']); // défaut documenté
   });
 
-  test('aucun poste en retard → rien à signaler', async () => {
-    mockQuery.mockResolvedValue({ rows: [] });
+  test('QA-11 : le seuil n\'est plus codé en dur — il vient de settings', async () => {
+    mockSupervision({ postes: [], settings: { 'badgeuse.supervision_silence_minutes': '30' } });
     const r = await checkBadgeuseDevices();
-    expect(r.items).toBe(0);
+    expect(sqlFor('badgeuse_devices')[0].params).toEqual(['30']);
+    expect(r.silence_minutes).toBe(30);
+    // Le code source ne porte plus la constante littérale du seuil.
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'services', 'scheduler.js'), 'utf8');
+    expect(src).not.toMatch(/const SILENCE_MINUTES = 15/);
+    expect(src).toMatch(/badgeuse\.supervision_silence_minutes/);
+  });
+
+  test('aucun poste en retard → rien à signaler, aucun e-mail', async () => {
+    mockSupervision({ postes: [] });
+    const r = await checkBadgeuseDevices();
+    expect(r).toMatchObject({ items: 0, emails: 0 });
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
   test('émission Socket.IO « badgeuse:device-offline » sur la salle de supervision', async () => {
     const emit = jest.fn();
     global.__io = { to: jest.fn(() => ({ emit })) };
-    mockQuery.mockResolvedValue({ rows: [{ id: 1, code: 'LH-P1', libelle: 'Atelier', dernier_heartbeat: null }] });
+    mockSupervision({ postes: [POSTE_MUET] });
 
     await checkBadgeuseDevices();
     expect(global.__io.to).toHaveBeenCalledWith('badgeuse:supervision');
@@ -266,13 +307,111 @@ describe('checkBadgeuseDevices — supervision des postes (BO-09)', () => {
   });
 
   test('sans Socket.IO initialisé, le job ne plante pas', async () => {
-    mockQuery.mockResolvedValue({ rows: [{ id: 1, code: 'LH-P1', dernier_heartbeat: null }] });
+    mockSupervision({ postes: [POSTE_MUET] });
     await expect(checkBadgeuseDevices()).resolves.toMatchObject({ items: 1 });
   });
 
   test('RÉSILIENCE : table absente → 0, jamais d\'exception qui casse runAllJobs', async () => {
-    mockQuery.mockRejectedValue(new Error('relation "badgeuse_devices" does not exist'));
+    mockSupervision({ erreur: 'relation "badgeuse_devices" does not exist' });
     await expect(checkBadgeuseDevices()).resolves.toEqual({ items: 0 });
+  });
+});
+
+describe('QA-04 — alerte e-mail de silence (BO-09)', () => {
+  function mockSupervision({ postes = [], settings = {}, admins = [] } = {}) {
+    mockQuery.mockImplementation((sql, params) => {
+      const s = String(sql);
+      if (/SELECT value FROM settings/.test(s)) {
+        const key = params && params[0];
+        return Promise.resolve({ rows: settings[key] != null ? [{ value: settings[key] }] : [] });
+      }
+      if (/FROM badgeuse_devices/.test(s)) return Promise.resolve({ rows: postes });
+      if (/FROM users/.test(s)) return Promise.resolve({ rows: admins.map((email) => ({ email })) });
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+  }
+
+  const POSTE_MUET = { id: 1, code: 'LH-P1', libelle: 'Atelier', dernier_heartbeat: null };
+
+  beforeEach(() => { mockNotify.mockClear(); });
+
+  test('un e-mail part vers CHAQUE destinataire paramétré', async () => {
+    mockSupervision({
+      postes: [POSTE_MUET],
+      settings: { 'badgeuse.supervision_alerte_emails': 'rh@solidarite-textiles.fr, direction@solidarite-textiles.fr' },
+    });
+    const r = await checkBadgeuseDevices();
+    expect(r.emails).toBe(2);
+    expect(mockNotify).toHaveBeenCalledTimes(2);
+    const [template, destinataire] = mockNotify.mock.calls[0];
+    expect(template.type).toBe('email');
+    expect(template.subject).toContain('poste(s) de pointage');
+    expect(template.body).toContain('LH-P1');
+    expect(destinataire).toBe('rh@solidarite-textiles.fr');
+  });
+
+  test('REPLI documenté : sans paramétrage, l\'alerte part aux ADMIN actifs', async () => {
+    mockSupervision({ postes: [POSTE_MUET], admins: ['admin@solidarite-textiles.fr'] });
+    const r = await checkBadgeuseDevices();
+    expect(r.emails).toBe(1);
+    expect(mockNotify.mock.calls[0][1]).toBe('admin@solidarite-textiles.fr');
+  });
+
+  test('GARDE : aucun destinataire → le job réussit quand même (jamais d\'échec)', async () => {
+    mockSupervision({ postes: [POSTE_MUET], admins: [] });
+    const r = await checkBadgeuseDevices();
+    expect(r).toMatchObject({ items: 1, emails: 0, email_statut: 'aucun_destinataire' });
+    expect(mockNotify).not.toHaveBeenCalled();
+    expect(warnSpy.mock.calls.flat().join(' ')).toContain('aucun destinataire');
+  });
+
+  test('GARDE : un envoi en échec ne fait pas échouer la détection', async () => {
+    mockNotify.mockRejectedValueOnce(new Error('Brevo indisponible'));
+    mockSupervision({ postes: [POSTE_MUET], settings: { 'badgeuse.supervision_alerte_emails': 'rh@x.fr' } });
+    const r = await checkBadgeuseDevices();
+    expect(r.items).toBe(1);     // la détection reste rendue
+    expect(r.emails).toBe(0);
+    expect(errSpy).toHaveBeenCalled();
+  });
+
+  test('ANTI-SPAM : un poste déjà alerté il y a moins de 6 h ne redéclenche pas d\'e-mail', async () => {
+    mockSupervision({
+      postes: [POSTE_MUET],
+      settings: {
+        'badgeuse.supervision_alerte_emails': 'rh@x.fr',
+        'badgeuse.supervision_derniere_alerte': JSON.stringify({ 'LH-P1': new Date(Date.now() - 3600 * 1000).toISOString() }),
+      },
+    });
+    const r = await checkBadgeuseDevices();
+    expect(r).toMatchObject({ items: 1, emails: 0, email_statut: 'anti_spam' });
+    expect(mockNotify).not.toHaveBeenCalled();
+  });
+
+  test('ANTI-SPAM : au-delà de la fenêtre, l\'alerte repart', async () => {
+    mockSupervision({
+      postes: [POSTE_MUET],
+      settings: {
+        'badgeuse.supervision_alerte_emails': 'rh@x.fr',
+        'badgeuse.supervision_derniere_alerte': JSON.stringify({ 'LH-P1': new Date(Date.now() - 12 * 3600 * 1000).toISOString() }),
+      },
+    });
+    expect((await checkBadgeuseDevices()).emails).toBe(1);
+  });
+
+  test('l\'envoi réussi mémorise la date d\'alerte pour l\'anti-spam', async () => {
+    mockSupervision({ postes: [POSTE_MUET], settings: { 'badgeuse.supervision_alerte_emails': 'rh@x.fr' } });
+    await checkBadgeuseDevices();
+    const ecriture = mockQuery.mock.calls
+      .map((c) => ({ sql: String(c[0]), params: c[1] }))
+      .find((c) => /INSERT INTO settings/.test(c.sql) && c.params[0] === 'badgeuse.supervision_derniere_alerte');
+    expect(ecriture).toBeDefined();
+    expect(JSON.parse(ecriture.params[1])['LH-P1']).toBeTruthy();
+  });
+
+  test('l\'e-mail rassure explicitement : aucune heure n\'est perdue', async () => {
+    mockSupervision({ postes: [POSTE_MUET], settings: { 'badgeuse.supervision_alerte_emails': 'rh@x.fr' } });
+    await checkBadgeuseDevices();
+    expect(mockNotify.mock.calls[0][0].body).toContain('Aucun pointage n\'est perdu');
   });
 });
 

@@ -344,6 +344,19 @@ io.on('connection', (socket) => {
     socket.leave(`vak:live:${vakId}`);
   });
 
+  // Supervision des postes de pointage (BO-09) : la page « Temps & Présence »
+  // rejoint la salle vers laquelle l'API device et le job checkBadgeuseDevices
+  // émettent déjà. Sans ce handler, les deux `emit` partaient dans le vide
+  // (QA-04). AUCUNE donnée personnelle ne transite par cette salle : code du
+  // poste, sens, statut et compteurs uniquement.
+  socket.on('badgeuse:join-supervision', () => {
+    socket.join('badgeuse:supervision');
+    logger.debug(`Socket ${socket.id} rejoint badgeuse:supervision`);
+  });
+  socket.on('badgeuse:leave-supervision', () => {
+    socket.leave('badgeuse:supervision');
+  });
+
   // Position GPS du chauffeur — avec détection proximité CAV pour historiser le temps de collecte
   const cavProximity = new Map();           // clé: `${tourId}-${cavId}`, valeur: { arrivedAt }
   const tourCavsCache = new Map();          // clé: tourId, valeur: { cavs: [...], cachedAt: ms }

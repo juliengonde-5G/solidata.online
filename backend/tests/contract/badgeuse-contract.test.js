@@ -60,10 +60,13 @@ const del = (path, role) => request(app).delete(path).set('Authorization', `Bear
 function installMocks({
   settings = {}, employee = { id: 5, user_id: 99 }, feuille = null,
   pointages = [], corrections = [], badges = [], devices = [], contenus = [],
+  contrats = [],
 } = {}) {
   mockQuery.mockImplementation((sql, params) => {
     const s = String(sql);
     if (/^\s*(BEGIN|COMMIT|ROLLBACK)/.test(s)) return Promise.resolve({ rows: [] });
+    // Heures hebdo contractuelles (QA-03) : le contrat couvrant le 1er du mois.
+    if (/FROM employee_contracts ec/.test(s)) return Promise.resolve({ rows: contrats });
     if (/SELECT key, value FROM settings WHERE key LIKE/.test(s)) {
       return Promise.resolve({ rows: Object.entries(settings).map(([key, value]) => ({ key, value })) });
     }
@@ -339,6 +342,51 @@ describe('POST /corrections — verrous RH', () => {
     expect(sqls.some((s) => /UPDATE badgeuse_pointages/.test(s))).toBe(false);
     expect(sqls.some((s) => /DELETE FROM badgeuse_pointages/.test(s))).toBe(false);
   });
+
+  // ══ QA-05 — `regularisation_delai_jours` produit enfin un effet ══
+  describe('QA-05 — délai de signalement (ADR-0002 addendum §4)', () => {
+    /** Correction portant sur une date donnée (heure murale Paris). */
+    const corriger = (dateISO, extra = {}) => post('/api/badgeuse/corrections', 'RH', {
+      employee_id: 5, type: 'ajout', horodatage_corrige: `${dateISO}T08:00:00`,
+      sens_corrige: 'entree', motif_code: 'oubli_badge', ...extra,
+    });
+
+    /** Date civile Paris décalée de N jours (N négatif = dans le passé). */
+    const jourDecale = (n) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' })
+      .format(new Date(Date.now() + n * 24 * 3600 * 1000));
+
+    test('une régularisation du jour ne porte AUCUN avertissement', async () => {
+      const r = await corriger(jourDecale(0));
+      expect(r.status).toBe(201);
+      expect(r.body.avertissement).toBeNull();
+      expect(r.body.regularisation_delai_jours).toBe(5);
+    });
+
+    test('au-delà du délai, la réponse porte « hors_delai_signalement »', async () => {
+      // 60 jours calendaires en arrière : bien plus de 5 jours OUVRÉS.
+      const r = await corriger(jourDecale(-60));
+      expect(r.status).toBe(201);
+      expect(r.body.avertissement).toBe('hors_delai_signalement');
+      expect(r.body.jours_ouvres_ecoules).toBeGreaterThan(5);
+    });
+
+    test('l\'avertissement est NON BLOQUANT : la correction est bien enregistrée', async () => {
+      await corriger(jourDecale(-60));
+      expect(mockQuery.mock.calls.map((c) => String(c[0]))
+        .some((s) => /INSERT INTO badgeuse_corrections/.test(s))).toBe(true);
+    });
+
+    test('le délai vient du PARAMÈTRE, jamais du code', async () => {
+      // Délai porté à 999 jours ouvrés : la même correction repasse dans les clous.
+      installMocks({ settings: { 'badgeuse.regularisation_delai_jours': '999' } });
+      const large = await corriger(jourDecale(-60));
+      expect(large.body.avertissement).toBeNull();
+      expect(large.body.regularisation_delai_jours).toBe(999);
+      // Délai à 0 = règle désactivée : aucun avertissement non plus.
+      installMocks({ settings: { 'badgeuse.regularisation_delai_jours': '0' } });
+      expect((await corriger(jourDecale(-60))).body.avertissement).toBeNull();
+    });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -393,7 +441,15 @@ describe('forme des réponses des endpoints principaux', () => {
     expect((await get('/api/badgeuse/anomalies?du=2026-08-01')).status).toBe(400);
   });
 
-  test('GET /devices : statut « online » calculé sur la fraîcheur du heartbeat', async () => {
+  test('QA-05 : GET /anomalies restitue le taux de pointages complets (NOTE_RH §9)', async () => {
+    const r = await get('/api/badgeuse/anomalies?du=2026-08-01&au=2026-08-31');
+    expect(r.body).toHaveProperty('taux_pointages_complets_pct');
+    expect(r.body).toHaveProperty('jours_pointage_attendu');
+    // Aucun salarié pointé sur la fenêtre → null, JAMAIS 0 %.
+    expect(r.body.taux_pointages_complets_pct).toBeNull();
+  });
+
+  test('GET /devices : enveloppe { silence_minutes, devices } et « online » sur la fraîcheur du heartbeat', async () => {
     installMocks({
       devices: [
         { id: 1, code: 'LH-P1', actif: true, dernier_heartbeat: new Date().toISOString(), appaire: true },
@@ -402,9 +458,43 @@ describe('forme des réponses des endpoints principaux', () => {
       ],
     });
     const r = await get('/api/badgeuse/devices');
-    expect(r.body.map((d) => d.online)).toEqual([true, false, false]);
+    // Le seuil « en ligne » est PARAMÉTRÉ (QA-11) : il est exposé pour que la
+    // supervision affiche la même vérité que le job d'alerte.
+    expect(r.body.silence_minutes).toBe(15);
+    expect(r.body.devices.map((d) => d.online)).toEqual([true, false, false]);
     // Le condensat de la clé n'est JAMAIS exposé, même à l'ADMIN.
     expect(JSON.stringify(r.body)).not.toContain('api_key_hash');
+  });
+
+  test('QA-11 : le seuil « en ligne » suit le paramètre (plus de 5 min en dur)', async () => {
+    installMocks({
+      settings: { 'badgeuse.supervision_silence_minutes': '120' },
+      devices: [
+        // Silencieux depuis 1 h : hors ligne à 15 min, EN LIGNE à 120 min.
+        { id: 2, code: 'LH-P2', actif: true, dernier_heartbeat: new Date(Date.now() - 3600 * 1000).toISOString(), appaire: true },
+      ],
+    });
+    const r = await get('/api/badgeuse/devices');
+    expect(r.body.silence_minutes).toBe(120);
+    expect(r.body.devices[0].online).toBe(true);
+  });
+
+  test('QA-02 : l\'alerte remontée par le poste est exposée à la supervision', async () => {
+    installMocks({
+      devices: [{
+        id: 1, code: 'LH-P1', actif: true, dernier_heartbeat: new Date().toISOString(), appaire: true,
+        heartbeat_info: { version: '1.0.0', alerte: '3 pointage(s) refusés définitivement' },
+      }],
+    });
+    const r = await get('/api/badgeuse/devices');
+    expect(r.body.devices[0].alerte).toBe('3 pointage(s) refusés définitivement');
+  });
+
+  test('sans alerte du poste, le champ vaut null (jamais une chaîne vide trompeuse)', async () => {
+    installMocks({
+      devices: [{ id: 1, code: 'LH-P1', actif: true, dernier_heartbeat: null, appaire: true, heartbeat_info: { version: '1.0.0' } }],
+    });
+    expect((await get('/api/badgeuse/devices')).body.devices[0].alerte).toBeNull();
   });
 
   test('GET /feuilles-temps : période obligatoire, enveloppe { periode, feuilles }', async () => {
@@ -418,6 +508,128 @@ describe('forme des réponses des endpoints principaux', () => {
   test('GET /sites : référentiel multi-site', async () => {
     const r = await get('/api/badgeuse/sites');
     expect(r.body[0]).toMatchObject({ code: 'LH' });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// QA-03 — BO-04 : « théorique » et « écart » ne sont plus vides à vie.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('QA-03 — heures théoriques et écart de la feuille de temps (BO-04)', () => {
+  /** Le salarié 5 remonte dans la population de la période. */
+  const POPULATION = [{ id: 5, first_name: 'Karim', last_name: 'Benali', malibou_id: 'M42', team_id: 1 }];
+
+  /** Mock complet : population + contrat + insertion de feuille. */
+  function mocksFeuille({ contrats = [], weeklyHoursFiche = null, statut = 'brouillon' } = {}) {
+    installMocks({ contrats, employee: { id: 5, user_id: 99, weekly_hours: weeklyHoursFiche } });
+    const base = mockQuery.getMockImplementation();
+    mockQuery.mockImplementation((sql, params) => {
+      const s = String(sql);
+      if (/FROM employees e\s+WHERE e\.id IN/.test(s)) return Promise.resolve({ rows: POPULATION });
+      if (/INSERT INTO badgeuse_feuilles_temps/.test(s)) {
+        // Le RETURNING rend la ligne telle qu'elle vient d'être écrite.
+        return Promise.resolve({
+          rows: [{
+            id: 1, employee_id: 5, periode: params[1], statut,
+            heures_theoriques: params[2], heures_pointees: params[3],
+          }],
+        });
+      }
+      return base(sql, params);
+    });
+  }
+
+  test('35 h hebdo au contrat → 147 h théoriques en août 2026 (21 jours ouvrés)', async () => {
+    mocksFeuille({ contrats: [{ weekly_hours: 35 }] });
+    const r = await get('/api/badgeuse/feuilles-temps?periode=2026-08');
+    expect(r.body.feuilles[0].heures_theoriques).toBe(147);
+    expect(r.body.feuilles[0].source_theorique).toBe('contrat');
+  });
+
+  test('l\'ÉCART théorique/pointé est enfin calculé (raison d\'être de BO-04)', async () => {
+    mocksFeuille({ contrats: [{ weekly_hours: 35 }] });
+    const f = (await get('/api/badgeuse/feuilles-temps?periode=2026-08')).body.feuilles[0];
+    expect(f.ecart_heures).toBe(Number((f.heures_pointees - f.heures_theoriques).toFixed(2)));
+    expect(f.ecart_heures).toBe(-147); // aucun pointage sur la période mockée
+  });
+
+  test('temps partiel : 26 h hebdo → 109,2 h (la quotité est respectée)', async () => {
+    mocksFeuille({ contrats: [{ weekly_hours: 26 }] });
+    expect((await get('/api/badgeuse/feuilles-temps?periode=2026-08')).body.feuilles[0].heures_theoriques).toBe(109.2);
+  });
+
+  test('REPLI documenté sur la fiche quand aucun contrat ne couvre le 1er du mois', async () => {
+    mocksFeuille({ contrats: [], weeklyHoursFiche: 35 });
+    const f = (await get('/api/badgeuse/feuilles-temps?periode=2026-08')).body.feuilles[0];
+    expect(f.heures_theoriques).toBe(147);
+    expect(f.source_theorique).toBe('fiche');
+  });
+
+  test('aucune heure connue → théorique ET écart à NULL (jamais 0)', async () => {
+    mocksFeuille({ contrats: [], weeklyHoursFiche: null });
+    const f = (await get('/api/badgeuse/feuilles-temps?periode=2026-08')).body.feuilles[0];
+    expect(f.heures_theoriques).toBeNull();
+    expect(f.ecart_heures).toBeNull();
+    expect(f.source_theorique).toBeNull();
+  });
+
+  test('le théorique est PERSISTÉ en base (colonne heures_theoriques)', async () => {
+    mocksFeuille({ contrats: [{ weekly_hours: 35 }] });
+    await get('/api/badgeuse/feuilles-temps?periode=2026-08');
+    const ins = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_feuilles_temps/.test(String(c[0])));
+    expect(String(ins[0])).toMatch(/heures_theoriques/);
+    expect(ins[1][2]).toBe(147);
+  });
+
+  test('la requête de contrat vise bien le 1er du mois de la période', async () => {
+    mocksFeuille({ contrats: [{ weekly_hours: 35 }] });
+    await get('/api/badgeuse/feuilles-temps?periode=2026-08');
+    const c = mockQuery.mock.calls.find((x) => /FROM employee_contracts ec/.test(String(x[0])));
+    expect(c[1]).toEqual([5, '2026-08-01']);
+    expect(String(c[0])).toMatch(/start_date <= \$2::date/);
+    expect(String(c[0])).toMatch(/end_date IS NULL OR ec\.end_date >= \$2::date/);
+  });
+
+  test('QA-05 : le taux de pointages complets accompagne la feuille', async () => {
+    mocksFeuille({ contrats: [{ weekly_hours: 35 }] });
+    const f = (await get('/api/badgeuse/feuilles-temps?periode=2026-08')).body.feuilles[0];
+    expect(f).toHaveProperty('taux_pointages_complets_pct');
+    expect(f.taux_pointages_complets_pct).toBeNull(); // aucune journée soumise
+  });
+
+  test('une feuille VALIDÉE rend ses chiffres figés, jamais le recalcul', async () => {
+    // La ligne existante doit être lue en entier : sur une feuille validée,
+    // ce sont ses colonnes qui font foi (heures pointées/théoriques/validées
+    // et dates de validation). Une projection partielle les rendait undefined.
+    installMocks({
+      contrats: [{ weekly_hours: 35 }],
+      feuille: {
+        id: 1, employee_id: 5, periode: '2026-08', statut: 'validee_rh',
+        heures_theoriques: '140.00', heures_pointees: '138.50', heures_validees: '138.50',
+        valide_rh_le: '2026-09-02T09:00:00Z', valide_encadrant_le: '2026-09-01T09:00:00Z',
+      },
+    });
+    const base = mockQuery.getMockImplementation();
+    mockQuery.mockImplementation((sql, params) => {
+      if (/FROM employees e\s+WHERE e\.id IN/.test(String(sql))) return Promise.resolve({ rows: POPULATION });
+      return base(sql, params);
+    });
+
+    const f = (await get('/api/badgeuse/feuilles-temps?periode=2026-08')).body.feuilles[0];
+    expect(f.statut).toBe('validee_rh');
+    expect(f.heures_theoriques).toBe(140);       // figé, PAS le recalcul (147)
+    expect(f.heures_pointees).toBe(138.5);
+    expect(f.heures_validees).toBe(138.5);
+    expect(f.ecart_heures).toBe(-1.5);           // dérivé des chiffres qui font foi
+    expect(f.valide_rh_le).toBeTruthy();         // la date de validation remonte
+  });
+
+  test('la requête de lecture de la feuille existante n\'est pas une projection partielle', async () => {
+    mocksFeuille({ contrats: [{ weekly_hours: 35 }] });
+    await get('/api/badgeuse/feuilles-temps?periode=2026-08');
+    const lecture = mockQuery.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => /SELECT .* FROM badgeuse_feuilles_temps WHERE employee_id/.test(s));
+    expect(lecture).not.toMatch(/SELECT id, statut FROM badgeuse_feuilles_temps/);
   });
 });
 
@@ -522,12 +734,35 @@ describe('validation des feuilles de temps (BO-04)', () => {
   test('409 si la feuille est déjà validée RH', async () => {
     mockQuery.mockImplementation((sql) => {
       const s = String(sql);
-      if (/SELECT id, statut FROM badgeuse_feuilles_temps/.test(s)) return Promise.resolve({ rows: [{ id: 1, statut: 'validee_rh' }] });
+      // La feuille existante est lue en entier (ses chiffres font foi).
+      if (/SELECT \* FROM badgeuse_feuilles_temps WHERE employee_id/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 1, statut: 'validee_rh', heures_pointees: '120.00' }] });
+      }
       if (/UPDATE badgeuse_feuilles_temps/.test(s)) return Promise.resolve({ rows: [] }); // clause statut <> 'validee_rh'
       return Promise.resolve({ rows: [] });
     });
     const r = await post('/api/badgeuse/feuilles-temps/5/valider', 'RH', { periode: '2026-08', niveau: 'rh' });
     expect(r.status).toBe(409);
+  });
+
+  test('la validation RH d\'une feuille déjà validée ENCADRANT reprend ses heures (jamais NaN)', async () => {
+    // Régression : la ligne existante était lue en `id, statut` seulement, donc
+    // `heures_pointees` valait undefined → Number(undefined) = NaN écrit en base.
+    mockQuery.mockImplementation((sql) => {
+      const s = String(sql);
+      if (/SELECT \* FROM badgeuse_feuilles_temps WHERE employee_id/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 1, statut: 'validee_encadrant', heures_pointees: '138.50', heures_theoriques: '140.00' }] });
+      }
+      if (/UPDATE badgeuse_feuilles_temps/.test(s)) {
+        return Promise.resolve({ rows: [{ id: 1, statut: 'validee_rh', heures_validees: '138.50' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await post('/api/badgeuse/feuilles-temps/5/valider', 'RH', { periode: '2026-08', niveau: 'rh' });
+    expect(r.status).toBe(200);
+    const upd = mockQuery.mock.calls.find((c) => /UPDATE badgeuse_feuilles_temps/.test(String(c[0])));
+    expect(upd[1][3]).toBe(138.5);
+    expect(Number.isNaN(upd[1][3])).toBe(false);
   });
 
   test('la dévalidation ADMIN est journalisée', async () => {
@@ -631,6 +866,16 @@ describe('badges (BO-01) et postes (BO-09)', () => {
   test('POST /badges refuse un UID en clair et n\'accepte qu\'un condensat', async () => {
     expect((await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: '04A23B1C' })).status).toBe(400);
     expect((await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: 'a'.repeat(64) })).status).toBe(201);
+  });
+
+  test('QA-12 : POST /badges normalise le condensat en MINUSCULES avant stockage', async () => {
+    // Le poste et la base doivent porter la même casse, sans quoi un badge
+    // légitime deviendrait « orphelin » à la première présentation.
+    const majuscules = 'AB'.repeat(32);
+    const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: majuscules });
+    expect(r.status).toBe(201);
+    const ins = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_badges/.test(String(c[0])));
+    expect(ins[1][1]).toBe(majuscules.toLowerCase());
   });
 
   test('un second badge actif pour le même salarié → 409', async () => {

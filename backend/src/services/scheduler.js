@@ -770,8 +770,53 @@ async function badgeusePurgeRetention(options = {}) {
  * signalé. Un poste hors ligne ne perd aucune heure (le poste met en file et
  * rejoue), mais l'exploitant doit le savoir vite.
  */
+// Anti-spam de l'alerte de silence : au plus UN e-mail par poste par fenêtre.
+// Un poste débranché pendant une semaine ne doit pas produire un e-mail par
+// exécution du job (BO-09).
+const BADGEUSE_ALERTE_FENETRE_HEURES = 6;
+const BADGEUSE_ALERTE_SETTING_KEY = 'badgeuse.supervision_derniere_alerte';
+
+/**
+ * Destinataires de l'alerte BO-09. `badgeuse.supervision_alerte_emails` (liste
+ * séparée par des virgules) fait foi ; à VIDE, repli documenté sur les
+ * administrateurs actifs — sans quoi l'exigence « alerte e-mail » resterait
+ * lettre morte faute de paramétrage, ce qui est précisément le mode d'échec
+ * silencieux que le module proscrit.
+ */
+async function badgeuseAlerteDestinataires() {
+  const { readBadgeuseSetting } = require('../utils/badgeuse-settings');
+  const brut = await readBadgeuseSetting('badgeuse.supervision_alerte_emails');
+  const configures = String(brut || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => x.includes('@'));
+  if (configures.length > 0) return { emails: configures, source: 'parametre' };
+
+  const r = await pool.query(
+    "SELECT email FROM users WHERE role = 'ADMIN' AND is_active = true AND email IS NOT NULL AND email <> ''"
+  );
+  return {
+    emails: r.rows.map((x) => x.email).filter((x) => x && String(x).includes('@')),
+    source: 'admins',
+  };
+}
+
+/**
+ * Supervision des postes de pointage (BO-09) : un poste actif silencieux
+ * au-delà du seuil paramétré est signalé — console, salle Socket.IO
+ * `badgeuse:supervision` (dont l'abonnement client existe, cf. index.js) ET
+ * e-mail via Brevo (service de notification du dépôt).
+ *
+ * GARDE : Brevo non configuré, aucun destinataire, ou envoi en échec ne font
+ * JAMAIS échouer le job — la détection et sa trace priment sur la diffusion.
+ */
 async function checkBadgeuseDevices() {
-  const SILENCE_MINUTES = 15;
+  const { readBadgeuseSetting, writeSetting } = require('../utils/badgeuse-settings');
+  let silenceMinutes = 15;
+  try {
+    silenceMinutes = Math.max(1, Number(await readBadgeuseSetting('badgeuse.supervision_silence_minutes')) || 15);
+  } catch (_) { /* défaut documenté */ }
+
   try {
     const r = await pool.query(
       `SELECT id, code, libelle, dernier_heartbeat
@@ -779,22 +824,88 @@ async function checkBadgeuseDevices() {
        WHERE actif = true
          AND (dernier_heartbeat IS NULL OR dernier_heartbeat < NOW() - ($1 || ' minutes')::interval)
        ORDER BY code`,
-      [String(SILENCE_MINUTES)]
+      [String(silenceMinutes)]
     );
-    if (r.rows.length > 0) {
-      const codes = r.rows.map((x) => x.code).join(', ');
-      console.warn(`[SCHEDULER] Badgeuse — ${r.rows.length} poste(s) sans remontée depuis > ${SILENCE_MINUTES} min : ${codes}`);
-      const io = global.__io || null;
-      if (io) {
-        io.to('badgeuse:supervision').emit('badgeuse:device-offline', {
-          silence_minutes: SILENCE_MINUTES,
-          postes: r.rows.map((x) => ({
-            id: x.id, code: x.code, libelle: x.libelle, dernier_heartbeat: x.dernier_heartbeat,
-          })),
-        });
-      }
+    if (r.rows.length === 0) return { items: 0, silence_minutes: silenceMinutes, emails: 0 };
+
+    const codes = r.rows.map((x) => x.code).join(', ');
+    console.warn(`[SCHEDULER] Badgeuse — ${r.rows.length} poste(s) sans remontée depuis > ${silenceMinutes} min : ${codes}`);
+
+    const io = global.__io || null;
+    if (io) {
+      io.to('badgeuse:supervision').emit('badgeuse:device-offline', {
+        silence_minutes: silenceMinutes,
+        postes: r.rows.map((x) => ({
+          id: x.id, code: x.code, libelle: x.libelle, dernier_heartbeat: x.dernier_heartbeat,
+        })),
+      });
     }
-    return { items: r.rows.length, silence_minutes: SILENCE_MINUTES };
+
+    // ── Alerte e-mail (BO-09), anti-spam par poste ──
+    let envoyes = 0;
+    let emailStatut = 'ok';
+    try {
+      let derniere = {};
+      try {
+        const brut = await readBadgeuseSetting(BADGEUSE_ALERTE_SETTING_KEY);
+        derniere = brut ? JSON.parse(brut) : {};
+        if (!derniere || typeof derniere !== 'object') derniere = {};
+      } catch (_) { derniere = {}; }
+
+      const fenetreMs = BADGEUSE_ALERTE_FENETRE_HEURES * 3600 * 1000;
+      const maintenant = Date.now();
+      const aAlerter = r.rows.filter((x) => {
+        const precedente = Date.parse(derniere[x.code] || '');
+        return !Number.isFinite(precedente) || (maintenant - precedente) >= fenetreMs;
+      });
+
+      if (aAlerter.length === 0) {
+        emailStatut = 'anti_spam';
+      } else {
+        const { emails, source } = await badgeuseAlerteDestinataires();
+        if (emails.length === 0) {
+          emailStatut = 'aucun_destinataire';
+          console.warn('[SCHEDULER] Badgeuse — alerte non envoyée : aucun destinataire (badgeuse.supervision_alerte_emails vide et aucun ADMIN avec e-mail)');
+        } else {
+          const { sendNotification } = require('./notification');
+          const lignes = aAlerter.map((x) => `- ${x.libelle || x.code} (${x.code}) : ${x.dernier_heartbeat ? `dernière remontée le ${new Date(x.dernier_heartbeat).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })}` : 'aucune remontée depuis l\'appairage'}`).join('\n');
+          const template = {
+            type: 'email',
+            subject: `SOLIDATA — ${aAlerter.length} poste(s) de pointage sans remontée`,
+            body: `Les postes de pointage suivants n'ont plus donné signe de vie depuis plus de ${silenceMinutes} minutes :\n\n${lignes}\n\nAucun pointage n'est perdu : les postes conservent leur file locale et la remonteront au rétablissement. Vérifiez l'alimentation et le réseau du site concerné.\n\nSupervision : https://solidata.online/temps-presence`,
+          };
+          for (const email of emails) {
+            try {
+              await sendNotification(template, email, null, {});
+              envoyes += 1;
+            } catch (e) {
+              console.error(`[SCHEDULER] Badgeuse — envoi d'alerte impossible à ${email} : ${e.message}`);
+            }
+          }
+          if (envoyes > 0) {
+            for (const x of aAlerter) derniere[x.code] = new Date(maintenant).toISOString();
+            // On ne conserve que les postes encore connus (le JSON ne gonfle pas).
+            const codesConnus = new Set(r.rows.map((x) => x.code));
+            const propre = {};
+            for (const [code, iso] of Object.entries(derniere)) {
+              if (codesConnus.has(code)) propre[code] = iso;
+            }
+            await writeSetting(BADGEUSE_ALERTE_SETTING_KEY, JSON.stringify(propre));
+          }
+          if (source === 'admins') {
+            console.warn('[SCHEDULER] Badgeuse — alerte envoyée aux ADMIN (repli) : renseignez badgeuse.supervision_alerte_emails pour cibler les destinataires');
+          }
+        }
+      }
+    } catch (e) {
+      // La diffusion ne fait jamais échouer la détection.
+      emailStatut = 'erreur';
+      console.error('[SCHEDULER] Badgeuse — alerte e-mail en échec :', e.message);
+    }
+
+    return {
+      items: r.rows.length, silence_minutes: silenceMinutes, emails: envoyes, email_statut: emailStatut,
+    };
   } catch (err) {
     console.error('[SCHEDULER] Erreur checkBadgeuseDevices:', err.message);
     return { items: 0 };

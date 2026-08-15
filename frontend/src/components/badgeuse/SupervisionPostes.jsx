@@ -1,8 +1,14 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Radio, Plus, KeyRound, ShieldCheck, RefreshCw, Copy, Check, Thermometer, Clock3, Database, ListOrdered } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import io from 'socket.io-client';
+import { Radio, Plus, KeyRound, ShieldCheck, RefreshCw, Copy, Check, Thermometer, Clock3, Database, ListOrdered, AlertTriangle } from 'lucide-react';
 import api from '../../services/api';
 import { LoadingSpinner, ErrorState, EmptyState, Modal, ConfirmDialog } from '../../components';
 import { apiErr, fmtDepuis, CIBLE_DEVICE_LABELS, EnLigneBadge, isDeviceOnline } from './badgeuseShared';
+
+// Cadence de rafraîchissement de la supervision (BO-09). Le temps réel passe
+// par Socket.IO ; ce sondage est le filet de sécurité qui garantit que l'écran
+// ne reste jamais figé sur un instantané, même socket coupée.
+const REFRESH_MS = 60 * 1000;
 
 // Bouton « copier » utilitaire, réutilisé dans le panneau de clés à usage unique.
 function CopyButton({ value, label }) {
@@ -221,11 +227,19 @@ function VerifyChainResult({ device, onClose }) {
 
 // ── Carte poste ──────────────────────────────────────────────────────────────
 function DeviceCard({ device, isAdmin, onRegenerate, onVerify }) {
+  // Noms de champs du CONTRAT_API_DEVICE §2.5 (`derive_estimee_sec`,
+  // `temperature_cpu`, `disque_libre_mo`) — ils étaient lus sous des noms qui
+  // n'existent nulle part côté serveur, si bien que toute la télémétrie
+  // s'affichait « — ». Les alias historiques restent en repli.
   const hb = device.heartbeat_info || {};
-  const derive = hb.derive_horloge_sec ?? hb.derive_sec ?? hb.clock_drift_sec;
-  const temperature = hb.temperature_c ?? hb.temperature;
+  const derive = hb.derive_estimee_sec ?? hb.derive_horloge_sec ?? hb.derive_sec;
+  const temperature = hb.temperature_cpu ?? hb.temperature_c ?? hb.temperature;
   const tailleFile = hb.taille_file ?? hb.file_attente ?? hb.queue_size;
-  const disque = hb.disque_pct ?? hb.espace_disque_pct ?? hb.disk_pct;
+  const disqueMo = hb.disque_libre_mo ?? hb.espace_libre_mo;
+  const throttled = hb.throttled === true;
+  // Alerte remontée par le poste (QA-02) : à plat dans la réponse, sinon dans
+  // le heartbeat brut.
+  const alerte = device.alerte ?? hb.alerte ?? null;
   const enLigne = isDeviceOnline(device);
 
   return (
@@ -238,6 +252,15 @@ function DeviceCard({ device, isAdmin, onRegenerate, onVerify }) {
         <EnLigneBadge enLigne={enLigne} />
       </div>
 
+      {/* Alerte émise par le poste lui-même (PST-07 / QA-02) : file non
+          purgeable, éléments refusés, lecteur débranché… Jamais silencieuse. */}
+      {alerte && (
+        <div role="alert" className="flex items-start gap-1.5 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-2 py-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 mt-px flex-shrink-0" aria-hidden="true" />
+          <span className="break-words">{alerte}</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-slate-600">
         <div className="flex items-center gap-1"><Clock3 className="w-3.5 h-3.5 text-slate-400" /> Dernière remontée</div>
         <div className="text-right text-slate-500">{device.dernier_heartbeat ? fmtDepuis(device.dernier_heartbeat) : 'jamais'}</div>
@@ -248,11 +271,13 @@ function DeviceCard({ device, isAdmin, onRegenerate, onVerify }) {
         <div className="flex items-center gap-1"><Clock3 className="w-3.5 h-3.5 text-slate-400" /> Dérive horloge</div>
         <div className={`text-right ${derive != null && Math.abs(Number(derive)) > 2 ? 'text-red-600 font-medium' : 'text-slate-500'}`}>{derive != null ? `${derive} s` : '—'}</div>
         <div className="flex items-center gap-1"><Thermometer className="w-3.5 h-3.5 text-slate-400" /> Température</div>
-        <div className="text-right text-slate-500">{temperature != null ? `${temperature} °C` : '—'}</div>
+        <div className={`text-right ${throttled ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
+          {temperature != null ? `${temperature} °C` : '—'}{throttled ? ' (throttling)' : ''}
+        </div>
         <div className="flex items-center gap-1"><ListOrdered className="w-3.5 h-3.5 text-slate-400" /> File d'attente</div>
-        <div className="text-right text-slate-500">{tailleFile != null ? tailleFile : '—'}</div>
-        <div className="flex items-center gap-1"><Database className="w-3.5 h-3.5 text-slate-400" /> Disque</div>
-        <div className="text-right text-slate-500">{disque != null ? `${disque} %` : '—'}</div>
+        <div className={`text-right ${Number(tailleFile) > 0 ? 'text-amber-700 font-medium' : 'text-slate-500'}`}>{tailleFile != null ? tailleFile : '—'}</div>
+        <div className="flex items-center gap-1"><Database className="w-3.5 h-3.5 text-slate-400" /> Disque libre</div>
+        <div className="text-right text-slate-500">{disqueMo != null ? `${Math.round(Number(disqueMo) / 1024)} Go` : '—'}</div>
       </div>
 
       <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
@@ -272,24 +297,75 @@ function DeviceCard({ device, isAdmin, onRegenerate, onVerify }) {
 // ── Onglet Supervision (BO-09) ────────────────────────────────────────────────
 export default function SupervisionPostes({ isAdmin }) {
   const [devices, setDevices] = useState([]);
+  const [silenceMinutes, setSilenceMinutes] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [majLe, setMajLe] = useState(null);
+  const [tempsReel, setTempsReel] = useState(false);
   const [appairerOpen, setAppairerOpen] = useState(false);
   const [regenDevice, setRegenDevice] = useState(null);
   const [verifyDevice, setVerifyDevice] = useState(null);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    api.get('/badgeuse/devices')
+  // `silencieux` sert au rendu ; `load` doit rester stable pour le timer et la
+  // socket — d'où la référence plutôt qu'une dépendance.
+  const loadRef = useRef(null);
+
+  const load = useCallback(({ silencieux = false } = {}) => {
+    if (!silencieux) setLoading(true);
+    return api.get('/badgeuse/devices')
       .then((r) => {
         const d = r.data;
         setDevices(Array.isArray(d) ? d : (d.devices || d.rows || d.items || []));
+        if (d && d.silence_minutes != null) setSilenceMinutes(Number(d.silence_minutes));
+        setMajLe(new Date());
         setError(null);
       })
-      .catch((err) => setError(apiErr(err, 'Chargement des postes impossible.')))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        // Un rafraîchissement de fond en échec ne doit pas effacer l'écran :
+        // l'erreur ne remonte que pour le premier chargement.
+        if (!silencieux) setError(apiErr(err, 'Chargement des postes impossible.'));
+      })
+      .finally(() => { if (!silencieux) setLoading(false); });
   }, []);
+  loadRef.current = load;
+
   useEffect(() => { load(); }, [load]);
+
+  // ── Rafraîchissement automatique (BO-09) ──
+  // La page ne peut plus rester figée sur l'instantané du montage : sondage
+  // toutes les 60 s, nettoyé au démontage.
+  useEffect(() => {
+    const timer = setInterval(() => loadRef.current({ silencieux: true }), REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  // ── Temps réel (Socket.IO) ──
+  // Le serveur émettait déjà « badgeuse:pointage » et « badgeuse:device-offline »
+  // vers la salle `badgeuse:supervision` — sans aucun abonné (QA-04). On la
+  // rejoint ici, en reprenant le pattern de VakLive. En cas d'indisponibilité
+  // de la socket, le sondage ci-dessus suffit : la supervision n'en dépend pas.
+  useEffect(() => {
+    // Clé réelle du dépôt : « accessToken » (cf. VakLive) — « token » n'existe
+    // pas et laisserait la socket non authentifiée.
+    const token = localStorage.getItem('accessToken');
+    if (!token) return undefined;
+    let socket;
+    try {
+      socket = io(window.location.origin, { auth: { token } });
+    } catch {
+      return undefined;
+    }
+    const rafraichir = () => loadRef.current({ silencieux: true });
+    socket.on('connect', () => { setTempsReel(true); socket.emit('badgeuse:join-supervision'); });
+    socket.on('disconnect', () => setTempsReel(false));
+    socket.on('connect_error', () => setTempsReel(false));
+    socket.on('badgeuse:pointage', rafraichir);
+    socket.on('badgeuse:device-offline', rafraichir);
+    return () => {
+      try { socket.emit('badgeuse:leave-supervision'); } catch { /* socket déjà fermée */ }
+      socket.disconnect();
+    };
+  }, []);
 
   const [sites, setSites] = useState([]);
   useEffect(() => {
@@ -306,14 +382,28 @@ export default function SupervisionPostes({ isAdmin }) {
   }, [devices, sites]);
 
   if (loading) return <LoadingSpinner size="lg" message="Chargement des postes…" />;
-  if (error) return <ErrorState variant="card" title="Supervision indisponible" message={error} onRetry={load} />;
+  if (error) return <ErrorState variant="card" title="Supervision indisponible" message={error} onRetry={() => load()} />;
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Radio className="w-4 h-4 text-teal-600" /> Postes de pointage</h3>
+        <div>
+          <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+            <Radio className="w-4 h-4 text-teal-600" /> Postes de pointage
+            {tempsReel && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> temps réel
+              </span>
+            )}
+          </h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Actualisation automatique toutes les minutes
+            {majLe ? ` — dernière à ${majLe.toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' })}` : ''}
+            {silenceMinutes != null ? ` · un poste est déclaré hors ligne après ${silenceMinutes} min de silence` : ''}
+          </p>
+        </div>
         <div className="flex items-center gap-2">
-          <button onClick={load} className="text-xs text-slate-400 hover:text-teal-700 inline-flex items-center gap-1" title="Actualiser">
+          <button onClick={() => load()} className="text-xs text-slate-400 hover:text-teal-700 inline-flex items-center gap-1" title="Actualiser">
             <RefreshCw className="w-3.5 h-3.5" /> Actualiser
           </button>
           {isAdmin && (

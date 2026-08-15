@@ -102,8 +102,17 @@ function CorrectionModal({ open, onClose, employees, prefill, onDone }) {
         payload.horodatage_corrige = `${form.date}T${form.heure}:00`;
         payload.sens_corrige = form.sens_corrige;
       }
-      await api.post('/badgeuse/corrections', payload);
+      const res = await api.post('/badgeuse/corrections', payload);
       toast.success('Correction enregistrée.');
+      // Délai de signalement dépassé (NOTE_RH §5.1) : la correction EST
+      // enregistrée — l'avertissement est informatif, jamais bloquant.
+      if (res?.data?.avertissement === 'hors_delai_signalement') {
+        const delai = res.data.regularisation_delai_jours;
+        toast.warning(
+          `Régularisation tardive : ${res.data.jours_ouvres_ecoules} jours ouvrés se sont écoulés depuis la date corrigée`
+          + `${delai ? `, au-delà du délai de signalement de ${delai} jours ouvrés` : ''}. La correction est bien enregistrée.`
+        );
+      }
       onDone();
     } catch (err) {
       const status = err?.response?.status;

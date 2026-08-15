@@ -146,6 +146,58 @@ describe('CONTRAT_INTEGRITE — genèse, charge canonique et chaînage', () => {
     expect(canonical.split('|')[3]).toBe('-');
   });
 
+  // ══ QA-08 — la charge canonique JS est aussi stricte que le Python ══
+  describe('QA-08 — champs vides et séparateur refusés (parité avec chain.canonical)', () => {
+    const BASE = {
+      uuid: '11111111-2222-4333-8444-555555555555', device_code: 'LH-P1', sequence_device: 1,
+      uid_hmac: UID_HMAC, horodatage_utc: '2026-08-17T06:58:12.031Z', sens: 'entree', source: 'badge',
+    };
+
+    test.each(['uuid', 'device_code', 'sens', 'source'])('champ « %s » vide → erreur', (champ) => {
+      expect(() => canonicalPointage({ ...BASE, [champ]: '' })).toThrow(new RegExp(champ));
+      expect(() => canonicalPointage({ ...BASE, [champ]: null })).toThrow(new RegExp(champ));
+    });
+
+    test('séquence illisible → erreur (et non la chaîne « NaN »)', () => {
+      expect(() => canonicalPointage({ ...BASE, sequence_device: null })).toThrow(/sequence_device/);
+      expect(() => canonicalPointage({ ...BASE, sequence_device: 'abc' })).toThrow(/sequence_device/);
+      // La séquence 0 est un entier VALIDE, elle ne doit pas être confondue
+      // avec une absence.
+      expect(canonicalPointage({ ...BASE, sequence_device: 0 }).split('|')[2]).toBe('0');
+    });
+
+    test('horodatage illisible → erreur', () => {
+      expect(() => canonicalPointage({ ...BASE, horodatage_utc: 'pas une date' })).toThrow(/horodatage_utc/);
+    });
+
+    test.each(['uuid', 'device_code', 'sens', 'source'])('champ « %s » contenant « | » → erreur', (champ) => {
+      expect(() => canonicalPointage({ ...BASE, [champ]: 'a|b' })).toThrow(/séparateur/);
+    });
+
+    test('AMBIGUÏTÉ CANONIQUE : les deux découpages fautifs sont refusés, jamais confondus', () => {
+      // Sans la garde, `uuid="a|b", device_code="c"` et `uuid="a",
+      // device_code="b|c"` produisaient la MÊME charge canonique.
+      expect(() => canonicalPointage({ ...BASE, uuid: 'a|b', device_code: 'c' })).toThrow();
+      expect(() => canonicalPointage({ ...BASE, uuid: 'a', device_code: 'b|c' })).toThrow();
+    });
+
+    test('le pointage sans badge (« - ») reste VALIDE — jamais confondu avec un champ vide', () => {
+      // QA-01 : `-` est la forme canonique de l'absence de badge, pas un vide.
+      expect(canonicalPointage({ ...BASE, uid_hmac: '-' }).split('|')[3]).toBe('-');
+      expect(canonicalPointage({ ...BASE, uid_hmac: null }).split('|')[3]).toBe('-');
+      expect(canonicalPointage({ ...BASE, uid_hmac: '' }).split('|')[3]).toBe('-');
+      // Les trois formes produisent la MÊME charge, donc le même condensat.
+      const c1 = canonicalPointage({ ...BASE, uid_hmac: '-' });
+      const c2 = canonicalPointage({ ...BASE, uid_hmac: null });
+      expect(chainHash(GENESIS_LH_P1, c1)).toBe(chainHash(GENESIS_LH_P1, c2));
+    });
+
+    test('le vecteur du contrat reste inchangé (aucune régression de format)', () => {
+      expect(canonicalPointage(BASE)).toBe(CANONICAL_VECTEUR);
+      expect(chainHash(GENESIS_LH_P1, canonicalPointage(BASE))).toBe(CHAIN_VECTEUR);
+    });
+  });
+
   test('sequence_device est en base 10 sans zéros de tête', () => {
     const canonical = canonicalPointage({
       uuid: 'u', device_code: 'D', sequence_device: '007',

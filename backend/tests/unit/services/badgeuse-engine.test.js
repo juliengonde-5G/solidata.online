@@ -82,18 +82,188 @@ describe('journée nominale et déduction de pause (NOTE_RH §3)', () => {
   });
 });
 
-describe('arrondi à l\'avantage du salarié — prouvé dans les DEUX sens', () => {
-  test('l\'entrée est arrondie vers le BAS et la sortie vers le HAUT', () => {
-    // 08:02 → 08:00 (2 min gagnées) ; 12:03 → 12:05 (2 min gagnées).
+describe('QA-06 — la déduction de pause est MONOTONE (ADR-0002 addendum §1)', () => {
+  // Journée d'une seule paire (pause NON badgée), démarrée à 08:00 Paris.
+  const journeeDe = (minutes) => engine.computeDay([
+    ev('2026-08-17T06:00:00Z', 'entree'),
+    ev(new Date(Date.parse('2026-08-17T06:00:00Z') + minutes * 60000).toISOString(), 'sortie'),
+  ], PARAMS, { date: '2026-08-17' });
+
+  // Les 4 points chiffrés du rapport QA §4.4 — la « zone morte » de 45 min
+  // (]6 h 00 ; 6 h 45]) doit avoir disparu.
+  test.each([
+    [360, 360], // 6 h 00 pile : sous le seuil, aucune déduction
+    [361, 360], // 6 h 01 : AVANT le correctif, 316 min (44 min de moins que 6 h 00)
+    [405, 360], // 6 h 45 : déduction plafonnée au dépassement
+    [420, 375], // 7 h 00 : déduction complète possible sans passer sous le seuil
+    [540, 495], // 9 h 00 : régime nominal, 45 min pleines
+  ])('%i minutes travaillées → %i minutes payées', (brutes, payees) => {
+    expect(journeeDe(brutes).minutes).toBe(payees);
+  });
+
+  test('la fonction de paie est CROISSANTE minute par minute autour du seuil', () => {
+    let precedent = -1;
+    for (let m = 350; m <= 430; m += 1) {
+      const payees = journeeDe(m).minutes;
+      expect(payees).toBeGreaterThanOrEqual(precedent);
+      precedent = payees;
+    }
+  });
+
+  test('la déduction ne fait JAMAIS passer la journée sous le seuil', () => {
+    for (let m = 361; m <= 420; m += 1) {
+      expect(journeeDe(m).minutes).toBeGreaterThanOrEqual(360);
+    }
+  });
+
+  test('avec pause badgée (2 paires), aucune déduction — règle inchangée', () => {
+    const j = engine.computeDay([
+      ev('2026-08-17T06:00:00Z', 'entree'), ev('2026-08-17T10:00:00Z', 'sortie'),
+      ev('2026-08-17T10:30:00Z', 'entree'), ev('2026-08-17T12:31:00Z', 'sortie'),
+    ], PARAMS, { date: '2026-08-17' });
+    expect(j.pause_deduite_minutes).toBe(0);
+    expect(j.minutes).toBe(361);
+  });
+});
+
+describe('QA-05 — pointages incomplets et taux de pointages complets', () => {
+  const journeeLongue2Pointages = [ev('2026-08-17T06:00:00Z', 'entree'), ev('2026-08-17T15:00:00Z', 'sortie')];
+  const journeeLongue4Pointages = [
+    ev('2026-08-18T06:00:00Z', 'entree'), ev('2026-08-18T10:00:00Z', 'sortie'),
+    ev('2026-08-18T11:00:00Z', 'entree'), ev('2026-08-18T15:00:00Z', 'sortie'),
+  ];
+
+  test('journée > seuil de pause avec 2 pointages sur 4 attendus → anomalie `pointages_incomplets`', () => {
+    const jours = engine.computeDays(journeeLongue2Pointages, PARAMS);
+    const anomalies = engine.detectAnomalies(jours, PARAMS, { employee_id: 5 });
+    const a = anomalies.find((x) => x.type === 'pointages_incomplets');
+    expect(a).toMatchObject({ employee_id: 5, date: '2026-08-17', severite: 'info' });
+    expect(a.detail).toContain('4 attendus');
+  });
+
+  test('journée > seuil avec les 4 pointages attendus → aucune anomalie', () => {
+    const jours = engine.computeDays(journeeLongue4Pointages, PARAMS);
+    expect(engine.detectAnomalies(jours, PARAMS, {}).map((x) => x.type))
+      .not.toContain('pointages_incomplets');
+  });
+
+  test('demi-journée SOUS le seuil de pause : jamais signalée (aucune règle inventée)', () => {
+    const jours = engine.computeDays([ev('2026-08-17T06:00:00Z', 'entree'), ev('2026-08-17T10:00:00Z', 'sortie')], PARAMS);
+    expect(engine.detectAnomalies(jours, PARAMS, {}).map((x) => x.type))
+      .not.toContain('pointages_incomplets');
+  });
+
+  test('le seuil vient du PARAMÈTRE : à pointages_par_jour = 2, la journée redevient complète', () => {
+    const jours = engine.computeDays(journeeLongue2Pointages, PARAMS);
+    expect(engine.detectAnomalies(jours, { ...PARAMS, pointages_par_jour: 2 }, {}).map((x) => x.type))
+      .not.toContain('pointages_incomplets');
+    // Paramètre absent → aucun signalement (règle non arbitrée = pas de règle).
+    expect(engine.detectAnomalies(jours, { ...PARAMS, pointages_par_jour: 0 }, {}).map((x) => x.type))
+      .not.toContain('pointages_incomplets');
+  });
+
+  test('computeMonth expose le taux de pointages complets (indicateur NOTE_RH §9)', () => {
+    const jours = engine.computeDays([...journeeLongue2Pointages, ...journeeLongue4Pointages], PARAMS);
+    const mois = engine.computeMonth(jours, PARAMS, { periode: '2026-08' });
+    expect(mois.jours_pointage_attendu).toBe(2);
+    expect(mois.jours_pointage_complet).toBe(1);
+    expect(mois.taux_pointages_complets_pct).toBe(50);
+  });
+
+  test('aucune journée soumise → taux null, JAMAIS 0 %', () => {
+    const jours = engine.computeDays([ev('2026-08-17T06:00:00Z', 'entree'), ev('2026-08-17T09:00:00Z', 'sortie')], PARAMS);
+    const mois = engine.computeMonth(jours, PARAMS, { periode: '2026-08' });
+    expect(mois.jours_pointage_attendu).toBe(0);
+    expect(mois.taux_pointages_complets_pct).toBeNull();
+  });
+});
+
+describe('QA-03 — heures théoriques du mois (ADR-0002 addendum §3)', () => {
+  test('jours ouvrés du mois : lun→ven, même définition que le moteur ETP', () => {
+    expect(engine.joursOuvresDuMois('2026-08')).toBe(21); // août 2026
+    expect(engine.joursOuvresDuMois('2026-02')).toBe(20); // février 2026
+    expect(engine.joursOuvresDuMois('2024-02')).toBe(21); // bissextile
+    expect(engine.joursOuvresDuMois('pas-une-periode')).toBeNull();
+    expect(engine.joursOuvresDuMois('2026-13')).toBeNull();
+  });
+
+  test('35 h hebdo × 21 jours ouvrés ÷ 5 = 147 h (août 2026)', () => {
+    expect(engine.heuresTheoriquesMois(35, '2026-08')).toBe(147);
+  });
+
+  test('temps partiel : 26 h hebdo → 109,2 h, arrondi 2 décimales', () => {
+    expect(engine.heuresTheoriquesMois(26, '2026-08')).toBe(109.2);
+    expect(engine.heuresTheoriquesMois(28, '2026-02')).toBe(112);
+  });
+
+  test('aucune heure contractuelle connue → null, JAMAIS 0 (« jamais de valeur inventée »)', () => {
+    expect(engine.heuresTheoriquesMois(null, '2026-08')).toBeNull();
+    expect(engine.heuresTheoriquesMois(undefined, '2026-08')).toBeNull();
+    expect(engine.heuresTheoriquesMois(0, '2026-08')).toBeNull();
+    expect(engine.heuresTheoriquesMois('', '2026-08')).toBeNull();
+    expect(engine.heuresTheoriquesMois(35, 'invalide')).toBeNull();
+  });
+
+  test('computeMonth calcule l\'écart dès que le théorique est fourni', () => {
+    const jours = engine.computeDays([ev('2026-08-17T06:00:00Z', 'entree'), ev('2026-08-17T10:00:00Z', 'sortie')], PARAMS);
+    const mois = engine.computeMonth(jours, PARAMS, { periode: '2026-08', heures_theoriques: engine.heuresTheoriquesMois(35, '2026-08') });
+    expect(mois.heures_theoriques).toBe(147);
+    expect(mois.ecart_heures).toBe(-143);
+  });
+});
+
+describe('QA-05 — délai de signalement en jours OUVRÉS', () => {
+  test('compte les jours ouvrés, départ exclu et arrivée incluse', () => {
+    // Lundi 17/08/2026 → vendredi 21/08 = 4 jours ouvrés.
+    expect(engine.joursOuvresEcoules('2026-08-17', '2026-08-21')).toBe(4);
+    // Le week-end ne compte pas : vendredi 21 → lundi 24 = 1 jour ouvré.
+    expect(engine.joursOuvresEcoules('2026-08-21', '2026-08-24')).toBe(1);
+    // Même jour, ou arrivée antérieure → 0, jamais un nombre négatif.
+    expect(engine.joursOuvresEcoules('2026-08-17', '2026-08-17')).toBe(0);
+    expect(engine.joursOuvresEcoules('2026-08-21', '2026-08-17')).toBe(0);
+  });
+
+  test('un mois plus tard dépasse largement le délai de 5 jours ouvrés', () => {
+    expect(engine.joursOuvresEcoules('2026-07-17', '2026-08-17')).toBeGreaterThan(5);
+  });
+
+  test('borne illisible → null (aucun avertissement inventé)', () => {
+    expect(engine.joursOuvresEcoules('pas-une-date', '2026-08-17')).toBeNull();
+    expect(engine.joursOuvresEcoules('2026-08-17', null)).toBeNull();
+  });
+});
+
+describe('arrondi : entrée au pas INFÉRIEUR, sortie AU RÉEL (ADR-0002 add. §2, QA-10)', () => {
+  test('l\'entrée recule au pas inférieur, la sortie est comptée telle qu\'elle a été badgée', () => {
+    // Exemple chiffré de l'addendum : entrée 08:03 au pas de 5 min → 08:00 ;
+    // sortie 16:58 → 16:58 (AUCUN arrondi, lettre de NOTE_RH §3).
+    const j = engine.computeDay(
+      [ev('2026-08-17T06:03:00Z', 'entree'), ev('2026-08-17T14:58:00Z', 'sortie')],
+      PARAMS, { date: '2026-08-17' }
+    );
+    expect(j.paires[0].entree_comptee_utc).toBe('2026-08-17T06:00:00.000Z');
+    expect(j.paires[0].sortie_comptee_utc).toBe('2026-08-17T14:58:00.000Z');
+    // 8 h 55 réelles → 8 h 58 comptées avant pause : l'arrondi d'entrée ne
+    // retire jamais de temps, et la sortie n'en ajoute plus.
+    expect(j.minutes_brutes).toBe(538);
+  });
+
+  test('QA-10 : la sortie n\'est JAMAIS remontée au pas supérieur', () => {
+    // Régression du défaut : 12:03 était compté 12:05 (+2 min offertes).
     const j = engine.computeDay(
       [ev('2026-08-17T06:02:00Z', 'entree'), ev('2026-08-17T10:03:00Z', 'sortie')],
       PARAMS, { date: '2026-08-17' }
     );
     expect(j.paires[0].entree_comptee_utc).toBe('2026-08-17T06:00:00.000Z');
-    expect(j.paires[0].sortie_comptee_utc).toBe('2026-08-17T10:05:00.000Z');
-    // 4 h 01 réelles → 4 h 05 comptées : l'arrondi ne retire JAMAIS de temps.
-    expect(j.minutes).toBe(245);
+    expect(j.paires[0].sortie_comptee_utc).toBe('2026-08-17T10:03:00.000Z');
+    expect(j.minutes).toBe(243);
     expect(j.regles_appliquees).toContain('arrondi');
+  });
+
+  test('arrondirInstant : la borne « sortie » est l\'identité en grille arbitrée', () => {
+    const ms = Date.parse('2026-08-17T10:03:00Z');
+    expect(engine.arrondirInstant(ms, 'sortie', PARAMS)).toBe(ms);
+    expect(engine.arrondirInstant(ms, 'entree', PARAMS)).toBe(Date.parse('2026-08-17T10:00:00Z'));
   });
 
   test('l\'arrondi ne peut jamais réduire le temps compté (invariant)', () => {
@@ -409,14 +579,17 @@ describe('anomalies et plage d\'acceptation', () => {
 });
 
 describe('ADR-0002 — AUCUNE règle de gestion en dur dans le moteur', () => {
-  const EVENTS = [ev('2026-08-17T06:00:00Z', 'entree'), ev('2026-08-17T15:07:00Z', 'sortie')];
+  // Entrée à 08:07 (hors pas) : la sortie étant désormais comptée au réel
+  // (QA-10), c'est la borne d'ENTRÉE qui témoigne du pas d'arrondi.
+  const EVENTS = [ev('2026-08-17T06:07:00Z', 'entree'), ev('2026-08-17T15:07:00Z', 'sortie')];
 
   test('changer CHAQUE paramètre change le résultat (aucune constante figée)', () => {
     const reference = engine.computeDay(EVENTS, PARAMS, { date: '2026-08-17' });
 
-    // Pas d'arrondi : 15 min → 5 min change la borne de sortie comptée.
+    // Pas d'arrondi : 15 min → 5 min change la borne d'ENTRÉE comptée
+    // (08:07 → 08:05 au pas de 5 ; → 08:00 au pas de 15).
     expect(engine.computeDay(EVENTS, { ...PARAMS, arrondi_minutes: 15 }, { date: '2026-08-17' })
-      .paires[0].sortie_comptee_utc).not.toBe(reference.paires[0].sortie_comptee_utc);
+      .paires[0].entree_comptee_utc).not.toBe(reference.paires[0].entree_comptee_utc);
 
     // Durée de pause.
     expect(engine.computeDay(EVENTS, { ...PARAMS, pause_deduite_minutes: 30 }, { date: '2026-08-17' })
@@ -453,7 +626,7 @@ describe('ADR-0002 — AUCUNE règle de gestion en dur dans le moteur', () => {
 
   test('une grille de paramètres VIDE ne fait pas planter le moteur (dégradation honnête)', () => {
     const j = engine.computeDay(EVENTS, {}, { date: '2026-08-17' });
-    expect(j.minutes_brutes).toBe(547); // décompte au réel, aucune règle appliquée
+    expect(j.minutes_brutes).toBe(540); // décompte au réel, aucune règle appliquée
     expect(j.pause_deduite_minutes).toBe(0);
     expect(j.regles_appliquees).toHaveLength(0);
   });
