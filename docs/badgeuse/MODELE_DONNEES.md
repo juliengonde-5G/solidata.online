@@ -102,6 +102,23 @@ Règles applicatives : un encadrant ne corrige jamais **ses propres** pointages 
 salarié cible est lié à `req.user` via `employees.user_id`) ; aucune correction sur une
 période dont la feuille de temps est `validee_rh` (409, NOTE_RH §5.2).
 
+**Verrou de période — DOUBLE (revue Codex C2).** Une `modification` qui déplace un pointage
+à travers une frontière de mois touche **deux** périodes : celle qu'elle vide (période du
+pointage d'origine) et celle qu'elle remplit (période de `horodatage_corrige`). Le refus
+409 tombe dès que **l'une** des deux est `validee_rh` — sans quoi un mois clos serait
+modifié « par l'autre bout ». Les deux périodes sont lues en une requête paramétrée
+(`periode = ANY($2)`) ; seules les périodes **connues** sont vérifiées (un pointage
+d'origine introuvable ne fait pas inventer de période — la clé étrangère tranche à
+l'insertion). La réponse 409 porte `periodes_concernees`.
+
+**Appartenance à une période.** Un événement appartient à la période de son horodatage
+**effectif** (corrigé), jamais de son horodatage brut : le calcul charge les pointages de la
+fenêtre **plus** ceux qu'une correction y fait entrer, charge les corrections de la fenêtre
+**plus** celles des pointages chargés, puis restreint les événements effectifs à la fenêtre
+(`badgeuse-engine.filterEventsToWindow`). Une heure déplacée est ainsi comptée **une** fois,
+du bon côté de la frontière — et ni perdue par la période de destination, ni comptée deux
+fois.
+
 ### `badgeuse_feuilles_temps` (BO-04)
 `id SERIAL, employee_id INTEGER NOT NULL REFERENCES employees(id), periode VARCHAR(7) NOT
 NULL ('YYYY-MM'), heures_theoriques NUMERIC(6,2), heures_pointees NUMERIC(6,2),
@@ -197,6 +214,19 @@ désormais le trio complet de BO-04 et l'indicateur NOTE_RH §9 :
 et `jours_pointage_complet` (même définition, agrégés sur la fenêtre) ; le type d'anomalie
 **`pointages_incomplets`** (sévérité `info`) apparaît pour toute journée dépassant le seuil de
 pause avec moins de `badgeuse.pointages_par_jour` événements (ADR-0002 addendum §4, QA-05).
+
+**Population d'une période (revue Codex C1).** `GET /feuilles-temps?periode=` liste les
+salariés ayant, sur le mois, **un pointage brut OU une feuille déjà ouverte OU une
+correction** (troisième membre ajouté : un salarié en mission extérieure n'a que des
+corrections `ajout` — il était absent de la liste, donc ni validable ni exportable). La
+même population sert à `GET /anomalies` (fenêtre libre, donc sans le membre « feuille ») et
+aux **exports paie/IAE**, qui matérialisent en brouillon la feuille manquante d'un salarié
+de la population : l'export ne dépend plus d'un passage préalable par l'écran mensuel. La
+matérialisation est idempotente et ne réécrit **jamais** une feuille déjà validée ; le
+journal de l'export paie porte `feuilles_creees`.
+
+**`POST /corrections`** (409) : ajoute `periodes_concernees` (les périodes touchées — une
+seule pour un `ajout`, deux pour une `modification` qui franchit une frontière de mois).
 
 **`POST /corrections`** (201) : ajoute `avertissement` (`'hors_delai_signalement'` \| `null`),
 `jours_ouvres_ecoules` et `regularisation_delai_jours`. L'avertissement est **informatif et

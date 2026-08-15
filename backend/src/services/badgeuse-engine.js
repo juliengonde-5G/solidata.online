@@ -288,6 +288,33 @@ function buildEffectiveEvents(pointages, corrections) {
   return events;
 }
 
+/**
+ * Restreint des événements EFFECTIFS à une fenêtre `[debut, fin[` (revue Codex
+ * C2). À appliquer APRÈS `buildEffectiveEvents` : c'est l'horodatage **corrigé**
+ * qui décide de la période d'appartenance, jamais l'horodatage brut. Sans ce
+ * filtre, une correction franchissant une frontière de jour ou de mois comptait
+ * l'événement DEUX fois (dans le mois d'origine par son heure brute, dans le
+ * mois de destination par son heure corrigée) — ou zéro fois.
+ *
+ * Une borne absente (`null`) est une fenêtre ouverte de ce côté-là.
+ *
+ * @param {Array} events sortie de buildEffectiveEvents
+ * @param {Date|string|null} debut borne INCLUSE
+ * @param {Date|string|null} fin borne EXCLUE
+ * @returns {Array} événements de la fenêtre, ordre conservé
+ */
+function filterEventsToWindow(events, debut, fin) {
+  const d = debut == null ? null : toDate(debut);
+  const f = fin == null ? null : toDate(fin);
+  return (events || []).filter((e) => {
+    const t = toDate(e && e.horodatage_utc);
+    if (!t) return false;
+    if (d && t.getTime() < d.getTime()) return false;
+    if (f && t.getTime() >= f.getTime()) return false;
+    return true;
+  });
+}
+
 // ── 2. Appariement entrée / sortie ─────────────────────────────────────────
 
 /**
@@ -687,6 +714,7 @@ module.exports = {
   heuresTheoriquesMois,
   // moteur
   buildEffectiveEvents,
+  filterEventsToWindow,
   pairEvents,
   arrondirInstant,
   ajusterEntree,
