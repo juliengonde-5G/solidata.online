@@ -6,8 +6,14 @@ import sqlite3
 
 import pytest
 
-from badgeuse_agent.chain import canonical, chain_hash, genesis_hash
-from badgeuse_agent.store import Store, StoreError, alerte_invalides
+from badgeuse_agent.chain import canonical, chain_hash, genesis_hash, utc_iso_ms
+from badgeuse_agent.store import (
+    Store,
+    StoreError,
+    alerte_invalides,
+    file_ancienne,
+    message_retries,
+)
 
 DEVICE = "LH-P1"
 UID_A = "6af79677ac212277ce9caf53668e1561c75c43aaba28c6588da17c55915551d8"
@@ -79,7 +85,7 @@ def test_purge_sur_accuses_ok_duplicate_orphan(store):
 
 
 @pytest.mark.parametrize(
-    "statut", ["error", "invalid_payload", "", "rejected", None, "weird"]
+    "statut", ["error", "invalid_payload", "", "rejected", None, "weird", "retry"]
 )
 def test_aucune_purge_sans_accuse(store, statut):
     payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
@@ -182,6 +188,116 @@ def test_alerte_invalides_message_pur():
     utilisé par sync.py pour peupler le champ ``alerte`` du contrat §2.5."""
     assert alerte_invalides(1) == "1 pointage(s) invalide(s) purge(s) — verifier le poste"
     assert alerte_invalides(3) == "3 pointage(s) invalide(s) purge(s) — verifier le poste"
+
+
+# --------------------------------------------- accusé transitoire 'retry' (QA-13, v1.2)
+
+
+def test_retry_jamais_purge(store):
+    """CONTRAT_API_DEVICE §2.1 v1.2 : ``retry`` n'est PAS un accusé — cause
+    transitoire côté serveur, l'élément reste en file pour être représenté
+    au prochain lot."""
+    payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+    store.ack([{"uuid": payload["uuid"], "status": "retry"}])
+    assert store.queue_size() == 1
+
+
+def test_retry_n_incremente_pas_le_compteur_invalides(store):
+    """Un retry n'est ni réparable ni irréparable : il ne doit surtout pas
+    être confondu avec ``invalid`` dans le compteur d'exploitation."""
+    payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+    store.ack([{"uuid": payload["uuid"], "status": "retry"}])
+    assert store.invalid_count() == 0
+
+
+def test_lot_mixte_ok_retry_invalid(store):
+    """Lot mixte représentatif d'une panne partielle serveur : seuls ok et
+    invalid sont des accusés (purgés) ; retry reste en file ; seul invalid
+    alimente le compteur persistant."""
+    a = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+    b = store.enqueue_pointage(uid_hmac=UID_B, sens="entree", salarie_id=2)
+    c = store.enqueue_pointage(uid_hmac=UID_A, sens="sortie", salarie_id=1)
+    store.ack(
+        [
+            {"uuid": a["uuid"], "status": "ok"},
+            {"uuid": b["uuid"], "status": "retry"},
+            {"uuid": c["uuid"], "status": "invalid"},
+        ]
+    )
+    restants = store.pending_batch()
+    assert [p["uuid"] for p in restants] == [b["uuid"]]
+    assert store.invalid_count() == 1
+
+
+def test_message_retries_pur():
+    """Gabarit du log INFO (fonction pure) — distinct du chemin 'statut
+    inconnu', dédié pour rester sobre et explicite."""
+    assert (
+        message_retries(1)
+        == "1 pointage(s) differe(s) par le serveur — nouvelle tentative au prochain envoi"
+    )
+    assert (
+        message_retries(5)
+        == "5 pointage(s) differe(s) par le serveur — nouvelle tentative au prochain envoi"
+    )
+
+
+# ------------------------------------------------- ancienneté de file (QA-13, v1.2)
+
+
+def test_file_ancienne_faux_si_file_vide():
+    assert file_ancienne(None, dt.datetime.now(dt.timezone.utc)) is False
+
+
+def test_file_ancienne_faux_sous_le_seuil():
+    maintenant = dt.datetime(2026, 8, 17, 12, 0, tzinfo=dt.timezone.utc)
+    oldest = "2026-08-17T11:30:00.000Z"  # 30 min : sous le seuil d'1 h
+    assert file_ancienne(oldest, maintenant) is False
+
+
+def test_file_ancienne_vrai_au_dela_du_seuil():
+    maintenant = dt.datetime(2026, 8, 17, 12, 0, tzinfo=dt.timezone.utc)
+    oldest = "2026-08-17T10:30:00.000Z"  # 1 h 30 : au-dela du seuil d'1 h
+    assert file_ancienne(oldest, maintenant) is True
+
+
+def test_file_ancienne_borne_exacte_non_ancienne():
+    """Exactement le seuil (1 h pile) n'est pas encore « ancien » — l'alerte
+    se déclenche strictement au-delà, pas à l'égalité."""
+    maintenant = dt.datetime(2026, 8, 17, 12, 0, 0, tzinfo=dt.timezone.utc)
+    oldest = "2026-08-17T11:00:00.000Z"  # exactement 3600 s
+    assert file_ancienne(oldest, maintenant) is False
+
+
+def test_file_ancienne_seuil_parametrable():
+    maintenant = dt.datetime(2026, 8, 17, 12, 0, tzinfo=dt.timezone.utc)
+    oldest = "2026-08-17T11:55:00.000Z"  # 5 min
+    assert file_ancienne(oldest, maintenant, seuil_sec=60.0) is True
+    assert file_ancienne(oldest, maintenant, seuil_sec=3600.0) is False
+
+
+def test_file_ancienne_avec_oldest_queued_at_reel(store):
+    """Intégration avec la vraie file : le plus ancien élément non purgé
+    (ex. retry en boucle depuis plus d'1 h) déclenche l'ancienneté.
+
+    ``created_at`` est horodaté à la mise en file (heure de dépôt, pas
+    ``horodatage_utc`` du pointage) : on le recule directement en base pour
+    simuler un élément qui stagne depuis 2 h, comme le ferait un poste réel
+    dont le serveur répond ``retry`` en boucle.
+    """
+    payload = store.enqueue_pointage(uid_hmac=UID_A, sens="entree", salarie_id=1)
+    ancien = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=2)
+    store._conn.execute(
+        "UPDATE queue SET created_at = ? WHERE uuid = ?",
+        (utc_iso_ms(ancien), payload["uuid"]),
+    )
+
+    assert file_ancienne(store.oldest_queued_at(), dt.datetime.now(dt.timezone.utc))
+
+    # Purge (accusé ok/duplicate/orphan/invalid) : la file redevient vide ->
+    # plus jamais "ancienne".
+    store.ack([{"uuid": payload["uuid"], "status": "ok"}])
+    assert not file_ancienne(store.oldest_queued_at(), dt.datetime.now(dt.timezone.utc))
 
 
 # ----------------------------------------------------------- séquence et chaîne

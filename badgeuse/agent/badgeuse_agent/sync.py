@@ -23,7 +23,14 @@ import httpx
 from . import __version__
 from .chain import utc_iso_ms
 from .config import Config, TLS_INSECURE_ALERT
-from .store import MAX_BATCH, Store, alerte_invalides
+from .store import (
+    ALERTE_FILE_ANCIENNE,
+    MAX_BATCH,
+    Store,
+    alerte_invalides,
+    file_ancienne,
+    message_retries,
+)
 
 LOGGER = logging.getLogger("badgeuse.sync")
 
@@ -189,12 +196,21 @@ class Syncer:
         """
         orphelins = sum(1 for r in resultats if r.get("status") == "orphan")
         invalides = sum(1 for r in resultats if r.get("status") == "invalid")
+        retries = sum(1 for r in resultats if r.get("status") == "retry")
         ruptures = sum(1 for r in resultats if r.get("avertissement") == "chain_broken")
         if orphelins:
             LOGGER.warning("%d pointage(s) orphelin(s) transmis pour traitement RH",
                            orphelins)
         if ruptures:
             LOGGER.error("%d rupture(s) de chaine signalee(s) par le serveur", ruptures)
+        if retries:
+            # CONTRAT_API_DEVICE v1.2 (QA-13) : 'retry' est une cause
+            # TRANSITOIRE, pas un accuse — store.ack() ne le purge pas,
+            # l'element reste en file et sera represente au prochain lot.
+            # Log INFO sobre et dedie : pas d'alerte heartbeat pour un retry
+            # isole (une file qui ne s'ecoule vraiment pas est detectee par
+            # anciennete, cf. send_heartbeat / store.file_ancienne).
+            LOGGER.info(message_retries(retries))
         if invalides:
             # QA-01 : invalid est un accuse terminal purge comme les autres,
             # mais jamais en silence — compteur persistant + alerte heartbeat.
@@ -274,13 +290,20 @@ class Syncer:
         }
 
         # Extension au contrat : l'anomalie remonte avec l'état du poste,
-        # jamais en silence. Deux sources concatenées si necessaire :
+        # jamais en silence. Sources concatenees si necessaire :
         # (1) reserve de conformite R3 — TLS non verifie, alerte permanente
         #     tant que verify_tls=false (double geste explicite, config.py) ;
-        # (2) derniere anomalie ponctuelle (lot refuse, invalides purges...).
+        # (2) file qui ne s'ecoule vraiment pas (QA-13, v1.2) — le plus
+        #     ancien element non purge date de plus d'1 h ; un 'retry' isole
+        #     ne declenche PAS cette alerte, seule la persistance dans le
+        #     temps le fait (verifie a chaque heartbeat, pas seulement apres
+        #     un envoi) ;
+        # (3) derniere anomalie ponctuelle (lot refuse, invalides purges...).
         alertes = []
         if not self._config.verify_tls:
             alertes.append(TLS_INSECURE_ALERT)
+        if file_ancienne(self._store.oldest_queued_at(), _dt.datetime.now(_dt.timezone.utc)):
+            alertes.append(ALERTE_FILE_ANCIENNE)
         if self._last_alert:
             alertes.append(self._last_alert)
         if alertes:

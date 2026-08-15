@@ -50,11 +50,29 @@ from .sens import PARIS, PointageLocal
 #: poste le purge comme les autres — mais le compte et alerte (cf. ``ack``).
 #: Tout statut hors de cet ensemble (y compris inconnu/futur) laisse
 #: l'élément en file : aucune heure ne se perd, quitte à être retransmise.
+#:
+#: ``retry`` (amendement v1.2, QA-13) est **délibérément exclu** de cet
+#: ensemble : ce n'est PAS un accusé, c'est une cause TRANSITOIRE côté
+#: serveur (timeout, ressource, sérialisation...). L'élément reste en file
+#: et sera représenté au prochain lot, sans compter comme ``invalid`` — ce
+#: n'est ni une réparation impossible, ni un simple statut inconnu muet :
+#: cf. ``sync._log_resultats`` pour son traitement (log INFO dédié).
 ACK_STATUSES = frozenset({"ok", "duplicate", "orphan", "invalid"})
 
 #: Clé du compteur persistant de pointages ``invalid`` purgés (table
 #: ``compteurs``), exposé par :meth:`Store.invalid_count`.
 COMPTEUR_INVALIDES = "invalides"
+
+#: Seuil au-delà duquel le plus ancien élément non purgé de la file
+#: déclenche l'alerte heartbeat « file en attente » (CONTRAT_API_DEVICE
+#: v1.2) — distingue un ``retry`` isolé (silencieux côté heartbeat) d'une
+#: file qui ne s'écoule vraiment pas (mêmes éléments en retry depuis
+#: longtemps, ou tout autre blocage de transmission).
+SEUIL_FILE_ANCIENNE_SEC = 3600.0
+
+#: Message d'alerte heartbeat pour une file qui ne s'écoule pas depuis plus
+#: de :data:`SEUIL_FILE_ANCIENNE_SEC`.
+ALERTE_FILE_ANCIENNE = "file en attente depuis plus d'1 h — verifier le serveur"
 
 #: Taille maximale d'un lot déposé (CONTRAT_API_DEVICE §2.1).
 MAX_BATCH = 100
@@ -119,6 +137,39 @@ def alerte_invalides(nombre: int) -> str:
     dépend de ``httpx`` — pour rester testable sans dépendance HTTP.
     """
     return f"{nombre} pointage(s) invalide(s) purge(s) — verifier le poste"
+
+
+def message_retries(nombre: int) -> str:
+    """Message de journal (INFO, sobre) pour un lot différé par le serveur.
+
+    Statut ``retry`` (CONTRAT_API_DEVICE §2.1, amendement v1.2) : cause
+    TRANSITOIRE, pas un accusé — l'élément reste en file. Fonction PURE,
+    dédiée pour ne pas tomber dans un traitement générique « statut inconnu »
+    potentiellement plus bruyant.
+    """
+    return (
+        f"{nombre} pointage(s) differe(s) par le serveur — "
+        "nouvelle tentative au prochain envoi"
+    )
+
+
+def file_ancienne(
+    oldest_created_at: Optional[str],
+    maintenant: _dt.datetime,
+    seuil_sec: float = SEUIL_FILE_ANCIENNE_SEC,
+) -> bool:
+    """Vrai si le plus ancien élément non purgé de la file dépasse le seuil.
+
+    Fonction PURE (horloge injectée) : distingue un ``retry`` isolé (pas
+    d'alerte) d'une file qui ne s'écoule vraiment pas (mêmes éléments
+    en attente depuis plus d'1 h — CONTRAT_API_DEVICE v1.2). ``oldest_created_at``
+    est le retour de :meth:`Store.oldest_queued_at` — ``None`` (file vide)
+    n'est jamais « ancien ».
+    """
+    if not oldest_created_at:
+        return False
+    age_sec = (maintenant - chain_mod.parse_utc_iso(oldest_created_at)).total_seconds()
+    return age_sec > seuil_sec
 
 
 class StoreError(RuntimeError):
