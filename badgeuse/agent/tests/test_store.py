@@ -12,6 +12,7 @@ from badgeuse_agent.store import (
     StoreError,
     alerte_invalides,
     file_ancienne,
+    lot_entierement_differe,
     message_retries,
 )
 
@@ -227,6 +228,23 @@ def test_lot_mixte_ok_retry_invalid(store):
     restants = store.pending_batch()
     assert [p["uuid"] for p in restants] == [b["uuid"]]
     assert store.invalid_count() == 1
+
+
+def test_lot_entierement_differe_pur():
+    """QA-14 : un lot où TOUS les éléments sont 'retry' est un différé
+    transitoire assumé (pas d'alerte générique) ; toute autre composition
+    — lot vide compris — n'entre pas dans ce cas."""
+    retry = {"status": "retry"}
+    assert lot_entierement_differe([retry]) is True
+    assert lot_entierement_differe([retry, {"status": "retry"}]) is True
+    # Lot vide : réponse inexploitable, PAS un différé assumé.
+    assert lot_entierement_differe([]) is False
+    # Composition mixte : les accusés du lot auraient purgé quelque chose.
+    assert lot_entierement_differe([retry, {"status": "ok"}]) is False
+    assert lot_entierement_differe([{"status": "invalid"}]) is False
+    # Élément malformé : jamais assimilé à un différé.
+    assert lot_entierement_differe([None]) is False
+    assert lot_entierement_differe([{}]) is False
 
 
 def test_message_retries_pur():

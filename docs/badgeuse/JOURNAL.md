@@ -80,7 +80,32 @@ Divers : `PUT /parametres` marque l'arbitrage à tout enregistrement réussi (le
     QA-12 (casse hmac), + réserve R3 d'A5 (verrouillage `verify_tls`).
   - QA-06 et QA-10 sont des corrections de RÈGLE : consignées dans l'ADR-0002 addendum,
     **à confirmer par la Direction avec le reste de la grille** (écran Paramètres).
-  - Re-vérification A4 demandée après correctifs (itération 1/3).
+
+## Boucle de correction n°2 et verdict final des barrières
+
+- **Itération 2 (A4)** : les 12 défauts de la boucle 1 prouvés corrigés, mais détection de
+  **QA-13 (bloquant)** — le correctif QA-01 accusait `invalid` (terminal, purgé par le poste)
+  toute erreur SQL y compris transitoire : un incident d'infrastructure aurait détruit une
+  heure. Contrat amendé **v1.2** : statut par élément `retry` NON terminal ; `invalid`
+  restreint aux SQLSTATE de données (classes 22/23 hors 23505).
+- **Correctifs boucle 2** : serveur — classification par SQLSTATE + **arrêt du lot au premier
+  incident transitoire** (préserve la chaîne d'intégrité au rejeu, prouvé par contre-épreuve
+  A4 : sans arrêt de lot, le rejeu produit une rupture permanente) + ROLLBACK TO SAVEPOINT
+  protégé ; poste — `retry` jamais purgé ni compté, alerte seulement si la file stagne > 1 h.
+- **Itération 3 (A4) : ✅ GO SOUS RÉSERVE — barrière logicielle levée.** 13/13 défauts
+  corrigés et prouvés, traçabilité 23 OK / 6 PARTIEL / 0 ABSENT, vecteurs de chaîne
+  identiques au bit près entre Node et Python sur les 3 itérations. Résidu mineur QA-14
+  (alerte générique levée à tort sur un lot entièrement différé) **soldé par l'orchestrateur**
+  (fonction pure `lot_entierement_differe`, test dédié — pytest 191/191).
+- **Réserves finales A4 (non bloquantes)** : BO-05 « absence non justifiée » en V1.1, AFF-03
+  contraste à mesurer en recette, PST-08/AFF-04/AFF-06 sans test automatisé (UI kiosque),
+  BO-11 MANAGER non cloisonné par équipe (= E1 d'A5, décision RH/DPO), fuite de handle Jest
+  pré-existante masquée par --forceExit.
+- **La recette matérielle RP-1→RP-6 (RAPPORT_QA.md) reste le préalable obligatoire à la mise
+  en service sur site** — RP-5 (30 badges/60 s, comptage contradictoire papier) est le test le
+  plus discriminant car il exerce le chemin `retry`.
+- **Chiffres finaux** : Jest 93 suites / 1605 tests (1601 ✓, 4 skipped pré-existants),
+  build Vite OK, pytest 191/191.
 
 ## Écarts assumés à la lettre du dossier de prompts
 

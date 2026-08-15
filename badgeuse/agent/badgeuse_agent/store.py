@@ -153,6 +153,19 @@ def message_retries(nombre: int) -> str:
     )
 
 
+def lot_entierement_differe(resultats: list) -> bool:
+    """Vrai si le serveur a répondu ``retry`` pour TOUS les éléments du lot.
+
+    QA-14 : ce cas (incident transitoire dès le premier élément) ne doit pas
+    lever l'alerte générique « réponse sans accusé exploitable » — c'est un
+    différé assumé par le contrat v1.2, silencieux tant que la file ne
+    stagne pas (cf. ``file_ancienne``). Fonction PURE.
+    """
+    if not resultats:
+        return False
+    return all((r or {}).get("status") == "retry" for r in resultats)
+
+
 def file_ancienne(
     oldest_created_at: Optional[str],
     maintenant: _dt.datetime,

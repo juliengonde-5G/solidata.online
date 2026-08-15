@@ -29,6 +29,7 @@ from .store import (
     Store,
     alerte_invalides,
     file_ancienne,
+    lot_entierement_differe,
     message_retries,
 )
 
@@ -172,10 +173,16 @@ class Syncer:
             alerte_levee = self._log_resultats(resultats)
 
             if purges == 0:
-                # Aucun accusé exploitable : inutile de boucler sur le même lot.
-                self._raise_alert(
-                    "reponse serveur sans accuse exploitable — file conservee"
-                )
+                # QA-14 : un lot ENTIÈREMENT différé (retry, contrat v1.2) est
+                # un incident transitoire assumé — on s'arrête sans lever
+                # l'alerte générique (le différé est déjà journalisé en INFO,
+                # et la stagnation de file a sa propre alerte dédiée).
+                if not lot_entierement_differe(resultats):
+                    # Aucun accusé exploitable : inutile de boucler sur le
+                    # même lot.
+                    self._raise_alert(
+                        "reponse serveur sans accuse exploitable — file conservee"
+                    )
                 break
 
             # QA-01 : si des invalides viennent d'etre purges dans CE lot,

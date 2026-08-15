@@ -1,10 +1,10 @@
 # Rapport QA — Module « Temps & Présence » (badgeuse)
 
 **Agent A4 (QA/Debug) — barrière bloquante avant mise en production**
-**Itération 2 — re-vérification après boucle de correction n°1 (1/3)**
-**Date :** 15 août 2026 · **Périmètre re-vérifié :** HEAD `89f6310` (correctifs serveur+front) et
-`1b45d03` (correctifs poste embarqué), sur amendements `CONTRAT_API_DEVICE.md v1.1` et
-`adr/0002` addendum.
+**Itération 3 — re-vérification FINALE après boucle de correction n°2 (3/3)**
+**Date :** 15 août 2026 · **Périmètre re-vérifié :** HEAD `87331c8` (QA-13 serveur) et `135404c`
+(QA-13 poste), sur amendement `CONTRAT_API_DEVICE.md v1.2` (statut `retry` non terminal).
+Historique : itération 2 sur `89f6310`/`1b45d03` (contrat v1.1 + addendum `adr/0002`).
 **Posture :** adversariale et inchangée. Aucun statut « corrigé » n'a été accordé sur la foi d'un
 rapport de correction : chaque défaut a été re-vérifié dans le code (fichier:ligne) et, quand la
 règle est numérique, re-prouvé par exécution. Aucun correctif n'a été appliqué par le présent
@@ -12,16 +12,17 @@ agent : ce document constate.
 
 ---
 
-## 1. Résultats des trois suites — ré-exécutées réellement (itération 2)
+## 1. Résultats des trois suites — ré-exécutées réellement (itération 3)
 
 | Suite | Commande | Résultat | Sortie |
 |---|---|---|---|
-| Backend Jest | `cd backend && npx jest --forceExit` | **93 suites, 1583 tests : 1579 passés, 4 ignorés, 0 échec** — 5,6 s | 0 |
-| Frontend build | `cd frontend && npx vite build` | **Succès, 9,95 s** | 0 |
-| Agent Python | `python3 -m pytest badgeuse/agent/tests/ -q` | **179 tests passés** — 1,17 s | 0 |
+| Backend Jest | `cd backend && npx jest --forceExit` | **93 suites, 1605 tests : 1601 passés, 4 ignorés, 0 échec** — 5,5 s | 0 |
+| Frontend build | `cd frontend && npx vite build` | **Succès, 10,24 s** | 0 |
+| Agent Python | `python3 -m pytest badgeuse/agent/tests/ -q` | **190 tests passés** — 0,65 s | 0 |
 
-**Évolution depuis l'itération 1 :** Jest **1498 → 1579** passés (**+81**, 0 régression, suites
-toujours 93/93) · Python **166 → 179** (**+13**) · build toujours vert.
+**Trajectoire sur les 3 itérations** — Jest : 1498 → 1579 → **1601** passés (**+103**, suites
+toujours 93/93, **0 régression à chaque boucle**) · Python : 166 → 179 → **190** (**+24**) ·
+build vert aux 3 itérations.
 
 > Réserve maintenue : Jest signale toujours `A worker process has failed to exit gracefully` ;
 > le `--forceExit` masque une fuite de handle. Sans incidence sur les verdicts, à traiter en
@@ -49,7 +50,7 @@ sans test, ou exigence à moitié couverte · **ABSENT** = non trouvé dans le c
 | PST-02 — anti-rebond 8 s, message « déjà enregistré » | `debounce.py` (module dédié) ; seuil serveur `badgeuse-settings.js:40` (`anti_rebond_sec: 8`) ; message `ui/app.js` | `tests/test_debounce.py` | **OK** |
 | PST-03 — sens par alternance depuis le dernier pointage du jour | `sens.py` (`determine_sens`, `ENTREE`/`INCONNU`) ; appel `app.py:159` | `tests/test_sens.py` | **OK** |
 | PST-04 — badge inconnu → écran d'erreur + pointage orphelin, jamais de rejet silencieux | `badgeuse-device.js:188-196` (`badge_inconnu`, `badge_inactif`), `:201-204` (`hors_plage`) — stocké en `statut='orphelin'`, jamais rejeté | `badgeuse-device.test.js`, `badgeuse-contract.test.js` | **OK** |
-| PST-05 — file SQLite persistante, purge sur accusé serveur uniquement | `store.py:271-309` (`ack`), `ACK_STATUSES` `store.py:53` = `{ok, duplicate, orphan, invalid}` + compteur persistant | `tests/test_store.py` | **PARTIEL** — les 4 statuts sont désormais purgeables (QA-01 corrigé), mais une erreur SQL **transitoire** est accusée à tort et détruit le pointage (**QA-13**) |
+| PST-05 — file SQLite persistante, purge sur accusé serveur uniquement | `ACK_STATUSES` `store.py:60` = `{ok, duplicate, orphan, invalid}` — **`retry` délibérément exclu** (`store.py:54`) ; classification serveur `badgeuse-device.js:152-157` ; arrêt de lot `:392-396` | `tests/test_store.py`, `badgeuse-device.test.js` | **OK** (QA-01 + QA-13 corrigés) |
 | PST-06 — cache badges 5 min / playlist 15 min, ETag | `sync.py:191/207/219` ; ETag serveur `badgeuse-device.js:92-103` ; cadences `badgeuse-settings.js:44-45` (300 s / 900 s) | `badgeuse-device.test.js` (304), `tests/test_store.py` | **OK** |
 | PST-07 — heartbeat 60 s (version, dérive, file, température, disque) | `sync.py:235-258` ; réception `badgeuse-device.js:434-452` (dont `alerte`) ; télémétrie `sync.py:322-364` | `badgeuse-device.test.js` | **OK** (QA-02 corrigé) |
 | PST-08 — bandeau discret « hors ligne » | `ui/app.js:46` (`hors_ligne`), élément `#bandeau-hors-ligne` `:65` | non testé (UI kiosque) | **PARTIEL** (implémenté, non couvert par un test automatisé) |
@@ -86,10 +87,12 @@ sans test, ou exigence à moitié couverte · **ABSENT** = non trouvé dans le c
 | BO-11 — rôles salarié / encadrant / RH / admin + journalisation des consultations RH | `routes/badgeuse.js:49-52` (`READ`/`WRITE`/`CORRECTION`/`ADMIN_ONLY`) ; salarié `:1352` (`/mes-pointages`, borné par `user_id`) ; journal `:86` (`logConsultation` → `rgpd_audit_log`), purgé `scheduler.js` | `badgeuse-contract.test.js` (matrice de rôles) | **PARTIEL** — l'encadrant (MANAGER) **n'est pas restreint à son équipe** (écart assumé et documenté `routes/badgeuse.js:12-13`, précédent v2.12.0) |
 
 **Synthèse itération 1 :** 29 exigences — 17 OK, 12 PARTIEL, 0 ABSENT.
-**Synthèse itération 2 (après boucle 1) :** 29 exigences — **22 OK**, **7 PARTIEL**, **0 ABSENT**.
-Restent PARTIEL : PST-05 (QA-13), PST-08/AFF-04/AFF-06 (implémentés, non couverts par un test
-automatisé), AFF-03 (borne basse 38 px < 48 px, contraste à mesurer en recette), BO-05 (« absence
-non justifiée » non implémentée), BO-11 (MANAGER non restreint à son équipe — écart assumé et
+**Synthèse itération 2 (après boucle 1) :** 29 exigences — 22 OK, 7 PARTIEL, 0 ABSENT.
+**Synthèse itération 3 (après boucle 2) :** 29 exigences — **23 OK**, **6 PARTIEL**, **0 ABSENT**.
+Restent PARTIEL, tous **non bloquants** : PST-08 / AFF-04 / AFF-06 (implémentés, non couverts par
+un test automatisé), AFF-03 (borne basse 38 px < 48 px — sans effet sur un écran kiosque 16:9
+usuel où le rendu est plafonné à 84 px ; contraste à mesurer en recette), BO-05 (« absence non
+justifiée » non implémentée), BO-11 (MANAGER non restreint à son équipe — écart assumé et
 documenté).
 
 ---
@@ -211,10 +214,11 @@ restent valides, le calcul portant toujours sur les instants.
 
 ---
 
-## 5. Statut des défauts après la boucle de correction n°1
+## 5. Statut des défauts après les boucles de correction n°1 et n°2
 
-**Verdict de re-vérification : 12 / 12 corrigés et prouvés — 1 défaut NOUVEAU introduit par le
-correctif de QA-01 (QA-13, bloquant).**
+**Verdict de re-vérification finale : 13 / 13 défauts corrigés et prouvés.** La boucle 1 a corrigé
+QA-01 → QA-12 (en introduisant QA-13) ; la boucle 2 a corrigé QA-13 sans régression. Un unique
+résidu **mineur** est apparu (QA-14, bruit d'alerte — non bloquant).
 
 | Id | Sévérité initiale | Statut | Preuve de la correction (re-vérifiée dans le code) |
 |---|---|---|---|
@@ -230,7 +234,8 @@ correctif de QA-01 (QA-13, bloquant).**
 | QA-10 | mineur | ✅ **CORRIGÉ** | `arrondirInstant` (`badgeuse-engine.js:362`) : en `avantage_salarie`, l'entrée recule au pas, **la sortie est intouchée**. Re-prouvé (§4.4bis) : sortie 16:52 → comptée 16:52. Conforme à NOTE_RH §3. |
 | QA-11 | mineur | ✅ **CORRIGÉ** | Seuil lu dans `badgeuse.supervision_silence_minutes` (`scheduler.js:817`, `badgeuse.js` `/devices`), défaut 15 min. |
 | QA-12 | mineur | ✅ **CORRIGÉ** | Normalisation explicite en minuscules avant chaînage côté poste (`store.py:204` : `(uid_hmac or NO_BADGE).lower()`, `-` inchangé), + `:358`, `:385`. |
-| **QA-13** | **BLOQUANT** | 🔴 **NOUVEAU** | **Régression introduite par le correctif de QA-01** — voir ci-dessous. |
+| QA-13 | BLOQUANT | ✅ **CORRIGÉ** (boucle 2) | Classification par SQLSTATE `badgeuse-device.js:152-157` (classes 22/23 hors 23505 → `invalid` ; **tout le reste, code absent compris → `retry`**) ; `retry` non inséré et **non accusé** ; arrêt du lot au premier incident transitoire `:392-396` ; `ROLLBACK TO SAVEPOINT` protégé (`savepointOk` faux → `retry` même sur 22/23, `:369`). Poste : `retry` exclu d'`ACK_STATUSES` (`store.py:54,60`), log INFO dédié (`sync.py:205-212`), alerte seulement si la file stagne > 1 h (`file_ancienne`, `sync.py:305`). **Cohérence du rejeu re-prouvée par exécution** (§5ter). |
+| **QA-14** | **mineur** | 🟡 **NOUVEAU** | Un lot **entièrement** différé lève l'alerte générique « sans accusé exploitable » au lieu du chemin `retry` silencieux — voir §5ter. |
 
 ### Symétrie du contrat amendé — re-vérifiée par exécution
 
@@ -249,7 +254,74 @@ le poste émet `uid_hmac: "-"` (`store.py:204`), le serveur l'accepte (`isSansBa
 `NULL` et **le recanonise en `-`** — donc `chainHash` serveur = `chain_hash` poste sur le pointage
 sans badge, qui était le cas cassé de l'itération 1.
 
-### QA-13 — BLOQUANT — Une erreur SQL **transitoire** détruit désormais le pointage
+### 5ter. QA-13 — re-vérification finale (boucle 2) : **corrigé et prouvé**
+
+**Classification serveur** (`badgeuse-device.js:152-157`) — doctrine « le doute profite à la
+preuve » : un code SQLSTATE non conforme (absent, non-SQL, longueur ≠ 5) retombe sur `retry` ;
+seules les classes **22** (données erronées) et **23** (violation de contrainte, hors `23505`
+déjà traité en `duplicate`) sont jugées **permanentes** et accusées `invalid`. Les classes
+transitoires qui causaient la perte (`57014` timeout, `53100` disque plein, `40*`, `08*`)
+produisent désormais `retry`, **sans insertion et sans accusé**. Garde supplémentaire : si le
+`ROLLBACK TO SAVEPOINT` lui-même échoue, l'état transactionnel est perdu et l'élément est différé
+**même sur une classe 22/23** (`:369`).
+
+**Traitement poste** — `retry` est **délibérément exclu** d'`ACK_STATUSES` (`store.py:54`, `:60`) :
+jamais purgé, jamais compté comme invalide, log INFO dédié (`sync.py:205-212`). Une file qui ne
+s'écoule réellement plus est détectée par **ancienneté** (fonction pure `file_ancienne`, seuil 1 h,
+`sync.py:305`) et non par un retry isolé.
+
+**Cohérence du rejeu — prouvée par exécution.** Scénario : lot de 5 pointages chaînés, incident
+transitoire sur la séquence 3.
+
+| Étape | Résultat mesuré |
+|---|---|
+| Lot 1 | séq. 1-2 insérées et **committées** ; séq. 3 `retry` (`erreur_transitoire`) ; séq. 4-5 `retry` (`lot_interrompu`) ; `break` puis `COMMIT` |
+| File du poste | séq. 3-4-5 conservées ; `pending_batch` les rend **dans l'ordre croissant** de séquence (`store.py`, `ORDER BY sequence_device ASC`) |
+| Lot 2 (rejeu) | séq. 3 → `chaine_valide = true` · séq. 4 → `true` · séq. 5 → `true` |
+| Verdict | **CHAÎNE INTACTE APRÈS REJEU : OUI** — et statut `ok` (l'élément n'ayant jamais été inséré, il n'y a ni conflit d'`uuid` ni de séquence) |
+
+**Contre-épreuve — l'arrêt du lot est load-bearing, pas une simple précaution.** En simulant le
+comportement sans arrêt de lot (séquence 4 insérée alors que 3 est différée), le rejeu de la
+séquence 3 donne **`chaine_valide = false`** : son `hash_precedent` ne correspond plus au dernier
+hash stocké. L'arrêt du lot est donc ce qui **empêche un incident d'infrastructure de se
+transformer en rupture de preuve permanente**. La justification portée en commentaire du code
+(`:380-391`) est exacte et vérifiée.
+
+### QA-14 — mineur — Un lot entièrement différé lève une alerte générique
+
+**Constat.** Si l'incident transitoire frappe le **premier** élément d'un lot, tous les éléments
+sont différés, donc `ack()` ne purge rien et `push_queue` entre dans la branche `purges == 0`
+(`sync.py:172-177`), qui lève `« reponse serveur sans accuse exploitable — file conservee »`.
+Cette branche ne distingue pas « le serveur n'a rien renvoyé d'exploitable » de « le serveur a
+explicitement répondu `retry` », alors que `_log_resultats` documente précisément l'intention
+inverse : « pas d'alerte heartbeat pour un retry isolé ».
+
+**Conséquence.** Bruit d'exploitation : un simple à-coup de base de données sur le premier élément
+d'un lot remonte une alerte au back-office, au lieu d'être absorbé silencieusement et laissé à la
+détection par ancienneté (`file_ancienne`, > 1 h).
+
+**Ce que ce n'est pas.** Aucune perte, aucun blocage, aucune boucle : la file est correctement
+conservée, le `break` est justifié (inutile de réessayer le même lot immédiatement) et l'alerte
+s'efface d'elle-même au premier lot suivant qui acquitte quelque chose. **Non bloquant.**
+
+**Correctif proposé (non appliqué).** Dans la branche `purges == 0`, ne lever l'alerte que si le
+lot ne contient **pas** que des `retry` :
+```python
+if purges == 0:
+    if not resultats or any(r.get("status") != "retry" for r in resultats):
+        self._raise_alert("reponse serveur sans accuse exploitable — file conservee")
+    break
+```
+
+---
+
+### QA-13 — fiche d'origine (itération 2) — ⚠️ CORRIGÉ depuis, voir §5ter
+
+> **État actuel : CORRIGÉ** (boucle 2, HEAD `87331c8`). La fiche ci-dessous décrit le défaut **tel
+> qu'il se présentait à l'itération 2** et est conservée pour la traçabilité de l'audit ; le code
+> décrit n'existe plus. Ne pas la lire comme un constat courant.
+
+**Titre d'origine : une erreur SQL transitoire détruit le pointage**
 
 **Reproduction minimale.** Provoquer une erreur SQL non-`23505` **transitoire** sur l'`INSERT` d'un
 élément de lot — le cas le plus réaliste étant un `57014 query_canceled` (dépassement de
@@ -645,65 +717,72 @@ Badger 3 pointages. Rétablir le réseau après 15 min. Répéter avec pile neuv
 thermomètre d'ambiance, chronomètre vidéo, accès `journalctl` et `sqlite3` sur les postes.
 
 ---
+## 7. Avis final — itération 3 (barrière logicielle)
 
-## 7. Avis final — itération 2 (après boucle de correction n°1)
+# ✅ GO SOUS RÉSERVE — barrière logicielle levée
 
-# ⛔ NO-GO (logiciel)
+**Aucun défaut bloquant ni majeur ne subsiste.** Les **13 défauts** ouverts au cours de l'audit sont
+**corrigés et prouvés dans le code** (§5) : QA-01 → QA-12 par la boucle 1, QA-13 par la boucle 2,
+cette dernière **sans introduire de régression** (3 suites vertes, +22 tests backend, +11 tests
+poste, 93/93 suites à chaque itération).
 
-**Motif : un défaut BLOQUANT subsiste — mais ce n'est plus le même.** Les **12 défauts de
-l'itération 1 sont corrigés et prouvés** (§5), y compris le bloquant QA-01. Le correctif de QA-01 a
-toutefois **introduit une régression de sévérité supérieure** :
+Le point qui a coûté deux boucles — la sémantique de l'accusé de réception — est désormais **sain
+et démontré** :
 
-> **QA-13** — la branche `erreur_stockage` (`badgeuse-device.js:311`) accuse réception en `invalid`
-> de **toute** erreur SQL non-`23505`, y compris les **transitoires** (`57014` timeout, `53100`
-> disque plein, `40*`, `08*`). Depuis l'amendement v1.1, `invalid` est un accusé **terminal que le
-> poste purge** : un incident de base de données passager **détruit désormais définitivement et
-> silencieusement un pointage**.
+- un pointage **sans badge** est accepté (`-` ⇄ `NULL`), et les condensats de chaîne restent
+  **identiques au bit près** entre Node et Python sur les trois vecteurs, **inchangés depuis
+  l'itération 1** malgré les modifications des deux piles ;
+- une donnée **définitivement** non stockable est accusée `invalid`, purgée, **comptée et
+  signalée** — jamais en silence ;
+- un incident **transitoire** est différé (`retry`), **jamais accusé, jamais purgé** : le poste
+  conserve l'heure et la représente ;
+- le **rejeu après interruption préserve la chaîne d'intégrité**, ce qui a été prouvé par exécution
+  **et par contre-épreuve** : sans l'arrêt de lot, le pointage différé serait rejoué avec une
+  chaîne définitivement rompue (§5ter).
 
-L'itération 1 avait un défaut qui **bloquait** une heure sur le poste ; l'itération 2 a un défaut
-qui **détruit** cette heure. La régression est donc plus grave que le défaut qu'elle corrige, sur
-un dispositif dont la finalité est probatoire et dont la doctrine affichée est « aucune heure ne se
-perd ». Conformément au mandat, **un seul défaut bloquant suffit à prononcer le NO-GO.**
+Autrement dit, les trois issues possibles d'un pointage — stocké, rejeté définitivement, différé —
+sont désormais **explicites, symétriques entre les deux piles, et sans perte**. C'est l'invariant
+central du module (« aucune heure ne se perd, aucune preuve n'est effacée ») ; il est tenu.
 
-### Ce que la boucle 1 a réellement acquis
+### Réserves (aucune n'est bloquante)
 
-- **12/12 défauts corrigés**, dont les 6 majeurs à effet RH, juridique et exploitation.
-- **Symétrie du contrat amendé vérifiée dans les deux sens** et par exécution : le poste émet
-  `uid_hmac:"-"`, le serveur l'accepte, le stocke `NULL` et le recanonise en `-` ; les trois
-  condensats de chaîne restent **identiques au bit près** entre Node et Python malgré les
-  modifications des deux piles (aucune régression cryptographique).
-- **Règles de paie désormais saines et prouvées** : monotonie rétablie (361 min ne sont plus payées
-  moins que 360), sortie comptée au réel conformément à NOTE_RH §3, heures théoriques enfin
-  calculées depuis les contrats avec `source_theorique` honnête.
-- **+81 tests backend et +13 tests poste**, 0 régression, 3 suites vertes.
-- **Traçabilité : 22 OK / 7 PARTIEL / 0 ABSENT** (contre 17/12/0 à l'itération 1).
+| # | Réserve | Nature |
+|---|---|---|
+| R1 | **QA-14** — un lot entièrement différé lève l'alerte générique « sans accusé exploitable » au lieu du chemin `retry` silencieux (§5ter). Correctif de 3 lignes proposé. | Bruit d'exploitation, auto-résorbé |
+| R2 | **BO-05** — « absence non justifiée » non implémentée (les 4 autres types d'anomalie fonctionnent). | Exigence partielle |
+| R3 | **AFF-03** — borne basse de police 38 px < 48 px exigés. Sans effet sur un écran kiosque 16:9 usuel (rendu plafonné à 84 px) ; **contraste ≥ 7:1 et lisibilité à 3 m à mesurer en recette** (RP-5). | À mesurer sur site |
+| R4 | **PST-08 / AFF-04 / AFF-06** — bandeau hors ligne, retours sonores, transitions : implémentés, **non couverts par un test automatisé**. | Couverture de test |
+| R5 | **BO-11** — le MANAGER (encadrant technique) n'est **pas restreint à son équipe**. Écart **assumé et documenté** (`routes/badgeuse.js:12-13`, précédent v2.12.0). | Décision à confirmer par le RH/DPO |
+| R6 | Fuite de handle Jest masquée par `--forceExit` (`A worker process has failed to exit gracefully`). | Hygiène de test |
 
-### Condition unique de levée du NO-GO logiciel
+Aucune de ces réserves ne met en cause l'intégrité des données, la paie, la sécurité ni la
+conformité. R1 et R6 relèvent du traitement courant ; R2 et R4 sont des compléments planifiables ;
+R3 se vérifie en recette ; R5 est une décision d'organisation, pas un défaut technique.
 
-1. **QA-13** — distinguer les SQLSTATE **permanents** (accusé `invalid` assumé) des **transitoires**
-   (aucun accusé : omettre l'élément de `resultats`, le poste le conservera et le rejouera).
-   Correctif proposé au §5, environ dix lignes, sans changement de contrat : le comportement de
-   non-accusé est **déjà** correctement implémenté côté poste (`store.py:289`, `sync.py:167-172`).
-   À couvrir par un test de contrat dédié (erreur transitoire simulée ⇒ élément **absent** de
-   `resultats` ⇒ file conservée).
+### Portée de cet avis — et ce qui reste avant la mise en service
 
-**Aucun autre correctif n'est requis pour le GO logiciel.** Les 7 exigences restées PARTIEL sont
-soit des couvertures de test manquantes sur l'UI kiosque (PST-08, AFF-04, AFF-06), soit des écarts
-assumés et documentés (BO-11), soit des points de recette matérielle (AFF-03), soit une exigence
-mineure non implémentée (BO-05 « absence non justifiée ») — aucun n'est bloquant.
+**Cet avis porte sur le logiciel seul.** Il ne vaut pas autorisation de mise en service.
 
-### GO définitif sur site
+La **recette matérielle RP-1 → RP-6 (§6) reste le préalable obligatoire au GO de mise en service
+sur site**, et aucun de ces six tests n'est substituable par du logiciel :
 
-Le GO logiciel ne vaut pas GO de mise en service. La **recette matérielle RP-1 → RP-6** (§6) reste
-intégralement à exécuter et à tracer : aucun de ces six tests n'est substituable par du logiciel.
-**RP-6 (RTC pile vide)** et **RP-1 (coupures secteur ×20)** conditionnent la valeur probante du
-dispositif. **RP-5 (charge 30 badges/60 s)** prend une importance particulière après cette
-itération : c'est le scénario qui met la base sous contention et donc **le plus susceptible de
-déclencher QA-13** — il devra être rejoué après correction, en vérifiant explicitement qu'aucun
-pointage n'a disparu (comptage contradictoire contre feuille de présence papier).
+- **RP-1 (coupures secteur ×20)** et **RP-6 (RTC pile vide)** conditionnent la **valeur probante**
+  du dispositif : une base corrompue ou un horodatage faux non signalé ruinerait la preuve, quelle
+  que soit la qualité du code.
+- **RP-5 (charge 30 badges / 60 s)** garde une importance particulière : c'est le scénario qui met
+  la base sous contention et donc **celui qui exerce réellement le chemin `retry` corrigé en boucle
+  2**. Il doit être joué en vérifiant par **comptage contradictoire** (contre une feuille de
+  présence papier) qu'aucun pointage n'a disparu, et en confirmant que la file revient à 0.
+- **RP-2, RP-3, RP-4** valident respectivement le mode hors ligne 24 h, le comportement thermique
+  et la cible dégradée Pi 3.
+
+**Recommandation de séquencement :** livrer le correctif R1 (3 lignes) avec la campagne de recette,
+puis exécuter RP-1 → RP-6 et tracer leurs résultats chiffrés en annexe du présent rapport avant la
+décision de mise en service.
 
 ---
 
-*Rapport établi par l'Agent A4 (QA/Debug). Itération 2 : les trois suites ont été ré-exécutées, les
-vecteurs cryptographiques croisés et les règles de paie re-prouvés par exécution réelle du code du
-dépôt à HEAD `89f6310`. Aucun fichier de code n'a été modifié, aucun commit n'a été créé.*
+*Rapport établi par l'Agent A4 (QA/Debug). Itération 3 (finale) : les trois suites ont été
+ré-exécutées, la classification SQLSTATE, la symétrie du contrat v1.2 et la cohérence du rejeu
+(avec contre-épreuve) ont été prouvées par exécution réelle du code du dépôt à HEAD `87331c8`.
+Aucun fichier de code n'a été modifié, aucun commit n'a été créé.*
