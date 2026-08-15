@@ -379,7 +379,7 @@ describe('POST /pointages — dépôt de lot', () => {
       expect(warnSpy.mock.calls.flat().join(' ')).toMatch(/2 élément\(s\) refusé\(s\) définitivement/);
     });
 
-    test('une erreur de stockage reste « invalid » ET journalise sa cause SQL', async () => {
+    test('une erreur de DONNÉES reste « invalid » ET journalise sa cause SQL', async () => {
       const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       installMocks({ insertError: Object.assign(new Error('valeur hors bornes'), { code: '22003' }) });
       const p = makePointage({ uuid: '11111111-2222-4333-8444-5555555555a9', precedent: genesisHash(DEVICE_CODE) });
@@ -387,6 +387,173 @@ describe('POST /pointages — dépôt de lot', () => {
       expect(r.body.resultats[0]).toEqual({ uuid: p.uuid, status: 'invalid', raison: 'erreur_stockage' });
       expect(errSpy.mock.calls.flat().join(' ')).toContain('22003');
       errSpy.mockRestore();
+    });
+
+    // ══ QA-13 — un incident de stockage TRANSITOIRE ne détruit pas une heure ══
+    // `invalid` est un accusé que le poste PURGE. L'accuser sur un timeout de
+    // base détruisait définitivement le pointage. Le contrat v1.2 introduit
+    // `retry` : pas un accusé, l'élément reste dans la file du poste.
+    describe('QA-13 — classification des échecs de stockage par SQLSTATE', () => {
+      let errSpy;
+      beforeEach(() => { errSpy = jest.spyOn(console, 'error').mockImplementation(() => {}); });
+      afterEach(() => errSpy.mockRestore());
+
+      const pointageSeul = (uuid = '11111111-2222-4333-8444-5555555555c1') =>
+        makePointage({ uuid, precedent: genesisHash(DEVICE_CODE) });
+
+      /** Un échec d'insertion de code SQLSTATE donné. */
+      const echec = (code, message = 'incident simulé') =>
+        installMocks({ insertError: code === null
+          ? new Error(message)
+          : Object.assign(new Error(message), { code }) });
+
+      // (1) Erreur TRANSITOIRE : timeout d'instruction.
+      test('57014 (requête annulée / timeout) → « retry », AUCUNE insertion', async () => {
+        echec('57014', 'canceling statement due to statement timeout');
+        const p = pointageSeul();
+        const r = await post(`${PATH}/pointages`, { pointages: [p] });
+        expect(r.status).toBe(200);
+        expect(r.body.resultats[0]).toEqual({
+          uuid: p.uuid, status: 'retry', raison: 'erreur_transitoire',
+        });
+        // Le statut n'est PAS un accusé : rien n'a été stocké.
+        expect(r.body.resultats[0].status).not.toBe('invalid');
+        expect(errSpy.mock.calls.flat().join(' ')).toContain('57014');
+      });
+
+      test('l\'élément différé reste REJOUABLE : le même uuid repasse en « ok » après rétablissement', async () => {
+        const p = pointageSeul('11111111-2222-4333-8444-5555555555c2');
+        echec('57014');
+        expect((await post(`${PATH}/pointages`, { pointages: [p] })).body.resultats[0].status).toBe('retry');
+        // Base rétablie, le poste représente le MÊME élément.
+        installMocks();
+        const r2 = await post(`${PATH}/pointages`, { pointages: [p] });
+        expect(r2.body.resultats[0]).toEqual({ uuid: p.uuid, status: 'ok' });
+      });
+
+      // (2) et (3) Erreurs de DONNÉES : permanentes.
+      test.each([
+        ['22P02', 'invalid input syntax for type integer'],
+        ['22003', 'value out of range'],
+        ['23503', 'insert or update violates foreign key constraint'],
+        ['23502', 'null value in column violates not-null constraint'],
+        ['23514', 'new row violates check constraint'],
+      ])('%s (donnée) → « invalid » (permanent, le rejeu ne réparerait rien)', async (code, message) => {
+        echec(code, message);
+        const p = pointageSeul();
+        const r = await post(`${PATH}/pointages`, { pointages: [p] });
+        expect(r.body.resultats[0]).toEqual({ uuid: p.uuid, status: 'invalid', raison: 'erreur_stockage' });
+      });
+
+      // (4) Erreurs d'INFRASTRUCTURE : transitoires.
+      test.each([
+        ['53100', 'disque plein'],
+        ['53300', 'trop de connexions'],
+        ['40001', 'échec de sérialisation'],
+        ['40P01', 'interblocage détecté'],
+        ['08006', 'connexion perdue'],
+        ['08003', 'connexion inexistante'],
+        ['25P02', 'transaction avortée'],
+        ['XX000', 'erreur interne'],
+      ])('%s (infrastructure) → « retry » (l\'élément est conservé par le poste)', async (code, message) => {
+        echec(code, message);
+        const p = pointageSeul();
+        const r = await post(`${PATH}/pointages`, { pointages: [p] });
+        expect(r.body.resultats[0].status).toBe('retry');
+      });
+
+      test('erreur SANS SQLSTATE (pool indisponible, réseau) → « retry »', async () => {
+        echec(null, 'Connection terminated unexpectedly');
+        const p = pointageSeul();
+        const r = await post(`${PATH}/pointages`, { pointages: [p] });
+        expect(r.body.resultats[0].status).toBe('retry');
+        expect(errSpy.mock.calls.flat().join(' ')).toContain('SQLSTATE absent');
+      });
+
+      test('un code SQLSTATE malformé est traité comme transitoire (le doute profite à la preuve)', async () => {
+        echec('nope', 'code non conforme');
+        expect((await post(`${PATH}/pointages`, { pointages: [pointageSeul()] })).body.resultats[0].status).toBe('retry');
+      });
+
+      test('CHAÎNE : après un incident transitoire, TOUT le reste du lot est différé', async () => {
+        // Insérer l'élément N+1 alors que N est différé casserait la
+        // vérification de chaîne au rejeu de N.
+        const g = genesisHash(DEVICE_CODE);
+        const p1 = makePointage({ uuid: '11111111-2222-4333-8444-5555555555c3', sequence: 1, precedent: g });
+        const p2 = makePointage({ uuid: '11111111-2222-4333-8444-5555555555c4', sequence: 2, precedent: p1.hash_courant });
+        const p3 = makePointage({ uuid: '11111111-2222-4333-8444-5555555555c5', sequence: 3, precedent: p2.hash_courant });
+        echec('40P01', 'deadlock detected');
+
+        const r = await post(`${PATH}/pointages`, { pointages: [p1, p2, p3] });
+        expect(r.body.resultats).toHaveLength(3);
+        expect(r.body.resultats.map((x) => x.status)).toEqual(['retry', 'retry', 'retry']);
+        expect(r.body.resultats[0].raison).toBe('erreur_transitoire');
+        expect(r.body.resultats[1].raison).toBe('lot_interrompu');
+        // Une SEULE tentative d'insertion : on n'insiste pas sur une base en incident.
+        expect(mockQuery.mock.calls.filter((c) => /INSERT INTO badgeuse_pointages/.test(String(c[0])))).toHaveLength(1);
+      });
+
+      test('une erreur PERMANENTE n\'interrompt PAS le lot (les suivants passent)', async () => {
+        // Contraste avec le cas transitoire : la donnée fautive est isolée.
+        let appels = 0;
+        const g = genesisHash(DEVICE_CODE);
+        const p1 = makePointage({ uuid: '11111111-2222-4333-8444-5555555555c6', sequence: 1, precedent: g });
+        const p2 = makePointage({ uuid: '11111111-2222-4333-8444-5555555555c7', sequence: 2, precedent: p1.hash_courant });
+        installMocks();
+        const base = mockQuery.getMockImplementation();
+        mockQuery.mockImplementation((sql, params) => {
+          if (/INSERT INTO badgeuse_pointages/.test(String(sql))) {
+            appels += 1;
+            if (appels === 1) return Promise.reject(Object.assign(new Error('fk'), { code: '23503' }));
+            return Promise.resolve({ rows: [{ id: 101 }] });
+          }
+          return base(sql, params);
+        });
+        const r = await post(`${PATH}/pointages`, { pointages: [p1, p2] });
+        expect(r.body.resultats[0].status).toBe('invalid');
+        expect(r.body.resultats[1].status).toBe('ok');
+      });
+
+      test('si le retour au point de sauvegarde échoue, l\'élément est différé même sur un code « donnée »', async () => {
+        // Transaction/connexion perdue : on ne peut plus rien affirmer sur la
+        // donnée elle-même — le doute profite à la preuve, donc « retry » et
+        // non « invalid » (qui ferait purger le poste).
+        installMocks();
+        const base = mockQuery.getMockImplementation();
+        mockQuery.mockImplementation((sql, params) => {
+          const s = String(sql);
+          if (/INSERT INTO badgeuse_pointages/.test(s)) {
+            return Promise.reject(Object.assign(new Error('fk'), { code: '23503' }));
+          }
+          if (/ROLLBACK TO SAVEPOINT/.test(s)) {
+            return Promise.reject(new Error('current transaction is aborted'));
+          }
+          return base(sql, params);
+        });
+        const p = pointageSeul('11111111-2222-4333-8444-5555555555ca');
+        const r = await post(`${PATH}/pointages`, { pointages: [p] });
+        expect(r.body.resultats[0].status).toBe('retry');
+      });
+
+      test('23505 reste un « duplicate » (idempotence), jamais un « retry »', async () => {
+        echec('23505', 'duplicate key value violates unique constraint');
+        const p = pointageSeul();
+        const r = await post(`${PATH}/pointages`, { pointages: [p] });
+        expect(r.body.resultats[0]).toEqual({
+          uuid: p.uuid, status: 'duplicate', avertissement: 'sequence_reutilisee',
+        });
+      });
+
+      // (5) Le vecteur nominal reste inchangé.
+      test('VECTEUR NOMINAL inchangé : sans incident, le lot répond « ok »', async () => {
+        installMocks();
+        const g = genesisHash(DEVICE_CODE);
+        const p1 = makePointage({ uuid: '11111111-2222-4333-8444-5555555555c8', sequence: 1, precedent: g });
+        const p2 = makePointage({ uuid: '11111111-2222-4333-8444-5555555555c9', sequence: 2, precedent: p1.hash_courant, sens: 'sortie' });
+        const r = await post(`${PATH}/pointages`, { pointages: [p1, p2] });
+        expect(r.body.resultats.map((x) => x.status)).toEqual(['ok', 'ok']);
+        expect(JSON.stringify(r.body)).not.toContain('retry');
+      });
     });
 
     test('QA-08 : une charge canonique ambiguë est refusée, sans casser le lot', async () => {

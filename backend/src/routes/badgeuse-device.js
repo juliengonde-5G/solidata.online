@@ -19,11 +19,16 @@
  *    §2.1, amendement v1.1). Un badge inconnu ou un pointage hors plage est
  *    STOCKÉ en statut `orphelin` pour traitement RH, jamais rejeté.
  *  - `invalid` est RÉSERVÉ à l'élément qu'aucun rejeu ne réparera (UUID
- *    invalide, horodatage illisible, charge canonique ambiguë). Il est
- *    JOURNALISÉ ici et remonte dans le champ `alerte` du heartbeat du poste :
- *    une purge silencieuse serait le pire des cas. Un `uid_hmac` valant `-`
- *    (pointage manuel/import, CONTRAT_INTEGRITE §2) est en revanche VALIDE :
- *    il est stocké NULL en base et reste `-` dans le calcul de chaîne (QA-01).
+ *    invalide, horodatage illisible, charge canonique ambiguë, donnée refusée
+ *    par la base en SQLSTATE 22xxx/23xxx). Il est JOURNALISÉ ici et remonte
+ *    dans le champ `alerte` du heartbeat du poste : une purge silencieuse
+ *    serait le pire des cas. Un `uid_hmac` valant `-` (pointage manuel/import,
+ *    CONTRAT_INTEGRITE §2) est en revanche VALIDE : il est stocké NULL en base
+ *    et reste `-` dans le calcul de chaîne (QA-01).
+ *  - `retry` (v1.2, QA-13) n'est PAS un accusé : tout échec de stockage qui
+ *    n'est pas démontrablement une erreur de DONNÉES (timeout, disque, verrou,
+ *    connexion, erreur sans SQLSTATE) laisse l'élément dans la file du poste.
+ *    Un incident d'infrastructure ne détruit jamais une heure de travail.
  *  - AUCUNE HEURE NE SE PERD : une rupture de chaîne n'empêche pas le stockage
  *    (chaine_valide = false + avertissement `chain_broken`). On n'efface jamais
  *    une preuve, même imparfaite.
@@ -123,6 +128,34 @@ const isHex64 = (v) => /^[0-9a-fA-F]{64}$/.test(String(v || ''));
  */
 const isSansBadge = (v) => v == null || v === '' || String(v) === NO_BADGE;
 
+/**
+ * Nature d'un échec d'insertion, d'après son SQLSTATE (CONTRAT_API_DEVICE §2.1,
+ * amendement v1.2 — QA-13). C'est la frontière entre « on peut purger » et
+ * « il faut garder » : s'y tromper détruit une heure de travail.
+ *
+ *  - `'invalid'` (PERMANENT, accusé terminal) : classes **22** (données
+ *    erronées : 22P02 texte non convertible, 22001 débordement, 22003 valeur
+ *    hors bornes) et **23** (violation de contrainte : 23502 NOT NULL, 23503
+ *    clé étrangère, 23514 CHECK). Le contenu de l'élément est en cause —
+ *    aucun rejeu ne le réparera. `23505` est traité en amont (`duplicate`).
+ *  - `'retry'` (TRANSITOIRE, PAS un accusé) : tout le reste — 57xxx (timeout
+ *    d'instruction, arrêt administrateur), 53xxx (disque plein, mémoire,
+ *    connexions épuisées), 40xxx (échec de sérialisation, interblocage),
+ *    08xxx (connexion perdue), 25xxx (transaction avortée), ainsi que toute
+ *    erreur SANS SQLSTATE (indisponibilité du pool, coupure réseau, bug JS).
+ *    La cause est l'INFRASTRUCTURE, pas la donnée : le poste conserve
+ *    l'élément et le représentera.
+ *
+ * DOCTRINE : le doute profite à la preuve. Tout ce qui n'est pas
+ * démontrablement une erreur de données est traité comme transitoire.
+ */
+function classerErreurStockage(err) {
+  const code = err && typeof err.code === 'string' ? err.code.trim() : '';
+  if (!/^[0-9A-Za-z]{5}$/.test(code)) return 'retry';
+  const classe = code.slice(0, 2);
+  return classe === '22' || classe === '23' ? 'invalid' : 'retry';
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /v1/devices/:code/pointages — dépôt d'un lot (idempotent)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -146,6 +179,7 @@ router.post('/v1/devices/:code/pointages',
     let orphelins = 0;
     let ruptures = 0;
     let invalides = 0;
+    let differes = 0;
 
     /**
      * Accusé TERMINAL `invalid` (CONTRAT_API_DEVICE §2.1 v1.1) : le poste purge
@@ -158,6 +192,18 @@ router.post('/v1/devices/:code/pointages',
       invalides += 1;
       console.warn(`[BADGEUSE-DEVICE] ${req.device.code} : pointage ${uuid || '(uuid absent)'} refusé définitivement — ${raison}`);
       liste.push({ uuid: uuid || null, status: 'invalid', raison });
+    };
+
+    /**
+     * Statut `retry` (CONTRAT_API_DEVICE §2.1 v1.2 — QA-13). Ce n'est PAS un
+     * accusé de réception : l'élément n'est pas inséré, le poste le CONSERVE
+     * dans sa file et le représentera au prochain lot. C'est la seule issue
+     * acceptable pour un incident de stockage passager — un timeout de base ne
+     * doit jamais détruire un pointage.
+     */
+    const differer = (liste, uuid, raison) => {
+      differes += 1;
+      liste.push({ uuid: uuid || null, status: 'retry', raison });
     };
 
     try {
@@ -173,7 +219,9 @@ router.post('/v1/devices/:code/pointages',
       );
       let dernierHash = last.rows[0] ? last.rows[0].hash_courant : genesisHash(req.device.code);
 
-      for (const p of lot) {
+      // Boucle INDEXÉE : sur un incident transitoire, il faut pouvoir différer
+      // tout le reste du lot (cf. le bloc `catch` d'insertion ci-dessous).
+      for (const [index, p] of lot.entries()) {
         // Validation syntaxique par élément : un élément malformé n'invalide
         // pas le lot, il est signalé — le poste ne peut pas boucler dessus.
         if (!isUuid(p && p.uuid)) {
@@ -297,19 +345,55 @@ router.post('/v1/devices/:code/pointages',
             });
           }
         } catch (e) {
-          await client.query('ROLLBACK TO SAVEPOINT badgeuse_item');
-          await client.query('RELEASE SAVEPOINT badgeuse_item');
-          if (e.code === '23505') {
+          // Le retour au point de sauvegarde peut lui-même échouer si la
+          // transaction ou la connexion est perdue : on le constate au lieu de
+          // le supposer (une exception ici partirait au catch externe → 503,
+          // ce qui est sûr mais moins précis pour le poste).
+          let savepointOk = true;
+          try {
+            await client.query('ROLLBACK TO SAVEPOINT badgeuse_item');
+            await client.query('RELEASE SAVEPOINT badgeuse_item');
+          } catch (_) {
+            savepointOk = false;
+          }
+
+          if (savepointOk && e.code === '23505') {
             // Séquence de poste déjà utilisée : accusé de réception (le poste
             // purge) — l'anomalie reste visible dans /devices/:id/verify-chain.
             resultats.push({ uuid: p.uuid, status: 'duplicate', avertissement: 'sequence_reutilisee' });
-          } else {
-            // Erreur SQL non gérable par le poste (FK d'un salarié supprimé,
-            // dépassement de BIGINT sur la séquence…) : accusé terminal, mais
-            // la cause est journalisée côté serveur pour l'exploitant.
-            console.error(`[BADGEUSE-DEVICE] ${req.device.code} : échec de stockage (${e.code || 'sans code'}) — ${e.message}`);
-            rejeter(resultats, p.uuid, 'erreur_stockage');
+            continue;
           }
+
+          // État transactionnel perdu ⇒ on ne peut RIEN affirmer sur la donnée :
+          // le doute profite à la preuve, l'élément est différé.
+          const nature = savepointOk ? classerErreurStockage(e) : 'retry';
+          console.error(`[BADGEUSE-DEVICE] ${req.device.code} : échec de stockage (SQLSTATE ${e.code || 'absent'}, traité en « ${nature} ») — ${e.message}`);
+
+          if (nature === 'invalid') {
+            // Donnée définitivement non stockable (FK d'un salarié supprimé,
+            // dépassement de bornes…) : accusé terminal, journalisé.
+            rejeter(resultats, p.uuid, 'erreur_stockage');
+            continue;
+          }
+
+          // ── Incident TRANSITOIRE : le lot s'arrête ici (QA-13) ──
+          // On ne tente PAS les éléments suivants, pour deux raisons :
+          //  1. INTÉGRITÉ DE LA CHAÎNE — les pointages sont chaînés par
+          //     séquence. Insérer l'élément N+1 alors que N a été différé
+          //     ferait échouer la vérification de chaîne de N à son rejeu
+          //     (son `hash_precedent` ne correspondrait plus au dernier hash
+          //     stocké) : on transformerait un incident d'infrastructure en
+          //     rupture de preuve permanente.
+          //  2. La cause n'est pas propre à l'élément (base sous tension,
+          //     connexion perdue) : poursuivre produirait une cascade
+          //     d'erreurs, potentiellement « transaction avortée » (25P02).
+          // Tout le reste du lot est donc différé — le poste le conserve
+          // intégralement et le représentera dans l'ordre.
+          differer(resultats, p.uuid, 'erreur_transitoire');
+          for (const restant of lot.slice(index + 1)) {
+            differer(resultats, restant && restant.uuid, 'lot_interrompu');
+          }
+          break;
         }
       }
 
@@ -322,6 +406,9 @@ router.post('/v1/devices/:code/pointages',
       }
       if (invalides > 0) {
         console.warn(`[BADGEUSE-DEVICE] ${req.device.code} : ${invalides} élément(s) refusé(s) définitivement sur ${lot.length} — à investiguer (le poste les purge et le signale par heartbeat)`);
+      }
+      if (differes > 0) {
+        console.error(`[BADGEUSE-DEVICE] ${req.device.code} : ${differes} élément(s) différé(s) sur ${lot.length} — incident de stockage transitoire, le poste les CONSERVE et les représentera (aucune heure perdue)`);
       }
       res.json({ resultats, server_time_utc: new Date().toISOString() });
     } catch (err) {
