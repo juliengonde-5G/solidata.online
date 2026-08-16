@@ -164,6 +164,27 @@ file qui gonfle) et alimente la supervision BO-09 (alerte si silence > seuil par
 | `429` | Débit dépassé |
 | `503` | Maintenance — le poste garde sa file et réessaie (backoff expo plafonné 5 min) |
 
+## 3bis. Amendements v1.3 — écran d'information v2 (CDC_AFFICHAGE_V2, ADR-0004)
+
+- **§2.2 cache badges** — champs ajoutés, par badge : `premier_jour` (bool),
+  `anniversaire` (bool), `anniversaire_entreprise_annees` (int|null). **Booléens/entier
+  calculés côté serveur au moment du sync, uniquement si opt-in individuel**
+  (`employees.badgeuse_optin_festif`) — jamais de date de naissance, jamais de statut.
+  Absents = false/null (rétro-compatible).
+- **§2.3 config** — bloc ajouté `affichage` : `messages` (gabarits `{prenom}` par moment
+  `matin|pause|retour|soir|premier_jour|anniversaire|anniversaire_entreprise`),
+  `plages_moments` (bornes HH:MM), `phrases_motivation` (tableau, rotation quotidienne
+  déterministe côté poste), `motivation_active`, `festif_actif` (booléens).
+- **§2.4 playlist** — types ajoutés : `annonces`, `actus`, `tournees`, `social`,
+  `media`, `lien` (servi comme `media`), `vak_live`. Le contenu des types dynamiques est
+  **généré côté serveur** à la construction de la réponse ; les éléments `media`/`social`
+  référencent `media_id` + `media_type` (image|video) + `media_sha256`.
+- **Nouvel endpoint** `GET /devices/:code/media/:id` — flux binaire du média référencé
+  par la playlist (clé device, mêmes 401/429). Le poste télécharge dans
+  `/var/lib/badgeuse/media/` (cache plafonné, purge des non-référencés, vérification
+  sha256) et sert en local : la CSP du kiosque reste `'self'`, le hors-ligne est préservé.
+- Les jours de VAK active, le serveur abaisse `sync_playlist_interval_sec` à 300.
+
 ## 4. Matrice de couverture (exigences → endpoint)
 
 | Exigence | Couverte par |
