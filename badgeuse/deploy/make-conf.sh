@@ -86,14 +86,19 @@ done
 
 erreur() { echo "ERREUR : $*" >&2; exit 1; }
 
+# Clavier réel si un terminal de contrôle est ouvrable, sinon entrée standard
+# (le script reste utilisable depuis prepare-sd.sh ou un banc de test, au lieu
+# d'échouer sur un « /dev/tty: No such device »).
+if : </dev/tty 2>/dev/null; then TTY=/dev/tty; else TTY=/dev/stdin; fi
+
 # Une valeur demandée au clavier si elle n'a pas été fournie en option.
 demander() {
   local invite="$1" defaut="${2:-}" reponse=""
   if [ -n "$defaut" ]; then
-    read -r -p "$invite [$defaut] : " reponse </dev/tty || true
+    read -r -p "$invite [$defaut] : " reponse <"$TTY" || true
     echo "${reponse:-$defaut}"
   else
-    read -r -p "$invite : " reponse </dev/tty || true
+    read -r -p "$invite : " reponse <"$TTY" || true
     echo "$reponse"
   fi
 }
@@ -101,8 +106,8 @@ demander() {
 # Un SECRET : saisie masquée, jamais réaffiché, jamais dans l'historique.
 demander_secret() {
   local invite="$1" reponse=""
-  read -r -s -p "$invite : " reponse </dev/tty || true
-  echo >/dev/tty
+  read -r -s -p "$invite : " reponse <"$TTY" || true
+  [ "$TTY" = "/dev/tty" ] && echo >/dev/tty || echo >&2
   echo "$reponse"
 }
 
