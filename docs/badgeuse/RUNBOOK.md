@@ -85,14 +85,50 @@ Le modèle est `badgeuse/deploy/badgeuse.conf.example`. Chaque clé expliquée :
 | `[ui]` | `ws_port`, `http_port`, `dir` | Ports et dossier de l'interface locale | Laisser commenté (valeurs par défaut) |
 | `[dpms]` | `allumage`, `extinction` | Plage horaire d'allumage de l'écran | Format `HH:MM`, heure locale du poste (ex. `05:30` / `21:30`). Laisser vide pour un écran allumé en permanence |
 
-Sur un ordinateur (pas nécessairement le poste), préparer le fichier :
+Sur un ordinateur (pas nécessairement le poste), lancer le **script de génération** — il pose
+les questions une par une, vérifie chaque réponse et écrit le fichier en `0600` :
 
 ```bash
-cp badgeuse/deploy/badgeuse.conf.example badgeuse.conf
-# éditer badgeuse.conf : coller device_code, device_key, hmac_key, target
+bash badgeuse/deploy/make-conf.sh
 ```
 
-Transférer ensuite ce fichier sur le poste (clé USB, ou `scp` si le poste est déjà accessible en SSH).
+Le dialogue demande : l'adresse de SOLIDATA, le code du poste, la cible (`pi5`/`pi3`), puis les
+**deux clés en saisie masquée** (elles ne s'affichent pas à l'écran et n'entrent pas dans
+l'historique du shell — c'est pourquoi elles ne sont pas des options de ligne de commande).
+Le fichier `badgeuse.conf` est créé dans le dossier courant.
+
+Le script **refuse tout de suite** les erreurs qui, sinon, ne se verraient qu'au premier
+démarrage du service — avec le message qui dit quoi corriger :
+
+| Message | Ce qui s'est passé |
+|---|---|
+| « c'est la clé du SITE, pas celle du poste » | Les deux clés ont été interverties (la clé HMAC fait exactement 64 caractères) |
+| « clé du poste trop courte — vérifiez le copier-coller » | Le copier-coller a tronqué la valeur |
+| « l'adresse doit être en HTTPS » | `http://` saisi au lieu de `https://` |
+| « cible inconnue » | Autre chose que `pi5` ou `pi3` |
+| « restée sur la valeur d'exemple » | Une valeur `CHANGE_ME…` n'a pas été remplacée |
+| « existe déjà » | Un fichier est déjà là — relancer avec `--force` pour l'écraser |
+
+Quand `python3` est disponible, le script termine par un **contrôle de validité** : il fait lire
+le fichier par l'agent lui-même. « contrôle de validité : OK » signifie que le poste démarrera.
+
+Variantes utiles :
+
+```bash
+# Directement sur le poste, à l'emplacement définitif (root requis)
+sudo bash badgeuse/deploy/make-conf.sh --install
+
+# Sans dialogue (déploiement scripté) : les clés passent par l'environnement
+BADGEUSE_DEVICE_KEY='…' BADGEUSE_HMAC_KEY='…' \
+  bash badgeuse/deploy/make-conf.sh --code LH-P2 --target pi3 -o /tmp/secours.conf
+
+bash badgeuse/deploy/make-conf.sh --help   # toutes les options
+```
+
+Transférer ensuite ce fichier sur le poste (clé USB, ou `scp` si le poste est déjà accessible en
+SSH). Le modèle commenté `badgeuse/deploy/badgeuse.conf.example` reste disponible pour une
+préparation entièrement manuelle : il documente chaque clé, y compris les options facultatives
+que le script laisse commentées.
 
 ### 1.6 Installer
 
