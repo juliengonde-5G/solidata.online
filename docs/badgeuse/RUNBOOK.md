@@ -27,6 +27,91 @@ La liste complète, avec références et prix, est dans `docs/badgeuse/SPEC_TECH
 
 **Avant de commander en série : tester un badge sur une unité du lecteur.** Certains lecteurs sortent l'UID en décimal tronqué au lieu d'hexadécimal — SPEC_TECHNIQUE §3.6.
 
+---
+
+## VOIE RAPIDE — carte SD, une seule commande sur le Raspberry
+
+**C'est la procédure recommandée.** Elle remplace tout le §1 ci-dessous (NVMe, EEPROM,
+clonage de dépôt) : la carte SD transporte le code **et** les deux configurations, et chaque
+Raspberry reconnaît la sienne. Les sections §1.2 à §1.7 restent la référence pour une
+installation sur SSD NVMe.
+
+### A. Flasher la carte (sur le PC, une fois par poste)
+
+Avec **Raspberry Pi Imager** : Raspberry Pi 5 (ou 3) · **Raspberry Pi OS Lite (64-bit)** ·
+la carte microSD. Puis **⚙ Réglages** avant d'écrire : nom d'hôte (`ST-Badgeuse` /
+`ST-Badgeuse-Secours`), **SSH activé**, utilisateur + mot de passe, Wi-Fi si pas d'Ethernet,
+fuseau `Europe/Paris`, clavier français.
+
+### B. Déposer le code et les deux configurations (sur le PC)
+
+Réinsérez la carte : une partition **`bootfs`** apparaît dans l'explorateur de fichiers.
+
+```bash
+bash badgeuse/deploy/prepare-sd.sh /media/$USER/bootfs     # Linux
+bash badgeuse/deploy/prepare-sd.sh /Volumes/bootfs         # macOS
+```
+
+Le script copie le dossier `badgeuse/` (~600 Ko) sur la carte, puis demande pour **chaque
+poste** son code (proposé : `LH-P1` pour le Pi 5, `LH-P2` pour le Pi 3) et ses **deux clés**
+en saisie masquée — celles de SOLIDATA → Temps & Présence → Supervision → « Appairer un
+poste ». Il produit `badgeuse-pi5.conf` et `badgeuse-pi3.conf`.
+
+*Sous Windows, ou sans partition montée* : copiez à la main le dossier `badgeuse` à la racine
+de `bootfs`, et générez les deux fichiers avec
+`bash badgeuse/deploy/make-conf.sh -o badgeuse-pi5.conf --target pi5 --code LH-P1` (idem
+`pi3`/`LH-P2`), à déposer eux aussi à la racine de `bootfs`.
+
+**La clé HMAC est celle du SITE** : la même dans les deux fichiers. Seule la clé du poste
+diffère.
+
+### C. Installer (sur le Raspberry, une seule commande)
+
+Insérez la carte, branchez écran, réseau et alimentation, connectez-vous (SSH ou clavier) :
+
+```bash
+sudo bash /boot/firmware/badgeuse/deploy/sd-init.sh
+```
+
+C'est tout. Le script reconnaît la machine — **Pi 5 = poste standard, Pi 3 = poste de
+secours** — prend la configuration correspondante, installe paquets, service, écran kiosque
+et pare-feu, puis affiche un compte rendu. Aucune question n'est posée.
+
+Pour fermer SSH au seul réseau d'administration dans la foulée :
+
+```bash
+sudo RESEAU_ADMIN=192.168.1.0/24 bash /boot/firmware/badgeuse/deploy/sd-init.sh
+```
+
+**La même carte SD peut servir aux deux postes** : préparez-la une fois, clonez-la, chaque
+machine prendra sa configuration. Le script refuse d'ailleurs de s'exécuter sur autre chose
+qu'un Raspberry, et refuse une configuration qui ne correspond pas au modèle détecté.
+
+### D. Vérifier
+
+1. **SOLIDATA → Temps & Présence → Supervision** : le poste passe **en ligne** dans la minute.
+2. Présentez un badge : refus à l'écran (normal), puis le badge apparaît dans **Journal →
+   Pointages orphelins** avec son empreinte.
+3. **Badges → « + Attribuer un badge »** : collez l'empreinte, choisissez le salarié,
+   re-badgez.
+
+Si l'agent ne démarre pas : `journalctl -u badgeuse-agent -n 40`.
+
+### Ce que la voie SD change
+
+| | SSD NVMe (§1) | Carte SD (voie rapide) |
+|---|---|---|
+| Réglage EEPROM | requis (`eeprom-nvme.sh`) | **inutile** |
+| Dépôt Git sur le poste | requis | **inutile** (tout est sur la carte) |
+| Commandes sur le Pi | 4 à 6 | **1** |
+| Durée de vie du support | plusieurs années | **carte haute endurance recommandée**, clonage de secours conseillé |
+
+La carte SD est le point faible connu d'un poste allumé en permanence : utilisez une carte
+**haute endurance**, et gardez un clone prêt à l'emploi (§4). L'onduleur devient d'autant
+plus utile qu'il évite les coupures brutales en écriture.
+
+---
+
 ### 1.2 Préparer le support de démarrage (SSD NVMe)
 
 Cette étape se fait **avant** l'assemblage, avec un ordinateur séparé et un adaptateur USB vers M.2/NVMe. Elle n'est pas scriptée dans ce dépôt — c'est l'usage standard de l'outil Raspberry Pi Imager, mentionné ici pour que la procédure soit complète.
