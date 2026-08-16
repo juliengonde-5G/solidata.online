@@ -28,15 +28,23 @@
  */
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const multer = require('multer');
 const pool = require('../config/database');
 const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
 const { query: q, param, body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const { mediaFilter } = require('../utils/upload-filters');
 const engine = require('../services/badgeuse-engine');
+const media = require('../services/badgeuse-social');
 const {
-  BADGEUSE_SETTING_DEFAULTS, REGLES_VALIDEES_LE_KEY, REGLES_VALIDEES_PAR_KEY,
+  BADGEUSE_SETTING_DEFAULTS, REGLES_VALIDEES_LE_KEY, REGLES_VALIDEES_PAR_KEY, REGLES_RH_KEYS,
+  META_TOKEN_KEY, META_TOKEN_CONFIGURE_LE_KEY, SOCIAL_DERNIER_SYNC_KEY,
   hmacKeySettingKey, readBadgeuseParams, readReglesValidees, writeSetting,
+  validateAffichageSettings,
 } = require('../utils/badgeuse-settings');
 const {
   generateDeviceKey, hashDeviceKey, generateSiteKey, encryptSecret,
@@ -58,6 +66,46 @@ const ADMIN_ONLY = authorize('ADMIN');
 // que la supervision le considère muet.
 
 const MOTIFS = ['oubli_badge', 'badge_defaillant', 'mission_exterieure', 'rdv_accompagnement', 'formation', 'autre'];
+
+// Types de contenus de veille (BO-08 + écran v2). Les 5 premiers sont des
+// contenus SAISIS, les suivants sont des GÉNÉRATEURS dont le contenu est
+// construit par le serveur à la lecture de la playlist (routes/badgeuse-device.js).
+const CONTENU_TYPES = [
+  'message', 'image', 'planning', 'compte_a_rebours', 'meteo',
+  'annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live',
+];
+
+// Téléversement d'un média d'affichage (pattern Refashion : diskStorage +
+// filtre extension/MIME + plafond). 100 Mo : une vidéo de veille de quelques
+// dizaines de secondes tient largement dedans, et le poste doit pouvoir la
+// mettre en cache local (plafond `badgeuse.media_cache_max_mo`).
+const MEDIA_UPLOAD_MAX_MO = 100;
+const uploadMedia = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, media.ensureMediaDir()),
+    filename: (req, file, cb) => cb(
+      null,
+      `media-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${path.extname(file.originalname || '').toLowerCase()}`
+    ),
+  }),
+  limits: { fileSize: MEDIA_UPLOAD_MAX_MO * 1024 * 1024 },
+  fileFilter: mediaFilter,
+});
+
+/**
+ * Multer, mais avec une réponse EXPLICITE au lieu d'un 500 opaque : un fichier
+ * refusé (type ou taille) est une erreur d'utilisateur, pas une panne — il doit
+ * pouvoir lire pourquoi et recommencer.
+ */
+function uploadMediaSingle(req, res, next) {
+  uploadMedia.single('fichier')(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: `Fichier trop volumineux (maximum ${MEDIA_UPLOAD_MAX_MO} Mo)` });
+    }
+    return res.status(415).json({ error: err.message || 'Type de fichier non autorisé' });
+  });
+}
 
 // Marge de CHARGEMENT autour d'une période (revue Codex — correctif C2) : une
 // journée de travail peut enjamber la frontière de mois. Ce n'est pas une règle
@@ -315,14 +363,29 @@ router.put('/parametres', WRITE, async (req, res) => {
       return res.status(400).json({ error: 'Aucun paramètre reconnu à enregistrer' });
     }
 
+    // Garde-fous d'AFFICHAGE (écran v2) : un gabarit sans `{prenom}`, une
+    // borne horaire illisible ou un vivier de phrases démesuré casseraient
+    // l'écran en silence. Le lot est refusé ENTIER — un paramétrage à moitié
+    // écrit serait pire qu'un refus (règles incohérentes entre elles).
+    const erreurAffichage = validateAffichageSettings(entrees);
+    if (erreurAffichage) return res.status(400).json({ error: erreurAffichage });
+
     await client.query('BEGIN');
     for (const [key, value] of entrees) {
       await writeSetting(key, value, client);
     }
     // L'enregistrement explicite de la grille VAUT arbitrage (ADR-0002 §3) :
     // le bandeau « règles par défaut » disparaît alors du back-office.
-    await writeSetting(REGLES_VALIDEES_LE_KEY, new Date().toISOString(), client);
-    await writeSetting(REGLES_VALIDEES_PAR_KEY, String(req.user.id), client);
+    // MAIS uniquement si le lot touche VRAIMENT une règle de gestion RH : les
+    // paramètres d'AFFICHAGE de l'écran v2 (gabarits, phrases, réseaux
+    // sociaux) passent par le même endpoint, et modifier un message de
+    // bienvenue ne vaut pas arbitrage de la grille par la Direction. Sans
+    // cette distinction, le signal « non arbitré » s'éteindrait tout seul.
+    const toucheRegleRh = entrees.some(([k]) => REGLES_RH_KEYS.includes(k));
+    if (toucheRegleRh) {
+      await writeSetting(REGLES_VALIDEES_LE_KEY, new Date().toISOString(), client);
+      await writeSetting(REGLES_VALIDEES_PAR_KEY, String(req.user.id), client);
+    }
     await client.query('COMMIT');
 
     const [params, regles] = await Promise.all([readBadgeuseParams(), readReglesValidees()]);
@@ -353,7 +416,9 @@ router.get('/badges', READ, [
 
     const r = await pool.query(
       `SELECT b.id, b.employee_id, b.uid_hmac, b.statut, b.attribue_le, b.restitue_le,
-              b.commentaire, b.created_at, e.first_name, e.last_name, e.malibou_id
+              b.commentaire, b.created_at, e.first_name, e.last_name, e.malibou_id,
+              COALESCE(e.badgeuse_optin_festif, false) AS badgeuse_optin_festif,
+              e.badgeuse_optin_festif_le
        FROM badgeuse_badges b
        JOIN employees e ON e.id = b.employee_id
        ${where}
@@ -372,6 +437,11 @@ router.get('/badges', READ, [
       attribue_le: x.attribue_le,
       restitue_le: x.restitue_le,
       commentaire: x.commentaire,
+      // Consentement à l'affichage festif (ADR-0004 §4) : la case se gère dans
+      // l'onglet Badges, avec sa date de recueil — un consentement sans date
+      // ne prouve rien.
+      badgeuse_optin_festif: x.badgeuse_optin_festif === true,
+      badgeuse_optin_festif_le: x.badgeuse_optin_festif_le || null,
     })));
   } catch (err) {
     console.error('[BADGEUSE] Erreur liste badges :', err.message);
@@ -1342,7 +1412,7 @@ router.get('/exports/iae', WRITE, [
 // ═══════════════════════════════════════════════════════════════════════════
 
 const contenuValidators = [
-  body('type').optional().isIn(['message', 'image', 'planning', 'compte_a_rebours', 'meteo']).withMessage('type invalide'),
+  body('type').optional().isIn(CONTENU_TYPES).withMessage('type invalide'),
   body('titre').optional({ nullable: true }).isString().isLength({ max: 200 }),
   body('corps').optional({ nullable: true }).isString().isLength({ max: 2000 })
     .withMessage('Le corps d\'un contenu d\'affichage est limité à 2000 caractères'),
@@ -1374,20 +1444,136 @@ router.post('/contenus', WRITE, contenuValidators, validate, async (req, res) =>
     const b = req.body || {};
     const r = await pool.query(
       `INSERT INTO badgeuse_contenus
-         (site_id, type, titre, corps, media_url, ordre, duree_sec, visible_du, visible_au, actif, cree_par)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+         (site_id, type, titre, corps, media_url, ordre, duree_sec, visible_du, visible_au, actif, config, cree_par)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [
         b.site_id == null ? null : parseInt(b.site_id, 10), b.type || 'message',
         b.titre || null, b.corps || null, b.media_url || null,
         b.ordre == null ? 0 : parseInt(b.ordre, 10),
         b.duree_sec == null ? 10 : parseInt(b.duree_sec, 10),
         b.visible_du || null, b.visible_au || null,
-        b.actif === undefined ? true : !!b.actif, req.user.id,
+        b.actif === undefined ? true : !!b.actif,
+        b.config == null ? null : JSON.stringify(b.config),
+        req.user.id,
       ]
     );
     res.status(201).json(r.rows[0]);
   } catch (err) {
     console.error('[BADGEUSE] Erreur création contenu :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── Écran v2 : médias téléversés et liens partagés ─────────────────────────
+
+/**
+ * POST /contenus/upload — téléverse une image ou une vidéo et en fait un
+ * contenu de playlist de type `media`. Le poste la téléchargera par l'API
+ * device et la servira depuis son cache local : la CSP du kiosque reste
+ * `'self'` et l'affichage survit à une coupure réseau (AFF-07).
+ *
+ * Le condensat SHA-256 est calculé EN FLUX (un fichier de 100 Mo n'a pas à
+ * passer par la mémoire) : il permet au poste de vérifier son cache sans
+ * retélécharger.
+ */
+router.post('/contenus/upload', WRITE, uploadMediaSingle, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu (champ « fichier » attendu)' });
+  const relatif = path.basename(req.file.path);
+  try {
+    const b = req.body || {};
+    const mime = media.mimeForFile(relatif);
+    const mediaType = media.mediaTypeForMime(mime);
+    if (!mediaType) {
+      media.unlinkMedia(relatif);
+      return res.status(415).json({ error: 'Type de fichier non diffusable sur l\'écran' });
+    }
+
+    // Condensat en flux.
+    const sha256 = await new Promise((resolve, reject) => {
+      const hash = crypto.createHash('sha256');
+      const flux = fs.createReadStream(req.file.path);
+      flux.on('error', reject);
+      flux.on('data', (c) => hash.update(c));
+      flux.on('end', () => resolve(hash.digest('hex')));
+    });
+
+    const r = await pool.query(
+      `INSERT INTO badgeuse_contenus
+         (site_id, type, titre, ordre, duree_sec, visible_du, visible_au, actif,
+          fichier, media_type, media_sha256, cree_par)
+       VALUES ($1,'media',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [
+        b.site_id == null || b.site_id === '' ? null : parseInt(b.site_id, 10),
+        b.titre || req.file.originalname || 'Média',
+        b.ordre == null || b.ordre === '' ? 0 : parseInt(b.ordre, 10),
+        b.duree_sec == null || b.duree_sec === '' ? 10 : Math.min(60, Math.max(5, parseInt(b.duree_sec, 10) || 10)),
+        b.visible_du || null, b.visible_au || null,
+        b.actif === undefined ? true : !(b.actif === 'false' || b.actif === false),
+        relatif, mediaType, sha256, req.user.id,
+      ]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    // Échec APRÈS l'écriture multer : le fichier orphelin est nettoyé
+    // (correctif de la classe signalée par la revue Codex PR#79).
+    media.unlinkMedia(relatif);
+    console.error('[BADGEUSE] Erreur téléversement média :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /contenus/lien — un utilisateur partage un lien, le SERVEUR télécharge
+ * le contenu et le transforme en média local.
+ *
+ * C'est le point le plus sensible du lot : une URL fournie par un humain
+ * déclenche une requête sortante depuis le serveur. Toutes les gardes vivent
+ * dans services/badgeuse-social.js (https strict, résolution DNS + refus des
+ * plans d'adressage internes, redirections revalidées, type et taille
+ * plafonnés, délai borné) — voir l'en-tête de ce fichier pour le risque
+ * résiduel documenté (DNS rebinding).
+ */
+router.post('/contenus/lien', WRITE, [
+  body('url').isString().isLength({ min: 8, max: 2000 }).withMessage('url requise'),
+  body('titre').optional({ nullable: true }).isString().isLength({ max: 200 }),
+  body('duree_sec').optional().isInt({ min: 5, max: 60 }),
+  body('ordre').optional().isInt({ min: 0, max: 9999 }),
+  body('site_id').optional({ nullable: true }).isInt(),
+], validate, async (req, res) => {
+  const b = req.body || {};
+  let telecharge = null;
+  try {
+    const params = await readBadgeuseParams();
+    const maxBytes = Math.max(1, Number(params.lien_taille_max_mo) || 50) * 1024 * 1024;
+
+    telecharge = await media.downloadMedia(b.url, { maxBytes, prefixe: 'lien' });
+
+    const r = await pool.query(
+      `INSERT INTO badgeuse_contenus
+         (site_id, type, titre, ordre, duree_sec, visible_du, visible_au, actif,
+          fichier, media_type, media_sha256, source_url, cree_par)
+       VALUES ($1,'lien',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [
+        b.site_id == null ? null : parseInt(b.site_id, 10),
+        b.titre || 'Contenu partagé',
+        b.ordre == null ? 0 : parseInt(b.ordre, 10),
+        b.duree_sec == null ? 10 : parseInt(b.duree_sec, 10),
+        b.visible_du || null, b.visible_au || null,
+        b.actif === undefined ? true : !!b.actif,
+        telecharge.fichier, telecharge.media_type, telecharge.media_sha256,
+        String(b.url).slice(0, 500), req.user.id,
+      ]
+    );
+    res.status(201).json({ ...r.rows[0], octets: telecharge.bytes });
+  } catch (err) {
+    if (telecharge) media.unlinkMedia(telecharge.fichier); // jamais d'orphelin
+    if (err instanceof media.MediaError) {
+      // 422 : la demande est bien formée, mais le contenu visé n'est pas
+      // diffusable (ou le lien est refusé par les gardes). Message EXPLICITE :
+      // l'utilisateur doit comprendre pourquoi, pas deviner.
+      return res.status(422).json({ error: err.message, code: err.code });
+    }
+    console.error('[BADGEUSE] Erreur rapatriement de lien :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -1402,6 +1588,7 @@ router.put('/contenus/:id', WRITE, [param('id').isInt(), ...contenuValidators], 
          media_url = COALESCE($6, media_url), ordre = COALESCE($7, ordre),
          duree_sec = COALESCE($8, duree_sec), visible_du = COALESCE($9, visible_du),
          visible_au = COALESCE($10, visible_au), actif = COALESCE($11, actif),
+         config = COALESCE($12::jsonb, config),
          updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [
@@ -1413,6 +1600,7 @@ router.put('/contenus/:id', WRITE, [param('id').isInt(), ...contenuValidators], 
         b.duree_sec == null ? null : parseInt(b.duree_sec, 10),
         b.visible_du || null, b.visible_au || null,
         b.actif === undefined ? null : !!b.actif,
+        b.config == null ? null : JSON.stringify(b.config),
       ]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Contenu introuvable' });
@@ -1425,11 +1613,175 @@ router.put('/contenus/:id', WRITE, [param('id').isInt(), ...contenuValidators], 
 
 router.delete('/contenus/:id', WRITE, [param('id').isInt()], validate, async (req, res) => {
   try {
-    const r = await pool.query('DELETE FROM badgeuse_contenus WHERE id = $1 RETURNING id', [parseInt(req.params.id, 10)]);
+    // `fichier` est rendu par le DELETE : supprimer la ligne sans supprimer le
+    // binaire laisserait un média orphelin que plus rien ne référence (et que
+    // la purge devrait deviner).
+    const r = await pool.query(
+      'DELETE FROM badgeuse_contenus WHERE id = $1 RETURNING id, fichier',
+      [parseInt(req.params.id, 10)]
+    );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Contenu introuvable' });
-    res.json({ deleted: true, id: r.rows[0].id });
+    const fichierSupprime = r.rows[0].fichier ? media.unlinkMedia(r.rows[0].fichier) : false;
+    res.json({ deleted: true, id: r.rows[0].id, fichier_supprime: fichierSupprime });
   } catch (err) {
     console.error('[BADGEUSE] Erreur suppression contenu :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OPT-IN AFFICHAGE FESTIF (ADR-0004 §4) — consentement individuel, tracé
+//
+// Afficher un anniversaire n'est pas nécessaire au décompte du temps : c'est
+// une divulgation supplémentaire, qui exige un CONSENTEMENT LIBRE. Refuser
+// n'a aucune conséquence, ce qui rend le consentement valable malgré le lien
+// de subordination. Le recueil ET le retrait sont journalisés DANS la
+// transaction (même exigence que les actes qui font foi : validation RH,
+// rattachement d'orphelin) : sans trace datée, un consentement ne se prouve pas.
+// ═══════════════════════════════════════════════════════════════════════════
+router.post('/salaries/:employeeId/optin-festif', WRITE, [
+  param('employeeId').isInt(),
+  body('actif').isBoolean().withMessage('actif (booléen) requis'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const employeeId = parseInt(req.params.employeeId, 10);
+    const actif = !!req.body.actif;
+
+    await client.query('BEGIN');
+    const upd = await client.query(
+      `UPDATE employees
+       SET badgeuse_optin_festif = $2,
+           badgeuse_optin_festif_le = CASE WHEN $2 THEN NOW() ELSE NULL END,
+           badgeuse_optin_festif_par = CASE WHEN $2 THEN $3::int ELSE NULL END
+       WHERE id = $1
+       RETURNING id, badgeuse_optin_festif, badgeuse_optin_festif_le`,
+      [employeeId, actif, req.user.id]
+    );
+    if (upd.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Salarié introuvable' });
+    }
+    await client.query(
+      'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+      [req.user.id, 'BADGEUSE_OPTIN_FESTIF', 'employees', employeeId,
+        JSON.stringify({
+          employee_id: employeeId,
+          consentement: actif ? 'recueilli' : 'retire',
+          finalite: 'affichage des anniversaires sur l\'écran du poste de pointage',
+          requested_by: req.user.id,
+        })]
+    );
+    await client.query('COMMIT');
+    res.json({
+      employee_id: employeeId,
+      badgeuse_optin_festif: upd.rows[0].badgeuse_optin_festif,
+      badgeuse_optin_festif_le: upd.rows[0].badgeuse_optin_festif_le,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
+    console.error('[BADGEUSE] Erreur opt-in festif :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RÉSEAUX SOCIAUX (ADR-0004 §6) — jeton chiffré, jamais relu
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * PUT /social/config — jeton Meta et comptes suivis (ADMIN).
+ * Le jeton est chiffré AES-256-GCM (pattern SumUp / clés HMAC de site) et
+ * n'est JAMAIS renvoyé, même tronqué : seule sa date de configuration l'est.
+ */
+router.put('/social/config', ADMIN_ONLY, [
+  body('meta_token').optional({ nullable: true }).isString().isLength({ max: 500 }),
+  body('comptes').optional().isArray({ max: 30 }),
+  body('sync_actif').optional().isBoolean(),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const b = req.body || {};
+    await client.query('BEGIN');
+
+    if (typeof b.meta_token === 'string' && b.meta_token.trim()) {
+      await writeSetting(META_TOKEN_KEY, encryptSecret(b.meta_token.trim()), client);
+      await writeSetting(META_TOKEN_CONFIGURE_LE_KEY, new Date().toISOString(), client);
+    } else if (b.meta_token === null) {
+      // Retrait explicite du jeton (le job redevient un no-op silencieux).
+      await writeSetting(META_TOKEN_KEY, null, client);
+      await writeSetting(META_TOKEN_CONFIGURE_LE_KEY, null, client);
+    }
+
+    if (Array.isArray(b.comptes)) {
+      const comptes = b.comptes.slice(0, 30).map((c) => ({
+        reseau: c && c.reseau === 'facebook' ? 'facebook' : 'instagram',
+        compte: String((c && c.compte) || '').slice(0, 100),
+        graph_id: c && c.graph_id ? String(c.graph_id).slice(0, 100) : null,
+        actif: !!(c && c.actif),
+      })).filter((c) => c.compte);
+      await writeSetting('badgeuse.social_comptes', comptes, client);
+    }
+    if (b.sync_actif !== undefined) {
+      await writeSetting('badgeuse.social_sync_actif', !!b.sync_actif, client);
+    }
+    await client.query('COMMIT');
+
+    await socialStatus(res);
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
+    console.error('[BADGEUSE] Erreur configuration sociale :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+/** État de la synchronisation sociale — le jeton n'y figure jamais. */
+async function socialStatus(res) {
+  const params = await readBadgeuseParams();
+  const etat = await pool.query(
+    'SELECT key, value FROM settings WHERE key IN ($1, $2, $3)',
+    [META_TOKEN_KEY, META_TOKEN_CONFIGURE_LE_KEY, SOCIAL_DERNIER_SYNC_KEY]
+  );
+  const map = new Map(etat.rows.map((x) => [x.key, x.value]));
+  let posts = { total: 0, dernier: null };
+  try {
+    const p = await pool.query(
+      'SELECT COUNT(*)::int AS total, MAX(publie_le) AS dernier FROM badgeuse_social_posts'
+    );
+    posts = { total: p.rows[0].total || 0, dernier: p.rows[0].dernier || null };
+  } catch (_) { /* table absente sur une base non migrée */ }
+
+  res.json({
+    sync_actif: params.social_sync_actif === true,
+    jeton_configure: !!map.get(META_TOKEN_KEY),
+    jeton_configure_le: map.get(META_TOKEN_CONFIGURE_LE_KEY) || null,
+    dernier_sync: map.get(SOCIAL_DERNIER_SYNC_KEY) || null,
+    posts_par_compte: params.social_posts_par_compte,
+    comptes: Array.isArray(params.social_comptes) ? params.social_comptes : [],
+    posts,
+  });
+}
+
+router.get('/social/status', READ, async (req, res) => {
+  try {
+    await socialStatus(res);
+  } catch (err) {
+    console.error('[BADGEUSE] Erreur état social :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/** POST /social/sync — déclenchement à la demande (ADMIN). */
+router.post('/social/sync', ADMIN_ONLY, async (req, res) => {
+  try {
+    const bilan = await media.syncSocialPosts();
+    res.json(bilan);
+  } catch (err) {
+    console.error('[BADGEUSE] Erreur synchronisation sociale :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

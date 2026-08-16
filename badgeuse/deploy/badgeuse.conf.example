@@ -62,6 +62,16 @@ data_dir = /var/lib/badgeuse
 ; Le code applicatif est identique ; seule l'installation diffère.
 target = pi5
 
+; Plafond du cache des médias de l'écran de veille (images et vidéos), en Mo.
+; Sous-répertoire : <data_dir>/media.
+;
+; NE PAS RENSEIGNER en exploitation normale : la valeur fait foi CÔTÉ SERVEUR
+; (Temps & Présence → Affichage), comme toutes les règles d'affichage
+; (ADR-0002). Ce réglage local n'est qu'un GARDE-FOU de secours pour un poste
+; à petit disque : il ne peut que RÉDUIRE le plafond serveur, jamais
+; l'augmenter. Laissé vide, seul le paramétrage serveur s'applique.
+;media_cache_max_mo = 512
+
 [ui]
 ; Écoutes strictement locales (127.0.0.1). Ne pas exposer sur le réseau.
 ;ws_port = 8765

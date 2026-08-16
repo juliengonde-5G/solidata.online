@@ -102,7 +102,14 @@ CREATE TABLE IF NOT EXISTS badges (
     uid_hmac   TEXT PRIMARY KEY,
     salarie_id INTEGER NOT NULL,
     prenom     TEXT    NOT NULL,
-    initiale   TEXT    NOT NULL
+    initiale   TEXT    NOT NULL,
+    -- Drapeaux festifs v1.3 (CONTRAT_API_DEVICE §3bis). Booléens et entier
+    -- UNIQUEMENT : jamais de date de naissance, jamais de date d'entrée.
+    -- Posés par le serveur seulement si le salarié a donné son accord
+    -- individuel (ADR-0004 §4) ; le poste ne calcule ni ne déduit rien.
+    premier_jour                   INTEGER NOT NULL DEFAULT 0,
+    anniversaire                   INTEGER NOT NULL DEFAULT 0,
+    anniversaire_entreprise_annees INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS pointages_locaux (
@@ -126,6 +133,59 @@ CREATE TABLE IF NOT EXISTS compteurs (
     valeur INTEGER NOT NULL DEFAULT 0
 );
 """
+
+#: Colonnes ajoutées **après** la première mise en service, par table.
+#:
+#: ``CREATE TABLE IF NOT EXISTS`` ne fait rien sur une table existante : une
+#: base déjà en service sur un poste ne verrait jamais les colonnes ajoutées
+#: au schéma. Ce registre porte la migration, appliquée à chaque ouverture et
+#: **idempotente** (une colonne déjà présente est simplement ignorée) — même
+#: doctrine que ``init-db.js`` côté serveur.
+#:
+#: Les identifiants proviennent exclusivement de cette constante du module, et
+#: jamais d'une entrée externe : le SQL de DDL ne peut pas être paramétré
+#: (SQLite n'accepte pas de marqueur pour un nom de colonne), la sécurité tient
+#: donc au fait que ces chaînes sont écrites en dur ici.
+_MIGRATIONS_COLONNES = {
+    "badges": (
+        ("premier_jour", "INTEGER NOT NULL DEFAULT 0"),
+        ("anniversaire", "INTEGER NOT NULL DEFAULT 0"),
+        ("anniversaire_entreprise_annees", "INTEGER"),
+    ),
+}
+
+
+def normaliser_drapeaux(badge: Mapping[str, Any]) -> Dict[str, Any]:
+    """Drapeaux festifs d'un badge, ramenés à leur forme stockable.
+
+    Fonction PURE (aucune E/S) — c'est la frontière de confiance avec le
+    serveur : quelle que soit la forme envoyée (``true``, ``1``, ``"oui"``,
+    champ absent…), on stocke des entiers 0/1 et un entier ou ``NULL``.
+
+    Rétro-compatibilité (CONTRAT_API_DEVICE §3bis) : un serveur encore en v1.2
+    n'envoie aucun de ces champs → tout retombe sur « pas de festif », sans
+    erreur et sans resynchronisation forcée.
+
+    Garde d'honnêteté sur l'ancienneté : une valeur inférieure à 1 an est
+    ramenée à ``NULL`` (« 0 ans avec nous » ne s'affiche pas ; la première
+    année relève du drapeau ``premier_jour``).
+    """
+    annees = badge.get("anniversaire_entreprise_annees")
+    if isinstance(annees, bool) or annees is None:
+        annees_stockees: Optional[int] = None
+    else:
+        try:
+            valeur = int(annees)
+        except (TypeError, ValueError):
+            annees_stockees = None
+        else:
+            annees_stockees = valeur if valeur >= 1 else None
+
+    return {
+        "premier_jour": 1 if badge.get("premier_jour") else 0,
+        "anniversaire": 1 if badge.get("anniversaire") else 0,
+        "anniversaire_entreprise_annees": annees_stockees,
+    }
 
 
 def alerte_invalides(nombre: int) -> str:
@@ -207,7 +267,33 @@ class Store:
         self._conn.execute("PRAGMA synchronous=FULL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA)
+        self._migrer_colonnes()
         self._init_chain_state()
+
+    # ------------------------------------------------------------- migrations
+
+    def _migrer_colonnes(self) -> None:
+        """Ajoute les colonnes manquantes des tables existantes (idempotent).
+
+        Sans transaction explicite : un ``ALTER TABLE ADD COLUMN`` est atomique
+        sous SQLite, et la boucle est ré-exécutable sans effet de bord. Une
+        base déjà à jour ne produit aucune écriture.
+        """
+        for table, colonnes in _MIGRATIONS_COLONNES.items():
+            existantes = {
+                row["name"]
+                for row in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            if not existantes:
+                # Table absente de cette base (schéma antérieur ou futur) :
+                # rien à migrer, _SCHEMA l'aura créée si elle est attendue.
+                continue
+            for nom, definition in colonnes:
+                if nom in existantes:
+                    continue
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {nom} {definition}"
+                )
 
     # ------------------------------------------------------------------ chaîne
 
@@ -404,8 +490,11 @@ class Store:
     def replace_badges(self, badges: Iterable[Mapping[str, Any]]) -> int:
         """Remplace le cache des badges actifs (transaction atomique).
 
-        Ne conserve que les quatre champs du contrat : tout autre champ envoyé
-        par le serveur est ignoré, par construction.
+        Ne conserve que les champs du contrat — identité réduite à **prénom +
+        initiale** (exigence A5) et **drapeaux festifs booléens** de la v1.3.
+        Tout autre champ envoyé par le serveur est ignoré, par construction :
+        ni nom complet, ni statut, ni équipe, ni date de naissance ne peuvent
+        entrer dans cette base, même si le serveur en envoyait un jour.
         """
         rows = []
         for badge in badges:
@@ -413,6 +502,7 @@ class Store:
             salarie_id = badge.get("salarie_id")
             if not uid_hmac or salarie_id is None:
                 continue
+            drapeaux = normaliser_drapeaux(badge)
             rows.append(
                 (
                     # Frontière de casse (QA-12) : le serveur normalise déjà en
@@ -423,6 +513,9 @@ class Store:
                     int(salarie_id),
                     str(badge.get("prenom") or ""),
                     str(badge.get("initiale_nom") or badge.get("initiale") or ""),
+                    drapeaux["premier_jour"],
+                    drapeaux["anniversaire"],
+                    drapeaux["anniversaire_entreprise_annees"],
                 )
             )
 
@@ -431,8 +524,10 @@ class Store:
         try:
             conn.execute("DELETE FROM badges")
             conn.executemany(
-                "INSERT OR REPLACE INTO badges (uid_hmac, salarie_id, prenom, initiale)"
-                " VALUES (?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO badges"
+                " (uid_hmac, salarie_id, prenom, initiale,"
+                "  premier_jour, anniversaire, anniversaire_entreprise_annees)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
             conn.execute("COMMIT")
@@ -444,11 +539,24 @@ class Store:
     def find_badge(self, uid_hmac: str) -> Optional[Dict[str, Any]]:
         # Frontière de casse (QA-12) : normalise en miroir de replace_badges.
         row = self._conn.execute(
-            "SELECT uid_hmac, salarie_id, prenom, initiale FROM badges"
-            " WHERE uid_hmac = ?",
+            "SELECT uid_hmac, salarie_id, prenom, initiale,"
+            " premier_jour, anniversaire, anniversaire_entreprise_annees"
+            " FROM badges WHERE uid_hmac = ?",
             ((uid_hmac or "").lower(),),
         ).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+
+        badge = dict(row)
+        # Les drapeaux ressortent en booléens Python : l'appelant (moments.py)
+        # raisonne en « vrai / faux », jamais en 0/1 stockés.
+        badge["premier_jour"] = bool(badge["premier_jour"])
+        badge["anniversaire"] = bool(badge["anniversaire"])
+        annees = badge["anniversaire_entreprise_annees"]
+        badge["anniversaire_entreprise_annees"] = (
+            int(annees) if annees is not None else None
+        )
+        return badge
 
     def badges_count(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM badges").fetchone()

@@ -687,16 +687,17 @@ async function badgeusePurgeRetention(options = {}) {
   const dryRun = !!options.dryRun;
   const compte = {
     pointages: 0, corrections: 0, feuilles: 0, badges: 0, badge_historique: 0,
-    contenus: 0, journal_acces: 0,
+    contenus: 0, journal_acces: 0, social_posts: 0, medias_orphelins: 0,
   };
   try {
     const { readBadgeuseSetting } = require('../utils/badgeuse-settings');
-    const [moisPointages, moisFeuilles, joursBadges, joursContenus, moisJournal] = await Promise.all([
+    const [moisPointages, moisFeuilles, joursBadges, joursContenus, moisJournal, joursSocial] = await Promise.all([
       readBadgeuseSetting('badgeuse.retention_pointages_mois'),
       readBadgeuseSetting('badgeuse.retention_feuilles_mois'),
       readBadgeuseSetting('badgeuse.retention_badges_apres_restitution_jours'),
       readBadgeuseSetting('badgeuse.retention_contenus_apres_expiration_jours'),
       readBadgeuseSetting('badgeuse.retention_journal_acces_mois'),
+      readBadgeuseSetting('badgeuse.retention_social_jours'),
     ]);
 
     // Helper : SELECT COUNT en dry-run, DELETE sinon. Chaque bloc est isolé —
@@ -736,6 +737,75 @@ async function badgeusePurgeRetention(options = {}) {
     await run('journal_acces', 'rgpd_audit_log',
       `action LIKE 'BADGEUSE_%' AND created_at < NOW() - ($1 || ' months')::interval`, [String(moisJournal)]);
 
+    // ── Écran d'information v2 : posts sociaux et médias ────────────────────
+    // SEUL ENDROIT qui applique la conservation des posts sociaux (le job de
+    // synchronisation ne purge délibérément RIEN : deux purges concurrentes,
+    // ce sont deux règles qui divergent le jour où l'une change).
+    // Les fichiers image des posts purgés sont supprimés AVANT les lignes,
+    // pendant qu'on sait encore où ils sont.
+    const badgeuseSocial = require('./badgeuse-social');
+    try {
+      const condamnes = await pool.query(
+        `SELECT media_fichier FROM badgeuse_social_posts
+         WHERE media_fichier IS NOT NULL
+           AND COALESCE(publie_le, sync_le) < NOW() - ($1 || ' days')::interval`,
+        [String(joursSocial)]
+      );
+      if (!dryRun) {
+        for (const row of condamnes.rows) badgeuseSocial.unlinkMedia(row.media_fichier);
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] badgeusePurgeRetention — fichiers sociaux ignorés : ${err.message}`);
+    }
+    await run('social_posts', 'badgeuse_social_posts',
+      `COALESCE(publie_le, sync_le) < NOW() - ($1 || ' days')::interval`, [String(joursSocial)]);
+
+    // Médias ORPHELINS : fichiers du répertoire qu'aucune ligne ne référence
+    // plus (contenu supprimé hors application, purge interrompue, import
+    // avorté). Sans ce ménage, le disque du serveur ne redescend jamais.
+    // PRUDENCE : on ne supprime que ce qui est démontrablement orphelin — si
+    // l'une des deux tables est illisible, on s'abstient entièrement (un doute
+    // ne doit jamais faire effacer un média encore diffusé).
+    // DÉLAI DE GRÂCE de 24 h : entre l'écriture du fichier par multer et
+    // l'INSERT qui le référence, il existe un instant où le média est
+    // légitimement orphelin. Purger sans ce délai reviendrait à effacer, une
+    // fois de temps en temps, le fichier d'un téléversement en cours.
+    const GRACE_ORPHELIN_MS = 24 * 3600 * 1000;
+    try {
+      const fsp = require('fs');
+      const pathp = require('path');
+      const racine = badgeuseSocial.mediaRoot();
+      if (fsp.existsSync(racine)) {
+        const [refContenus, refSocial] = await Promise.all([
+          pool.query('SELECT fichier FROM badgeuse_contenus WHERE fichier IS NOT NULL'),
+          pool.query('SELECT media_fichier FROM badgeuse_social_posts WHERE media_fichier IS NOT NULL'),
+        ]);
+        const references = new Set([
+          ...refContenus.rows.map((x) => String(x.fichier)),
+          ...refSocial.rows.map((x) => String(x.media_fichier)),
+        ]);
+        const lister = (sousDossier) => {
+          const dir = sousDossier ? pathp.join(racine, sousDossier) : racine;
+          if (!fsp.existsSync(dir)) return [];
+          return fsp.readdirSync(dir, { withFileTypes: true })
+            .filter((e) => e.isFile())
+            .map((e) => (sousDossier ? `${sousDossier}/${e.name}` : e.name));
+        };
+        for (const relatif of [...lister(''), ...lister(badgeuseSocial.SOCIAL_SUBDIR)]) {
+          if (references.has(relatif)) continue;
+          const abs = badgeuseSocial.resolveMediaPath(relatif);
+          if (!abs) continue;
+          let age = 0;
+          try { age = Date.now() - fsp.statSync(abs).mtimeMs; } catch (_) { continue; }
+          if (age < GRACE_ORPHELIN_MS) continue; // téléversement peut-être en cours
+          compte.medias_orphelins += 1;
+          if (!dryRun) badgeuseSocial.unlinkMedia(relatif);
+        }
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] badgeusePurgeRetention — médias orphelins ignorés : ${err.message}`);
+    }
+
     const total = Object.values(compte).reduce((a, b) => a + b, 0);
     if (total > 0) {
       console.log(`[SCHEDULER] Badgeuse — purge RGPD${dryRun ? ' (SIMULATION)' : ''} : ${JSON.stringify(compte)}`);
@@ -753,6 +823,7 @@ async function badgeusePurgeRetention(options = {}) {
             retention_badges_apres_restitution_jours: joursBadges,
             retention_contenus_apres_expiration_jours: joursContenus,
             retention_journal_acces_mois: moisJournal,
+            retention_social_jours: joursSocial,
           })]
         ).catch((err) => console.error('[SCHEDULER] Journalisation purge badgeuse impossible :', err.message));
       }
@@ -908,6 +979,30 @@ async function checkBadgeuseDevices() {
     };
   } catch (err) {
     console.error('[SCHEDULER] Erreur checkBadgeuseDevices:', err.message);
+    return { items: 0 };
+  }
+}
+
+/**
+ * Écran d'information v2 — synchronisation des derniers posts Instagram /
+ * Facebook des comptes DE la structure (CDC_AFFICHAGE_V2 §2, ADR-0004 §6).
+ *
+ * Le travail réel (API Meta Graph, téléchargement gardé des visuels, upsert)
+ * vit dans services/badgeuse-social.js : le scheduler ne fait que le cadencer.
+ * Sans jeton configuré ou avec la synchronisation désactivée, c'est un no-op
+ * SILENCIEUX — le partage manuel (types `media` / `lien`) reste la voie
+ * nominale, et une intégration non installée n'a pas à crier trois fois par
+ * jour dans les journaux.
+ *
+ * La CONSERVATION des posts n'est PAS traitée ici : elle appartient à
+ * badgeusePurgeRetention (`badgeuse.retention_social_jours`).
+ */
+async function syncBadgeuseSocial() {
+  try {
+    const badgeuseSocial = require('./badgeuse-social');
+    return await badgeuseSocial.syncSocialPosts();
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur syncBadgeuseSocial:', err.message);
     return { items: 0 };
   }
 }
@@ -1819,6 +1914,7 @@ async function runAllJobs() {
     await runInstrumented('checkQhseDocuments', checkQhseDocuments);
     await runInstrumented('checkBadgeuseDevices', checkBadgeuseDevices);
     await runInstrumented('badgeusePurgeRetention', badgeusePurgeRetention);
+    await runInstrumented('syncBadgeuseSocial', syncBadgeuseSocial);
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
@@ -1872,6 +1968,7 @@ module.exports = {
   // avant première application en production.
   badgeusePurgeRetention,
   checkBadgeuseDevices,
+  syncBadgeuseSocial,
   // Sync SumUp live 5 min (jours de VAK) — exposés pour les tests.
   vakLiveSyncTick,
   isVakActiveToday,

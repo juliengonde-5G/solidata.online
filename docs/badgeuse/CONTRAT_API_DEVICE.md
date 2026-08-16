@@ -179,6 +179,14 @@ file qui gonfle) et alimente la supervision BO-09 (alerte si silence > seuil par
   `media`, `lien` (servi comme `media`), `vak_live`. Le contenu des types dynamiques est
   **généré côté serveur** à la construction de la réponse ; les éléments `media`/`social`
   référencent `media_id` + `media_type` (image|video) + `media_sha256`.
+  **Formes FIGÉES des types dynamiques** (v1.3.1 — champs de PREMIER NIVEAU de
+  l'élément, jamais du JSON dans `corps` ; constaté et aligné à l'intégration) :
+  - `annonces` : `element.annonces = [{prenom, initiale, type: 'anniversaire'|'anniversaire_entreprise', annees|null}]` ;
+  - `actus` : `element.actus = [{titre, resume, source}]` ;
+  - `tournees` : `element.tournees = [{libelle, vehicule_code, points_faits, points_total, statut}]` — jamais de nom de chauffeur ;
+  - `social` : `element.posts = [{reseau, compte, legende, publie_le, media_id|null, media_type, media_sha256}]` (les visuels sont NICHÉS dans `posts[]`) ;
+  - `vak_live` : `element.vak = {libelle, poids_kg, objectif_poids_kg|null, ca_ttc|null}`.
+  Le poste garde la voie `corps` en repli pour les types texte historiques uniquement.
 - **Nouvel endpoint** `GET /devices/:code/media/:id` — flux binaire du média référencé
   par la playlist (clé device, mêmes 401/429). Le poste télécharge dans
   `/var/lib/badgeuse/media/` (cache plafonné, purge des non-référencés, vérification

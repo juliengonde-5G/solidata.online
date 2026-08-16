@@ -14,6 +14,7 @@ from badgeuse_agent.store import (
     file_ancienne,
     lot_entierement_differe,
     message_retries,
+    normaliser_drapeaux,
 )
 
 DEVICE = "LH-P1"
@@ -424,6 +425,12 @@ def test_base_d_un_autre_poste_refusee(tmp_path):
 
 
 def test_cache_badges_limite_aux_champs_du_contrat(store):
+    """Le cache ne porte QUE les champs du contrat (A5).
+
+    Étendu à la v1.3 : les trois drapeaux festifs s'ajoutent, et rien d'autre.
+    Ce sont des booléens/entier — jamais une date de naissance, jamais un
+    statut, jamais un nom de famille (ADR-0004 §4).
+    """
     store.replace_badges(
         [
             {
@@ -434,6 +441,8 @@ def test_cache_badges_limite_aux_champs_du_contrat(store):
                 "nom": "NE DOIT PAS ETRE STOCKE",
                 "equipe": "Tri",
                 "salaire": 1800,
+                "date_naissance": "1987-04-12",
+                "statut": "en_parcours",
             }
         ]
     )
@@ -443,11 +452,16 @@ def test_cache_badges_limite_aux_champs_du_contrat(store):
         "salarie_id": 123,
         "prenom": "Karim",
         "initiale": "B",
+        "premier_jour": False,
+        "anniversaire": False,
+        "anniversaire_entreprise_annees": None,
     }
 
     contenu = open(store.path, "rb").read()
     assert b"NE DOIT PAS ETRE STOCKE" not in contenu
     assert b"1800" not in contenu
+    assert b"1987-04-12" not in contenu
+    assert b"en_parcours" not in contenu
 
 
 def test_remplacement_complet_du_cache(store):
@@ -572,3 +586,196 @@ def test_payload_json_ne_contient_que_le_condensat(store):
     brut = json.dumps(store.pending_batch())
     assert UID_A in brut
     assert "04A23B1C" not in brut
+
+
+# ------------------------------------------- drapeaux festifs v1.3 + migration
+
+
+def test_drapeaux_festifs_stockes_et_relus(store):
+    """CONTRAT_API_DEVICE §3bis : booléens + entier, rien d'autre."""
+    store.replace_badges(
+        [
+            {
+                "uid_hmac": UID_A,
+                "salarie_id": 1,
+                "prenom": "Karim",
+                "initiale_nom": "B",
+                "premier_jour": False,
+                "anniversaire": True,
+                "anniversaire_entreprise_annees": 2,
+            }
+        ]
+    )
+    badge = store.find_badge(UID_A)
+    assert badge["anniversaire"] is True
+    assert badge["premier_jour"] is False
+    assert badge["anniversaire_entreprise_annees"] == 2
+
+
+def test_serveur_sans_drapeaux_reste_compatible(store):
+    """Serveur encore en v1.2 : champs absents → pas de festif, sans erreur."""
+    store.replace_badges(
+        [{"uid_hmac": UID_A, "salarie_id": 1, "prenom": "Karim", "initiale_nom": "B"}]
+    )
+    badge = store.find_badge(UID_A)
+    assert badge["premier_jour"] is False
+    assert badge["anniversaire"] is False
+    assert badge["anniversaire_entreprise_annees"] is None
+
+
+@pytest.mark.parametrize(
+    "brut, attendu",
+    [(1, 1), ("1", 1), (True, 1), ("oui", 1), (0, 0), ("", 0), (None, 0), (False, 0)],
+)
+def test_normaliser_drapeaux_booleens(brut, attendu):
+    drapeaux = normaliser_drapeaux({"premier_jour": brut, "anniversaire": brut})
+    assert drapeaux["premier_jour"] == attendu
+    assert drapeaux["anniversaire"] == attendu
+
+
+@pytest.mark.parametrize("brut", [0, -3, None, "", "deux", True, False])
+def test_normaliser_drapeaux_anciennete_inexploitable(brut):
+    """Garde d'honnêteté : « 0 ans avec nous » ne s'affiche jamais."""
+    drapeaux = normaliser_drapeaux({"anniversaire_entreprise_annees": brut})
+    assert drapeaux["anniversaire_entreprise_annees"] is None
+
+
+@pytest.mark.parametrize("brut, attendu", [(1, 1), ("4", 4), (12.0, 12)])
+def test_normaliser_drapeaux_anciennete_valide(brut, attendu):
+    drapeaux = normaliser_drapeaux({"anniversaire_entreprise_annees": brut})
+    assert drapeaux["anniversaire_entreprise_annees"] == attendu
+
+
+def _base_ancienne(chemin):
+    """Crée une base au schéma ANTÉRIEUR à la v1.3 (badges à 4 colonnes)."""
+    conn = sqlite3.connect(chemin)
+    conn.executescript(
+        """
+        CREATE TABLE badges (
+            uid_hmac   TEXT PRIMARY KEY,
+            salarie_id INTEGER NOT NULL,
+            prenom     TEXT    NOT NULL,
+            initiale   TEXT    NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO badges (uid_hmac, salarie_id, prenom, initiale)"
+        " VALUES (?, ?, ?, ?)",
+        (UID_A, 42, "Karim", "B"),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _colonnes(chemin, table):
+    conn = sqlite3.connect(chemin)
+    try:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    finally:
+        conn.close()
+
+
+def test_migration_ajoute_les_colonnes_manquantes(tmp_path):
+    """Un poste déjà en service reçoit les colonnes v1.3 à l'ouverture."""
+    chemin = str(tmp_path / "badgeuse.db")
+    _base_ancienne(chemin)
+    assert "anniversaire" not in _colonnes(chemin, "badges")
+
+    with Store(str(tmp_path), DEVICE):
+        pass
+
+    colonnes = _colonnes(chemin, "badges")
+    assert {
+        "premier_jour",
+        "anniversaire",
+        "anniversaire_entreprise_annees",
+    } <= colonnes
+
+
+def test_migration_preserve_les_donnees_existantes(tmp_path):
+    """Migrer ne vide pas le cache : le poste reste opérationnel hors ligne."""
+    chemin = str(tmp_path / "badgeuse.db")
+    _base_ancienne(chemin)
+
+    with Store(str(tmp_path), DEVICE) as store:
+        badge = store.find_badge(UID_A)
+
+    assert badge["salarie_id"] == 42
+    assert badge["prenom"] == "Karim"
+    # Les drapeaux prennent leur valeur par défaut, jamais NULL inexploitable.
+    assert badge["premier_jour"] is False
+    assert badge["anniversaire"] is False
+    assert badge["anniversaire_entreprise_annees"] is None
+
+
+def test_migration_idempotente(tmp_path):
+    """Trois ouvertures successives : aucune erreur, aucune colonne en double."""
+    chemin = str(tmp_path / "badgeuse.db")
+    _base_ancienne(chemin)
+
+    for _ in range(3):
+        with Store(str(tmp_path), DEVICE) as store:
+            store.replace_badges(
+                [{"uid_hmac": UID_B, "salarie_id": 7, "prenom": "Ana", "anniversaire": True}]
+            )
+
+    colonnes = _colonnes(chemin, "badges")
+    assert len(colonnes) == 7
+    with Store(str(tmp_path), DEVICE) as store:
+        assert store.find_badge(UID_B)["anniversaire"] is True
+
+
+def test_base_neuve_a_le_schema_complet(tmp_path):
+    """Chemin « base neuve » : _SCHEMA et la migration doivent concorder."""
+    with Store(str(tmp_path), DEVICE):
+        pass
+    colonnes = _colonnes(str(tmp_path / "badgeuse.db"), "badges")
+    assert colonnes == {
+        "uid_hmac",
+        "salarie_id",
+        "prenom",
+        "initiale",
+        "premier_jour",
+        "anniversaire",
+        "anniversaire_entreprise_annees",
+    }
+
+
+def test_aucun_nom_complet_dans_le_cache_v13(tmp_path):
+    """Non-régression A5 : les drapeaux n'ouvrent AUCUNE porte à l'identité.
+
+    Même en envoyant nom, date de naissance et statut à côté des drapeaux
+    festifs, rien de tout cela n'atteint le disque du poste.
+    """
+    with Store(str(tmp_path), DEVICE) as store:
+        store.replace_badges(
+            [
+                {
+                    "uid_hmac": UID_A,
+                    "salarie_id": 1,
+                    "prenom": "Karim",
+                    "initiale_nom": "B",
+                    "nom": "BENALI",
+                    "nom_complet": "Karim BENALI",
+                    "date_naissance": "1987-04-12",
+                    "date_entree": "2024-08-16",
+                    "statut": "en_parcours",
+                    "premier_jour": True,
+                    "anniversaire": True,
+                    "anniversaire_entreprise_annees": 2,
+                }
+            ]
+        )
+        store.flush()
+        chemin = store.path
+
+    for suffixe in ("", "-wal", "-shm"):
+        try:
+            contenu = open(chemin + suffixe, "rb").read()
+        except FileNotFoundError:
+            continue
+        assert b"BENALI" not in contenu
+        assert b"1987-04-12" not in contenu
+        assert b"2024-08-16" not in contenu
+        assert b"en_parcours" not in contenu

@@ -415,21 +415,73 @@ describe('QA-04 — alerte e-mail de silence (BO-09)', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Écran d'information v2 : conservation des posts sociaux et des médias.
+// UN SEUL endroit applique la rétention (ici) — le job de synchronisation ne
+// purge délibérément rien, sous peine de voir deux règles diverger.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('badgeusePurgeRetention — posts sociaux et médias (écran v2)', () => {
+  test('les posts sociaux sont purgés sur leur date de publication, en JOURS', async () => {
+    await badgeusePurgeRetention({ dryRun: true });
+    const c = sqlFor('badgeuse_social_posts').find((x) => /COALESCE\(publie_le, sync_le\)/.test(x.sql) && !/SELECT media_fichier/.test(x.sql));
+    expect(c).toBeDefined();
+    expect(c.sql).toMatch(/COALESCE\(publie_le, sync_le\) < NOW\(\) - \(\$1 \|\| ' days'\)::interval/);
+    expect(c.params).toEqual(['30']); // défaut documenté
+  });
+
+  test('le seuil vient des settings, jamais du code', async () => {
+    installMocks({ settings: { 'badgeuse.retention_social_jours': '7' } });
+    await badgeusePurgeRetention({ dryRun: true });
+    const c = sqlFor('badgeuse_social_posts').find((x) => /COALESCE\(publie_le, sync_le\)/.test(x.sql) && !/SELECT media_fichier/.test(x.sql));
+    expect(c.params).toEqual(['7']);
+  });
+
+  test('les fichiers des posts purgés sont listés AVANT la suppression des lignes', async () => {
+    await badgeusePurgeRetention({ dryRun: true });
+    const ordre = mockQuery.mock.calls.map((c) => String(c[0]));
+    const iListe = ordre.findIndex((s) => /SELECT media_fichier FROM badgeuse_social_posts/.test(s));
+    const iSuppr = ordre.findIndex((s) => /badgeuse_social_posts/.test(s) && /^\s*(DELETE|SELECT COUNT)/.test(s.trim()));
+    expect(iListe).toBeGreaterThanOrEqual(0);
+    expect(iListe).toBeLessThan(iSuppr); // sinon on ne saurait plus quoi effacer
+  });
+
+  test('le bilan porte les deux nouveaux périmètres', async () => {
+    const r = await badgeusePurgeRetention({ dryRun: true });
+    expect(r).toHaveProperty('social_posts');
+    expect(r).toHaveProperty('medias_orphelins');
+  });
+
+  test('la trace journalisée mentionne la durée de conservation appliquée', async () => {
+    installMocks({ counts: { badgeuse_pointages: 5 } });
+    await badgeusePurgeRetention();
+    const trace = mockQuery.mock.calls.find((c) => /INSERT INTO rgpd_audit_log/.test(String(c[0])));
+    expect(JSON.parse(trace[1][0])).toHaveProperty('retention_social_jours');
+  });
+});
+
 describe('enregistrement dans la chaîne planifiée et la supervision', () => {
   const fs = require('fs');
   const path = require('path');
   const ROOT = path.join(__dirname, '..', '..', '..');
 
-  test('les deux jobs sont appelés par runAllJobs via runInstrumented', () => {
+  test('les trois jobs sont appelés par runAllJobs via runInstrumented', () => {
     const src = fs.readFileSync(path.join(ROOT, 'src', 'services', 'scheduler.js'), 'utf8');
     expect(src).toMatch(/runInstrumented\('checkBadgeuseDevices', checkBadgeuseDevices\)/);
     expect(src).toMatch(/runInstrumented\('badgeusePurgeRetention', badgeusePurgeRetention\)/);
+    expect(src).toMatch(/runInstrumented\('syncBadgeuseSocial', syncBadgeuseSocial\)/);
   });
 
-  test('les deux jobs figurent au JOB_SCHEDULE de la supervision', () => {
+  test('les trois jobs figurent au JOB_SCHEDULE de la supervision', () => {
     const src = fs.readFileSync(path.join(ROOT, 'src', 'routes', 'monitoring.js'), 'utf8');
     const bloc = src.slice(src.indexOf('const JOB_SCHEDULE'), src.indexOf('// Seuils de fraîcheur'));
     expect(bloc).toMatch(/checkBadgeuseDevices:\s*\{/);
     expect(bloc).toMatch(/badgeusePurgeRetention:\s*\{/);
+    expect(bloc).toMatch(/syncBadgeuseSocial:\s*\{/);
+  });
+
+  test('syncBadgeuseSocial délègue au service et ne lève jamais', async () => {
+    const { syncBadgeuseSocial } = require('../../../src/services/scheduler');
+    installMocks(); // synchronisation désactivée par défaut
+    await expect(syncBadgeuseSocial()).resolves.toMatchObject({ items: 0 });
   });
 });

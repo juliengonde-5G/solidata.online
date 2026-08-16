@@ -649,15 +649,28 @@ describe('MINIMISATION — aucun identifiant de badge dans les journaux serveur'
 });
 
 describe('GET /badges — cache des badges (minimisation + ETag)', () => {
-  test('ne sert QUE prénom + initiale (ni nom complet, ni statut, ni équipe)', async () => {
+  // LISTE BLANCHE des champs servis au poste. Le contrat v1.3 (écran
+  // d'information v2) ajoute TROIS drapeaux et rien d'autre : ce test est le
+  // garde-fou qui empêche une future colonne « pratique » d'arriver à l'écran.
+  test('ne sert QUE prénom + initiale + drapeaux (ni nom complet, ni statut, ni équipe)', async () => {
     const r = await get(`${PATH}/badges`);
     expect(r.status).toBe(200);
     expect(r.body.badges).toEqual([
-      { uid_hmac: UID_HMAC, salarie_id: 7, prenom: 'Karim', initiale_nom: 'B' },
+      {
+        uid_hmac: UID_HMAC, salarie_id: 7, prenom: 'Karim', initiale_nom: 'B',
+        premier_jour: false, anniversaire: false, anniversaire_entreprise_annees: null,
+      },
+    ]);
+    expect(Object.keys(r.body.badges[0]).sort()).toEqual([
+      'anniversaire', 'anniversaire_entreprise_annees', 'initiale_nom',
+      'premier_jour', 'prenom', 'salarie_id', 'uid_hmac',
     ]);
     const charge = JSON.stringify(r.body);
     expect(charge).not.toContain('Benali');
     expect(charge).not.toMatch(/insertion|equipe|team|statut|contrat/i);
+    // Aucune date d'état civil ne transite (ADR-0004 §4) — ni le champ, ni une
+    // date au format ISO qui trahirait une naissance.
+    expect(charge).not.toMatch(/birth|naissance|seniority/i);
   });
 
   test('seuls les badges ACTIFS sont servis', async () => {

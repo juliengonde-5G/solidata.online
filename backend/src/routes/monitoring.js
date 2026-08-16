@@ -107,6 +107,9 @@ const JOB_SCHEDULE = {
   // est un manquement de conformité, d'où sa présence ici.
   checkBadgeuseDevices:           { label: 'Postes badgeuse silencieux (> 15 min)', cadence: '3×/jour',        maxAgeHours: DAILY },
   badgeusePurgeRetention:         { label: 'Purge RGPD badgeuse (conservation)', cadence: '3×/jour',           maxAgeHours: DAILY },
+  // No-op silencieux tant qu'aucun jeton Meta n'est configuré : le job tourne,
+  // mais l'écran d'information se contente alors des contenus partagés à la main.
+  syncBadgeuseSocial:             { label: 'Réseaux sociaux — écran badgeuse',  cadence: '3×/jour',            maxAgeHours: DAILY },
   checkVehicleMaintenance:        { label: 'Maintenance préventive véhicules',  cadence: '3×/jour',            maxAgeHours: DAILY },
   autoFeedNews:                   { label: 'Veille sectorielle (fil actu)',     cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredCandidates:         { label: 'Purge RGPD candidats > 24 mois',    cadence: '3×/jour',            maxAgeHours: DAILY },

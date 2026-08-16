@@ -62,6 +62,11 @@ class Config:
     ws_port: int = DEFAULT_WS_PORT
     http_port: int = DEFAULT_HTTP_PORT
     ui_dir: Optional[str] = None
+    #: Plafond LOCAL du cache média, en Mo (facultatif). Le paramétrage fait
+    #: foi côté serveur (CDC_AFFICHAGE_V2 §2) ; cette valeur n'est qu'un
+    #: garde-fou de secours pour un poste à petit disque et ne peut que
+    #: RÉDUIRE le plafond serveur (cf. ``media_cache.plafond_effectif``).
+    media_cache_max_mo: Optional[int] = None
     verify_tls: bool = True
     ca_bundle: Optional[str] = None
     dpms_allumage: Optional[str] = None
@@ -191,6 +196,9 @@ def load(path: Optional[str] = None) -> Config:
         ws_port=parser.getint("ui", "ws_port", fallback=DEFAULT_WS_PORT),
         http_port=parser.getint("ui", "http_port", fallback=DEFAULT_HTTP_PORT),
         ui_dir=_clean(parser.get("ui", "dir", fallback="")),
+        media_cache_max_mo=_parse_entier_positif(
+            parser, "system", "media_cache_max_mo"
+        ),
         verify_tls=verify_tls,
         ca_bundle=_clean(parser.get("server", "ca_bundle", fallback="")),
         dpms_allumage=_clean(parser.get("dpms", "allumage", fallback="")),
@@ -251,6 +259,31 @@ def _parse_id(
         raise ConfigError(
             f"{section}.{option} invalide : '{raw}' (attendu 0x1234 ou un entier)"
         ) from None
+
+
+def _parse_entier_positif(
+    parser: configparser.ConfigParser, section: str, option: str
+) -> Optional[int]:
+    """Lit un entier strictement positif facultatif.
+
+    Valeur absente, vide, illisible ou ≤ 0 → ``None`` : l'option est alors
+    considérée comme non renseignée et le paramétrage serveur s'applique seul
+    (jamais de plafond fantaisiste déduit d'une faute de frappe).
+    """
+    raw = (
+        _clean(parser.get(section, option, fallback=""))
+        if parser.has_section(section)
+        else None
+    )
+    if not raw:
+        return None
+    try:
+        valeur = int(raw)
+    except ValueError:
+        raise ConfigError(
+            f"{section}.{option} invalide : '{raw}' (attendu un entier de Mo)"
+        ) from None
+    return valeur if valeur > 0 else None
 
 
 def _hex_or_none(value: Optional[int]) -> Optional[str]:

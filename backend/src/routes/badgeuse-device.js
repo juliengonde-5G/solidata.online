@@ -37,6 +37,7 @@
  */
 const express = require('express');
 const crypto = require('crypto');
+const fs = require('fs');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const router = express.Router();
 const pool = require('../config/database');
@@ -48,6 +49,11 @@ const {
 } = require('../utils/badgeuse-crypto');
 const { readBadgeuseParams } = require('../utils/badgeuse-settings');
 const engine = require('../services/badgeuse-engine');
+const media = require('../services/badgeuse-social');
+// Périmètre de caisse d'une VAK : SOURCE UNIQUE partagée avec routes/vak.js
+// (l'écran promotionnel doit compter exactement ce que compte le module VAK,
+// sinon deux chiffres circulent dans la maison).
+const { sqlPerimetreCaisse } = require('../services/sumup');
 
 // Lot ≤ 100 (CONTRAT_API_DEVICE §2.1).
 const LOT_MAX = 100;
@@ -425,22 +431,104 @@ router.post('/v1/devices/:code/pointages',
 // GET /v1/devices/:code/badges — cache des badges actifs (ETag)
 // MINIMISATION (exigence A5) : prénom + initiale du nom, RIEN d'autre.
 // Ni nom complet, ni statut, ni équipe, ni parcours d'insertion.
+//
+// v1.3 (CDC_AFFICHAGE_V2 §1, ADR-0004 §4) — trois DRAPEAUX s'ajoutent, et
+// RIEN de plus :
+//   `premier_jour` (bool), `anniversaire` (bool),
+//   `anniversaire_entreprise_annees` (entier ≥ 1 | null).
+// La DATE DE NAISSANCE NE QUITTE JAMAIS LE SERVEUR : la comparaison de
+// jour/mois est faite ici, en SQL, et seul son RÉSULTAT part. Un poste volé
+// ne livre donc aucune date d'anniversaire.
+//   - `anniversaire` / `anniversaire_entreprise_annees` : uniquement pour les
+//     salariés ayant donné leur accord (`employees.badgeuse_optin_festif`,
+//     défaut false) ET si l'affichage festif est activé (`badgeuse.festif_actif`)
+//     — on n'envoie pas une donnée qui ne sera pas affichée.
+//   - `premier_jour` : envoyé SANS condition d'opt-in. Un message de bienvenue
+//     n'est pas un anniversaire : il ne divulgue aucune donnée d'état civil,
+//     seulement le fait qu'une personne arrive — ce que l'atelier voit de
+//     toute façon. Il vaut false quand aucune date de début n'est connue
+//     (jamais deviné : « jamais de valeur inventée »).
 // ═══════════════════════════════════════════════════════════════════════════
+
+/** Colonnes de base du cache (sans les drapeaux v1.3) — repli documenté. */
+const BADGES_SQL_LEGACY = `
+  SELECT b.uid_hmac, b.employee_id, e.first_name, e.last_name,
+         false AS optin, false AS anniversaire, NULL::int AS anniversaire_annees,
+         false AS premier_jour
+  FROM badgeuse_badges b
+  JOIN employees e ON e.id = b.employee_id
+  WHERE b.statut = 'actif'
+  ORDER BY b.employee_id`;
+
+/**
+ * Cache badges enrichi. `$1` = jour civil Paris (YYYY-MM-DD), `$2` = son
+ * « MM-DD » : les deux sont calculés côté serveur pour que la bascule de date
+ * suive l'heure de Paris et non celle du conteneur (doctrine 2.20.0).
+ * `premier_jour` : un contrat dont le début EST aujourd'hui (source
+ * `employee_contracts`, comme heuresHebdoContractuelles), avec repli sur la
+ * date d'embauche de la fiche quand aucun contrat n'est importé.
+ */
+const BADGES_SQL_V13 = `
+  SELECT b.uid_hmac, b.employee_id, e.first_name, e.last_name,
+         COALESCE(e.badgeuse_optin_festif, false) AS optin,
+         (e.birth_date IS NOT NULL AND to_char(e.birth_date, 'MM-DD') = $2) AS anniversaire,
+         CASE
+           WHEN e.seniority_date IS NOT NULL
+                AND to_char(e.seniority_date, 'MM-DD') = $2
+                AND EXTRACT(YEAR FROM age($1::date, e.seniority_date))::int >= 1
+           THEN EXTRACT(YEAR FROM age($1::date, e.seniority_date))::int
+         END AS anniversaire_annees,
+         (
+           EXISTS (
+             SELECT 1 FROM employee_contracts ec
+             WHERE ec.employee_id = e.id AND ec.start_date = $1::date
+           )
+           OR (
+             NOT EXISTS (SELECT 1 FROM employee_contracts ec2 WHERE ec2.employee_id = e.id)
+             AND e.contract_start = $1::date
+           )
+         ) AS premier_jour
+  FROM badgeuse_badges b
+  JOIN employees e ON e.id = b.employee_id
+  WHERE b.statut = 'actif'
+  ORDER BY b.employee_id`;
+
 router.get('/v1/devices/:code/badges', deviceLimiter, authenticateDevice, async (req, res) => {
   try {
-    const r = await pool.query(
-      `SELECT b.uid_hmac, b.employee_id, e.first_name, e.last_name
-       FROM badgeuse_badges b
-       JOIN employees e ON e.id = b.employee_id
-       WHERE b.statut = 'actif'
-       ORDER BY b.employee_id`
-    );
-    const badges = r.rows.map((row) => ({
-      uid_hmac: row.uid_hmac,
-      salarie_id: row.employee_id,
-      prenom: row.first_name || '',
-      initiale_nom: String(row.last_name || '').trim().charAt(0).toUpperCase() || '',
-    }));
+    const aujourdhui = engine.parisDateStr(new Date());
+    const jourMois = aujourdhui.slice(5); // « MM-DD »
+    const params = await readBadgeuseParams();
+
+    let r;
+    try {
+      r = await pool.query(BADGES_SQL_V13, [aujourdhui, jourMois]);
+    } catch (err) {
+      // Base pas encore migrée (colonne absente, SQLSTATE 42703) : le cache
+      // badges est le chemin le plus critique du dispositif — il DOIT continuer
+      // de servir, quitte à le faire sans les drapeaux festifs.
+      if (err.code !== '42703') throw err;
+      console.warn('[BADGEUSE-DEVICE] Cache badges servi sans les drapeaux d\'affichage v2 (base non migrée) — exécutez init-db');
+      r = await pool.query(BADGES_SQL_LEGACY);
+    }
+
+    const festifActif = params.festif_actif !== false;
+    const badges = r.rows.map((row) => {
+      // Le consentement conditionne les DEUX drapeaux d'anniversaire.
+      const festif = festifActif && row.optin === true;
+      const annees = parseInt(row.anniversaire_annees, 10);
+      return {
+        uid_hmac: row.uid_hmac,
+        salarie_id: row.employee_id,
+        prenom: row.first_name || '',
+        initiale_nom: String(row.last_name || '').trim().charAt(0).toUpperCase() || '',
+        premier_jour: row.premier_jour === true,
+        anniversaire: festif && row.anniversaire === true,
+        anniversaire_entreprise_annees: festif && Number.isFinite(annees) && annees >= 1 ? annees : null,
+      };
+    });
+    // Les drapeaux entrent dans le calcul de l'ETag (ils font partie du contenu
+    // servi) : le poste reçoit donc bien un 200 le jour où un anniversaire
+    // tombe, au lieu d'un 304 sur le cache de la veille.
     sendWithEtag(req, res, computeEtag(badges), { badges });
   } catch (err) {
     console.error('[BADGEUSE-DEVICE] Erreur cache badges :', err.message);
@@ -450,10 +538,26 @@ router.get('/v1/devices/:code/badges', deviceLimiter, authenticateDevice, async 
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GET /v1/devices/:code/config — paramètres d'affichage et de capture (ETag)
+//
+// v1.3 : bloc `affichage` (gabarits de message, plages des moments, vivier de
+// phrases, interrupteurs). AUCUNE règle n'est codée dans le poste (ADR-0002) :
+// tout descend d'ici, et le poste se contente de substituer `{prenom}`.
 // ═══════════════════════════════════════════════════════════════════════════
 router.get('/v1/devices/:code/config', deviceLimiter, authenticateDevice, async (req, res) => {
   try {
     const p = await readBadgeuseParams();
+
+    // Les jours de VAK, la playlist porte un écran promotionnel dont les
+    // compteurs bougent : le serveur abaisse lui-même la cadence de
+    // rafraîchissement à 300 s (CONTRAT_API_DEVICE §3bis). Résilient : si la
+    // table VAK est inaccessible, on garde la cadence paramétrée.
+    let syncPlaylist = p.sync_playlist_interval_sec;
+    let vakActive = false;
+    try {
+      vakActive = !!(await vakDuJour());
+      if (vakActive) syncPlaylist = Math.min(Number(syncPlaylist) || 900, VAK_SYNC_PLAYLIST_SEC);
+    } catch (_) { /* cadence paramétrée conservée */ }
+
     // overlay_duree_sec est déjà reborné 3–8 s par readBadgeuseParams (exigence
     // juridique §3.5) ; le poste re-borne de son côté : double plafond.
     const config = {
@@ -464,7 +568,29 @@ router.get('/v1/devices/:code/config', deviceLimiter, authenticateDevice, async 
       dpms: { extinction: p.dpms_extinction, allumage: p.dpms_allumage },
       heartbeat_interval_sec: p.heartbeat_interval_sec,
       sync_badges_interval_sec: p.sync_badges_interval_sec,
-      sync_playlist_interval_sec: p.sync_playlist_interval_sec,
+      sync_playlist_interval_sec: syncPlaylist,
+      media_cache_max_mo: p.media_cache_max_mo,
+      affichage: {
+        messages: {
+          matin: p.msg_matin,
+          pause: p.msg_pause,
+          retour: p.msg_retour,
+          soir: p.msg_soir,
+          premier_jour: p.msg_premier_jour,
+          anniversaire: p.msg_anniversaire,
+          anniversaire_entreprise: p.msg_anniversaire_entreprise,
+        },
+        plages_moments: {
+          matin_fin: p.moment_matin_fin,
+          pause_debut: p.moment_pause_debut,
+          pause_fin: p.moment_pause_fin,
+          retour_fin: p.moment_retour_fin,
+          soir_debut: p.moment_soir_debut,
+        },
+        phrases_motivation: Array.isArray(p.phrases_motivation) ? p.phrases_motivation : [],
+        motivation_active: p.motivation_active !== false,
+        festif_actif: p.festif_actif !== false,
+      },
     };
     sendWithEtag(req, res, computeEtag(config), { config });
   } catch (err) {
@@ -474,13 +600,191 @@ router.get('/v1/devices/:code/config', deviceLimiter, authenticateDevice, async 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// GÉNÉRATEURS DE PLAYLIST (v1.3) — le contenu dynamique est construit ICI,
+// côté serveur, jamais par le poste.
+//
+// DEUX INVARIANTS gouvernent tout ce bloc :
+//  1. AUCUN NOM COMPLET, AUCUNE DONNÉE DE PARCOURS. Les annonces festives ne
+//     portent que « prénom + initiale » (ADR-0004 §1) et n'existent que pour
+//     les salariés ayant consenti. Les tournées ne portent JAMAIS le nom du
+//     chauffeur (ADR-0004 §5 : ce serait une géolocalisation indirecte d'une
+//     personne, devant une audience nouvelle).
+//  2. RIEN N'EST INVENTÉ. Un générateur sans donnée du jour est OMIS de la
+//     playlist — pas d'écran vide, pas de « 0 » présenté comme un résultat.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Cadence de rafraîchissement imposée les jours de VAK (CONTRAT_API_DEVICE §3bis). */
+const VAK_SYNC_PLAYLIST_SEC = 300;
+
+/** Types dont le contenu est produit par le serveur à chaque construction. */
+const TYPES_GENERES = ['annonces', 'actus', 'tournees', 'social', 'vak_live'];
+
+/** Configuration JSONB d'un contenu, tolérante (jamais bloquante). */
+function contenuConfig(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(String(raw)) || {}; } catch (_) { return {}; }
+}
+
+/** Entier borné lu dans la config d'un générateur. */
+function nbConfig(config, cle, defaut, max) {
+  const n = parseInt(config[cle], 10);
+  if (!Number.isFinite(n) || n < 1) return defaut;
+  return Math.min(n, max);
+}
+
+/**
+ * Anniversaires du jour (naissance + entrée dans la structure).
+ * PRÉNOM + INITIALE uniquement, opt-in obligatoire, salariés actifs. La date
+ * de naissance ne sort pas de SQL : seule la coïncidence jour/mois en sort.
+ */
+async function buildAnnonces(jourParis) {
+  const jourMois = jourParis.slice(5);
+  const r = await pool.query(
+    `SELECT e.first_name, e.last_name,
+            (e.birth_date IS NOT NULL AND to_char(e.birth_date, 'MM-DD') = $2) AS anniversaire,
+            CASE
+              WHEN e.seniority_date IS NOT NULL
+                   AND to_char(e.seniority_date, 'MM-DD') = $2
+                   AND EXTRACT(YEAR FROM age($1::date, e.seniority_date))::int >= 1
+              THEN EXTRACT(YEAR FROM age($1::date, e.seniority_date))::int
+            END AS annees
+     FROM employees e
+     WHERE COALESCE(e.badgeuse_optin_festif, false) = true
+       AND COALESCE(e.is_active, true) = true`,
+    [jourParis, jourMois]
+  );
+
+  const annonces = [];
+  for (const row of r.rows) {
+    const prenom = row.first_name || '';
+    const initiale = String(row.last_name || '').trim().charAt(0).toUpperCase() || '';
+    const annees = parseInt(row.annees, 10);
+    if (row.anniversaire === true) {
+      annonces.push({ prenom, initiale, type: 'anniversaire', annees: null });
+    }
+    if (Number.isFinite(annees) && annees >= 1) {
+      annonces.push({ prenom, initiale, type: 'anniversaire_entreprise', annees });
+    }
+  }
+  return annonces;
+}
+
+/** Dernières brèves du fil d'actualités (épinglées d'abord). */
+async function buildActus(limite) {
+  const r = await pool.query(
+    `SELECT title, summary, source_name
+     FROM news_articles
+     ORDER BY is_pinned DESC NULLS LAST, created_at DESC, id DESC
+     LIMIT $1`,
+    [limite]
+  );
+  return r.rows.map((x) => ({
+    titre: x.title,
+    resume: x.summary || null,
+    source: x.source_name || null,
+  }));
+}
+
+/**
+ * Tournées en cours — SANS NOM DE CHAUFFEUR (ADR-0004 §5). La requête ne joint
+ * même pas `employees` : ce qui n'est pas lu ne peut pas fuir par distraction.
+ * Progression comptée sur les DEUX natures de points (CAV et points
+ * d'association), sinon une tournée « associations » afficherait 0/0.
+ */
+async function buildTournees(jourParis) {
+  const r = await pool.query(
+    `SELECT t.id, t.status, t.collection_type,
+            v.name AS vehicule_nom, v.registration,
+            (SELECT COUNT(*) FROM tour_cav tc WHERE tc.tour_id = t.id)
+              + (SELECT COUNT(*) FROM tour_association_point tap WHERE tap.tour_id = t.id) AS total,
+            (SELECT COUNT(*) FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected')
+              + (SELECT COUNT(*) FROM tour_association_point tap WHERE tap.tour_id = t.id AND tap.status = 'collected') AS faits
+     FROM tours t
+     LEFT JOIN vehicles v ON v.id = t.vehicle_id
+     WHERE t.date = $1::date AND t.status IN ('planned', 'in_progress', 'returning')
+     ORDER BY t.id`,
+    [jourParis]
+  );
+  return r.rows.map((x) => ({
+    libelle: x.collection_type === 'association' ? 'Tournée associations' : 'Tournée CAV',
+    vehicule: x.vehicule_nom || x.registration || null,
+    statut: x.status,
+    points_faits: Number(x.faits) || 0,
+    points_total: Number(x.total) || 0,
+  }));
+}
+
+/** VAK active aujourd'hui (jour civil Paris) — même borne que /vak/live/current. */
+async function vakDuJour() {
+  const jour = engine.parisDateStr(new Date());
+  const r = await pool.query(
+    `SELECT id, libelle, poids_objectif_kg, ca_objectif_ttc
+     FROM vaks WHERE $1::date BETWEEN date_debut AND date_fin
+     ORDER BY date_debut DESC LIMIT 1`,
+    [jour]
+  );
+  return r.rows[0] || null;
+}
+
+/**
+ * Écran promotionnel VAK : poids cumulé vendu depuis l'ouverture, objectif,
+ * chiffre d'affaires. Aucune donnée personnelle (vocation visiteurs).
+ * Le PÉRIMÈTRE DE CAISSE est celui du module VAK (`sqlPerimetreCaisse`) :
+ * l'écran ne peut pas afficher un chiffre différent du tableau de bord.
+ */
+async function buildVakLive() {
+  const vak = await vakDuJour();
+  if (!vak) return null;
+  const c = await pool.query(
+    `SELECT COALESCE(SUM(t.poids_kg), 0)::float AS poids,
+            COALESCE(SUM(t.total_ttc), 0)::float AS ca,
+            COUNT(*)::int AS tickets
+     FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
+     WHERE t.vak_id = $1 AND ${sqlPerimetreCaisse('vk', 't')}`,
+    [vak.id]
+  );
+  const compteurs = c.rows[0] || {};
+  return {
+    libelle: vak.libelle,
+    poids_kg: Math.round((Number(compteurs.poids) || 0) * 10) / 10,
+    objectif_poids_kg: vak.poids_objectif_kg == null ? null : Number(vak.poids_objectif_kg),
+    ca_ttc: Math.round((Number(compteurs.ca) || 0) * 100) / 100,
+    objectif_ca_ttc: vak.ca_objectif_ttc == null ? null : Number(vak.ca_objectif_ttc),
+    tickets: Number(compteurs.tickets) || 0,
+  };
+}
+
+/** Derniers posts sociaux pourvus d'un visuel rapatrié côté serveur. */
+async function buildSocial(limite) {
+  const r = await pool.query(
+    `SELECT id, reseau, compte, legende, media_sha256, publie_le
+     FROM badgeuse_social_posts
+     WHERE media_fichier IS NOT NULL
+     ORDER BY publie_le DESC NULLS LAST, id DESC
+     LIMIT $1`,
+    [limite]
+  );
+  return r.rows.map((x) => ({
+    media_id: `s${x.id}`,
+    media_type: 'image',
+    media_sha256: x.media_sha256 || null,
+    reseau: x.reseau,
+    compte: x.compte,
+    legende: x.legende || null,
+    publie_le: x.publie_le || null,
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // GET /v1/devices/:code/playlist — contenus de veille (ETag)
 // Aucune donnée personnelle (finalité communication interne dissociée).
 // ═══════════════════════════════════════════════════════════════════════════
 router.get('/v1/devices/:code/playlist', deviceLimiter, authenticateDevice, async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, type, titre, corps, media_url, duree_sec, ordre
+      `SELECT id, type, titre, corps, media_url, duree_sec, ordre,
+              fichier, media_type, media_sha256, config
        FROM badgeuse_contenus
        WHERE actif = true
          AND (site_id IS NULL OR site_id = $1)
@@ -489,18 +793,129 @@ router.get('/v1/devices/:code/playlist', deviceLimiter, authenticateDevice, asyn
        ORDER BY ordre, id`,
       [req.device.site_id]
     );
-    const elements = r.rows.map((x) => ({
-      id: x.id,
-      type: x.type,
-      titre: x.titre,
-      corps: x.corps,
-      media_url: x.media_url,
-      duree_sec: x.duree_sec,
-      ordre: x.ordre,
-    }));
+
+    const params = await readBadgeuseParams();
+    const jourParis = engine.parisDateStr(new Date());
+    const elements = [];
+
+    for (const x of r.rows) {
+      const base = {
+        id: x.id,
+        type: x.type,
+        titre: x.titre,
+        corps: x.corps,
+        media_url: x.media_url,
+        duree_sec: x.duree_sec,
+        ordre: x.ordre,
+      };
+
+      // Éléments TEXTE historiques : forme strictement inchangée (le poste
+      // déployé les consomme déjà — aucune régression tolérée).
+      if (!TYPES_GENERES.includes(x.type)) {
+        if (x.type === 'media' || x.type === 'lien') {
+          // Média téléversé ou lien rapatrié : le poste télécharge le binaire
+          // par /media/:id, vérifie le sha256, et sert depuis son cache local.
+          if (!x.fichier) continue; // fichier absent ⇒ élément muet, on l'omet
+          elements.push({
+            ...base,
+            type: 'media',
+            media_id: `c${x.id}`,
+            media_type: x.media_type || 'image',
+            media_sha256: x.media_sha256 || null,
+          });
+          continue;
+        }
+        elements.push(base);
+        continue;
+      }
+
+      // ── Générateurs : contenu construit ici, élément OMIS si vide ──
+      const config = contenuConfig(x.config);
+      try {
+        if (x.type === 'annonces') {
+          if (params.festif_actif === false) continue;
+          const annonces = await buildAnnonces(jourParis);
+          if (annonces.length === 0) continue;
+          elements.push({ ...base, annonces });
+        } else if (x.type === 'actus') {
+          const actus = await buildActus(nbConfig(config, 'nb_actus', 3, 10));
+          if (actus.length === 0) continue;
+          elements.push({ ...base, actus });
+        } else if (x.type === 'tournees') {
+          const tournees = await buildTournees(jourParis);
+          if (tournees.length === 0) continue;
+          elements.push({ ...base, tournees });
+        } else if (x.type === 'social') {
+          const posts = await buildSocial(nbConfig(config, 'nb_posts', 5, 20));
+          if (posts.length === 0) continue;
+          elements.push({ ...base, posts });
+        } else if (x.type === 'vak_live') {
+          const vak = await buildVakLive();
+          if (!vak) continue;
+          elements.push({ ...base, vak });
+        }
+      } catch (err) {
+        // Un générateur en panne (table absente, requête lente) ne doit PAS
+        // vider la playlist : il s'efface, les autres passent.
+        console.error(`[BADGEUSE-DEVICE] Générateur « ${x.type} » ignoré : ${err.message}`);
+      }
+    }
+
     sendWithEtag(req, res, computeEtag(elements), { elements });
   } catch (err) {
     console.error('[BADGEUSE-DEVICE] Erreur playlist :', err.message);
+    res.status(503).json({ error: 'service_unavailable' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /v1/devices/:code/media/:id — flux binaire d'un média (v1.3)
+//
+// ROUTAGE : `:id` est PRÉFIXÉ par l'origine du média — `c<id>` pour un contenu
+// de playlist (téléversé ou rapatriage d'un lien), `s<id>` pour le visuel d'un
+// post social. Un seul point d'entrée plutôt que deux routes jumelles : le
+// poste reçoit `media_id` dans la playlist et le rejoue tel quel, sans avoir à
+// connaître la table d'origine.
+//
+// SÉCURITÉ : clé device obligatoire ; le chemin vient de la base mais est
+// RÉSOLU STRICTEMENT sous uploads/badgeuse (aucun `..` possible) ; le
+// Content-Type est déduit d'une LISTE BLANCHE d'extensions — jamais du
+// contenu, jamais d'un en-tête stocké — et `nosniff` interdit au navigateur du
+// kiosque de réinterpréter le fichier.
+// ═══════════════════════════════════════════════════════════════════════════
+router.get('/v1/devices/:code/media/:id', deviceLimiter, authenticateDevice, async (req, res) => {
+  const introuvable = () => res.status(404).json({ error: 'not_found' });
+  try {
+    const brut = String(req.params.id || '');
+    const m = /^([cs])(\d{1,12})$/.exec(brut);
+    if (!m) return introuvable();
+    const id = parseInt(m[2], 10);
+
+    const r = m[1] === 'c'
+      ? await pool.query('SELECT fichier FROM badgeuse_contenus WHERE id = $1', [id])
+      : await pool.query('SELECT media_fichier AS fichier FROM badgeuse_social_posts WHERE id = $1', [id]);
+    const relatif = r.rows[0] ? r.rows[0].fichier : null;
+    if (!relatif) return introuvable();
+
+    const abs = media.resolveMediaPath(relatif);
+    const mime = media.mimeForFile(relatif);
+    // Chemin hors racine, ou extension hors liste blanche → 404 (et non 415) :
+    // le poste n'a pas à distinguer « absent » de « refusé ».
+    if (!abs || !mime) return introuvable();
+    if (!fs.existsSync(abs)) return introuvable();
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    const flux = fs.createReadStream(abs);
+    flux.on('error', (err) => {
+      console.error('[BADGEUSE-DEVICE] Lecture média impossible :', err.message);
+      if (!res.headersSent) res.status(404).json({ error: 'not_found' });
+      else res.end();
+    });
+    flux.pipe(res);
+  } catch (err) {
+    console.error('[BADGEUSE-DEVICE] Erreur média :', err.message);
     res.status(503).json({ error: 'service_unavailable' });
   }
 });

@@ -23,6 +23,14 @@ import httpx
 from . import __version__
 from .chain import utc_iso_ms
 from .config import Config, TLS_INSECURE_ALERT
+from .media_cache import (
+    SOUS_REPERTOIRE as MEDIA_SOUS_REPERTOIRE,
+    MediaCache,
+    appliquer_urls_locales,
+    manquants,
+    plafond_effectif,
+    references_playlist,
+)
 from .store import (
     ALERTE_FILE_ANCIENNE,
     MAX_BATCH,
@@ -42,6 +50,21 @@ BACKOFF_MAX_SEC = 300.0
 #: Délais courts : un poste ne doit jamais rester bloqué sur le réseau.
 TIMEOUT_CONNECT_SEC = 5.0
 TIMEOUT_READ_SEC = 15.0
+
+#: Délai de lecture élargi pour un média (une vidéo pèse plus qu'un JSON).
+#: Reste borné : un téléchargement qui traîne ne doit pas retenir la boucle
+#: de playlist indéfiniment — il reprendra au cycle suivant.
+TIMEOUT_MEDIA_SEC = 60.0
+
+#: Taille maximale acceptée pour un média, en octets. Garde-fou du poste :
+#: le serveur borne déjà à l'envoi, mais un poste ne doit jamais remplir son
+#: disque sur une réponse inattendue (la file des pointages prime sur
+#: l'affichage).
+MEDIA_MAX_OCTETS = 64 * 1024 * 1024
+
+#: Nombre de médias téléchargés par passe. Le reste attend le cycle suivant :
+#: on étale la charge réseau au lieu de saturer la liaison du site.
+MEDIA_PAR_PASSE = 5
 
 CACHE_KEY_CONFIG = "config"
 CACHE_KEY_PLAYLIST = "playlist"
@@ -76,6 +99,15 @@ class Syncer:
         self._next_attempt = 0.0
         self._online = False
         self._last_alert: Optional[str] = None
+        self._media = MediaCache(
+            os.path.join(config.data_dir, MEDIA_SOUS_REPERTOIRE),
+            max_mo=plafond_effectif(None, config.media_cache_max_mo),
+        )
+
+    @property
+    def media(self) -> MediaCache:
+        """Cache média local (servi par ``ws_server`` sur la boucle locale)."""
+        return self._media
 
     # ------------------------------------------------------------ cycle de vie
 
@@ -262,7 +294,13 @@ class Syncer:
         return config
 
     async def refresh_playlist(self) -> Optional[List[Dict[str, Any]]]:
-        """Rafraîchit la playlist de veille (AFF-05/07)."""
+        """Rafraîchit la playlist de veille (AFF-05/07).
+
+        La playlist est mémorisée **telle que reçue** : c'est elle qui fait
+        référence pour l'entretien du cache média. Les URL renvoyées à
+        l'interface, elles, sont réécrites vers la boucle locale (le poste ne
+        fetch jamais un domaine externe, ADR-0004 §6).
+        """
         outcome = await self._get(
             "playlist", etag=self._store.get_etag(CACHE_KEY_PLAYLIST)
         )
@@ -273,7 +311,143 @@ class Syncer:
         elements = data.get("elements") or []
         self._store.set_cache(CACHE_KEY_PLAYLIST, elements, etag=data.get("etag"))
         LOGGER.info("playlist rafraichie : %d element(s)", len(elements))
-        return elements
+        return self.playlist_locale()
+
+    def playlist_locale(self) -> List[Dict[str, Any]]:
+        """Dernière playlist connue, URL médias pointées sur le cache local.
+
+        Utilisable hors ligne et avant tout échange réseau (AFF-07) : c'est la
+        forme que l'interface consomme, y compris au démarrage du poste.
+        """
+        elements = self._store.get_cache(CACHE_KEY_PLAYLIST, default=[]) or []
+        return appliquer_urls_locales(
+            elements, self._media.noms_presents(), self._config.http_port
+        )
+
+    # ------------------------------------------------------------------ médias
+
+    def _plafond_media_mo(self) -> int:
+        """Plafond de cache retenu : serveur d'abord, local en garde-fou."""
+        config = self._store.get_cache(CACHE_KEY_CONFIG, default={}) or {}
+        affichage = config.get("affichage") if isinstance(config, dict) else None
+        serveur = None
+        if isinstance(affichage, dict):
+            serveur = affichage.get("media_cache_max_mo")
+        if serveur is None and isinstance(config, dict):
+            serveur = config.get("media_cache_max_mo")
+        return plafond_effectif(serveur, self._config.media_cache_max_mo)
+
+    async def sync_media(self) -> int:
+        """Télécharge les médias manquants puis entretient le cache.
+
+        **Jamais bloquant pour le badgeage** : appelée en tâche de fond, un
+        média par un média, avec un plafond par passe. Un échec (réseau,
+        empreinte fausse, disque plein) est journalisé et retenté au cycle
+        suivant — l'écran affiche entre-temps le texte de l'élément.
+
+        :returns: nombre de médias effectivement entrés en cache.
+        """
+        elements = self._store.get_cache(CACHE_KEY_PLAYLIST, default=[]) or []
+        plafond_mo = self._plafond_media_mo()
+
+        # Entretien AVANT téléchargement : on libère la place des médias que
+        # la playlist ne réclame plus, sinon un cache plein empêcherait de
+        # récupérer les nouveaux contenus.
+        try:
+            bilan = self._media.entretenir(references_playlist(elements), plafond_mo)
+            if bilan["purges"] or bilan["evinces"]:
+                LOGGER.info(
+                    "cache media entretenu : %d purge(s), %d eviction(s)",
+                    len(bilan["purges"]),
+                    len(bilan["evinces"]),
+                )
+        except OSError:
+            LOGGER.warning("entretien du cache media impossible — affichage degrade")
+
+        a_telecharger = manquants(elements, self._media.noms_presents())
+        if not a_telecharger:
+            return 0
+
+        recuperes = 0
+        for media in a_telecharger[:MEDIA_PAR_PASSE]:
+            if not self.ready():
+                # Backoff en cours : inutile d'insister, le cycle suivant
+                # reprendra là où celui-ci s'arrête.
+                break
+            if await self._telecharger_media(media):
+                recuperes += 1
+
+        if recuperes:
+            LOGGER.info("%d media(s) ajoute(s) au cache local", recuperes)
+        return recuperes
+
+    async def _telecharger_media(self, media: Mapping[str, Any]) -> bool:
+        """Récupère un média et ne l'écrit qu'après vérification d'empreinte."""
+        identifiant = media.get("media_id")
+        contenu = await self._get_media(identifiant)
+        if contenu is None:
+            return False
+
+        if len(contenu) > MEDIA_MAX_OCTETS:
+            LOGGER.warning(
+                "media %s ignore : %d octets depassent le plafond du poste",
+                identifiant,
+                len(contenu),
+            )
+            return False
+
+        if not self._media.stocker(
+            media.get("nom"), contenu, media.get("media_sha256")
+        ):
+            # Empreinte fausse, nom non conforme ou ecriture impossible : on
+            # ne sert JAMAIS un media non verifie (contenu substitue ou
+            # transfert corrompu). Retente au cycle suivant.
+            LOGGER.warning(
+                "media %s refuse (empreinte ou ecriture) — non servi", identifiant
+            )
+            return False
+        return True
+
+    async def _get_media(self, media_id: Any) -> Optional[bytes]:
+        """``GET /devices/:code/media/:id`` — flux binaire, jamais du JSON.
+
+        Voie séparée de :meth:`_request` : la réponse n'est pas du JSON, et le
+        délai de lecture est plus large. La gestion d'état (backoff, en ligne /
+        hors ligne) reste la même, pour que l'indicateur de supervision dise
+        la vérité quelle que soit la voie utilisée.
+        """
+        if self._client is None:
+            return None
+
+        url = self._config.device_url(f"{MEDIA_SOUS_REPERTOIRE}/{media_id}")
+        try:
+            response = await self._client.request(
+                "GET", url, timeout=httpx.Timeout(TIMEOUT_MEDIA_SEC, connect=TIMEOUT_CONNECT_SEC)
+            )
+        except httpx.TimeoutException:
+            self._failed()
+            return None
+        except httpx.HTTPError as exc:
+            self._failed()
+            LOGGER.info("media %s indisponible (%s)", media_id, type(exc).__name__)
+            return None
+
+        if response.status_code == 401:
+            self._online = True
+            LOGGER.error("authentification du poste refusee (401) sur un media")
+            return None
+        if response.status_code == 429 or response.status_code >= 500:
+            self._failed()
+            return None
+        if response.status_code >= 300:
+            # 404 : le media a disparu cote serveur. Ce n'est pas une panne du
+            # poste — on n'entre pas en backoff pour autant.
+            self._succeeded()
+            LOGGER.info("media %s absent du serveur (%d)", media_id, response.status_code)
+            return None
+
+        self._succeeded()
+        return response.content
 
     # ------------------------------------------------------------- heartbeat
 

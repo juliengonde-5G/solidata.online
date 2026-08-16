@@ -233,6 +233,14 @@ else
 fi
 info "donnees : ${REPERTOIRE_DONNEES}"
 
+# Cache des medias de l'ecran de veille (CDC_AFFICHAGE_V2 §2). L'agent le cree
+# aussi au demarrage ; on le pose ici pour qu'il porte les bons droits des la
+# premiere installation, y compris quand le rootfs passe en lecture seule.
+# Son plafond est pilote par le SERVEUR (onglet Affichage) ; le fichier local
+# ne porte qu'un garde-fou facultatif (cf. badgeuse.conf.example).
+install -d -m 0750 -o "$UTILISATEUR" -g "$UTILISATEUR" "${REPERTOIRE_DONNEES}/media"
+info "cache media : ${REPERTOIRE_DONNEES}/media"
+
 etape "6bis/9 Validation de la configuration"
 if BADGEUSE_CONFIG="$CIBLE_CONFIG" "${RACINE_INSTALL}/venv/bin/python" \
      -m badgeuse_agent --check --config "$CIBLE_CONFIG"; then

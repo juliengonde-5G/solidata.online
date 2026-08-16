@@ -1,20 +1,37 @@
 /* Interface kiosque du poste de pointage — SOLIDATA.
  *
- * Sans dependance : ni framework, ni bundler, ni police distante.
- * L'agent local pousse tout par WebSocket ; l'interface n'emet jamais rien
- * (aucune interaction clavier ou souris n'est requise ni possible — PST-10).
+ * Sans dependance : ni framework, ni bundler, ni police distante, ni requete
+ * reseau sortante. L'agent local pousse tout par WebSocket ; l'interface
+ * n'emet jamais rien (aucune interaction clavier ou souris n'est requise ni
+ * possible — PST-10).
  *
  * Regles tenues ici :
  *  - AFF-01 : overlay prenom + initiale + sens + heure + pictogramme ;
  *  - duree d'overlay pilotee par le serveur, RE-PLAFONNEE A 8 s en dur
  *    ci-dessous (exigence juridique, troisieme verrou apres le serveur et
- *    l'agent) ;
+ *    l'agent), y compris pour la variante FESTIVE ;
  *  - AFF-02 : le cumul hebdomadaire ne s'affiche que si le message le porte ;
+ *  - AFF-03 : information principale >= 48 px (le message du moment) ;
  *  - AFF-04 : deux sons distincts, synthetises (aucun fichier audio) ;
- *  - AFF-06 : fondus doux, aucun clignotement ;
+ *  - AFF-06 : fondus doux, aucun clignotement — les animations festives sont
+ *    lentes (chute de ~7 s, soit ~0,14 Hz : tres en dessous du plafond de
+ *    2 Hz) et ne touchent jamais l'opacite du texte ;
  *  - AFF-07 : la derniere playlist recue est rejouee, y compris hors ligne ;
  *  - PST-08 : bandeau discret « hors ligne — vos pointages sont enregistres » ;
- *  - jamais de photo, jamais de nom complet.
+ *  - jamais de photo, jamais de nom complet, jamais de statut.
+ *
+ * Ecran d'information v2 (CDC_AFFICHAGE_V2) :
+ *  - overlay enrichi : message du moment (matin/pause/retour/soir), phrase de
+ *    motivation generique, variante festive (anniversaire / anniversaire
+ *    d'entreprise / premier jour) ;
+ *  - playlist enrichie : annonces, actus, tournees, social, media, vak_live.
+ *
+ * Contrat de donnees des types dynamiques : le contenu est genere COTE
+ * SERVEUR et transporte dans « corps » (JSON, comme le type historique
+ * compte_a_rebours). Les formes consommees sont documentees devant chaque
+ * moteur de rendu. Tout ce qui manque degrade proprement : un renderer qui
+ * ne trouve pas ses donnees retombe sur le rendu texte, jamais sur un ecran
+ * vide ou une icone cassee.
  */
 'use strict';
 
@@ -36,6 +53,12 @@
   var RECONNEXION_MIN_MS = 1000;
   var RECONNEXION_MAX_MS = 10000;
 
+  /** Nombre de confettis de la variante festive (classes .conf-1 a .conf-12). */
+  var CONFETTIS = 12;
+
+  /** Longueur maximale d'une legende de publication sociale. */
+  var LEGENDE_MAX = 180;
+
   var MESSAGES = {
     entree: 'Entrée enregistrée',
     sortie: 'Sortie enregistrée',
@@ -47,6 +70,21 @@
     lecteur: 'Lecteur de badge non détecté — préviens ton encadrant'
   };
 
+  /** Pictogramme de chaque variante festive (aucune photo, jamais). */
+  var PICTO_FESTIF = {
+    premier_jour: '👋',
+    anniversaire: '🎂',
+    anniversaire_entreprise: '🎉'
+  };
+
+  var PICTO_ANNONCE = {
+    anniversaire: '🎂',
+    anniversaire_entreprise: '🎉',
+    premier_jour: '👋'
+  };
+
+  var RESEAUX = { instagram: 'Instagram', facebook: 'Facebook' };
+
   var JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
   var MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
               'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -54,10 +92,13 @@
   /* ------------------------------------------------------------- elements */
 
   var elOverlay = document.getElementById('overlay');
+  var elConfettis = document.getElementById('overlay-confettis');
   var elPicto = document.getElementById('overlay-picto');
+  var elMoment = document.getElementById('overlay-moment');
   var elIdentite = document.getElementById('overlay-identite');
-  var elMessage = document.getElementById('overlay-message');
+  var elSens = document.getElementById('overlay-sens');
   var elHeure = document.getElementById('overlay-heure');
+  var elPhrase = document.getElementById('overlay-phrase');
   var elCumul = document.getElementById('overlay-cumul');
 
   var elHorloge = document.getElementById('horloge-heure');
@@ -141,6 +182,13 @@
     note(587, 0, 0.12, 'triangle', 0.16);
   }
 
+  /** Arpege court et doux pour un ecran festif (AFF-04 : reste discret). */
+  function sonFestif() {
+    note(659, 0, 0.12, 'sine', 0.20);
+    note(880, 0.13, 0.12, 'sine', 0.20);
+    note(1318, 0.26, 0.22, 'sine', 0.18);
+  }
+
   /* --------------------------------------------------------------- overlay */
 
   function afficherOverlay(options) {
@@ -149,22 +197,24 @@
       overlayTimer = null;
     }
 
-    elOverlay.className = 'overlay ' + (options.variante || '');
+    var classes = 'overlay ' + (options.variante || '');
+    if (options.festif) { classes += ' festif festif-' + options.festif; }
+    elOverlay.className = classes;
+
     elPicto.textContent = options.picto;
-    elIdentite.textContent = options.identite || '';
-    elIdentite.hidden = !options.identite;
-    elMessage.textContent = options.message || '';
-    elHeure.textContent = options.heure || '';
-    elHeure.hidden = !options.heure;
+
+    // Information principale (>= 48 px) : le message du moment, ou le motif
+    // de refus quand il n'y a pas de badge reconnu.
+    texte(elMoment, options.moment);
+    texte(elIdentite, options.identite);
+    texte(elSens, options.sens);
+    texte(elHeure, options.heure);
+    texte(elPhrase, options.phrase);
 
     // AFF-02 : rien ne s'affiche si l'agent n'a pas envoye de cumul.
-    if (options.cumul) {
-      elCumul.textContent = 'Cette semaine : ' + options.cumul;
-      elCumul.hidden = false;
-    } else {
-      elCumul.textContent = '';
-      elCumul.hidden = true;
-    }
+    texte(elCumul, options.cumul ? 'Cette semaine : ' + options.cumul : '');
+
+    confettis(options.festif);
 
     elOverlay.hidden = false;
     // Force un cycle de rendu pour que la transition d'opacite s'applique.
@@ -178,8 +228,16 @@
     elOverlay.classList.remove('visible');
     overlayTimer = setTimeout(function () {
       elOverlay.hidden = true;
+      elConfettis.textContent = '';   // libere les animations
       overlayTimer = null;
     }, 300);
+  }
+
+  /** Ecrit un texte et masque l'element s'il est vide (jamais de ligne fantome). */
+  function texte(noeud, valeur) {
+    var contenu = valeur === null || valeur === undefined ? '' : String(valeur);
+    noeud.textContent = contenu;
+    noeud.hidden = contenu === '';
   }
 
   /** Plafond dur : meme si le serveur demandait 30 s, l'affichage cesse a 8 s. */
@@ -189,10 +247,31 @@
     return Math.max(OVERLAY_MIN_MS, Math.min(OVERLAY_MAX_MS, ms));
   }
 
+  /**
+   * Confettis de la variante festive.
+   *
+   * Douze elements aux classes fixes (.conf-1 a .conf-12) : la position, le
+   * delai et la duree de chute sont dans la feuille de style, donc AUCUN
+   * style en ligne — la CSP 'self' reste tenable sans 'unsafe-inline'.
+   * Chute lente et continue : aucun clignotement (AFF-06).
+   */
+  function confettis(actif) {
+    elConfettis.textContent = '';
+    if (!actif) { return; }
+    for (var i = 1; i <= CONFETTIS; i += 1) {
+      var piece = document.createElement('span');
+      piece.className = 'confetti conf-' + i;
+      elConfettis.appendChild(piece);
+    }
+  }
+
   function identite(prenom, initiale) {
-    var texte = (prenom || '').trim();
-    if (initiale) { texte += ' ' + String(initiale).trim().charAt(0) + '.'; }
-    return texte.trim();
+    var texteIdentite = (prenom || '').trim();
+    if (initiale) {
+      // Initiale SEULE, jamais le nom de famille (ADR-0004 §1).
+      texteIdentite += ' ' + String(initiale).trim().charAt(0) + '.';
+    }
+    return texteIdentite.trim();
   }
 
   /* -------------------------------------------------------------- playlist */
@@ -230,8 +309,14 @@
     }
   }
 
-  /** Construit une diapositive. Tout passe par textContent : aucune injection. */
+  /**
+   * Construit une diapositive.
+   *
+   * Tout passe par textContent : aucune injection possible, meme si un
+   * contenu de playlist portait du HTML.
+   */
   function construireDiapo(noeud, element) {
+    noeud.className = 'diapo';
     noeud.textContent = '';
 
     if (!element) {
@@ -240,102 +325,438 @@
     }
 
     var type = element.type || 'message';
+    var moteur = RENDERERS[type];
+    var donnees = charge(element);
 
-    if (element.titre) {
-      noeud.appendChild(bloc('h1', 'diapo-titre', element.titre));
-    }
+    noeud.classList.add('diapo-' + type);
 
-    if (type === 'image') {
-      var source = urlMemeOrigine(element.media_url);
-      if (source) {
-        var image = document.createElement('img');
-        image.className = 'diapo-image';
-        image.alt = element.titre || '';
-        image.src = source;
-        noeud.appendChild(image);
-        return;
-      }
-      // Image indisponible hors ligne : on retombe sur le texte, jamais sur
-      // une icone cassee.
-    }
+    if (moteur && moteur(noeud, element, donnees)) { return; }
 
-    if (type === 'compte_a_rebours') {
-      var compte = compteARebours(element.corps);
-      if (compte) {
-        noeud.appendChild(bloc('p', 'diapo-compteur', String(compte.jours)));
-        noeud.appendChild(bloc('p', 'diapo-unite',
-                               compte.jours > 1 ? 'jours restants' : 'jour restant'));
-        if (compte.libelle) {
-          noeud.appendChild(bloc('p', 'diapo-corps', compte.libelle));
-        }
-        return;
-      }
-    }
-
-    // message, planning, meteo et replis : rendu generique titre + corps.
-    if (element.corps) {
-      noeud.appendChild(bloc('p', 'diapo-corps', String(element.corps)));
-    } else if (!element.titre) {
-      noeud.appendChild(bloc('p', 'diapo-vide', 'Bonne journée'));
-    }
+    // Repli commun : titre + corps textuel. Sert les types historiques
+    // (message, planning, meteo) ET tout type dont les donnees manquent.
+    rendreTexte(noeud, element, donnees);
   }
 
-  function bloc(balise, classe, texte) {
+  /* ---------------------------------------------------- moteurs de rendu */
+
+  /** Rendu generique titre + corps (types historiques et repli universel). */
+  function rendreTexte(noeud, element) {
+    if (noeud.childNodes.length === 0 && element.titre) {
+      noeud.appendChild(bloc('h1', 'diapo-titre', element.titre));
+    }
+    var corps = element.corps;
+    if (corps && typeof corps === 'string' && corps.charAt(0) !== '{') {
+      noeud.appendChild(bloc('p', 'diapo-corps', corps));
+    } else if (noeud.childNodes.length === 0) {
+      noeud.appendChild(bloc('p', 'diapo-vide', 'Bonne journée'));
+    }
+    return true;
+  }
+
+  /** image (historique) : media_url deja resolue en local par l'agent. */
+  function rendreImage(noeud, element) {
+    titre(noeud, element);
+    var source = urlLocale(element.media_url);
+    if (!source) { return false; }        // hors ligne : repli texte
+    noeud.appendChild(image(source, element.titre));
+    return true;
+  }
+
+  /**
+   * media : image ou video televersee dans SOLIDATA, telechargee par l'agent
+   * et servie depuis le cache local (/media/...). Le poste ne fetch jamais un
+   * domaine externe (ADR-0004 §6).
+   */
+  function rendreMedia(noeud, element) {
+    var source = urlLocale(element.media_url);
+    if (!source) { return false; }        // pas encore en cache : repli texte
+
+    titre(noeud, element);
+    if (String(element.media_type || '').toLowerCase() === 'video') {
+      noeud.appendChild(video(source));
+    } else {
+      noeud.appendChild(image(source, element.titre));
+    }
+    return true;
+  }
+
+  /**
+   * annonces : evenements du jour.
+   * corps = {"items":[{"prenom":"Karim","initiale":"B",
+   *                    "type":"anniversaire","annees":2}]}
+   * Prenom + initiale UNIQUEMENT, opt-in cote serveur (ADR-0004 §4).
+   */
+  function rendreAnnonces(noeud, element, donnees) {
+    var items = liste(element, donnees, 'annonces');
+    if (!items.length) { return false; }
+
+    noeud.appendChild(bloc('h1', 'diapo-titre', element.titre || "Aujourd'hui"));
+
+    var liste_ = document.createElement('ul');
+    liste_.className = 'annonces';
+    items.forEach(function (item) {
+      var ligne = document.createElement('li');
+      ligne.className = 'annonce';
+      ligne.appendChild(bloc('span', 'annonce-picto',
+                             PICTO_ANNONCE[item.type] || '🎉'));
+      ligne.appendChild(bloc('span', 'annonce-nom',
+                             identite(item.prenom, item.initiale)));
+      var annees = entier(item.annees);
+      if (annees > 0) {
+        ligne.appendChild(bloc('span', 'annonce-detail',
+                               annees + (annees > 1 ? ' ans' : ' an')));
+      }
+      liste_.appendChild(ligne);
+    });
+    noeud.appendChild(liste_);
+    return true;
+  }
+
+  /**
+   * actus : brèves du fil d'actualites SOLIDATA.
+   * element.actus = [{"titre":"...","resume":"...","source":"..."}]
+   */
+  function rendreActus(noeud, element, donnees) {
+    var items = liste(element, donnees, 'actus');
+    if (!items.length) { return false; }
+
+    noeud.appendChild(bloc('h1', 'diapo-titre', element.titre || 'Actualités'));
+
+    var conteneur = document.createElement('div');
+    conteneur.className = 'actus';
+    items.forEach(function (item) {
+      var carte = document.createElement('article');
+      carte.className = 'actu';
+      if (item.titre) { carte.appendChild(bloc('h2', 'actu-titre', item.titre)); }
+      if (item.resume) {
+        carte.appendChild(bloc('p', 'actu-resume', tronquer(item.resume, LEGENDE_MAX)));
+      }
+      if (item.source) { carte.appendChild(bloc('p', 'actu-source', item.source)); }
+      conteneur.appendChild(carte);
+    });
+    noeud.appendChild(conteneur);
+    return true;
+  }
+
+  /**
+   * tournees : collectes en cours.
+   * element.tournees = [{"libelle":"Tournée CAV","vehicule":"AB-123-CD",
+   *                      "points_faits":7,"points_total":12,"statut":"in_progress"}]
+   * JAMAIS de nom de chauffeur (ADR-0004 §5), jamais de carte.
+   */
+  function rendreTournees(noeud, element, donnees) {
+    var items = liste(element, donnees, 'tournees');
+    if (!items.length) { return false; }
+
+    noeud.appendChild(bloc('h1', 'diapo-titre', element.titre || 'Collectes en cours'));
+
+    var conteneur = document.createElement('div');
+    conteneur.className = 'tournees';
+    items.forEach(function (item) {
+      var faits = entier(champ(item, ['points_faits', 'cav_faits']));
+      var total = entier(champ(item, ['points_total', 'cav_total']));
+
+      var ligne = document.createElement('div');
+      ligne.className = 'tournee';
+
+      var entete = document.createElement('div');
+      entete.className = 'tournee-entete';
+      entete.appendChild(bloc('span', 'tournee-libelle', item.libelle || 'Tournée'));
+      if (item.vehicule) {
+        entete.appendChild(bloc('span', 'tournee-vehicule', item.vehicule));
+      }
+      if (total > 0) {
+        entete.appendChild(bloc('span', 'tournee-progression', faits + ' / ' + total));
+      }
+      ligne.appendChild(entete);
+
+      if (total > 0) {
+        ligne.appendChild(jauge(faits / total));
+      }
+      conteneur.appendChild(ligne);
+    });
+    noeud.appendChild(conteneur);
+    return true;
+  }
+
+  /**
+   * social : derniere publication d'un compte de la structure.
+   * element.posts = [{"media_id":"s12","media_type":"image","reseau":"instagram",
+   *                   "compte":"fripandcorouen","legende":"...","publie_le":"..."}]
+   *
+   * Chaque post porte SON visuel : l'agent les met tous en cache et reecrit
+   * leur media_url vers la boucle locale. V1 affiche le PLUS RECENT (le
+   * serveur en envoie plusieurs, deja tries) — un post par diapositive, la
+   * rotation restant celle de la playlist.
+   */
+  function rendreSocial(noeud, element, donnees) {
+    var posts = liste(element, donnees, 'posts');
+    var post = posts.length ? posts[0] : donnees;
+
+    var source = urlLocale(post.media_url || element.media_url);
+    var legende = post.legende || donnees.legende || '';
+    if (!source && !legende) { return false; }
+
+    var reseau = String(post.reseau || donnees.reseau || '').toLowerCase();
+    var compte = post.compte || donnees.compte;
+
+    var badge = document.createElement('div');
+    badge.className = 'social-badge';
+    badge.appendChild(bloc('span', 'social-reseau', RESEAUX[reseau] || 'Réseaux'));
+    if (compte) {
+      badge.appendChild(bloc('span', 'social-compte', '@' + compte));
+    }
+    noeud.appendChild(badge);
+
+    if (source) {
+      if (String(post.media_type || element.media_type || '').toLowerCase() === 'video') {
+        noeud.appendChild(video(source));
+      } else {
+        noeud.appendChild(image(source, compte || ''));
+      }
+    }
+    if (legende) {
+      noeud.appendChild(bloc('p', 'social-legende', tronquer(legende, LEGENDE_MAX)));
+    }
+    return true;
+  }
+
+  /**
+   * vak_live : ecran promotionnel des jours de Vente Au Kilo.
+   * element.vak = {"libelle":"VAK d'août","poids_kg":1234.5,
+   *                "objectif_poids_kg":2000,"ca_ttc":...,"tickets":...}
+   * Aucune donnee personnelle : vocation visiteurs, chiffres enormes.
+   * Seuls le poids et son objectif sont affiches (le CA ne s'expose pas a des
+   * visiteurs sur un ecran d'atelier).
+   */
+  function rendreVakLive(noeud, element, donnees) {
+    var vak = objet(element, donnees, 'vak');
+    var kg = nombre(champ(vak, ['poids_kg', 'kg']));
+    if (kg === null) { return false; }
+
+    var objectif = nombre(champ(vak, ['objectif_poids_kg', 'objectif_kg']));
+
+    noeud.appendChild(bloc('p', 'vak-libelle',
+                           vak.libelle || element.titre || 'Vente au Kilo'));
+    noeud.appendChild(bloc('p', 'vak-compteur', nombreFr(kg, 1)));
+    noeud.appendChild(bloc('p', 'vak-unite', 'kg vendus'));
+
+    if (objectif !== null && objectif > 0) {
+      noeud.appendChild(jauge(kg / objectif));
+      noeud.appendChild(bloc('p', 'vak-objectif',
+                             'Objectif ' + nombreFr(objectif, 0) + ' kg'));
+    }
+    return true;
+  }
+
+  /** compte_a_rebours (historique) : {"date_cible":"2026-12-31","libelle":"..."} */
+  function rendreCompteARebours(noeud, element, donnees) {
+    if (!donnees.date_cible) { return false; }
+
+    var cible = new Date(donnees.date_cible);
+    if (isNaN(cible.getTime())) { return false; }
+
+    var aujourdhui = new Date();
+    var minuitCible = Date.UTC(cible.getFullYear(), cible.getMonth(), cible.getDate());
+    var minuitJour = Date.UTC(aujourdhui.getFullYear(), aujourdhui.getMonth(),
+                              aujourdhui.getDate());
+    var jours = Math.max(0, Math.round((minuitCible - minuitJour) / 86400000));
+
+    titre(noeud, element);
+    noeud.appendChild(bloc('p', 'diapo-compteur', String(jours)));
+    noeud.appendChild(bloc('p', 'diapo-unite',
+                           jours > 1 ? 'jours restants' : 'jour restant'));
+    if (donnees.libelle) {
+      noeud.appendChild(bloc('p', 'diapo-corps', donnees.libelle));
+    }
+    return true;
+  }
+
+  var RENDERERS = {
+    message: null,                       // repli texte
+    planning: null,
+    meteo: null,
+    image: rendreImage,
+    media: rendreMedia,
+    lien: rendreMedia,                   // servi comme un media (ADR-0004 §6)
+    annonces: rendreAnnonces,
+    actus: rendreActus,
+    tournees: rendreTournees,
+    social: rendreSocial,
+    vak_live: rendreVakLive,
+    compte_a_rebours: rendreCompteARebours
+  };
+
+  /* ------------------------------------------------------ fabriques DOM */
+
+  function bloc(balise, classe, contenu) {
     var noeud = document.createElement(balise);
     noeud.className = classe;
-    noeud.textContent = texte;
+    noeud.textContent = contenu;
     return noeud;
   }
 
-  /** N'accepte qu'une ressource locale : la page doit tenir hors ligne. */
-  function urlMemeOrigine(url) {
+  function titre(noeud, element) {
+    if (element.titre) { noeud.appendChild(bloc('h1', 'diapo-titre', element.titre)); }
+  }
+
+  function image(source, alternatif) {
+    var noeud = document.createElement('img');
+    noeud.className = 'diapo-image';
+    noeud.alt = alternatif || '';
+    noeud.src = source;
+    return noeud;
+  }
+
+  /** Video muette, en boucle : aucun son intempestif dans l'atelier. */
+  function video(source) {
+    var noeud = document.createElement('video');
+    noeud.className = 'diapo-video';
+    noeud.muted = true;
+    noeud.defaultMuted = true;
+    noeud.autoplay = true;
+    noeud.loop = true;
+    noeud.playsInline = true;
+    noeud.setAttribute('muted', '');
+    noeud.setAttribute('playsinline', '');
+    noeud.src = source;
+    return noeud;
+  }
+
+  /**
+   * Jauge de progression.
+   *
+   * Le remplissage passe par une classe par pas de 5 % (.jauge-p0 a
+   * .jauge-p100) : aucun style en ligne, donc rien qui dependrait de
+   * 'unsafe-inline' dans la CSP. Le pas de 5 % est invisible a 5 m.
+   */
+  function jauge(ratio) {
+    var pourcent = Math.max(0, Math.min(100, Math.round((Number(ratio) || 0) * 100)));
+    var pas = Math.round(pourcent / 5) * 5;
+
+    var conteneur = document.createElement('div');
+    conteneur.className = 'jauge';
+    var barre = document.createElement('span');
+    barre.className = 'jauge-barre jauge-p' + pas;
+    conteneur.appendChild(barre);
+    return conteneur;
+  }
+
+  /* --------------------------------------------------------- utilitaires */
+
+  /** Donnees structurees d'un element : « corps » JSON, sinon objet vide. */
+  function charge(element) {
+    var corps = element.corps;
+    if (corps && typeof corps === 'object') { return corps; }
+    if (typeof corps === 'string' && corps.charAt(0) === '{') {
+      try {
+        var donnees = JSON.parse(corps);
+        return donnees && typeof donnees === 'object' ? donnees : {};
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  }
+
+  /**
+   * Liste d'items d'un type dynamique.
+   *
+   * Le serveur pose le contenu genere en CHAMP DE PREMIER NIVEAU de
+   * l'element (element.annonces, element.actus, element.tournees,
+   * element.posts) : c'est la source principale. Les autres formes
+   * (« items », contenu JSON dans « corps ») sont acceptees en repli, pour
+   * qu'un contenu saisi a la main reste affichable.
+   */
+  function liste(element, donnees, cle) {
+    var candidats = [element[cle], donnees[cle], donnees.items, element.items];
+    for (var i = 0; i < candidats.length; i += 1) {
+      if (Array.isArray(candidats[i])) {
+        return candidats[i].filter(function (item) {
+          return item && typeof item === 'object';
+        });
+      }
+    }
+    return [];
+  }
+
+  /** Objet d'un type dynamique (ex. element.vak), avec repli sur « corps ». */
+  function objet(element, donnees, cle) {
+    if (element[cle] && typeof element[cle] === 'object') { return element[cle]; }
+    if (donnees[cle] && typeof donnees[cle] === 'object') { return donnees[cle]; }
+    return donnees;
+  }
+
+  /** Premiere valeur definie parmi plusieurs cles (tolerance de nommage). */
+  function champ(source, cles) {
+    for (var i = 0; i < cles.length; i += 1) {
+      var valeur = source[cles[i]];
+      if (valeur !== undefined && valeur !== null) { return valeur; }
+    }
+    return null;
+  }
+
+  /**
+   * N'accepte qu'une ressource LOCALE : la page doit tenir hors ligne et le
+   * poste ne doit jamais contacter un domaine externe (ADR-0004 §6).
+   */
+  function urlLocale(url) {
     if (!url) { return null; }
-    var texte = String(url);
-    if (texte.indexOf('data:image/') === 0) { return texte; }
+    var texteUrl = String(url);
+    if (texteUrl.indexOf('data:image/') === 0) { return texteUrl; }
     try {
-      var resolue = new URL(texte, window.location.href);
+      var resolue = new URL(texteUrl, window.location.href);
       return resolue.origin === window.location.origin ? resolue.href : null;
     } catch (e) {
       return null;
     }
   }
 
-  /** corps attendu : {"date_cible": "2026-12-31", "libelle": "..."} */
-  function compteARebours(corps) {
-    if (!corps) { return null; }
-    var donnees;
-    try {
-      donnees = typeof corps === 'string' ? JSON.parse(corps) : corps;
-    } catch (e) {
-      return null;
-    }
-    if (!donnees || !donnees.date_cible) { return null; }
+  function tronquer(valeur, maximum) {
+    var texteBrut = String(valeur === null || valeur === undefined ? '' : valeur).trim();
+    if (texteBrut.length <= maximum) { return texteBrut; }
+    return texteBrut.slice(0, maximum - 1).replace(/\s+$/, '') + '…';
+  }
 
-    var cible = new Date(donnees.date_cible);
-    if (isNaN(cible.getTime())) { return null; }
+  function nombre(valeur) {
+    var n = Number(valeur);
+    return isFinite(n) ? n : null;
+  }
 
-    var aujourdhui = new Date();
-    var minuitCible = Date.UTC(cible.getFullYear(), cible.getMonth(), cible.getDate());
-    var minuitJour = Date.UTC(aujourdhui.getFullYear(), aujourdhui.getMonth(),
-                              aujourdhui.getDate());
-    var jours = Math.round((minuitCible - minuitJour) / 86400000);
+  function entier(valeur) {
+    var n = Number(valeur);
+    return isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
 
-    return { jours: Math.max(0, jours), libelle: donnees.libelle || '' };
+  /**
+   * Formatage francais sans dependre d'ICU : espace fine insecable pour les
+   * milliers, virgule decimale. Deterministe sur tout poste.
+   */
+  function nombreFr(valeur, decimales) {
+    var n = Number(valeur);
+    if (!isFinite(n)) { return '0'; }
+
+    var texteNombre = Math.abs(n).toFixed(decimales || 0);
+    var morceaux = texteNombre.split('.');
+    var entierPart = morceaux[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    var resultat = (n < 0 ? '-' : '') + entierPart;
+    if (morceaux[1]) { resultat += ',' + morceaux[1]; }
+    return resultat;
   }
 
   /* --------------------------------------------------------------- bandeau */
 
   function majBandeau() {
-    var texte = null;
-    if (!lecteurPresent) { texte = MESSAGES.lecteur; }
-    else if (!enLigne) { texte = MESSAGES.hors_ligne; }
+    var texteBandeau = null;
+    if (!lecteurPresent) { texteBandeau = MESSAGES.lecteur; }
+    else if (!enLigne) { texteBandeau = MESSAGES.hors_ligne; }
 
-    if (texte === null) {
+    if (texteBandeau === null) {
       elBandeau.classList.remove('visible');
       elBandeau.hidden = true;
       return;
     }
-    elBandeau.textContent = texte;
+    elBandeau.textContent = texteBandeau;
     elBandeau.hidden = false;
     void elBandeau.offsetWidth;
     elBandeau.classList.add('visible');
@@ -379,24 +800,14 @@
     switch (message.type) {
 
       case 'badge_ok':
-        afficherOverlay({
-          variante: message.sens === 'sortie' ? 'sortie' : 'entree',
-          picto: '✓',
-          identite: identite(message.prenom, message.initiale),
-          message: MESSAGES[message.sens] || MESSAGES.inconnu,
-          heure: message.heure_locale,
-          cumul: message.cumul_hebdo,     // null tant que l'option est inactive
-          duree: message.overlay_duree_sec
-        });
-        sonSucces();
+        badgeAccepte(message);
         break;
 
       case 'badge_err':
         afficherOverlay({
           variante: 'erreur',
           picto: '✗',
-          identite: '',
-          message: MESSAGES[message.raison] || MESSAGES.badge_inconnu,
+          moment: MESSAGES[message.raison] || MESSAGES.badge_inconnu,
           duree: message.overlay_duree_sec
         });
         sonErreur();
@@ -406,8 +817,8 @@
         afficherOverlay({
           variante: 'neutre',
           picto: '•',
+          moment: MESSAGES.deja,
           identite: identite(message.prenom, ''),
-          message: MESSAGES.deja,
           duree: message.overlay_duree_sec
         });
         sonNeutre();
@@ -426,6 +837,35 @@
       default:
         break;
     }
+  }
+
+  /**
+   * Pointage accepte : overlay ordinaire ou variante festive.
+   *
+   * L'agent a deja decide du moment, du message, de la phrase et du festif
+   * (module PUR moments.py) : l'interface ne recalcule rien et n'invente
+   * aucun texte — elle affiche ce qu'on lui donne, ou rien.
+   */
+  function badgeAccepte(message) {
+    var festif = message.festif && message.festif.type ? message.festif : null;
+
+    afficherOverlay({
+      variante: message.sens === 'sortie' ? 'sortie' : 'entree',
+      festif: festif ? festif.type : null,
+      picto: festif ? (PICTO_FESTIF[festif.type] || '🎉') : '✓',
+      // Le message festif prime sur celui du moment : un seul message en
+      // tres grand, jamais les deux empiles (overlay plafonne a 8 s).
+      moment: (festif ? festif.message : message.message) ||
+              MESSAGES[message.sens] || MESSAGES.inconnu,
+      identite: identite(message.prenom, message.initiale),
+      sens: MESSAGES[message.sens] || MESSAGES.inconnu,
+      heure: message.heure_locale,
+      phrase: message.phrase_motivation || '',
+      cumul: message.cumul_hebdo,        // null tant que l'option est inactive
+      duree: message.overlay_duree_sec
+    });
+
+    if (festif) { sonFestif(); } else { sonSucces(); }
   }
 
   /* --------------------------------------------------------------- demarrage */

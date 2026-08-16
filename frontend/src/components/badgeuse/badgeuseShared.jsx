@@ -23,10 +23,114 @@ export const STATUT_FEUILLE_LABELS = {
   brouillon: 'Brouillon', validee_encadrant: 'Validée (encadrant)', validee_rh: 'Validée (RH)',
 };
 export const TYPE_CORRECTION_LABELS = { ajout: 'Ajout', modification: 'Modification', annulation: 'Annulation' };
+// Types « historiques » (V1, saisie manuelle intégrale) + types v2
+// (CDC_AFFICHAGE_V2.md §2, CONTRAT_API_DEVICE.md §3bis) : générateurs (contenu
+// calculé côté serveur à chaque construction de playlist) et médias servis par
+// le serveur (téléversement ou lien partagé téléchargé côté serveur — le poste
+// ne fait jamais de requête vers un domaine externe).
 export const TYPE_CONTENU_LABELS = {
   message: 'Message', image: 'Image', planning: 'Planning',
   compte_a_rebours: 'Compte à rebours', meteo: 'Météo',
+  annonces: 'Annonces du jour (anniversaires)',
+  actus: "Fil d'actualités",
+  tournees: 'Tournées en cours',
+  social: 'Réseaux sociaux',
+  vak_live: 'Écran VAK (jours de VAK)',
+  media: 'Média (image/vidéo)',
+  lien: 'Lien partagé',
 };
+
+// Aide contextuelle affichée dans le formulaire de création (une phrase par
+// type, jamais une donnée personnelle).
+export const TYPE_CONTENU_HINTS = {
+  message: 'Texte libre affiché tel quel sur le poste.',
+  image: "Chemin d'un fichier déjà déployé sur le poste (V1, CSP img-src 'self').",
+  planning: 'Planning affiché en texte libre (corps du message).',
+  compte_a_rebours: 'Décompte affiché en texte libre (corps du message).',
+  meteo: 'Bloc météo affiché en texte libre (corps du message).',
+  annonces: "Anniversaires du jour (naissance et/ou entrée dans la structure) — prénom + initiale, salariés ayant donné leur accord uniquement. Généré côté serveur, rien à saisir ici.",
+  actus: "Dernières brèves du fil d'actualités SOLIDATA (titre + résumé + source). Généré côté serveur.",
+  tournees: 'Tournées en cours (véhicule, progression X/Y CAV) — jamais le nom du chauffeur. Généré côté serveur.',
+  social: "Derniers posts des comptes Instagram/Facebook de la structure (réglage dans « Réseaux sociaux »). Généré côté serveur.",
+  vak_live: 'Écran promotionnel injecté automatiquement les jours de VAK active (poids cumulé, jauge objectif). Généré côté serveur.',
+  media: 'Image ou vidéo téléversée dans SOLIDATA — servie en local par le poste (hors ligne préservé).',
+  lien: 'URL partagée : le serveur télécharge le contenu et le transforme en média — le poste ne contacte jamais un domaine externe.',
+};
+
+// Catégories de types (CDC_AFFICHAGE_V2.md §4) — pilotent le formulaire.
+export const TYPES_LEGACY = ['message', 'image', 'planning', 'compte_a_rebours', 'meteo'];
+export const TYPES_GENERATEURS = ['annonces', 'actus', 'tournees', 'social', 'vak_live'];
+// Créés uniquement via les boutons dédiés (upload / partage de lien) — jamais
+// depuis le sélecteur de type générique, jamais de corps/media_url saisis à la main.
+export const TYPES_MEDIA_SERVEUR = ['media', 'lien'];
+
+export const isGenerateurType = (type) => TYPES_GENERATEURS.includes(type);
+export const isMediaServeurType = (type) => TYPES_MEDIA_SERVEUR.includes(type);
+
+// Config JSONB simple (champs number) de chaque générateur — clés et bornes
+// confirmées côté serveur (routes/badgeuse-device.js `nbConfig`) :
+// nb_actus défaut 3 max 10, nb_posts défaut 5 max 20.
+export const TYPE_CONTENU_CONFIG_FIELDS = {
+  annonces: [],
+  actus: [{ key: 'nb_actus', label: 'Nombre de brèves affichées', min: 1, max: 10, default: 3 }],
+  tournees: [],
+  social: [{ key: 'nb_posts', label: 'Nombre de posts affichés', min: 1, max: 20, default: 5 }],
+  vak_live: [],
+};
+
+// Longueur maximale d'un gabarit de message (backend `GABARIT_MAX`,
+// utils/badgeuse-settings.js) — distincte de la longueur d'une phrase de
+// motivation (200 car., cf. plus bas).
+export const MESSAGE_GABARIT_MAX = 120;
+
+// Gabarits de messages de badgeage (CDC_AFFICHAGE_V2.md §1) — 7 moments.
+export const MOMENTS_BADGEAGE = [
+  { key: 'matin', label: 'Matin (entrée)' },
+  { key: 'pause', label: 'Pause déjeuner (sortie)' },
+  { key: 'retour', label: 'Retour de pause (entrée)' },
+  { key: 'soir', label: 'Soir (sortie)' },
+  { key: 'premier_jour', label: 'Premier jour' },
+  { key: 'anniversaire', label: 'Anniversaire (naissance)' },
+  { key: 'anniversaire_entreprise', label: "Anniversaire d'entrée dans la structure" },
+];
+
+// Valeurs par défaut affichées tant que le serveur n'a rien enregistré —
+// mêmes gabarits que `BADGEUSE_SETTING_DEFAULTS` (utils/badgeuse-settings.js,
+// clés `badgeuse.msg_*`) : simple repli d'affichage avant la première lecture.
+export const DEFAULT_MESSAGES_BADGEAGE = {
+  matin: 'Bonjour, {prenom} !',
+  pause: 'Bon appétit, {prenom} !',
+  retour: 'Bon après-midi, {prenom} !',
+  soir: 'Bonne fin de journée, {prenom} !',
+  premier_jour: 'Bienvenue chez Solidarité Textiles, {prenom} !',
+  anniversaire: 'Joyeux anniversaire, {prenom} ! 🎉',
+  anniversaire_entreprise: '{annees} an(s) avec nous, {prenom} — merci ! 🎉',
+};
+
+// Bornes horaires par défaut des moments (clés serveur `badgeuse.moment_*`) —
+// SEULEMENT 5 bornes : le début de « retour » n'a pas de clé dédiée, il suit
+// directement la fin de la pause (`pause_fin`).
+export const DEFAULT_PLAGES_MOMENTS = {
+  matin_fin: '11:30',
+  pause_debut: '11:00',
+  pause_fin: '14:00',
+  retour_fin: '15:00',
+  soir_debut: '14:00',
+};
+
+// Comptes sociaux de référence (settings `badgeuse.social_comptes`, seedés
+// INACTIFS — l'identifiant Graph doit être renseigné par un ADMIN, rien n'est
+// deviné depuis le nom d'utilisateur).
+export const DEFAULT_SOCIAL_COMPTES = [
+  { reseau: 'instagram', compte: 'fripandcorouen', graph_id: null, actif: false },
+  { reseau: 'instagram', compte: 'vintiz.fr', graph_id: null, actif: false },
+  { reseau: 'instagram', compte: 'fripandcostreet', graph_id: null, actif: false },
+  { reseau: 'instagram', compte: 'fripandcofamily', graph_id: null, actif: false },
+  { reseau: 'facebook', compte: 'fripandcorouen', graph_id: null, actif: false },
+  { reseau: 'facebook', compte: 'SolidariteTextiles', graph_id: null, actif: false },
+  { reseau: 'facebook', compte: 'vintiz.fr', graph_id: null, actif: false },
+];
+export const RESEAUX_LABELS = { instagram: 'Instagram', facebook: 'Facebook' };
 export const CIBLE_DEVICE_LABELS = { pi5: 'Raspberry Pi 5', pi3: 'Raspberry Pi 3 B+ (secours)' };
 export const EVENEMENT_HISTORIQUE_LABELS = {
   attribution: 'Attribution', perte: 'Déclaré perdu', vol: 'Déclaré volé',
@@ -58,6 +162,14 @@ export async function blobErr(err, fallback) {
     }
   } catch { /* garde le message générique */ }
   return apiErr(err, fallback);
+}
+
+// Poids kg → « 1 245 kg » (écran VAK live) — null-safe, jamais de faux zéro.
+export function fmtKg(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} kg`;
 }
 
 // Décimal → « 7 h 42 » (jamais de faux zéro : null/vide → « — »).

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
-import { IdCard, Plus, ChevronDown, AlertTriangle, Undo2, Ban, History } from 'lucide-react';
+import { IdCard, Plus, ChevronDown, AlertTriangle, Undo2, Ban, History, Cake } from 'lucide-react';
 import api from '../../services/api';
 import { LoadingSpinner, ErrorState, EmptyState, Modal, ConfirmDialog, useToast } from '../../components';
 import { compareByName, formatEmployeeName } from '../../utils/names';
@@ -7,6 +7,21 @@ import {
   apiErr, fmtDateTimeParis, employeeName,
   STATUT_BADGE_LABELS, EVENEMENT_HISTORIQUE_LABELS, StatutBadgeChip,
 } from './badgeuseShared';
+
+// Opt-in festif (ADR-0004 §4) — champ confirmé côté GET /badgeuse/badges
+// (routes/badgeuse.js) : `badgeuse_optin_festif` (bool) + `badgeuse_optin_festif_le`.
+const optinFestif = (b) => b?.badgeuse_optin_festif === true;
+
+function OptinFestifBadge({ actif, le }) {
+  return actif ? (
+    <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-pink-100 text-pink-700"
+      title={le ? `Accord recueilli le ${fmtDateTimeParis(le)}` : undefined}>
+      <Cake className="w-3.5 h-3.5" aria-hidden="true" /> Oui
+    </span>
+  ) : (
+    <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Non</span>
+  );
+}
 
 const uidTronque = (uid) => (uid ? `${String(uid).slice(0, 12)}…` : '—');
 
@@ -105,6 +120,8 @@ export default function GestionBadges({ canWrite }) {
   const [attribuerOpen, setAttribuerOpen] = useState(false);
   const [confirm, setConfirm] = useState(null); // { badge, statut, label }
   const [acting, setActing] = useState(false);
+  const [confirmOptin, setConfirmOptin] = useState(null); // { badge, actif }
+  const [actingOptin, setActingOptin] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -138,6 +155,21 @@ export default function GestionBadges({ canWrite }) {
     } finally { setActing(false); }
   };
 
+  // Opt-in festif (ADR-0004 §4) : accord LIBRE et révocable, tracé au journal
+  // RGPD côté serveur — jamais de conséquence si le salarié refuse.
+  const doToggleOptin = async () => {
+    if (!confirmOptin) return;
+    setActingOptin(true);
+    try {
+      await api.post(`/badgeuse/salaries/${confirmOptin.badge.employee_id}/optin-festif`, { actif: confirmOptin.actif });
+      toast.success(confirmOptin.actif ? 'Accord festif recueilli.' : 'Accord festif retiré.');
+      setConfirmOptin(null);
+      load();
+    } catch (err) {
+      toast.error(apiErr(err, 'Action impossible.'));
+    } finally { setActingOptin(false); }
+  };
+
   if (loading) return <LoadingSpinner size="lg" message="Chargement des badges…" />;
   if (error) return <ErrorState variant="card" title="Badges indisponibles" message={error} onRetry={load} />;
 
@@ -164,6 +196,7 @@ export default function GestionBadges({ canWrite }) {
                   <th className="text-left py-2 px-2">Empreinte (uid_hmac)</th>
                   <th className="text-center py-2 px-2">Statut</th>
                   <th className="text-left py-2 px-2">Attribué le</th>
+                  <th className="text-center py-2 px-2">Anniversaires à l'écran</th>
                   {canWrite && <th className="text-right py-2 px-2">Actions</th>}
                 </tr>
               </thead>
@@ -175,6 +208,21 @@ export default function GestionBadges({ canWrite }) {
                       <td className="py-2 px-2 font-mono text-xs text-slate-500" title={b.uid_hmac}>{uidTronque(b.uid_hmac)}</td>
                       <td className="py-2 px-2 text-center"><StatutBadgeChip statut={b.statut} /></td>
                       <td className="py-2 px-2 whitespace-nowrap text-slate-500">{fmtDateTimeParis(b.attribue_le)}</td>
+                      <td className="py-2 px-2 text-center">
+                        <div className="inline-flex items-center gap-2">
+                          <OptinFestifBadge actif={optinFestif(b)} le={b.badgeuse_optin_festif_le} />
+                          {canWrite && (
+                            <button
+                              onClick={() => setConfirmOptin({ badge: b, actif: !optinFestif(b) })}
+                              className="text-slate-400 hover:text-pink-600 p-1"
+                              title={optinFestif(b) ? "Retirer l'accord" : "Recueillir l'accord"}
+                              aria-label={optinFestif(b) ? "Retirer l'accord festif" : "Recueillir l'accord festif"}
+                            >
+                              <Cake className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       {canWrite && (
                         <td className="py-2 px-2 text-right whitespace-nowrap">
                           {b.statut === 'actif' && (
@@ -198,7 +246,7 @@ export default function GestionBadges({ canWrite }) {
                     </tr>
                     {openHist === b.id && (
                       <tr className="border-b border-slate-50 bg-slate-50/60">
-                        <td colSpan={canWrite ? 5 : 4} className="px-4 py-2">
+                        <td colSpan={canWrite ? 6 : 5} className="px-4 py-2">
                           <HistoriqueBadge badgeId={b.id} />
                         </td>
                       </tr>
@@ -216,6 +264,13 @@ export default function GestionBadges({ canWrite }) {
 
       <ConfirmDialog isOpen={!!confirm} onCancel={() => setConfirm(null)} onConfirm={doChangeStatut}
         title="Confirmer l'action" message={confirm?.message || ''} confirmLabel="Confirmer" confirmVariant="danger" loading={acting} />
+
+      <ConfirmDialog isOpen={!!confirmOptin} onCancel={() => setConfirmOptin(null)} onConfirm={doToggleOptin}
+        title={confirmOptin?.actif ? "Recueillir l'accord festif" : "Retirer l'accord festif"}
+        message={confirmOptin ? `${confirmOptin.actif
+          ? `${employeeName(confirmOptin.badge)} accepte-t-il/elle l'affichage de son anniversaire (prénom + initiale) sur l'écran de badgeage ?`
+          : `Retirer l'accord d'affichage festif de ${employeeName(confirmOptin.badge)} ?`} Accord LIBRE du salarié — refuser n'a aucune conséquence ; tracé au journal RGPD.` : ''}
+        confirmLabel={confirmOptin?.actif ? "Recueillir l'accord" : "Retirer l'accord"} confirmVariant={confirmOptin?.actif ? 'primary' : 'danger'} loading={actingOptin} />
     </div>
   );
 }

@@ -24,12 +24,14 @@ from .clock import DriftMonitor
 from .config import Config
 from .debounce import DEFAULT_WINDOW_SEC, Debouncer
 from .hmac_uid import hmac_uid, short
+from .moments import bloc_affichage, clamp_overlay
+from .motivation import phrase_du_jour
 from .normalize import normalize_uid
 from .reader import BadgeReader
 from .sens import ENTREE, INCONNU, PARIS, determine_sens
 from .store import Store
-from .sync import CACHE_KEY_CONFIG, CACHE_KEY_PLAYLIST, Syncer
-from .ws_server import UiChannel, clamp_overlay
+from .sync import CACHE_KEY_CONFIG, Syncer
+from .ws_server import UiChannel
 
 LOGGER = logging.getLogger("badgeuse.app")
 
@@ -94,6 +96,30 @@ class Agent:
     def _cumul_active(self) -> bool:
         """AFF-02 : désactivé par défaut, activé seulement par le serveur."""
         return bool(self._server_config.get("affichage_cumul_hebdo", False))
+
+    @property
+    def _affichage(self) -> Dict[str, Any]:
+        """Bloc ``affichage`` de la config serveur (CONTRAT_API_DEVICE §3bis).
+
+        Absent tant que le serveur est en v1.2 : l'écran retombe alors sur les
+        gabarits par défaut, sans festif ni phrase (rétro-compatible).
+        """
+        return dict(bloc_affichage(self._server_config))
+
+    def _phrase_motivation(self, maintenant: _dt.datetime) -> str:
+        """Phrase du vivier générique pour le jour civil en cours.
+
+        Vivier commun à tous, rotation quotidienne déterministe — jamais un
+        message dérivé d'un profil individuel (ADR-0004 §2). Le jour est celui
+        du calendrier **local** : la phrase change à minuit heure de Paris,
+        pas à minuit UTC.
+        """
+        affichage = self._affichage
+        return phrase_du_jour(
+            affichage.get("phrases_motivation"),
+            maintenant.astimezone(PARIS).date(),
+            active=bool(affichage.get("motivation_active", False)),
+        )
 
     # ------------------------------------------------------------- capture
 
@@ -172,11 +198,16 @@ class Agent:
             self._store.queue_size(),
         )
 
+        # Le moment de la journée, le message et l'écran festif se décident
+        # dans ``moments.construire_badge_ok`` (module PUR) à partir du badge
+        # en cache et du bloc ``affichage`` du serveur : aucune règle
+        # d'affichage n'est codée en dur ici (ADR-0002).
         await self._ui.badge_ok(
-            prenom=badge["prenom"],
-            initiale=badge["initiale"],
+            badge=badge,
             sens=sens,
             heure_locale=maintenant.astimezone(PARIS).strftime("%H:%M:%S"),
+            affichage=self._affichage,
+            phrase_motivation=self._phrase_motivation(maintenant),
             overlay_duree_sec=self._overlay_sec,
             cumul_hebdo=self._cumul_hebdo(badge["salarie_id"], maintenant),
         )
@@ -258,7 +289,11 @@ class Agent:
                 if self._syncer is not None and self._syncer.ready():
                     elements = await self._syncer.refresh_playlist()
                     if elements is not None:
+                        # La playlist part à l'écran IMMÉDIATEMENT, avec les
+                        # médias déjà en cache ; ceux qui manquent arrivent
+                        # ensuite et déclenchent un second envoi.
                         await self._ui.playlist(elements)
+                    await self._sync_media()
             except Exception:  # noqa: BLE001
                 LOGGER.exception("echec de rafraichissement de la playlist")
             await self._sleep(
@@ -267,6 +302,24 @@ class Agent:
                     DEFAULT_PLAYLIST_SEC,
                 )
             )
+
+    async def _sync_media(self) -> None:
+        """Télécharge les médias manquants, puis renvoie la playlist à l'écran.
+
+        Tâche de fond, **jamais sur le chemin d'un badgeage** : la capture, le
+        calcul du sens et la mise en file ne dépendent ni du réseau ni de ce
+        cache. Un média absent n'est pas une panne — l'élément concerné
+        s'affiche avec son texte, et le média apparaîtra au cycle suivant.
+        """
+        if self._syncer is None:
+            return
+        try:
+            recuperes = await self._syncer.sync_media()
+        except Exception:  # noqa: BLE001 - l'affichage ne casse jamais le poste
+            LOGGER.exception("echec de synchronisation des medias")
+            return
+        if recuperes:
+            await self._ui.playlist(self._syncer.playlist_locale())
 
     async def _loop_heartbeat(self) -> None:
         while not self._stopping.is_set():
@@ -358,11 +411,16 @@ class Agent:
             self._config.target,
         )
         await self._ui.start()
-        await self._ui.playlist(self._store.get_cache(CACHE_KEY_PLAYLIST, default=[]))
         await self._notify_status()
 
         async with Syncer(self._config, self._store) as syncer:
             self._syncer = syncer
+            # Le cache média appartient au Syncer ; l'interface le sert sous
+            # /media/ sur la boucle locale (CSP 'self' préservée).
+            self._ui.media_cache = syncer.media
+            # Dernière playlist connue, médias déjà en cache : l'écran est
+            # complet dès le démarrage, avant tout échange réseau (AFF-07).
+            await self._ui.playlist(syncer.playlist_locale())
             sd_notify("READY=1")
 
             taches = [
