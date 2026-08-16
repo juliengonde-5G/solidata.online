@@ -4,8 +4,15 @@
 <meta charset="utf-8">
 <title>Pointage — Solidarité Textiles</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  CSP inchangee dans son principe : TOUT reste en 'self'. Le poste ne charge
+  aucune ressource externe et ne contacte aucun domaine tiers (ADR-0004 §6).
+  media-src 'self' est necessaire aux videos de l'ecran de veille, servies par
+  l'agent depuis son cache local (/media/...) — sans cette directive,
+  default-src 'none' les bloquerait. Aucune origine distante n'est autorisee.
+-->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src ws://127.0.0.1:8765 ws://localhost:8765; base-uri 'none'; form-action 'none'">
+      content="default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src ws://127.0.0.1:8765 ws://localhost:8765; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -40,11 +47,16 @@
 
 <!-- ----------------------------------------------------------------- OVERLAY -->
 <div id="overlay" class="overlay" role="status" aria-live="assertive" hidden>
+  <!-- Confettis de la variante festive : purement decoratif, hors flux a11y. -->
+  <div id="overlay-confettis" class="confettis" aria-hidden="true"></div>
   <div class="overlay-carte">
     <div id="overlay-picto" class="picto" aria-hidden="true"></div>
+    <!-- Information principale (AFF-03, >= 48 px) : message du moment ou festif. -->
+    <p id="overlay-moment" class="message-moment"></p>
     <p id="overlay-identite" class="identite"></p>
-    <p id="overlay-message" class="message"></p>
+    <p id="overlay-sens" class="message"></p>
     <p id="overlay-heure" class="heure"></p>
+    <p id="overlay-phrase" class="phrase" hidden></p>
     <p id="overlay-cumul" class="cumul" hidden></p>
   </div>
 </div>

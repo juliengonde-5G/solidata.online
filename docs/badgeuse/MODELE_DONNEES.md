@@ -171,6 +171,34 @@ users(id), created_at, updated_at`. Aucune donnée personnelle dans ces contenus
 communication interne dissociée — NOTE_JURIDIQUE §3.2) : pas de FK employé, et le back-office
 l'affiche en avertissement.
 
+**Écran d'information v2** (CDC_AFFICHAGE_V2, ADR-0004) — colonnes ajoutées (idempotentes) :
+`fichier VARCHAR(300)` (chemin **relatif** à `uploads/badgeuse`, jamais une URL externe),
+`media_type VARCHAR(10)` (`image`|`video`), `media_sha256 VARCHAR(64)` (vérification du cache
+du poste), `source_url VARCHAR(500)` (provenance d'un lien rapatrié), `config JSONB`
+(paramètres du générateur, ex. `{"nb_actus":3}`). La CHECK `type` est **élargie à 12 valeurs**
+(+ `annonces`, `actus`, `tournees`, `social`, `media`, `lien`, `vak_live`) par **DO-scan de
+`pg_constraint`** : `CREATE TABLE IF NOT EXISTS` ne re-contraint jamais une table existante,
+sans ce scan une base déjà déployée refuserait tout contenu v2 (prouvé sur PostgreSQL 16.13 :
+`vak_live` rejeté en 23514 avant migration, accepté après, type inconnu toujours rejeté).
+
+### `badgeuse_social_posts` (écran v2 — ADR-0004 §6)
+`id SERIAL, reseau VARCHAR(20) CHECK IN ('instagram','facebook'), compte VARCHAR(100),
+post_id VARCHAR(100), permalink VARCHAR(500), legende TEXT, media_fichier VARCHAR(300),
+media_sha256 VARCHAR(64), publie_le TIMESTAMPTZ, sync_le TIMESTAMPTZ, UNIQUE(reseau, post_id)`.
+Publications **publiques des comptes DE la structure**, rapatriées côté serveur par l'API Meta
+Graph (jamais de scraping) : aucune FK vers `employees`/`users`, aucune donnée de salarié.
+L'`UNIQUE(reseau, post_id)` rend la synchronisation idempotente ; le visuel est **téléchargé
+puis servi par l'API device**, si bien que le kiosque ne contacte aucun domaine externe.
+
+### Consentement à l'affichage festif (`employees`, ADR-0004 §4)
+`badgeuse_optin_festif BOOLEAN NOT NULL DEFAULT false`, `badgeuse_optin_festif_le TIMESTAMPTZ`,
+`badgeuse_optin_festif_par INTEGER REFERENCES users(id)`. Afficher un anniversaire n'est **pas
+nécessaire** au décompte du temps : c'est une divulgation supplémentaire, donc un consentement
+libre, révocable, **daté et imputé** (recueil comme retrait journalisés `BADGEUSE_OPTIN_FESTIF`
+dans `rgpd_audit_log`, DANS la transaction). Défaut `false` : l'absence de choix n'est jamais
+un accord. Seuls des **booléens** partent ensuite vers le poste — la date de naissance ne quitte
+jamais le serveur.
+
 ## 2. Paramètres (`settings`, catégorie `badgeuse`)
 
 Voir ADR-0002 (règles de gestion, défauts = recommandations RH) + conservation :
@@ -193,6 +221,29 @@ pas lettre morte faute de paramétrage.
 `badgeuse.supervision_derniere_alerte` — JSON `{ code_poste: horodatage ISO }`, anti-spam
 d'un e-mail par poste toutes les 6 h.
 
+**Écran d'information v2** (CDC_AFFICHAGE_V2 §1/§4 — **aucune règle d'affichage n'est codée
+dans le poste**, tout descend par `GET /config`) :
+
+| Clé | Défaut | Rôle |
+|---|---|---|
+| `badgeuse.msg_matin` / `msg_pause` / `msg_retour` / `msg_soir` | « Bonjour, {prenom} ! », « Bon appétit… », « Bon après-midi… », « Bonne fin de journée… » | gabarits par moment ; **`{prenom}` obligatoire**, ≤ 120 car. |
+| `badgeuse.msg_premier_jour` | « Bienvenue chez Solidarité Textiles, {prenom} ! » | premier badgeage |
+| `badgeuse.msg_anniversaire` / `msg_anniversaire_entreprise` | « Joyeux anniversaire… » / « {annees} an(s) avec nous… » | écran festif (opt-in requis) |
+| `badgeuse.moment_matin_fin` (11:30), `moment_pause_debut` (11:00), `moment_pause_fin` (14:00), `moment_retour_fin` (15:00), `moment_soir_debut` (14:00) | — | bornes HH:MM des moments (heure murale Paris) |
+| `badgeuse.phrases_motivation` | 10 phrases génériques (JSON) | vivier **collectif** — jamais lié à un profil PCM (ADR-0004 §2) ; ≤ 30 phrases, ≤ 200 car. |
+| `badgeuse.motivation_active` / `festif_actif` | true / true | interrupteurs ; `festif_actif` ne **remplace pas** l'opt-in individuel, il s'y ajoute |
+| `badgeuse.media_cache_max_mo` | 500 | plafond du cache média local du poste |
+| `badgeuse.lien_taille_max_mo` | 50 | plafond de téléchargement d'un lien partagé |
+| `badgeuse.social_sync_actif` | false | active le job `syncBadgeuseSocial` |
+| `badgeuse.social_comptes` | 7 comptes de la structure, **inactifs, `graph_id: null`** | l'identifiant Graph est un paramétrage, jamais une inférence depuis le pseudo |
+| `badgeuse.social_posts_par_compte` | 5 | nombre de posts récupérés par compte |
+| `badgeuse.retention_social_jours` | 30 | conservation des posts sociaux — appliquée par `badgeusePurgeRetention` **et par lui seul** |
+
+Secret chiffré AES-256-GCM, **hors `BADGEUSE_SETTING_DEFAULTS`** (donc inaccessible en
+lecture comme en écriture par `PUT /parametres`) : `badgeuse.meta_token` — jeton Meta Graph,
+jamais renvoyé par l'API, même tronqué ; seule sa date de configuration l'est
+(`badgeuse.meta_token_configure_le`). État d'exploitation : `badgeuse.social_dernier_sync`.
+
 ## 3. API back-office `/api/badgeuse` (authentifiée)
 
 Rôles : `READ = ADMIN/RH/MANAGER` (MANAGER = encadrant technique ; accès non restreint par
@@ -211,7 +262,12 @@ individuelle) est journalisée dans `rgpd_audit_log` (`BADGEUSE_CONSULTATION`) �
 | GET `/anomalies?du=&au=` | READ | BO-05 (oubli sortie, journée > seuil, hors plage, orphelins) |
 | GET `/exports/paie?periode=&heures=decimal|hms` | WRITE_RH | BO-06 — CSV `;` BOM, journalisé |
 | GET `/exports/iae?periode=` | WRITE_RH | BO-07 — salariés `insertion_status='en_parcours'`, journalisé |
-| GET/POST/PUT/DELETE `/contenus` | READ / WRITE_RH | BO-08 (prévisualisation côté front) |
+| GET/POST/PUT/DELETE `/contenus` | READ / WRITE_RH | BO-08 (prévisualisation côté front) ; DELETE supprime AUSSI le fichier média |
+| POST `/contenus/upload` (multipart `fichier`) | WRITE_RH | écran v2 — téléversement image/vidéo (≤ 100 Mo, liste blanche ext+MIME, sha256 en flux) ; 415 type refusé, 413 trop gros |
+| POST `/contenus/lien` | WRITE_RH | écran v2 — le **serveur** télécharge le contenu d'un lien partagé (gardes anti-SSRF, cf. §3.1) ; 422 + `code` si refusé |
+| POST `/salaries/:employeeId/optin-festif` | WRITE_RH | consentement affichage festif — journalisé `BADGEUSE_OPTIN_FESTIF` en transaction |
+| GET `/social/status` | READ | comptes suivis, dernier sync, nb posts — **jamais le jeton** |
+| PUT `/social/config`, POST `/social/sync` | ADMIN_ONLY | jeton Meta chiffré (jamais relu), comptes, déclenchement à la demande |
 | GET `/devices`, POST `/devices`, PATCH `/devices/:id`, POST `/devices/:id/regenerate-key`, GET `/devices/:id/verify-chain` | READ (liste) / ADMIN_ONLY (écritures) | BO-09 + CONTRAT_INTEGRITE §4 |
 | GET `/mes-pointages` | tout rôle authentifié | droit d'accès art. 15 (lien `employees.user_id`) |
 | GET `/salaries/:employeeId/releve?periode=` | READ (journalisé) | récapitulatif remis au salarié (sortie, contestation) |
@@ -261,6 +317,47 @@ non bloquant** — la correction est enregistrée dans tous les cas (NOTE_RH §5
 vide ou contenant `|` en base — cf. QA-08) est rendue comme une **rupture**
 (`raison: 'canonique_impossible'`), jamais comme une erreur 500.
 
+**`GET /badges` (back-office)** : ajoute `badgeuse_optin_festif` (bool) et
+`badgeuse_optin_festif_le` — la case se gère dans l'onglet Badges, avec sa date de recueil
+(un consentement sans date ne prouve rien).
+
+**`POST /contenus/lien` — gardes anti-SSRF (écran v2).** Le serveur devient client HTTP pour
+que le poste n'ait jamais à l'être : cette route est donc la surface la plus sensible du lot.
+Refus en **422** avec un `code` stable et un message lisible :
+
+| `code` | Cas |
+|---|---|
+| `protocole` | autre chose que `https:` (jamais `http`, `file`, `data`…) |
+| `ip_privee` | l'hôte **résout** vers une adresse privée / loopback / lien-local (169.254.169.254 des métadonnées cloud) / CGNAT / multicast — **une seule** adresse interne parmi plusieurs suffit à refuser |
+| `dns` | nom non résolu, ou résolution vide |
+| `redirections` | plus de 3 sauts (chaque saut est **revalidé** : un 302 vers une IP interne est refusé) |
+| `http` | le tiers ne répond pas 2xx |
+| `type` | Content-Type hors liste blanche image/vidéo (jpg, png, webp, gif, mp4, webm — **ni SVG ni HTML** : exécutables côté navigateur) |
+| `trop_gros` | dépasse `badgeuse.lien_taille_max_mo`, en annoncé **comme en flux** (un serveur menteur sur `content-length` est coupé net) |
+
+**Limite connue, documentée plutôt que tue** : entre la résolution DNS et la connexion, un
+attaquant maîtrisant sa zone peut faire varier la réponse (*DNS rebinding*). S'en prémunir
+imposerait de se connecter à l'IP validée avec l'en-tête `Host` d'origine, ce qui casse la
+validation TLS. Risque résiduel accepté : l'écriture est réservée à ADMIN/RH (surface interne)
+et le contenu rapatrié n'est jamais interprété (fichier statique servi tel quel).
+
+**Diffusion des médias au poste — convention `media_id`.** La playlist device référence un
+binaire par un identifiant **préfixé de son origine** : `c<id>` pour un contenu de playlist
+(téléversé ou rapatrié d'un lien), `s<id>` pour le visuel d'un post social. Un seul point
+d'entrée `GET /devices/:code/media/:id` plutôt que deux routes jumelles : le poste rejoue
+l'identifiant **tel quel**, sans avoir à connaître la table d'origine. Le chemin de fichier
+serveur ne part jamais vers le poste ; il est résolu strictement sous `uploads/badgeuse`
+(aucun `..`, aucun chemin absolu) et le `Content-Type` est déduit d'une **liste blanche
+d'extensions** — jamais du contenu, jamais d'un en-tête stocké — avec `nosniff`.
+
+**Purge (BO-10) — deux périmètres ajoutés** au bilan de `badgeusePurgeRetention` :
+`social_posts` (au-delà de `badgeuse.retention_social_jours`, fichiers supprimés **avant** les
+lignes) et `medias_orphelins` (fichiers d'`uploads/badgeuse` qu'aucune ligne ne référence,
+avec un **délai de grâce de 24 h** — sans lui, un téléversement en cours pourrait être effacé
+entre l'écriture du fichier et l'INSERT qui le référence). Le job `syncBadgeuseSocial` ne
+purge **délibérément rien** : deux purges concurrentes, ce sont deux règles qui divergent le
+jour où l'une change.
+
 ## 4. Matrice de couverture exigences → implémentation
 
 | Réf | Élément |
@@ -280,3 +377,9 @@ vide ou contenant `|` en base — cf. QA-08) est rendue comme une **rupture**
 | BO-10 | job `badgeusePurgeRetention` (dry-run possible, journalisé) |
 | BO-11 | rôles + journalisation `rgpd_audit_log` |
 | §4.1 minimisation / inaltérabilité / idempotence | CONTRAT_HMAC / CONTRAT_INTEGRITE / uuid UNIQUE |
+| CDC v2 §1 (overlay personnalisé) | `GET /config` bloc `affichage` + drapeaux du cache badges |
+| CDC v2 §2 (playlist enrichie) | générateurs serveur `annonces`/`actus`/`tournees`/`social`/`vak_live` + `GET /devices/:code/media/:id` |
+| CDC v2 §3 (jours de VAK) | élément `vak_live` (périmètre caisse partagé `sqlPerimetreCaisse`) + `sync_playlist_interval_sec` abaissé à 300 s |
+| CDC v2 §4 (paramétrage) | settings `badgeuse.msg_*`/`moment_*`/`phrases_motivation` + `POST /salaries/:id/optin-festif` + `PUT /social/config` |
+| ADR-0004 §1/§4/§5 (interdits) | prénom + initiale partout, opt-in obligatoire, tournées sans chauffeur — verrouillés par `badgeuse-affichage-device.test.js` |
+| ADR-0004 §6 (réseaux sociaux) | `badgeuse_social_posts` + job `syncBadgeuseSocial` (API officielle, jeton chiffré, vidéos = V2) |

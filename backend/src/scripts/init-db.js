@@ -6864,6 +6864,81 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_contenus_site ON badgeuse_contenus(site_id, actif, ordre);');
 
+    // ── ÉCRAN D'INFORMATION v2 (CDC_AFFICHAGE_V2, ADR-0004) ──────────────────
+    //
+    // (i) CONSENTEMENT à l'affichage festif (ADR-0004 §4). Afficher un
+    //     anniversaire est une divulgation NON NÉCESSAIRE au traitement :
+    //     elle exige un consentement libre, recueilli individuellement,
+    //     RÉVOCABLE et TRACÉ (date + auteur, plus rgpd_audit_log côté route).
+    //     Défaut `false` : l'absence de choix n'est jamais un accord.
+    //     Seuls des BOOLÉENS partent ensuite vers le poste — la date de
+    //     naissance ne quitte jamais le serveur (CONTRAT_API_DEVICE §3bis).
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_optin_festif BOOLEAN NOT NULL DEFAULT false;');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_optin_festif_le TIMESTAMPTZ;');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_optin_festif_par INTEGER REFERENCES users(id) ON DELETE SET NULL;');
+
+    // (j) Contenus enrichis : médias téléversés / liens rapatriés par le
+    //     SERVEUR, et paramètres des générateurs.
+    //     `fichier` est un chemin RELATIF à uploads/badgeuse (jamais un chemin
+    //     absolu, jamais une URL externe : le poste ne contacte aucun domaine
+    //     tiers — la CSP du kiosque reste 'self', ADR-0004 §6).
+    //     `source_url` garde la trace du lien d'origine (provenance auditable),
+    //     `media_sha256` permet au poste de vérifier son cache local.
+    //     `config` JSONB porte les paramètres du générateur (ex. {"nb_actus":3}).
+    await client.query('ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS fichier VARCHAR(300);');
+    await client.query('ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS media_type VARCHAR(10);');
+    await client.query('ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS media_sha256 VARCHAR(64);');
+    await client.query('ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS source_url VARCHAR(500);');
+    await client.query('ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS config JSONB;');
+
+    //     Élargissement de la CHECK `type` aux 7 nouveaux types. DO-scan de
+    //     pg_constraint (même parade que `milestone_type` du module Insertion
+    //     et que `users.role`) : CREATE TABLE IF NOT EXISTS ne re-contraint
+    //     JAMAIS une table existante, une base déjà déployée garderait sinon
+    //     l'ancienne liste et refuserait tout contenu v2. Idempotent : la
+    //     contrainte est reconstruite à l'identique à chaque exécution.
+    await client.query(`
+      DO $$
+      DECLARE cname text;
+      BEGIN
+        FOR cname IN
+          SELECT con.conname FROM pg_constraint con
+          JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey)
+          WHERE con.conrelid = 'badgeuse_contenus'::regclass
+            AND con.contype = 'c' AND att.attname = 'type'
+        LOOP
+          EXECUTE 'ALTER TABLE badgeuse_contenus DROP CONSTRAINT ' || quote_ident(cname);
+        END LOOP;
+        ALTER TABLE badgeuse_contenus ADD CONSTRAINT badgeuse_contenus_type_check
+          CHECK (type IN ('message', 'image', 'planning', 'compte_a_rebours', 'meteo',
+                          'annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live'));
+      END $$;
+    `);
+
+    // (k) Posts sociaux rapatriés par le serveur (ADR-0004 §6 : API Meta Graph
+    //     officielle ou saisie manuelle — JAMAIS de scraping). L'image est
+    //     TÉLÉCHARGÉE côté serveur puis servie au poste par l'API device :
+    //     le kiosque ne joint aucun domaine externe.
+    //     AUCUNE donnée personnelle de salarié : ce sont des publications
+    //     PUBLIQUES des comptes DE la structure (pas de FK employees/users).
+    //     `UNIQUE(reseau, post_id)` rend la synchronisation idempotente.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_social_posts (
+        id SERIAL PRIMARY KEY,
+        reseau VARCHAR(20) NOT NULL CHECK (reseau IN ('instagram', 'facebook')),
+        compte VARCHAR(100) NOT NULL,
+        post_id VARCHAR(100) NOT NULL,
+        permalink VARCHAR(500),
+        legende TEXT,
+        media_fichier VARCHAR(300),
+        media_sha256 VARCHAR(64),
+        publie_le TIMESTAMPTZ,
+        sync_le TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(reseau, post_id)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_social_posts_publie ON badgeuse_social_posts(publie_le DESC);');
+
     // Registre RGPD — traitement « Temps & Présence (badgeuse) ». Fiche art. 30
     // OBLIGATOIRE avant la mise en service (NOTE_JURIDIQUE §3.8). Idempotent.
     await client.query(`
@@ -6882,7 +6957,7 @@ async function initDatabase() {
         SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Temps & Présence (badgeuse) — décompte du temps de travail'
       );
     `);
-    console.log('[INIT-DB] Module 33 Temps & Présence (badgeuse) — 8 tables + site LH + registre RGPD ✓');
+    console.log('[INIT-DB] Module 33 Temps & Présence (badgeuse) — 8 tables + écran v2 (opt-in festif, médias, social) + site LH + registre RGPD ✓');
 
     // ══════════════════════════════════════════
     // Module Achats responsables (RSEI-17) — 31e module
@@ -7080,7 +7155,7 @@ async function initDatabase() {
       // BIGSERIAL : pg_get_serial_sequence la couvre de la même façon.
       'badgeuse_sites', 'badgeuse_devices', 'badgeuse_badges',
       'badgeuse_badge_historique', 'badgeuse_pointages', 'badgeuse_corrections',
-      'badgeuse_feuilles_temps', 'badgeuse_contenus',
+      'badgeuse_feuilles_temps', 'badgeuse_contenus', 'badgeuse_social_posts',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une

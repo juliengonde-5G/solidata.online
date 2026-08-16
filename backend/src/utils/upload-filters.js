@@ -77,4 +77,15 @@ const spreadsheetFilter = makeFilter({
   ],
 });
 
-module.exports = { imageFilter, csvFilter, documentFilter, spreadsheetFilter, makeFilter };
+// Médias diffusés sur l'écran d'information de la badgeuse (module 33) :
+// images ET vidéos courtes. Liste blanche VOLONTAIREMENT étroite — le kiosque
+// ne lit que ce que Chromium décode nativement, et tout format exotique serait
+// un fichier inerte de plusieurs dizaines de Mo sur le poste. Ni SVG ni HTML :
+// ce sont des formats EXÉCUTABLES côté navigateur (chaîne stored XSS, cf. T1.1).
+const mediaFilter = makeFilter({
+  label: 'média d\'affichage (image ou vidéo)',
+  extensions: ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm'],
+  mimes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm'],
+});
+
+module.exports = { imageFilter, csvFilter, documentFilter, spreadsheetFilter, mediaFilter, makeFilter };

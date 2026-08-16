@@ -1,13 +1,20 @@
 /* Interface kiosque du poste de pointage — SOLIDATA.
  *
  * Contraintes tenues ici :
- *  - AFF-03 : contraste >= 7:1 et information principale >= 48 px, lisible a 3 m ;
- *  - AFF-06 : transitions en fondu, aucune animation clignotante ;
+ *  - AFF-03 : contraste >= 7:1 et information principale >= 48 px, lisible a 3 m
+ *    (les chiffres promotionnels VAK visent 5 m) ;
+ *  - AFF-06 : transitions en fondu, aucune animation clignotante — la chute
+ *    des confettis dure ~7 s (~0,14 Hz), tres en dessous du plafond de 2 Hz,
+ *    et n'affecte jamais l'opacite d'un texte ;
  *  - PST-10 : aucun curseur, aucune selection, aucune interaction possible ;
- *  - aucune police distante, aucune ressource externe (page auto-portante).
+ *  - aucune police distante, aucune ressource externe (page auto-portante) ;
+ *  - aucun style en ligne n'est requis par l'interface : la CSP tient sans
+ *    'unsafe-inline' (les jauges passent par des classes par pas de 5 %).
  *
  * Contrastes mesures sur le fond #0f172a (luminance 0,0082) :
  *   #ffffff 18,0:1   #4ade80 9,9:1   #fca5a5 9,1:1   #f59e0b 8,4:1   #94a3b8 6,5:1
+ * Fond festif : degrade #7c2d12 (blanc 9,3:1) -> #1e1b4b (blanc 16,0:1) ; la
+ * carte conserve le fond #1e293b, donc le contraste du texte reste 18:1.
  * Les teintes vives #22c55e / #ef4444 ne servent qu'aux pictogrammes et aux
  * bordures (element graphique : seuil 3:1), jamais au texte.
  */
@@ -23,6 +30,9 @@
   --orange: #f59e0b;
   --rouge: #ef4444;
   --rouge-texte: #fca5a5;
+
+  --festif-a: #7c2d12;
+  --festif-b: #1e1b4b;
 
   --fondu: 600ms;
   --police: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
@@ -120,6 +130,7 @@ html, body {
   padding: 2vh 2vw;
   background: var(--fond-carte);
   border-radius: 24px;
+  overflow: hidden;
 
   opacity: 0;
   /* Fondu doux, jamais de clignotement (AFF-06). */
@@ -148,6 +159,19 @@ html, body {
   border-radius: 16px;
 }
 
+.diapo-video {
+  max-width: 96%;
+  max-height: 78%;
+  object-fit: contain;
+  border-radius: 16px;
+  background: #000000;
+}
+
+/* Un media plein cadre n'a pas besoin de marges : on laisse l'image respirer. */
+.diapo-media { gap: 1.6vh; }
+.diapo-media .diapo-image,
+.diapo-media .diapo-video { max-height: 84%; }
+
 .diapo-compteur {
   font-size: clamp(64px, 12vw, 220px);
   font-weight: 800;
@@ -167,6 +191,223 @@ html, body {
   font-size: clamp(24px, 2.4vw, 40px);
   color: var(--texte-doux);
 }
+
+/* ------------------------------------------------------------- ANNONCES */
+
+.annonces {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1.8vh;
+  width: 88%;
+}
+
+.annonce {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  font-size: clamp(34px, 4.4vw, 76px);
+  font-weight: 700;
+  color: var(--texte);
+}
+
+.annonce-picto { font-size: 1.1em; line-height: 1; }
+.annonce-nom { letter-spacing: 0.01em; }
+
+.annonce-detail {
+  font-size: 0.62em;
+  font-weight: 600;
+  color: var(--orange);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- ACTUS */
+
+.actus {
+  display: flex;
+  flex-direction: column;
+  gap: 2vh;
+  width: 92%;
+  text-align: left;
+}
+
+.actu {
+  background: rgba(148, 163, 184, 0.12);
+  border-left: 6px solid var(--vert);
+  border-radius: 14px;
+  padding: 1.6vh 1.6vw;
+}
+
+.actu-titre {
+  font-size: clamp(26px, 2.8vw, 48px);
+  font-weight: 700;
+  color: var(--texte);
+}
+
+.actu-resume {
+  font-size: clamp(20px, 2vw, 34px);
+  color: var(--texte-doux);
+  margin-top: 0.4em;
+}
+
+.actu-source {
+  font-size: clamp(15px, 1.4vw, 24px);
+  color: #94a3b8;
+  margin-top: 0.4em;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* -------------------------------------------------------------- TOURNEES */
+
+.tournees {
+  display: flex;
+  flex-direction: column;
+  gap: 2.2vh;
+  width: 92%;
+}
+
+.tournee {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9vh;
+}
+
+.tournee-entete {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: clamp(24px, 2.6vw, 44px);
+}
+
+.tournee-libelle { font-weight: 700; color: var(--texte); }
+
+.tournee-vehicule {
+  font-weight: 600;
+  color: var(--texte-doux);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.tournee-progression {
+  font-weight: 800;
+  color: var(--vert-texte);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- SOCIAL */
+
+.social-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  font-size: clamp(18px, 1.8vw, 30px);
+}
+
+.social-reseau {
+  background: var(--orange);
+  color: #1c1207;               /* sur fond orange : contraste 8,9:1 */
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 0.25em 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.social-compte { color: var(--texte-doux); font-weight: 600; }
+
+.social-legende {
+  font-size: clamp(20px, 2.1vw, 36px);
+  color: var(--texte-doux);
+  max-width: 88%;
+}
+
+/* -------------------------------------------------------------- VAK LIVE */
+
+/* Ecran promotionnel : chiffres enormes, lisibles a 5 m. */
+.diapo-vak_live {
+  background: linear-gradient(160deg, #7c2d12 0%, #1e293b 62%);
+  gap: 1vh;
+}
+
+.vak-libelle {
+  font-size: clamp(28px, 3vw, 54px);
+  font-weight: 700;
+  color: var(--texte);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.vak-compteur {
+  font-size: clamp(90px, 16vw, 300px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--texte);
+  line-height: 0.95;
+}
+
+.vak-unite {
+  font-size: clamp(30px, 3.4vw, 62px);
+  font-weight: 700;
+  color: var(--orange);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.vak-objectif {
+  font-size: clamp(20px, 2vw, 34px);
+  color: var(--texte-doux);
+}
+
+/* ---------------------------------------------------------------- JAUGES */
+
+.jauge {
+  width: 100%;
+  height: 2.4vh;
+  min-height: 14px;
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.jauge-barre {
+  display: block;
+  height: 100%;
+  background: var(--vert);
+  border-radius: 999px;
+  /* Progression : croissance douce, jamais d'a-coup (AFF-06). */
+  transition: width var(--fondu) ease-in-out;
+}
+
+.diapo-vak_live .jauge { width: 72%; height: 3.2vh; }
+.diapo-vak_live .jauge-barre { background: var(--orange); }
+
+/* Remplissage par pas de 5 % : evite tout style en ligne (CSP sans
+ * 'unsafe-inline'). Le pas est invisible a la distance de lecture. */
+.jauge-p0   { width: 0; }
+.jauge-p5   { width: 5%; }
+.jauge-p10  { width: 10%; }
+.jauge-p15  { width: 15%; }
+.jauge-p20  { width: 20%; }
+.jauge-p25  { width: 25%; }
+.jauge-p30  { width: 30%; }
+.jauge-p35  { width: 35%; }
+.jauge-p40  { width: 40%; }
+.jauge-p45  { width: 45%; }
+.jauge-p50  { width: 50%; }
+.jauge-p55  { width: 55%; }
+.jauge-p60  { width: 60%; }
+.jauge-p65  { width: 65%; }
+.jauge-p70  { width: 70%; }
+.jauge-p75  { width: 75%; }
+.jauge-p80  { width: 80%; }
+.jauge-p85  { width: 85%; }
+.jauge-p90  { width: 90%; }
+.jauge-p95  { width: 95%; }
+.jauge-p100 { width: 100%; }
 
 /* -------------------------------------------------------------- BANDEAU BAS */
 
@@ -209,15 +450,18 @@ html, body {
   opacity: 0;
   transition: opacity 260ms ease-in-out;
   z-index: 10;
+  overflow: hidden;
 }
 
 .overlay.visible { opacity: 1; }
 
 .overlay-carte {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.6vh;
+  gap: 1.2vh;
   text-align: center;
   padding: 4vh 6vw;
   border-radius: 32px;
@@ -230,7 +474,7 @@ html, body {
 .overlay.neutre  .overlay-carte { border-color: #64748b; }
 
 .picto {
-  font-size: clamp(110px, 18vh, 260px);
+  font-size: clamp(90px, 14vh, 200px);
   line-height: 1;
   color: var(--vert);
 }
@@ -239,15 +483,27 @@ html, body {
 .overlay.neutre  .picto { color: var(--texte-doux); }
 
 /* Information principale : jamais sous 48 px (AFF-03). */
-.identite {
-  font-size: clamp(48px, 8vw, 140px);
+.message-moment {
+  font-size: clamp(48px, 7vw, 128px);
   font-weight: 800;
   color: var(--texte);
   line-height: 1.05;
+  max-width: 84vw;
+}
+
+.overlay.erreur .message-moment { color: var(--rouge-texte); }
+.overlay.neutre  .message-moment { color: var(--texte-doux); }
+
+/* Identite : prenom + initiale, jamais le nom complet (ADR-0004 §1). */
+.identite {
+  font-size: clamp(40px, 4.4vw, 80px);
+  font-weight: 700;
+  color: var(--texte-doux);
+  line-height: 1.1;
 }
 
 .message {
-  font-size: clamp(32px, 4vw, 72px);
+  font-size: clamp(28px, 3vw, 52px);
   font-weight: 700;
   color: var(--vert-texte);
 }
@@ -263,13 +519,100 @@ html, body {
   color: var(--texte);
 }
 
+/* Phrase de motivation : volontairement plus petite que le message. */
+.phrase {
+  font-size: clamp(22px, 2.2vw, 38px);
+  font-style: italic;
+  color: var(--texte-doux);
+  max-width: 70vw;
+  margin-top: 0.4vh;
+}
+
 .cumul {
   font-size: clamp(20px, 2vw, 34px);
   color: var(--texte-doux);
 }
 
+/* ------------------------------------------------------------------ FESTIF */
+
+/* Variante festive : fond chaleureux, meme carte (donc meme contraste de
+ * texte, 18:1) et meme plafond de 8 s. Ni photo, ni nom complet, ni statut. */
+.overlay.festif {
+  background: linear-gradient(155deg, var(--festif-a) 0%, var(--festif-b) 100%);
+}
+
+.overlay.festif .overlay-carte {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 12px rgba(245, 158, 11, 0.16);
+}
+
+.overlay.festif .message-moment { color: var(--texte); }
+
+.overlay.festif .picto {
+  color: var(--texte);
+  animation: apparition 900ms ease-out 1 both;
+}
+
+/* Une seule apparition, en douceur : pas de pulsation, pas de clignotement. */
+@keyframes apparition {
+  from { transform: scale(0.72); }
+  to   { transform: scale(1); }
+}
+
+.confettis {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.confetti {
+  position: absolute;
+  top: -8vh;
+  width: 1.1vw;
+  height: 2.0vh;
+  min-width: 10px;
+  min-height: 16px;
+  border-radius: 3px;
+  background: var(--orange);
+  animation-name: chute;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* Chute lente et continue : ~0,14 Hz, tres en dessous du plafond de 2 Hz
+ * (AFF-06). Aucune variation d'opacite, donc aucun scintillement. */
+@keyframes chute {
+  from { transform: translate3d(0, -8vh, 0) rotate(0deg); }
+  to   { transform: translate3d(0, 112vh, 0) rotate(540deg); }
+}
+
+/* Position, cadence et teinte figees en classes : aucun style en ligne. */
+.conf-1  { left:  4%; animation-duration: 7.0s; animation-delay: 0.0s; }
+.conf-2  { left: 12%; animation-duration: 8.4s; animation-delay: 0.6s;
+           background: var(--vert); }
+.conf-3  { left: 21%; animation-duration: 6.4s; animation-delay: 1.2s; }
+.conf-4  { left: 29%; animation-duration: 7.8s; animation-delay: 0.3s;
+           background: #f9a8d4; }
+.conf-5  { left: 38%; animation-duration: 6.8s; animation-delay: 1.6s;
+           background: var(--vert); }
+.conf-6  { left: 46%; animation-duration: 8.0s; animation-delay: 0.9s; }
+.conf-7  { left: 55%; animation-duration: 7.2s; animation-delay: 0.2s;
+           background: #93c5fd; }
+.conf-8  { left: 63%; animation-duration: 6.6s; animation-delay: 1.4s; }
+.conf-9  { left: 72%; animation-duration: 8.2s; animation-delay: 0.7s;
+           background: var(--vert); }
+.conf-10 { left: 80%; animation-duration: 7.4s; animation-delay: 1.1s;
+           background: #f9a8d4; }
+.conf-11 { left: 88%; animation-duration: 6.9s; animation-delay: 0.4s; }
+.conf-12 { left: 95%; animation-duration: 7.6s; animation-delay: 1.8s;
+           background: #93c5fd; }
+
 [hidden] { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 1ms !important; }
+  /* Le fond festif et le message restent ; seul le mouvement disparait. */
+  .confettis { display: none !important; }
+  .overlay.festif .picto { animation: none !important; }
 }

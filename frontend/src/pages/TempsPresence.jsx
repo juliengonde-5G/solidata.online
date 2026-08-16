@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import Layout from '../components/Layout';
 import { PageHeader } from '../components';
-import { Clock, ListChecks, FileSpreadsheet, AlertTriangle, IdCard, MonitorPlay, Radio, Sliders } from 'lucide-react';
+import { Clock, ListChecks, FileSpreadsheet, AlertTriangle, IdCard, MonitorPlay, Radio, Sliders, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import JournalPointages from '../components/badgeuse/JournalPointages';
 import FeuillesTemps from '../components/badgeuse/FeuillesTemps';
 import AnomaliesBadgeuse from '../components/badgeuse/AnomaliesBadgeuse';
 import GestionBadges from '../components/badgeuse/GestionBadges';
 import PlaylistAffichage from '../components/badgeuse/PlaylistAffichage';
+import ReseauxSociaux from '../components/badgeuse/ReseauxSociaux';
 import SupervisionPostes from '../components/badgeuse/SupervisionPostes';
 import ParametresBadgeuse from '../components/badgeuse/ParametresBadgeuse';
+import MessagesBadgeage from '../components/badgeuse/MessagesBadgeage';
 
 // Module « Temps & Présence » (badgeuse) — décompte du temps de travail par
 // badge RFID (Raspberry Pi + lecteur au Houlme). Page à onglets, sur le
@@ -26,6 +28,9 @@ export default function TempsPresence() {
   const [tab, setTab] = useState('journal');
   // Passerelle Anomalies → Journal : ouvre la modale de correction pré-remplie.
   const [journalPrefill, setJournalPrefill] = useState(null);
+  // Sous-onglet de « Paramètres » : règles de gestion (existant) vs messages
+  // de badgeage (écran d'information v2, CDC_AFFICHAGE_V2.md §4).
+  const [parametresSousTab, setParametresSousTab] = useState('regles');
 
   const TABS = [
     { id: 'journal', label: 'Journal', icon: ListChecks },
@@ -77,9 +82,35 @@ export default function TempsPresence() {
           />
         )}
         {tab === 'badges' && <GestionBadges canWrite={canWriteRh} />}
-        {tab === 'affichage' && <PlaylistAffichage canWrite={canWriteRh} />}
+        {tab === 'affichage' && (
+          <div className="space-y-5">
+            <PlaylistAffichage canWrite={canWriteRh} />
+            <ReseauxSociaux canWrite={isAdmin} />
+          </div>
+        )}
         {tab === 'supervision' && <SupervisionPostes isAdmin={isAdmin} />}
-        {tab === 'parametres' && <ParametresBadgeuse canWrite={canWriteRh} />}
+        {tab === 'parametres' && (
+          <div className="space-y-4">
+            <div className="flex gap-1 border-b border-slate-100">
+              {[
+                { id: 'regles', label: 'Règles de gestion', icon: Sliders },
+                { id: 'messages', label: 'Messages de badgeage', icon: MessageSquare },
+              ].map((t) => {
+                const Icon = t.icon;
+                const active = parametresSousTab === t.id;
+                return (
+                  <button key={t.id} onClick={() => setParametresSousTab(t.id)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition ${active ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                    aria-current={active ? 'page' : undefined}>
+                    <Icon className="w-3.5 h-3.5" /> {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            {parametresSousTab === 'regles' && <ParametresBadgeuse canWrite={canWriteRh} />}
+            {parametresSousTab === 'messages' && <MessagesBadgeage canWrite={canWriteRh} />}
+          </div>
+        )}
       </div>
     </Layout>
   );

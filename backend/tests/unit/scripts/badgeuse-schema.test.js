@@ -24,6 +24,8 @@ const src = fs.readFileSync(path.join(BACKEND_ROOT, 'src', 'scripts', 'init-db.j
 const BADGEUSE_TABLES = [
   'badgeuse_sites', 'badgeuse_devices', 'badgeuse_badges', 'badgeuse_badge_historique',
   'badgeuse_pointages', 'badgeuse_corrections', 'badgeuse_feuilles_temps', 'badgeuse_contenus',
+  // Écran d'information v2 (CDC_AFFICHAGE_V2, ADR-0004 §6)
+  'badgeuse_social_posts',
 ];
 
 /** Corps d'un CREATE TABLE (du nom de la table jusqu'au « ); » qui le ferme). */
@@ -46,7 +48,7 @@ function sectionBadgeuse() {
   return src.slice(start, end);
 }
 
-describe('les 8 tables du module', () => {
+describe('les tables du module', () => {
   test('chaque table est créée en CREATE TABLE IF NOT EXISTS (idempotence)', () => {
     for (const t of BADGEUSE_TABLES) {
       expect(src).toMatch(new RegExp(`CREATE TABLE IF NOT EXISTS ${t}\\b`));
@@ -58,7 +60,7 @@ describe('les 8 tables du module', () => {
       .toBeLessThan(src.indexOf('const tablesAResyncer'));
   });
 
-  test('les 8 tables sont rattachées au resync des séquences SERIAL', () => {
+  test('toutes les tables sont rattachées au resync des séquences SERIAL', () => {
     const bloc = src.slice(src.indexOf('const tablesAResyncer'), src.indexOf('const SAFE_TABLE'));
     for (const t of BADGEUSE_TABLES) expect(bloc).toContain(`'${t}'`);
   });
@@ -199,6 +201,66 @@ describe('badges, corrections et feuilles de temps', () => {
     const b = tableBody('badgeuse_contenus');
     expect(b).toMatch(/duree_sec INTEGER NOT NULL DEFAULT 10 CHECK \(duree_sec BETWEEN 5 AND 60\)/);
     expect(b).toMatch(/CHECK \(type IN \('message', 'image', 'planning', 'compte_a_rebours', 'meteo'\)\)/);
+  });
+
+  // ══ ÉCRAN D'INFORMATION v2 (CDC_AFFICHAGE_V2, ADR-0004) ══
+  describe('écran d\'information v2', () => {
+    const section = () => sectionBadgeuse();
+
+    test('le CONSENTEMENT festif est porté par employees, en 3 colonnes idempotentes', () => {
+      const s = section();
+      // Défaut false : l'absence de choix n'est JAMAIS un accord (ADR-0004 §4).
+      expect(s).toMatch(/ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_optin_festif BOOLEAN NOT NULL DEFAULT false/);
+      // Un consentement se date et s'impute, sinon il ne prouve rien.
+      expect(s).toMatch(/ADD COLUMN IF NOT EXISTS badgeuse_optin_festif_le TIMESTAMPTZ/);
+      expect(s).toMatch(/ADD COLUMN IF NOT EXISTS badgeuse_optin_festif_par INTEGER REFERENCES users\(id\)/);
+    });
+
+    test('les colonnes média des contenus sont ajoutées en ADD COLUMN IF NOT EXISTS', () => {
+      const s = section();
+      for (const col of [
+        'fichier VARCHAR\\(300\\)', 'media_type VARCHAR\\(10\\)', 'media_sha256 VARCHAR\\(64\\)',
+        'source_url VARCHAR\\(500\\)', 'config JSONB',
+      ]) {
+        expect(s).toMatch(new RegExp(`ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS ${col}`));
+      }
+    });
+
+    test('la CHECK des types est ÉLARGIE par DO-scan de pg_constraint (bases déjà déployées)', () => {
+      const s = section();
+      // CREATE TABLE IF NOT EXISTS ne re-contraint jamais une table existante :
+      // sans ce scan, une base en production refuserait tout contenu v2.
+      expect(s).toMatch(/FROM pg_constraint con/);
+      expect(s).toMatch(/conrelid = 'badgeuse_contenus'::regclass/);
+      expect(s).toMatch(/DROP CONSTRAINT/);
+      expect(s).toMatch(/badgeuse_contenus_type_check/);
+      for (const t of ['annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live']) {
+        expect(s).toMatch(new RegExp(`'${t}'`));
+      }
+    });
+
+    test('badgeuse_social_posts : upsert idempotent par (réseau, post_id)', () => {
+      const b = tableBody('badgeuse_social_posts');
+      expect(b).toMatch(/reseau VARCHAR\(20\) NOT NULL CHECK \(reseau IN \('instagram', 'facebook'\)\)/);
+      expect(b).toMatch(/post_id VARCHAR\(100\) NOT NULL/);
+      expect(b).toMatch(/UNIQUE\(reseau, post_id\)/);
+      expect(b).toMatch(/media_sha256 VARCHAR\(64\)/);
+    });
+
+    test('les posts sociaux ne portent AUCUNE donnée de salarié (publications publiques)', () => {
+      const b = tableBody('badgeuse_social_posts');
+      expect(b).not.toMatch(/REFERENCES employees/);
+      expect(b).not.toMatch(/\bemployee_id\b/);
+      expect(b).not.toMatch(/uid_hmac/);
+    });
+
+    test('aucune URL EXTERNE n\'est servie au poste : le média est un fichier LOCAL', () => {
+      // `fichier` (chemin relatif côté serveur) et non une URL : le kiosque ne
+      // contacte aucun domaine tiers (ADR-0004 §6, CSP 'self').
+      const s = section();
+      expect(s).toMatch(/ADD COLUMN IF NOT EXISTS fichier VARCHAR\(300\)/);
+      expect(tableBody('badgeuse_social_posts')).toMatch(/media_fichier VARCHAR\(300\)/);
+    });
   });
 
   test('devices : code UNIQUE et clé stockée en CONDENSAT uniquement', () => {

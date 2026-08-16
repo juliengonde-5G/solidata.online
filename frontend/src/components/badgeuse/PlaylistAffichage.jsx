@@ -1,16 +1,45 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { MonitorPlay, Plus, Pencil, Trash2, ShieldAlert, Eye } from 'lucide-react';
+import { MonitorPlay, Plus, Pencil, Trash2, ShieldAlert, Eye, UploadCloud, Link2 } from 'lucide-react';
 import api from '../../services/api';
 import { LoadingSpinner, ErrorState, EmptyState, Modal, ConfirmDialog, useToast } from '../../components';
-import { apiErr, fmtDateParis, TYPE_CONTENU_LABELS } from './badgeuseShared';
+import {
+  apiErr, fmtDateParis, TYPE_CONTENU_LABELS, TYPE_CONTENU_HINTS, TYPE_CONTENU_CONFIG_FIELDS,
+  TYPES_LEGACY, TYPES_GENERATEURS, isGenerateurType, isMediaServeurType,
+} from './badgeuseShared';
+import PrevisualisationContenu from './PrevisualisationContenu';
+import UploadMediaModal from './UploadMediaModal';
+import PartagerLienModal from './PartagerLienModal';
 
-const TYPES = Object.entries(TYPE_CONTENU_LABELS).map(([value, label]) => ({ value, label }));
+// Types proposés à la création libre (§4 CDC) : les 5 historiques + les 5
+// générateurs. `media`/`lien` sont créés UNIQUEMENT via leurs boutons dédiés
+// (téléversement / partage de lien), jamais depuis ce sélecteur.
+const TYPES_LEGACY_OPTIONS = TYPES_LEGACY.map((v) => ({ value: v, label: TYPE_CONTENU_LABELS[v] }));
+const TYPES_GENERATEURS_OPTIONS = TYPES_GENERATEURS.map((v) => ({ value: v, label: TYPE_CONTENU_LABELS[v] }));
 
-function emptyForm() {
-  return { type: 'message', titre: '', corps: '', media_url: '', duree_sec: 10, ordre: 0, visible_du: '', visible_au: '', actif: true };
+function defaultConfigFor(type) {
+  const fields = TYPE_CONTENU_CONFIG_FIELDS[type] || [];
+  const cfg = {};
+  fields.forEach((f) => { cfg[f.key] = f.default; });
+  return cfg;
 }
 
-// ── Modale de création/édition d'un contenu ──────────────────────────────────
+function parseConfig(v, type) {
+  if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+  if (typeof v === 'string' && v.trim()) {
+    try { const p = JSON.parse(v); if (p && typeof p === 'object') return p; } catch { /* repli défauts */ }
+  }
+  return defaultConfigFor(type);
+}
+
+function emptyForm() {
+  return {
+    type: 'message', titre: '', corps: '', media_url: '', duree_sec: 10, ordre: 0,
+    visible_du: '', visible_au: '', actif: true, config: {},
+  };
+}
+
+// ── Modale de création/édition d'un contenu (types historiques + générateurs ;
+// les entrées media/lien existantes s'y éditent en métadonnées seules) ──────
 function ContenuForm({ open, onClose, onSaved, editing }) {
   const toast = useToast();
   const [form, setForm] = useState(emptyForm());
@@ -19,30 +48,46 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
 
   useEffect(() => {
     if (!open) return;
-    setForm(editing ? {
-      type: editing.type || 'message', titre: editing.titre || '', corps: editing.corps || '',
-      media_url: editing.media_url || '',
-      duree_sec: editing.duree_sec ?? 10, ordre: editing.ordre ?? 0,
-      visible_du: editing.visible_du ? String(editing.visible_du).slice(0, 10) : '',
-      visible_au: editing.visible_au ? String(editing.visible_au).slice(0, 10) : '',
-      actif: editing.actif !== false,
-    } : emptyForm());
+    if (editing) {
+      setForm({
+        type: editing.type || 'message', titre: editing.titre || '', corps: editing.corps || '',
+        media_url: editing.media_url || '',
+        duree_sec: editing.duree_sec ?? 10, ordre: editing.ordre ?? 0,
+        visible_du: editing.visible_du ? String(editing.visible_du).slice(0, 10) : '',
+        visible_au: editing.visible_au ? String(editing.visible_au).slice(0, 10) : '',
+        actif: editing.actif !== false,
+        config: parseConfig(editing.config, editing.type),
+      });
+    } else {
+      setForm(emptyForm());
+    }
     setError(null);
   }, [open, editing]);
 
+  const changeType = (type) => {
+    setForm((f) => ({ ...f, type, config: isGenerateurType(type) ? defaultConfigFor(type) : {} }));
+  };
+  const setConfigField = (key, v) => setForm((f) => ({ ...f, config: { ...f.config, [key]: v } }));
+
+  const verrouTypeMedia = editing && isMediaServeurType(editing.type);
+  const generateur = isGenerateurType(form.type);
+  const configFields = TYPE_CONTENU_CONFIG_FIELDS[form.type] || [];
+
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.titre.trim()) { setError('Le titre est requis.'); return; }
+    if (!generateur && !verrouTypeMedia && !form.titre.trim()) { setError('Le titre est requis.'); return; }
     const duree = parseInt(form.duree_sec, 10);
     if (!Number.isFinite(duree) || duree < 5 || duree > 60) { setError('La durée doit être comprise entre 5 et 60 secondes.'); return; }
     setSaving(true); setError(null);
     try {
       const payload = {
-        type: form.type, titre: form.titre.trim(), corps: form.corps.trim() || null,
-        media_url: form.type === 'image' ? (form.media_url.trim() || null) : null,
+        type: form.type, titre: form.titre.trim() || null,
+        corps: (!generateur && !verrouTypeMedia) ? (form.corps.trim() || null) : null,
+        media_url: (!generateur && !verrouTypeMedia && form.type === 'image') ? (form.media_url.trim() || null) : null,
         duree_sec: duree, ordre: parseInt(form.ordre, 10) || 0,
         visible_du: form.visible_du || null, visible_au: form.visible_au || null,
         actif: form.actif,
+        config: generateur ? form.config : null,
       };
       if (editing) await api.put(`/badgeuse/contenus/${editing.id}`, payload);
       else await api.post('/badgeuse/contenus', payload);
@@ -62,24 +107,49 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Type</label>
-            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="input-modern py-2 text-sm w-full">
-              {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            {verrouTypeMedia ? (
+              <div className="input-modern py-2 text-sm w-full bg-slate-50 text-slate-500">{TYPE_CONTENU_LABELS[form.type] || form.type}</div>
+            ) : (
+              <select value={form.type} onChange={(e) => changeType(e.target.value)} className="input-modern py-2 text-sm w-full">
+                <optgroup label="Contenus manuels">
+                  {TYPES_LEGACY_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </optgroup>
+                <optgroup label="Générateurs (contenu calculé côté serveur)">
+                  {TYPES_GENERATEURS_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </optgroup>
+              </select>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Ordre d'affichage</label>
             <input type="number" value={form.ordre} onChange={(e) => setForm({ ...form, ordre: e.target.value })} className="input-modern py-2 text-sm w-full" />
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Titre</label>
-          <input value={form.titre} onChange={(e) => setForm({ ...form, titre: e.target.value })} className="input-modern py-2 text-sm w-full" maxLength={200} required />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Corps du message</label>
-          <textarea value={form.corps} onChange={(e) => setForm({ ...form, corps: e.target.value })} rows={3} className="input-modern py-2 text-sm w-full" />
-        </div>
-        {form.type === 'image' && (
+
+        {TYPE_CONTENU_HINTS[form.type] && (
+          <p className="text-[11px] text-slate-400 -mt-1">{TYPE_CONTENU_HINTS[form.type]}</p>
+        )}
+
+        {verrouTypeMedia ? (
+          <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2">
+            {editing.type === 'lien' && editing.source_url ? <>Lien source : <span className="font-mono break-all">{editing.source_url}</span></> : null}
+            {editing.fichier ? <>Fichier : {editing.fichier}</> : null}
+            <p className="mt-1">Seuls le titre, la durée, l'ordre, la fenêtre de validité et l'état actif sont modifiables ici.</p>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Titre {generateur && '(facultatif)'}</label>
+            <input value={form.titre} onChange={(e) => setForm({ ...form, titre: e.target.value })} className="input-modern py-2 text-sm w-full" maxLength={200} required={!generateur} />
+          </div>
+        )}
+
+        {!generateur && !verrouTypeMedia && (
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Corps du message</label>
+            <textarea value={form.corps} onChange={(e) => setForm({ ...form, corps: e.target.value })} rows={3} className="input-modern py-2 text-sm w-full" />
+          </div>
+        )}
+        {!generateur && !verrouTypeMedia && form.type === 'image' && (
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">URL de l'image</label>
             <input type="text" value={form.media_url} onChange={(e) => setForm({ ...form, media_url: e.target.value })}
@@ -89,9 +159,27 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
               <code className="mx-1">img-src 'self'</code> — défense en profondeur) : chemin relatif d'un fichier
               déployé dans <code className="mx-1">ui/</code> (ex. <code>consignes-tri.png</code>). Une URL distante
               ne s'affichera pas. Aucune donnée personnelle, aucune photo de personne — exigence de conformité.
+              Pour un média hébergé sur SOLIDATA, utilisez plutôt « Téléverser un média ».
             </p>
           </div>
         )}
+
+        {generateur && configFields.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 rounded-lg border border-slate-200 p-3">
+            {configFields.map((f) => (
+              <div key={f.key}>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{f.label}</label>
+                <input type="number" min={f.min} max={f.max} value={form.config[f.key] ?? f.default}
+                  onChange={(e) => setConfigField(f.key, parseInt(e.target.value, 10) || f.default)}
+                  className="input-modern py-2 text-sm w-full" />
+              </div>
+            ))}
+          </div>
+        )}
+        {generateur && configFields.length === 0 && (
+          <p className="text-xs text-slate-400 italic">Aucun réglage supplémentaire — contenu entièrement calculé côté serveur.</p>
+        )}
+
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Durée (s)</label>
@@ -114,31 +202,6 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
   );
 }
 
-// Rendu de prévisualisation 16:9, au plus proche du kiosque en veille (BO-08).
-function Previsualisation16x9({ contenu }) {
-  if (!contenu) {
-    return (
-      <div className="aspect-video w-full rounded-xl bg-slate-900 flex items-center justify-center text-slate-500 text-sm">
-        Sélectionnez un contenu pour le prévisualiser
-      </div>
-    );
-  }
-  return (
-    <div className="aspect-video w-full rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 flex flex-col items-center justify-center text-center px-10 py-8 overflow-hidden">
-      <span className="text-[11px] uppercase tracking-widest text-teal-400 font-semibold mb-3">{TYPE_CONTENU_LABELS[contenu.type] || contenu.type}</span>
-      <h2 className="text-white font-bold leading-tight" style={{ fontSize: 'clamp(1.5rem, 4vw, 2.75rem)' }}>{contenu.titre || 'Sans titre'}</h2>
-      {contenu.type === 'image' && contenu.media_url && (
-        <img src={contenu.media_url} alt={contenu.titre || 'Contenu image'}
-          className="mt-4 max-h-[45%] max-w-[80%] object-contain rounded-lg" />
-      )}
-      {contenu.corps && (
-        <p className="text-slate-300 mt-4 max-w-2xl" style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.25rem)' }}>{contenu.corps}</p>
-      )}
-      <span className="text-slate-500 text-xs mt-6">{contenu.duree_sec || 10} s à l'écran</span>
-    </div>
-  );
-}
-
 // ── Onglet Affichage (BO-08) ──────────────────────────────────────────────────
 export default function PlaylistAffichage({ canWrite }) {
   const toast = useToast();
@@ -147,6 +210,8 @@ export default function PlaylistAffichage({ canWrite }) {
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [modal, setModal] = useState({ open: false, editing: null });
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [lienOpen, setLienOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   const load = useCallback(() => {
@@ -182,7 +247,7 @@ export default function PlaylistAffichage({ canWrite }) {
     <div className="space-y-5">
       <div role="note" className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-xs px-3 py-2 flex items-start gap-2">
         <ShieldAlert className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
-        <span>Aucune donnée personnelle dans ces contenus — l'écran de veille est une finalité de communication interne dissociée du pointage (photo, nom complet, statut de contrat ou de parcours interdits).</span>
+        <span>Aucune donnée personnelle dans ces contenus — l'écran de veille est une finalité de communication interne dissociée du pointage (photo, nom complet, statut de contrat ou de parcours interdits). Les générateurs (annonces, tournées…) respectent les mêmes règles côté serveur.</span>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
@@ -191,13 +256,21 @@ export default function PlaylistAffichage({ canWrite }) {
           <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
             <h3 className="font-semibold text-slate-800 flex items-center gap-2"><MonitorPlay className="w-4 h-4 text-teal-600" /> Contenus de la playlist</h3>
             {canWrite && (
-              <button onClick={() => setModal({ open: true, editing: null })} className="btn-primary text-sm inline-flex items-center gap-1.5">
-                <Plus className="w-4 h-4" /> Nouveau contenu
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button onClick={() => setModal({ open: true, editing: null })} className="btn-primary text-sm inline-flex items-center gap-1.5">
+                  <Plus className="w-4 h-4" /> Nouveau contenu
+                </button>
+                <button onClick={() => setUploadOpen(true)} className="btn-secondary text-sm inline-flex items-center gap-1.5">
+                  <UploadCloud className="w-4 h-4" /> Téléverser un média
+                </button>
+                <button onClick={() => setLienOpen(true)} className="btn-secondary text-sm inline-flex items-center gap-1.5">
+                  <Link2 className="w-4 h-4" /> Partager un lien
+                </button>
+              </div>
             )}
           </div>
           {contenus.length === 0 ? (
-            <EmptyState icon={MonitorPlay} title="Playlist vide" description="Ajoutez un premier contenu (message, image, planning…) pour l'écran de veille." />
+            <EmptyState icon={MonitorPlay} title="Playlist vide" description="Ajoutez un premier contenu (message, image, annonces, média…) pour l'écran de veille." />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -217,7 +290,7 @@ export default function PlaylistAffichage({ canWrite }) {
                     <tr key={c.id} className={`border-b border-slate-50 cursor-pointer ${selected?.id === c.id ? 'bg-teal-50/60' : 'hover:bg-slate-50/60'}`} onClick={() => setSelectedId(c.id)}>
                       <td className="py-2 px-2 text-slate-500">{c.ordre ?? 0}</td>
                       <td className="py-2 px-2 text-slate-600">{TYPE_CONTENU_LABELS[c.type] || c.type}</td>
-                      <td className="py-2 px-2 font-medium text-slate-700 max-w-[220px] truncate" title={c.titre}>{c.titre}</td>
+                      <td className="py-2 px-2 font-medium text-slate-700 max-w-[220px] truncate" title={c.titre}>{c.titre || '—'}</td>
                       <td className="py-2 px-2 text-right text-slate-500">{c.duree_sec || 10} s</td>
                       <td className="py-2 px-2 text-slate-500 whitespace-nowrap text-xs">
                         {c.visible_du || c.visible_au ? `${c.visible_du ? fmtDateParis(c.visible_du) : '…'} → ${c.visible_au ? fmtDateParis(c.visible_au) : '…'}` : 'permanent'}
@@ -243,16 +316,26 @@ export default function PlaylistAffichage({ canWrite }) {
         {/* Prévisualisation 16:9 */}
         <div className="lg:col-span-2 bg-white rounded-xl border p-4">
           <h3 className="font-semibold text-slate-800 mb-3">Aperçu écran (16:9)</h3>
-          <Previsualisation16x9 contenu={selected} />
-          <p className="text-[11px] text-slate-400 mt-2">Rendu approximatif du kiosque en veille — la mise en page réelle dépend du poste.</p>
+          <PrevisualisationContenu contenu={selected} />
+          <p className="text-[11px] text-slate-400 mt-2">
+            Rendu approximatif du kiosque en veille — la mise en page réelle dépend du poste. Pour les générateurs
+            (annonces, actus, tournées, réseaux sociaux, VAK), la donnée affichée ici est un exemple : la vraie
+            donnée est calculée côté serveur pour le poste.
+          </p>
         </div>
       </div>
 
       <ContenuForm open={modal.open} editing={modal.editing} onClose={() => setModal({ open: false, editing: null })}
         onSaved={() => { setModal({ open: false, editing: null }); load(); }} />
 
+      <UploadMediaModal open={uploadOpen} onClose={() => setUploadOpen(false)}
+        onUploaded={() => { setUploadOpen(false); load(); }} />
+
+      <PartagerLienModal open={lienOpen} onClose={() => setLienOpen(false)}
+        onShared={() => { setLienOpen(false); load(); }} />
+
       <ConfirmDialog isOpen={!!confirmDelete} onCancel={() => setConfirmDelete(null)} onConfirm={doDelete}
-        title="Supprimer le contenu" message={confirmDelete ? `Supprimer « ${confirmDelete.titre} » de la playlist ? Action définitive.` : ''}
+        title="Supprimer le contenu" message={confirmDelete ? `Supprimer « ${confirmDelete.titre || TYPE_CONTENU_LABELS[confirmDelete.type] || confirmDelete.type} » de la playlist ? Action définitive.` : ''}
         confirmLabel="Supprimer" confirmVariant="danger" />
     </div>
   );
