@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, ErrorState, Modal, KPICard } from '../components';
 import {
   Gauge, LayoutDashboard, Grid3x3, GitCompare, Settings, Download, RefreshCw,
-  AlertTriangle, CheckCircle2, TrendingUp, Users, Info,
+  AlertTriangle, CheckCircle2, TrendingUp, Users, Info, Scale, Upload, FileText,
+  Link2, ChevronDown, ChevronRight, AlertCircle,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -423,6 +424,681 @@ function SyntheseTab({ annee, setAnnee, canWrite }) {
       </div>
 
       <AspModal open={!!modalMonth} month={modalMonth} annee={annee} convention={convention} onClose={() => setModalMonth(null)} onSaved={load} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Onglet « Comparaison ASP » — import de l'état mensuel ASP (PDF) et
+// rapprochement avec les ETP calculés par SOLIDATA (contrat
+// /effectifs/asp/{import,comparaison,comparaison/:mois,liaison,export}).
+// Besoin client : « comparer facilement les écarts entre SOLIDATA et l'ASP,
+// le plus simplement possible » — la clarté de lecture prime sur
+// l'exhaustivité : 3 blocs de détail (concordants / ASP seul / SOLIDATA
+// seul), chacun avec un motif traduit en clair.
+// ═══════════════════════════════════════════════════════════════════════════
+const MOTIF_ASP_SEUL = {
+  sorti_non_importe: "Salarié sorti, non présent dans l'import de paie",
+  non_apparie: 'Non rapproché — lier manuellement',
+};
+const MOTIF_SOLIDATA_SEUL = {
+  apprenti: "Apprenti — non éligible à l'aide au poste",
+  cdi_hors_insertion: 'CDI hors insertion',
+  cdd_hors_insertion: 'CDD hors insertion',
+  non_declare: 'À vérifier : payé mais non déclaré',
+};
+const APPARIEMENT_LABELS = { liaison: 'liaison manuelle', nom: 'nom', naissance: 'naissance', approchant: 'approchant' };
+
+// Seuils de mise en valeur de l'écart (spec produit) : ≤0,5 ETP = vert,
+// ≤2 ETP = ambre, au-delà = rouge. `absEcart` est déjà en valeur absolue.
+function ecartToneClass(absEcart) {
+  if (absEcart == null) return 'text-slate-300';
+  if (absEcart <= 0.5) return 'text-emerald-600';
+  if (absEcart <= 2) return 'text-amber-600';
+  return 'text-red-600';
+}
+
+function AppariementBadge({ mode }) {
+  if (!mode) return <span className="text-slate-300">—</span>;
+  const approx = mode === 'approchant';
+  return (
+    <span
+      className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap ${approx ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}
+      title={approx ? 'Correspondance approximative — à vérifier' : undefined}
+    >
+      {APPARIEMENT_LABELS[mode] || mode}
+    </span>
+  );
+}
+
+// status: true (vert) | false (rouge, avec explication) | null/undefined
+// (gris, « non calculable ») — jamais de couleur inventée sur une donnée
+// absente (doctrine du projet).
+function CoherencePill({ status, label, explainFalse }) {
+  const tone = status === true ? 'emerald' : status === false ? 'red' : 'slate';
+  const Icon = status === true ? CheckCircle2 : status === false ? AlertTriangle : Info;
+  const toneCls = {
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    red: 'border-red-200 bg-red-50 text-red-700',
+    slate: 'border-slate-200 bg-slate-50 text-slate-500',
+  }[tone];
+  return (
+    <div className={`rounded-lg border px-3 py-2 text-xs flex items-start gap-2 ${toneCls}`}>
+      <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+      <div>
+        <div className="font-semibold">{label}</div>
+        {status === false && explainFalse && <div className="mt-0.5">{explainFalse}</div>}
+        {status == null && <div className="mt-0.5">Non calculable sur ce document.</div>}
+      </div>
+    </div>
+  );
+}
+
+// Le taux ASP peut arriver en ratio (0,92) ou déjà en pourcentage (92) selon
+// la façon dont le PDF est parsé côté backend — heuristique défensive (à
+// reconfirmer au debug avec un vrai PDF ASP, cf. rapport de livraison).
+function fmtPercentAuto(v, digits = 1) {
+  const n = num(v);
+  if (n == null) return '—';
+  const pct = Math.abs(n) <= 1.5 ? n * 100 : n;
+  return `${fmtNum(pct, digits)} %`;
+}
+
+// Corps de la modale de prévisualisation d'import (POST /effectifs/asp/import
+// sans confirm=1) : mois détecté, totaux d'en-tête, pastilles de cohérence,
+// résumé du rapprochement, avertissement si un état existe déjà.
+function AspImportPreviewBody({ preview, confirmError, confirming, onCancel, onConfirm }) {
+  const e = preview.entetes || {};
+  const coh = preview.coherence || {};
+  const rap = preview.rapprochement || {};
+  const nbSalaries = (preview.salaries || []).length;
+  const nbConcordants = Number(rap.concordants ?? 0);
+  const nbNonApparies = Number(rap.asp_non_apparies ?? 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm text-slate-600">
+        <FileText className="w-4 h-4 text-slate-400" aria-hidden="true" />
+        État détecté pour <strong>{moisLabel(preview.mois, true)} {preview.annee}</strong>
+      </div>
+
+      {rap.deja_importe && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-xs px-3 py-2 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <span>Un état ASP existe déjà pour ce mois — il sera <strong>remplacé</strong> par cet import.</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+        <div className="rounded-lg border border-slate-200 px-3 py-2">
+          <div className="text-[11px] text-slate-400">Heures déclarées</div>
+          <div className="font-semibold text-slate-800">{fmtNum(e.heures_declarees, 1)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 px-3 py-2">
+          <div className="text-[11px] text-slate-400">Heures éligibles</div>
+          <div className="font-semibold text-slate-800">{fmtNum(e.heures_eligibles, 1)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 px-3 py-2">
+          <div className="text-[11px] text-slate-400">ETP réalisés (ASP)</div>
+          <div className="font-semibold text-slate-800">{fmtNum(e.etp_realises, 2)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 px-3 py-2">
+          <div className="text-[11px] text-slate-400">ETP conventionnés</div>
+          <div className="font-semibold text-slate-800">{fmtNum(e.etp_conventionnes, 2)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 px-3 py-2">
+          <div className="text-[11px] text-slate-400">Taux</div>
+          <div className="font-semibold text-slate-800">{fmtPercentAuto(e.taux)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 px-3 py-2">
+          <div className="text-[11px] text-slate-400">Nb salariés</div>
+          <div className="font-semibold text-slate-800">{e.nb_salaries ?? nbSalaries ?? '—'}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 px-3 py-2 col-span-2">
+          <div className="text-[11px] text-slate-400">Montant forfaitaire</div>
+          <div className="font-semibold text-slate-800">{e.montant_forfaitaire != null ? `${fmtNum(e.montant_forfaitaire, 2)} €` : '—'}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <CoherencePill status={coh.somme_heures_ok} label="Somme des heures des salariés = total déclaré"
+          explainFalse="La somme des heures des salariés du PDF ne correspond pas au total déclaré en en-tête." />
+        <CoherencePill status={coh.etp_formule_ok} label="Formule ETP cohérente"
+          explainFalse="Le nombre d'ETP réalisés ne correspond pas au calcul attendu à partir des heures déclarées." />
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <strong>{nbSalaries}</strong> salarié{nbSalaries >= 2 ? 's' : ''} dans l'état —{' '}
+        <span className="text-emerald-700 font-medium">{nbConcordants} rapproché{nbConcordants >= 2 ? 's' : ''}</span> avec SOLIDATA,{' '}
+        <span className={nbNonApparies > 0 ? 'text-amber-700 font-medium' : 'text-slate-500'}>
+          {nbNonApparies} non rapproché{nbNonApparies >= 2 ? 's' : ''}
+        </span>
+        {nbNonApparies > 0 ? ' (à lier après enregistrement, depuis le détail du mois)' : ''}.
+      </div>
+
+      {confirmError && <p className="text-xs text-red-600">{confirmError}</p>}
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button onClick={onCancel} disabled={confirming} className="btn-secondary text-sm disabled:opacity-50">Annuler</button>
+        <button onClick={onConfirm} disabled={confirming} className="btn-primary text-sm disabled:opacity-50">
+          {confirming ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DetailBlock({ title, count, tone, icon: Icon, children }) {
+  const toneText = { emerald: 'text-emerald-700', amber: 'text-amber-700', red: 'text-red-700' }[tone] || 'text-slate-700';
+  const toneBadge = { emerald: 'bg-emerald-100 text-emerald-700', amber: 'bg-amber-100 text-amber-700', red: 'bg-red-100 text-red-700' }[tone] || 'bg-slate-100 text-slate-600';
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-3">
+      <h4 className={`text-xs font-bold flex items-center gap-1.5 mb-2 ${toneText}`}>
+        <Icon className="w-3.5 h-3.5" aria-hidden="true" /> {title}
+        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${toneBadge}`}>{count}</span>
+      </h4>
+      {children}
+    </div>
+  );
+}
+
+// Détail d'un mois (GET /effectifs/asp/comparaison/:mois) — 3 blocs.
+function MoisDetail({ annee, mois, statut, canWrite, onLinked }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [linkTarget, setLinkTarget] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true); setError(null);
+    api.get(`/effectifs/asp/comparaison/${mois}?annee=${annee}`)
+      .then((r) => setData(r.data))
+      .catch((err) => setError(apiErr(err, 'Détail indisponible')))
+      .finally(() => setLoading(false));
+  }, [annee, mois]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div className="py-4"><LoadingSpinner message="Chargement du détail…" /></div>;
+  if (error) return <ErrorState variant="card" title="Détail indisponible" message={error} onRetry={load} />;
+  if (!data) return null;
+
+  const concordants = [...(data.concordants || [])].sort((a, b) => Math.abs(num(b.ecart) ?? 0) - Math.abs(num(a.ecart) ?? 0));
+  const aspSeul = data.asp_seul || [];
+  const solidataSeul = data.solidata_seul || [];
+
+  return (
+    <div className="space-y-3">
+      {statut === 'saisi' && (
+        <p className="text-[11px] text-slate-400 italic">
+          Cet état a été validé manuellement (sans import PDF) — le détail par salarié n'est disponible que pour les états importés depuis un PDF ASP.
+        </p>
+      )}
+
+      <DetailBlock title="✅ Concordants" count={concordants.length} tone="emerald" icon={CheckCircle2}>
+        {concordants.length === 0 ? (
+          <p className="text-xs text-slate-400 py-2">Aucun salarié rapproché ce mois-ci.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                  <th className="py-1.5 pr-2">Nom</th>
+                  <th className="py-1.5 px-2 text-right">Heures ASP</th>
+                  <th className="py-1.5 px-2 text-right">ETP ASP</th>
+                  <th className="py-1.5 px-2 text-right">ETP SOLIDATA</th>
+                  <th className="py-1.5 px-2 text-right">Écart</th>
+                  <th className="py-1.5 pl-2">Appariement</th>
+                </tr>
+              </thead>
+              <tbody>
+                {concordants.map((c, i) => {
+                  const ec = num(c.ecart);
+                  return (
+                    <tr key={c.employee_id ?? i} className="border-b border-slate-50">
+                      <td className="py-1.5 pr-2 font-medium text-slate-700 whitespace-nowrap">{c.nom || '—'}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtNum(c.heures_asp, 1)}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtNum(c.etp_asp, 2)}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtNum(c.etp_solidata, 2)}</td>
+                      <td className={`py-1.5 px-2 text-right font-semibold ${ecartToneClass(ec != null ? Math.abs(ec) : null)}`}>{fmtSigned(c.ecart, 2)}</td>
+                      <td className="py-1.5 pl-2"><AppariementBadge mode={c.mode_appariement} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </DetailBlock>
+
+      <DetailBlock title="⚠️ Déclarés à l'ASP, absents de SOLIDATA" count={aspSeul.length} tone="amber" icon={AlertTriangle}>
+        {aspSeul.length === 0 ? (
+          <p className="text-xs text-slate-400 py-2">Aucun écart de ce type ce mois-ci.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                  <th className="py-1.5 pr-2">Nom ASP</th>
+                  <th className="py-1.5 px-2">Naissance</th>
+                  <th className="py-1.5 px-2 text-right">Heures</th>
+                  <th className="py-1.5 px-2">Sortie</th>
+                  <th className="py-1.5 px-2">Motif</th>
+                  {canWrite && <th className="py-1.5 pl-2" />}
+                </tr>
+              </thead>
+              <tbody>
+                {aspSeul.map((s, i) => (
+                  <tr key={i} className="border-b border-slate-50">
+                    <td className="py-1.5 pr-2 font-medium text-slate-700 whitespace-nowrap">{s.nom_asp || '—'}</td>
+                    <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">{fmtDate(s.date_naissance)}</td>
+                    <td className="py-1.5 px-2 text-right">{fmtNum(s.heures_asp, 1)}</td>
+                    <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">{fmtDate(s.date_sortie)}</td>
+                    <td className="py-1.5 px-2 text-slate-600">{MOTIF_ASP_SEUL[s.motif] || s.motif || '—'}</td>
+                    {canWrite && (
+                      <td className="py-1.5 pl-2 text-right">
+                        {s.motif === 'non_apparie' && (
+                          <button onClick={() => setLinkTarget(s)} className="inline-flex items-center gap-1 text-[11px] text-teal-700 hover:underline font-medium whitespace-nowrap">
+                            <Link2 className="w-3 h-3" aria-hidden="true" /> Lier à un salarié
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </DetailBlock>
+
+      <DetailBlock title="❗ Comptés par SOLIDATA, non déclarés à l'ASP" count={solidataSeul.length} tone="red" icon={AlertCircle}>
+        {solidataSeul.length === 0 ? (
+          <p className="text-xs text-slate-400 py-2">Aucun écart de ce type ce mois-ci.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                  <th className="py-1.5 pr-2">Nom</th>
+                  <th className="py-1.5 px-2 text-right">ETP SOLIDATA</th>
+                  <th className="py-1.5 px-2">Type de contrat</th>
+                  <th className="py-1.5 px-2">Poste</th>
+                  <th className="py-1.5 pl-2">Motif</th>
+                </tr>
+              </thead>
+              <tbody>
+                {solidataSeul.map((s, i) => {
+                  const alert = s.motif === 'non_declare';
+                  return (
+                    <tr key={s.employee_id ?? i} className="border-b border-slate-50">
+                      <td className="py-1.5 pr-2 font-medium text-slate-700 whitespace-nowrap">{s.nom || '—'}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtNum(s.etp_solidata, 2)}</td>
+                      <td className="py-1.5 px-2 text-slate-500">{s.type_contrat || '—'}</td>
+                      <td className="py-1.5 px-2 text-slate-500">{s.poste || '—'}</td>
+                      <td className={`py-1.5 pl-2 ${alert ? 'text-amber-700 font-medium' : 'text-slate-400'}`}>
+                        {MOTIF_SOLIDATA_SEUL[s.motif] || s.motif || '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </DetailBlock>
+
+      {linkTarget && (
+        <LinkAspSalarieModal
+          salarie={linkTarget}
+          onClose={() => setLinkTarget(null)}
+          onLinked={() => { setLinkTarget(null); load(); onLinked?.(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modale de liaison manuelle (POST /effectifs/asp/liaison) — résout les noms
+// d'usage divergents entre l'ASP et la paie (ex. nom de naissance vs nom
+// d'usage). Recherche côté client sur GET /employees (pattern déjà utilisé
+// dans Candidates.jsx › LinkEmployeeModal).
+function LinkAspSalarieModal({ salarie, onClose, onLinked }) {
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setError(null);
+    api.get('/employees')
+      .then((r) => { if (active) setEmployees(r.data || []); })
+      .catch((err) => { if (active) setError(apiErr(err, 'Chargement des salariés impossible')); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const filtered = useMemo(() => {
+    const sorted = sortByName(employees);
+    const q = norm(search).trim();
+    if (!q) return sorted;
+    return sorted.filter((e) => norm(`${e.first_name} ${e.last_name} ${e.malibou_id || ''}`).includes(q));
+  }, [search, employees]);
+
+  const link = async (emp) => {
+    setSaving(true); setSaveError(null);
+    try {
+      await api.post('/effectifs/asp/liaison', {
+        nom_asp: salarie.nom_asp,
+        date_naissance: salarie.date_naissance,
+        employee_id: emp.id,
+      });
+      onLinked();
+    } catch (err) {
+      setSaveError(apiErr(err, 'Échec de la liaison'));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Lier « ${salarie.nom_asp || '—'} » à un salarié SOLIDATA`} size="md">
+      <div className="space-y-3">
+        <p className="text-xs text-slate-500">
+          Le nom déclaré à l'ASP peut différer du nom d'usage en paie (ex. nom de naissance). Sélectionnez le salarié
+          correspondant — la liaison sera réutilisée aux prochains imports.
+        </p>
+        {salarie.date_naissance && (
+          <p className="text-xs text-slate-500">Naissance ASP : <strong>{fmtDate(salarie.date_naissance)}</strong></p>
+        )}
+        {saveError && <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2">{saveError}</div>}
+        <input
+          autoFocus
+          placeholder="Rechercher un salarié (nom, matricule)…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="input-modern w-full text-sm"
+        />
+        {loading ? (
+          <LoadingSpinner message="Chargement des salariés…" />
+        ) : error ? (
+          <ErrorState variant="card" title="Salariés indisponibles" message={error} />
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-slate-400 py-6 text-center">Aucun salarié ne correspond.</p>
+        ) : (
+          <ul className="max-h-72 overflow-y-auto divide-y border rounded-lg">
+            {filtered.slice(0, 150).map((e) => (
+              <li key={e.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-800 truncate">
+                    {displayName(e)}
+                    {!e.is_active && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold">inactif</span>}
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">{e.position || 'Poste non défini'}{e.malibou_id ? ` · Mat. ${e.malibou_id}` : ''}</div>
+                </div>
+                <button disabled={saving} onClick={() => link(e)} className="text-xs px-3 py-1.5 rounded-lg btn-primary shrink-0 disabled:opacity-50">
+                  {saving ? '…' : 'Lier'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// Ligne d'un mois du tableau de comparaison — cliquable (déplie le détail),
+// sauf statut 'absent' (rien à déplier, seul l'import est proposé).
+function MonthRow({ m, mn, isOpen, onToggle, canWrite, onImportClick }) {
+  const ecart = num(m.ecart_etp);
+  const cls = ecartToneClass(ecart != null ? Math.abs(ecart) : null);
+  const statut = m.statut;
+  const clickable = statut !== 'absent';
+
+  return (
+    <tr onClick={clickable ? onToggle : undefined} className={`border-b border-slate-50 ${clickable ? 'cursor-pointer hover:bg-slate-50/70' : ''} ${isOpen ? 'bg-teal-50/40' : ''}`}>
+      <td className="py-2 pr-2 font-medium text-slate-700">
+        <span className="inline-flex items-center gap-1">
+          {clickable
+            ? (isOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />)
+            : <span className="w-3.5 h-3.5 inline-block" />}
+          {moisLabel(mn)}
+        </span>
+      </td>
+      <td className="py-2 px-2 text-right">{statut === 'absent' ? <span className="text-slate-300">—</span> : fmtNum(m.etp_asp, 2)}</td>
+      <td className="py-2 px-2 text-right">{fmtNum(m.etp_solidata_previsionnel, 2)}</td>
+      <td className="py-2 px-2 text-right">{fmtNum(m.etp_solidata_realise, 2)}</td>
+      <td className="py-2 px-2 text-right">
+        {statut === 'absent' ? (
+          <span className="text-slate-300">—</span>
+        ) : (
+          <span className={`font-semibold ${cls}`}>
+            {fmtSigned(m.ecart_etp, 2)}
+            {m.ecart_pct != null && <span className="ml-1 text-[10px] font-normal text-slate-400">({fmtSigned(Number(m.ecart_pct), 1)} %)</span>}
+          </span>
+        )}
+      </td>
+      <td className="py-2 pl-2 text-center" onClick={(e) => e.stopPropagation()}>
+        {statut === 'absent' ? (
+          canWrite ? (
+            <button onClick={onImportClick} className="text-xs text-teal-700 hover:underline font-medium">Importer l'état</button>
+          ) : (
+            <span className="inline-block text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">État non importé</span>
+          )
+        ) : (
+          <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${statut === 'importe' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+            {statut === 'importe' ? 'Importé (PDF)' : statut === 'saisi' ? 'Saisi' : (statut || '—')}
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function ComparaisonAspTab({ annee, setAnnee, canWrite }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expandedMois, setExpandedMois] = useState(null);
+
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
+
+  const fileInputRef = useRef(null);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true); setError(null);
+    api.get(`/effectifs/asp/comparaison?annee=${annee}`)
+      .then((r) => setData(r.data))
+      .catch((err) => setError(apiErr(err, 'Chargement de la comparaison ASP impossible')))
+      .finally(() => setLoading(false));
+  }, [annee]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setExpandedMois(null); }, [annee]);
+
+  const runPreview = useCallback((file) => {
+    setPreviewLoading(true); setPreviewError(null); setPreview(null); setConfirmError(null);
+    const form = new FormData();
+    form.append('fichier', file);
+    api.post('/effectifs/asp/import', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
+      .then((r) => setPreview(r.data))
+      .catch((err) => setPreviewError(apiErr(err, "Échec de l'analyse du PDF — vérifiez qu'il s'agit bien d'un état mensuel ASP.")))
+      .finally(() => setPreviewLoading(false));
+  }, []);
+
+  const onFilePicked = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setPendingFile(file);
+    setPreviewOpen(true);
+    runPreview(file);
+  };
+
+  const closePreview = () => {
+    setPreviewOpen(false); setPendingFile(null); setPreview(null); setPreviewError(null); setConfirmError(null);
+  };
+
+  const confirmImport = async () => {
+    if (!pendingFile) return;
+    setConfirming(true); setConfirmError(null);
+    try {
+      const form = new FormData();
+      form.append('fichier', pendingFile);
+      await api.post('/effectifs/asp/import?confirm=1', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 });
+      closePreview();
+      setExpandedMois(null);
+      load();
+    } catch (err) {
+      setConfirmError(apiErr(err, "Échec de l'enregistrement de l'état ASP"));
+    }
+    setConfirming(false);
+  };
+
+  const exportXlsx = async () => {
+    setExporting(true); setExportError(null);
+    try {
+      const res = await api.get(`/effectifs/asp/export?annee=${annee}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = `comparaison_asp_${annee}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      let msg = "Échec de l'export.";
+      try { const txt = await err.response?.data?.text?.(); if (txt) msg = JSON.parse(txt).error || msg; } catch { /* garde le message générique */ }
+      setExportError(msg);
+    }
+    setExporting(false);
+  };
+
+  const toggleMonth = (mn) => setExpandedMois((cur) => (cur === mn ? null : mn));
+
+  if (loading) return <LoadingSpinner size="lg" message="Chargement de la comparaison ASP…" />;
+  if (error) return <ErrorState variant="card" title="Comparaison indisponible" message={error} onRetry={load} />;
+  if (!data) return null;
+
+  const convention = data.convention || null;
+  const mois = data.mois || [];
+
+  return (
+    <div className="space-y-5">
+      {/* Input fichier caché — déclenché par le bandeau ou par « Importer l'état » d'une ligne 'absent' */}
+      <input ref={fileInputRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={onFilePicked} />
+
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <label htmlFor="asp-annee" className="text-sm text-slate-500">Année</label>
+          <select id="asp-annee" value={annee} onChange={(e) => setAnnee(Number(e.target.value))} className="input-modern text-sm py-1.5 w-auto">
+            {yearsList().map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <button onClick={exportXlsx} disabled={exporting} className="btn-secondary text-sm inline-flex items-center gap-1.5 disabled:opacity-50">
+          <Download className="w-4 h-4" strokeWidth={1.8} /> {exporting ? 'Export…' : 'Exporter la comparaison (Excel)'}
+        </button>
+      </div>
+      {exportError && <p className="text-xs text-red-600">{exportError}</p>}
+
+      {canWrite && (
+        <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-white border border-teal-200 flex-shrink-0">
+              <Upload className="w-4 h-4 text-teal-700" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-teal-800">Importer un état ASP</p>
+              <p className="text-xs text-teal-700/80">
+                Déposez le PDF de l'état mensuel ASP pour comparer automatiquement heures et ETP déclarés à ceux calculés par SOLIDATA.
+              </p>
+            </div>
+          </div>
+          <button onClick={() => fileInputRef.current?.click()} className="btn-primary text-sm inline-flex items-center gap-1.5 flex-shrink-0">
+            <Upload className="w-4 h-4" strokeWidth={1.8} /> Importer un état ASP (PDF)
+          </button>
+        </div>
+      )}
+
+      {conventionMissing(convention) && <ConventionWarning />}
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 text-slate-600 text-xs px-3 py-2 flex items-start gap-2">
+        <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-slate-400" aria-hidden="true" />
+        <span>
+          L'ASP déclare des heures <strong>payées</strong> (congés inclus) et n'inclut que les salariés en insertion ;
+          SOLIDATA calcule des ETP contractuels sur son propre périmètre. Les écarts attendus sont expliqués par les
+          trois blocs ci-dessous — un écart n'est pas forcément une anomalie.
+        </span>
+      </div>
+
+      <div className="bg-white rounded-xl border p-4">
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+          <h3 className="text-sm font-bold text-slate-700">Comparaison mensuelle {annee}</h3>
+          <p className="text-[11px] text-slate-400">
+            <span className="text-emerald-600 font-medium">Écart ≤ 0,5 ETP</span> ·{' '}
+            <span className="text-amber-600 font-medium">≤ 2 ETP</span> ·{' '}
+            <span className="text-red-600 font-medium">&gt; 2 ETP</span>
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                <th className="py-2 pr-2">Mois</th>
+                <th className="py-2 px-2 text-right">ETP ASP</th>
+                <th className="py-2 px-2 text-right">ETP SOLIDATA (prév.)</th>
+                <th className="py-2 px-2 text-right">ETP SOLIDATA (réalisé)</th>
+                <th className="py-2 px-2 text-right">Écart</th>
+                <th className="py-2 pl-2 text-center">Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mois.length === 0 ? (
+                <tr><td colSpan={6} className="text-center text-slate-400 py-6">Aucune donnée pour {annee}.</td></tr>
+              ) : mois.map((m) => {
+                const mn = Number(m.mois);
+                const isOpen = expandedMois === mn;
+                return (
+                  <Fragment key={mn}>
+                    <MonthRow m={m} mn={mn} isOpen={isOpen} onToggle={() => toggleMonth(mn)} canWrite={canWrite}
+                      onImportClick={() => fileInputRef.current?.click()} />
+                    {isOpen && (
+                      <tr>
+                        <td colSpan={6} className="bg-slate-50/60 border-b border-slate-100 px-3 py-3">
+                          <MoisDetail annee={annee} mois={mn} statut={m.statut} canWrite={canWrite} onLinked={load} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Modal isOpen={previewOpen} onClose={closePreview} title="Import de l'état ASP" size="lg">
+        {previewLoading ? (
+          <LoadingSpinner message="Analyse du PDF…" />
+        ) : previewError ? (
+          <div className="space-y-3">
+            <ErrorState variant="card" title="Analyse impossible" message={previewError} onRetry={() => pendingFile && runPreview(pendingFile)} />
+            <div className="flex justify-end"><button onClick={closePreview} className="btn-secondary text-sm">Fermer</button></div>
+          </div>
+        ) : preview ? (
+          <AspImportPreviewBody preview={preview} confirmError={confirmError} confirming={confirming} onCancel={closePreview} onConfirm={confirmImport} />
+        ) : null}
+      </Modal>
     </div>
   );
 }
@@ -940,6 +1616,7 @@ export default function EffectifsETP() {
 
   const TABS = [
     { id: 'synthese', label: 'Synthèse mensuelle', icon: LayoutDashboard, show: true },
+    { id: 'comparaison_asp', label: 'Comparaison ASP', icon: Scale, show: true },
     { id: 'previsionnel', label: 'Grille prévisionnelle', icon: Grid3x3, show: true },
     { id: 'realise', label: 'Réalisé & écarts', icon: GitCompare, show: true },
     { id: 'parametres', label: 'Paramètres', icon: Settings, show: canWrite },
@@ -972,6 +1649,7 @@ export default function EffectifsETP() {
         </div>
 
         {tab === 'synthese' && <SyntheseTab annee={annee} setAnnee={setAnnee} canWrite={canWrite} />}
+        {tab === 'comparaison_asp' && <ComparaisonAspTab annee={annee} setAnnee={setAnnee} canWrite={canWrite} />}
         {tab === 'previsionnel' && <PrevisionnelTab annee={annee} setAnnee={setAnnee} />}
         {tab === 'realise' && <RealiseTab annee={annee} setAnnee={setAnnee} />}
         {tab === 'parametres' && canWrite && <ParametresTab annee={annee} setAnnee={setAnnee} />}
