@@ -7109,7 +7109,76 @@ async function initDatabase() {
       );
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_etp_asp_annee ON etp_asp_mensuel(annee);');
-    console.log('[INIT-DB] Module Effectifs conventionnés (ETP) — table etp_asp_mensuel ✓');
+
+    // ── Import des états mensuels de présence ASP (PDF) ──────────────────
+    // Enrichissement de la validation mensuelle avec les en-têtes de l'état
+    // officiel (heures déclarées / éligibles, ETP conventionnés de l'annexe,
+    // taux, effectif déclaré, montant forfaitaire) + traçabilité de la source
+    // ('saisie' manuelle vs 'import_pdf'). Colonnes NULLABLES : une validation
+    // saisie à la main reste valide sans aucune de ces valeurs (jamais de
+    // valeur inventée). Migration idempotente (ADD COLUMN IF NOT EXISTS).
+    await client.query(`
+      ALTER TABLE etp_asp_mensuel ADD COLUMN IF NOT EXISTS heures_declarees NUMERIC(10,2);
+      ALTER TABLE etp_asp_mensuel ADD COLUMN IF NOT EXISTS heures_eligibles NUMERIC(10,2);
+      ALTER TABLE etp_asp_mensuel ADD COLUMN IF NOT EXISTS etp_conventionnes_asp NUMERIC(6,2);
+      ALTER TABLE etp_asp_mensuel ADD COLUMN IF NOT EXISTS taux_asp NUMERIC(6,2);
+      ALTER TABLE etp_asp_mensuel ADD COLUMN IF NOT EXISTS nb_salaries_asp INTEGER;
+      ALTER TABLE etp_asp_mensuel ADD COLUMN IF NOT EXISTS montant_forfaitaire NUMERIC(12,2);
+      ALTER TABLE etp_asp_mensuel ADD COLUMN IF NOT EXISTS source VARCHAR(20);
+      ALTER TABLE etp_asp_mensuel ADD COLUMN IF NOT EXISTS fichier_nom TEXT;
+    `);
+
+    // Détail salarié de l'état ASP : une ligne par salarié DÉCLARÉ et par mois.
+    // C'est la matière du rapprochement d'écarts (routes/effectifs.js) :
+    //   - `nom_asp` est le nom d'USAGE tel que déclaré à l'ASP — il diffère
+    //     régulièrement du nom porté par la paie (nom marital, prénom composé
+    //     tronqué), d'où la table de liaison manuelle ci-dessous ;
+    //   - `employee_id` est le rapprochement RETENU (NULL = non rapproché :
+    //     le salarié n'est pas dans l'ERP, le plus souvent parce que l'export
+    //     de paie n'inclut pas les salariés sortis) ;
+    //   - AUCUNE fiche salarié n'est jamais créée depuis un état ASP (RGPD :
+    //     pas d'invention de fiche RH — on EXPLIQUE l'écart, on ne le comble
+    //     pas artificiellement).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS etp_asp_salaries (
+        id SERIAL PRIMARY KEY,
+        annee INTEGER NOT NULL,
+        mois INTEGER NOT NULL CHECK (mois BETWEEN 1 AND 12),
+        nom_asp TEXT NOT NULL,
+        date_naissance DATE,
+        forme_contrat VARCHAR(10),
+        heures NUMERIC(8,2),
+        salaire_brut NUMERIC(10,2),
+        contrat_debut DATE,
+        contrat_fin DATE,
+        date_sortie DATE,
+        motif_sortie VARCHAR(10),
+        employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(annee, mois, nom_asp, date_naissance)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_etp_asp_salaries_periode ON etp_asp_salaries(annee, mois);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_etp_asp_salaries_employee ON etp_asp_salaries(employee_id);');
+
+    // Liaisons manuelles nom ASP ↔ collaborateur : mémorise la correspondance
+    // validée par un humain (nom d'usage différent, date de naissance divergente
+    // entre l'ASP et la paie — la paie ramène parfois le jour au 01). Persistée
+    // pour que le rapprochement des mois SUIVANTS soit automatique.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS etp_asp_liaisons (
+        id SERIAL PRIMARY KEY,
+        nom_asp TEXT NOT NULL,
+        date_naissance DATE,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        cree_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        cree_le TIMESTAMP DEFAULT NOW(),
+        UNIQUE(nom_asp, date_naissance)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_etp_asp_liaisons_employee ON etp_asp_liaisons(employee_id);');
+
+    console.log('[INIT-DB] Module Effectifs conventionnés (ETP) — etp_asp_mensuel + import ASP (etp_asp_salaries, etp_asp_liaisons) ✓');
 
 
     // ══════════════════════════════════════════
@@ -7151,6 +7220,7 @@ async function initDatabase() {
       'enquete_modeles', 'enquete_questions', 'enquete_campagnes', 'enquete_reponses',
       'achats_fournisseurs', 'achats_criteres', 'achats_fds',
       'qhse_documents', 'formation_actions', 'etp_asp_mensuel',
+      'etp_asp_salaries', 'etp_asp_liaisons',
       // Module 33 — Temps & Présence (badgeuse). badgeuse_pointages est en
       // BIGSERIAL : pg_get_serial_sequence la couvre de la même façon.
       'badgeuse_sites', 'badgeuse_devices', 'badgeuse_badges',
