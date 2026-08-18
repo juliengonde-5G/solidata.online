@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
@@ -9,8 +9,9 @@ import {
   addPendingCollect, deleteItem, newClientId, STORES,
   draftKey, saveDraft, readDraft, clearDraft,
 } from '../services/db';
-import { sendCollect, getPendingCount } from '../services/sync';
+import { sendCollect, sendCollectWithPhoto, getPendingCount } from '../services/sync';
 import { authedFetch } from '../services/authedFetch';
+import { pickAuditCavId } from '../services/auditPhoto';
 
 // 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
 // (plein) avec une anomalie 'debordement' automatiquement posée.
@@ -25,12 +26,20 @@ const FILL_LEVELS = [
 
 export default function FillLevel() {
   const [fillLevel, setFillLevel] = useState(null);
+  const [remballe, setRemballe] = useState(false);
   const [notes, setNotes] = useState('');
   const [notesOpen, setNotesOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState(null); // { cavName, pendingId, status }
   const [cavName, setCavName] = useState(null);
+  // Photo d'audit aléatoire (item « une photo par tournée ») : `auditRequired`
+  // pilote l'affichage, recalculé en toute rigueur au submit() (jamais fait
+  // confiance au seul état affiché — cf. commentaire dans submit).
+  const [auditRequired, setAuditRequired] = useState(false);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const photoInputRef = useRef(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const scannedQR = localStorage.getItem('scanned_qr');
@@ -48,14 +57,44 @@ export default function FillLevel() {
     readDraft(key).then(d => {
       if (!d) return;
       if (typeof d.fillLevel === 'number') setFillLevel(d.fillLevel);
+      if (d.remballe) setRemballe(true);
       if (d.notes) { setNotes(d.notes); setNotesOpen(true); }
     }).catch(() => {});
   }, [tourId]);
 
+  // Détermine dès l'arrivée sur l'écran si ce point est celui tiré au sort
+  // pour la tournée, afin d'afficher la consigne AVANT que le chauffeur tente
+  // de valider (best-effort — le vrai contrôle est refait dans submit()).
+  useEffect(() => {
+    if (!tourId) return;
+    resolveCurrentCav()
+      .then(({ cavId, cavs }) => {
+        const auditCavId = pickAuditCavId(tourId, cavs);
+        setAuditRequired(auditCavId != null && String(auditCavId) === String(cavId));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tourId]);
+
   const chooseLevel = (v) => { vibrateTap(); setFillLevel(v); };
+  const toggleRemballe = () => { vibrateTap(); setRemballe(v => !v); };
+
+  const onPhotoChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (photoPreview) { try { URL.revokeObjectURL(photoPreview); } catch { /* noop */ } }
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+  const clearPhoto = () => {
+    if (photoPreview) { try { URL.revokeObjectURL(photoPreview); } catch { /* noop */ } }
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
 
   // Résout le CAV en cours à marquer depuis la tournée.
-  // Retourne { cavId, displayName, tourIsAssociation } ou lève une erreur.
+  // Retourne { cavId, displayName, tourIsAssociation, cavs } ou lève une erreur.
   const resolveCurrentCav = async () => {
     const tourRes = await authedFetch(`/api/tours/${tourId}/public`);
     if (!tourRes.ok) throw new Error('Impossible de charger la tournée');
@@ -75,6 +114,7 @@ export default function FillLevel() {
       cavId: cav.cav_id || cav.id,
       displayName: cav.nom || cav.cav_name || 'CAV',
       tourIsAssociation,
+      cavs,
     };
   };
 
@@ -88,16 +128,30 @@ export default function FillLevel() {
     setError('');
     try {
       // 1) charger la tournée pour retrouver le CAV à marquer.
-      const { cavId, displayName, tourIsAssociation } = await resolveCurrentCav();
+      const { cavId, displayName, tourIsAssociation, cavs } = await resolveCurrentCav();
       setCavName(displayName);
+
+      // Photo d'audit : recalculée à partir des données fraîchement chargées —
+      // jamais depuis le seul état `auditRequired` affiché, qui peut être
+      // obsolète (échec réseau au chargement de l'écran, etc.).
+      const auditCavId = pickAuditCavId(tourId, cavs);
+      const photoRequiredNow = auditCavId != null && String(auditCavId) === String(cavId);
+      setAuditRequired(photoRequiredNow);
+      if (photoRequiredNow && !photoFile) {
+        setError('Photo obligatoire pour ce point (tirage aléatoire de la tournée).');
+        setLoading(false);
+        return;
+      }
 
       // 2) Persiste un draft pour pouvoir re-pré-remplir le formulaire via
       //    "Corriger" tant que l'action n'est pas sent.
       const dKey = draftKey('collect', tourId, cavId);
-      await saveDraft(dKey, { fillLevel, notes });
+      await saveDraft(dKey, { fillLevel, remballe, notes });
 
       // 3) Toujours écrire dans la file offline d'abord pour garantir aucune
-      //    perte de donnée, même si le submit backend échoue.
+      //    perte de donnée, même si le submit backend échoue. La photo n'est
+      //    PAS mise en file (pas de blob dans la file de sync, même
+      //    contrainte que les incidents) — seulement tentée en ligne ci-dessous.
       const payload = {
         clientId: newClientId(),
         tourId,
@@ -106,15 +160,22 @@ export default function FillLevel() {
         anomaly: effectiveAnomaly,
         notes,
         qrScanned: !tourIsAssociation,
+        remballe,
       };
       const pendingId = await addPendingCollect(payload);
 
       // 3) Si online, tenter l'envoi immédiat. Si ça passe, on peut supprimer
       //    l'entrée locale. Sinon on la laisse pour sync ultérieure.
       let status = 'pending';
+      let photoInfo = null;
       if (navigator.onLine) {
         try {
-          await sendCollect(payload);
+          if (photoFile) {
+            await sendCollectWithPhoto(payload, photoFile);
+            photoInfo = 'Photo jointe';
+          } else {
+            await sendCollect(payload);
+          }
           await deleteItem(STORES.pendingCollects, pendingId);
           status = 'sent';
         } catch (e) {
@@ -123,9 +184,12 @@ export default function FillLevel() {
             await deleteItem(STORES.pendingCollects, pendingId);
             status = 'retry';
           } else {
+            if (photoFile) photoInfo = 'Photo non envoyée (réseau) — collecte enregistrée';
             status = 'pending';
           }
         }
+      } else if (photoFile) {
+        photoInfo = 'Photo non jointe hors réseau — collecte enregistrée';
       }
 
       // Si envoi serveur OK, le draft devient sans valeur : on le supprime
@@ -136,7 +200,7 @@ export default function FillLevel() {
 
       await getPendingCount();
       vibrateSuccess();
-      setConfirm({ cavName: displayName, pendingId, status, cavId });
+      setConfirm({ cavName: displayName, pendingId, status, cavId, photoInfo });
     } catch (err) {
       vibrateError();
       setError(err.message || 'Erreur, réessayez');
@@ -172,9 +236,11 @@ export default function FillLevel() {
     const lines = [];
     if (selected) lines.push({ label: 'Niveau', value: `${selected.pct} — ${selected.label}` });
     if (selected?.overflow) lines.push({ label: 'Anomalie', value: 'Débordement' });
+    if (remballe) lines.push({ label: 'Remballe', value: 'Oui' });
+    if (confirm?.photoInfo) lines.push({ label: 'Photo', value: confirm.photoInfo });
     if (notes) lines.push({ label: 'Note', value: notes });
     return lines;
-  }, [selected, notes]);
+  }, [selected, remballe, notes, confirm]);
 
   if (confirm) {
     // "Corriger" n'est proposé que si l'action n'a pas encore quitté le
@@ -209,7 +275,7 @@ export default function FillLevel() {
           primaryLabel="Valider · point suivant"
           onPrimary={submit}
           loading={loading}
-          disabled={fillLevel === null}
+          disabled={fillLevel === null || (auditRequired && !photoFile)}
           error={error || null}
           pendingOffline={!navigator.onLine}
         />
@@ -273,6 +339,75 @@ export default function FillLevel() {
             </div>
           )}
         </div>
+
+        {/* 1bis. Case remballe */}
+        <button
+          type="button"
+          onClick={toggleRemballe}
+          aria-pressed={remballe}
+          className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+          style={{
+            minHeight: 56,
+            padding: '12px 14px',
+            borderRadius: 14,
+            border: remballe ? '2px solid var(--color-primary)' : '2px solid #E2E8F0',
+            background: remballe ? 'var(--color-primary-surface, #F0FDFA)' : 'white',
+          }}
+        >
+          <span
+            className="flex items-center justify-center flex-shrink-0"
+            style={{
+              width: 26, height: 26, borderRadius: 8,
+              border: remballe ? 'none' : '2px solid #CBD5E1',
+              background: remballe ? 'var(--color-primary)' : 'white',
+              color: 'white', fontSize: 16, fontWeight: 900,
+            }}
+            aria-hidden="true"
+          >
+            {remballe ? '✓' : ''}
+          </span>
+          <span className="flex-1 font-bold text-[15px] text-gray-800">J'ai fait de la remballe</span>
+        </button>
+
+        {/* 1ter. Photo d'audit — obligatoire uniquement sur le point tiré au
+            sort pour cette tournée (test aléatoire, une photo par tournée) */}
+        {auditRequired && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-red-600 font-bold mb-2">
+              Contrôle aléatoire — photo obligatoire pour ce point
+            </p>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={onPhotoChange}
+              className="hidden"
+              aria-label="Prendre une photo du CAV"
+            />
+            {!photoPreview ? (
+              <button
+                type="button"
+                onClick={() => photoInputRef.current && photoInputRef.current.click()}
+                className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+                style={{ minHeight: 56, padding: '12px 14px', borderRadius: 14, border: '2px solid #FCA5A5', color: '#334155' }}
+              >
+                <span className="text-xl" aria-hidden="true">📷</span>
+                <span className="flex-1 font-bold text-[15px]">Prendre une photo du CAV</span>
+                <span className="text-xs font-bold text-red-600">obligatoire</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-3 bg-white p-2" style={{ borderRadius: 14, border: '2px solid #BBF7D0' }}>
+                <img src={photoPreview} alt="Aperçu du CAV" className="rounded-lg object-cover" style={{ width: 56, height: 56 }} />
+                <span className="flex-1 text-sm font-semibold text-green-800">Photo prête à envoyer</span>
+                <button type="button" onClick={clearPhoto} className="text-sm text-gray-500 underline px-2 py-1">Retirer</button>
+              </div>
+            )}
+            {!navigator.onLine && photoPreview && (
+              <p className="mt-1 text-xs text-amber-600 font-medium">Hors réseau : la photo ne sera pas jointe, la collecte sera bien enregistrée.</p>
+            )}
+          </div>
+        )}
 
         {/* 2. Actions secondaires — incident / camion plein */}
         <div className="flex flex-col gap-2">

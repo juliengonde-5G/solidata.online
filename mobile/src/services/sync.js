@@ -292,6 +292,7 @@ export async function sendCollect(collect) {
         status: 'collected',
         fill_level: collect.fillLevel,
         qr_scanned: !!collect.qrScanned,
+        remballe: !!collect.remballe,
         notes: collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''),
         client_id: collect.clientId || null,
       };
@@ -332,6 +333,32 @@ export async function sendIncidentWithPhoto(incident, photoFile) {
     throw err;
   }
   return res.json();
+}
+
+/**
+ * Envoie une collecte AVEC photo en multipart (uniquement en ligne — comme
+ * pour les incidents, la file offline reste en JSON sans photo). Utilisé pour
+ * le point tiré au sort par tournée (services/auditPhoto.js).
+ */
+export async function sendCollectWithPhoto(collect, photoFile) {
+  const fd = new FormData();
+  fd.append('status', 'collected');
+  fd.append('fill_level', String(collect.fillLevel));
+  fd.append('qr_scanned', String(!!collect.qrScanned));
+  fd.append('remballe', String(!!collect.remballe));
+  fd.append('notes', collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''));
+  if (collect.clientId) fd.append('client_id', collect.clientId);
+  fd.append('photo', photoFile);
+  const res = await authedFetch(`/api/tours/${collect.tourId}/cav/${collect.cavId}/collect-public`, {
+    method: 'PUT',
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status };
+    throw err;
+  }
+  return res.json().catch(() => ({}));
 }
 
 export async function syncPendingCollects() {

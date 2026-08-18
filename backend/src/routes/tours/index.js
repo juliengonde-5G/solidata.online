@@ -22,6 +22,20 @@ const photoStorage = multer.diskStorage({
 // qui pourraient être réfléchis via /uploads/incidents.
 const upload = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFilter });
 
+// Upload photos de collecte (audit aléatoire — une par tournée, FillLevel.jsx)
+const collectePhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', '..', '..', 'uploads', 'collectes');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).replace(/[^a-zA-Z0-9.]/g, '');
+    cb(null, `collecte_${Date.now()}${ext}`);
+  },
+});
+const uploadCollectePhoto = multer({ storage: collectePhotoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFilter });
+
 // Sub-routers
 const crudRouter = require('./crud');
 const proposalsRouter = require('./proposals');
@@ -297,11 +311,20 @@ router.put('/:id/start-public', async (req, res) => {
 // (inaccessible, bouché, vide…) sans forcer une saisie de niveau. skip_reason
 // est aligné sur le CHECK de tour_cav et sur la route web execution.js.
 const VALID_SKIP_REASON = ['cav_fermee', 'bouchee', 'acces_impossible', 'proprietaire_absent', 'vide', 'autre'];
-router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
+// multer laisse passer les requêtes JSON non-multipart (hors ligne, sans
+// photo) — même pattern que incident-public.
+router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo'), async (req, res) => {
   try {
     const { fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes } = req.body;
     const status = req.body.status === 'skipped' ? 'skipped' : 'collected';
     const skip_reason = req.body.skip_reason || null;
+    // multipart : les champs arrivent en string ('true'/'false').
+    const remballe = req.body.remballe === true || req.body.remballe === 'true';
+    // Photo d'audit (item « photo aléatoire par tournée ») : présente seulement
+    // si ce point est le point tiré au sort pour cette tournée (choisi côté
+    // mobile, cf. services/auditPhoto.js). COALESCE : un re-submit sans photo
+    // (ex. correction du niveau) ne doit jamais effacer une photo déjà reçue.
+    const photo_path = req.file ? `/uploads/collectes/${req.file.filename}` : null;
 
     if (status === 'skipped' && skip_reason && !VALID_SKIP_REASON.includes(skip_reason)) {
       return res.status(400).json({ error: 'skip_reason invalide', allowed: VALID_SKIP_REASON });
@@ -318,11 +341,14 @@ router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
         `UPDATE tour_association_point SET status = $1,
          fill_level = $2,
          notes = $3,
+         remballe = $4,
+         photo_path = COALESCE($5, photo_path),
          collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
-         WHERE tour_id = $4 AND association_point_id = $5 RETURNING *`,
+         WHERE tour_id = $6 AND association_point_id = $7 RETURNING *`,
         [status,
          status === 'skipped' ? null : fill_level,
          status === 'skipped' ? (notes || (skip_reason ? `Non collecté : ${skip_reason}` : 'Non collecté')) : (notes || null),
+         remballe, photo_path,
          req.params.id, req.params.cavId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
@@ -336,10 +362,12 @@ router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
          qr_unavailable_reason = $5,
          skip_reason = CASE WHEN $1 = 'skipped' THEN $6 ELSE NULL END,
          notes = $7,
+         remballe = $8,
+         photo_path = COALESCE($9, photo_path),
          collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
-         WHERE tour_id = $8 AND cav_id = $9 RETURNING *`,
+         WHERE tour_id = $10 AND cav_id = $11 RETURNING *`,
         [status, fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null,
-         skip_reason, notes || null, req.params.id, req.params.cavId]
+         skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
       res.json(result.rows[0]);

@@ -229,7 +229,7 @@ export async function updatePendingIncident(id, patch) {
  * Ajoute une collecte OU un saut de point en attente.
  * @param {object} data - {
  *   tourId, cavId, action?='collect'|'skip', fillLevel?, skipReason?,
- *   anomaly?, notes?, qrScanned?
+ *   anomaly?, notes?, qrScanned?, remballe?
  * }
  * - action='skip' : le CAV est marqué « impossible à collecter » (skipReason
  *   inaccessible/bouché/vide/…), sans niveau de remplissage.
@@ -246,6 +246,7 @@ export async function addPendingCollect(data) {
     anomaly: data.anomaly || null,
     notes: data.notes || null,
     qrScanned: !!data.qrScanned,
+    remballe: !!data.remballe,
     createdAt: new Date().toISOString(),
   });
 }

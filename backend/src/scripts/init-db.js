@@ -1834,6 +1834,26 @@ async function initDatabase() {
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
 
+    // Mobile collecte : case « J'ai fait de la remballe » (FillLevel.jsx) et
+    // photo d'audit aléatoire (une par tournée). `photo_path` existait déjà
+    // sur tour_cav (jamais écrit) ; ajouté ici sur tour_association_point pour
+    // que les tournées association bénéficient du même contrôle photo.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tour_cav ADD COLUMN remballe BOOLEAN DEFAULT false;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tour_association_point ADD COLUMN remballe BOOLEAN DEFAULT false;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tour_association_point ADD COLUMN photo_path VARCHAR(500);
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
     // Vague 1 (item 45) — checklist véhicule : persister les remarques/anomalies
     // saisies par le chauffeur au départ. Le champ `notes` était envoyé par le
     // mobile (Checklist.jsx) mais jamais déstructuré ni stocké → perdu.
