@@ -36,7 +36,7 @@ router.get('/:id/live-summary', async (req, res) => {
     const tourResult = await pool.query(`
       SELECT t.*,
              v.registration, v.name AS vehicle_name, v.max_capacity_kg,
-             CONCAT(e.first_name, ' ', e.last_name) AS driver_name,
+             NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS driver_name,
              e.id AS driver_id
       FROM tours t
       LEFT JOIN vehicles v ON v.id = t.vehicle_id

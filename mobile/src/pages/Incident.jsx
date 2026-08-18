@@ -84,6 +84,9 @@ export default function Incident() {
 
   const chooseType = async (t) => {
     if (phase !== 'type') return;
+    // Photo obligatoire : le bouton est désactivé tant qu'elle manque, mais on
+    // vérifie aussi ici en garde-fou (défense en profondeur).
+    if (!photoFile) return;
     vibrateTap();
     setType(t);
     setError('');
@@ -353,10 +356,12 @@ export default function Incident() {
         </div>
 
         <p className="text-sm text-gray-600 leading-snug">
-          Un seul tap suffit. Les détails sont optionnels et pourront être ajoutés juste après.
+          {photoFile
+            ? "Un seul tap suffit pour choisir le type. Les détails sont optionnels et pourront être ajoutés juste après."
+            : "Ajoutez une photo, puis choisissez le type en un tap."}
         </p>
 
-        {/* Photo (optionnelle) — jointe si réseau, sinon incident enregistré sans photo */}
+        {/* Photo obligatoire — jointe si réseau, sinon incident enregistré sans photo */}
         <div>
           <input
             ref={photoInputRef}
@@ -365,22 +370,22 @@ export default function Incident() {
             capture="environment"
             onChange={onPhotoChange}
             className="hidden"
-            aria-label="Prendre une photo de l'incident"
+            aria-label="Prendre une photo de l'anomalie"
           />
           {!photoPreview ? (
             <button
               type="button"
               onClick={() => photoInputRef.current && photoInputRef.current.click()}
               className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
-              style={{ minHeight: 56, padding: '12px 14px', borderRadius: 14, border: '2px solid #E2E8F0', color: '#334155' }}
+              style={{ minHeight: 56, padding: '12px 14px', borderRadius: 14, border: '2px solid #FCA5A5', color: '#334155' }}
             >
               <span className="text-xl" aria-hidden="true">📷</span>
               <span className="flex-1 font-bold text-[15px]">Ajouter une photo</span>
-              <span className="text-xs text-gray-400">optionnel</span>
+              <span className="text-xs font-bold text-red-600">obligatoire</span>
             </button>
           ) : (
             <div className="flex items-center gap-3 bg-white p-2" style={{ borderRadius: 14, border: '2px solid #BBF7D0' }}>
-              <img src={photoPreview} alt="Aperçu incident" className="rounded-lg object-cover" style={{ width: 56, height: 56 }} />
+              <img src={photoPreview} alt="Aperçu de l'anomalie" className="rounded-lg object-cover" style={{ width: 56, height: 56 }} />
               <span className="flex-1 text-sm font-semibold text-green-800">Photo prête à envoyer</span>
               <button type="button" onClick={clearPhoto} className="text-sm text-gray-500 underline px-2 py-1">Retirer</button>
             </div>
@@ -390,11 +395,14 @@ export default function Incident() {
           )}
         </div>
 
-        {/* Type grid 2x3 */}
+        {/* Type grid 2x3 — verrouillée tant qu'aucune photo n'a été ajoutée */}
         <div>
           <p className="text-[11px] uppercase tracking-widest text-gray-500 font-bold mb-3">
             Type d'incident
           </p>
+          {!photoFile && (
+            <p className="text-xs text-amber-600 font-medium mb-2">Ajoutez une photo pour pouvoir choisir un type.</p>
+          )}
           <div className="grid grid-cols-2 gap-2.5">
             {INCIDENT_TYPES.map(t => (
               <button
@@ -402,13 +410,15 @@ export default function Incident() {
                 type="button"
                 aria-label={`Signaler : ${t.label}`}
                 onClick={() => chooseType(t)}
-                className="flex flex-col items-center justify-center gap-1 text-center bg-white active:scale-[0.97] transition-all"
+                disabled={!photoFile}
+                className="flex flex-col items-center justify-center gap-1 text-center bg-white active:scale-[0.97] transition-all disabled:active:scale-100"
                 style={{
                   minHeight: 96,
                   padding: '12px 10px',
                   borderRadius: 14,
                   border: '2px solid #E2E8F0',
                   color: '#1E293B',
+                  opacity: photoFile ? 1 : 0.4,
                 }}
               >
                 <span className="text-[28px] leading-none" aria-hidden="true">{t.icon}</span>

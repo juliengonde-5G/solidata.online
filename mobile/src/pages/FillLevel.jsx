@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
 import MobileShell from '../components/MobileShell';
@@ -9,8 +9,9 @@ import {
   addPendingCollect, deleteItem, newClientId, STORES,
   draftKey, saveDraft, readDraft, clearDraft,
 } from '../services/db';
-import { sendCollect, getPendingCount } from '../services/sync';
+import { sendCollect, sendCollectWithPhoto, getPendingCount } from '../services/sync';
 import { authedFetch } from '../services/authedFetch';
+import { pickAuditCavId } from '../services/auditPhoto';
 
 // 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
 // (plein) avec une anomalie 'debordement' automatiquement posée.
@@ -23,44 +24,22 @@ const FILL_LEVELS = [
   { value: 5, label: 'au-delà',       pct: '++',   visual: 'overflow',      store: 4, overflow: true },
 ];
 
-const COMMON_ANOMALIES = [
-  { value: 'debordement', label: 'Débordement', icon: '🟨' },
-  { value: 'acces_bloque', label: 'Accès bloqué', icon: '🚧' },
-  { value: 'conteneur_endommage', label: 'Conteneur endommagé', icon: '⚠️' },
-  { value: 'dechets_non_conformes', label: 'Déchets non conformes', icon: '🗑' },
-];
-const OTHER_ANOMALIES = [
-  { value: 'vandalisme', label: 'Vandalisme' },
-  { value: 'cle_cassee', label: 'Clé cassée' },
-];
-const ANOMALY_LABELS = [...COMMON_ANOMALIES, ...OTHER_ANOMALIES].reduce((acc, a) => {
-  acc[a.value] = a.label;
-  return acc;
-}, {});
-
-// Raisons de saut d'un point (« impossible à collecter »). Libellés simples
-// (public FALC) mappés sur l'enum backend skip_reason (tour_cav).
-const SKIP_REASONS = [
-  { value: 'acces_impossible', label: 'Accès impossible', icon: '🚧' },
-  { value: 'bouchee',          label: 'Borne bouchée',    icon: '🔒' },
-  { value: 'vide',             label: 'Borne vide',       icon: '⬜' },
-  { value: 'cav_fermee',       label: 'Borne condamnée',  icon: '⛔' },
-  { value: 'autre',            label: 'Autre raison',     icon: '❓' },
-];
-const SKIP_LABELS = SKIP_REASONS.reduce((acc, r) => { acc[r.value] = r.label; return acc; }, {});
-
 export default function FillLevel() {
   const [fillLevel, setFillLevel] = useState(null);
-  const [anomaly, setAnomaly] = useState('');
-  const [showOtherAnomalies, setShowOtherAnomalies] = useState(false);
+  const [remballe, setRemballe] = useState(false);
   const [notes, setNotes] = useState('');
   const [notesOpen, setNotesOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState(null); // { cavName, pendingId, status }
   const [cavName, setCavName] = useState(null);
-  const [skipOpen, setSkipOpen] = useState(false); // panneau « impossible à collecter »
-  const [skipping, setSkipping] = useState(false);
+  // Photo d'audit aléatoire (item « une photo par tournée ») : `auditRequired`
+  // pilote l'affichage, recalculé en toute rigueur au submit() (jamais fait
+  // confiance au seul état affiché — cf. commentaire dans submit).
+  const [auditRequired, setAuditRequired] = useState(false);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const photoInputRef = useRef(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const scannedQR = localStorage.getItem('scanned_qr');
@@ -78,19 +57,44 @@ export default function FillLevel() {
     readDraft(key).then(d => {
       if (!d) return;
       if (typeof d.fillLevel === 'number') setFillLevel(d.fillLevel);
-      if (d.anomaly) setAnomaly(d.anomaly);
+      if (d.remballe) setRemballe(true);
       if (d.notes) { setNotes(d.notes); setNotesOpen(true); }
     }).catch(() => {});
   }, [tourId]);
 
+  // Détermine dès l'arrivée sur l'écran si ce point est celui tiré au sort
+  // pour la tournée, afin d'afficher la consigne AVANT que le chauffeur tente
+  // de valider (best-effort — le vrai contrôle est refait dans submit()).
+  useEffect(() => {
+    if (!tourId) return;
+    resolveCurrentCav()
+      .then(({ cavId, cavs }) => {
+        const auditCavId = pickAuditCavId(tourId, cavs);
+        setAuditRequired(auditCavId != null && String(auditCavId) === String(cavId));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tourId]);
+
   const chooseLevel = (v) => { vibrateTap(); setFillLevel(v); };
-  const toggleAnomaly = (value) => {
-    vibrateTap();
-    setAnomaly(prev => (prev === value ? '' : value));
+  const toggleRemballe = () => { vibrateTap(); setRemballe(v => !v); };
+
+  const onPhotoChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (photoPreview) { try { URL.revokeObjectURL(photoPreview); } catch { /* noop */ } }
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+  const clearPhoto = () => {
+    if (photoPreview) { try { URL.revokeObjectURL(photoPreview); } catch { /* noop */ } }
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
-  // Résout le CAV en cours à marquer (collecte ou saut) depuis la tournée.
-  // Retourne { cavId, displayName, tourIsAssociation } ou lève une erreur.
+  // Résout le CAV en cours à marquer depuis la tournée.
+  // Retourne { cavId, displayName, tourIsAssociation, cavs } ou lève une erreur.
   const resolveCurrentCav = async () => {
     const tourRes = await authedFetch(`/api/tours/${tourId}/public`);
     if (!tourRes.ok) throw new Error('Impossible de charger la tournée');
@@ -110,58 +114,8 @@ export default function FillLevel() {
       cavId: cav.cav_id || cav.id,
       displayName: cav.nom || cav.cav_name || 'CAV',
       tourIsAssociation,
+      cavs,
     };
-  };
-
-  // Déclare le point en cours comme « impossible à collecter » (saut).
-  // Offline-first : écrit d'abord dans la file de sync, tente l'envoi immédiat.
-  const submitSkip = async (reason) => {
-    if (skipping) return;
-    setSkipping(true);
-    setError('');
-    try {
-      const { cavId, displayName } = await resolveCurrentCav();
-      setCavName(displayName);
-
-      const payload = {
-        clientId: newClientId(),
-        tourId,
-        cavId,
-        action: 'skip',
-        skipReason: reason,
-        notes: notes || null,
-      };
-      const pendingId = await addPendingCollect(payload);
-
-      let status = 'pending';
-      if (navigator.onLine) {
-        try {
-          await sendCollect(payload);
-          await deleteItem(STORES.pendingCollects, pendingId);
-          status = 'sent';
-        } catch (e) {
-          if (e?.response?.status >= 400 && e?.response?.status < 500) {
-            await deleteItem(STORES.pendingCollects, pendingId);
-            status = 'retry';
-          } else {
-            status = 'pending';
-          }
-        }
-      }
-
-      // Un point sauté n'a plus de draft de collecte à conserver.
-      try { await clearDraft(draftKey('collect', tourId, cavId)); } catch {}
-
-      await getPendingCount();
-      vibrateSuccess();
-      setSkipOpen(false);
-      setConfirm({ cavName: displayName, pendingId, status, cavId, skipped: true, skipReason: reason });
-    } catch (err) {
-      vibrateError();
-      setError(err.message || 'Erreur, réessayez');
-      console.error('[FillLevel] submitSkip', err);
-    }
-    setSkipping(false);
   };
 
   const submit = async () => {
@@ -169,21 +123,35 @@ export default function FillLevel() {
     // Résout la valeur à envoyer et l'anomalie implicite pour le niveau ++.
     const levelObj = FILL_LEVELS.find(l => l.value === fillLevel);
     const storeLevel = levelObj ? levelObj.store : fillLevel;
-    const effectiveAnomaly = levelObj?.overflow && !anomaly ? 'debordement' : anomaly;
+    const effectiveAnomaly = levelObj?.overflow ? 'debordement' : null;
     setLoading(true);
     setError('');
     try {
       // 1) charger la tournée pour retrouver le CAV à marquer.
-      const { cavId, displayName, tourIsAssociation } = await resolveCurrentCav();
+      const { cavId, displayName, tourIsAssociation, cavs } = await resolveCurrentCav();
       setCavName(displayName);
+
+      // Photo d'audit : recalculée à partir des données fraîchement chargées —
+      // jamais depuis le seul état `auditRequired` affiché, qui peut être
+      // obsolète (échec réseau au chargement de l'écran, etc.).
+      const auditCavId = pickAuditCavId(tourId, cavs);
+      const photoRequiredNow = auditCavId != null && String(auditCavId) === String(cavId);
+      setAuditRequired(photoRequiredNow);
+      if (photoRequiredNow && !photoFile) {
+        setError('Photo obligatoire pour ce point (tirage aléatoire de la tournée).');
+        setLoading(false);
+        return;
+      }
 
       // 2) Persiste un draft pour pouvoir re-pré-remplir le formulaire via
       //    "Corriger" tant que l'action n'est pas sent.
       const dKey = draftKey('collect', tourId, cavId);
-      await saveDraft(dKey, { fillLevel, anomaly, notes });
+      await saveDraft(dKey, { fillLevel, remballe, notes });
 
       // 3) Toujours écrire dans la file offline d'abord pour garantir aucune
-      //    perte de donnée, même si le submit backend échoue.
+      //    perte de donnée, même si le submit backend échoue. La photo n'est
+      //    PAS mise en file (pas de blob dans la file de sync, même
+      //    contrainte que les incidents) — seulement tentée en ligne ci-dessous.
       const payload = {
         clientId: newClientId(),
         tourId,
@@ -192,15 +160,22 @@ export default function FillLevel() {
         anomaly: effectiveAnomaly,
         notes,
         qrScanned: !tourIsAssociation,
+        remballe,
       };
       const pendingId = await addPendingCollect(payload);
 
       // 3) Si online, tenter l'envoi immédiat. Si ça passe, on peut supprimer
       //    l'entrée locale. Sinon on la laisse pour sync ultérieure.
       let status = 'pending';
+      let photoInfo = null;
       if (navigator.onLine) {
         try {
-          await sendCollect(payload);
+          if (photoFile) {
+            await sendCollectWithPhoto(payload, photoFile);
+            photoInfo = 'Photo jointe';
+          } else {
+            await sendCollect(payload);
+          }
           await deleteItem(STORES.pendingCollects, pendingId);
           status = 'sent';
         } catch (e) {
@@ -209,9 +184,12 @@ export default function FillLevel() {
             await deleteItem(STORES.pendingCollects, pendingId);
             status = 'retry';
           } else {
+            if (photoFile) photoInfo = 'Photo non envoyée (réseau) — collecte enregistrée';
             status = 'pending';
           }
         }
+      } else if (photoFile) {
+        photoInfo = 'Photo non jointe hors réseau — collecte enregistrée';
       }
 
       // Si envoi serveur OK, le draft devient sans valeur : on le supprime
@@ -222,7 +200,7 @@ export default function FillLevel() {
 
       await getPendingCount();
       vibrateSuccess();
-      setConfirm({ cavName: displayName, pendingId, status, cavId });
+      setConfirm({ cavName: displayName, pendingId, status, cavId, photoInfo });
     } catch (err) {
       vibrateError();
       setError(err.message || 'Erreur, réessayez');
@@ -257,27 +235,14 @@ export default function FillLevel() {
   const summaryLines = useMemo(() => {
     const lines = [];
     if (selected) lines.push({ label: 'Niveau', value: `${selected.pct} — ${selected.label}` });
-    if (anomaly) lines.push({ label: 'Anomalie', value: ANOMALY_LABELS[anomaly] || anomaly });
+    if (selected?.overflow) lines.push({ label: 'Anomalie', value: 'Débordement' });
+    if (remballe) lines.push({ label: 'Remballe', value: 'Oui' });
+    if (confirm?.photoInfo) lines.push({ label: 'Photo', value: confirm.photoInfo });
     if (notes) lines.push({ label: 'Note', value: notes });
     return lines;
-  }, [selected, anomaly, notes]);
+  }, [selected, remballe, notes, confirm]);
 
   if (confirm) {
-    // Écran de saut : pas de « Corriger » (rien à ré-éditer), résumé = motif.
-    if (confirm.skipped) {
-      return (
-        <StepConfirmScreen
-          title="Point non collecté"
-          cavName={confirm.cavName}
-          status={confirm.status}
-          summaryLines={[{ label: 'Motif', value: SKIP_LABELS[confirm.skipReason] || confirm.skipReason }]}
-          primaryLabel="Continuer"
-          onPrimary={finishAndReturn}
-          onAutoReturn={finishAndReturn}
-          autoReturnMs={8000}
-        />
-      );
-    }
     // "Corriger" n'est proposé que si l'action n'a pas encore quitté le
     // mobile. Le backend n'expose pas de endpoint uncollect-public, donc
     // un rollback serveur n'est pas possible aujourd'hui (cf. contrat
@@ -310,7 +275,7 @@ export default function FillLevel() {
           primaryLabel="Valider · point suivant"
           onPrimary={submit}
           loading={loading}
-          disabled={fillLevel === null}
+          disabled={fillLevel === null || (auditRequired && !photoFile)}
           error={error || null}
           pendingOffline={!navigator.onLine}
         />
@@ -375,119 +340,77 @@ export default function FillLevel() {
           )}
         </div>
 
-        {/* 2. Anomalies — cartes tactiles */}
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Anomalie (optionnel)</p>
-          <div className="grid grid-cols-2 gap-2">
-            {COMMON_ANOMALIES.map(a => {
-              const active = anomaly === a.value;
-              return (
-                <button
-                  key={a.value}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => toggleAnomaly(a.value)}
-                  className={`card-mobile p-3 flex items-center gap-2 text-left transition-all ${
-                    active ? 'ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5' : ''
-                  }`}
-                >
-                  <span className="text-xl" aria-hidden="true">{a.icon}</span>
-                  <span className="text-sm font-semibold text-gray-800">{a.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {!showOtherAnomalies && (
-            <button
-              type="button"
-              onClick={() => setShowOtherAnomalies(true)}
-              className="mt-2 text-sm font-medium text-[var(--color-primary)] underline"
-            >
-              Autres anomalies
-            </button>
-          )}
-
-          {showOtherAnomalies && (
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              {OTHER_ANOMALIES.map(a => {
-                const active = anomaly === a.value;
-                return (
-                  <button
-                    key={a.value}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => toggleAnomaly(a.value)}
-                    className={`card-mobile p-3 text-sm font-medium text-gray-700 transition-all ${
-                      active ? 'ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5' : ''
-                    }`}
-                  >
-                    {a.label}
-                  </button>
-                );
-              })}
-              {anomaly && (
-                <button
-                  type="button"
-                  onClick={() => setAnomaly('')}
-                  className="card-mobile p-3 text-sm text-gray-500"
-                >
-                  Effacer
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 2bis. Actions secondaires — impossible à collecter / incident / camion plein */}
-        <div className="flex flex-col gap-2">
-          {/* Saut de point : distinct de la saisie de niveau (item 46a) */}
-          <button
-            type="button"
-            onClick={() => { vibrateTap(); setSkipOpen(v => !v); }}
-            aria-expanded={skipOpen}
-            className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+        {/* 1bis. Case remballe */}
+        <button
+          type="button"
+          onClick={toggleRemballe}
+          aria-pressed={remballe}
+          className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+          style={{
+            minHeight: 56,
+            padding: '12px 14px',
+            borderRadius: 14,
+            border: remballe ? '2px solid var(--color-primary)' : '2px solid #E2E8F0',
+            background: remballe ? 'var(--color-primary-surface, #F0FDFA)' : 'white',
+          }}
+        >
+          <span
+            className="flex items-center justify-center flex-shrink-0"
             style={{
-              minHeight: 60,
-              padding: '12px 14px',
-              borderRadius: 14,
-              border: skipOpen ? '2px solid #F59E0B' : '2px solid #FDE68A',
-              color: '#92400E',
+              width: 26, height: 26, borderRadius: 8,
+              border: remballe ? 'none' : '2px solid #CBD5E1',
+              background: remballe ? 'var(--color-primary)' : 'white',
+              color: 'white', fontSize: 16, fontWeight: 900,
             }}
+            aria-hidden="true"
           >
-            <span className="text-xl" aria-hidden="true">🚫</span>
-            <span className="flex-1 font-bold text-[15px]">Impossible de collecter ce point</span>
-            <span aria-hidden="true" className="text-gray-400">{skipOpen ? '▾' : '→'}</span>
-          </button>
-          {skipOpen && (
-            <div className="card-mobile p-3">
-              <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">
-                Pourquoi ?
-              </p>
-              <div className="grid grid-cols-1 gap-2">
-                {SKIP_REASONS.map(r => (
-                  <button
-                    key={r.value}
-                    type="button"
-                    disabled={skipping}
-                    onClick={() => submitSkip(r.value)}
-                    className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform disabled:opacity-50"
-                    style={{
-                      minHeight: 56,
-                      padding: '10px 14px',
-                      borderRadius: 12,
-                      border: '2px solid #E2E8F0',
-                      color: '#1E293B',
-                    }}
-                  >
-                    <span className="text-xl" aria-hidden="true">{r.icon}</span>
-                    <span className="flex-1 font-bold text-[15px]">{r.label}</span>
-                  </button>
-                ))}
+            {remballe ? '✓' : ''}
+          </span>
+          <span className="flex-1 font-bold text-[15px] text-gray-800">J'ai fait de la remballe</span>
+        </button>
+
+        {/* 1ter. Photo d'audit — obligatoire uniquement sur le point tiré au
+            sort pour cette tournée (test aléatoire, une photo par tournée) */}
+        {auditRequired && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-red-600 font-bold mb-2">
+              Contrôle aléatoire — photo obligatoire pour ce point
+            </p>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={onPhotoChange}
+              className="hidden"
+              aria-label="Prendre une photo du CAV"
+            />
+            {!photoPreview ? (
+              <button
+                type="button"
+                onClick={() => photoInputRef.current && photoInputRef.current.click()}
+                className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+                style={{ minHeight: 56, padding: '12px 14px', borderRadius: 14, border: '2px solid #FCA5A5', color: '#334155' }}
+              >
+                <span className="text-xl" aria-hidden="true">📷</span>
+                <span className="flex-1 font-bold text-[15px]">Prendre une photo du CAV</span>
+                <span className="text-xs font-bold text-red-600">obligatoire</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-3 bg-white p-2" style={{ borderRadius: 14, border: '2px solid #BBF7D0' }}>
+                <img src={photoPreview} alt="Aperçu du CAV" className="rounded-lg object-cover" style={{ width: 56, height: 56 }} />
+                <span className="flex-1 text-sm font-semibold text-green-800">Photo prête à envoyer</span>
+                <button type="button" onClick={clearPhoto} className="text-sm text-gray-500 underline px-2 py-1">Retirer</button>
               </div>
-              {skipping && <p className="mt-2 text-sm text-gray-500">Enregistrement…</p>}
-            </div>
-          )}
+            )}
+            {!navigator.onLine && photoPreview && (
+              <p className="mt-1 text-xs text-amber-600 font-medium">Hors réseau : la photo ne sera pas jointe, la collecte sera bien enregistrée.</p>
+            )}
+          </div>
+        )}
+
+        {/* 2. Actions secondaires — incident / camion plein */}
+        <div className="flex flex-col gap-2">
           <button
             type="button"
             onClick={() => navigate('/incident')}
@@ -501,7 +424,7 @@ export default function FillLevel() {
             }}
           >
             <span className="text-xl" aria-hidden="true">⚠</span>
-            <span className="flex-1 font-bold text-[15px]">Déclarer un incident</span>
+            <span className="flex-1 font-bold text-[15px]">Déclarer une anomalie</span>
             <span aria-hidden="true" className="text-gray-400">→</span>
           </button>
           <button

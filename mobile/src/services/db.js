@@ -15,6 +15,10 @@
  *   - pendingMessageReads            (file d'envoi : accusés de lecture des
  *                                     consignes manager → chauffeur)
  *
+ * Stores v4 :
+ *   - pendingEndOfDay                (file d'envoi : déclarations de fin de
+ *                                     journée chauffeur/suiveur/binôme)
+ *
  * Chaque entrée "pending*" porte un clientId (uuid) pour permettre une
  * idempotence côté serveur si le backend évolue (cf. contrat recommandé dans
  * DOCUMENTATION_MOBILE.md). Par défaut, on s'appuie sur la politique
@@ -22,7 +26,7 @@
  */
 
 const DB_NAME = 'solidata-mobile';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export const STORES = {
   tours: 'tours',
@@ -34,6 +38,7 @@ export const STORES = {
   pendingIncidents: 'pendingIncidents',
   pendingCollects: 'pendingCollects',
   pendingMessageReads: 'pendingMessageReads',
+  pendingEndOfDay: 'pendingEndOfDay',
 };
 
 export function openDB() {
@@ -77,6 +82,12 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORES.pendingMessageReads)) {
         const s = db.createObjectStore(STORES.pendingMessageReads, { keyPath: 'id', autoIncrement: true });
         s.createIndex('messageId', 'messageId', { unique: false });
+      }
+
+      // v4 — déclarations de fin de journée
+      if (!db.objectStoreNames.contains(STORES.pendingEndOfDay)) {
+        const s = db.createObjectStore(STORES.pendingEndOfDay, { keyPath: 'id', autoIncrement: true });
+        s.createIndex('tourId', 'tourId', { unique: false });
       }
     };
 
@@ -229,7 +240,7 @@ export async function updatePendingIncident(id, patch) {
  * Ajoute une collecte OU un saut de point en attente.
  * @param {object} data - {
  *   tourId, cavId, action?='collect'|'skip', fillLevel?, skipReason?,
- *   anomaly?, notes?, qrScanned?
+ *   anomaly?, notes?, qrScanned?, remballe?
  * }
  * - action='skip' : le CAV est marqué « impossible à collecter » (skipReason
  *   inaccessible/bouché/vide/…), sans niveau de remplissage.
@@ -246,6 +257,7 @@ export async function addPendingCollect(data) {
     anomaly: data.anomaly || null,
     notes: data.notes || null,
     qrScanned: !!data.qrScanned,
+    remballe: !!data.remballe,
     createdAt: new Date().toISOString(),
   });
 }
@@ -267,6 +279,28 @@ export async function addPendingMessageRead(data) {
 export async function getAckedMessageIds() {
   const rows = await getAllItems(STORES.pendingMessageReads).catch(() => []);
   return rows.map((r) => r.messageId).filter((v) => v != null);
+}
+
+/**
+ * Ajoute une déclaration de fin de journée à envoyer (chauffeur/suiveur/
+ * binôme — EndOfDayChecklist.jsx).
+ * @param {object} data - { tourId, chauffeurNonFume, chauffeurPasObjetPersonnel,
+ *   suiveurNonFume, suiveurPasObjetPersonnel, binomeVehiculeVide,
+ *   binomeVehiculeOk, remarques? }
+ */
+export async function addPendingEndOfDay(data) {
+  return putItem(STORES.pendingEndOfDay, {
+    clientId: data.clientId || newClientId(),
+    tourId: data.tourId,
+    chauffeurNonFume: !!data.chauffeurNonFume,
+    chauffeurPasObjetPersonnel: !!data.chauffeurPasObjetPersonnel,
+    suiveurNonFume: !!data.suiveurNonFume,
+    suiveurPasObjetPersonnel: !!data.suiveurPasObjetPersonnel,
+    binomeVehiculeVide: !!data.binomeVehiculeVide,
+    binomeVehiculeOk: !!data.binomeVehiculeOk,
+    remarques: data.remarques || null,
+    createdAt: new Date().toISOString(),
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────────

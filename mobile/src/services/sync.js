@@ -68,16 +68,17 @@ export function __resetBackoffForTests() {
  * @returns {Promise<{ scans, weights, gps, incidents, collects, total }>}
  */
 export async function getPendingCount() {
-  const [scans, weights, gps, incidents, collects, messageReads] = await Promise.all([
+  const [scans, weights, gps, incidents, collects, messageReads, endOfDay] = await Promise.all([
     countItems(STORES.pendingScans).catch(() => 0),
     countItems(STORES.pendingWeights).catch(() => 0),
     countItems(STORES.gpsBuffer).catch(() => 0),
     countItems(STORES.pendingIncidents).catch(() => 0),
     countItems(STORES.pendingCollects).catch(() => 0),
     countItems(STORES.pendingMessageReads).catch(() => 0),
+    countItems(STORES.pendingEndOfDay).catch(() => 0),
   ]);
-  const counts = { scans, weights, gps, incidents, collects, messageReads };
-  counts.total = scans + weights + gps + incidents + collects + messageReads;
+  const counts = { scans, weights, gps, incidents, collects, messageReads, endOfDay };
+  counts.total = scans + weights + gps + incidents + collects + messageReads + endOfDay;
   emit('pending', { counts });
   return counts;
 }
@@ -292,6 +293,7 @@ export async function sendCollect(collect) {
         status: 'collected',
         fill_level: collect.fillLevel,
         qr_scanned: !!collect.qrScanned,
+        remballe: !!collect.remballe,
         notes: collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''),
         client_id: collect.clientId || null,
       };
@@ -332,6 +334,32 @@ export async function sendIncidentWithPhoto(incident, photoFile) {
     throw err;
   }
   return res.json();
+}
+
+/**
+ * Envoie une collecte AVEC photo en multipart (uniquement en ligne — comme
+ * pour les incidents, la file offline reste en JSON sans photo). Utilisé pour
+ * le point tiré au sort par tournée (services/auditPhoto.js).
+ */
+export async function sendCollectWithPhoto(collect, photoFile) {
+  const fd = new FormData();
+  fd.append('status', 'collected');
+  fd.append('fill_level', String(collect.fillLevel));
+  fd.append('qr_scanned', String(!!collect.qrScanned));
+  fd.append('remballe', String(!!collect.remballe));
+  fd.append('notes', collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''));
+  if (collect.clientId) fd.append('client_id', collect.clientId);
+  fd.append('photo', photoFile);
+  const res = await authedFetch(`/api/tours/${collect.tourId}/cav/${collect.cavId}/collect-public`, {
+    method: 'PUT',
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status };
+    throw err;
+  }
+  return res.json().catch(() => ({}));
 }
 
 export async function syncPendingCollects() {
@@ -403,6 +431,59 @@ export async function syncPendingMessageReads() {
   return { synced, failed, pending: items.length - synced - failed };
 }
 
+/**
+ * Envoie une déclaration de fin de journée. Le backend rejette (400) toute
+ * déclaration partielle — les 6 champs sont donc toujours envoyés à true
+ * (l'écran mobile ne permet pas d'envoyer autrement).
+ */
+export async function sendEndOfDay(item) {
+  const res = await authedFetch(`/api/tours/${item.tourId}/end-of-day-public`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chauffeur_non_fume: item.chauffeurNonFume,
+      chauffeur_pas_objet_personnel: item.chauffeurPasObjetPersonnel,
+      suiveur_non_fume: item.suiveurNonFume,
+      suiveur_pas_objet_personnel: item.suiveurPasObjetPersonnel,
+      binome_vehicule_vide: item.binomeVehiculeVide,
+      binome_vehicule_ok: item.binomeVehiculeOk,
+      remarques: item.remarques || null,
+      client_id: item.clientId || null, // ignoré par le backend actuel
+    }),
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status };
+    throw err;
+  }
+  return res.json().catch(() => ({}));
+}
+
+export async function syncPendingEndOfDay() {
+  const store = STORES.pendingEndOfDay;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const items = await getAllItems(store);
+  let synced = 0; let failed = 0;
+  for (const it of items) {
+    try {
+      await sendEndOfDay(it);
+      await deleteItem(store, it.id);
+      synced++;
+    } catch (err) {
+      if (isClientError(err)) {
+        console.warn('[SYNC] Déclaration fin de journée rejetée, suppression:', err.response?.status);
+        await deleteItem(store, it.id);
+        failed++;
+      } else {
+        recordFailure(store);
+        break;
+      }
+    }
+  }
+  if (synced > 0 || failed > 0) recordSuccess(store);
+  return { synced, failed, pending: items.length - synced - failed };
+}
+
 export async function syncAll() {
   if (!navigator.onLine) {
     emit('state', { state: 'offline' });
@@ -421,6 +502,7 @@ export async function syncAll() {
       incidents: await syncPendingIncidents(),
       collects: await syncPendingCollects(),
       messageReads: await syncPendingMessageReads(),
+      endOfDay: await syncPendingEndOfDay(),
     };
     const totalSynced = Object.values(results).reduce((a, r) => a + r.synced, 0);
     const totalPending = Object.values(results).reduce((a, r) => a + r.pending, 0);

@@ -162,7 +162,7 @@ export default function WeighIn() {
 
       <div className="flex-1 overflow-y-auto px-5 pt-5 pb-6 space-y-4">
         <p className="text-[11px] uppercase tracking-widest text-gray-500 font-bold">
-          Poids net sur bascule
+          Poids net (saisie manuelle)
         </p>
 
         {/* Readout card */}
@@ -204,20 +204,6 @@ export default function WeighIn() {
                 {d > 0 ? `+${d}` : `${d}`}
               </button>
             ))}
-          </div>
-
-          <div
-            className="inline-flex items-center gap-2 mt-4"
-            style={{
-              background: 'var(--color-primary-surface, #F0FDFA)',
-              color: 'var(--color-primary-dark)',
-              padding: '10px 14px',
-              borderRadius: 10,
-              fontSize: 13,
-              fontWeight: 700,
-            }}
-          >
-            🔗 Bascule connectée · auto-lecture
           </div>
         </div>
 

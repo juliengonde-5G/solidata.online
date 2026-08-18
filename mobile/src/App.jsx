@@ -19,6 +19,7 @@ import ReturnCentre from './pages/ReturnCentre';
 import WeighIn from './pages/WeighIn';
 import TourSummary from './pages/TourSummary';
 import TourHistory from './pages/TourHistory';
+import EndOfDayChecklist from './pages/EndOfDayChecklist';
 
 function App() {
   useEffect(() => {
@@ -51,6 +52,7 @@ function App() {
             <Route path="/weigh-in" element={<WeighIn />} />
             <Route path="/tour-summary" element={<TourSummary />} />
             <Route path="/tour-history" element={<TourHistory />} />
+            <Route path="/end-of-day" element={<EndOfDayChecklist />} />
             <Route path="*" element={<Navigate to="/start" />} />
           </Routes>
           <BatteryAlert />

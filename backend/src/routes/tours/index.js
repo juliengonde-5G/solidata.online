@@ -22,6 +22,20 @@ const photoStorage = multer.diskStorage({
 // qui pourraient être réfléchis via /uploads/incidents.
 const upload = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFilter });
 
+// Upload photos de collecte (audit aléatoire — une par tournée, FillLevel.jsx)
+const collectePhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', '..', '..', 'uploads', 'collectes');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).replace(/[^a-zA-Z0-9.]/g, '');
+    cb(null, `collecte_${Date.now()}${ext}`);
+  },
+});
+const uploadCollectePhoto = multer({ storage: collectePhotoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFilter });
+
 // Sub-routers
 const crudRouter = require('./crud');
 const proposalsRouter = require('./proposals');
@@ -35,6 +49,10 @@ const reoptimizeRouter = require('./reoptimize');
 const planningRouter = require('./planning');
 const dashboardRouter = require('./dashboard');
 const { ensurePlannedPassages } = require('./planned-passage');
+// Session chauffeur « 1 URL = 1 véhicule » : le véhicule est lu dans le claim
+// `vehicle_id` du jeton et, en repli, dans le `username` historique
+// « driver_<vehicleId> ». Helper partagé avec routes/tours/execution.js.
+const { driverVehicleIdFromToken, resolveDriverEmployeeId } = require('./driver-session');
 const {
   proposeReoptimization,
   applyReoptimization,
@@ -68,10 +86,6 @@ const MOBILE_DRIVER_PATH = /(-public(\/|$))|(^\/[^/]+\/public$)|(^\/vehicle\/[^/
 // l'username distingue le véhicule). On en dérive le véhicule autorisé et on
 // refuse (403) toute cible d'un autre véhicule. Le flux légitime (le chauffeur
 // agit TOUJOURS sur son véhicule) est inchangé.
-function driverVehicleIdFromToken(user) {
-  const m = /^driver_(\d+)$/.exec(user && user.username ? String(user.username) : '');
-  return m ? parseInt(m[1], 10) : null;
-}
 
 // Refuse (403) si le token chauffeur cible un véhicule différent du sien.
 //   - tokenVehId null → token NON chauffeur (ADMIN/MANAGER en supervision, ou
@@ -268,6 +282,47 @@ router.post('/:id/checklist-public', async (req, res) => {
   }
 });
 
+// POST /api/tours/:id/end-of-day-public — Déclarations de fin de journée
+// (chauffeur / suiveur / binôme, mobile chauffeur JWT requis).
+//
+// Contrôle serveur, pas seulement client : les 6 déclarations doivent TOUTES
+// être true. L'écran mobile ne permet déjà pas d'envoyer autrement, mais un
+// client modifié ou un rejeu de requête ne doit pas pouvoir poser une
+// déclaration partielle.
+const END_OF_DAY_FIELDS = [
+  'chauffeur_non_fume', 'chauffeur_pas_objet_personnel',
+  'suiveur_non_fume', 'suiveur_pas_objet_personnel',
+  'binome_vehicule_vide', 'binome_vehicule_ok',
+];
+router.post('/:id/end-of-day-public', async (req, res) => {
+  try {
+    const missing = END_OF_DAY_FIELDS.filter((f) => req.body[f] !== true);
+    if (missing.length > 0) {
+      return res.status(400).json({ error: 'Toutes les déclarations doivent être cochées', missing });
+    }
+    // Le véhicule vient de la session chauffeur (source fiable), pas du corps
+    // de la requête. Le chauffeur rattaché suit la même cascade honnête que
+    // les prises de tournée (jeton → compte → affectation du véhicule → null).
+    const vehicleId = driverVehicleIdFromToken(req.user);
+    const employeeId = await resolveDriverEmployeeId(pool, req.user, vehicleId);
+    const remarques = req.body.remarques && String(req.body.remarques).trim()
+      ? String(req.body.remarques).trim() : null;
+
+    const result = await pool.query(
+      `INSERT INTO tour_end_of_day_declarations
+         (tour_id, vehicle_id, employee_id, chauffeur_non_fume, chauffeur_pas_objet_personnel,
+          suiveur_non_fume, suiveur_pas_objet_personnel, binome_vehicule_vide, binome_vehicule_ok, remarques)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [req.params.id, vehicleId, employeeId, true, true, true, true, true, true, remarques]
+    );
+    res.status(201).json({ ok: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error('[TOURS] Erreur end-of-day-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // PUT /api/tours/:id/start-public — Démarrer une tournée (mobile sans auth)
 router.put('/:id/start-public', async (req, res) => {
   try {
@@ -297,11 +352,20 @@ router.put('/:id/start-public', async (req, res) => {
 // (inaccessible, bouché, vide…) sans forcer une saisie de niveau. skip_reason
 // est aligné sur le CHECK de tour_cav et sur la route web execution.js.
 const VALID_SKIP_REASON = ['cav_fermee', 'bouchee', 'acces_impossible', 'proprietaire_absent', 'vide', 'autre'];
-router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
+// multer laisse passer les requêtes JSON non-multipart (hors ligne, sans
+// photo) — même pattern que incident-public.
+router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo'), async (req, res) => {
   try {
     const { fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes } = req.body;
     const status = req.body.status === 'skipped' ? 'skipped' : 'collected';
     const skip_reason = req.body.skip_reason || null;
+    // multipart : les champs arrivent en string ('true'/'false').
+    const remballe = req.body.remballe === true || req.body.remballe === 'true';
+    // Photo d'audit (item « photo aléatoire par tournée ») : présente seulement
+    // si ce point est le point tiré au sort pour cette tournée (choisi côté
+    // mobile, cf. services/auditPhoto.js). COALESCE : un re-submit sans photo
+    // (ex. correction du niveau) ne doit jamais effacer une photo déjà reçue.
+    const photo_path = req.file ? `/uploads/collectes/${req.file.filename}` : null;
 
     if (status === 'skipped' && skip_reason && !VALID_SKIP_REASON.includes(skip_reason)) {
       return res.status(400).json({ error: 'skip_reason invalide', allowed: VALID_SKIP_REASON });
@@ -318,11 +382,14 @@ router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
         `UPDATE tour_association_point SET status = $1,
          fill_level = $2,
          notes = $3,
+         remballe = $4,
+         photo_path = COALESCE($5, photo_path),
          collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
-         WHERE tour_id = $4 AND association_point_id = $5 RETURNING *`,
+         WHERE tour_id = $6 AND association_point_id = $7 RETURNING *`,
         [status,
          status === 'skipped' ? null : fill_level,
          status === 'skipped' ? (notes || (skip_reason ? `Non collecté : ${skip_reason}` : 'Non collecté')) : (notes || null),
+         remballe, photo_path,
          req.params.id, req.params.cavId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
@@ -336,10 +403,12 @@ router.put('/:id/cav/:cavId/collect-public', async (req, res) => {
          qr_unavailable_reason = $5,
          skip_reason = CASE WHEN $1 = 'skipped' THEN $6 ELSE NULL END,
          notes = $7,
+         remballe = $8,
+         photo_path = COALESCE($9, photo_path),
          collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
-         WHERE tour_id = $8 AND cav_id = $9 RETURNING *`,
+         WHERE tour_id = $10 AND cav_id = $11 RETURNING *`,
         [status, fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null,
-         skip_reason, notes || null, req.params.id, req.params.cavId]
+         skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
       res.json(result.rows[0]);

@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Html5Qrcode } from 'html5-qrcode';
-import { vibrateSuccess } from '../services/haptic';
+import { vibrateSuccess, vibrateError } from '../services/haptic';
 import PrimaryActionBar from '../components/PrimaryActionBar';
 import { authedFetch } from '../services/authedFetch';
+import { getCurrentPosition, distanceMeters } from '../services/geo';
+
+// Sécurité anti-fraude : impossible de valider un point sans être physiquement
+// à proximité du CAV concerné (scan QR, sélection dans la liste, ou code
+// manuel — les 3 chemins revendiquent la même présence).
+const MAX_SCAN_DISTANCE_M = 50;
 
 /**
  * Flux unifié d'identification d'un CAV :
@@ -21,11 +27,43 @@ export default function IdentifyCav() {
   const [expectedCav, setExpectedCav] = useState(null);
   const [manualCode, setManualCode] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
+  const [proximityError, setProximityError] = useState('');
+  const [checkingProximity, setCheckingProximity] = useState(false);
   const scannerRef = useRef(null);
   const startingRef = useRef(false);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
   const expectedCavId = localStorage.getItem('selected_cav_id');
+
+  // Vérifie que l'appareil est à moins de MAX_SCAN_DISTANCE_M du CAV visé.
+  // Fail-open si la géolocalisation est indisponible/refusée/expirée : on ne
+  // bloque pas la collecte pour une contrainte technique du téléphone — le
+  // but est d'empêcher une validation À DISTANCE, pas de rendre l'appli
+  // inutilisable dès que le GPS est mauvais. Renvoie true si le passage est
+  // autorisé (à proximité, coordonnées inconnues, ou géoloc indisponible).
+  const ensureNearCav = async (cav) => {
+    const lat = cav?.latitude, lng = cav?.longitude;
+    if (lat == null || lng == null) return true; // CAV sans coordonnées connues
+    setCheckingProximity(true);
+    setProximityError('');
+    try {
+      const pos = await getCurrentPosition();
+      const dist = distanceMeters(pos.lat, pos.lng, lat, lng);
+      if (dist != null && dist > MAX_SCAN_DISTANCE_M) {
+        vibrateError();
+        setProximityError(
+          `Trop loin du CAV (≈ ${Math.round(dist)} m, ${MAX_SCAN_DISTANCE_M} m max). Rapproche-toi puis réessaie.`
+        );
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn('[IdentifyCav] géolocalisation indisponible', err);
+      return true;
+    } finally {
+      setCheckingProximity(false);
+    }
+  };
 
   useEffect(() => {
     if (tourId) loadTourCavs();
@@ -83,7 +121,16 @@ export default function IdentifyCav() {
     }
   };
 
-  const handleScanSuccess = (decodedText) => {
+  const handleScanSuccess = async (decodedText) => {
+    if (checkingProximity) return; // vérification déjà en cours pour un scan précédent
+    // Pause immédiate : évite que le scanner ne redéclenche ce handler en
+    // boucle sur le même code pendant qu'on interroge le GPS.
+    try { scannerRef.current?.pause(true); } catch { /* noop */ }
+    const near = await ensureNearCav(expectedCav);
+    if (!near) {
+      try { scannerRef.current?.resume(); } catch { /* noop */ }
+      return;
+    }
     vibrateSuccess();
     localStorage.setItem('scanned_qr', decodedText);
     localStorage.removeItem('qr_unavailable_reason');
@@ -91,8 +138,10 @@ export default function IdentifyCav() {
     navigate('/fill-level');
   };
 
-  const confirmCav = (cav) => {
-    if (!cav) return;
+  const confirmCav = async (cav) => {
+    if (!cav || checkingProximity) return;
+    const near = await ensureNearCav(cav);
+    if (!near) return;
     const cavId = cav.cav_id || cav.id;
     localStorage.setItem('selected_cav_id', String(cavId));
     localStorage.setItem('selected_cav_name', cav.nom || cav.cav_name || '');
@@ -102,9 +151,14 @@ export default function IdentifyCav() {
     navigate('/fill-level');
   };
 
-  const submitManualCode = () => {
+  const submitManualCode = async () => {
     const code = manualCode.trim();
-    if (!code) return;
+    if (!code || checkingProximity) return;
+    // Le code saisi n'identifie pas un CAV précis côté client : on vérifie la
+    // proximité au CAV attendu (même hypothèse que resolveCurrentCav côté
+    // FillLevel — c'est le point que ce parcours de collecte adresse).
+    const near = await ensureNearCav(expectedCav);
+    if (!near) return;
     localStorage.setItem('scanned_qr', code);
     localStorage.setItem('qr_unavailable_reason', 'manual');
     stopScanner();
@@ -205,11 +259,29 @@ export default function IdentifyCav() {
                 />
               </div>
 
-              <p className="text-white/60 text-sm mt-6">Cherche le QR code…</p>
+              <p className="text-white/60 text-sm mt-6">
+                {checkingProximity ? 'Vérification de la position…' : 'Cherche le QR code…'}
+              </p>
               {expectedCav && (
                 <p className="text-white/80 text-sm mt-1 font-medium">
                   Attendu : {expectedCav.nom || expectedCav.cav_name}
                 </p>
+              )}
+              {proximityError && (
+                <div
+                  className="mt-4 text-sm font-semibold text-center"
+                  style={{
+                    maxWidth: 300,
+                    padding: '10px 14px',
+                    borderRadius: 12,
+                    background: 'rgba(220,38,38,0.2)',
+                    border: '1px solid rgba(220,38,38,0.4)',
+                    color: '#FCA5A5',
+                  }}
+                  role="alert"
+                >
+                  {proximityError}
+                </div>
               )}
             </>
           )}
@@ -278,13 +350,23 @@ export default function IdentifyCav() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4 space-y-4">
+        {proximityError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 font-medium" role="alert">
+            {proximityError}
+          </div>
+        )}
+        {checkingProximity && (
+          <p className="text-sm text-gray-500 font-medium">Vérification de la position…</p>
+        )}
+
         {expectedCav && (
           <div>
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Attendu ici</p>
             <button
               type="button"
               onClick={() => confirmCav(expectedCav)}
-              className="w-full card-mobile p-4 flex items-center gap-3 ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5 text-left"
+              disabled={checkingProximity}
+              className="w-full card-mobile p-4 flex items-center gap-3 ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5 text-left disabled:opacity-50"
             >
               <span className="flex-1 min-w-0">
                 <span className="block font-bold text-gray-900 truncate">{expectedCav.nom || expectedCav.cav_name}</span>
@@ -308,7 +390,8 @@ export default function IdentifyCav() {
                   key={cav.cav_id || cav.id}
                   type="button"
                   onClick={() => confirmCav(cav)}
-                  className="w-full card-mobile p-3 text-left flex items-center gap-3"
+                  disabled={checkingProximity}
+                  className="w-full card-mobile p-3 text-left flex items-center gap-3 disabled:opacity-50"
                 >
                   <span className="flex-1 min-w-0">
                     <span className="block font-semibold text-gray-800 truncate">{cav.nom || cav.cav_name}</span>

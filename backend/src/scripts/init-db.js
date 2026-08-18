@@ -511,7 +511,12 @@ async function initDatabase() {
         id SERIAL PRIMARY KEY,
         date DATE NOT NULL,
         vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
-        driver_employee_id INTEGER NOT NULL REFERENCES employees(id),
+        -- Nullable par conception : le mobile chauffeur s'authentifie par un lien
+        -- unique de VÉHICULE (« 1 URL = 1 véhicule »). Une tournée peut donc
+        -- démarrer sans fiche employé identifiée (véhicule sans chauffeur affecté,
+        -- salarié de paie sans compte utilisateur). Le rattachement RH est posé
+        -- quand il est connu, jamais inventé.
+        driver_employee_id INTEGER REFERENCES employees(id),
         standard_route_id INTEGER REFERENCES standard_routes(id),
         mode VARCHAR(20) NOT NULL CHECK (mode IN ('intelligent', 'standard', 'manual')),
         status VARCHAR(20) DEFAULT 'planned' CHECK (status IN ('planned', 'in_progress', 'paused', 'returning', 'completed', 'cancelled')),
@@ -628,6 +633,29 @@ async function initDatabase() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    // Déclarations de fin de journée (chauffeur / suiveur / binôme) — pendant
+    // mobile de vehicle_checklists (départ), posée au retour au centre de tri
+    // (TourSummary.jsx « Terminer la journée »). Les 6 booléens sont NOT NULL :
+    // le backend impose qu'ils soient tous à true, jamais une déclaration
+    // partielle — l'écran mobile ne permet d'ailleurs pas d'envoyer autrement.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tour_end_of_day_declarations (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER REFERENCES tours(id),
+        vehicle_id INTEGER REFERENCES vehicles(id),
+        employee_id INTEGER REFERENCES employees(id),
+        chauffeur_non_fume BOOLEAN NOT NULL,
+        chauffeur_pas_objet_personnel BOOLEAN NOT NULL,
+        suiveur_non_fume BOOLEAN NOT NULL,
+        suiveur_pas_objet_personnel BOOLEAN NOT NULL,
+        binome_vehicule_vide BOOLEAN NOT NULL,
+        binome_vehicule_ok BOOLEAN NOT NULL,
+        remarques TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_end_of_day_tour ON tour_end_of_day_declarations(tour_id);');
 
     // ── Vague 2 (item 62) — Canal manager → chauffeur ─────────────────────
     // Consignes envoyées par le responsable logistique (web) au chauffeur en
@@ -1829,6 +1857,26 @@ async function initDatabase() {
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
 
+    // Mobile collecte : case « J'ai fait de la remballe » (FillLevel.jsx) et
+    // photo d'audit aléatoire (une par tournée). `photo_path` existait déjà
+    // sur tour_cav (jamais écrit) ; ajouté ici sur tour_association_point pour
+    // que les tournées association bénéficient du même contrôle photo.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tour_cav ADD COLUMN remballe BOOLEAN DEFAULT false;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tour_association_point ADD COLUMN remballe BOOLEAN DEFAULT false;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tour_association_point ADD COLUMN photo_path VARCHAR(500);
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
+
     // Vague 1 (item 45) — checklist véhicule : persister les remarques/anomalies
     // saisies par le chauffeur au départ. Le champ `notes` était envoyé par le
     // mobile (Checklist.jsx) mais jamais déstructuré ni stocké → perdu.
@@ -2300,14 +2348,18 @@ async function initDatabase() {
     // Migration : contraintes NOT NULL sur colonnes opérationnelles critiques
     // Appliquées uniquement si aucune valeur NULL existante (évite les erreurs sur BDD legacy)
     try {
-      const nullTours = await client.query('SELECT COUNT(*) FROM tours WHERE vehicle_id IS NULL OR driver_employee_id IS NULL');
+      const nullTours = await client.query('SELECT COUNT(*) FROM tours WHERE vehicle_id IS NULL');
       if (parseInt(nullTours.rows[0].count) === 0) {
         await client.query('ALTER TABLE tours ALTER COLUMN vehicle_id SET NOT NULL');
-        await client.query('ALTER TABLE tours ALTER COLUMN driver_employee_id SET NOT NULL');
-        console.log('[INIT-DB] Migration NOT NULL tours.vehicle_id + driver_employee_id ✓');
+        console.log('[INIT-DB] Migration NOT NULL tours.vehicle_id ✓');
       } else {
-        console.warn('[INIT-DB] Migration NOT NULL tours ignorée : valeurs NULL existantes (' + nullTours.rows[0].count + ' lignes)');
+        console.warn('[INIT-DB] Migration NOT NULL tours.vehicle_id ignorée : valeurs NULL existantes (' + nullTours.rows[0].count + ' lignes)');
       }
+      // driver_employee_id : NOT NULL RETIRÉ (idempotent). Le mobile chauffeur
+      // s'authentifie par le lien unique du VÉHICULE — un camion sans chauffeur
+      // affecté doit pouvoir partir en tournée. La contrainte bloquait la prise
+      // de tournée depuis le mobile ; l'intégrité utile (véhicule) est conservée.
+      await client.query('ALTER TABLE tours ALTER COLUMN driver_employee_id DROP NOT NULL');
     } catch (e) { console.warn('[INIT-DB] Migration NOT NULL tours :', e.message); }
 
     try {

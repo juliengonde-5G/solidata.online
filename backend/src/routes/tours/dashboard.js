@@ -36,7 +36,7 @@ router.get('/dashboard/summary', async (req, res) => {
                    ELSE (SELECT COUNT(*)::int FROM tour_cav WHERE tour_id = t.id AND status = 'collected')
               END) AS collected_count,
              v.registration, v.name AS vehicle_name, v.max_capacity_kg,
-             CONCAT(e.first_name, ' ', e.last_name) AS driver_name,
+             NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS driver_name,
              sr.name AS route_name
         FROM tours t
         LEFT JOIN vehicles v ON v.id = t.vehicle_id
