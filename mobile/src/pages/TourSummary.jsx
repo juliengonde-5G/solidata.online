@@ -48,8 +48,10 @@ export default function TourSummary() {
   }, [tourId]);
 
   const finishDay = () => {
-    localStorage.removeItem('current_tour_id');
-    navigate('/vehicle-select');
+    // current_tour_id est conservé : EndOfDayChecklist en a besoin pour
+    // rattacher les déclarations à la tournée, et le nettoie lui-même une
+    // fois les 6 déclarations validées.
+    navigate('/end-of-day');
   };
 
   if (loading) {

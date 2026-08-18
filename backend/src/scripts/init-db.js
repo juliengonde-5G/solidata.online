@@ -634,6 +634,29 @@ async function initDatabase() {
       );
     `);
 
+    // Déclarations de fin de journée (chauffeur / suiveur / binôme) — pendant
+    // mobile de vehicle_checklists (départ), posée au retour au centre de tri
+    // (TourSummary.jsx « Terminer la journée »). Les 6 booléens sont NOT NULL :
+    // le backend impose qu'ils soient tous à true, jamais une déclaration
+    // partielle — l'écran mobile ne permet d'ailleurs pas d'envoyer autrement.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tour_end_of_day_declarations (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER REFERENCES tours(id),
+        vehicle_id INTEGER REFERENCES vehicles(id),
+        employee_id INTEGER REFERENCES employees(id),
+        chauffeur_non_fume BOOLEAN NOT NULL,
+        chauffeur_pas_objet_personnel BOOLEAN NOT NULL,
+        suiveur_non_fume BOOLEAN NOT NULL,
+        suiveur_pas_objet_personnel BOOLEAN NOT NULL,
+        binome_vehicule_vide BOOLEAN NOT NULL,
+        binome_vehicule_ok BOOLEAN NOT NULL,
+        remarques TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_end_of_day_tour ON tour_end_of_day_declarations(tour_id);');
+
     // ── Vague 2 (item 62) — Canal manager → chauffeur ─────────────────────
     // Consignes envoyées par le responsable logistique (web) au chauffeur en
     // tournée (bannière mobile). vehicle_id = destinataire (« 1 URL = 1 véhicule »),

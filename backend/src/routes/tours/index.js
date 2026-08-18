@@ -52,7 +52,7 @@ const { ensurePlannedPassages } = require('./planned-passage');
 // Session chauffeur « 1 URL = 1 véhicule » : le véhicule est lu dans le claim
 // `vehicle_id` du jeton et, en repli, dans le `username` historique
 // « driver_<vehicleId> ». Helper partagé avec routes/tours/execution.js.
-const { driverVehicleIdFromToken } = require('./driver-session');
+const { driverVehicleIdFromToken, resolveDriverEmployeeId } = require('./driver-session');
 const {
   proposeReoptimization,
   applyReoptimization,
@@ -278,6 +278,47 @@ router.post('/:id/checklist-public', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[TOURS] Erreur checklist-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/:id/end-of-day-public — Déclarations de fin de journée
+// (chauffeur / suiveur / binôme, mobile chauffeur JWT requis).
+//
+// Contrôle serveur, pas seulement client : les 6 déclarations doivent TOUTES
+// être true. L'écran mobile ne permet déjà pas d'envoyer autrement, mais un
+// client modifié ou un rejeu de requête ne doit pas pouvoir poser une
+// déclaration partielle.
+const END_OF_DAY_FIELDS = [
+  'chauffeur_non_fume', 'chauffeur_pas_objet_personnel',
+  'suiveur_non_fume', 'suiveur_pas_objet_personnel',
+  'binome_vehicule_vide', 'binome_vehicule_ok',
+];
+router.post('/:id/end-of-day-public', async (req, res) => {
+  try {
+    const missing = END_OF_DAY_FIELDS.filter((f) => req.body[f] !== true);
+    if (missing.length > 0) {
+      return res.status(400).json({ error: 'Toutes les déclarations doivent être cochées', missing });
+    }
+    // Le véhicule vient de la session chauffeur (source fiable), pas du corps
+    // de la requête. Le chauffeur rattaché suit la même cascade honnête que
+    // les prises de tournée (jeton → compte → affectation du véhicule → null).
+    const vehicleId = driverVehicleIdFromToken(req.user);
+    const employeeId = await resolveDriverEmployeeId(pool, req.user, vehicleId);
+    const remarques = req.body.remarques && String(req.body.remarques).trim()
+      ? String(req.body.remarques).trim() : null;
+
+    const result = await pool.query(
+      `INSERT INTO tour_end_of_day_declarations
+         (tour_id, vehicle_id, employee_id, chauffeur_non_fume, chauffeur_pas_objet_personnel,
+          suiveur_non_fume, suiveur_pas_objet_personnel, binome_vehicule_vide, binome_vehicule_ok, remarques)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [req.params.id, vehicleId, employeeId, true, true, true, true, true, true, remarques]
+    );
+    res.status(201).json({ ok: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error('[TOURS] Erreur end-of-day-public:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
