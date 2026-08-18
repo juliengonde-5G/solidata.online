@@ -532,6 +532,9 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
                 Questionnaire participant FSE+ (entrée dans l'opération). Les réponses déjà saisies dans les autres rubriques
                 (niveau de formation, ressources, logement, situation familiale, RQTH) sont réutilisées automatiquement — seuls les items restants sont à compléter.
               </p>
+              <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
+                Toute fausse déclaration peut faire l'objet de sanctions disciplinaires ou pénales.
+              </p>
               <FieldRow label="Situation juste avant l'entrée">
                 <ChoicePicker value={fse.statut_avant_entree} onChange={(v) => setFse('statut_avant_entree', v)}
                   options={[['demandeur_emploi', "Demandeur d'emploi"], ['inactif', 'Inactif (ni emploi ni recherche)'], ['emploi', 'En emploi'], ['formation', 'En formation']]} />

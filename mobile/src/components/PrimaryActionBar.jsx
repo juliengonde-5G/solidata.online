@@ -54,7 +54,7 @@ export default function PrimaryActionBar({
             onClick={onSecondary}
             disabled={loading}
             aria-label={secondaryLabel}
-            className="btn-secondary-mobile flex items-center justify-center gap-1.5 px-4 flex-shrink-0"
+            className="btn-secondary-mobile w-auto flex items-center justify-center gap-1.5 px-4 flex-shrink-0"
           >
             {secondaryIcon && <span aria-hidden="true">{secondaryIcon}</span>}
             <span>{secondaryLabel}</span>
@@ -65,7 +65,7 @@ export default function PrimaryActionBar({
           onClick={onPrimary}
           disabled={isDisabled}
           aria-label={primaryLabel}
-          className="btn-primary-mobile py-4 text-base flex items-center justify-center gap-2"
+          className="btn-primary-mobile flex-1 min-w-0 py-4 text-base flex items-center justify-center gap-2"
         >
           {loading && (
             <span
