@@ -41,7 +41,7 @@ router.get('/planning/resources',
                t.estimated_distance_km, t.estimated_duration_min,
                COALESCE(t.nb_cav, 0) AS nb_cav,
                v.registration, v.name AS vehicle_name, v.max_capacity_kg, v.status AS vehicle_status,
-               CONCAT(e.first_name, ' ', e.last_name) AS driver_name,
+               NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS driver_name,
                sr.name AS route_name
           FROM tours t
           LEFT JOIN vehicles v ON v.id = t.vehicle_id

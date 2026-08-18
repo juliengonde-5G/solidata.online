@@ -5,14 +5,99 @@ const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { ensurePlannedPassages } = require('./planned-passage');
 const { sendPushToRoles } = require('../../services/push-notifications');
+const {
+  driverVehicleIdFromToken,
+  resolveDriverEmployeeId,
+  SQL_TODAY_PARIS,
+} = require('./driver-session');
 
 // Upload is passed from index.js via router factory
 module.exports = function createExecutionRouter(upload) {
-  // GET /api/tours/my — Vehicules et tournees du jour (mobile)
-  // Retourne toutes les tournees du jour (planned + in_progress) + vehicules disponibles
-  // Marque is_assigned_vehicle=true si le véhicule est affecté au chauffeur connecté
+  /**
+   * Réponse de GET /my pour une session chauffeur : le périmètre est le seul
+   * véhicule du lien. Même contrat de sortie que la branche superviseur (liste
+   * d'entrées « tournée » et/ou « véhicule libre ») pour que le mobile ne
+   * distingue pas deux formats — il affiche simplement une confirmation
+   * puisqu'il n'y a jamais plus d'une entrée.
+   */
+  async function respondDriverScope(req, res, vehicleId) {
+    const vRes = await pool.query(
+      `SELECT v.id, v.registration, v.name, v.status, v.assigned_driver_id
+       FROM vehicles v
+       WHERE v.id = $1 AND COALESCE(v.is_archived, false) = false`,
+      [vehicleId]
+    );
+    // Véhicule archivé/supprimé après l'émission du jeton : liste vide plutôt
+    // qu'une erreur — l'écran affiche « aucun véhicule », le raccourci sera
+    // reparamétré par le responsable.
+    if (vRes.rows.length === 0) return res.json([]);
+    const vehicle = vRes.rows[0];
+
+    // Tournée du jour de CE véhicule (jour civil Paris, aligné sur
+    // GET /vehicle/:id/today qui enchaîne juste après côté mobile).
+    const tRes = await pool.query(
+      `SELECT t.*, v.registration, v.name as vehicle_name,
+              v.assigned_driver_id, v.status as vehicle_status,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') as driver_name,
+              COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id)) as nb_cav,
+              (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count,
+              false as is_free_vehicle
+       FROM tours t
+       JOIN vehicles v ON v.id = t.vehicle_id
+       LEFT JOIN employees e ON e.id = t.driver_employee_id
+       WHERE t.vehicle_id = $1
+         AND t.date = ${SQL_TODAY_PARIS}
+         AND t.status IN ('planned', 'in_progress')
+       ORDER BY t.status = 'in_progress' DESC, t.id DESC`,
+      [vehicleId]
+    );
+
+    if (tRes.rows.length > 0) {
+      return res.json(tRes.rows.map((t) => ({ ...t, is_assigned_vehicle: true })));
+    }
+
+    // Aucune tournée planifiée : le véhicule lui-même est proposé au départ
+    // (une tournée sera créée à la volée par POST /claim-vehicle). On le
+    // renvoie quel que soit son `status` — le mobile affiche l'état réel et
+    // bloque le départ si le véhicule est immobilisé, plutôt que de faire
+    // disparaître le seul véhicule du chauffeur sans explication.
+    return res.json([{
+      vehicle_id: vehicle.id,
+      registration: vehicle.registration,
+      vehicle_name: vehicle.name,
+      vehicle_type: null,
+      vehicle_status: vehicle.status,
+      assigned_driver_id: vehicle.assigned_driver_id,
+      id: null,
+      status: 'planned',
+      date: null,
+      driver_employee_id: null,
+      driver_name: null,
+      nb_cav: 0,
+      collected_count: 0,
+      is_free_vehicle: true,
+      is_assigned_vehicle: true,
+    }]);
+  }
+
+  // GET /api/tours/my — Véhicule et tournée du jour (mobile)
+  //
+  // Session chauffeur (raccourci « 1 URL = 1 véhicule ») : le périmètre est
+  // SON véhicule, et lui seul. Le parc n'est jamais listé — l'écran de
+  // sélection n'est qu'une confirmation de départ. Auparavant la route
+  // renvoyait TOUTES les tournées du jour + TOUS les véhicules disponibles
+  // quel que soit le lien utilisé, ce qui vidait le lien véhicule de son sens
+  // (et laissait un chauffeur prendre le camion d'un autre).
+  //
+  // Session non-chauffeur (ADMIN/MANAGER, supervision) : comportement
+  // historique inchangé — toutes les tournées du jour + véhicules libres.
   router.get('/my', async (req, res) => {
     try {
+      const sessionVehicleId = driverVehicleIdFromToken(req.user);
+      if (sessionVehicleId != null) {
+        return respondDriverScope(req, res, sessionVehicleId);
+      }
+
       // Récupérer l'employee_id du chauffeur connecté
       const userId = req.user.id;
       const empRes = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
@@ -22,7 +107,7 @@ module.exports = function createExecutionRouter(upload) {
       const toursResult = await pool.query(`
         SELECT t.*, v.registration, v.name as vehicle_name,
          v.assigned_driver_id,
-         CONCAT(e.first_name, ' ', e.last_name) as driver_name,
+         NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') as driver_name,
          COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id)) as nb_cav,
          (SELECT COUNT(*)::int FROM tour_cav tc WHERE tc.tour_id = t.id AND tc.status = 'collected') as collected_count,
          false as is_free_vehicle
@@ -84,24 +169,33 @@ module.exports = function createExecutionRouter(upload) {
   });
 
   // POST /api/tours/claim-vehicle — Le chauffeur prend un vehicule libre (sans tournee)
-  // Cree une tournee a la volee pour ce vehicule
+  // Cree une tournee a la volee pour ce vehicule.
+  //
+  // L'identité de la session mobile est le VÉHICULE (« 1 URL = 1 véhicule ») :
+  // le chauffeur est une information de rattachement, pas une condition d'accès.
+  // La route exigeait auparavant une fiche employé liée au compte utilisateur —
+  // or les fiches salariés viennent de la paie et n'ont pas de compte : tout
+  // départ en tournée échouait sur « Aucune fiche employé liée à votre compte ».
   router.post('/claim-vehicle', [
     body('vehicle_id').isInt().withMessage('ID véhicule requis'),
   ], validate, async (req, res) => {
     try {
-      const userId = req.user.id;
-      const { vehicle_id } = req.body;
+      const vehicleId = parseInt(req.body.vehicle_id, 10);
 
-      const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
-      if (empResult.rows.length === 0) {
-        return res.status(400).json({ error: 'Aucune fiche employe liee a votre compte' });
+      // Périmètre : une session chauffeur ne prend que SON véhicule.
+      const sessionVehicleId = driverVehicleIdFromToken(req.user);
+      if (sessionVehicleId != null && sessionVehicleId !== vehicleId) {
+        return res.status(403).json({ error: 'Ce véhicule ne correspond pas à votre session chauffeur' });
       }
-      const employeeId = empResult.rows[0].id;
+
+      // Chauffeur rattaché à la tournée : jeton → compte → affectation du
+      // véhicule → null (tournée portée par le véhicule seul).
+      const employeeId = await resolveDriverEmployeeId(pool, req.user, vehicleId);
 
       // Verifier que le vehicule n'est pas deja en tournee
       const existing = await pool.query(
-        `SELECT id FROM tours WHERE vehicle_id = $1 AND date = CURRENT_DATE AND status IN ('planned', 'in_progress')`,
-        [vehicle_id]
+        `SELECT id FROM tours WHERE vehicle_id = $1 AND date = ${SQL_TODAY_PARIS} AND status IN ('planned', 'in_progress')`,
+        [vehicleId]
       );
       if (existing.rows.length > 0) {
         return res.status(400).json({ error: 'Ce vehicule est deja en tournee aujourd\'hui' });
@@ -110,9 +204,9 @@ module.exports = function createExecutionRouter(upload) {
       // Creer une tournee a la volee
       const result = await pool.query(
         `INSERT INTO tours (vehicle_id, driver_employee_id, date, status, started_at, created_at, updated_at)
-         VALUES ($1, $2, CURRENT_DATE, 'in_progress', NOW(), NOW(), NOW())
+         VALUES ($1, $2, ${SQL_TODAY_PARIS}, 'in_progress', NOW(), NOW(), NOW())
          RETURNING *`,
-        [vehicle_id, employeeId]
+        [vehicleId, employeeId]
       );
 
       // Best-effort : calcul OSRM si la tournée est ensuite alimentée avec des CAV
@@ -130,20 +224,39 @@ module.exports = function createExecutionRouter(upload) {
   // Seule une tournee planned peut etre claimee -> atomique
   router.put('/:id/claim', async (req, res) => {
     try {
-      const userId = req.user.id;
-      const empResult = await pool.query('SELECT id FROM employees WHERE user_id = $1', [userId]);
-      if (empResult.rows.length === 0) {
-        return res.status(400).json({ error: 'Aucune fiche employe liee a votre compte' });
+      const tourId = parseInt(req.params.id, 10);
+      if (!Number.isInteger(tourId)) {
+        return res.status(400).json({ error: 'Tournée introuvable' });
       }
-      const employeeId = empResult.rows[0].id;
+
+      const tourRes = await pool.query('SELECT vehicle_id FROM tours WHERE id = $1', [tourId]);
+      if (tourRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Tournée introuvable' });
+      }
+      const tourVehicleId = tourRes.rows[0].vehicle_id;
+
+      // Périmètre : une session chauffeur ne prend que les tournées de SON
+      // véhicule (mêmes règles que la garde des routes mobiles « -public »).
+      const sessionVehicleId = driverVehicleIdFromToken(req.user);
+      if (sessionVehicleId != null && tourVehicleId != null && Number(tourVehicleId) !== sessionVehicleId) {
+        return res.status(403).json({ error: 'Cette tournée ne correspond pas à votre véhicule' });
+      }
+
+      // Chauffeur rattaché à la tournée (cascade honnête, null accepté — voir
+      // driver-session.js). L'accès est porté par le lien véhicule, pas par
+      // l'existence d'une fiche employé liée au compte.
+      const employeeId = await resolveDriverEmployeeId(pool, req.user, tourVehicleId);
 
       // Assigner le chauffeur et passer en in_progress atomiquement
-      // Seule une tournee planned peut etre claimee (empeche double claim)
+      // Seule une tournee planned peut etre claimee (empeche double claim).
+      // COALESCE : un chauffeur déjà planifié par le manager n'est pas effacé
+      // par une session véhicule qui ne sait pas qui conduit.
       const result = await pool.query(
-        `UPDATE tours SET driver_employee_id = $1, status = 'in_progress', updated_at = NOW()
+        `UPDATE tours SET driver_employee_id = COALESCE($1, driver_employee_id),
+                          status = 'in_progress', updated_at = NOW()
          WHERE id = $2 AND status = 'planned'
          RETURNING *`,
-        [employeeId, req.params.id]
+        [employeeId, tourId]
       );
 
       if (result.rows.length === 0) {
@@ -174,11 +287,16 @@ module.exports = function createExecutionRouter(upload) {
       if (status === 'in_progress') updates.push('started_at = NOW()');
       if (status === 'completed') updates.push('completed_at = NOW()');
 
-      // Auto-assigner le chauffeur connecté si pas encore assigné
+      // Auto-assigner le chauffeur connecté si pas encore assigné. Même cascade
+      // que les prises de tournée : jeton chauffeur → compte utilisateur →
+      // chauffeur affecté au véhicule. Sans chauffeur identifiable, la tournée
+      // reste rattachée au véhicule seul (aucun rattachement inventé).
       if (status === 'in_progress' && req.user) {
-        const empRes = await pool.query('SELECT id FROM employees WHERE user_id = $1', [req.user.id]);
-        if (empRes.rows.length > 0) {
-          params.push(empRes.rows[0].id);
+        const vehRes = await pool.query('SELECT vehicle_id FROM tours WHERE id = $1', [req.params.id]);
+        const tourVehicleId = vehRes.rows.length > 0 ? vehRes.rows[0].vehicle_id : null;
+        const autoEmployeeId = await resolveDriverEmployeeId(pool, req.user, tourVehicleId);
+        if (autoEmployeeId != null) {
+          params.push(autoEmployeeId);
           updates.push(`driver_employee_id = COALESCE(driver_employee_id, $${params.length})`);
         }
       }

@@ -35,6 +35,10 @@ const reoptimizeRouter = require('./reoptimize');
 const planningRouter = require('./planning');
 const dashboardRouter = require('./dashboard');
 const { ensurePlannedPassages } = require('./planned-passage');
+// Session chauffeur « 1 URL = 1 véhicule » : le véhicule est lu dans le claim
+// `vehicle_id` du jeton et, en repli, dans le `username` historique
+// « driver_<vehicleId> ». Helper partagé avec routes/tours/execution.js.
+const { driverVehicleIdFromToken } = require('./driver-session');
 const {
   proposeReoptimization,
   applyReoptimization,
@@ -68,10 +72,6 @@ const MOBILE_DRIVER_PATH = /(-public(\/|$))|(^\/[^/]+\/public$)|(^\/vehicle\/[^/
 // l'username distingue le véhicule). On en dérive le véhicule autorisé et on
 // refuse (403) toute cible d'un autre véhicule. Le flux légitime (le chauffeur
 // agit TOUJOURS sur son véhicule) est inchangé.
-function driverVehicleIdFromToken(user) {
-  const m = /^driver_(\d+)$/.exec(user && user.username ? String(user.username) : '');
-  return m ? parseInt(m[1], 10) : null;
-}
 
 // Refuse (403) si le token chauffeur cible un véhicule différent du sien.
 //   - tokenVehId null → token NON chauffeur (ADMIN/MANAGER en supervision, ou

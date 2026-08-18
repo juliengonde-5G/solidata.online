@@ -15,7 +15,9 @@ import { useAuth } from '../contexts/AuthContext';
  *   3. L'URL est immédiatement nettoyée via history.replaceState pour que
  *      le token ne reste pas visible dans la barre d'adresse pendant la session.
  *   4. Si une tournée du jour existe pour ce véhicule, on enchaîne sur la
- *      checklist ; sinon on bascule sur la sélection de tournée.
+ *      checklist ; sinon on bascule sur l'écran de départ, qui ne propose que
+ *      CE véhicule (confirmation avant création de la tournée à la volée —
+ *      jamais une liste du parc : le lien détermine déjà le véhicule).
  *
  * Erreurs :
  *   - 401 : token inconnu, révoqué (régénéré côté admin), ou véhicule archivé.
@@ -66,8 +68,9 @@ export default function VehicleLogin() {
           return;
         }
       }
-      // Pas de tournée planifiée aujourd'hui → la page /vehicle-select gère
-      // l'affichage (« Aucune tournée planifiée pour aujourd'hui »).
+      // Pas de tournée planifiée aujourd'hui → /vehicle-select affiche le seul
+      // véhicule de la session pour confirmation du départ (GET /tours/my est
+      // borné au véhicule du jeton).
       navigate('/vehicle-select', { replace: true });
     } catch (err) {
       const status = err?.response?.status;

@@ -2,33 +2,60 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
+import { getVehicleToken } from '../services/driverAuth';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
 
+// Statuts pour lesquels le véhicule ne doit pas partir en tournée.
+const BLOCKING_STATUS = {
+  maintenance: 'Ce véhicule est en maintenance.',
+  out_of_service: 'Ce véhicule est hors service.',
+};
+
+/**
+ * Écran de départ en tournée.
+ *
+ * Session chauffeur (raccourci « 1 URL = 1 véhicule ») : ce n'est PAS un
+ * sélecteur — le véhicule est déjà déterminé par le lien. L'API ne renvoie que
+ * ce véhicule (ou sa tournée du jour) ; l'écran se contente de le confirmer
+ * avant le départ. Le parc n'est jamais listé.
+ */
 export default function VehicleSelect() {
   const [tours, setTours] = useState([]);
   const [selectedTour, setSelectedTour] = useState(null);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
+  const [error, setError] = useState('');
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  // Le vehicle_token n'est présent que si l'app a été ouverte par le raccourci
+  // véhicule → l'écran est en mode confirmation, pas en mode sélection.
+  const isVehicleSession = Boolean(getVehicleToken());
 
   useEffect(() => { loadData(); }, []);
 
-  const loadData = async () => {
+  // `keepError` : après un échec de prise en charge on recharge la liste sans
+  // effacer le message d'erreur qui vient d'être affiché au chauffeur.
+  const loadData = async ({ keepError = false } = {}) => {
+    if (!keepError) setError('');
     try {
       const res = await api.get('/tours/my');
-      setTours(res.data);
+      const list = Array.isArray(res.data) ? res.data : [];
+      setTours(list);
       // Si une tournée est déjà in_progress pour ce chauffeur, reprendre directement
-      const inProgress = res.data.find(t => t.status === 'in_progress');
+      const inProgress = list.find(t => t.status === 'in_progress');
       if (inProgress) {
         localStorage.setItem('current_tour_id', inProgress.id);
         navigate('/tour-map');
         return;
       }
-      // Pré-sélectionner le véhicule attitré du chauffeur
-      const assigned = res.data.find(t => t.is_assigned_vehicle);
-      if (assigned) setSelectedTour(assigned);
-    } catch (err) { console.error(err); }
+      // Session véhicule : une seule entrée possible → pré-sélection.
+      // Sinon : pré-sélectionner le véhicule attitré du chauffeur.
+      const preselect = isVehicleSession ? list[0] : list.find(t => t.is_assigned_vehicle);
+      if (preselect) setSelectedTour(preselect);
+    } catch (err) {
+      console.error(err);
+      setError("Impossible de charger ton véhicule. Vérifie le réseau et réessaie.");
+    }
     setLoading(false);
   };
 
@@ -46,15 +73,20 @@ export default function VehicleSelect() {
       }
       navigate('/checklist');
     } catch (err) {
-      const msg = err.response?.data?.error || 'Erreur lors de la prise du vehicule';
-      alert(msg);
+      const msg = err.response?.data?.error || 'Erreur lors de la prise du véhicule';
+      setError(msg);
       setSelectedTour(null);
-      loadData();
+      loadData({ keepError: true });
     }
     setClaiming(false);
   };
 
   const dateLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  // Véhicule immobilisé : on l'affiche quand même (c'est LE véhicule du lien),
+  // mais le départ est bloqué avec le motif réel plutôt qu'un écran vide.
+  const blockedReason = selectedTour && selectedTour.is_free_vehicle
+    ? BLOCKING_STATUS[selectedTour.vehicle_status] || null
+    : null;
 
   return (
     <MobileShell
@@ -74,7 +106,22 @@ export default function VehicleSelect() {
         <TourStepBar currentPath="/vehicle-select" />
       </div>
 
-      <h2 className="font-extrabold text-gray-900 text-xl mb-4">Choisir votre véhicule</h2>
+      <h2 className="font-extrabold text-gray-900 text-xl mb-4">
+        {isVehicleSession ? 'Votre véhicule' : 'Choisir votre véhicule'}
+      </h2>
+
+      {error && (
+        <div className="mb-4 rounded-2xl bg-red-50 border border-red-200 p-4">
+          <p className="text-sm font-semibold text-red-800">{error}</p>
+          <button
+            type="button"
+            onClick={() => { setLoading(true); loadData(); }}
+            className="mt-2 text-sm font-bold text-red-700 underline"
+          >
+            Réessayer
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
@@ -86,8 +133,14 @@ export default function VehicleSelect() {
           <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4 text-3xl">
             🚛
           </div>
-          <p className="font-semibold text-gray-800">Aucun véhicule disponible</p>
-          <p className="text-sm text-gray-500 mt-1">Aucune tournée n'est planifiée pour aujourd'hui.</p>
+          <p className="font-semibold text-gray-800">
+            {isVehicleSession ? 'Véhicule indisponible' : 'Aucun véhicule disponible'}
+          </p>
+          <p className="text-sm text-gray-500 mt-1">
+            {isVehicleSession
+              ? "Ton véhicule n'est plus accessible. Demande à ton responsable de reparamétrer ton téléphone."
+              : "Aucune tournée n'est planifiée pour aujourd'hui."}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -164,10 +217,16 @@ export default function VehicleSelect() {
 
       {selectedTour && (
         <div className="mt-6 pt-4">
+          {blockedReason && (
+            <div className="mb-3 rounded-2xl bg-amber-50 border border-amber-200 p-4">
+              <p className="text-sm font-semibold text-amber-900">{blockedReason}</p>
+              <p className="text-sm text-amber-800 mt-1">Vois avec ton responsable avant de partir.</p>
+            </div>
+          )}
           <button
             type="button"
             onClick={startTour}
-            disabled={claiming}
+            disabled={claiming || Boolean(blockedReason)}
             className="w-full flex items-center justify-center gap-2 font-extrabold text-lg text-white bg-[var(--color-primary)] active:scale-[0.98] transition-transform disabled:opacity-50"
             style={{
               minHeight: 84,
@@ -176,7 +235,11 @@ export default function VehicleSelect() {
             }}
           >
             <span aria-hidden="true">▶</span>
-            {claiming ? 'Prise en charge…' : `Prendre ${selectedTour.registration || 'ce véhicule'}`}
+            {claiming
+              ? 'Prise en charge…'
+              : isVehicleSession
+                ? `Démarrer avec ${selectedTour.registration || 'ce véhicule'}`
+                : `Prendre ${selectedTour.registration || 'ce véhicule'}`}
           </button>
         </div>
       )}

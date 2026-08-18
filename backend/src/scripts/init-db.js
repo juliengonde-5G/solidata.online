@@ -511,7 +511,12 @@ async function initDatabase() {
         id SERIAL PRIMARY KEY,
         date DATE NOT NULL,
         vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
-        driver_employee_id INTEGER NOT NULL REFERENCES employees(id),
+        -- Nullable par conception : le mobile chauffeur s'authentifie par un lien
+        -- unique de VÉHICULE (« 1 URL = 1 véhicule »). Une tournée peut donc
+        -- démarrer sans fiche employé identifiée (véhicule sans chauffeur affecté,
+        -- salarié de paie sans compte utilisateur). Le rattachement RH est posé
+        -- quand il est connu, jamais inventé.
+        driver_employee_id INTEGER REFERENCES employees(id),
         standard_route_id INTEGER REFERENCES standard_routes(id),
         mode VARCHAR(20) NOT NULL CHECK (mode IN ('intelligent', 'standard', 'manual')),
         status VARCHAR(20) DEFAULT 'planned' CHECK (status IN ('planned', 'in_progress', 'paused', 'returning', 'completed', 'cancelled')),
@@ -2300,14 +2305,18 @@ async function initDatabase() {
     // Migration : contraintes NOT NULL sur colonnes opérationnelles critiques
     // Appliquées uniquement si aucune valeur NULL existante (évite les erreurs sur BDD legacy)
     try {
-      const nullTours = await client.query('SELECT COUNT(*) FROM tours WHERE vehicle_id IS NULL OR driver_employee_id IS NULL');
+      const nullTours = await client.query('SELECT COUNT(*) FROM tours WHERE vehicle_id IS NULL');
       if (parseInt(nullTours.rows[0].count) === 0) {
         await client.query('ALTER TABLE tours ALTER COLUMN vehicle_id SET NOT NULL');
-        await client.query('ALTER TABLE tours ALTER COLUMN driver_employee_id SET NOT NULL');
-        console.log('[INIT-DB] Migration NOT NULL tours.vehicle_id + driver_employee_id ✓');
+        console.log('[INIT-DB] Migration NOT NULL tours.vehicle_id ✓');
       } else {
-        console.warn('[INIT-DB] Migration NOT NULL tours ignorée : valeurs NULL existantes (' + nullTours.rows[0].count + ' lignes)');
+        console.warn('[INIT-DB] Migration NOT NULL tours.vehicle_id ignorée : valeurs NULL existantes (' + nullTours.rows[0].count + ' lignes)');
       }
+      // driver_employee_id : NOT NULL RETIRÉ (idempotent). Le mobile chauffeur
+      // s'authentifie par le lien unique du VÉHICULE — un camion sans chauffeur
+      // affecté doit pouvoir partir en tournée. La contrainte bloquait la prise
+      // de tournée depuis le mobile ; l'intégrité utile (véhicule) est conservée.
+      await client.query('ALTER TABLE tours ALTER COLUMN driver_employee_id DROP NOT NULL');
     } catch (e) { console.warn('[INIT-DB] Migration NOT NULL tours :', e.message); }
 
     try {

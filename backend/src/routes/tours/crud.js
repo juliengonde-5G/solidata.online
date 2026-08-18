@@ -33,7 +33,7 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     const { date, status, vehicle_id } = req.query;
     let query = `
       SELECT t.*, v.registration, v.name as vehicle_name,
-       CONCAT(e.first_name, ' ', e.last_name) as driver_name,
+       NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') as driver_name,
        sr.name as route_name,
        CASE WHEN t.collection_type = 'association'
          THEN COALESCE(t.nb_cav, (SELECT COUNT(*)::int FROM tour_association_point tap WHERE tap.tour_id = t.id))

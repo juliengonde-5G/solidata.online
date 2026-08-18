@@ -130,8 +130,25 @@ router.post('/driver-start', async (req, res) => {
       tv = tvRes.rows[0]?.token_version == null ? 0 : tvRes.rows[0].token_version;
     } catch (_) { /* défaut 0 */ }
 
+    // Le jeton porte explicitement le VÉHICULE et, quand il est connu, la fiche
+    // employé du chauffeur affecté. C'est l'identité de la session : les fiches
+    // salariés viennent de la paie et n'ont en général aucun compte utilisateur,
+    // donc `userId` est le plus souvent le compte générique « chauffeur » — sur
+    // lequel aucune fiche employé n'est rattachée. Sans ces deux claims, toute
+    // action ayant besoin du chauffeur (prise de tournée) échouait sur
+    // « Aucune fiche employé liée à votre compte ».
+    // `username` = « driver_<vehicleId> » est conservé à l'identique : la garde
+    // de périmètre véhicule de routes/tours/index.js s'appuie dessus.
     const token = jwt.sign(
-      { id: userId, userId, role: 'COLLABORATEUR', username: `driver_${vehicle.id}`, tv },
+      {
+        id: userId,
+        userId,
+        role: 'COLLABORATEUR',
+        username: `driver_${vehicle.id}`,
+        vehicle_id: vehicle.id,
+        employee_id: employeeId || null,
+        tv,
+      },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
