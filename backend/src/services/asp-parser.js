@@ -187,7 +187,31 @@ function isDataLine(line) {
 }
 
 /**
- * Découpe les lignes en enregistrements ouverts par une ligne « NOM PRÉNOM ».
+ * Enregistrement tenant sur UNE SEULE ligne : « NOM PRÉNOM 19/07/1964 CDII 152
+ * 2000.00 ». C'est la forme des CDI Inclusion (CDII), dont l'ASP n'imprime pas
+ * la mention « Classique » et qui tiennent donc sur une ligne. Sans ce cas, la
+ * ligne est rejetée par isNameLine (elle contient des chiffres) ET par
+ * isDataLine si aucun enregistrement n'est ouvert : le salarié était purement
+ * et simplement perdu (constaté sur les états de février et mars 2026, un
+ * CDII à 152 h manquant à chaque fois — la garde de cohérence de la somme des
+ * heures a bien refusé l'import, ce qui a permis de le détecter).
+ *
+ * @returns {{ nom: string, data: string }|null}
+ */
+function splitInlineRecord(line) {
+  // Nom = jetons EN CAPITALES uniquement, suivis d'une date de naissance puis
+  // du reste des données. Les en-têtes en capitales (raison sociale, adresse)
+  // ne comportent pas de date à cet endroit et ne matchent donc pas.
+  const m = line.match(/^([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ'\- .]*?)\s+(\d{2}\/\d{2}\/\d{4}\b.*)$/);
+  if (!m) return null;
+  const nom = m[1].trim();
+  if (!isNameLine(nom)) return null;
+  return { nom, data: m[2] };
+}
+
+/**
+ * Découpe les lignes en enregistrements ouverts par une ligne « NOM PRÉNOM »
+ * (forme courante, sur 2-3 lignes) ou par un enregistrement mono-ligne (CDII).
  * @returns {Array<{ nom: string, lignes: string[] }>}
  */
 function splitRecords(lines) {
@@ -196,6 +220,14 @@ function splitRecords(lines) {
   for (const line of lines) {
     if (isNameLine(line)) {
       current = { nom: line, lignes: [] };
+      records.push(current);
+      continue;
+    }
+    const inline = splitInlineRecord(line);
+    if (inline) {
+      // La « Période du contrat » suit sur la ligne d'après : elle sera
+      // rattachée à cet enregistrement par le test isDataLine ci-dessous.
+      current = { nom: inline.nom, lignes: [inline.data] };
       records.push(current);
       continue;
     }
@@ -420,5 +452,6 @@ module.exports = {
   isNameLine,
   isDataLine,
   splitRecords,
+  splitInlineRecord,
   parseRecord,
 };
