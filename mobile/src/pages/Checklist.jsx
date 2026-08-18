@@ -13,7 +13,7 @@ const CHECKLIST_ITEMS = [
   { id: 'telephone', label: 'Téléphone chargé', sub: '> 50% batterie', icon: '📱' },
   { id: 'eclairage', label: 'Feux & clignotants', sub: 'test rapide avant / arrière', icon: '💡' },
   { id: 'pneus', label: 'Pneus & pression', sub: 'visuel autour du camion', icon: '🛞' },
-  { id: 'niveaux', label: 'Niveaux moteur', sub: 'huile, liquide de refr.', icon: '🛢️' },
+  { id: 'niveaux', label: 'Tableau de bord', sub: 'Pas de voyants allumés', icon: '🔔' },
   { id: 'proprete', label: 'Benne propre', sub: 'vide, sans résidu', icon: '🧽' },
   { id: 'sacs_remballes', label: 'Sacs de remballes', sub: 'stock disponible', icon: '🛍️' },
 ];
