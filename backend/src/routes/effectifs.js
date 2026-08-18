@@ -167,13 +167,17 @@ function posteInsertion(positionTitle) {
  *       restant comptées (le filtrage est fait ligne à ligne sur les périodes
  *       effectives chaînées d'employee_contracts).
  *   (c) CDD : requalification en CDDI de fait (données héritées d'avant
- *       l'import 2.20.0, qui stockait le type brut Malibou « CDD »)
- *       UNIQUEMENT si l'intitulé de poste contient « Cddi » OU si le salarié
- *       est déclaré à l'ASP (`emp.declare_asp`, jointure etp_asp_salaries).
+ *       l'import 2.20.0, qui stockait le type brut Malibou « CDD ») si
+ *       l'intitulé de poste contient « Cddi », OU si le salarié est déclaré à
+ *       l'ASP (`emp.declare_asp`, jointure etp_asp_salaries), OU — repli des
+ *       bases anciennes — si AUCUN intitulé de poste n'est connu et que la
+ *       personne a un parcours d'insertion (`emp.insertion_status` ≠ 'none').
  *       L'ancienne règle « tout CDD d'un salarié ayant un parcours » était
- *       trop large : elle faisait entrer des CDD ordinaires (poste de
- *       manutention, remplacement) et les permanents issus d'un parcours
- *       clôturé.
+ *       trop large dès lors que le poste EST connu : elle faisait entrer des
+ *       CDD ordinaires (« Cariste Manutentionnaire ») et les permanents issus
+ *       d'un parcours clôturé. Un poste connu SANS mention « Cddi » exclut
+ *       donc désormais, tandis qu'un poste inconnu conserve le comportement
+ *       historique (aucune régression sur une base non réimportée).
  *
  * @param {Object} contrat { contract_type, position_title }
  * @param {Object} emp     { cddi_derogation_motif, declare_asp, … }
@@ -186,7 +190,13 @@ function keepContractForInsertion(contrat, emp) {
   if (isCdi(type)) {                                                    // (b)
     return posteInsertion(poste) || (emp && emp.cddi_derogation_motif === 'cdi_inclusion');
   }
-  if (isCdd(type)) return posteInsertion(poste) || !!(emp && emp.declare_asp); // (c)
+  if (isCdd(type)) {                                                    // (c)
+    if (posteInsertion(poste)) return true;
+    if (emp && emp.declare_asp) return true;
+    const posteConnu = poste != null && String(poste).trim() !== '';
+    if (posteConnu) return false;
+    return !!(emp && emp.insertion_status && emp.insertion_status !== 'none');
+  }
   return false;
 }
 

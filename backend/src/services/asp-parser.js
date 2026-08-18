@@ -219,7 +219,17 @@ function splitRecords(lines) {
   let current = null;
   for (const line of lines) {
     if (isNameLine(line)) {
-      current = { nom: line, lignes: [] };
+      // La forme de contrat est imprimée sur la MÊME ligne que le nom, à
+      // droite (« ANQUETIL PHILIPPE            CDDI ») : après compactage des
+      // espaces elle se retrouve collée au nom. On la détache, sans quoi le
+      // nom serait « ANQUETIL PHILIPPE CDDI » (rapprochement impossible) et la
+      // forme de contrat resterait nulle.
+      const m = line.match(/^(.*?)\s+(CDDI|CDII|Classique|CVG)$/);
+      if (m && isNameLine(m[1].trim())) {
+        current = { nom: m[1].trim(), lignes: [m[2]] };
+      } else {
+        current = { nom: line, lignes: [] };
+      }
       records.push(current);
       continue;
     }
