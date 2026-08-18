@@ -205,20 +205,6 @@ export default function WeighIn() {
               </button>
             ))}
           </div>
-
-          <div
-            className="inline-flex items-center gap-2 mt-4"
-            style={{
-              background: '#FFFBEB',
-              color: '#B45309',
-              padding: '10px 14px',
-              borderRadius: 10,
-              fontSize: 13,
-              fontWeight: 700,
-            }}
-          >
-            ✏️ Bascule non connectée · saisie manuelle
-          </div>
         </div>
 
         {/* Manual inputs */}
