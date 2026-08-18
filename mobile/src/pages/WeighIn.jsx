@@ -1,20 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { vibrateSuccess, vibrateError, vibrateTap } from '../services/haptic';
+import { vibrateSuccess, vibrateError } from '../services/haptic';
 import StepConfirmScreen from '../components/StepConfirmScreen';
 import OfflineActionBadge from '../components/OfflineActionBadge';
 import { addPendingWeight, deleteItem, newClientId, STORES } from '../services/db';
 import { sendWeight, getPendingCount } from '../services/sync';
+import { authedFetch } from '../services/authedFetch';
 
 export default function WeighIn() {
   const [grossWeight, setGrossWeight] = useState('');
-  const [tareWeight, setTareWeight] = useState('');
+  // Tare fixe du véhicule (vehicles.tare_weight_kg) — plus besoin de la
+  // ressaisir à chaque pesée. `tareManual` n'est utilisé qu'en repli si le
+  // véhicule n'a aucune tare configurée (jamais de valeur inventée : 0 n'est
+  // jamais supposé silencieusement).
+  const [tare, setTare] = useState(null);
+  const [tareLoading, setTareLoading] = useState(true);
+  const [tareManual, setTareManual] = useState('');
   const [loading, setLoading] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState(null); // { status, pendingId, net, tare, gross }
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
+  const vehicleId = localStorage.getItem('selected_vehicle_id');
   const isIntermediate = localStorage.getItem('intermediate_return') === 'true';
 
   useEffect(() => {
@@ -28,22 +36,30 @@ export default function WeighIn() {
     };
   }, []);
 
-  const netWeight = Math.max(0, (parseFloat(grossWeight) || 0) - (parseFloat(tareWeight) || 0));
+  useEffect(() => {
+    if (!vehicleId) { setTareLoading(false); return; }
+    authedFetch(`/api/vehicles/${vehicleId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((v) => {
+        if (v && typeof v.tare_weight_kg === 'number') setTare(v.tare_weight_kg);
+      })
+      .catch(() => {})
+      .finally(() => setTareLoading(false));
+  }, [vehicleId]);
 
-  const step = (delta) => {
-    vibrateTap();
-    setGrossWeight(prev => {
-      const current = parseFloat(prev) || 0;
-      const next = Math.max(0, current + delta);
-      return String(next);
-    });
-  };
+  // Tare résolue : celle du véhicule si configurée, sinon la saisie
+  // exceptionnelle de repli. `null` tant qu'aucune des deux n'est connue.
+  const effectiveTare = tare != null ? tare : (tareManual !== '' ? parseFloat(tareManual) : null);
+  const netWeight = effectiveTare != null
+    ? Math.max(0, (parseFloat(grossWeight) || 0) - effectiveTare)
+    : null;
 
   const submit = async () => {
+    if (effectiveTare == null) return;
     setLoading(true);
     setError('');
     try {
-      const tare = parseFloat(tareWeight) || 0;
+      const tareVal = effectiveTare;
       const gross = parseFloat(grossWeight) || 0;
       const finalize = !isIntermediate;
 
@@ -52,7 +68,7 @@ export default function WeighIn() {
         clientId: newClientId(),
         tourId,
         weightKg: netWeight,
-        tareKg: tare,
+        tareKg: tareVal,
         isIntermediate,
         finalize,
         notes: null,
@@ -78,7 +94,7 @@ export default function WeighIn() {
 
       await getPendingCount();
       vibrateSuccess();
-      setConfirm({ status, pendingId, gross, tare, net: netWeight });
+      setConfirm({ status, pendingId, gross, tare: tareVal, net: netWeight });
     } catch (err) {
       vibrateError();
       console.error('[WeighIn] submit', err);
@@ -120,7 +136,7 @@ export default function WeighIn() {
     );
   }
 
-  const canSubmit = !loading && grossWeight !== '' && tareWeight !== '';
+  const canSubmit = !loading && grossWeight !== '' && effectiveTare != null;
   const now = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
   return (
@@ -179,35 +195,12 @@ export default function WeighIn() {
             className="font-extrabold text-gray-900"
             style={{ fontSize: 72, lineHeight: 1, letterSpacing: '-0.03em' }}
           >
-            {netWeight.toFixed(0)}
+            {netWeight != null ? netWeight.toFixed(0) : '—'}
             <span className="text-gray-400 ml-2" style={{ fontSize: 28 }}>kg</span>
-          </div>
-
-          <div className="flex justify-center gap-2.5 mt-5">
-            {[-5, -1, +1, +5].map(d => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => step(d)}
-                aria-label={`Ajuster poids de ${d > 0 ? '+' : ''}${d} kg`}
-                className="font-extrabold active:scale-95 transition-transform"
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 14,
-                  background: '#F1F5F9',
-                  color: '#1E293B',
-                  border: 'none',
-                  fontSize: 20,
-                }}
-              >
-                {d > 0 ? `+${d}` : `${d}`}
-              </button>
-            ))}
           </div>
         </div>
 
-        {/* Manual inputs */}
+        {/* Saisie du poids brut — seul champ à remplir au clavier */}
         <div className="grid grid-cols-2 gap-2.5">
           <div
             className="bg-white"
@@ -223,21 +216,37 @@ export default function WeighIn() {
               className="w-full bg-transparent outline-none text-center text-lg font-bold text-gray-900"
             />
           </div>
+          {/* Tare : donnée fixe du véhicule (fiche véhicule), plus besoin de la
+              ressaisir à chaque pesée. Repli en saisie exceptionnelle si le
+              véhicule n'a aucune tare configurée. */}
           <div
             className="bg-white"
             style={{ borderRadius: 14, padding: 12, border: '1px solid #E2E8F0' }}
           >
             <label className="block text-xs font-semibold text-gray-600 mb-1">Tare (kg)</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={tareWeight}
-              onChange={e => setTareWeight(e.target.value)}
-              placeholder="À vide"
-              className="w-full bg-transparent outline-none text-center text-lg font-bold text-gray-900"
-            />
+            {tareLoading ? (
+              <p className="text-center text-sm text-gray-400 py-1.5">Chargement…</p>
+            ) : tare != null ? (
+              <p className="text-center text-lg font-bold text-gray-900">
+                {tare.toFixed(0)} <span className="text-[11px] font-medium text-gray-400">fixe</span>
+              </p>
+            ) : (
+              <input
+                type="number"
+                inputMode="decimal"
+                value={tareManual}
+                onChange={e => setTareManual(e.target.value)}
+                placeholder="Non configurée"
+                className="w-full bg-transparent outline-none text-center text-lg font-bold text-gray-900"
+              />
+            )}
           </div>
         </div>
+        {!tareLoading && tare == null && (
+          <p className="text-xs text-amber-600 font-medium -mt-2">
+            Tare non configurée pour ce véhicule — saisie exceptionnelle. Signale-le à un responsable pour l'ajouter à la fiche véhicule.
+          </p>
+        )}
 
         {/* Recap déchargement */}
         <div
