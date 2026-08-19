@@ -2,27 +2,25 @@
 # -----------------------------------------------------------------------------
 # Client du kiosque — lance par le COMPOSITEUR (cage ou xinit), jamais a la main.
 #
-# Raison d'etre : constate en exploitation, chromium mourait sous cage SANS
-# LAISSER UNE SEULE LIGNE — cage restait seul a tenir un ecran vide et rien,
-# ni dans le journal du service ni ailleurs, ne disait pourquoi. Ce lanceur
-# rend l'echec bruyant :
-#   - controles prealables nommes (navigateur present, rendu GPU accessible) ;
-#   - sortie de chromium (stdout+stderr) versee au journal systemd sous
-#     l'etiquette « badgeuse-kiosk-client » ;
-#   - code de fin journalise, PUIS propage : le compositeur tombe avec son
-#     client et systemd (Restart=always) relance l'ensemble — plus jamais un
-#     compositeur vivant devant un ecran mort.
+# Rend l'echec du navigateur BRUYANT : constate en exploitation, chromium
+# mourait sous cage sans laisser une seule ligne, cage restant seul devant un
+# ecran vide.
 #
-# Le navigateur et ses options viennent de /etc/badgeuse/kiosk.env, charge par
-# l'unite systemd (EnvironmentFile) et herite par ce processus.
+# JOURNALISATION PAR HERITAGE, deliberement : ce processus est l'enfant de
+# cage, lui-meme lance par systemd avec StandardOutput/StandardError=journal —
+# tout ce qui s'ecrit ici et tout ce que chromium ecrira arrive DONC au journal
+# du service (journalctl -u badgeuse-kiosk), sans aucun intermediaire. La
+# premiere version passait par systemd-cat : constate sur le poste, il peut
+# BLOQUER dans ce contexte de session (cage fige en do_wait sur un lanceur
+# suspendu avant sa premiere ligne — aucun log, aucun chromium, ecran vide).
+# Plus aucun processus intermediaire ici : un printf ne bloque pas.
 # -----------------------------------------------------------------------------
 set -u
 
-TAG=badgeuse-kiosk-client
 URL="${KIOSK_URL:-http://127.0.0.1:8766}"
 NAV="${NAVIGATEUR_BIN:-/usr/bin/chromium}"
 
-dire() { printf '%s\n' "$*" | systemd-cat -t "$TAG" 2>/dev/null || printf '%s\n' "$*" >&2; }
+dire() { printf 'kiosk-client: %s\n' "$*" >&2; }
 
 if [ ! -x "$NAV" ]; then
   dire "ERREUR : navigateur introuvable (${NAV}) — relancer install.sh"
@@ -35,7 +33,7 @@ dire "demarrage : ${NAV} (options : ${CHROMIUM_FLAGS:-aucune}) -> ${URL}"
 
 # shellcheck disable=SC2086 — CHROMIUM_FLAGS est une liste d'options, le
 # decoupage sur les espaces est voulu (aucune option ne contient d'espace).
-"$NAV" ${CHROMIUM_FLAGS:-} "$URL" > >(systemd-cat -t "$TAG") 2>&1
+"$NAV" ${CHROMIUM_FLAGS:-} "$URL"
 CODE=$?
 
 dire "chromium termine (code ${CODE})"
