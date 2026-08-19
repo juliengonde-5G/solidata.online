@@ -432,6 +432,40 @@ const JOUR = engine.parisDateStr(new Date());
     expect(JSON.stringify(liste.body)).not.toContain('api_key');
   });
 
+  // ── Anti-rebond : la règle doit VOYAGER jusqu'au poste ───────────────────
+  //
+  // L'exploitation signalait qu'un salarié qui badge plusieurs fois n'a aucun
+  // message. La fenêtre passe donc à 5 minutes — mais une règle de gestion ne
+  // sert à rien si elle reste en base : ce test suit la valeur depuis
+  // `settings` jusqu'à la charge utile que le poste consomme (GET /config).
+  test('la fenêtre d\'anti-rebond descend RÉELLEMENT au poste par /config', async () => {
+    const lu = async () => {
+      const r = await dev(request(app).get(`/api/badgeuse/v1/devices/${CODE_POSTE}/config`), deviceKey);
+      expect(r.status).toBe(200);
+      return r.body.config.anti_rebond_sec;
+    };
+
+    // Par défaut (aucune ligne en base) : la recommandation documentée.
+    await pool.query('DELETE FROM settings WHERE key = $1', ['badgeuse.anti_rebond_sec']);
+    expect(await lu()).toBe(300);
+
+    // Après arbitrage de la Direction : c'est SA valeur qui part au poste.
+    const maj = await auth(request(app).put('/api/badgeuse/parametres'), 'ADMIN').send({ anti_rebond_sec: 120 });
+    expect(maj.status).toBe(200);
+    expect(await lu()).toBe(120);
+
+    await pool.query('DELETE FROM settings WHERE key = $1', ['badgeuse.anti_rebond_sec']);
+  });
+
+  test('modifier l\'anti-rebond VAUT arbitrage de la grille RH (ADR-0002)', async () => {
+    await pool.query('DELETE FROM settings WHERE key IN ($1,$2,$3)',
+      ['badgeuse.anti_rebond_sec', 'badgeuse.regles_validees_le', 'badgeuse.regles_validees_par']);
+    await auth(request(app).put('/api/badgeuse/parametres'), 'ADMIN').send({ anti_rebond_sec: 300 });
+
+    const r = await pool.query('SELECT value FROM settings WHERE key = $1', ['badgeuse.regles_validees_le']);
+    expect(r.rows.length).toBe(1); // l'anti-rebond EST une règle de gestion
+  });
+
   test('la clé HMAC du site est chiffrée au repos et ne ressort par aucune lecture', async () => {
     const r = await pool.query('SELECT value FROM settings WHERE key = $1', [`badgeuse.hmac_key_site_${siteId}`]);
     // Format AES-256-GCM du dépôt : 'v1:<iv>:<tag>:<chiffré>' — jamais 64 hex en clair.

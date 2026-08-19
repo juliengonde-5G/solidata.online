@@ -710,7 +710,9 @@ describe('GET /config et /playlist', () => {
     expect(r.status).toBe(200);
     expect(r.body.config).toMatchObject({
       overlay_duree_sec: 5,
-      anti_rebond_sec: 8,
+      // 5 min : l'anti-rebond ne couvre plus seulement le rebond matériel du
+      // lecteur mais la re-présentation par doute (addendum ADR-0002).
+      anti_rebond_sec: 300,
       affichage_cumul_hebdo: false,
       plage_acceptation: { debut: '05:00', fin: '21:00' },
       heartbeat_interval_sec: 60,

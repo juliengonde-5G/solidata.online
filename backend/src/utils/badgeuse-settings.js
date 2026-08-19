@@ -40,7 +40,16 @@ const BADGEUSE_SETTING_DEFAULTS = {
   'badgeuse.plage_acceptation_fin': '21:00',
   'badgeuse.affichage_cumul_hebdo': false,
   'badgeuse.overlay_duree_sec': 5,
-  'badgeuse.anti_rebond_sec': 8,
+  // ANTI-REBOND (s) — durée pendant laquelle une NOUVELLE présentation du même
+  // badge n'est pas comptée. 8 s ne couvrait que le rebond matériel du lecteur ;
+  // le geste réellement problématique est humain (représenter son badge par
+  // doute une demi-minute plus tard), et il passait donc en silence : deux
+  // pointages, sens alternés, journée refermée sur une paire de quelques
+  // secondes et vrai départ transformé en entrée orpheline.
+  // 300 s = arbitrage demandé par l'exploitation. Contrepartie assumée : un
+  // aller-retour réel plus court que la fenêtre n'est pas compté — c'est
+  // pourquoi le poste l'annonce à l'écran au lieu de l'ignorer en silence.
+  'badgeuse.anti_rebond_sec': 300,
   'badgeuse.regularisation_delai_jours': 5,
   // ── Cadences de synchronisation du poste (CONTRAT_API_DEVICE §2.3) ──
   'badgeuse.heartbeat_interval_sec': 60,

@@ -71,7 +71,8 @@
     inconnu: 'Pointage enregistré',
     badge_inconnu: 'Badge non reconnu — va voir ton encadrant',
     badge_illisible: 'Badge illisible — présente-le à nouveau',
-    deja: 'Déjà enregistré',
+    deja: 'Badge déjà enregistré',
+    deja_detail: 'ce passage ne compte pas une seconde fois',
     hors_ligne: 'Hors ligne — vos pointages sont enregistrés',
     lecteur: 'Lecteur de badge non détecté — préviens ton encadrant'
   };
@@ -263,6 +264,40 @@
       elConfettis.textContent = '';   // libere les animations
       overlayTimer = null;
     }, 300);
+  }
+
+  /**
+   * « il y a 3 minutes » a partir d'une anciennete en secondes.
+   *
+   * Sans ce reperage, « Badge deja enregistre » ne dit pas a la personne si
+   * son passage vient d'etre pris ou s'il date : elle ne sait pas si elle doit
+   * s'inquieter. L'agent envoie une DUREE, jamais une heure de pointage
+   * (l'ecran ne doit rien reveler d'autre que le prenom et l'initiale).
+   *
+   * Rend une chaine vide si l'agent n'a rien envoye : on n'invente pas de
+   * duree.
+   */
+  function depuisTexte(secondes) {
+    var n = Number(secondes);
+    if (secondes === null || secondes === undefined || !isFinite(n) || n < 0) { return ''; }
+    if (n < 60) { return 'il y a moins d\'une minute'; }
+    var minutes = Math.floor(n / 60);
+    return minutes === 1 ? 'il y a 1 minute' : 'il y a ' + minutes + ' minutes';
+  }
+
+  /**
+   * Ligne secondaire de l'overlay d'anti-rebond.
+   *
+   * Elle occupe le meme emplacement que le sens (entree/sortie) d'un badgeage
+   * accepte : c'est la ligne que l'oeil cherche apres le titre. Elle doit dire
+   * les DEUX choses utiles — depuis quand le badge est pris, et que cette
+   * presentation-ci ne compte pas. Sans duree connue, la phrase reste vraie.
+   */
+  function rebondTexte(secondes) {
+    var depuis = depuisTexte(secondes);
+    return depuis
+      ? depuis + ' — ' + MESSAGES.deja_detail
+      : MESSAGES.deja_detail.charAt(0).toUpperCase() + MESSAGES.deja_detail.slice(1);
   }
 
   /** Ecrit un texte et masque l'element s'il est vide (jamais de ligne fantome). */
@@ -1004,6 +1039,7 @@
           picto: '•',
           moment: MESSAGES.deja,
           identite: identite(message.prenom, ''),
+          sens: rebondTexte(message.depuis_sec),
           duree: message.overlay_duree_sec
         });
         sonNeutre();

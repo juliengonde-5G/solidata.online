@@ -47,7 +47,7 @@ sans test, ou exigence à moitié couverte · **ABSENT** = non trouvé dans le c
 | Exig. | Implémenté (fichier:ligne) | Testé | Verdict |
 |---|---|---|---|
 | PST-01 — capture `evdev` exclusive `EVIOCGRAB` | `badgeuse/agent/badgeuse_agent/reader.py` (`device.grab()` sur **toutes** les interfaces qualifiées, libération en fin de boucle) ; droits `deploy/systemd/badgeuse-agent.service:14` | `tests/test_reader.py` (faux `evdev`, lecteur à **deux** interfaces dont une muette — cas rencontré en exploitation), `tests/test_pipeline.py` | **OK** (défaut de terrain corrigé : une seule interface était retenue, le badgeage se jouait à pile ou face) |
-| PST-02 — anti-rebond 8 s, message « déjà enregistré » | `debounce.py` (module dédié) ; seuil serveur `badgeuse-settings.js:40` (`anti_rebond_sec: 8`) ; message `ui/app.js` | `tests/test_debounce.py` | **OK** |
+| PST-02 — anti-rebond (fenêtre paramétrée, défaut 300 s), message « Badge déjà enregistré, il y a X minutes » | `debounce.py` (module dédié, `elapsed()`) ; seuil serveur `badgeuse-settings.js` (`anti_rebond_sec: 300`) ; message `ui/app.js` (`depuisTexte`) | `tests/test_debounce.py`, `tests/test_promesse_poste.py` | **OK** |
 | PST-03 — sens par alternance depuis le dernier pointage du jour | `sens.py` (`determine_sens`, `ENTREE`/`INCONNU`) ; appel `app.py` (`_process`) | `tests/test_sens.py` | **OK** |
 | PST-04 — badge inconnu → écran d'erreur + pointage orphelin, jamais de rejet silencieux | `badgeuse-device.js:188-196` (`badge_inconnu`, `badge_inactif`), `:201-204` (`hors_plage`) — stocké en `statut='orphelin'`, jamais rejeté | `badgeuse-device.test.js`, `badgeuse-contract.test.js` | **OK** |
 | PST-05 — file SQLite persistante, purge sur accusé serveur uniquement | `ACK_STATUSES` `store.py:60` = `{ok, duplicate, orphan, invalid}` — **`retry` délibérément exclu** (`store.py:54`) ; classification serveur `badgeuse-device.js:152-157` ; arrêt de lot `:392-396` | `tests/test_store.py`, `badgeuse-device.test.js` | **OK** (QA-01 + QA-13 corrigés) |
@@ -687,7 +687,7 @@ Relever `temperature_cpu` et `throttled` du heartbeat toutes les minutes.
 
 **Protocole.** 30 personnes (ou 30 présentations successives de badges **distincts**) en 60 s,
 cadence ~1 badge / 2 s, à l'embauche. Répéter 3 fois (matin, après pause, fin de poste). Inclure
-**2 présentations doubles volontaires** (< 8 s) pour éprouver l'anti-rebond PST-02.
+**2 présentations doubles volontaires** (à quelques secondes, puis une à ~30 s) pour éprouver l'anti-rebond PST-02 : les deux doivent afficher « Badge déjà enregistré » avec l'ancienneté, et ne produire qu'UN pointage.
 **Critères.**
 - **30 pointages distincts** enregistrés par salve (les doubles < 8 s comptent pour 1 et affichent
   « déjà enregistré »).

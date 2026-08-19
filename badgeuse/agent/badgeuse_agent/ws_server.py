@@ -241,13 +241,23 @@ class UiChannel:
         )
 
     async def badge_repeat(
-        self, *, prenom: Optional[str] = None, overlay_duree_sec: int = 5
+        self,
+        *,
+        prenom: Optional[str] = None,
+        depuis_sec: Optional[float] = None,
+        overlay_duree_sec: int = 5,
     ) -> None:
-        """Anti-rebond : « déjà enregistré », ni succès ni erreur (PST-02)."""
+        """Anti-rebond : « déjà enregistré », ni succès ni erreur (PST-02).
+
+        ``depuis_sec`` est l'ancienneté du pointage déjà retenu. C'est une
+        DURÉE, jamais un horodatage ni une donnée d'identité : l'écran reste au
+        prénom + initiale.
+        """
         await self.broadcast(
             {
                 "type": "badge_repeat",
                 "prenom": prenom,
+                "depuis_sec": None if depuis_sec is None else max(0, int(depuis_sec)),
                 "overlay_duree_sec": clamp_overlay(overlay_duree_sec),
             }
         )

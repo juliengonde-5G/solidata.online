@@ -162,9 +162,15 @@ class Agent:
 
         if not self._debouncer.accept(condensat):
             badge = self._store.find_badge(condensat)
+            # L'ancienneté est lue AVANT tout autre traitement : c'est elle qui
+            # permet à l'écran de dire « déjà enregistré il y a X minutes »
+            # plutôt qu'un « déjà enregistré » sans repère, incompréhensible
+            # avec une fenêtre de plusieurs minutes.
+            depuis_sec = self._debouncer.elapsed(condensat)
             LOGGER.info("anti-rebond : badge %s ignore", short(condensat))
             await self._ui.badge_repeat(
                 prenom=(badge or {}).get("prenom"),
+                depuis_sec=depuis_sec,
                 overlay_duree_sec=self._overlay_sec,
             )
             return

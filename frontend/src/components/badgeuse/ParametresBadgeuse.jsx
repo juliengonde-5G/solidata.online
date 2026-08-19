@@ -23,6 +23,16 @@ const RETENTIONS = [
   { key: 'retention_journal_acces_mois', label: "Journal des accès RH", unite: 'mois' },
 ];
 
+/** « 300 s » → « soit 5 min » : une durée en secondes ne se lit pas d'un coup d'œil. */
+function dureeLisible(secondes) {
+  const n = Number(secondes);
+  if (!Number.isFinite(n) || n <= 0) return 'Délai non défini';
+  if (n < 60) return `Soit ${Math.round(n)} s`;
+  const min = Math.floor(n / 60);
+  const rest = Math.round(n % 60);
+  return rest ? `Soit ${min} min ${rest} s` : `Soit ${min} min`;
+}
+
 /**
  * Réponse de GET /parametres → état du formulaire. On lit `data.parametres`
  * (et non la racine), sinon TOUS les champs retombaient sur leurs valeurs de
@@ -43,7 +53,7 @@ function fromApi(data = {}) {
     plage_fin: d.plage_acceptation_fin || '21:00',
     affichage_cumul_hebdo: !!d.affichage_cumul_hebdo,
     overlay_duree_sec: d.overlay_duree_sec ?? 5,
-    anti_rebond_sec: d.anti_rebond_sec ?? 8,
+    anti_rebond_sec: d.anti_rebond_sec ?? 300,
     regularisation_delai_jours: d.regularisation_delai_jours ?? 5,
     supervision_silence_minutes: d.supervision_silence_minutes ?? 15,
     supervision_alerte_emails: d.supervision_alerte_emails || '',
@@ -203,8 +213,15 @@ export default function ParametresBadgeuse({ canWrite }) {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Anti-rebond (s)</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Anti-rebond — badge présenté deux fois (s)</label>
             <input type="number" min={1} step={1} value={form.anti_rebond_sec} onChange={(e) => set('anti_rebond_sec', e.target.value)} disabled={disabled} className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
+            <p className="text-[11px] text-slate-400 mt-1">
+              {dureeLisible(form.anti_rebond_sec)}. Pendant ce délai, représenter le même badge n'ajoute pas de pointage :
+              l'écran affiche « Badge déjà enregistré, il y a X minutes ». Recommandation : 300 s (5 min) — en dessous,
+              un salarié qui doute et rebadge crée un second pointage qui casse sa journée.
+              <strong> En contrepartie, un aller-retour plus court que ce délai n'est pas compté</strong> (le passage est
+              annoncé à l'écran, jamais avalé en silence) : à régulariser par une correction si le cas se présente.
+            </p>
           </div>
 
           <div>
