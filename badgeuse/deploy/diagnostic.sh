@@ -101,6 +101,32 @@ case "$CMD" in
     ;;
 esac
 
+# Le compositeur vivant ne prouve PAS que le navigateur affiche : cage peut
+# tenir l'ecran alors que son client est mort ou n'a jamais peint. On liste donc
+# les processus REELLEMENT dans le cgroup du service, et depuis combien de temps.
+titre "3 bis. Processus du kiosque"
+CG="/sys/fs/cgroup/system.slice/badgeuse-kiosk.service/cgroup.procs"
+DEPUIS="$(systemctl show badgeuse-kiosk -p ActiveEnterTimestamp --value 2>/dev/null)"
+ligne "actif depuis" "${DEPUIS:-inconnu}"
+ligne "redemarrages" "$(systemctl show badgeuse-kiosk -p NRestarts --value 2>/dev/null || echo '?')"
+NAV_VU=0
+if [ -r "$CG" ]; then
+  while read -r pid; do
+    [ -n "$pid" ] || continue
+    NOM="$(ps -o comm= -p "$pid" 2>/dev/null)"
+    TPS="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [ -n "$NOM" ] && ligne "  pid ${pid}" "${NOM} (${TPS:-?} s)"
+    case "$NOM" in chromium*) NAV_VU=1 ;; esac
+  done < "$CG"
+else
+  ligne "cgroup" "illisible (service arrete ?)"
+fi
+
+if [ "$KIOSQUE_OK" -eq 1 ] && [ "$NAV_VU" -eq 0 ]; then
+  retenir "COMPOSITEUR SEUL : le service tourne, mais AUCUN processus chromium n'est vivant dans le kiosque — l'ecran affiche un fond vide. Lire le journal du kiosque (section 6) pour la sortie du navigateur, puis :
+      sudo systemctl restart badgeuse-kiosk"
+fi
+
 # ── 4. L'interface est-elle servie ? ─────────────────────────────────────────
 titre "4. Interface locale (servie par l'agent)"
 if command -v curl >/dev/null 2>&1; then
@@ -158,9 +184,13 @@ esac
 titre "8. Verdict"
 if [ "${#CAUSES[@]}" -eq 0 ]; then
   if [ "$KIOSQUE_OK" -eq 1 ] && [ "$AGENT_OK" -eq 1 ]; then
-    echo "    Les deux services tournent et l'interface repond."
-    echo "    Si l'ecran reste noir, c'est l'ecran ou le cable : verifier la"
-    echo "    section 5 ci-dessus (HDMI « connected » ?) et la plage d'allumage."
+    echo "    Les deux services tournent, le navigateur est vivant dans le"
+    echo "    kiosque, et l'interface repond en 200."
+    echo
+    echo "    Si l'ecran reste noir malgre cela, la piste n'est plus logicielle :"
+    echo "    verifier la section 5 (HDMI « connected »), la plage d'allumage,"
+    echo "    l'entree selectionnee sur l'ecran, et le cable micro-HDMI (sur"
+    echo "    Raspberry Pi 5, la prise la PLUS PROCHE de l'alimentation)."
   elif [ "$KIOSQUE_OK" -eq 0 ]; then
     echo "    Le kiosque echoue alors que toutes les briques semblent presentes."
     echo "    Les journaux des sections 6 et 7 bis portent la cause exacte."
