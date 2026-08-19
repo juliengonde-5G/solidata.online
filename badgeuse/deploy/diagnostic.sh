@@ -36,10 +36,18 @@ fi
 
 # ── 2. Services ──────────────────────────────────────────────────────────────
 titre "2. Services"
+# systemctl is-active ECRIT l'etat sur stdout ET rend un code non nul des que
+# l'etat n'est pas « active » (« activating », « failed »...). Un `|| echo` ici
+# affichait donc DEUX lignes : l'etat reel, puis « inactif ». On lit la sortie,
+# on ignore le code.
+etat_service() {
+  local e; e="$(systemctl is-active "$1" 2>/dev/null)"
+  printf '%s' "${e:-inconnu}"
+}
 for s in badgeuse-agent badgeuse-kiosk; do
-  ligne "$s" "$(systemctl is-active "$s" 2>/dev/null || echo inactif)"
+  ligne "$s" "$(etat_service "$s")"
 done
-ligne "getty@tty1 (invite login)" "$(systemctl is-active getty@tty1.service 2>/dev/null || echo inactif)"
+ligne "getty@tty1 (invite login)" "$(etat_service getty@tty1.service)"
 
 KIOSQUE_OK=0; systemctl is-active --quiet badgeuse-kiosk 2>/dev/null && KIOSQUE_OK=1
 AGENT_OK=0;   systemctl is-active --quiet badgeuse-agent 2>/dev/null && AGENT_OK=1
@@ -69,7 +77,8 @@ CMD="$(systemctl show badgeuse-kiosk -p ExecStart --value 2>/dev/null | head -c 
 for mot in $CMD; do
   case "$mot" in
     /usr/bin/chromium*|/usr/bin/cage|/usr/bin/xinit)
-      [ -x "$mot" ] || retenir "BINAIRE INTROUVABLE : l'unite lance ${mot}, qui n'existe pas (echec 203/EXEC, ecran noir). Corriger : sudo bash /opt/badgeuse/deploy/install.sh" ;;
+      [ -x "$mot" ] || retenir "BINAIRE INTROUVABLE : la commande du kiosque reference ${mot}, qui n'existe pas — le service echoue a chaque essai et l'ecran reste NOIR. Corriger :
+      sudo bash /opt/badgeuse/deploy/install.sh" ;;
   esac
 done
 

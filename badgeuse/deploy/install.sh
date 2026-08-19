@@ -93,38 +93,58 @@ info "python : $(python3 --version)"
 # ---------------------------------------------------------------- 2. paquets
 etape "2/9 Paquets systeme"
 
-paquet_disponible() { apt-cache policy "$1" 2>/dev/null | grep -q 'Candidate: [^(]'; }
+# On n'INTERROGE PAS apt sur la disponibilite d'un paquet, on ESSAIE de
+# l'installer : apt est la seule autorite, et son verdict tient dans un code de
+# retour, pas dans un texte.
+#
+# L'ancienne sonde lisait `apt-cache policy | grep 'Candidate:'`. Or ce libelle
+# est TRADUIT : sur un poste en francais apt ecrit « Candidat : », le motif
+# anglais ne matche jamais, et TOUS les paquets sondes sont declares absents —
+# silencieusement. C'est ainsi qu'un poste s'est retrouve installe sans
+# navigateur NI compositeur (ecran noir), alors que les deux etaient disponibles
+# dans l'archive. Aucune analyse de sortie localisee ne subsiste ici.
+installer_paquet() {
+  DEBIAN_FRONTEND=noninteractive LC_ALL=C \
+    apt-get install -y --no-install-recommends "$@" >/dev/null 2>&1
+}
 
 if [ "$SANS_APT" -eq 1 ]; then
   info "installation des paquets ignoree (--no-apt)"
 else
-  # L'index doit etre a jour AVANT toute interrogation de disponibilite,
-  # sinon apt-cache repond « aucun candidat » sur une machine fraiche.
   export DEBIAN_FRONTEND=noninteractive
   info "mise a jour de l'index des paquets"
   apt-get update -qq
 
-  PAQUETS=(python3-venv python3-pip python3-evdev ca-certificates nftables)
+  # Socle indispensable : son echec est un echec d'installation, pas un repli.
+  apt-get install -y --no-install-recommends \
+    python3-venv python3-pip python3-evdev ca-certificates nftables
 
+  # Navigateur : les distributions ne s'accordent pas sur le nom du paquet
+  # (« chromium » sur Debian et Raspberry Pi OS recents, « chromium-browser »
+  # sur les plus anciens). On tente dans l'ordre, le premier qui s'installe
+  # gagne.
   NAVIGATEUR=""
   for candidat in chromium chromium-browser; do
-    if paquet_disponible "$candidat"; then NAVIGATEUR="$candidat"; break; fi
+    if installer_paquet "$candidat"; then NAVIGATEUR="$candidat"; break; fi
   done
-  [ -n "$NAVIGATEUR" ] && PAQUETS+=("$NAVIGATEUR") \
-    || avert "aucun paquet chromium trouve — l'affichage devra etre installe a la main"
-
-  COMPOSITEUR=""
-  if paquet_disponible cage; then
-    COMPOSITEUR="cage"
-    PAQUETS+=(cage wlr-randr)
+  if [ -n "$NAVIGATEUR" ]; then
+    info "navigateur installe : ${NAVIGATEUR}"
   else
-    avert "paquet 'cage' indisponible — repli X11 (openbox)"
-    COMPOSITEUR="x11"
-    PAQUETS+=(xserver-xorg-core xserver-xorg-video-fbdev xinit openbox x11-xserver-utils)
+    avert "AUCUN navigateur installable (ni chromium, ni chromium-browser)"
+    avert "  l'ecran restera NOIR tant qu'un navigateur ne sera pas installe"
   fi
 
-  info "installation : ${PAQUETS[*]}"
-  apt-get install -y --no-install-recommends "${PAQUETS[@]}"
+  # Compositeur : cage (Wayland) de preference, sinon repli X11.
+  if installer_paquet cage; then
+    COMPOSITEUR="cage"
+    installer_paquet wlr-randr || avert "wlr-randr absent — extinction d'ecran degradee"
+    info "compositeur installe : cage (Wayland)"
+  else
+    avert "paquet 'cage' non installable — repli X11 (openbox)"
+    COMPOSITEUR="x11"
+    apt-get install -y --no-install-recommends \
+      xserver-xorg-core xserver-xorg-video-fbdev xinit openbox x11-xserver-utils
+  fi
 fi
 
 command -v cage >/dev/null 2>&1 && COMPOSITEUR="cage" || COMPOSITEUR="${COMPOSITEUR:-x11}"
@@ -375,7 +395,9 @@ NAVIGATEUR_BIN=""
 for candidat in /usr/bin/chromium /usr/bin/chromium-browser; do
   if [ -x "$candidat" ]; then NAVIGATEUR_BIN="$candidat"; break; fi
 done
+SANS_NAVIGATEUR=0
 if [ -z "$NAVIGATEUR_BIN" ]; then
+  SANS_NAVIGATEUR=1
   # Aucun navigateur : on l'ecrit quand meme pour que l'unite echoue avec un
   # message explicite plutot que sur un ecran noir muet.
   NAVIGATEUR_BIN="/usr/bin/chromium"
@@ -402,23 +424,6 @@ else
 ExecStart=
 ExecStart=/usr/bin/cage -- ${NAVIGATEUR_BIN} \$CHROMIUM_FLAGS http://127.0.0.1:8766
 FIN
-fi
-
-# La console tty1 doit revenir au KIOSQUE. badgeuse-kiosk.service reclame
-# /dev/tty1 avec StandardInput=tty-fail : systemd REFUSE de demarrer le service
-# si la console est deja prise. Or Raspberry Pi OS y lance getty@tty1, qui
-# affiche l'invite de connexion. Sans cette liberation, le kiosque echouait a
-# chaque tentative et le poste restait indefiniment sur l'ecran de login
-# (avec Restart=always, une boucle de redemarrage toutes les 5 s).
-# On desactive getty@tty1 plutot que de le forcer : le conflit doit disparaitre,
-# pas etre arbitre a chaque demarrage. Reversible : systemctl enable --now
-# getty@tty1.service redonne la console locale (voir RUNBOOK, depannage).
-if systemctl cat getty@tty1.service >/dev/null 2>&1; then
-  if systemctl disable --now getty@tty1.service >/dev/null 2>&1; then
-    info "console tty1 liberee pour le kiosque (getty@tty1 desactive)"
-  else
-    avert "getty@tty1 non desactive — le kiosque restera sur l'invite de connexion"
-  fi
 fi
 
 # La console tty1 doit revenir au KIOSQUE. badgeuse-kiosk.service reclame
@@ -483,6 +488,28 @@ fi
 ETAPE_NVME=""
 if [ "$CIBLE" = "pi5" ]; then
   ETAPE_NVME="   2. Demarrage NVMe    sudo bash ${RACINE_INSTALL}/deploy/eeprom-nvme.sh   (puis redemarrer)"
+fi
+
+# Un poste sans navigateur ne peut RIEN afficher. L'installation se termine
+# quand meme (l'agent, lui, enregistre deja les badgeages), mais le defaut est
+# annonce en tete du resume, pas noye dans les avertissements : c'est
+# exactement ce qui a produit un ecran noir sans explication.
+if [ "$SANS_NAVIGATEUR" -eq 1 ]; then
+  cat <<'FINAV'
+
+  ####################################################################
+  #  INSTALLATION INCOMPLETE — AUCUN NAVIGATEUR SUR CE POSTE         #
+  #                                                                  #
+  #  L'agent fonctionne et enregistre les badgeages, mais L'ECRAN    #
+  #  RESTERA NOIR : il n'y a rien pour afficher l'interface.         #
+  #                                                                  #
+  #  Corriger, puis relancer cette installation :                    #
+  #    sudo apt-get update                                           #
+  #    sudo apt-get install -y chromium || \                         #
+  #      sudo apt-get install -y chromium-browser                    #
+  ####################################################################
+
+FINAV
 fi
 
 cat <<FIN
