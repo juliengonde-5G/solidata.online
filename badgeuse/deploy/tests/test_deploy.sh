@@ -179,6 +179,14 @@ verifier_contient "x11 : lance le lanceur via xinit" "/usr/bin/xinit /opt/badgeu
 verifier_contient "x11 : navigateur resolu transmis en environnement" "NAVIGATEUR_BIN=/usr/bin/chromium-browser" "$LANCEMENT_X11"
 verifier_contient "x11 : session x11" "XDG_SESSION_TYPE=x11" "$LANCEMENT_X11"
 verifier_contient "x11 : vt1 sans ecoute TCP" "-- :0 vt1 -nolisten tcp" "$LANCEMENT_X11"
+# X11 ne peut PAS demarrer sous les durcissements de l'unite de base :
+# NoNewPrivileges neutralise le setuid d'Xorg.wrap, ProtectHome empeche xinit
+# d'ecrire .Xauthority. Ces levees sont donc load-bearing — et strictement
+# reservees a X11 : la voie Wayland doit rester entierement durcie.
+verifier_contient "x11 : setuid Xorg.wrap autorise" "NoNewPrivileges=no" "$LANCEMENT_X11"
+verifier_contient "x11 : acces au home pour .Xauthority" "ProtectHome=no" "$LANCEMENT_X11"
+verifier_absent  "cage : durcissement conserve (NoNewPrivileges)" "NoNewPrivileges=no" "$LANCEMENT_CAGE"
+verifier_absent  "cage : durcissement conserve (ProtectHome)" "ProtectHome=no" "$LANCEMENT_CAGE"
 # Le navigateur ne doit JAMAIS etre code en dur dans le drop-in : c'est celui
 # resolu a l'installation qui doit s'y trouver.
 verifier_absent "x11 : pas de chromium code en dur" "/usr/bin/chromium " "$LANCEMENT_X11"
