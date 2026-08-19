@@ -359,19 +359,49 @@ RuntimeWatchdogSec=15s
 FIN
 info "watchdog materiel configure : /etc/systemd/system.conf.d/badgeuse-watchdog.conf"
 
-# Repli X11 : cage indisponible, on remplace la commande de lancement.
+# Commande de lancement du kiosque. Elle ne peut PAS etre codee en dur dans
+# l'unite : le chemin du navigateur varie d'une distribution a l'autre
+# (/usr/bin/chromium sur Raspberry Pi OS Bookworm et Trixie,
+# /usr/bin/chromium-browser ailleurs) et install.sh sait deja installer l'un ou
+# l'autre. Un chemin faux fait echouer l'unite en 203/EXEC : cage demarre, son
+# client jamais — l'ecran reste NOIR sans message a l'ecran. On resout donc le
+# binaire ici, et on ecrit la commande complete dans un drop-in unique qui
+# couvre les deux compositeurs (un seul fichier pose ExecStart, pas deux qui se
+# marchent dessus).
 install -d -m 0755 /etc/systemd/system/badgeuse-kiosk.service.d
+rm -f /etc/systemd/system/badgeuse-kiosk.service.d/x11.conf   # ancien nom
+
+NAVIGATEUR_BIN=""
+for candidat in /usr/bin/chromium /usr/bin/chromium-browser; do
+  if [ -x "$candidat" ]; then NAVIGATEUR_BIN="$candidat"; break; fi
+done
+if [ -z "$NAVIGATEUR_BIN" ]; then
+  # Aucun navigateur : on l'ecrit quand meme pour que l'unite echoue avec un
+  # message explicite plutot que sur un ecran noir muet.
+  NAVIGATEUR_BIN="/usr/bin/chromium"
+  avert "aucun navigateur trouve (/usr/bin/chromium ni /usr/bin/chromium-browser)"
+  avert "  l'ecran restera NOIR — installer : sudo apt-get install -y chromium"
+else
+  info "navigateur retenu : ${NAVIGATEUR_BIN}"
+fi
+
 if [ "$COMPOSITEUR" = "x11" ]; then
-  cat > /etc/systemd/system/badgeuse-kiosk.service.d/x11.conf <<'FIN'
+  cat > /etc/systemd/system/badgeuse-kiosk.service.d/lancement.conf <<FIN
 # Genere par install.sh — repli X11 (paquet cage indisponible).
 [Service]
 Environment=XDG_SESSION_TYPE=x11
 ExecStart=
-ExecStart=/usr/bin/xinit /usr/bin/chromium $CHROMIUM_FLAGS http://127.0.0.1:8766 -- :0 vt1 -nolisten tcp
+ExecStart=/usr/bin/xinit ${NAVIGATEUR_BIN} \$CHROMIUM_FLAGS http://127.0.0.1:8766 -- :0 vt1 -nolisten tcp
 FIN
   info "repli X11 configure"
 else
-  rm -f /etc/systemd/system/badgeuse-kiosk.service.d/x11.conf
+  cat > /etc/systemd/system/badgeuse-kiosk.service.d/lancement.conf <<FIN
+# Genere par install.sh — compositeur cage (Wayland), navigateur resolu a
+# l'installation.
+[Service]
+ExecStart=
+ExecStart=/usr/bin/cage -- ${NAVIGATEUR_BIN} \$CHROMIUM_FLAGS http://127.0.0.1:8766
+FIN
 fi
 
 # La console tty1 doit revenir au KIOSQUE. badgeuse-kiosk.service reclame
@@ -459,6 +489,10 @@ ${ETAPE_NVME}
    3. Partition donnees sudo bash ${RACINE_INSTALL}/deploy/overlayfs-setup.sh --data-only
    4. Rootfs en lecture seule
                         sudo bash ${RACINE_INSTALL}/deploy/overlayfs-setup.sh   (puis redemarrer)
+
+  Si l'ecran n'affiche pas l'interface (noir, ou invite de connexion) :
+    sudo bash ${RACINE_INSTALL}/deploy/diagnostic.sh
+  Ce diagnostic ne modifie rien : il nomme la cause et donne la correction.
 
   Verifications utiles :
     systemctl status badgeuse-agent
