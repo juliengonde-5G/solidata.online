@@ -232,7 +232,18 @@ FINX
   fi
 fi
 
-command -v cage >/dev/null 2>&1 && COMPOSITEUR="cage" || COMPOSITEUR="${COMPOSITEUR:-x11}"
+# Garde de coherence pour le mode --no-apt (aucune installation n'a tourne, donc
+# COMPOSITEUR peut etre vide) : on regarde ce qui est REELLEMENT present.
+# Elle ne doit JAMAIS revenir sur une decision deja prise — ni sur le forcage de
+# l'exploitant, ni sur le choix issu des installations : constate en
+# exploitation, cette ligne re-detectait le binaire cage et ecrasait
+# « compositeur FORCE : x11 » trois lignes apres l'avoir annonce.
+if [ -z "${COMPOSITEUR:-}" ]; then
+  if command -v cage >/dev/null 2>&1; then COMPOSITEUR="cage"; else COMPOSITEUR="x11"; fi
+fi
+# Le forcage prime en dernier ressort, quoi qu'il arrive en amont.
+[ "${COMPOSITEUR_FORCE:-}" = "x11" ] && COMPOSITEUR="x11"
+[ "${COMPOSITEUR_FORCE:-}" = "cage" ] && command -v cage >/dev/null 2>&1 && COMPOSITEUR="cage"
 info "compositeur retenu : ${COMPOSITEUR}"
 
 # ------------------------------------------------------------ 3. utilisateur
