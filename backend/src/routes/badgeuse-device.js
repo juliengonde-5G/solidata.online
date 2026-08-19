@@ -45,9 +45,9 @@ const { body, param } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const {
   canonicalPointage, genesisHash, chainHash, hashDeviceKey, timingSafeEqualHex, isoMillisUTC,
-  NO_BADGE,
+  NO_BADGE, hashAppairageCode, generateDeviceKey, generateSiteKey, encryptSecret, decryptSecret,
 } = require('../utils/badgeuse-crypto');
-const { readBadgeuseParams } = require('../utils/badgeuse-settings');
+const { readBadgeuseParams, hmacKeySettingKey, writeSetting } = require('../utils/badgeuse-settings');
 const engine = require('../services/badgeuse-engine');
 const media = require('../services/badgeuse-social');
 // Périmètre de caisse d'une VAK : SOURCE UNIQUE partagée avec routes/vak.js
@@ -161,6 +161,186 @@ function classerErreurStockage(err) {
   const classe = code.slice(0, 2);
   return classe === '22' || classe === '23' ? 'invalid' : 'retry';
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POST /v1/appairage — réclamation de configuration par CODE COURT (ADR-0005)
+// ───────────────────────────────────────────────────────────────────────────
+// SEULE route de ce fichier SANS `X-Device-Key` : le poste n'a pas encore de
+// clé, c'est précisément ce qu'il vient chercher. Elle est donc montée AVANT
+// les routes `:code`, hors du middleware `authenticateDevice`.
+//
+// Le secret présenté est un code de 8 caractères. Les garde-fous (ADR-0005
+// §Analyse de risque) : usage unique, expiration courte, portée d'un seul
+// poste, débit strictement limité, message d'échec générique.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Limiteur DÉDIÉ à la réclamation : 20 tentatives/heure/IP (ADR-0005). Il est
+ * distinct de `deviceLimiter` (120/min) — celui-ci protège l'exploitation
+ * normale d'un poste appairé, celui-là borde une devinette de secret court.
+ * La clé est l'IP normalisée par `ipKeyGenerator` : sans elle, un client IPv6
+ * changerait d'adresse dans son /64 pour repartir à zéro.
+ */
+const appairageLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `badgeuse-appairage:${ipKeyGenerator(req.ip)}`,
+  message: { error: 'rate_limited' },
+});
+
+// Plancher de temps de réponse sur ÉCHEC. Deux effets : les rejets coûtent
+// tous la même durée, qu'ils viennent d'un code malformé (aucune requête) ou
+// d'un code bien formé mais faux (une requête) — plus d'oracle de forme ; et
+// une campagne de devinettes est ralentie même sous le plafond de débit.
+// Le SUCCÈS, lui, est plus long (transaction) : ce n'est pas une fuite, celui
+// qui réussit sait déjà qu'il a réussi.
+const APPAIRAGE_ECHEC_DELAI_MS = 250;
+const attendre = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/**
+ * Adresse du serveur remise au poste. CASCADE HONNÊTE, jamais une valeur
+ * inventée à la volée : réglage `badgeuse.server_url` (renseigné quand le
+ * poste doit joindre SOLIDATA par une autre adresse — VPN, nom interne) →
+ * `PUBLIC_BASE_URL` de l'environnement (déjà la source d'URL publique du
+ * dépôt, cf. SumUp) → domaine de production documenté en dernier recours.
+ */
+async function resolveServerUrl() {
+  const params = await readBadgeuseParams();
+  const configure = String(params.server_url || '').trim();
+  if (configure) return configure.replace(/\/+$/, '');
+  const env = String(process.env.PUBLIC_BASE_URL || '').trim();
+  if (env) return env.replace(/\/+$/, '');
+  return 'https://solidata.online';
+}
+
+router.post('/v1/appairage', appairageLimiter, async (req, res) => {
+  // Message d'échec UNIQUE : inconnu, expiré, déjà consommé, poste désactivé —
+  // rien ne les distingue côté client (CONTRAT_API_DEVICE §3ter). Distinguer
+  // « expiré » de « inconnu » confirmerait à un attaquant qu'il a deviné un
+  // code, ce qui vaut la moitié du travail.
+  const refuser = async () => {
+    await attendre(APPAIRAGE_ECHEC_DELAI_MS);
+    return res.status(404).json({ error: 'code_invalide' });
+  };
+
+  try {
+    // Normalisation + condensat en une passe : le code en clair ne sort pas
+    // d'ici, et un code malformé n'atteint jamais la base.
+    const hash = hashAppairageCode(req.body && req.body.code);
+    if (!hash) return refuser();
+
+    const candidats = await pool.query(
+      `SELECT id, code, site_id, cible, appairage_code_hash
+       FROM badgeuse_devices
+       WHERE actif = true
+         AND appairage_code_hash IS NOT NULL
+         AND appairage_expire_le IS NOT NULL
+         AND appairage_expire_le > NOW()`
+    );
+
+    // Comparaison à TEMPS CONSTANT, et parcours COMPLET (pas de `break`) : ni
+    // la valeur du condensat ni la position du poste dans la liste ne se
+    // lisent dans la durée de la réponse.
+    let device = null;
+    for (const row of candidats.rows) {
+      if (timingSafeEqualHex(hash, row.appairage_code_hash)) device = row;
+    }
+    if (!device) return refuser();
+
+    // Lu AVANT la transaction : aucune requête de confort au milieu d'un
+    // verrou d'écriture.
+    const serverUrl = await resolveServerUrl();
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // CONSOMMATION ATOMIQUE. Le `WHERE` reprend le condensat et l'échéance :
+      // deux postes qui présentent le même code au même instant, un seul
+      // l'obtient — le second retombe sur le refus générique. (Cette égalité
+      // SQL n'est pas l'authentification : celle-ci a eu lieu ci-dessus, à
+      // temps constant. C'est un verrou d'unicité sur une valeur déjà validée.)
+      //
+      // La clé du poste est RÉGÉNÉRÉE ici : réinstaller un poste révoque
+      // automatiquement sa clé précédente (ADR-0005 §Conséquences).
+      const apiKey = generateDeviceKey();
+      const upd = await client.query(
+        `UPDATE badgeuse_devices
+         SET api_key_hash = $2, appairage_code_hash = NULL, appairage_expire_le = NULL
+         WHERE id = $1 AND appairage_code_hash = $3 AND appairage_expire_le > NOW()
+         RETURNING id, code, site_id, cible`,
+        [device.id, hashDeviceKey(apiKey), hash]
+      );
+      if (upd.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return refuser();
+      }
+      const poste = upd.rows[0];
+
+      // Clé HMAC du site (CONTRAT_HMAC §3) : générée à la volée si le site
+      // n'en a pas encore — même logique que POST /badgeuse/devices.
+      let hmacKey = null;
+      if (poste.site_id != null) {
+        const cle = hmacKeySettingKey(poste.site_id);
+        const ex = await client.query('SELECT value FROM settings WHERE key = $1', [cle]);
+        const stocke = ex.rows[0] ? ex.rows[0].value : null;
+        if (!stocke) {
+          hmacKey = generateSiteKey();
+          await writeSetting(cle, encryptSecret(hmacKey), client);
+        } else {
+          hmacKey = decryptSecret(stocke);
+          if (!hmacKey) {
+            // JAMAIS DE ROTATION SILENCIEUSE : régénérer la clé d'un site qui
+            // en a déjà une invaliderait TOUS les `uid_hmac` déjà stockés —
+            // tous les badges seraient à réenrôler, sans que personne ne l'ait
+            // demandé. On échoue franchement, l'exploitant tranche.
+            await client.query('ROLLBACK');
+            console.error(`[BADGEUSE-DEVICE] Clé HMAC illisible pour le site ${poste.site_id} : appairage du poste ${poste.code} refusé (aucune rotation silencieuse)`);
+            return res.status(503).json({ error: 'service_unavailable' });
+          }
+        }
+      }
+
+      // Consommation tracée (ADR-0005). `user_id` NULL : l'acte vient du poste,
+      // pas d'un utilisateur SOLIDATA — l'émission, elle, porte son ADMIN.
+      await client.query(
+        'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+        [null, 'BADGEUSE_APPAIRAGE_CONSOMME', 'badgeuse_devices', poste.id,
+          JSON.stringify({
+            device_code: poste.code,
+            site_id: poste.site_id,
+            cle_poste: 'regeneree',
+            source: 'code_appairage',
+          })]
+      );
+      await client.query('COMMIT');
+
+      // Le poste, jamais le code ni les clés.
+      console.log(`[BADGEUSE-DEVICE] Appairage réussi du poste ${poste.code} (clé régénérée, code consommé)`);
+
+      return res.json({
+        device_code: poste.code,
+        device_key: apiKey,
+        hmac_key: hmacKey,
+        server_url: serverUrl,
+        cible: poste.cible || null,
+      });
+    } catch (errTx) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
+      throw errTx;
+    } finally {
+      // UNE seule libération, quel que soit le chemin de sortie : libérer dans
+      // chaque branche exposerait à un double `release()` si quoi que ce soit
+      // échouait après coup (le pool le refuse).
+      client.release();
+    }
+  } catch (err) {
+    console.error('[BADGEUSE-DEVICE] Erreur appairage :', err.message);
+    return res.status(503).json({ error: 'service_unavailable' });
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /v1/devices/:code/pointages — dépôt d'un lot (idempotent)

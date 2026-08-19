@@ -6929,6 +6929,19 @@ async function initDatabase() {
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_optin_festif_le TIMESTAMPTZ;');
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_optin_festif_par INTEGER REFERENCES users(id) ON DELETE SET NULL;');
 
+    // (i bis) APPAIRAGE PAR CODE COURT (ADR-0005). Mettre un poste en service
+    //     exigeait de recopier DEUX clés de 64 caractères hex au clavier d'un
+    //     Raspberry : illisible, et première cause d'échec de mise en service.
+    //     Un code de 8 caractères, à USAGE UNIQUE et à DURÉE LIMITÉE, est
+    //     échangé contre la configuration complète du poste.
+    //     `appairage_code_hash` = SHA-256 du code : comme la clé device, le
+    //     secret lui-même n'est JAMAIS stocké — il n'est montré qu'une fois à
+    //     l'ADMIN. `appairage_expire_le` borne la fenêtre (défaut 15 min,
+    //     `badgeuse.appairage_ttl_minutes`) ; les deux colonnes sont remises à
+    //     NULL dès la première réclamation réussie (consommation).
+    await client.query('ALTER TABLE badgeuse_devices ADD COLUMN IF NOT EXISTS appairage_code_hash VARCHAR(64);');
+    await client.query('ALTER TABLE badgeuse_devices ADD COLUMN IF NOT EXISTS appairage_expire_le TIMESTAMPTZ;');
+
     // (j) Contenus enrichis : médias téléversés / liens rapatriés par le
     //     SERVEUR, et paramètres des générateurs.
     //     `fichier` est un chemin RELATIF à uploads/badgeuse (jamais un chemin

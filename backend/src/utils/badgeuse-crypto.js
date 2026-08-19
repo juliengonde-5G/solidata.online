@@ -190,6 +190,75 @@ function timingSafeEqualHex(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
+// ── 4. Code d'appairage court d'un poste (ADR-0005) ────────────────────────
+
+/**
+ * Alphabet du code d'appairage : 30 symboles SANS AMBIGUÏTÉ DE LECTURE.
+ * Sont exclus `I`, `L`, `O`, `U` et `0`, `1` — les six caractères que l'on
+ * confond en dictant un code ou en le recopiant depuis un écran (I/1/L, O/0,
+ * U/V). Le code est saisi à la main sur le poste, en atelier, par quelqu'un
+ * qui n'est pas développeur : chaque confusion possible est une mise en
+ * service ratée, c'est-à-dire précisément ce que l'ADR-0005 supprime.
+ */
+const APPAIRAGE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+const APPAIRAGE_LENGTH = 8;
+
+/**
+ * Tire un code d'appairage de 8 caractères, UNIFORMÉMENT sur l'alphabet.
+ *
+ * BIAIS MODULO — le piège classique de ce tirage : `randomBytes(1)[0] % 30`
+ * serait BIAISÉ, car 256 n'est pas un multiple de 30 (256 = 8 × 30 + 16). Les
+ * 16 premiers symboles de l'alphabet sortiraient 9 fois sur 256 contre 8 pour
+ * les 14 autres, soit ~12 % de plus : de quoi rogner l'entropie annoncée dans
+ * l'analyse de risque de l'ADR. On passe donc par `crypto.randomInt(max)`, qui
+ * applique un REJET D'ÉCHANTILLON (les tirages tombant dans la zone qui
+ * déborde du dernier multiple complet de `max` sont jetés et retirés) et
+ * garantit l'uniformité exacte sur [0, max). Aucun `%` sur un octet brut
+ * n'apparaît ici, et aucun n'a le droit d'y revenir.
+ *
+ * @returns {string} 8 caractères de APPAIRAGE_ALPHABET, sans séparateur
+ */
+function generateAppairageCode() {
+  let code = '';
+  for (let i = 0; i < APPAIRAGE_LENGTH; i += 1) {
+    code += APPAIRAGE_ALPHABET[crypto.randomInt(APPAIRAGE_ALPHABET.length)];
+  }
+  return code;
+}
+
+/**
+ * Présentation lisible « XXXX-XXXX ». Le tiret est une AIDE À LA LECTURE, il
+ * n'appartient pas au secret : `normalizeAppairageCode` le retire avant tout
+ * calcul, si bien que l'installateur peut le saisir ou l'omettre.
+ */
+function formatAppairageCode(code) {
+  const c = String(code == null ? '' : code);
+  return c.length === APPAIRAGE_LENGTH ? `${c.slice(0, 4)}-${c.slice(4)}` : c;
+}
+
+/**
+ * Normalise un code saisi : MAJUSCULES, tirets et espaces retirés.
+ * @param {string} raw code tel que tapé sur le poste
+ * @returns {string|null} 8 caractères de l'alphabet, ou null si non conforme
+ */
+function normalizeAppairageCode(raw) {
+  if (raw == null) return null;
+  const cleaned = String(raw).replace(/[\s-]/g, '').toUpperCase();
+  if (cleaned.length !== APPAIRAGE_LENGTH) return null;
+  for (const ch of cleaned) if (!APPAIRAGE_ALPHABET.includes(ch)) return null;
+  return cleaned;
+}
+
+/**
+ * Condensat SHA-256 hex du code NORMALISÉ — seule forme jamais stockée
+ * (`badgeuse_devices.appairage_code_hash`), au même titre que la clé device.
+ * @returns {string|null} condensat, ou null si le code saisi n'est pas conforme
+ */
+function hashAppairageCode(raw) {
+  const code = normalizeAppairageCode(raw);
+  return code ? crypto.createHash('sha256').update(code, 'utf8').digest('hex') : null;
+}
+
 /**
  * Clé de chiffrement des secrets du module (dérivée SHA-256 d'un secret
  * d'environnement — même cascade que sumup.js, avec une clé dédiée en tête).
@@ -244,6 +313,12 @@ module.exports = {
   generateDeviceKey,
   hashDeviceKey,
   timingSafeEqualHex,
+  APPAIRAGE_ALPHABET,
+  APPAIRAGE_LENGTH,
+  generateAppairageCode,
+  formatAppairageCode,
+  normalizeAppairageCode,
+  hashAppairageCode,
   encryptSecret,
   decryptSecret,
 };

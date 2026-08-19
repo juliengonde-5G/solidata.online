@@ -31,6 +31,8 @@ Vernon », SPEC §9). La clé HMAC du site vit dans `settings` (`badgeuse.hmac_k
 | actif | BOOLEAN DEFAULT true | |
 | version_logicielle | VARCHAR(30) | heartbeat |
 | cible | VARCHAR(10) | `pi5` / `pi3` |
+| appairage_code_hash | VARCHAR(64) | **ADR-0005** — SHA-256 hex du code d'appairage court. Le code lui-même n'est **jamais** stocké, il n'est montré qu'une fois à l'ADMIN. Remis à `NULL` dès la première réclamation réussie (usage unique) |
+| appairage_expire_le | TIMESTAMPTZ | échéance du code (`badgeuse.appairage_ttl_minutes`, défaut 15 min). `NULL` = aucun code en cours. Un code sans expiration est exclu par conception |
 | dernier_heartbeat | TIMESTAMPTZ | |
 | heartbeat_info | JSONB | dernier heartbeat brut, **liste blanche** : `version`, `horloge_utc`, `derive_estimee_sec`, `taille_file`, `temperature_cpu`, `disque_libre_mo`, `cible`, `reader_mode`, `throttled`, **`alerte`** (≤ 300 car. ou `null` — CONTRAT_API_DEVICE §2.5 v1.1, QA-02) |
 | cree_le | TIMESTAMPTZ DEFAULT NOW() | |
@@ -239,6 +241,14 @@ dans le poste**, tout descend par `GET /config`) :
 | `badgeuse.social_posts_par_compte` | 5 | nombre de posts récupérés par compte |
 | `badgeuse.retention_social_jours` | 30 | conservation des posts sociaux — appliquée par `badgeusePurgeRetention` **et par lui seul** |
 
+**Appairage d'un poste** (ADR-0005) — réglages de SÉCURITÉ et d'EXPLOITATION, pas des
+règles RH :
+
+| Clé | Défaut | Rôle |
+|---|---|---|
+| `badgeuse.appairage_ttl_minutes` | 15 | durée de validité du code d'appairage. Borné [1, 1440] côté route : ni code déjà expiré, ni secret quasi permanent |
+| `badgeuse.server_url` | `''` (vide) | adresse du serveur remise au poste à l'appairage. Vide = **cascade honnête** : ce réglage → `PUBLIC_BASE_URL` → domaine de production documenté. À renseigner si le poste joint SOLIDATA par une autre adresse (VPN, nom interne) |
+
 Secret chiffré AES-256-GCM, **hors `BADGEUSE_SETTING_DEFAULTS`** (donc inaccessible en
 lecture comme en écriture par `PUT /parametres`) : `badgeuse.meta_token` — jeton Meta Graph,
 jamais renvoyé par l'API, même tronqué ; seule sa date de configuration l'est
@@ -269,8 +279,26 @@ individuelle) est journalisée dans `rgpd_audit_log` (`BADGEUSE_CONSULTATION`) �
 | GET `/social/status` | READ | comptes suivis, dernier sync, nb posts — **jamais le jeton** |
 | PUT `/social/config`, POST `/social/sync` | ADMIN_ONLY | jeton Meta chiffré (jamais relu), comptes, déclenchement à la demande |
 | GET `/devices`, POST `/devices`, PATCH `/devices/:id`, POST `/devices/:id/regenerate-key`, GET `/devices/:id/verify-chain` | READ (liste) / ADMIN_ONLY (écritures) | BO-09 + CONTRAT_INTEGRITE §4 |
+| POST `/devices/:id/code-appairage` | ADMIN_ONLY | **ADR-0005** — émet un code court `XXXX-XXXX` affiché **une seule fois** ; seul son SHA-256 entre en base, avec son échéance. Émettre un nouveau code écrase le précédent (un seul code vit à la fois par poste). Journalisé `BADGEUSE_CODE_APPAIRAGE` **dans la transaction** — le journal porte le poste et la fenêtre, **jamais le code** |
+| DELETE `/devices/:id` | ADMIN_ONLY | supprime un poste **jamais utilisé**. **409 + `pointages: <nombre>`** dès qu'il a enregistré un pointage : un poste qui a compté des heures appartient à la piste d'audit, sa disparition rendrait des pointages inexplicables et casserait `verify-chain` (ancrée sur le CODE du poste). La manœuvre correcte est alors la désactivation (`PATCH actif=false`), proposée par l'écran. Journalisé `BADGEUSE_DEVICE_SUPPRESSION` dans la transaction |
 | GET `/mes-pointages` | tout rôle authentifié | droit d'accès art. 15 (lien `employees.user_id`) |
 | GET `/salaries/:employeeId/releve?periode=` | READ (journalisé) | récapitulatif remis au salarié (sortie, contestation) |
+
+**Surface publique associée** — `POST /api/badgeuse/device/v1/appairage`
+(routes/badgeuse-device.js, contrat v1.4 §3ter). SEULE route de l'API device **sans**
+`X-Device-Key` : le poste n'a pas encore de clé, c'est ce qu'il vient chercher. Le code
+normalisé (majuscules, tirets et espaces retirés) est comparé à **temps constant** aux
+codes non expirés des postes actifs ; en cas de réussite, et **dans une transaction** :
+la clé du poste est **régénérée** (l'ancienne cesse donc de valoir — réinstaller un poste
+révoque sa clé précédente), le code est **consommé** (`appairage_code_hash`/
+`appairage_expire_le` → `NULL`), et le poste reçoit
+`{ device_code, device_key, hmac_key, server_url, cible }`. Consommation journalisée
+`BADGEUSE_APPAIRAGE_CONSOMME` (`user_id` NULL : l'acte vient du poste, pas d'un
+utilisateur). Garde-fous : **20 tentatives/heure/IP** (limiteur dédié, distinct du
+limiteur d'exploitation), échec **générique** `404 {"error":"code_invalide"}` — inconnu,
+expiré et déjà consommé sont indiscernables — avec un plancher de temps de réponse, et
+**aucune rotation silencieuse** de la clé HMAC d'un site qui en possède déjà une
+(illisible ⇒ 503, jamais une clé neuve qui invaliderait tous les `uid_hmac` existants).
 
 ### 3.1 Formes de réponse amendées (boucle QA n°1)
 

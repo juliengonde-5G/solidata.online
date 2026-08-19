@@ -87,8 +87,21 @@ Insérez la carte, branchez écran, réseau et alimentation, connectez-vous (SSH
 sudo bash /boot/firmware/badgeuse/deploy/sd-init.sh
 ```
 
-Le script reconnaît la machine — **Pi 5 = poste standard, Pi 3 = poste de secours** —
-puis cherche sa configuration dans cet ordre :
+Le script reconnaît la machine — **Pi 5 = poste standard, Pi 3 = poste de secours** — puis,
+s'il ne trouve pas de configuration, vous propose le **code d'appairage** :
+
+> `Code d'appairage (ex. K7M2-9PQX), ou Entrée pour la saisie manuelle :`
+
+**C'est la voie recommandée.** Dans SOLIDATA → Temps & Présence → Supervision → fiche du
+poste → **« Code d'appairage »** : un code de **8 caractères** s'affiche en grand. Tapez-le
+sur le poste, et c'est fini — le poste récupère seul sa clé et celle du site. Vous tapez 8
+caractères au lieu de 128, et les clés ne passent plus par un clavier.
+
+Le code est **à usage unique** et expire au bout de **15 minutes** : s'il est refusé,
+régénérez-en un simplement. Laisser le champ vide bascule sur l'ancienne saisie des deux
+clés (toujours disponible).
+
+Ordre de recherche complet de la configuration :
 
 1. `badgeuse-pi5.conf` / `badgeuse-pi3.conf` à la racine de la carte (étape B bis) ;
 2. la configuration déjà installée sur ce poste (cas d'une réinstallation) ;
