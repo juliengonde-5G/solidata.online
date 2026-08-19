@@ -508,11 +508,19 @@ router.patch('/badges/:id', WRITE, [
       return res.status(404).json({ error: 'Badge introuvable' });
     }
 
+    // TYPAGE EXPLICITE de $2 (::varchar aux DEUX emplacements). Sans lui,
+    // PostgreSQL déduit deux types incompatibles pour le MÊME paramètre —
+    // `character varying` depuis l'affectation de colonne, `text` depuis la
+    // comparaison à un littéral — et refuse la requête entière (SQLSTATE
+    // 42P08 « inconsistent types deduced for parameter $2 »). Tout le cycle
+    // de vie du badge tombait alors en 500 : un badge perdu restait ACTIF et
+    // continuait d'être accepté par le poste. Le défaut était invisible sous
+    // base mockée : seul un vrai moteur analyse la requête.
     const upd = await client.query(
       `UPDATE badgeuse_badges
-       SET statut = $2,
+       SET statut = $2::varchar,
            commentaire = COALESCE($3, commentaire),
-           restitue_le = CASE WHEN $2 = 'restitue' THEN NOW() ELSE restitue_le END
+           restitue_le = CASE WHEN $2::varchar = 'restitue' THEN NOW() ELSE restitue_le END
        WHERE id = $1 RETURNING *`,
       [id, statut, req.body.commentaire || null]
     );
