@@ -56,6 +56,17 @@ const BADGEUSE_SETTING_DEFAULTS = {
   // administrateurs actifs de SOLIDATA (repli documenté : l'exigence BO-09
   // « alerte e-mail » ne doit pas rester lettre morte faute de paramétrage).
   'badgeuse.supervision_alerte_emails': '',
+  // ── Appairage d'un poste par code court (ADR-0005) ──
+  // Durée de validité du code affiché au back-office. Ce n'est pas une règle
+  // RH mais un réglage de SÉCURITÉ : plus la fenêtre est courte, plus le code
+  // est difficile à deviner ou à réutiliser s'il a traîné sur un bureau.
+  'badgeuse.appairage_ttl_minutes': 15,
+  // Adresse du serveur remise au poste à l'appairage. VIDE = cascade honnête
+  // côté route : ce réglage → PUBLIC_BASE_URL → domaine de production
+  // documenté. Renseignez-le si le poste doit joindre SOLIDATA par une autre
+  // adresse que l'adresse publique (VPN, nom interne).
+  'badgeuse.server_url': '',
+
   // ── Conservation (NOTE_JURIDIQUE §3.7 — conformité, non arbitrable) ──
   'badgeuse.retention_pointages_mois': 60,
   'badgeuse.retention_feuilles_mois': 60,

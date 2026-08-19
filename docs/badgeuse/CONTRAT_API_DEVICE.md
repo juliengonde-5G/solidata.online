@@ -193,6 +193,41 @@ file qui gonfle) et alimente la supervision BO-09 (alerte si silence > seuil par
   sha256) et sert en local : la CSP du kiosque reste `'self'`, le hors-ligne est préservé.
 - Les jours de VAK active, le serveur abaisse `sync_playlist_interval_sec` à 300.
 
+## 3ter. Amendement v1.4 — appairage par code court (ADR-0005)
+
+### `POST /appairage` — réclamation de configuration (PUBLIC, hors `:code`)
+
+Chemin complet : `POST /api/badgeuse/device/v1/appairage`. **Pas d'en-tête `X-Device-Key`**
+(le poste n'en a pas encore). Débit **strictement** limité : 20 tentatives/heure/IP.
+
+Requête :
+```json
+{ "code": "K7M29PQX" }
+```
+Le code est normalisé côté serveur : majuscules, tirets et espaces retirés.
+
+Réponse `200` — **une seule fois**, le code est consommé :
+```json
+{
+  "device_code": "LH-P1",
+  "device_key": "…64 hex…",
+  "hmac_key":   "…64 hex…",
+  "server_url": "https://solidata.online",
+  "cible": "pi5"
+}
+```
+La `device_key` est **régénérée à cet instant** : l'ancienne clé du poste cesse de valoir
+(réinstaller un poste révoque donc sa clé précédente).
+
+Erreurs — message **générique**, sans distinguer inconnu / expiré / déjà utilisé :
+`404 {"error":"code_invalide"}`, `429 {"error":"rate_limited"}`.
+
+### Émission du code (back-office)
+
+`POST /api/badgeuse/devices/:id/code-appairage` (ADMIN) →
+`{ "code": "K7M2-9PQX", "expire_le": "…" }`, affiché une seule fois. Seul le condensat
+SHA-256 est stocké (`badgeuse_devices.appairage_code_hash`), avec `appairage_expire_le`.
+
 ## 4. Matrice de couverture (exigences → endpoint)
 
 | Exigence | Couverte par |

@@ -85,10 +85,28 @@ if [ -z "$CONFIG" ] && : </dev/tty 2>/dev/null; then
   info "Munissez-vous des clés affichées par SOLIDATA lors de l'appairage"
   info "(Temps & Présence -> Supervision -> « Appairer un poste »)."
   echo
-  read -r -p "    Code de ce poste [${CODE_DEFAUT}] : " CODE_SAISI </dev/tty || true
-  bash "${SOURCE}/deploy/make-conf.sh" \
-    --install --target "$CIBLE" --force --code "${CODE_SAISI:-$CODE_DEFAUT}" \
-    </dev/tty || mourir "configuration abandonnée."
+  # Voie NOMINALE : un code court de 8 caractères (ADR-0005). L'installateur
+  # tape 8 caractères au lieu de deux clés de 64 — et les clés ne transitent
+  # jamais par un clavier ni par un presse-papiers.
+  echo
+  info "Deux façons de configurer ce poste :"
+  info "  1. CODE D'APPAIRAGE (recommandé) — 8 caractères, affiché par SOLIDATA"
+  info "     dans Supervision -> fiche du poste -> « Code d'appairage »."
+  info "  2. Saisie des deux clés (64 caractères chacune) — laisser le code vide."
+  echo
+  read -r -p "    Code d'appairage (ex. K7M2-9PQX), ou Entrée pour la saisie manuelle : " CODE_APP </dev/tty || true
+
+  if [ -n "${CODE_APP:-}" ]; then
+    bash "${SOURCE}/deploy/appairage.sh" \
+      --code "$CODE_APP" --target "$CIBLE" --force \
+      --output /etc/badgeuse/badgeuse.conf \
+      || mourir "appairage impossible — le code expire et ne sert qu'une fois ; en régénérer un dans SOLIDATA."
+  else
+    read -r -p "    Code de ce poste [${CODE_DEFAUT}] : " CODE_SAISI </dev/tty || true
+    bash "${SOURCE}/deploy/make-conf.sh" \
+      --install --target "$CIBLE" --force --code "${CODE_SAISI:-$CODE_DEFAUT}" \
+      </dev/tty || mourir "configuration abandonnée."
+  fi
   CONFIG="/etc/badgeuse/badgeuse.conf"
 fi
 
