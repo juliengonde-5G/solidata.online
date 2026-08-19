@@ -213,17 +213,44 @@ install -d -m 0755 "$RACINE_INSTALL"
 deployer() {
   local origine="$1" destination="$2"
   [ -e "$origine" ] || { avert "absent, ignore : ${origine}"; return 0; }
+
+  # Ne JAMAIS deployer un chemin sur lui-meme. C'est le cas quand le script est
+  # lance depuis la copie installee (/opt/badgeuse/deploy/install.sh) : source
+  # et destination coincident. L'ancienne version deplacait alors la
+  # destination vers .ancien puis echouait a copier l'origine — DEVENUE le meme
+  # chemin, donc disparue — et le code s'AUTO-DETRUISAIT (constate en
+  # exploitation : /opt/badgeuse/agent et /opt/badgeuse/ui perdus). Relancer
+  # depuis /opt est pourtant legitime (re-derouler la configuration) : on
+  # constate que le code est deja en place, et on passe.
+  if [ "$(readlink -f "$origine")" = "$(readlink -f "$destination")" ]; then
+    info "deja en place : ${destination} (lance depuis la copie installee)"
+    return 0
+  fi
+
   rm -rf "${destination}.ancien"
   [ -e "$destination" ] && mv "$destination" "${destination}.ancien"
-  cp -a "$origine" "$destination"
-  rm -rf "${destination}.ancien"
-  info "installe : ${destination}"
+  if cp -a "$origine" "$destination"; then
+    rm -rf "${destination}.ancien"
+    info "installe : ${destination}"
+  else
+    # Echec de copie : on REMET l'ancien en place plutot que de laisser un trou.
+    avert "copie en echec : ${origine} -> ${destination}"
+    if [ -e "${destination}.ancien" ]; then
+      rm -rf "$destination"
+      mv "${destination}.ancien" "$destination"
+      avert "  version precedente restauree : ${destination}"
+    fi
+    return 1
+  fi
 }
 
 deployer "${SOURCE}/agent"  "${RACINE_INSTALL}/agent"
 deployer "${SOURCE}/ui"     "${RACINE_INSTALL}/ui"
 deployer "${SOURCE}/deploy" "${RACINE_INSTALL}/deploy"
-[ -f "${SOURCE}/README.md" ] && cp -a "${SOURCE}/README.md" "${RACINE_INSTALL}/README.md"
+if [ -f "${SOURCE}/README.md" ] && \
+   [ "$(readlink -f "${SOURCE}/README.md")" != "$(readlink -f "${RACINE_INSTALL}/README.md" 2>/dev/null || echo /nonexistent)" ]; then
+  cp -a "${SOURCE}/README.md" "${RACINE_INSTALL}/README.md"
+fi
 
 find "${RACINE_INSTALL}" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 chmod +x "${RACINE_INSTALL}"/deploy/*.sh 2>/dev/null || true
