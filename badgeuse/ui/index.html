@@ -22,7 +22,13 @@
 
   <header class="bandeau-haut">
     <div class="marque">
-      <span class="pastille" aria-hidden="true"></span>
+      <!--
+        Logo de l'association, servi EN LOCAL par l'agent (badgeuse/ui/assets/).
+        Le kiosque ne contacte aucun domaine externe : la CSP est 'self', et
+        pointer vers solidata.online serait une ressource distante interdite.
+      -->
+      <img class="logo-marque" src="assets/logo-solidarite-textiles.png"
+           alt="Solidarité Textiles" width="256" height="215">
       <span>Pointage</span>
     </div>
     <div class="horloge">
@@ -49,6 +55,16 @@
 <div id="overlay" class="overlay" role="status" aria-live="assertive" hidden>
   <!-- Confettis de la variante festive : purement decoratif, hors flux a11y. -->
   <div id="overlay-confettis" class="confettis" aria-hidden="true"></div>
+  <!--
+    Signature de marque au badgeage. Volontairement en coin et DERRIÈRE la
+    carte (z-index inférieur) : si un message long fait grandir la carte, le
+    logo passe dessous — jamais l'inverse. L'information principale et le
+    prénom ne peuvent structurellement pas être masqués.
+    aria-hidden : l'écran annonce déjà l'association dans son bandeau, le
+    répéter à chaque badgeage n'apporterait rien à une synthèse vocale.
+  -->
+  <img class="logo-overlay" src="assets/logo-solidarite-textiles.png"
+       alt="" aria-hidden="true" width="256" height="215">
   <div class="overlay-carte">
     <div id="overlay-picto" class="picto" aria-hidden="true"></div>
     <!-- Information principale (AFF-03, >= 48 px) : message du moment ou festif. -->

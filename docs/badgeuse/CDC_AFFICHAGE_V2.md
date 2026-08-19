@@ -80,6 +80,37 @@ et libellé de l'événement — aucune donnée personnelle, vocation visiteurs.
 - **Opt-in festif** : dans l'onglet Badges, par salarié — case « Affichage
   anniversaires accepté » + date de recueil tracée (`rgpd_audit_log`).
 
+## 4bis. Identité de l'association sur tous les écrans (août 2026)
+
+**Demande.** « Rajoute le logo de l'association sur tous les écrans. »
+
+**Réalisation.** Le logo de Solidarité Textiles figure sur **l'écran de veille**
+(bandeau haut, à gauche du libellé « Pointage » — présent quelle que soit la
+catégorie diffusée : message, annonces, actus, tournées, compte à rebours,
+météo, social, média, lien, VAK) **et sur l'écran de badgeage** (overlay :
+succès, festif, badge non reconnu, anti-rebond), en signature discrète dans le
+coin bas-gauche.
+
+**Contraintes respectées.**
+
+- **Aucun domaine externe.** Le fichier est servi par l'agent depuis
+  `badgeuse/ui/assets/logo-solidarite-textiles.png` : la CSP du kiosque reste
+  `default-src 'none'` avec `img-src 'self'`. Charger le logo depuis
+  `solidata.online` aurait été une ressource distante, donc bloquée — et une
+  dépendance réseau sur un écran qui doit fonctionner hors ligne.
+- **Jamais devant l'information.** Sur l'overlay, le logo est en `z-index`
+  inférieur à la carte : si un message long fait grandir celle-ci, le logo
+  passe **derrière**. Le prénom et le message principal ne peuvent pas être
+  masqués (AFF-03). Deux tests verrouillent ce point (présence sur les deux
+  écrans, et ordre d'empilement).
+- **Lisible sur fond sombre.** L'exemplaire du kiosque est recadré sur le bloc
+  de marque : la baseline « Association d'insertion par la valorisation… » est
+  imprimée en gris foncé, illisible sur le fond `#0f172a` et de toute façon
+  indéchiffrable à la taille d'affichage. Fichier réduit à 256 px de large
+  (21,6 Ko contre 301 Ko pour l'original) — un poste embarqué n'a pas à décoder
+  une image de 2 290 px pour l'afficher en 60.
+- **Aucune donnée personnelle** n'est ajoutée à l'écran par ce changement.
+
 ## 5. Hors périmètre V1 (documenté, pas silencieux)
 
 Stories vidéo Instagram (API Meta contraignante, V2) ; **rediffusion des vidéos de

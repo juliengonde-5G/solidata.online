@@ -86,6 +86,21 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+/*
+ * Logo de l'association dans le bandeau de veille. Il est dimensionné en `em`
+ * pour suivre la taille du libellé « Pointage » : sur un écran 4K comme sur un
+ * 24 pouces, le couple logo + mot garde ses proportions.
+ *
+ * La pastille verte qui tenait cette place est conservée en repli : si le
+ * fichier manque (cache vidé, image corrompue), l'`alt` s'affiche et le
+ * bandeau ne s'effondre pas.
+ */
+.logo-marque {
+  height: 2.4em;
+  width: auto;
+  display: block;
+}
+
 .pastille {
   width: 0.9em;
   height: 0.9em;
@@ -596,6 +611,26 @@ html, body {
 
 .overlay.erreur .overlay-carte { border-color: var(--rouge); }
 .overlay.neutre  .overlay-carte { border-color: #64748b; }
+
+/*
+ * Signature de marque au badgeage.
+ *
+ * z-index 1 contre 2 pour la carte : le logo est TOUJOURS dessous. C'est la
+ * garantie mécanique qu'un message long ne se retrouve jamais recouvert par
+ * une décoration. Opacité réduite pour rester une signature, pas un élément
+ * concurrent du prénom (AFF-03 : l'information principale reste la plus
+ * grande et la plus contrastée de l'écran).
+ */
+.logo-overlay {
+  position: absolute;
+  left: 3vw;
+  bottom: 3vh;
+  height: 9vh;
+  width: auto;
+  opacity: 0.7;
+  z-index: 1;
+  pointer-events: none;
+}
 
 .picto {
   font-size: clamp(90px, 14vh, 200px);

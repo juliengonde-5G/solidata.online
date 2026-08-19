@@ -49,14 +49,44 @@ def test_csp_ne_permet_que_la_boucle_locale():
         ), f"origine sortante inattendue : {origine}"
 
 
+#: Fichiers de ressource (logo, polices) : binaires, donc illisibles en texte.
+#: Ils sont exclus du balayage, jamais le contraire — un .js ou un .css glisse
+#: dans un sous-repertoire doit rester inspecte.
+_BINAIRES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".mp4", ".webm"}
+
+
 def test_interface_sans_ressource_externe():
-    """Le poste ne contacte jamais un domaine tiers, meme pour une police."""
-    for fichier in sorted(UI.iterdir()):
-        if not fichier.is_file():
+    """Le poste ne contacte jamais un domaine tiers, meme pour une police.
+
+    Le balayage est RECURSIF : depuis l'ajout de ``ui/assets/`` (logo de
+    l'association servi en local), un fichier place dans un sous-repertoire
+    echappait au controle.
+    """
+    inspectes = 0
+    for fichier in sorted(UI.rglob("*")):
+        if not fichier.is_file() or fichier.suffix.lower() in _BINAIRES:
             continue
         contenu = fichier.read_text(encoding="utf-8")
+        inspectes += 1
         for url in re.findall(r"https?://[^\s\"'()]+", contenu):
-            assert "127.0.0.1" in url, f"{fichier.name} reference {url}"
+            assert "127.0.0.1" in url, f"{fichier.relative_to(UI)} reference {url}"
+    assert inspectes >= 3, "index.html, style.css et app.js doivent etre inspectes"
+
+
+def test_ressources_locales_reellement_presentes():
+    """Une image referencee mais absente laisserait un bandeau casse en prod.
+
+    Le kiosque n'a pas de repli reseau : ce qui n'est pas sur le disque du
+    poste n'existe pas.
+    """
+    html = (UI / "index.html").read_text(encoding="utf-8")
+    sources = re.findall(r'<img[^>]*\ssrc="([^"]+)"', html)
+    assert sources, "aucune image dans l'interface"
+    for source in sources:
+        assert not source.startswith(("http://", "https://", "//")), (
+            f"ressource distante interdite : {source}"
+        )
+        assert (UI / source).is_file(), f"fichier absent du poste : {source}"
 
 
 def test_interface_sans_style_en_ligne_ni_innerhtml():
@@ -66,6 +96,33 @@ def test_interface_sans_style_en_ligne_ni_innerhtml():
     assert "innerHTML" not in script
     assert "eval(" not in script
     assert "document.write" not in script
+
+
+def test_logo_present_sur_la_veille_ET_sur_le_badgeage():
+    """Le logo doit tenir sur TOUS les ecrans, pas seulement celui de veille.
+
+    L'ecran de badgeage est un overlay plein ecran : sans marque de son cote,
+    le poste perdait l'identite de l'association pendant les 8 secondes les
+    plus regardees de la journee.
+    """
+    html = (UI / "index.html").read_text(encoding="utf-8")
+    veille = html.split('id="overlay"')[0]
+    overlay = html.split('id="overlay"')[1]
+    assert "logo-marque" in veille, "logo absent du bandeau de veille"
+    assert "logo-overlay" in overlay, "logo absent de l'ecran de badgeage"
+
+
+def test_logo_de_badgeage_derriere_la_carte():
+    """Garantie MECANIQUE que la marque ne masque jamais le prenom (AFF-03).
+
+    Le logo est en z-index inferieur a la carte : un message long passe
+    au-dessus de lui, jamais l'inverse.
+    """
+    css = (UI / "style.css").read_text(encoding="utf-8")
+    bloc = lambda nom: css.split(nom + " {")[1].split("}")[0]  # noqa: E731
+    z_logo = int(re.search(r"z-index:\s*(\d+)", bloc(".logo-overlay")).group(1))
+    z_carte = int(re.search(r"z-index:\s*(\d+)", bloc(".overlay-carte")).group(1))
+    assert z_logo < z_carte, "le logo passerait devant le message de badgeage"
 
 
 def test_aucun_secret_dans_le_depot():
