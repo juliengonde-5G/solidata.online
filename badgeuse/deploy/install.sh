@@ -158,8 +158,13 @@ else
   # de commande, diagnostic.sh ne peut pas dire combien de pointages attendent
   # — or c'est la question qui tranche entre « rien n'a ete capture » et
   # « capture mais pas transmis ». Quelques centaines de Ko bien places.
+  # fonts-noto-color-emoji : les ecrans posent des pictogrammes (meteo, gateau
+  # d'anniversaire, confettis). Sans police emoji COULEUR, le poste les rend en
+  # carres vides — l'ecran reste lisible (« 25° Nuageux ») mais laid, et le
+  # defaut ne se voit qu'en salle, jamais en developpement.
   apt-get install -y --no-install-recommends \
-    python3-venv python3-pip python3-evdev ca-certificates nftables sqlite3
+    python3-venv python3-pip python3-evdev ca-certificates nftables sqlite3 \
+    fonts-noto-color-emoji
 
   # Navigateur : les distributions ne s'accordent pas sur le nom du paquet
   # (« chromium » sur Debian et Raspberry Pi OS recents, « chromium-browser »
