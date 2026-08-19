@@ -177,12 +177,36 @@ else
   fi
 
   # Compositeur : cage (Wayland) de preference, sinon repli X11.
-  if installer_paquet cage; then
+  #
+  # FORCAGE : le fichier /etc/badgeuse/compositeur (contenu « x11 » ou
+  # « cage ») IMPOSE le choix, meme quand cage est installable. Ne d'un cas
+  # reel : sur un Pi 3, cage detenait le seat, la sortie DRM, le tty — et se
+  # figeait avant de lancer son client, sans emettre UNE ligne, meme en mode
+  # debug. Face a un composant qui ne peut plus rien dire, l'exploitant doit
+  # pouvoir basculer sur la voie X11 (fbdev, eprouvee sur Pi 3) d'un geste :
+  #     echo x11 | sudo tee /etc/badgeuse/compositeur
+  #     sudo bash /opt/badgeuse/deploy/install.sh
+  # Retour a l'automatique en supprimant le fichier.
+  COMPOSITEUR_FORCE=""
+  if [ -r /etc/badgeuse/compositeur ]; then
+    COMPOSITEUR_FORCE="$(tr -d '[:space:]' < /etc/badgeuse/compositeur)"
+    case "$COMPOSITEUR_FORCE" in
+      x11|cage) info "compositeur FORCE par /etc/badgeuse/compositeur : ${COMPOSITEUR_FORCE}" ;;
+      *) avert "valeur inconnue dans /etc/badgeuse/compositeur (« ${COMPOSITEUR_FORCE} ») — ignoree, choix automatique"
+         COMPOSITEUR_FORCE="" ;;
+    esac
+  fi
+
+  if [ "$COMPOSITEUR_FORCE" != "x11" ] && installer_paquet cage; then
     COMPOSITEUR="cage"
     installer_paquet wlr-randr || avert "wlr-randr absent — extinction d'ecran degradee"
     info "compositeur installe : cage (Wayland)"
   else
-    avert "paquet 'cage' non installable — repli X11 (openbox)"
+    if [ "$COMPOSITEUR_FORCE" = "x11" ]; then
+      info "voie X11 imposee par l'exploitant (fbdev, eprouvee sur Pi 3)"
+    else
+      avert "paquet 'cage' non installable — repli X11 (openbox)"
+    fi
     COMPOSITEUR="x11"
     # xserver-xorg-legacy est INDISPENSABLE ici : le kiosque tourne sous
     # l'utilisateur non privilegie « badgeuse », et seul le wrapper setuid
