@@ -218,3 +218,53 @@ MANAGER non cloisonnée par équipe (réserve E1 déjà documentée), pastille d
 suite PostgreSQL réelle à accrocher à `deploy.sh`/CI, recette matérielle RP-1→RP-6 toujours
 obligatoire avant toute mise en service réelle — les préalables CSE / note d'information
 salariés / arbitrage de la grille de règles restent, eux, inchangés.
+
+## 19 août 2026 — Écran de veille : la météo affiche enfin, l'actualité devient nationale
+
+Deux demandes de l'exploitant après quelques jours d'usage réel, traitées ensemble parce
+qu'elles touchent la même chaîne (générateur serveur → contrat device → moteur de rendu du
+poste).
+
+**« L'écran de la météo n'affiche rien ».** Ce n'était ni un problème de réseau ni un
+paramétrage manquant : le type `meteo` **n'a jamais eu de générateur**. Il figurait dans la
+liste des types depuis la V1, mais comme un simple **texte libre** — le serveur envoyait
+`{id, type:'meteo', titre, corps}` et l'interface du poste avait `meteo: null` dans sa table
+de moteurs de rendu. Un écran créé sans corps affichait donc son titre, et rien d'autre :
+c'est exactement la capture d'écran obtenue en reproduction. `meteo` devient un vrai
+générateur (Open-Meteo via `utils/weather.js`, déjà partagé avec Boutiques et VAK), avec un
+cache serveur (`badgeuse_meteo`) pour que l'écran tienne hors ligne, et une cascade de lieu
+site → réglage → rien. Sans relevé pour le jour courant, l'écran est **omis** — jamais la
+météo d'un autre jour. Un écran météo saisi à la main continue de fonctionner.
+
+**« L'actualité doit être nationale, un écran par article ».** Le type `actus` (fil interne
+SOLIDATA) est **conservé tel quel** ; un type `presse` est ajouté à côté, alimenté par des
+flux RSS **paramétrables** (défaut : franceinfo « à la une »), lus par le SERVEUR sous les
+mêmes gardes anti-SSRF que les visuels sociaux, vignettes téléchargées puis servies par
+l'API device. Le poste ne joint aucun site de presse.
+
+**Ce qui n'a pas été livré, et pourquoi : le « flux vidéo ».** Rediffuser une vidéo de
+presse sur un écran d'entreprise est une représentation qui suppose une licence ; un flux
+RSS n'en accorde pas. Le mécanisme est écrit et testé, mais **désactivé par défaut**
+(`badgeuse.presse_video_autorisee = false`) : un article dont le seul média est une vidéo
+s'affiche quand même, sans la vidéo. **ADR-0006** pose la question à la Direction (licence
+d'affichage en entreprise auprès de l'éditeur retenu ; sort des vignettes ; absence de lien
+de retour compensée par l'affichage systématique de la source).
+
+**Point de conformité tranché en passant** : le test de minimisation du schéma interdisait
+le mot « latitude » dans tout le module. L'interdit réel (NOTE_JURIDIQUE §3.4) est la
+géolocalisation **d'un salarié**. L'assertion a été **resserrée table par table** — aucune
+coordonnée sur les pointages, badges, postes, corrections, feuilles de temps — plutôt que
+contournée ; les coordonnées d'un site (adresse d'établissement) et du cache météo ne
+désignent personne. Contre-épreuve exécutée : ajouter une latitude sur `badgeuse_badges`
+fait tomber le test.
+
+**Tests** : jest badgeuse 569 → 612 (+43 : lecture de flux RSS et gardes, cascade du lieu,
+contrat de playlist, diffusion de la vignette, chaîne complète sur PostgreSQL réel),
+pytest poste 454 → 459 (forme de l'écran presse dans le cache média du poste), suite
+backend complète 1941 verts. Captures de recette produites depuis l'interface réelle du
+poste (avant/après météo, article de presse avec et sans vignette).
+
+**Reste à faire, hors périmètre de ce lot** : le sélecteur de type de l'écran de
+paramétrage (`frontend/src/components/badgeuse/badgeuseShared.jsx`) ne propose pas encore
+`presse` — les deux nouveaux jobs ne figurent pas non plus au registre de cadence
+`JOB_SCHEDULE` (`routes/monitoring.js`). Voir le rapport de lot.
