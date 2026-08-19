@@ -167,7 +167,7 @@ EOF
 [ "$PROCS_VUS" -eq 1 ] || ligne "processus" "aucun (hors agent)"
 
 if [ "$KIOSQUE_OK" -eq 1 ] && [ "$NAV_VU" -eq 0 ]; then
-  retenir "COMPOSITEUR SEUL : le service est actif, mais aucun processus chromium ne tourne sous l'utilisateur du kiosque — l'ecran affiche un fond vide. La cause exacte est dans le journal du client (section 6 bis : sortie de chromium et code de fin). Si cette section est vide, l'installation est anterieure au lanceur :
+  retenir "COMPOSITEUR SEUL : le service est actif, mais aucun processus chromium ne tourne sous l'utilisateur du kiosque — l'ecran affiche un fond vide. La cause exacte est dans la section 6 bis (lanceur + sortie de chromium et code de fin). Si elle est vide, l'installation est anterieure, ou le client n'a jamais ete lance :
       sudo bash /opt/badgeuse/deploy/install.sh && sudo systemctl restart badgeuse-kiosk"
 fi
 
@@ -321,12 +321,15 @@ titre "6. Journaux — kiosque (20 dernieres lignes)"
 journalctl -u badgeuse-kiosk -n 20 --no-pager 2>/dev/null | sed 's/^/    /' \
   || echo "    (journal indisponible)"
 
-titre "6 bis. Journal du client kiosque (chromium via kiosk-client.sh)"
-SORTIE_CLIENT="$(journalctl -t badgeuse-kiosk-client -n 12 --no-pager 2>/dev/null)"
+titre "6 bis. Sortie du lanceur et de chromium (journal de l'unite)"
+# Le lanceur ecrit sur son stderr HERITE (prefixe « kiosk-client: »), chromium
+# aussi : tout est dans le journal de l'unite — aucun intermediaire qui puisse
+# bloquer ou se perdre.
+SORTIE_CLIENT="$(journalctl -u badgeuse-kiosk --no-pager 2>/dev/null | grep -E 'kiosk-client:|chromium' | tail -12)"
 if [ -n "$SORTIE_CLIENT" ]; then
   printf '%s\n' "$SORTIE_CLIENT" | sed 's/^/    /'
 else
-  echo "    (aucune entree — installation anterieure au lanceur : relancer install.sh)"
+  echo "    (aucune ligne du lanceur — installation anterieure, ou client jamais lance : relancer install.sh)"
 fi
 
 titre "7. Journaux — agent (20 dernieres lignes)"
