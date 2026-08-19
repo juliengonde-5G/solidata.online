@@ -173,16 +173,27 @@ ligne_lancement() {
   # ligne_lancement <compositeur> <navigateur> <url> : contenu du drop-in
   # systemd qui pose ExecStart. UN SEUL fichier pose ExecStart, jamais deux
   # qui se marchent dessus.
+  #
+  # Le compositeur ne lance plus chromium DIRECTEMENT mais via
+  # kiosk-client.sh : constate en exploitation, chromium pouvait mourir sous
+  # cage sans laisser une seule ligne — cage restait seul devant un ecran
+  # vide. Le lanceur journalise la sortie et le code de fin de chromium
+  # (etiquette badgeuse-kiosk-client) puis PROPAGE ce code : le compositeur
+  # tombe avec son client et systemd relance l'ensemble. Le navigateur et
+  # l'URL passent par l'environnement (kiosk.env), pas par la ligne.
   local compositeur="${1:-cage}" navigateur="${2:-/usr/bin/chromium}"
   local url="${3:-http://127.0.0.1:8766}"
+  local client="/opt/badgeuse/deploy/kiosk-client.sh"
 
   if [ "$compositeur" = "x11" ]; then
     cat <<FIN
 # Genere par install.sh — repli X11 (paquet cage indisponible).
 [Service]
 Environment=XDG_SESSION_TYPE=x11
+Environment=NAVIGATEUR_BIN=${navigateur}
+Environment=KIOSK_URL=${url}
 ExecStart=
-ExecStart=/usr/bin/xinit ${navigateur} \$CHROMIUM_FLAGS ${url} -- :0 vt1 -nolisten tcp
+ExecStart=/usr/bin/xinit ${client} -- :0 vt1 -nolisten tcp
 FIN
   else
     cat <<FIN
@@ -190,8 +201,10 @@ FIN
 # l'installation.
 [Service]
 Environment=XDG_SESSION_TYPE=wayland
+Environment=NAVIGATEUR_BIN=${navigateur}
+Environment=KIOSK_URL=${url}
 ExecStart=
-ExecStart=/usr/bin/cage -- ${navigateur} \$CHROMIUM_FLAGS ${url}
+ExecStart=/usr/bin/cage -- ${client}
 FIN
   fi
 }

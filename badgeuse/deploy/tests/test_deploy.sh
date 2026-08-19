@@ -168,9 +168,15 @@ titre "Drop-in de lancement du kiosque"
 LANCEMENT_CAGE="$(ligne_lancement cage /usr/bin/chromium http://127.0.0.1:8766)"
 LANCEMENT_X11="$(ligne_lancement x11 /usr/bin/chromium-browser http://127.0.0.1:8766)"
 verifier_contient "cage : ExecStart vide d'abord" "ExecStart=" "$LANCEMENT_CAGE"
-verifier_contient "cage : lance cage" "/usr/bin/cage -- /usr/bin/chromium" "$LANCEMENT_CAGE"
+# Le compositeur lance le LANCEUR, plus jamais chromium directement : c'est le
+# lanceur qui journalise la sortie et le code de fin du navigateur (un chromium
+# qui meurt sous cage ne laissait AUCUNE trace). Le navigateur resolu passe par
+# l'environnement du service.
+verifier_contient "cage : lance le lanceur via cage" "/usr/bin/cage -- /opt/badgeuse/deploy/kiosk-client.sh" "$LANCEMENT_CAGE"
+verifier_contient "cage : navigateur resolu transmis en environnement" "NAVIGATEUR_BIN=/usr/bin/chromium" "$LANCEMENT_CAGE"
 verifier_contient "cage : session wayland" "XDG_SESSION_TYPE=wayland" "$LANCEMENT_CAGE"
-verifier_contient "x11 : lance xinit" "/usr/bin/xinit /usr/bin/chromium-browser" "$LANCEMENT_X11"
+verifier_contient "x11 : lance le lanceur via xinit" "/usr/bin/xinit /opt/badgeuse/deploy/kiosk-client.sh" "$LANCEMENT_X11"
+verifier_contient "x11 : navigateur resolu transmis en environnement" "NAVIGATEUR_BIN=/usr/bin/chromium-browser" "$LANCEMENT_X11"
 verifier_contient "x11 : session x11" "XDG_SESSION_TYPE=x11" "$LANCEMENT_X11"
 verifier_contient "x11 : vt1 sans ecoute TCP" "-- :0 vt1 -nolisten tcp" "$LANCEMENT_X11"
 # Le navigateur ne doit JAMAIS etre code en dur dans le drop-in : c'est celui

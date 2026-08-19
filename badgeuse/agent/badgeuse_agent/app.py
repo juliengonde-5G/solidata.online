@@ -138,7 +138,19 @@ class Agent:
         normalise = normalize_uid(raw)
         if normalise is None:
             # Lecture non conforme au contrat : pas d'enregistrement (CONTRAT_HMAC §2.4).
-            LOGGER.warning("lecture de badge non conforme — aucun enregistrement")
+            # Metadonnees SANS CONTENU — longueur avant/apres nettoyage et
+            # composition : c'est exactement ce qu'il faut pour regler un
+            # lecteur (mode d'emission, prefixe/suffixe) sans jamais exposer
+            # l'identifiant. Constate en exploitation : le message nu laissait
+            # l'exploitant sans aucune prise.
+            hexa = sum(1 for c in raw if c in '0123456789abcdefABCDEF')
+            LOGGER.warning(
+                "lecture de badge non conforme — aucun enregistrement "
+                "(saisie %d car., %d hexadecimaux apres nettoyage, %s ; "
+                "longueurs acceptees : 8/14/20 hex ou 10 chiffres)",
+                len(raw), hexa,
+                "que des chiffres" if raw.isdigit() else "avec lettres/symboles",
+            )
             await self._ui.badge_err(
                 RAISON_ILLISIBLE, overlay_duree_sec=self._overlay_sec
             )
