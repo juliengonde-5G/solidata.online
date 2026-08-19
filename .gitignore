@@ -16,3 +16,6 @@ deploy/backups/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Environnements de travail des agents Claude (worktrees isolés, jamais versionnés)
+.claude/worktrees/
