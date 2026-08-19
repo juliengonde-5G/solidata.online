@@ -2,5 +2,9 @@
   "DeveloperToolsAvailability": 2,
   "IncognitoModeAvailability": 1,
   "BrowserAddPersonEnabled": false,
-  "DefaultPopupsSetting": 2
+  "DefaultPopupsSetting": 2,
+  "TranslateEnabled": false,
+  "SpellcheckEnabled": false,
+  "PromptForDownloadLocation": false,
+  "DefaultNotificationsSetting": 2
 }
