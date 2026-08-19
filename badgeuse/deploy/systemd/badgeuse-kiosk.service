@@ -36,6 +36,17 @@ EnvironmentFile=/etc/badgeuse/kiosk.env
 RuntimeDirectory=badgeuse
 RuntimeDirectoryMode=0700
 
+# Purge des sessions logind residuelles AVANT d'ouvrir la notre. Constate en
+# exploitation : la session PAM du premier demarrage (ecran noir, cage tue en
+# SIGKILL) restait enregistree et DETENAIT seat0/tty1 — chaque redemarrage du
+# kiosque recevait alors une session neuve SANS seat, et cage attendait en
+# silence un controle que logind ne pouvait plus lui accorder. On repart
+# proprement : les sessions de l'utilisateur badgeuse sont cloturees (l'agent,
+# service systeme, n'en fait pas partie et n'est pas touche) et le VT1 revient
+# au premier plan. Prefixe « + » : ces gestes exigent root, le service, lui,
+# reste sous l'utilisateur badgeuse. Jamais bloquant (exit 0).
+ExecStartPre=+/bin/sh -c 'loginctl terminate-user badgeuse 2>/dev/null; sleep 1; chvt 1 2>/dev/null; exit 0'
+
 # L'attente laisse a l'agent le temps d'ouvrir son serveur local.
 ExecStartPre=/bin/sleep 3
 
