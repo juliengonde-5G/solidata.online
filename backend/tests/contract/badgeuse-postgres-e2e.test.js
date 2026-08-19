@@ -333,6 +333,91 @@ const JOUR = engine.parisDateStr(new Date());
   });
 
   // ── AUTHENTIFICATION DU POSTE ────────────────────────────────────────────
+  // ── Le geste RH constaté en exploitation : « affecter le badge » ──────────
+  test("attribuer le badge depuis un orphelin : creation + rattachement dans le meme geste", async () => {
+    // Un salarie badge avec un badge jamais enrole : deux orphelins s'empilent.
+    const uid = '0AFFEC7E';
+    for (const [h, sens] of [['08:01', 'entree'], ['12:02', 'sortie']]) {
+      const lot = poste.forger({ uid, horodatage: heure(JOUR, h), sens });
+      const r = await dev(request(app).post(`/api/badgeuse/v1/devices/${CODE_POSTE}/pointages`), deviceKey)
+        .send({ pointages: [lot] });
+      expect(r.body.resultats[0].status).toBe('orphan');
+    }
+    const avant = await auth(request(app).get('/api/badgeuse/orphelins'), 'RH');
+    const miens = avant.body.filter((o) => o.uid_hmac === poste.empreinte(uid));
+    expect(miens.length).toBe(2);
+
+    // La RH attribue le badge : les orphelins sont rattaches DANS LE MEME GESTE.
+    const crea = await auth(request(app).post('/api/badgeuse/badges'), 'RH')
+      .send({ employee_id: salarieBis, uid_hmac: poste.empreinte(uid), commentaire: 'jest-e2e' });
+    expect(crea.status).toBe(201);
+    expect(crea.body.orphelins_rattaches).toBe(2);
+
+    const apres = await auth(request(app).get('/api/badgeuse/orphelins'), 'RH');
+    expect(apres.body.filter((o) => o.uid_hmac === poste.empreinte(uid)).length).toBe(0);
+    const traites = await pool.query(
+      "SELECT employee_id, statut FROM badgeuse_pointages WHERE uid_hmac = $1", [poste.empreinte(uid)]);
+    expect(traites.rows.every((r2) => r2.statut === 'traite' && r2.employee_id === salarieBis)).toBe(true);
+    // Journalise comme un rattachement, avec le detail du geste.
+    const jrn = await pool.query(
+      "SELECT details FROM rgpd_audit_log WHERE action = 'BADGEUSE_ORPHELIN_RATTACHEMENT' AND details::text LIKE '%creation_badge%' ORDER BY id DESC LIMIT 1");
+    expect(jrn.rows.length).toBe(1);
+    const det = typeof jrn.rows[0].details === 'string' ? JSON.parse(jrn.rows[0].details) : jrn.rows[0].details;
+    expect(det.nb).toBe(2);
+  });
+
+  // ── Le badge SURVIT aux personnes : reattribution apres un depart ─────────
+  test('un badge restitue se reattribue a un AUTRE salarie ; un badge actif, jamais', async () => {
+    // salarieBis porte le badge 0AFFEC7E (test precedent). Tant qu'il est actif,
+    // toute reattribution est refusee avec un message qui NOMME le porteur.
+    const refus = await auth(request(app).post('/api/badgeuse/badges'), 'RH')
+      .send({ employee_id: salarie, uid_hmac: poste.empreinte('0AFFEC7E'), commentaire: 'jest-e2e' });
+    expect(refus.status).toBe(409);
+    expect(refus.body.error).toMatch(/encore actif au nom de/);
+    expect(refus.body.error).toMatch(/BENALI/i);
+
+    // Depart de l'entreprise : restitution, puis reattribution au premier salarie.
+    const badgeId = (await pool.query(
+      "SELECT id FROM badgeuse_badges WHERE uid_hmac = $1 AND statut = 'actif'", [poste.empreinte('0AFFEC7E')])).rows[0].id;
+    expect((await auth(request(app).patch(`/api/badgeuse/badges/${badgeId}`), 'RH')
+      .send({ statut: 'restitue' })).status).toBe(200);
+
+    // Le repreneur doit etre LIBRE : l'autre unicite (un badge actif par
+    // salarie) est aussi verifiee au passage — refus tant que son badge des
+    // tests precedents est actif, acceptation apres restitution.
+    const ancien = await pool.query(
+      "SELECT id FROM badgeuse_badges WHERE employee_id = $1 AND statut = 'actif'", [salarie]);
+    if (ancien.rows.length > 0) {
+      const occupe = await auth(request(app).post('/api/badgeuse/badges'), 'RH')
+        .send({ employee_id: salarie, uid_hmac: poste.empreinte('0AFFEC7E'), commentaire: 'jest-e2e' });
+      expect(occupe.status).toBe(409);
+      expect(occupe.body.error).toMatch(/déjà un badge actif/);
+      expect((await auth(request(app).patch(`/api/badgeuse/badges/${ancien.rows[0].id}`), 'RH')
+        .send({ statut: 'restitue' })).status).toBe(200);
+    }
+
+    const rea = await auth(request(app).post('/api/badgeuse/badges'), 'RH')
+      .send({ employee_id: salarie, uid_hmac: poste.empreinte('0AFFEC7E'), commentaire: 'jest-e2e' });
+    expect(rea.status).toBe(201);
+
+    // L'historique garde les DEUX periodes de detention de la meme empreinte.
+    const hist = await pool.query(
+      "SELECT employee_id, statut FROM badgeuse_badges WHERE uid_hmac = $1 ORDER BY id", [poste.empreinte('0AFFEC7E')]);
+    expect(hist.rows.length).toBe(2);
+    expect(hist.rows[0].statut).toBe('restitue');
+    expect(hist.rows[1].statut).toBe('actif');
+
+    // Les pointages de l'ANCIEN porteur ne sont jamais reattribues au nouveau.
+    const anciens = await pool.query(
+      "SELECT employee_id FROM badgeuse_pointages WHERE uid_hmac = $1 AND statut = 'traite'", [poste.empreinte('0AFFEC7E')]);
+    expect(anciens.rows.every((r2) => r2.employee_id === salarieBis)).toBe(true);
+
+    // Et le cache du poste sert le NOUVEAU porteur.
+    const cache = await dev(request(app).get(`/api/badgeuse/v1/devices/${CODE_POSTE}/badges`), deviceKey);
+    const entree = (cache.body.badges || []).find((b2) => b2.uid_hmac === poste.empreinte('0AFFEC7E'));
+    expect(entree.salarie_id).toBe(salarie);
+  });
+
   test('X-Device-Key obligatoire : ni absence, ni fausse clé, ni JWT ADMIN ne passent', async () => {
     expect((await request(app).get(`/api/badgeuse/v1/devices/${CODE_POSTE}/badges`)).status).toBe(401);
     expect((await dev(request(app).get(`/api/badgeuse/v1/devices/${CODE_POSTE}/badges`), 'a'.repeat(64))).status).toBe(401);

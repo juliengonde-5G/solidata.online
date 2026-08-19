@@ -92,8 +92,17 @@ describe('MINIMISATION — exigences NOTE_JURIDIQUE §3.4 portées par le schém
     }
   });
 
-  test('badgeuse_badges.uid_hmac est UNIQUE et NOT NULL (le pseudonyme est la clé)', () => {
-    expect(tableBody('badgeuse_badges')).toMatch(/uid_hmac VARCHAR\(64\) NOT NULL UNIQUE/);
+  test('badgeuse_badges.uid_hmac : NOT NULL, et UNIQUE parmi les badges ACTIFS', () => {
+    // Un badge physique survit aux personnes (reattribution apres un depart) :
+    // l'unicite absolue de l'empreinte a ete remplacee par une unicite sur le
+    // badge ACTIF — une seule personne porte une empreinte donnee a la fois,
+    // l'historique conserve une ligne par periode de detention. Le pseudonyme
+    // reste la cle du badge EN SERVICE ; l'ancienne contrainte de colonne est
+    // levee par la migration DO-scan (contype 'u').
+    expect(tableBody('badgeuse_badges')).toMatch(/uid_hmac VARCHAR\(64\) NOT NULL,/);
+    expect(tableBody('badgeuse_badges')).not.toMatch(/uid_hmac[^\n]*UNIQUE/);
+    const section = sectionBadgeuse();
+    expect(section).toMatch(/idx_badgeuse_badges_uid_actif_unique\s*\n?\s*ON badgeuse_badges\(uid_hmac\) WHERE statut = 'actif'/);
   });
 
   test('aucune donnée de santé, de statut IAE ou de géolocalisation dans le module', () => {
@@ -412,10 +421,22 @@ describe('INALTÉRABILITÉ côté code — aucun DELETE de pointage hors purge p
     expect(scheduler).toMatch(/DELETE FROM \$\{table\}|DELETE FROM \$\{/); // suppression paramétrée du job
   });
 
-  test('le seul UPDATE de badgeuse_pointages est le rattachement d\'un orphelin', () => {
+  test('les seuls UPDATE de badgeuse_pointages sont les DEUX rattachements d\'orphelins', () => {
+    // Deux gestes RH, meme effet, meme trace : le rattachement manuel (modale)
+    // et le rattachement a l'attribution d'un badge (les orphelins de cette
+    // empreinte sont rattaches dans la meme transaction). Tout autre UPDATE de
+    // cette table serait une atteinte a l'inalterabilite : chaque occurrence ne
+    // peut toucher que employee_id + statut, et seulement des lignes ORPHELINES.
     const code = fs.readFileSync(path.join(BACKEND_ROOT, 'src', 'routes', 'badgeuse.js'), 'utf8');
     const updates = code.match(/UPDATE badgeuse_pointages[\s\S]*?RETURNING/g) || [];
-    expect(updates).toHaveLength(1);
-    expect(updates[0]).toMatch(/SET employee_id = \$2, statut = 'traite'/);
+    expect(updates).toHaveLength(2);
+    for (const u of updates) {
+      expect(u).toMatch(/SET employee_id = \$\d, statut = 'traite'/);
+      expect(u).toMatch(/statut = 'orphelin'/);
+      expect(u).not.toMatch(/horodatage_utc\s*=|uid_hmac\s*=\s*\$\d\s*,|hash_/);
+    }
+    // Le rattachement « a l'attribution » est borne : jamais les pointages d'un
+    // porteur precedent (posterieurs a la derniere restitution du support).
+    expect(updates.some((u) => u.includes("orphelin_raison = 'badge_inconnu'") && u.includes('restitue_le'))).toBe(true);
   });
 });

@@ -13,6 +13,68 @@ import {
 
 const PAGE_SIZE = 30;
 
+// ── Modale « Affecter le badge » (depuis un orphelin badge inconnu) ─────────
+// L'empreinte vient de la ligne : la RH choisit le salarié, l'API cree le badge
+// ET rattache dans la meme transaction tous les orphelins de cette empreinte —
+// fin du parcours en deux ecrans (copier 64 hexa, changer d'onglet, revenir).
+function AffecterBadgeModal({ open, onClose, pointage, employees, onDone }) {
+  const toast = useToast();
+  const [employeeId, setEmployeeId] = useState('');
+  const [commentaire, setCommentaire] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setEmployeeId(''); setCommentaire(''); setError(null); setSaving(false);
+  }, [open, pointage]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!employeeId) { setError('Choisissez un salarié.'); return; }
+    setSaving(true); setError(null);
+    try {
+      const r = await api.post('/badgeuse/badges', {
+        employee_id: parseInt(employeeId, 10),
+        uid_hmac: pointage.uid_hmac,
+        commentaire: commentaire.trim() || null,
+      });
+      const n = r.data?.orphelins_rattaches ?? 0;
+      toast.success(n > 0
+        ? `Badge attribué — ${n} pointage${n > 1 ? 's' : ''} orphelin${n > 1 ? 's' : ''} rattaché${n > 1 ? 's' : ''}.`
+        : 'Badge attribué.');
+      onDone();
+    } catch (err) { setError(apiErr(err, 'Attribution impossible.')); setSaving(false); }
+  };
+
+  return (
+    <Modal isOpen={open} onClose={onClose} title="Affecter ce badge à un salarié" size="sm"
+      footer={<>
+        <button type="button" onClick={onClose} className="btn-secondary text-sm" disabled={saving}>Annuler</button>
+        <button type="submit" form="affecter-badge-form" disabled={saving} className="btn-primary text-sm disabled:opacity-50">{saving ? 'Attribution…' : 'Attribuer le badge'}</button>
+      </>}>
+      <form id="affecter-badge-form" onSubmit={submit} className="space-y-3">
+        {error && <div role="alert" className="text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{error}</div>}
+        <p className="text-sm text-slate-600">
+          Le badge <span className="font-mono text-xs" title={pointage?.uid_hmac}>{pointage?.uid_hmac?.slice(0, 12)}…</span> sera
+          attribué au salarié choisi, et <strong>ses pointages orphelins seront rattachés</strong> dans le même geste (journalisé).
+        </p>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Salarié</label>
+          <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className="input-modern py-2 text-sm w-full" required>
+            <option value="">— Choisir —</option>
+            {employees.map((emp) => <option key={emp.id} value={emp.id}>{formatEmployeeName(emp.last_name, emp.first_name)}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Commentaire (facultatif)</label>
+          <input value={commentaire} onChange={(e) => setCommentaire(e.target.value)} maxLength={300} className="input-modern py-2 text-sm w-full" placeholder="ex. badge attribué à l'accueil du 19/08" />
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ── Modale « Rattacher un pointage orphelin » ────────────────────────────────
 function RattacherModal({ open, onClose, pointage, employees, onDone }) {
   const toast = useToast();
@@ -230,7 +292,8 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
   const [orphelins, setOrphelins] = useState([]);
   const [orphLoading, setOrphLoading] = useState(true);
   const [orphError, setOrphError] = useState(null);
-  const [rattacher, setRattacher] = useState(null); // { pointage }
+  const [rattacher, setRattacher] = useState(null);
+  const [affecterBadge, setAffecterBadge] = useState(null); // { pointage }
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionPrefill, setCorrectionPrefill] = useState(null);
 
@@ -427,11 +490,21 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
                     </td>
                     <td className="py-2 px-2 text-slate-500">{o.device_code || o.device_libelle || '—'}</td>
                     {canWriteRh && (
-                      <td className="py-2 px-2 text-right">
-                        <button onClick={() => setRattacher(o)} className="inline-flex items-center gap-1 text-teal-700 hover:text-teal-900 text-xs font-medium"
+                      <td className="py-2 px-2 text-right whitespace-nowrap">
+                        {/* Badge non reconnu : le bon geste est d'AFFECTER le badge —
+                            l'empreinte est deja la, l'API rattache les orphelins dans
+                            la meme transaction. « Rattacher » reste pour le pointage
+                            seul (badge d'un visiteur, support qui ne sera pas enrole). */}
+                        {o.employee_id == null && o.uid_hmac && (
+                          <button onClick={() => setAffecterBadge(o)} className="inline-flex items-center gap-1 text-teal-700 hover:text-teal-900 text-xs font-medium mr-3"
+                            title="Attribuer ce badge à un salarié et rattacher ses pointages orphelins">
+                            <Plus className="w-3.5 h-3.5" /> Affecter le badge
+                          </button>
+                        )}
+                        <button onClick={() => setRattacher(o)} className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-700 text-xs font-medium"
                           title={o.employee_id != null
                             ? 'Confirmer ce pointage hors plage et le porter au compte du salarié'
-                            : 'Rattacher ce pointage au salarié concerné'}>
+                            : 'Rattacher ce seul pointage, sans enrôler le badge'}>
                           <Link2 className="w-3.5 h-3.5" /> {o.employee_id != null ? 'Confirmer' : 'Rattacher'}
                         </button>
                       </td>
@@ -460,6 +533,9 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
         </div>
       )}
 
+      <AffecterBadgeModal open={!!affecterBadge} pointage={affecterBadge} employees={employees}
+        onClose={() => setAffecterBadge(null)}
+        onDone={() => { setAffecterBadge(null); loadOrphelins(); load(); }} />
       <RattacherModal open={!!rattacher} pointage={rattacher} employees={employees}
         onClose={() => setRattacher(null)}
         onDone={() => { setRattacher(null); reloadAll(); }} />

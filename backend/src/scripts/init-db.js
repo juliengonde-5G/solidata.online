@@ -6771,7 +6771,7 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS badgeuse_badges (
         id SERIAL PRIMARY KEY,
         employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        uid_hmac VARCHAR(64) NOT NULL UNIQUE,
+        uid_hmac VARCHAR(64) NOT NULL,
         statut VARCHAR(15) NOT NULL DEFAULT 'actif'
           CHECK (statut IN ('actif', 'perdu', 'vole', 'restitue', 'desactive')),
         attribue_le TIMESTAMPTZ DEFAULT NOW(),
@@ -6786,6 +6786,25 @@ async function initDatabase() {
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_badgeuse_badges_actif_unique
       ON badgeuse_badges(employee_id) WHERE statut = 'actif';
+    `);
+    // Un badge physique SURVIT aux personnes : au depart d'un salarie, le meme
+    // support est reattribue. L'unicite ne porte donc PAS sur l'empreinte dans
+    // l'absolu (l'historique garde une ligne par periode de detention) mais sur
+    // l'empreinte ACTIVE : une seule personne porte un badge donne a la fois.
+    // Migration : la contrainte UNIQUE de colonne des premieres versions est
+    // levee si elle existe (DO-scan pg_constraint — son nom est genere).
+    await client.query(`
+      DO $$ DECLARE c RECORD; BEGIN
+        FOR c IN SELECT conname FROM pg_constraint
+                 WHERE conrelid = 'badgeuse_badges'::regclass AND contype = 'u'
+        LOOP
+          EXECUTE format('ALTER TABLE badgeuse_badges DROP CONSTRAINT %I', c.conname);
+        END LOOP;
+      END $$;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_badgeuse_badges_uid_actif_unique
+      ON badgeuse_badges(uid_hmac) WHERE statut = 'actif';
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_badges_employee ON badgeuse_badges(employee_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_badges_statut ON badgeuse_badges(statut);');
