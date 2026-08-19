@@ -31,9 +31,10 @@ SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'FIN'
-Usage : sudo bash deploy/install.sh --target pi5|pi3 --config <fichier.conf>
+Usage : sudo bash deploy/install.sh [--target pi5|pi3] [--config <fichier.conf>]
 
-  --target pi5|pi3   cible materielle (obligatoire)
+  --target pi5|pi3   cible materielle (facultatif : reconnue automatiquement
+                     sur un Raspberry Pi ; a preciser ailleurs)
   --config <chemin>  fichier de configuration a installer en 0600
                      (obligatoire au premier passage ; ensuite facultatif,
                       la configuration deja en place est conservee)
@@ -54,9 +55,24 @@ done
 
 [ "$(id -u)" -eq 0 ] || { echo "A executer en root (sudo)." >&2; exit 1; }
 
+# La machine sait se reconnaitre : exiger --target ne protege de rien et ouvre
+# une classe d'erreurs inutile (faute de frappe, mauvaise cible sur le mauvais
+# poste). On reprend la reconnaissance de sd-init.sh. --target reste accepte et
+# PRIME, pour forcer une cible en banc de test.
+if [ -z "$CIBLE" ] && [ -r /proc/device-tree/model ]; then
+  MODELE_DETECTE="$(tr -d '\0' < /proc/device-tree/model)"
+  case "$MODELE_DETECTE" in
+    *"Raspberry Pi 5"*) CIBLE="pi5" ;;
+    *"Raspberry Pi 4"*) CIBLE="pi5" ;;   # traite comme un poste standard
+    *"Raspberry Pi 3"*) CIBLE="pi3" ;;
+  esac
+  [ -n "$CIBLE" ] && echo "    cible reconnue : ${CIBLE} (${MODELE_DETECTE})"
+fi
+
 case "$CIBLE" in
   pi5|pi3) ;;
-  *) echo "ERREUR : --target pi5 ou --target pi3 est obligatoire." >&2; usage; exit 2 ;;
+  *) echo "ERREUR : cible materielle indeterminee — preciser --target pi5 ou --target pi3." >&2
+     usage; exit 2 ;;
 esac
 
 touch "$JOURNAL"
