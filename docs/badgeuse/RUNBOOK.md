@@ -79,6 +79,48 @@ de `bootfs`, et générez les deux fichiers avec
 **La clé HMAC est celle du SITE** : la même dans les deux fichiers. Seule la clé du poste
 diffère.
 
+### B ter. Se connecter au poste en SSH (depuis le PC)
+
+Travailler en SSH est **plus confortable qu'au clavier du Pi** : on colle du texte, on relit
+les messages, on garde l'historique. Prérequis : « SSH activé » a bien été coché dans les
+réglages de Raspberry Pi Imager (étape A).
+
+**1. La commande**, avec le nom d'hôte choisi au flash :
+
+```bash
+ssh pi-admin@ST-Badgeuse.local
+```
+
+`pi-admin` = l'utilisateur créé dans Imager ; `ST-Badgeuse` = le nom d'hôte. Le suffixe
+`.local` fonctionne d'emblée sur macOS et Linux, et sur Windows 10/11 à jour.
+
+**2. Si `.local` ne répond pas**, passez par l'adresse IP :
+
+| Où la trouver | Comment |
+|---|---|
+| Sur le Pi | Brancher un clavier et taper `hostname -I` |
+| Depuis la box Internet | Interface d'administration → liste des appareils connectés → chercher `ST-Badgeuse` |
+| Depuis le PC (Linux/macOS) | `ping ST-Badgeuse.local` affiche l'IP |
+
+Puis : `ssh pi-admin@192.168.1.42` (l'adresse relevée).
+
+**3. Sous Windows** : `ssh` est intégré depuis Windows 10 — ouvrez **PowerShell** ou
+**Terminal** et tapez la même commande. Sinon, PuTTY fait l'affaire (hôte, port 22).
+
+**4. À la première connexion**, une empreinte de clé s'affiche : répondez `yes`, puis saisissez
+le mot de passe défini dans Imager (rien ne s'affiche pendant la frappe, c'est normal).
+
+**Coller les clés** : `Ctrl+Shift+V` (Linux), `Cmd+V` (macOS), clic droit (PowerShell/PuTTY).
+
+**Problèmes courants**
+
+| Message | Cause et remède |
+|---|---|
+| `Could not resolve hostname` | `.local` non résolu → utiliser l'adresse IP (point 2) |
+| `Connection refused` | SSH non activé au flash → insérer la carte dans le PC et créer un fichier **vide** nommé `ssh` (sans extension) à la racine de `bootfs`, puis redémarrer le Pi |
+| `Permission denied` | Mauvais utilisateur ou mot de passe — c'est le couple défini dans Imager, pas celui de SOLIDATA |
+| Plus de réponse après `firewall.sh` | Le pare-feu limite SSH au réseau `RESEAU_ADMIN` déclaré. Se connecter depuis ce réseau, ou brancher un clavier sur le Pi pour rejouer le script avec le bon réseau |
+
 ### C. Installer (sur le Raspberry, une seule commande)
 
 Insérez la carte, branchez écran, réseau et alimentation, connectez-vous (SSH ou clavier) :
