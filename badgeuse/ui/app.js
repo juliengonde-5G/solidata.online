@@ -104,6 +104,7 @@
   var elHorloge = document.getElementById('horloge-heure');
   var elDate = document.getElementById('horloge-date');
   var elBandeau = document.getElementById('bandeau-hors-ligne');
+  var elConsigne = document.getElementById('consigne');
 
   var diapos = [document.getElementById('diapo-a'), document.getElementById('diapo-b')];
 
@@ -121,12 +122,37 @@
 
   /* --------------------------------------------------------------- horloge */
 
+  /**
+   * Ecart entre l'horloge du NAVIGATEUR et celle du POSTE, en millisecondes.
+   *
+   * L'heure affichee doit etre celle que l'agent utilise pour horodater les
+   * pointages (heure murale de Paris), pas celle du fuseau systeme de la
+   * machine : sur une image Raspberry Pi OS restee en UTC, la veille affichait
+   * 09:41 pendant que l'overlay de badgeage affichait 11:41. Deux heures
+   * differentes sur le meme ecran, sur un dispositif dont les heures font foi.
+   *
+   * Repli tant qu'aucun etat n'est arrive : le fuseau du navigateur, c'est-a-dire
+   * le comportement anterieur — jamais d'ecran sans horloge.
+   */
+  var decalageMs = -new Date().getTimezoneOffset() * 60000;
+
   function majHorloge() {
-    var maintenant = new Date();
-    elHorloge.textContent = deuxChiffres(maintenant.getHours()) + ':' +
-                            deuxChiffres(maintenant.getMinutes());
-    elDate.textContent = JOURS[maintenant.getDay()] + ' ' + maintenant.getDate() +
-                         ' ' + MOIS[maintenant.getMonth()];
+    // Les accesseurs UTC lisent les champs tels que le poste les a poses :
+    // c'est ce qui rend l'affichage independant du fuseau du navigateur.
+    var maintenant = new Date(Date.now() + decalageMs);
+    elHorloge.textContent = deuxChiffres(maintenant.getUTCHours()) + ':' +
+                            deuxChiffres(maintenant.getUTCMinutes());
+    elDate.textContent = JOURS[maintenant.getUTCDay()] + ' ' + maintenant.getUTCDate() +
+                         ' ' + MOIS[maintenant.getUTCMonth()];
+  }
+
+  /** Cale l'horloge sur celle du poste (« YYYY-MM-DDTHH:MM:SS », heure de Paris). */
+  function calerHorloge(horlogeLocale) {
+    if (!horlogeLocale) { return; }             // serveur anterieur : on garde le repli
+    var instant = Date.parse(String(horlogeLocale) + 'Z');
+    if (!isFinite(instant)) { return; }
+    decalageMs = instant - Date.now();
+    majHorloge();
   }
 
   function deuxChiffres(valeur) {
@@ -751,6 +777,11 @@
     if (!lecteurPresent) { texteBandeau = MESSAGES.lecteur; }
     else if (!enLigne) { texteBandeau = MESSAGES.hors_ligne; }
 
+    // Sans lecteur, on n'invite plus a presenter un badge : demander un geste
+    // qui ne PEUT PAS fonctionner, a cote du message qui dit qu'il ne
+    // fonctionnera pas, ne fait qu'egarer le salarie.
+    if (elConsigne) { elConsigne.hidden = !lecteurPresent; }
+
     if (texteBandeau === null) {
       elBandeau.classList.remove('visible');
       elBandeau.hidden = true;
@@ -831,6 +862,7 @@
       case 'status':
         enLigne = message.online !== false;
         lecteurPresent = message.lecteur !== false;
+        calerHorloge(message.horloge_locale);
         majBandeau();
         break;
 

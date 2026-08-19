@@ -75,7 +75,7 @@ fi
 # Repli 2 : rien nulle part → on la crée ICI, au clavier. Préparer la carte
 # depuis un PC reste plus confortable, mais n'est pas une obligation : le poste
 # sait se configurer seul, sans dépôt Git ni identifiant.
-if [ -z "$CONFIG" ] && : </dev/tty 2>/dev/null; then
+if [ -z "$CONFIG" ] && : 2>/dev/null </dev/tty; then
   case "$CIBLE" in
     pi5) CODE_DEFAUT="LH-P1" ;;
     pi3) CODE_DEFAUT="LH-P2" ;;

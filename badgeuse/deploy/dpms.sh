@@ -5,6 +5,8 @@
 # La plage est lue dans /etc/badgeuse/badgeuse.conf, section [dpms] :
 #     allumage   = 05:30
 #     extinction = 21:30
+# Les heures sont interpretees en EUROPE/PARIS, comme tout le reste du poste,
+# et non dans le fuseau systeme de la machine.
 # Plage absente ou incomplete => l'ecran reste allume (aucune extinction
 # decidee par defaut : on ne coupe pas un afficheur sur une supposition).
 #
@@ -22,19 +24,13 @@ KIOSK_USER="${KIOSK_USER:-badgeuse}"
 
 log() { printf '[dpms] %s\n' "$*"; }
 
+# Lecteur INI commun (deploy/lib.sh) : une seule implementation, testee.
+# shellcheck source=lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 lire_cle() {
-  # lire_cle <section> <cle> : lecture INI minimale, sans dependance.
-  local section="$1" cle="$2"
-  [ -r "$CONF" ] || return 0
-  awk -v section="[$section]" -v cle="$cle" '
-    /^[[:space:]]*[;#]/ { next }
-    /^[[:space:]]*\[/   { dans = ($0 ~ section); next }
-    dans && $0 ~ "^[[:space:]]*" cle "[[:space:]]*=" {
-      sub(/^[^=]*=[[:space:]]*/, "");
-      gsub(/[[:space:]]*$/, "");
-      print; exit
-    }
-  ' "$CONF"
+  # lire_cle <section> <cle> : dans la configuration du poste.
+  lire_cle_ini "$CONF" "$1" "$2"
 }
 
 minutes_depuis_minuit() {
@@ -86,7 +82,11 @@ main() {
   fin="$(minutes_depuis_minuit "$extinction")" || {
     log "heure d'extinction illisible ('$extinction') — ecran laisse allume"; exit 0; }
 
-  maintenant=$(( 10#$(date +%H) * 60 + 10#$(date +%M) ))
+  # Heure de REFERENCE du poste : Europe/Paris, comme partout ailleurs dans
+  # l'agent (sens.py, moments.py, horodatage local des pointages). Sans ce
+  # TZ explicite, la plage suivrait le fuseau SYSTEME : sur une image
+  # Raspberry Pi OS restee en UTC, l'ecran s'eteignait deux heures trop tot.
+  maintenant=$(( 10#$(TZ=Europe/Paris date +%H) * 60 + 10#$(TZ=Europe/Paris date +%M) ))
 
   local ouvert=0
   if [ "$debut" -le "$fin" ]; then

@@ -387,11 +387,16 @@ class Agent:
             await self._sleep(WATCHDOG_TICK_SEC)
 
     async def _notify_status(self) -> None:
+        # L'heure de référence de l'écran est celle de l'agent, en heure murale
+        # de Paris — jamais celle du navigateur, qui suivrait le fuseau système
+        # du poste (UTC par défaut sur une image Raspberry Pi OS neuve).
+        maintenant = _dt.datetime.now(PARIS)
         await self._ui.status(
             online=bool(self._syncer and self._syncer.online),
             file=self._store.queue_size(),
-            heure=_dt.datetime.now(PARIS).strftime("%H:%M"),
+            heure=maintenant.strftime("%H:%M"),
             lecteur=self._reader_connected,
+            horloge_locale=maintenant.strftime("%Y-%m-%dT%H:%M:%S"),
         )
 
     async def _sleep(self, seconds: float) -> None:

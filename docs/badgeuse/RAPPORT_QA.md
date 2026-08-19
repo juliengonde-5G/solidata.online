@@ -46,16 +46,16 @@ sans test, ou exigence à moitié couverte · **ABSENT** = non trouvé dans le c
 
 | Exig. | Implémenté (fichier:ligne) | Testé | Verdict |
 |---|---|---|---|
-| PST-01 — capture `evdev` exclusive `EVIOCGRAB` | `badgeuse/agent/badgeuse_agent/reader.py:107` (`device.grab()`), libération `:250` ; droits `deploy/systemd/badgeuse-agent.service:14` | `tests/test_pipeline.py` (lecteur simulé) | **OK** |
+| PST-01 — capture `evdev` exclusive `EVIOCGRAB` | `badgeuse/agent/badgeuse_agent/reader.py` (`device.grab()` sur **toutes** les interfaces qualifiées, libération en fin de boucle) ; droits `deploy/systemd/badgeuse-agent.service:14` | `tests/test_reader.py` (faux `evdev`, lecteur à **deux** interfaces dont une muette — cas rencontré en exploitation), `tests/test_pipeline.py` | **OK** (défaut de terrain corrigé : une seule interface était retenue, le badgeage se jouait à pile ou face) |
 | PST-02 — anti-rebond 8 s, message « déjà enregistré » | `debounce.py` (module dédié) ; seuil serveur `badgeuse-settings.js:40` (`anti_rebond_sec: 8`) ; message `ui/app.js` | `tests/test_debounce.py` | **OK** |
-| PST-03 — sens par alternance depuis le dernier pointage du jour | `sens.py` (`determine_sens`, `ENTREE`/`INCONNU`) ; appel `app.py:159` | `tests/test_sens.py` | **OK** |
+| PST-03 — sens par alternance depuis le dernier pointage du jour | `sens.py` (`determine_sens`, `ENTREE`/`INCONNU`) ; appel `app.py` (`_process`) | `tests/test_sens.py` | **OK** |
 | PST-04 — badge inconnu → écran d'erreur + pointage orphelin, jamais de rejet silencieux | `badgeuse-device.js:188-196` (`badge_inconnu`, `badge_inactif`), `:201-204` (`hors_plage`) — stocké en `statut='orphelin'`, jamais rejeté | `badgeuse-device.test.js`, `badgeuse-contract.test.js` | **OK** |
 | PST-05 — file SQLite persistante, purge sur accusé serveur uniquement | `ACK_STATUSES` `store.py:60` = `{ok, duplicate, orphan, invalid}` — **`retry` délibérément exclu** (`store.py:54`) ; classification serveur `badgeuse-device.js:152-157` ; arrêt de lot `:392-396` | `tests/test_store.py`, `badgeuse-device.test.js` | **OK** (QA-01 + QA-13 corrigés) |
 | PST-06 — cache badges 5 min / playlist 15 min, ETag | `sync.py:191/207/219` ; ETag serveur `badgeuse-device.js:92-103` ; cadences `badgeuse-settings.js:44-45` (300 s / 900 s) | `badgeuse-device.test.js` (304), `tests/test_store.py` | **OK** |
 | PST-07 — heartbeat 60 s (version, dérive, file, température, disque) | `sync.py:235-258` ; réception `badgeuse-device.js:434-452` (dont `alerte`) ; télémétrie `sync.py:322-364` | `badgeuse-device.test.js` | **OK** (QA-02 corrigé) |
 | PST-08 — bandeau discret « hors ligne » | `ui/app.js:46` (`hors_ligne`), élément `#bandeau-hors-ligne` `:65` | non testé (UI kiosque) | **PARTIEL** (implémenté, non couvert par un test automatisé) |
 | PST-09 — watchdog matériel + redémarrage systemd + arrêt propre bouton | `badgeuse-agent.service:29` `WatchdogSec=90` (+ `sd_notify`), `Restart=always` ; **watchdog matériel** `install.sh:322` `RuntimeWatchdogSec=15s` | `badgeuse-schema.test.js` (unités) | **OK** (QA-09 corrigé) — arrêt propre par bouton à confirmer en recette (RP-1) |
-| PST-10 — aucune saisie clavier, pas de bureau, sans barre d'outils, curseur masqué | `cage` `badgeuse-kiosk.service:35` ; flags `install.sh:249-251` ; **politique gérée** `deploy/chromium-policy.json` (`DeveloperToolsAvailability:2`) déployée sur les 2 arborescences `install.sh:254-256` ; curseur `ui/style.css:36` ; lecteur grabbé `reader.py:107` | — | **OK** (QA-07 corrigé) |
+| PST-10 — aucune saisie clavier, pas de bureau, sans barre d'outils, curseur masqué | `cage` (drop-in `lancement.conf` posé par `install.sh`) ; flags `deploy/lib.sh` (`flags_chromium`) ; **politique gérée** `deploy/chromium-policy.json` (`DeveloperToolsAvailability:2`) déployée sur les 2 arborescences par `install.sh` (étape 7/9) ; curseur `ui/style.css:36` ; lecteur grabbé `reader.py` (`device.grab()`) | — | **OK** (QA-07 corrigé) |
 
 ### 2.2 Affichage (AFF-01 → AFF-08)
 
@@ -552,7 +552,7 @@ Flags appliqués (`install.sh:249-255`) : `--kiosk --noerrdialogs --disable-tran
 (`127.0.0.1:8766` HTTP, `127.0.0.1:8765` WebSocket — `ws_server.py:29`, correctement bornés à la
 boucle locale, mais atteignables depuis la page).
 
-**Atténuations réelles :** le **lecteur de badge est grabbé** (`EVIOCGRAB`, `reader.py:107`), ses
+**Atténuations réelles :** le **lecteur de badge est grabbé** (`EVIOCGRAB`, `reader.py`), ses
 frappes n'atteignent donc pas Chromium ; `cage` n'expose aucun bureau ; l'attaque exige un accès
 physique et un clavier.
 

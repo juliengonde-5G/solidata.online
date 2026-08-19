@@ -126,6 +126,54 @@ En documentant le système réel, A6 a détecté 5 écarts UI. Traitement :
    (`img-src 'self'`) ; l'ouverture à `https://solidata.online` est une évolution V1.1 à
    arbitrer (elle toucherait la CSP du poste, donc re-passage barrière).
 
+## Passe « poste » après la première mise en service réelle (A3-DEBUG)
+
+Le poste de secours (Pi 3) a été installé sur site alors que pytest était vert à
+400/400. Six défauts sont apparus le même jour, dont un lecteur saisi mais muet.
+La cause profonde n'est pas dans les six correctifs : **la suite ne testait que des
+pièces, jamais la promesse** (« le poste badge et affiche »), et les scripts
+d'installation n'étaient testés par rien. Cette passe corrige cela.
+
+**Défaut principal — le lecteur « connecté » et muet.** Un lecteur RFID HID expose
+souvent deux `/dev/input/eventN` sous le même nom et les mêmes identifiants USB ;
+une seule émet les frappes. `reader.py` n'en retenait qu'une, la première du
+répertoire : le badgeage se jouait à pile ou face au branchement. Toutes les
+interfaces qualifiées sont désormais saisies et lues simultanément, chacune avec
+son tampon. Reproduit avant correctif (UID reçus = `[]`), vert après.
+
+**Trois autres chemins silencieux fermés** : la queue d'un flot anormal repartait
+comme un badge ; une interface refusant de s'ouvrir disparaissait sans trace ; un
+écran figé bloquait le verrou de badgeage, donc tous les pointages suivants
+(prouvé : ancien code bloqué à 3 s, nouveau rendu en 0,5 s).
+
+**install.sh détruisait le poste** quand on le relançait depuis `/opt/badgeuse` —
+la commande que le diagnostic recommande. `deployer()` déplaçait la destination
+avant de copier la source : même chemin, source perdue, `/opt/badgeuse/agent`
+renommé `.ancien`, installation interrompue. Corrigé (garde de même chemin +
+copie avant bascule) et testé.
+
+**Deux heures sur le même écran** : la veille affichait l'heure du navigateur
+(fuseau système, UTC sur une image neuve) pendant que l'overlay affichait Paris.
+L'agent envoie désormais son heure de référence ; `dpms.sh` lit l'heure en
+Europe/Paris ; `install.sh` aligne le fuseau du système.
+
+**Niveaux de test ajoutés** (pytest 400 → 454, plus 68 vérifications shell) :
+- `test_promesse_poste.py` + `faux_serveur.py` — l'agent RÉEL face à une API device
+  conforme au contrat (retry, invalid, 500, 503, ETag, média) ;
+- `test_reader.py` + `faux_evdev.py` — la capture réelle face à un lecteur à deux
+  interfaces (le module n'avait aucun test) ;
+- `test_conformite_poste.py` — CSP, absence de ressource externe, absence de secret,
+  aucune trace d'UID : les promesses de confidentialité deviennent des tests ;
+- `deploy/tests/test_deploy.sh` (branché sur pytest) — relance depuis `/opt`,
+  résolution du navigateur, cohérence compositeur ↔ options Chromium, écriture
+  réelle d'une configuration en 0600.
+
+**Instrumentation de terrain** : `python -m badgeuse_agent --lecteurs` (inventaire des
+interfaces, aucune frappe lue), trace « premiere frappe recue » par interface, et
+section « 4 bis. Lecteur de badge » du diagnostic. C'est ce qui manquait pour
+distinguer « le lecteur ne parle pas » de « le poste n'écoute pas la bonne
+interface ».
+
 ## Écarts assumés à la lettre du dossier de prompts
 
 - OpenAPI YAML remplacé par un contrat Markdown (ADR-0001) — même fonction, pile différente.

@@ -85,13 +85,15 @@ Aucune écoute réseau entrante : les deux serveurs locaux sont liés à
 | `store.py` | SQLite : file, chaîne, cache badges, caches | ✔ |
 | `clock.py` | Dérive d'horloge vs `server_time_utc` | ✔ |
 | `config.py` | Lecture et validation stricte du fichier INI | ✔ |
-| `reader.py` | Capture evdev, `EVIOCGRAB`, reconnexion | |
-| `sync.py` | Client API device, ETag, backoff, télémétrie | |
-| `ws_server.py` | WebSocket + service des fichiers de l'UI | |
-| `app.py` | Orchestration asyncio, tâches périodiques, watchdog | |
+| `reader.py` | Capture evdev, `EVIOCGRAB`, reconnexion | ✔ (faux `evdev`) |
+| `sync.py` | Client API device, ETag, backoff, télémétrie | ✔ (faux serveur) |
+| `ws_server.py` | WebSocket + service des fichiers de l'UI | ✔ (faux serveur) |
+| `app.py` | Orchestration asyncio, tâches périodiques, watchdog | ✔ (faux serveur) |
 
-Les modules **purs** n'utilisent que la bibliothèque standard : les tests
-tournent sans `evdev`, `httpx` ni `websockets`.
+Les modules **purs** n'utilisent que la bibliothèque standard : leurs tests
+tournent sans `evdev`, `httpx` ni `websockets`. Les quatre derniers sont
+couverts par des tests « de la promesse » qui font tourner l'agent réel
+(cf. §5) ; ils s'ignorent proprement si `httpx`/`websockets` manquent.
 
 ---
 
@@ -169,10 +171,22 @@ sudo -u badgeuse /opt/badgeuse/venv/bin/python -m badgeuse_agent --check
 
 ```bash
 python3 -m pytest badgeuse/agent/tests/ -q
+bash badgeuse/deploy/tests/test_deploy.sh          # scripts d'installation
 ```
 
-Les tests ne couvrent **que des modules purs** et n'exigent aucune dépendance
-externe. Deux vecteurs partagés avec le backend Node y sont figés (toute
+Trois niveaux, et c'est délibéré :
+
+| Niveau | Fichiers | Ce qu'il prouve |
+|---|---|---|
+| Unitaire (modules purs) | `test_normalize`, `test_hmac`, `test_chain`, `test_sens`, `test_debounce`, `test_moments`, `test_store`… | Les règles, sans aucune dépendance |
+| **Promesse** | `test_promesse_poste.py` + `faux_serveur.py`, `test_reader.py` + `faux_evdev.py` | **L'agent réel** (base SQLite, WebSocket, HTTP, client `httpx`) face à un faux serveur qui applique le CONTRAT_API_DEVICE, et la capture réelle face à un faux lecteur à deux interfaces |
+| Déploiement | `deploy/tests/test_deploy.sh` (branché sur pytest) | Les scripts shell : relance depuis `/opt`, résolution du navigateur, cohérence compositeur ↔ options Chromium |
+
+Le niveau « promesse » existe parce que 400 tests unitaires verts n'ont pas
+empêché six défauts en production le même jour : ils ne testaient que des
+pièces, jamais le fait que **le poste badge et affiche**.
+
+Deux vecteurs partagés avec le backend Node y sont figés (toute
 divergence casserait la vérification serveur) :
 
 ```
@@ -199,6 +213,7 @@ police distante : trois fichiers, ~22 Ko, modifiables directement sur le poste.
 | « Hors ligne » affiché | Normal si le réseau est coupé — les pointages sont enregistrés. Vérifier la file : `journalctl -u badgeuse-agent \| grep file` |
 | « Badge non reconnu » | Badge non attribué ou cache pas encore synchronisé. Le pointage est parti en orphelin : traitement RH au back-office |
 | « Lecteur non détecté » | Lecteur débranché — l'agent se reconnecte seul dès le rebranchement |
+| Lecteur « connecté », mais aucun badge n'arrive | `sudo bash /opt/badgeuse/deploy/diagnostic.sh` (section 4 bis) ou `sudo -u badgeuse /opt/badgeuse/venv/bin/python -m badgeuse_agent --lecteurs` : la liste dit quelles interfaces sont saisies. Puis `journalctl -u badgeuse-agent -f` et passer un badge : la ligne « premiere frappe recue » doit apparaître. Absente, le lecteur n'émet rien vers le poste (câble, alimentation, mode du lecteur : il doit être en **émulation clavier**) |
 | Mise à jour du code | Relancer `install.sh` (idempotent). Rootfs en lecture seule : `overlayfs-setup.sh --disable`, redémarrer, mettre à jour, réactiver |
 | Changement de poste | Ne **jamais** modifier `device_code` sur un poste en service : la base locale refuse de s'ouvrir sous un autre code (la chaîne appartient au poste) |
 
