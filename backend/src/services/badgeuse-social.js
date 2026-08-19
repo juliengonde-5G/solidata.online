@@ -1,6 +1,11 @@
 /**
- * Écran d'information v2 — MÉDIAS et RÉSEAUX SOCIAUX du module 33
- * « Temps & Présence » (CDC_AFFICHAGE_V2 §2, ADR-0004 §6).
+ * Écran d'information v2 — MÉDIAS EXTERNES du module 33 « Temps & Présence »
+ * (CDC_AFFICHAGE_V2 §2, ADR-0004 §6, ADR-0006).
+ *
+ * Ce fichier regroupe TOUT ce que le serveur va chercher DEHORS pour l'écran :
+ * médias partagés, réseaux sociaux (API Meta Graph), presse nationale (flux
+ * RSS) et météo (Open-Meteo). Le point commun n'est pas le sujet, c'est le
+ * principe structurant ci-dessous — et les gardes qui vont avec.
  *
  * ══ PRINCIPE STRUCTURANT ══
  * LE POSTE NE CONTACTE JAMAIS UN DOMAINE EXTERNE. Tout contenu venu du dehors
@@ -52,6 +57,11 @@ const { decryptSecret } = require('../utils/badgeuse-crypto');
 // téléversés/rapatriés depuis un lien, `social/` pour les visuels des posts.
 const MEDIA_ROOT = path.join(__dirname, '..', '..', 'uploads', 'badgeuse');
 const SOCIAL_SUBDIR = 'social';
+// Vignettes de presse : sous-dossier DÉDIÉ. Ce n'est pas cosmétique — la purge
+// des médias orphelins (scheduler) ne balaie que les dossiers qu'elle connaît :
+// un fichier posé à la racine et référencé par une table qu'elle ignore serait
+// effacé sous 24 h, et l'écran presse perdrait ses images en silence.
+const PRESSE_SUBDIR = 'presse';
 
 /** Types de médias diffusables sur le kiosque (liste blanche STRICTE). */
 const MEDIA_MIME_BY_EXT = {
@@ -553,11 +563,491 @@ async function syncSocialPosts() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PRESSE NATIONALE (ADR-0006) — flux RSS rapatriés par le SERVEUR
+//
+// L'écran d'actualité interne (`actus`, table news_articles) est conservé tel
+// quel : la presse nationale est un type de contenu DISTINCT (`presse`), avec
+// UN ÉCRAN PAR ARTICLE (demande de l'exploitant, août 2026).
+//
+// Le poste ne joint jamais le site de presse : le serveur lit le flux, range
+// les articles en base et télécharge la vignette sous les MÊMES gardes que les
+// visuels sociaux. Conséquence utile : l'écran continue de tourner hors ligne
+// sur le dernier état connu (AFF-07).
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Taille maximale d'un flux RSS accepté (un fil « à la une » pèse ~100 Ko). */
+const RSS_MAX_BYTES = 5 * 1024 * 1024;
+const RSS_TIMEOUT_MS = 15000;
+
+/** Types de contenu admis pour un flux (une page HTML n'est PAS un flux). */
+const RSS_MIMES = [
+  'application/rss+xml', 'application/atom+xml', 'application/xml',
+  'text/xml', 'application/rdf+xml', 'text/rss+xml',
+];
+
+/**
+ * Entités XML/HTML les plus fréquentes dans les fils de presse français.
+ * Volontairement COURTE : ce qu'on ne sait pas décoder reste affiché tel quel
+ * (une entité visible est un défaut cosmétique ; un décodage approximatif
+ * fabriquerait du texte que la source n'a pas écrit).
+ */
+const ENTITES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  laquo: '«', raquo: '»', hellip: '…', rsquo: '’', lsquo: '‘',
+  ldquo: '“', rdquo: '”', ndash: '–', mdash: '—', eacute: 'é', egrave: 'è',
+  ecirc: 'ê', agrave: 'à', ccedil: 'ç', ugrave: 'ù', ocirc: 'ô', icirc: 'î',
+  euro: '€', deg: '°', middot: '·', times: '×',
+};
+
+/** Décode les entités connues (nommées et numériques). Fonction PURE. */
+function decodeEntites(texte) {
+  return String(texte == null ? '' : texte)
+    .replace(/&#x([0-9a-f]+);/gi, (m, hex) => {
+      const code = parseInt(hex, 16);
+      return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : m;
+    })
+    .replace(/&#(\d+);/g, (m, dec) => {
+      const code = parseInt(dec, 10);
+      return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : m;
+    })
+    .replace(/&([a-z]+);/gi, (m, nom) => {
+      const cle = String(nom).toLowerCase();
+      return Object.prototype.hasOwnProperty.call(ENTITES, cle) ? ENTITES[cle] : m;
+    });
+}
+
+/** Texte lisible d'un fragment de flux : CDATA retiré, balises ôtées, espaces normalisés. */
+function texteFlux(brut) {
+  const sansCdata = String(brut == null ? '' : brut).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+  const sansBalises = sansCdata.replace(/<[^>]*>/g, ' ');
+  return decodeEntites(sansBalises).replace(/\s+/g, ' ').trim();
+}
+
+/** Contenu du premier élément `<nom>` d'un bloc (brut, CDATA compris). */
+function baliseFlux(bloc, nom) {
+  const m = new RegExp(`<(?:[a-z0-9]+:)?${nom}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[a-z0-9]+:)?${nom}>`, 'i').exec(bloc);
+  return m ? m[1] : null;
+}
+
+/** Valeur d'un attribut sur la première balise `<nom …>` d'un bloc. */
+function attributFlux(bloc, nom, attribut) {
+  const balise = new RegExp(`<(?:[a-z0-9]+:)?${nom}(\\s[^>]*)/?>`, 'i').exec(bloc);
+  if (!balise) return null;
+  const m = new RegExp(`${attribut}\\s*=\\s*["']([^"']+)["']`, 'i').exec(balise[1]);
+  return m ? decodeEntites(m[1]).trim() : null;
+}
+
+/** Date d'un flux (RFC 822 ou ISO 8601) → ISO, ou null si illisible. */
+function dateFlux(brut) {
+  const t = texteFlux(brut);
+  if (!t) return null;
+  const d = new Date(t);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
+ * Lit un flux RSS 2.0 ou Atom. Fonction PURE, testée sur des fils réels.
+ *
+ * PAS DE PARSEUR XML GÉNÉRIQUE, et c'est délibéré : un flux de presse est une
+ * entrée non maîtrisée, et les parseurs XML complets traînent une surface
+ * d'attaque (entités externes, expansion récursive) dont on n'a aucun besoin
+ * ici. On lit les quelques balises attendues et on ignore le reste.
+ *
+ * @returns {Array<{guid,titre,chapo,lien,publie_le,media_url,media_kind}>}
+ */
+function parseFluxRss(xml) {
+  const source = String(xml == null ? '' : xml);
+  let blocs = source.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi);
+  const atom = !blocs;
+  if (atom) blocs = source.match(/<entry(?:\s[^>]*)?>[\s\S]*?<\/entry>/gi);
+  if (!blocs) return [];
+
+  const articles = [];
+  for (const bloc of blocs) {
+    const titre = texteFlux(baliseFlux(bloc, 'title'));
+    if (!titre) continue;                       // sans titre, il n'y a pas d'écran
+
+    // Atom porte le lien en attribut ; RSS dans le texte de la balise.
+    const lien = texteFlux(baliseFlux(bloc, 'link')) || attributFlux(bloc, 'link', 'href') || null;
+    const description = baliseFlux(bloc, 'description')
+      || baliseFlux(bloc, 'summary')
+      || baliseFlux(bloc, 'encoded')            // content:encoded
+      || baliseFlux(bloc, 'content');
+
+    // Le visuel, dans l'ordre de fiabilité décroissante. `enclosure` et
+    // `media:content` portent leur type MIME : c'est lui qui distingue une
+    // image d'une vidéo, jamais l'extension du fichier.
+    let mediaUrl = null;
+    let mediaMime = null;
+    for (const [balise, attr] of [['enclosure', 'url'], ['content', 'url'], ['thumbnail', 'url']]) {
+      const u = attributFlux(bloc, balise, attr);
+      if (!u) continue;
+      mediaUrl = u;
+      mediaMime = attributFlux(bloc, balise, 'type');
+      break;
+    }
+    if (!mediaUrl && description) {
+      const img = /<img[^>]+src\s*=\s*["']([^"']+)["']/i.exec(description);
+      if (img) mediaUrl = decodeEntites(img[1]).trim();
+    }
+    const kind = String(mediaMime || '').toLowerCase().startsWith('video/') ? 'video' : 'image';
+
+    const guid = texteFlux(baliseFlux(bloc, 'guid')) || texteFlux(baliseFlux(bloc, 'id')) || lien;
+    if (!guid) continue;                        // rien de stable à dédoublonner
+
+    articles.push({
+      guid: guid.slice(0, 400),
+      titre: titre.slice(0, 400),
+      chapo: texteFlux(description).slice(0, 600) || null,
+      lien: lien ? lien.slice(0, 600) : null,
+      publie_le: dateFlux(baliseFlux(bloc, 'pubDate') || baliseFlux(bloc, 'published') || baliseFlux(bloc, 'updated') || baliseFlux(bloc, 'date')),
+      media_url: mediaUrl,
+      media_kind: mediaUrl ? kind : null,
+    });
+  }
+  return articles;
+}
+
+/**
+ * Télécharge un flux RSS sous garde SSRF (mêmes règles que les médias : https,
+ * IP publiques, redirections revalidées, taille et délai bornés).
+ * @throws {MediaError}
+ */
+async function fetchFluxRss(rawUrl, { maxBytes = RSS_MAX_BYTES, timeoutMs = RSS_TIMEOUT_MS } = {}) {
+  const controleur = new AbortController();
+  const minuteur = setTimeout(() => controleur.abort(), timeoutMs);
+  try {
+    let cible = await assertSafeHttpsUrl(rawUrl);
+    let reponse = null;
+    for (let saut = 0; saut <= MAX_REDIRECTS; saut += 1) {
+      try {
+        reponse = await globalThis.fetch(cible.toString(), {
+          redirect: 'manual',
+          signal: controleur.signal,
+          headers: { Accept: 'application/rss+xml,application/xml;q=0.9,*/*;q=0.1' },
+        });
+      } catch (err) {
+        throw new MediaError('reseau', `Flux injoignable : ${err.name === 'AbortError' ? 'délai dépassé' : err.message}`);
+      }
+      const statut = Number(reponse.status) || 0;
+      if (statut >= 300 && statut < 400) {
+        const location = reponse.headers && reponse.headers.get ? reponse.headers.get('location') : null;
+        if (!location) throw new MediaError('http', 'Flux refusé : redirection sans destination');
+        if (saut === MAX_REDIRECTS) throw new MediaError('redirections', 'Flux refusé : trop de redirections');
+        cible = await assertSafeHttpsUrl(new URL(location, cible).toString());
+        continue;
+      }
+      break;
+    }
+    if (!reponse || !reponse.ok) {
+      throw new MediaError('http', `Flux refusé : réponse ${reponse ? reponse.status : 'absente'}`);
+    }
+    const entetes = reponse.headers && reponse.headers.get ? reponse.headers : { get: () => null };
+    const mime = String(entetes.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    // Une page HTML au lieu d'un flux (erreur d'URL, mur de consentement) doit
+    // être dite, pas « parsée au cas où » : on n'en tirerait que du faux.
+    if (mime && !RSS_MIMES.includes(mime)) {
+      throw new MediaError('type', `Ce lien ne renvoie pas un flux RSS (type reçu : ${mime})`);
+    }
+    const annonce = parseInt(entetes.get('content-length') || '', 10);
+    if (Number.isFinite(annonce) && annonce > maxBytes) {
+      throw new MediaError('trop_gros', 'Flux trop volumineux');
+    }
+    const texte = await reponse.text();
+    if (texte.length > maxBytes) throw new MediaError('trop_gros', 'Flux trop volumineux');
+    return texte;
+  } finally {
+    clearTimeout(minuteur);
+  }
+}
+
+/**
+ * Synchronisation des flux de presse configurés.
+ *
+ * RÉSILIENT : un flux en panne n'empêche pas les autres, et n'efface jamais ce
+ * qui est déjà en base — l'écran continue sur le dernier état connu.
+ * NE PURGE RIEN (comme la synchro sociale) : la conservation est appliquée au
+ * seul endroit documenté, `badgeusePurgeRetention`.
+ */
+async function syncPresseArticles() {
+  const bilan = { items: 0, flux: 0, articles: 0, vignettes: 0, videos_ignorees: 0, erreurs: 0 };
+  try {
+    const params = await readBadgeuseParams();
+    if (!params.presse_sync_actif) return { ...bilan, ignore: 'desactive' };
+
+    const flux = Array.isArray(params.presse_flux) ? params.presse_flux : [];
+    const limite = Math.min(20, Math.max(1, parseInt(params.presse_articles_par_flux, 10) || 8));
+    const maxBytes = Math.max(1, Number(params.lien_taille_max_mo) || 50) * 1024 * 1024;
+
+    for (const f of flux) {
+      if (!f || !f.actif || !f.url) continue;
+      const libelle = String(f.libelle || f.url).slice(0, 120);
+      const source = String(f.source || f.libelle || '').slice(0, 120) || null;
+
+      let articles;
+      try {
+        articles = parseFluxRss(await fetchFluxRss(f.url));
+      } catch (err) {
+        console.error(`[BADGEUSE-PRESSE] ${libelle} : ${err.message}`);
+        bilan.erreurs += 1;
+        continue;
+      }
+      if (articles.length === 0) {
+        console.warn(`[BADGEUSE-PRESSE] ${libelle} : flux lu mais aucun article reconnu`);
+        bilan.erreurs += 1;
+        continue;
+      }
+      bilan.flux += 1;
+
+      for (const a of articles.slice(0, limite)) {
+        try {
+          // Un article déjà connu ET déjà pourvu de sa vignette n'est pas
+          // retéléchargé (idempotence, et on ne martèle pas le CDN du média).
+          const connu = await pool.query(
+            'SELECT id, media_fichier FROM badgeuse_presse_articles WHERE flux = $1 AND guid = $2',
+            [libelle, a.guid]
+          );
+          let media = null;
+          const videoRefusee = a.media_kind === 'video' && !params.presse_video_autorisee;
+          if (videoRefusee) bilan.videos_ignorees += 1;
+
+          if (a.media_url && params.presse_vignettes && !videoRefusee
+              && (!connu.rows[0] || !connu.rows[0].media_fichier)) {
+            try {
+              media = await downloadMedia(a.media_url, {
+                maxBytes, sousDossier: PRESSE_SUBDIR, prefixe: 'presse',
+              });
+              bilan.vignettes += 1;
+            } catch (err) {
+              // Une vignette manquante n'annule pas l'article : l'écran
+              // affichera le titre en grand, ce qui est déjà l'essentiel.
+              console.warn(`[BADGEUSE-PRESSE] ${libelle} — vignette ignorée : ${err.message}`);
+            }
+          }
+
+          await pool.query(
+            `INSERT INTO badgeuse_presse_articles
+               (flux, source, guid, titre, chapo, lien, publie_le, media_fichier, media_sha256, media_type, sync_le)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+             ON CONFLICT (flux, guid) DO UPDATE SET
+               source = EXCLUDED.source,
+               titre = EXCLUDED.titre,
+               chapo = COALESCE(EXCLUDED.chapo, badgeuse_presse_articles.chapo),
+               lien = COALESCE(EXCLUDED.lien, badgeuse_presse_articles.lien),
+               publie_le = COALESCE(EXCLUDED.publie_le, badgeuse_presse_articles.publie_le),
+               media_fichier = COALESCE(EXCLUDED.media_fichier, badgeuse_presse_articles.media_fichier),
+               media_sha256 = COALESCE(EXCLUDED.media_sha256, badgeuse_presse_articles.media_sha256),
+               media_type = COALESCE(EXCLUDED.media_type, badgeuse_presse_articles.media_type),
+               sync_le = NOW()`,
+            [
+              libelle, source, a.guid, a.titre, a.chapo, a.lien, a.publie_le,
+              media ? media.fichier : null,
+              media ? media.media_sha256 : null,
+              media ? media.media_type : null,
+            ]
+          );
+          bilan.articles += 1;
+        } catch (err) {
+          bilan.erreurs += 1;
+          console.error(`[BADGEUSE-PRESSE] ${libelle} — article ignoré : ${err.message}`);
+        }
+      }
+    }
+
+    bilan.items = bilan.articles;
+    if (bilan.articles || bilan.erreurs) {
+      console.log(`[BADGEUSE-PRESSE] Synchronisation : ${bilan.articles} article(s), ${bilan.vignettes} vignette(s), ${bilan.videos_ignorees} vidéo(s) non rediffusée(s), ${bilan.erreurs} anomalie(s)`);
+    }
+    return bilan;
+  } catch (err) {
+    console.error('[BADGEUSE-PRESSE] Erreur de synchronisation :', err.message);
+    return { ...bilan, erreurs: bilan.erreurs + 1 };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MÉTÉO (type de contenu `meteo`) — Open-Meteo, rapatriée par le SERVEUR
+//
+// Le poste n'appelle pas Open-Meteo : la CSP du kiosque reste 'self' et
+// l'écran doit tenir hors ligne. Le serveur range la prévision en base
+// (`badgeuse_meteo`), la playlist la lit. Aucune valeur n'est inventée : sans
+// relevé pour AUJOURD'HUI, le générateur ne rend rien et l'écran est omis.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Coordonnées à 4 décimales (~11 m) : la clé de cache doit être stable. */
+const arrondiCoord = (v) => Math.round(Number(v) * 10000) / 10000;
+
+/** Jour civil Paris décalé de `n` jours (le poste vit à l'heure murale Paris). */
+function jourParisDecale(n = 0, maintenant = new Date()) {
+  const d = new Date(maintenant.getTime() + n * 86400000);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d);
+}
+
+/**
+ * Lieu de la météo d'un poste, EN CASCADE HONNÊTE :
+ *   site du poste (badgeuse_sites.latitude/longitude) → réglages badgeuse.* →
+ *   null (aucune coordonnée ⇒ aucun écran météo, jamais une ville par défaut).
+ * La `source` retenue accompagne la prévision jusqu'à l'écran.
+ */
+async function resolveMeteoLieu(siteId = null) {
+  if (siteId != null) {
+    try {
+      const r = await pool.query(
+        'SELECT code, libelle, latitude, longitude FROM badgeuse_sites WHERE id = $1',
+        [siteId]
+      );
+      const site = r.rows[0];
+      if (site && site.latitude != null && site.longitude != null) {
+        return {
+          latitude: arrondiCoord(site.latitude),
+          longitude: arrondiCoord(site.longitude),
+          libelle: site.libelle || site.code || null,
+          source: 'site',
+        };
+      }
+    } catch (_) {
+      // Colonnes absentes (base non migrée) : on retombe sur le paramètre.
+    }
+  }
+  const params = await readBadgeuseParams();
+  const lat = Number(params.meteo_latitude);
+  const lng = Number(params.meteo_longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    latitude: arrondiCoord(lat),
+    longitude: arrondiCoord(lng),
+    libelle: params.meteo_lieu || null,
+    source: 'parametre',
+  };
+}
+
+/** Prévisions déjà connues pour un lieu, d'aujourd'hui à J+n (ordre chronologique). */
+async function readMeteoCache(lieu, jours = 3) {
+  const debut = jourParisDecale(0);
+  const fin = jourParisDecale(Math.max(0, jours));
+  const r = await pool.query(
+    `SELECT to_char(jour, 'YYYY-MM-DD') AS jour, code, libelle,
+            temp_min, temp_max, precip_mm, vent_max, releve_le
+     FROM badgeuse_meteo
+     WHERE latitude = $1 AND longitude = $2 AND jour BETWEEN $3::date AND $4::date
+     ORDER BY jour`,
+    [lieu.latitude, lieu.longitude, debut, fin]
+  );
+  return r.rows.map((x) => ({
+    jour: x.jour,
+    code: x.code == null ? null : Number(x.code),
+    libelle: x.libelle || null,
+    temp_min: x.temp_min == null ? null : Number(x.temp_min),
+    temp_max: x.temp_max == null ? null : Number(x.temp_max),
+    precip_mm: x.precip_mm == null ? null : Number(x.precip_mm),
+    vent_max: x.vent_max == null ? null : Number(x.vent_max),
+    releve_le: x.releve_le || null,
+  }));
+}
+
+/**
+ * Rafraîchit la prévision d'un lieu (une seule requête Open-Meteo pour toute
+ * la plage). Rend le nombre de jours écrits, 0 si la source n'a rien donné —
+ * auquel cas la base garde le dernier état connu plutôt qu'un trou.
+ */
+async function refreshMeteoLieu(lieu, jours = 3) {
+  const { fetchOpenMeteoDailyRange } = require('../utils/weather');
+  const debut = jourParisDecale(0);
+  const fin = jourParisDecale(Math.max(0, jours));
+  const prev = await fetchOpenMeteoDailyRange(lieu.latitude, lieu.longitude, debut, fin);
+  if (!prev || !Array.isArray(prev.jours) || prev.jours.length === 0) return 0;
+
+  let ecrits = 0;
+  for (const j of prev.jours) {
+    if (!j || !j.date) continue;
+    await pool.query(
+      `INSERT INTO badgeuse_meteo
+         (latitude, longitude, jour, code, libelle, temp_min, temp_max, precip_mm, vent_max, releve_le)
+       VALUES ($1,$2,$3::date,$4,$5,$6,$7,$8,$9,NOW())
+       ON CONFLICT (latitude, longitude, jour) DO UPDATE SET
+         code = EXCLUDED.code, libelle = EXCLUDED.libelle,
+         temp_min = EXCLUDED.temp_min, temp_max = EXCLUDED.temp_max,
+         precip_mm = EXCLUDED.precip_mm, vent_max = EXCLUDED.vent_max,
+         releve_le = NOW()`,
+      [
+        lieu.latitude, lieu.longitude, j.date,
+        j.code == null ? null : Math.round(Number(j.code)),
+        j.label || null,
+        j.tempMin == null ? null : Number(j.tempMin),
+        j.tempMax == null ? null : Number(j.tempMax),
+        j.precipMm == null ? null : Number(j.precipMm),
+        j.windMax == null ? null : Number(j.windMax),
+      ]
+    );
+    ecrits += 1;
+  }
+  return ecrits;
+}
+
+/**
+ * Job de rafraîchissement : tous les lieux réellement utilisés (sites équipés
+ * d'un poste ET pourvus de coordonnées, plus le lieu de repli des réglages).
+ * Dédoublonné par coordonnées : deux sites au même endroit = un seul appel.
+ */
+async function syncMeteo() {
+  const bilan = { items: 0, lieux: 0, jours: 0, erreurs: 0 };
+  try {
+    const params = await readBadgeuseParams();
+    if (!params.meteo_sync_actif) return { ...bilan, ignore: 'desactive' };
+    const jours = Math.min(5, Math.max(0, parseInt(params.meteo_jours_prevision, 10) || 0));
+
+    const lieux = new Map();
+    const ajouter = (lieu) => {
+      if (!lieu) return;
+      lieux.set(`${lieu.latitude}:${lieu.longitude}`, lieu);
+    };
+    try {
+      const sites = await pool.query(
+        `SELECT DISTINCT s.id FROM badgeuse_sites s
+         JOIN badgeuse_devices d ON d.site_id = s.id AND d.actif = true
+         WHERE s.actif = true`
+      );
+      for (const row of sites.rows) ajouter(await resolveMeteoLieu(row.id));
+    } catch (err) {
+      console.error(`[BADGEUSE-METEO] Sites illisibles : ${err.message}`);
+      bilan.erreurs += 1;
+    }
+    // Le lieu de repli est rafraîchi dans tous les cas : un poste appairé plus
+    // tard doit trouver une prévision prête, pas un écran vide.
+    ajouter(await resolveMeteoLieu(null));
+
+    for (const lieu of lieux.values()) {
+      try {
+        const ecrits = await refreshMeteoLieu(lieu, jours);
+        if (ecrits === 0) {
+          console.warn(`[BADGEUSE-METEO] ${lieu.libelle || `${lieu.latitude},${lieu.longitude}`} : source injoignable, dernier état conservé`);
+          bilan.erreurs += 1;
+          continue;
+        }
+        bilan.lieux += 1;
+        bilan.jours += ecrits;
+      } catch (err) {
+        bilan.erreurs += 1;
+        console.error(`[BADGEUSE-METEO] ${lieu.libelle || 'lieu'} : ${err.message}`);
+      }
+    }
+    bilan.items = bilan.jours;
+    return bilan;
+  } catch (err) {
+    console.error('[BADGEUSE-METEO] Erreur de synchronisation :', err.message);
+    return { ...bilan, erreurs: bilan.erreurs + 1 };
+  }
+}
+
 module.exports = {
   MEDIA_MIME_BY_EXT,
   MEDIA_EXT_BY_MIME,
   MEDIA_ROOT,
   SOCIAL_SUBDIR,
+  PRESSE_SUBDIR,
   MediaError,
   mediaRoot,
   ensureMediaDir,
@@ -573,4 +1063,16 @@ module.exports = {
   fetchComptePosts,
   readMetaToken,
   syncSocialPosts,
+  // Presse nationale (ADR-0006)
+  parseFluxRss,
+  decodeEntites,
+  texteFlux,
+  fetchFluxRss,
+  syncPresseArticles,
+  // Météo de l'écran de veille
+  resolveMeteoLieu,
+  readMeteoCache,
+  refreshMeteoLieu,
+  syncMeteo,
+  jourParisDecale,
 };

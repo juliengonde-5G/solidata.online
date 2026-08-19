@@ -144,6 +144,60 @@ const BADGEUSE_SETTING_DEFAULTS = {
     { reseau: 'facebook', compte: 'vintiz.fr', graph_id: null, actif: false },
   ],
   'badgeuse.social_posts_par_compte': 5,
+
+  // ══ MÉTÉO de l'écran de veille (type de contenu `meteo`) ══
+  //
+  // Le type `meteo` existait depuis la V1 mais n'était qu'un TEXTE LIBRE : le
+  // serveur n'envoyait aucune donnée, l'écran restait vide. Il est désormais
+  // servi par un générateur (Open-Meteo, utils/weather.js, comme Boutiques et
+  // VAK) qui lit ses coordonnées EN CASCADE :
+  //   1. `badgeuse_sites.latitude/longitude` du site du poste, s'ils sont
+  //      renseignés (voie nominale, et seule voie correcte en multi-site) ;
+  //   2. à défaut, les deux réglages ci-dessous.
+  // Le défaut n'est pas une valeur inventée : ce sont les coordonnées du centre
+  // de tri de Solidarité Textiles (Le Houlme, seul site équipé — CLAUDE.md §9),
+  // déjà utilisées par le moteur prédictif de collecte. La SOURCE retenue est
+  // renvoyée au poste avec la prévision : l'écran ne peut pas mentir sur le lieu.
+  'badgeuse.meteo_latitude': 49.4231,
+  'badgeuse.meteo_longitude': 1.0993,
+  'badgeuse.meteo_lieu': 'Le Houlme',
+  // Nombre de jours de prévision AFFICHÉS EN PLUS d'aujourd'hui (0 = le jour
+  // seul). Plafonné à 5 : au-delà, les vignettes ne sont plus lisibles à 3 m.
+  'badgeuse.meteo_jours_prevision': 3,
+  'badgeuse.meteo_sync_actif': true,
+
+  // ══ PRESSE NATIONALE (type de contenu `presse`) ══
+  //
+  // Demande de l'exploitant (août 2026) : l'écran d'actualité doit reprendre
+  // l'actualité NATIONALE, un écran par article. Le fil interne (`actus`,
+  // table news_articles) est CONSERVÉ tel quel — ce sont deux écrans distincts.
+  //
+  // Les URL ne sont JAMAIS codées en dur : une source de presse change d'adresse
+  // de flux, ferme, ou impose de nouvelles conditions ; l'exploitant doit pouvoir
+  // en changer sans redéploiement. Le flux par défaut est le fil « à la une » de
+  // franceinfo (service public, flux RSS public et stable, licence de
+  // syndication du titre + chapô + vignette avec attribution de la source).
+  // Voir ADR-0006 pour la question des DROITS (vignettes et vidéo).
+  'badgeuse.presse_flux': [
+    { libelle: 'franceinfo — à la une', source: 'franceinfo', url: 'https://www.francetvinfo.fr/titres.rss', actif: true },
+    { libelle: 'Le Monde — à la une', source: 'Le Monde', url: 'https://www.lemonde.fr/rss/une.xml', actif: false },
+  ],
+  'badgeuse.presse_sync_actif': true,
+  // Nombre d'articles conservés par flux à chaque synchronisation.
+  'badgeuse.presse_articles_par_flux': 8,
+  // Vignette de l'article : téléchargée CÔTÉ SERVEUR et servie par l'API device
+  // (le poste ne contacte jamais francetvinfo.fr). Désactivable si la Direction
+  // tranche que la reproduction des visuels de presse n'est pas couverte.
+  'badgeuse.presse_vignettes': true,
+  // VIDÉO DE PRESSE : DÉSACTIVÉE PAR DÉFAUT, et ce n'est pas un oubli.
+  // Rediffuser une vidéo de presse sur un écran d'entreprise est un acte de
+  // représentation qui suppose une licence ; les flux RSS n'en accordent pas
+  // (ADR-0006). Le mécanisme existe et fonctionne ; il attend un arbitrage
+  // écrit de la Direction, pas une ligne de code.
+  'badgeuse.presse_video_autorisee': false,
+  // Conservation des articles importés (jours) — hygiène de disque, PAS une
+  // durée RGPD (aucune donnée personnelle) : appliquée par la purge planifiée.
+  'badgeuse.retention_presse_jours': 15,
   // Conservation des posts sociaux importés (jours). Comme les autres
   // `retention_*` : appliquée par la purge planifiée, PAS par le job de sync
   // (un seul endroit supprime — cf. services/scheduler.js).
@@ -205,6 +259,8 @@ const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const GABARIT_MAX = 120;
 const PHRASE_MAX = 200;
 const PHRASES_MAX = 30;
+const FLUX_MAX = 5;
+const MAX_JOURS_PREVISION = 5;
 
 /** Clés de gabarit de message (toutes exigent la variable `{prenom}`). */
 const GABARIT_KEYS = [
@@ -267,6 +323,47 @@ function validateAffichageSetting(key, value) {
     if (!HHMM.test(String(value == null ? '' : value).trim())) {
       return `${key} : heure attendue au format HH:MM (00:00 à 23:59)`;
     }
+    return null;
+  }
+  // Coordonnées de repli de la météo. Une latitude saisie à la place d'une
+  // longitude (ou l'inverse) donnerait une prévision plausible mais FAUSSE :
+  // seules les bornes géographiques réelles sont acceptées.
+  if (key === 'badgeuse.meteo_latitude' || key === 'badgeuse.meteo_longitude') {
+    const n = parseFloat(value);
+    const borne = key.endsWith('latitude') ? 90 : 180;
+    if (!Number.isFinite(n) || Math.abs(n) > borne) {
+      return `${key} : coordonnée décimale attendue (${-borne} à ${borne})`;
+    }
+    return null;
+  }
+  if (key === 'badgeuse.meteo_jours_prevision') {
+    const n = parseInt(value, 10);
+    if (!Number.isFinite(n) || n < 0 || n > MAX_JOURS_PREVISION) {
+      return `badgeuse.meteo_jours_prevision : 0 à ${MAX_JOURS_PREVISION} jours (au-delà, les vignettes ne sont plus lisibles à 3 m)`;
+    }
+    return null;
+  }
+  // Flux de presse : c'est le SERVEUR qui ira les chercher. Le contrôle du
+  // protocole a lieu ici (refus à la saisie, message clair) ET au moment de
+  // l'appel (assertSafeHttpsUrl) — on ne fait pas confiance à la base.
+  if (key === 'badgeuse.presse_flux') {
+    const arr = typeof value === 'string' ? safeJsonArray(value) : value;
+    if (!Array.isArray(arr)) return 'badgeuse.presse_flux : tableau de flux attendu';
+    if (arr.length > FLUX_MAX) return `badgeuse.presse_flux : ${FLUX_MAX} flux au maximum`;
+    for (const f of arr) {
+      if (!f || typeof f !== 'object') return 'badgeuse.presse_flux : chaque flux est un objet { libelle, source, url, actif }';
+      const url = String(f.url || '').trim();
+      if (!url) return 'badgeuse.presse_flux : l\'adresse du flux est obligatoire';
+      let parsee;
+      try { parsee = new URL(url); } catch (_) { return `badgeuse.presse_flux : « ${url} » n'est pas une URL valide`; }
+      if (parsee.protocol !== 'https:') return `badgeuse.presse_flux : seuls les flux https sont acceptés (« ${url} »)`;
+      if (String(f.libelle || '').length > 120) return 'badgeuse.presse_flux : libellé limité à 120 caractères';
+    }
+    return null;
+  }
+  if (key === 'badgeuse.presse_articles_par_flux') {
+    const n = parseInt(value, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 20) return 'badgeuse.presse_articles_par_flux : 1 à 20 articles';
     return null;
   }
   if (key === 'badgeuse.phrases_motivation') {

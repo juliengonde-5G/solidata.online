@@ -105,12 +105,35 @@ describe('MINIMISATION — exigences NOTE_JURIDIQUE §3.4 portées par le schém
     expect(section).toMatch(/idx_badgeuse_badges_uid_actif_unique\s*\n?\s*ON badgeuse_badges\(uid_hmac\) WHERE statut = 'actif'/);
   });
 
-  test('aucune donnée de santé, de statut IAE ou de géolocalisation dans le module', () => {
+  test('aucune donnée de santé, de statut IAE ou de NIR dans le module', () => {
     const section = sectionBadgeuse();
     const sql = section.replace(/--[^\n]*/g, '').replace(/\/\/[^\n]*/g, '');
-    for (const interdit of [/\bsante\b/i, /\brqth\b/i, /latitude/i, /longitude/i, /\bnir\b/i]) {
+    for (const interdit of [/\bsante\b/i, /\brqth\b/i, /\bnir\b/i]) {
       expect(sql).not.toMatch(interdit);
     }
+  });
+
+  test('aucune GÉOLOCALISATION D\'UNE PERSONNE : les tables nominatives n\'ont pas de coordonnées', () => {
+    // NOTE_JURIDIQUE §3.4 interdit la géolocalisation — c'est-à-dire celle
+    // d'un SALARIÉ. L'assertion était initialement un « aucune latitude nulle
+    // part » ; elle a été RESSERRÉE (août 2026, écran météo) sur ce qu'elle
+    // protège réellement, plutôt que contournée :
+    //   - une coordonnée posée sur un POINTAGE, un BADGE ou un POSTE
+    //     localiserait une personne, ou permettrait de la suivre : interdit,
+    //     et vérifié table par table ci-dessous ;
+    //   - la coordonnée d'un SITE (adresse de l'établissement, déjà publique)
+    //     et celle du cache météo ne désignent personne. Elles servent à
+    //     afficher la météo du LIEU du poste sur l'écran de veille, et le
+    //     cache météo n'a aucune clé étrangère vers une personne.
+    for (const table of ['badgeuse_pointages', 'badgeuse_badges', 'badgeuse_badge_historique',
+      'badgeuse_corrections', 'badgeuse_devices', 'badgeuse_feuilles_temps']) {
+      const body = tableBody(table);
+      expect(body).not.toMatch(/latitude|longitude|\bgps\b/i);
+    }
+    // Le cache météo ne référence NI salarié NI poste : c'est une prévision
+    // pour des coordonnées, pas pour quelqu'un.
+    const meteo = tableBody('badgeuse_meteo');
+    expect(meteo).not.toMatch(/REFERENCES employees|REFERENCES badgeuse_devices|employee_id/);
   });
 
   test('les contenus d\'affichage n\'ont AUCUNE FK vers un salarié (finalité dissociée)', () => {
@@ -340,7 +363,7 @@ describe('seeds idempotents et registre RGPD', () => {
   });
 
   test('un log de clôture annonce la section', () => {
-    expect(src).toMatch(/\[INIT-DB\] Module 33 Temps & Présence \(badgeuse\) — 8 tables/);
+    expect(src).toMatch(/\[INIT-DB\] Module 33 Temps & Présence \(badgeuse\) — 10 tables/);
   });
 
   // Hotfix prod v2.22.1 — la fiche art. 30 badgeuse porte une base légale de

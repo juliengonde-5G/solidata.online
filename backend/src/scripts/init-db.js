@@ -6743,6 +6743,13 @@ async function initDatabase() {
       SELECT 'LH', 'Le Houlme — atelier'
       WHERE NOT EXISTS (SELECT 1 FROM badgeuse_sites WHERE code = 'LH');
     `);
+    //     Coordonnées du site (écran de veille : météo du LIEU du poste).
+    //     Volontairement NULLABLES et NON seedées : tant qu'elles ne sont pas
+    //     renseignées, la météo retombe sur le réglage `badgeuse.meteo_*`
+    //     (cascade documentée). Poser ici une valeur « probable » reviendrait à
+    //     afficher la météo d'un endroit que personne n'a validé.
+    await client.query('ALTER TABLE badgeuse_sites ADD COLUMN IF NOT EXISTS latitude NUMERIC(8,4);');
+    await client.query('ALTER TABLE badgeuse_sites ADD COLUMN IF NOT EXISTS longitude NUMERIC(8,4);');
 
     // (b) Postes de pointage. `api_key_hash` = SHA-256 hex de la clé device :
     //     la clé elle-même n'est montrée qu'UNE FOIS à l'appairage et n'est
@@ -6999,7 +7006,8 @@ async function initDatabase() {
         END LOOP;
         ALTER TABLE badgeuse_contenus ADD CONSTRAINT badgeuse_contenus_type_check
           CHECK (type IN ('message', 'image', 'planning', 'compte_a_rebours', 'meteo',
-                          'annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live'));
+                          'annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live',
+                          'presse'));
       END $$;
     `);
 
@@ -7027,6 +7035,58 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_social_posts_publie ON badgeuse_social_posts(publie_le DESC);');
 
+    // (l) MÉTÉO de l'écran de veille. Le poste ne contacte pas Open-Meteo (CSP
+    //     'self') : le SERVEUR rafraîchit (job syncBadgeuseMeteo) et la
+    //     playlist lit ici. Cache indexé par COORDONNÉES arrondies à 4
+    //     décimales (~11 m) et non par site : deux sites au même endroit
+    //     partagent le relevé, et le cache survit à la suppression d'un site.
+    //     `releve_le` est renvoyé au poste : une prévision porte toujours sa
+    //     date de relevé, jamais une fraîcheur supposée.
+    //     AUCUNE donnée personnelle.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_meteo (
+        id SERIAL PRIMARY KEY,
+        latitude NUMERIC(8,4) NOT NULL,
+        longitude NUMERIC(8,4) NOT NULL,
+        jour DATE NOT NULL,
+        code SMALLINT,
+        libelle VARCHAR(40),
+        temp_min NUMERIC(5,1),
+        temp_max NUMERIC(5,1),
+        precip_mm NUMERIC(6,1),
+        vent_max NUMERIC(6,1),
+        releve_le TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (latitude, longitude, jour)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_meteo_jour ON badgeuse_meteo(jour);');
+
+    // (m) PRESSE NATIONALE (ADR-0006) — articles rapatriés par le serveur
+    //     depuis les flux RSS paramétrés (`badgeuse.presse_flux`). Un article
+    //     = un écran. `UNIQUE(flux, guid)` rend la synchronisation idempotente
+    //     (le même article vu deux fois n'ajoute pas un second écran).
+    //     La vignette est TÉLÉCHARGÉE côté serveur (sous-dossier `presse/`) et
+    //     servie par l'API device : le poste ne joint aucun site de presse.
+    //     AUCUNE donnée personnelle : ce sont des publications de presse.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_presse_articles (
+        id SERIAL PRIMARY KEY,
+        flux VARCHAR(120) NOT NULL,
+        source VARCHAR(120),
+        guid VARCHAR(400) NOT NULL,
+        titre TEXT NOT NULL,
+        chapo TEXT,
+        lien VARCHAR(600),
+        publie_le TIMESTAMPTZ,
+        media_fichier VARCHAR(300),
+        media_sha256 VARCHAR(64),
+        media_type VARCHAR(10),
+        sync_le TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (flux, guid)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_presse_publie ON badgeuse_presse_articles(publie_le DESC);');
+
     // Registre RGPD — traitement « Temps & Présence (badgeuse) ». Fiche art. 30
     // OBLIGATOIRE avant la mise en service (NOTE_JURIDIQUE §3.8). Idempotent.
     await client.query(`
@@ -7045,7 +7105,7 @@ async function initDatabase() {
         SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Temps & Présence (badgeuse) — décompte du temps de travail'
       );
     `);
-    console.log('[INIT-DB] Module 33 Temps & Présence (badgeuse) — 8 tables + écran v2 (opt-in festif, médias, social) + site LH + registre RGPD ✓');
+    console.log('[INIT-DB] Module 33 Temps & Présence (badgeuse) — 10 tables + écran v2 (opt-in festif, médias, social, presse, météo) + site LH + registre RGPD ✓');
 
     // ══════════════════════════════════════════
     // Module Achats responsables (RSEI-17) — 31e module
