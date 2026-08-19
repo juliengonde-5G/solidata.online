@@ -150,6 +150,44 @@ else
   ligne "http://127.0.0.1:8766" "curl absent — non teste"
 fi
 
+# ── 4 bis. Lecteur de badge et file de pointages ────────────────────────────
+# C'est la RAISON D'ETRE du poste : un ecran parfait mais un lecteur muet ne
+# produit aucun pointage. Rien de tout cela n'etait verifie jusqu'ici.
+titre "4 bis. Lecteur de badge"
+ligne "peripheriques /dev/input" "$(ls /dev/input/event* 2>/dev/null | wc -l)"
+DERNIER_LECTEUR="$(journalctl -u badgeuse-agent --no-pager 2>/dev/null \
+  | grep -iE 'lecteur (connecte|indisponible)|evdev' | tail -1)"
+if [ -n "$DERNIER_LECTEUR" ]; then
+  printf '    dernier evenement lecteur :\n      %s\n' "$DERNIER_LECTEUR"
+  case "$DERNIER_LECTEUR" in
+    *indisponible*|*absente*)
+      retenir "LECTEUR NON CAPTURE : l'agent ne tient pas le lecteur — aucun badgeage ne peut etre enregistre. Verifier que le lecteur est branche (il doit apparaitre dans /dev/input), puis :
+      sudo systemctl restart badgeuse-agent" ;;
+  esac
+else
+  ligne "evenement lecteur" "AUCUN dans le journal"
+  retenir "LECTEUR JAMAIS OUVERT : le journal de l'agent ne mentionne aucune tentative d'ouverture du lecteur. Verifier le branchement, puis : sudo systemctl restart badgeuse-agent"
+fi
+
+titre "4 ter. File de pointages"
+DB=/var/lib/badgeuse/badgeuse.db
+if [ -r "$DB" ] && command -v sqlite3 >/dev/null 2>&1; then
+  ligne "en attente d'envoi" "$(sqlite3 "$DB" 'SELECT COUNT(*) FROM queue;' 2>/dev/null || echo '?')"
+  ligne "pointages locaux" "$(sqlite3 "$DB" 'SELECT COUNT(*) FROM pointages_locaux;' 2>/dev/null || echo '?')"
+  ligne "badges connus (cache)" "$(sqlite3 "$DB" 'SELECT COUNT(*) FROM badges;' 2>/dev/null || echo '?')"
+elif [ -r "$DB" ]; then
+  ligne "base locale" "presente (installer sqlite3 pour le detail)"
+else
+  ligne "base locale" "ABSENTE (${DB})"
+fi
+DERNIER_ENVOI="$(journalctl -u badgeuse-agent --no-pager 2>/dev/null \
+  | grep -E 'POST .*/pointages' | tail -1)"
+if [ -n "$DERNIER_ENVOI" ]; then
+  printf '    dernier envoi de pointages :\n      %s\n' "$DERNIER_ENVOI"
+else
+  ligne "envoi de pointages" "AUCUN depuis le demarrage"
+fi
+
 # ── 5. Ecran physique ────────────────────────────────────────────────────────
 titre "5. Ecran"
 if [ -d /sys/class/drm ]; then
