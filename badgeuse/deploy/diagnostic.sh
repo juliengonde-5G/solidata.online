@@ -105,25 +105,37 @@ esac
 # tenir l'ecran alors que son client est mort ou n'a jamais peint. On liste donc
 # les processus REELLEMENT dans le cgroup du service, et depuis combien de temps.
 titre "3 bis. Processus du kiosque"
-CG="/sys/fs/cgroup/system.slice/badgeuse-kiosk.service/cgroup.procs"
 DEPUIS="$(systemctl show badgeuse-kiosk -p ActiveEnterTimestamp --value 2>/dev/null)"
 ligne "actif depuis" "${DEPUIS:-inconnu}"
 ligne "redemarrages" "$(systemctl show badgeuse-kiosk -p NRestarts --value 2>/dev/null || echo '?')"
-NAV_VU=0
-if [ -r "$CG" ]; then
-  while read -r pid; do
-    [ -n "$pid" ] || continue
-    NOM="$(ps -o comm= -p "$pid" 2>/dev/null)"
-    TPS="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
-    [ -n "$NOM" ] && ligne "  pid ${pid}" "${NOM} (${TPS:-?} s)"
-    case "$NOM" in chromium*) NAV_VU=1 ;; esac
-  done < "$CG"
-else
-  ligne "cgroup" "illisible (service arrete ?)"
+
+# NE PAS deviner le chemin du cgroup. PAMName=login fait enregistrer une session
+# aupres de logind, qui peut deplacer les processus hors de
+# system.slice/<unite>/ : le cgroup.procs de l'unite est alors VIDE et une
+# lecture naive conclut a tort « aucun navigateur » (faux positif constate).
+# On part du MainPID reel, on lit SON cgroup, et on enumere les processus de
+# l'utilisateur du kiosque — independant de l'endroit ou logind les a places.
+MAINPID="$(systemctl show badgeuse-kiosk -p MainPID --value 2>/dev/null)"
+ligne "MainPID" "${MAINPID:-0}"
+if [ -n "${MAINPID:-}" ] && [ "${MAINPID:-0}" != "0" ] && [ -r "/proc/${MAINPID}/cgroup" ]; then
+  ligne "cgroup du MainPID" "$(sed -n 's/^0:://p' "/proc/${MAINPID}/cgroup" 2>/dev/null | head -1)"
 fi
 
+NAV_VU=0
+PROCS_VUS=0
+while read -r pid nom tps; do
+  [ -n "$pid" ] || continue
+  PROCS_VUS=1
+  ligne "  pid ${pid}" "${nom} (${tps} s)"
+  case "$nom" in chromium*|chrome*) NAV_VU=1 ;; esac
+done <<EOF
+$(ps -u badgeuse -o pid=,comm=,etimes= --no-headers 2>/dev/null \
+    | grep -Ev '[[:space:]](python|python3)[[:space:]]*$' | awk '{print $1, $2, $3}')
+EOF
+[ "$PROCS_VUS" -eq 1 ] || ligne "processus" "aucun (hors agent)"
+
 if [ "$KIOSQUE_OK" -eq 1 ] && [ "$NAV_VU" -eq 0 ]; then
-  retenir "COMPOSITEUR SEUL : le service tourne, mais AUCUN processus chromium n'est vivant dans le kiosque — l'ecran affiche un fond vide. Lire le journal du kiosque (section 6) pour la sortie du navigateur, puis :
+  retenir "COMPOSITEUR SEUL : le service est actif, mais aucun processus chromium ne tourne sous l'utilisateur du kiosque — l'ecran affiche un fond vide. Verifier la sortie du navigateur dans le journal (section 6), puis :
       sudo systemctl restart badgeuse-kiosk"
 fi
 

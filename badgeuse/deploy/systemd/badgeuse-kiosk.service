@@ -37,6 +37,13 @@ ExecStart=/usr/bin/cage -- /usr/bin/chromium $CHROMIUM_FLAGS http://127.0.0.1:87
 Restart=always
 RestartSec=5
 
+# cage ne rend pas la main promptement sur SIGTERM : sans borne, systemd
+# applique son defaut de 90 s avant le SIGKILL. Un simple « restart » laissait
+# donc l'ecran mort une minute et demie (constate en exploitation : « Stopping »
+# a 10:35:37, « stop-sigterm timed out. Killing » a 10:37:07). Le kiosque est un
+# afficheur sans etat a preserver : 10 s suffisent largement, ensuite on tue.
+TimeoutStopSec=10
+
 NoNewPrivileges=yes
 ProtectHome=yes
 PrivateTmp=yes
