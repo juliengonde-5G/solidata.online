@@ -68,3 +68,38 @@ plutôt que promis.
   badges, gabarits/plages dans la config, types de playlist enrichis, endpoint média).
 - La barrière A5 (conformité) est **re-passée en delta** sur les nouveaux flux avant
   fusion — c'est la contrepartie de l'extension d'une surface déjà validée.
+
+---
+
+## Addendum du 19/08/2026 — carte des tournées : la position revient, **approchée**
+
+Le §5 ci-dessus écartait toute carte sur le kiosque. La Direction demande désormais
+un écran « position de la tournée » montrant les véhicules sur une carte. Cet
+addendum **révise** le §5 — il ne l'annule pas : les deux motifs d'origine tiennent
+toujours, et ce sont eux qui dictent la forme retenue.
+
+**Ce qui est décidé** : position **approchée** — le véhicule apparaît sur la
+**commune ou le secteur en cours**, jamais au point GPS exact. La tournée se voit
+progresser sur le territoire ; les déplacements d'un salarié ne sont pas restituables
+mètre par mètre devant l'atelier et ses visiteurs.
+
+**Pourquoi pas le point exact** : un véhicule = un chauffeur à un instant donné. Le
+point GPS temps réel sur un écran commun expose les déplacements d'une personne
+identifiable à une audience nouvelle — c'est le motif qui avait fait refuser le nom
+du chauffeur au §5, et il s'applique identiquement à la position fine. Le point exact
+reste disponible aux MANAGER dans l'ERP, dont c'est la finalité déclarée.
+
+**Pourquoi pas de tuiles externes** : la CSP du kiosque reste `'self'`. Le fond de
+carte est **dessiné localement** à partir du référentiel des communes déjà en base —
+aucun appel réseau au moment de l'affichage, y compris hors ligne. La frugalité
+invoquée au §5 est donc préservée : pas de téléchargement de tuiles, pas de
+dépendance à un fournisseur cartographique.
+
+**Ce qui est affiché** : contour du territoire de collecte, véhicules par **code**
+(jamais un nom), commune ou secteur en cours, progression CAV. Inchangé du §5 :
+**jamais le nom du chauffeur**.
+
+**Reste à la charge de la Direction, avant mise en service de cet écran** :
+information du CSE — un écran d'atelier qui montre l'avancement des tournées est une
+information sur l'activité de salariés identifiables par leur véhicule, même sans
+position fine. À joindre au dossier de consultation déjà prévu (NOTE_JURIDIQUE §9).
