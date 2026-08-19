@@ -197,6 +197,23 @@ if [ -n "$SESSION_ID" ] && command -v loginctl >/dev/null 2>&1; then
 else
   ligne "session logind" "indeterminee"
 fi
+# Sessions residuelles : une session badgeuse morte qui detient encore
+# seat0/tty1 prive TOUTES les suivantes du seat — c'est exactement la panne
+# constatee (session du premier demarrage jamais cloturee apres un SIGKILL).
+if command -v loginctl >/dev/null 2>&1; then
+  SESSIONS_BADGEUSE="$(loginctl list-sessions --no-pager 2>/dev/null | awk '$3 == "badgeuse" && $6 !~ /manager/ { print $1, $4, $7 }')"
+  if [ -n "$SESSIONS_BADGEUSE" ]; then
+    NB_SESS="$(printf '%s\n' "$SESSIONS_BADGEUSE" | wc -l)"
+    ligne "sessions badgeuse (id seat tty)" "${NB_SESS}"
+    printf '%s\n' "$SESSIONS_BADGEUSE" | sed 's/^/      /'
+    if [ "$NB_SESS" -gt 1 ] || { [ -n "$SESSION_ID" ] && ! printf '%s\n' "$SESSIONS_BADGEUSE" | awk -v s="$SESSION_ID" '$1 == s && $2 == "seat0" { trouve = 1 } END { exit trouve ? 0 : 1 }'; }; then
+      retenir "SESSION RESIDUELLE : une ancienne session badgeuse detient seat0/tty1 pendant que la session COURANTE du kiosque n'a pas de seat — cage attend un controle que logind ne peut plus accorder. Purger puis relancer :
+      sudo loginctl terminate-user badgeuse && sleep 2 && sudo systemctl restart badgeuse-kiosk
+   (les versions d'install.sh posterieures au 19/08 apres-midi font cette purge a chaque demarrage du kiosque)"
+    fi
+  fi
+fi
+
 # Ce que cage et libseat ont dit, eux : rien = blocage avant toute sortie.
 SORTIE_CAGE="$(journalctl -u badgeuse-kiosk --no-pager 2>/dev/null | grep -Ei 'cage|wlr|libseat|seat' | grep -v 'pam_unix\|systemd\[1\]' | tail -8)"
 if [ -n "$SORTIE_CAGE" ]; then
