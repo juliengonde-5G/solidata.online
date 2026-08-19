@@ -190,3 +190,31 @@ interface ».
   ligne réelles) ne sont **pas exécutables en environnement de développement** : ils sont
   transcrits en tests logiciels équivalents (crash SQLite simulé, file hors ligne, plafonds) et
   consignés dans le RUNBOOK comme protocole de recette **sur matériel réel** avant mise en service.
+
+## 19 août 2026 — Mise en service du poste de secours et débogage multi-agents (bilan)
+
+La mise en service du poste de secours (Pi 3, `ST-BadgeuseSecours`) a fait apparaître en
+production, le jour même, une cascade de **11 correctifs terrain** (PR #105-#115 : trois
+incompatibilités Python 3.13/Trixie, conflit tty1 donnant une fausse impression de
+redémarrage en boucle, chemin du navigateur codé en dur, sonde apt insensible à la langue
+anglaise (« Candidat : » vs « Candidate: ») laissant le poste sans aucun navigateur installé,
+wrapper X11 setuid manquant, incohérence compositeur/options Chromium, `install.sh`
+s'auto-détruisant quand relancé depuis sa propre installation, création de `diagnostic.sh`),
+corrigés au fil de l'eau par l'orchestrateur. Une fois le poste stabilisé, un débogage
+systématique en deux vagues (A2 applicatif SOLIDATA PR #116, A3 poste embarqué PR #117) a
+corrigé **21 défauts supplémentaires** (4 bloquants/P0, 11 majeurs, 1 moyen, 5 mineurs), avec
+pour pièce maîtresse l'**élucidation du lecteur muet** : un lecteur RFID HID expose souvent
+deux interfaces `/dev/input/eventN` sous le même nom, une seule transmettant réellement les
+badges — le poste n'en écoutait qu'une, tirée au sort à chaque branchement ; toutes les
+interfaces qualifiées sont désormais lues simultanément. Côté SOLIDATA, 2 défauts P0 ont été
+trouvés en base PostgreSQL réelle (badge perdu impossible à désactiver, reconstruction d'une
+base neuve échouant à 0 table). **Tests** : pytest 400→454, jest badgeuse 549→569 (dont une
+suite d'exécution réelle sur PostgreSQL, opt-in), harnais de test des scripts shell 0→68,
+20 captures d'écran produites par les agents réels (0 avant ce jour). **Rapport complet** :
+`rapports/badgeuse-debug-2026-08-19/01-rapport-consolide.md`. **Décisions restant à arbitrer** :
+traitement des heures d'un orphelin « hors plage » avant validation RH, capture systématique
+de tous les claviers HID branchés au poste (dont un clavier d'administration local), lecture
+MANAGER non cloisonnée par équipe (réserve E1 déjà documentée), pastille d'état décorative,
+suite PostgreSQL réelle à accrocher à `deploy.sh`/CI, recette matérielle RP-1→RP-6 toujours
+obligatoire avant toute mise en service réelle — les préalables CSE / note d'information
+salariés / arbitrage de la grille de règles restent, eux, inchangés.
