@@ -171,6 +171,41 @@ if [ "$KIOSQUE_OK" -eq 1 ] && [ "$NAV_VU" -eq 0 ]; then
       sudo bash /opt/badgeuse/deploy/install.sh && sudo systemctl restart badgeuse-kiosk"
 fi
 
+# La session graphique : cage ne peut prendre l'ecran que si logind lui accorde
+# le CONTROLE DU SEAT — ce qui suppose une session rattachee a seat0 et ACTIVE
+# (le VT au premier plan). Sinon, cage attend en silence : vivant, sans client,
+# sans une ligne de journal, sourd a SIGTERM. C'est indiscernable d'un ecran
+# casse sans cette section.
+titre "3 ter. Session graphique du kiosque (seat/logind)"
+SESSION_ID=""
+if [ -n "${MAINPID:-}" ] && [ "${MAINPID:-0}" != "0" ] && [ -r "/proc/${MAINPID}/cgroup" ]; then
+  SESSION_ID="$(sed -n 's/.*session-\([0-9a-zA-Z]*\)\.scope.*/\1/p' "/proc/${MAINPID}/cgroup" | head -1)"
+fi
+if [ -n "$SESSION_ID" ] && command -v loginctl >/dev/null 2>&1; then
+  ligne "session logind" "$SESSION_ID"
+  ETAT_SESSION="$(loginctl show-session "$SESSION_ID" -p State --value 2>/dev/null)"
+  SEAT_SESSION="$(loginctl show-session "$SESSION_ID" -p Seat --value 2>/dev/null)"
+  ACTIVE_SESSION="$(loginctl show-session "$SESSION_ID" -p Active --value 2>/dev/null)"
+  ligne "  etat" "${ETAT_SESSION:-inconnu}"
+  ligne "  seat" "${SEAT_SESSION:-AUCUN}"
+  ligne "  active (VT au premier plan)" "${ACTIVE_SESSION:-inconnu}"
+  if [ "$KIOSQUE_OK" -eq 1 ] && { [ -z "$SEAT_SESSION" ] || [ "$ACTIVE_SESSION" = "no" ]; }; then
+    retenir "SEAT NON ACCORDE : la session du kiosque n'est pas rattachee a un seat actif (seat='${SEAT_SESSION:-aucun}', active='${ACTIVE_SESSION:-?}'). cage attend la prise de controle et ne lancera JAMAIS son client — ecran vide, aucune erreur. Essayer d'abord de remettre le VT1 au premier plan :
+      sudo chvt 1 && sleep 3 && sudo systemctl restart badgeuse-kiosk
+   puis relancer ce diagnostic. Si active reste 'no', transmettre cette section au support."
+  fi
+else
+  ligne "session logind" "indeterminee"
+fi
+# Ce que cage et libseat ont dit, eux : rien = blocage avant toute sortie.
+SORTIE_CAGE="$(journalctl -u badgeuse-kiosk --no-pager 2>/dev/null | grep -Ei 'cage|wlr|libseat|seat' | grep -v 'pam_unix\|systemd\[1\]' | tail -8)"
+if [ -n "$SORTIE_CAGE" ]; then
+  echo "    sortie compositeur/libseat (8 dernieres) :"
+  printf '%s\n' "$SORTIE_CAGE" | sed 's/^/      /'
+else
+  ligne "sortie compositeur" "AUCUNE — blocage avant toute initialisation"
+fi
+
 # ── 4. L'interface est-elle servie ? ─────────────────────────────────────────
 titre "4. Interface locale (servie par l'agent)"
 if command -v curl >/dev/null 2>&1; then
