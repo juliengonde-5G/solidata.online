@@ -1057,9 +1057,12 @@ async function syncBadgeusePresse() {
 /**
  * Écran d'information — MÉTÉO du lieu du poste (Open-Meteo, utils/weather.js).
  *
- * Toutes les trois heures : une prévision quotidienne ne bouge pas plus vite,
- * et l'écran doit rester servable même si le serveur perd Internet un moment
- * (la dernière prévision connue reste en base, avec sa date de relevé).
+ * Cadencé avec runAllJobs (démarrage du serveur, puis 7 h, 12 h et 18 h) :
+ * une prévision quotidienne ne bouge pas plus vite, et l'écran doit rester
+ * servable même si le serveur perd Internet un moment — la dernière prévision
+ * connue reste en base, avec sa date de relevé. La construction de la playlist
+ * tente en dernier recours un rafraîchissement pour un poste appairé entre
+ * deux passages (routes/badgeuse-device.js, mise au repos après un échec).
  */
 async function syncBadgeuseMeteo() {
   try {

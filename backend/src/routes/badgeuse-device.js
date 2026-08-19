@@ -969,9 +969,9 @@ function marquerEchecMeteo(lieu) {
  *    l'écran ne peut pas se tromper de ville en silence ;
  *  - sans relevé pour AUJOURD'HUI, on rend `null` : mieux vaut pas d'écran
  *    météo qu'une température d'avant-hier présentée comme celle du jour.
- *    Un rafraîchissement de dernier recours est tenté (le job passe toutes les
- *    trois heures, mais un poste appairé entre deux passages ne doit pas
- *    attendre pour avoir sa météo).
+ *    Un rafraîchissement de dernier recours est tenté (le job passe avec
+ *    runAllJobs — démarrage, puis 7 h, 12 h et 18 h ; un poste appairé entre
+ *    deux passages ne doit pas attendre la nuit pour avoir sa météo).
  */
 async function buildMeteo(siteId, params) {
   const lieu = await media.resolveMeteoLieu(siteId);
