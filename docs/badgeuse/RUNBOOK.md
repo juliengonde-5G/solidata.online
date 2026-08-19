@@ -43,7 +43,21 @@ la carte microSD. Puis **⚙ Réglages** avant d'écrire : nom d'hôte (`ST-Badg
 `ST-Badgeuse-Secours`), **SSH activé**, utilisateur + mot de passe, Wi-Fi si pas d'Ethernet,
 fuseau `Europe/Paris`, clavier français.
 
-### B. Déposer le code et les deux configurations (sur le PC)
+### B. Déposer le code sur la carte (sur le PC)
+
+**Le plus simple : copiez seulement le dossier `badgeuse`.** Les clés seront demandées
+directement sur le Raspberry à l'étape C — pas besoin de préparer les configurations, ni
+d'avoir bash, git ou le dépôt sur le PC.
+
+1. Sur GitHub, dépôt `solidata.online` → bouton vert **Code** → **Download ZIP**
+   (fonctionne dans le navigateur avec votre session, sans git ni jeton).
+2. Décompressez, puis copiez le dossier **`badgeuse`** à la racine de la partition
+   **`bootfs`** de la carte (glisser-déposer dans l'explorateur de fichiers).
+3. Éjectez proprement la carte.
+
+C'est tout : passez à l'étape C.
+
+### B bis. (Facultatif) Préparer aussi les configurations depuis le PC
 
 Réinsérez la carte : une partition **`bootfs`** apparaît dans l'explorateur de fichiers.
 
@@ -73,9 +87,16 @@ Insérez la carte, branchez écran, réseau et alimentation, connectez-vous (SSH
 sudo bash /boot/firmware/badgeuse/deploy/sd-init.sh
 ```
 
-C'est tout. Le script reconnaît la machine — **Pi 5 = poste standard, Pi 3 = poste de
-secours** — prend la configuration correspondante, installe paquets, service, écran kiosque
-et pare-feu, puis affiche un compte rendu. Aucune question n'est posée.
+Le script reconnaît la machine — **Pi 5 = poste standard, Pi 3 = poste de secours** —
+puis cherche sa configuration dans cet ordre :
+
+1. `badgeuse-pi5.conf` / `badgeuse-pi3.conf` à la racine de la carte (étape B bis) ;
+2. la configuration déjà installée sur ce poste (cas d'une réinstallation) ;
+3. **à défaut, il la crée sur place** : il demande le code du poste (proposé `LH-P1` /
+   `LH-P2`) puis les **deux clés en saisie masquée**. C'est le cas normal si vous n'avez
+   copié que le dossier `badgeuse`.
+
+Il installe ensuite paquets, service, écran kiosque et pare-feu, puis affiche un compte rendu.
 
 Pour fermer SSH au seul réseau d'administration dans la foulée :
 
