@@ -142,8 +142,27 @@ else
   else
     avert "paquet 'cage' non installable — repli X11 (openbox)"
     COMPOSITEUR="x11"
+    # xserver-xorg-legacy est INDISPENSABLE ici : le kiosque tourne sous
+    # l'utilisateur non privilegie « badgeuse », et seul le wrapper setuid
+    # /usr/lib/xorg/Xorg.wrap fourni par ce paquet autorise un non-root a
+    # demarrer le serveur X. Sans lui, xinit rend 1 immediatement, sans le
+    # moindre message — ecran noir et boucle de redemarrage.
     apt-get install -y --no-install-recommends \
-      xserver-xorg-core xserver-xorg-video-fbdev xinit openbox x11-xserver-utils
+      xserver-xorg-core xserver-xorg-legacy xserver-xorg-video-fbdev \
+      xinit openbox x11-xserver-utils
+    # Le wrapper n'autorise par defaut que les « utilisateurs console », au sens
+    # d'une session interactive ouverte sur le VT courant — ce que le kiosque
+    # n'est pas (service systemd, utilisateur sans shell). Sur ce poste dedie la
+    # console locale est justement reservee au kiosque (getty@tty1 desactive) :
+    # il n'y a aucun autre utilisateur local a proteger de cette ouverture.
+    install -d -m 0755 /etc/X11
+    cat > /etc/X11/Xorg.wrap.config <<'FINX'
+# Genere par install.sh — poste de pointage dedie. Le kiosque demarre X sous un
+# utilisateur systeme sans shell ; « console » ne suffirait pas.
+allowed_users=anybody
+needs_root_rights=auto
+FINX
+    chmod 0644 /etc/X11/Xorg.wrap.config
   fi
 fi
 

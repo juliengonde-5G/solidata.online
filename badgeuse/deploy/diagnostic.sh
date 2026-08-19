@@ -82,6 +82,25 @@ for mot in $CMD; do
   esac
 done
 
+# Repli X11 : le kiosque tourne en utilisateur non privilegie. Seul le wrapper
+# setuid /usr/lib/xorg/Xorg.wrap (paquet xserver-xorg-legacy) autorise un
+# non-root a demarrer le serveur X. Absent, xinit rend 1 SANS AUCUN MESSAGE.
+case "$CMD" in
+  *xinit*)
+    ligne "mode" "repli X11 (xinit)"
+    if [ -u /usr/lib/xorg/Xorg.wrap ]; then
+      ligne "Xorg.wrap (setuid)" "present"
+    else
+      ligne "Xorg.wrap (setuid)" "ABSENT"
+      retenir "SERVEUR X NON DEMARRABLE : le kiosque tourne sous l'utilisateur « badgeuse » (non root) et /usr/lib/xorg/Xorg.wrap est absent ou non setuid. xinit echoue immediatement, sans message. Corriger, de preference en passant a Wayland :
+      sudo apt-get install -y cage wlr-randr && sudo bash /opt/badgeuse/deploy/install.sh
+   ou, si cage n'est pas installable, en completant le repli X11 :
+      sudo apt-get install -y xserver-xorg-legacy && sudo bash /opt/badgeuse/deploy/install.sh"
+    fi
+    ligne "allowed_users" "$(grep -h '^allowed_users' /etc/X11/Xorg.wrap.config 2>/dev/null || echo 'non defini (defaut: console)')"
+    ;;
+esac
+
 # ── 4. L'interface est-elle servie ? ─────────────────────────────────────────
 titre "4. Interface locale (servie par l'agent)"
 if command -v curl >/dev/null 2>&1; then
@@ -118,6 +137,23 @@ titre "7. Journaux — agent (20 dernieres lignes)"
 journalctl -u badgeuse-agent -n 20 --no-pager 2>/dev/null | sed 's/^/    /' \
   || echo "    (journal indisponible)"
 
+# Le serveur X n'ecrit pas dans journald mais dans son propre fichier : sans
+# cette section, la cause reelle d'un echec X11 reste invisible.
+case "$CMD" in
+  *xinit*)
+    titre "7 bis. Journal du serveur X"
+    TROUVE=0
+    for j in /home/badgeuse/.local/share/xorg/Xorg.0.log /var/log/Xorg.0.log; do
+      if [ -r "$j" ]; then
+        TROUVE=1
+        printf '    %s (10 dernieres lignes) :\n' "$j"
+        tail -n 10 "$j" | sed 's/^/      /'
+      fi
+    done
+    [ "$TROUVE" -eq 1 ] || echo "    aucun journal Xorg — le serveur n'a jamais demarre"
+    ;;
+esac
+
 # ── 8. Verdict ───────────────────────────────────────────────────────────────
 titre "8. Verdict"
 if [ "${#CAUSES[@]}" -eq 0 ]; then
@@ -125,6 +161,14 @@ if [ "${#CAUSES[@]}" -eq 0 ]; then
     echo "    Les deux services tournent et l'interface repond."
     echo "    Si l'ecran reste noir, c'est l'ecran ou le cable : verifier la"
     echo "    section 5 ci-dessus (HDMI « connected » ?) et la plage d'allumage."
+  elif [ "$KIOSQUE_OK" -eq 0 ]; then
+    echo "    Le kiosque echoue alors que toutes les briques semblent presentes."
+    echo "    Les journaux des sections 6 et 7 bis portent la cause exacte."
+    echo
+    echo "    Piste la plus frequente — repasser a Wayland, qui n'exige aucun"
+    echo "    privilege particulier la ou X en demande :"
+    echo "      sudo apt-get install -y cage wlr-randr"
+    echo "      sudo bash /opt/badgeuse/deploy/install.sh"
   else
     echo "    Aucune cause connue reconnue automatiquement."
     echo "    Transmettre l'integralite de cette sortie au referent."
