@@ -45,7 +45,11 @@ RuntimeDirectoryMode=0700
 # service systeme, n'en fait pas partie et n'est pas touche) et le VT1 revient
 # au premier plan. Prefixe « + » : ces gestes exigent root, le service, lui,
 # reste sous l'utilisateur badgeuse. Jamais bloquant (exit 0).
-ExecStartPre=+/bin/sh -c 'loginctl terminate-user badgeuse 2>/dev/null; sleep 1; chvt 1 2>/dev/null; exit 0'
+# La cloture logind est ASYNCHRONE : constate en exploitation, le balayage de
+# terminate-user a tue la session PAM que l'etape suivante venait d'ouvrir
+# (« Control process exited, status=15/TERM »). On attend donc la DISPARITION
+# effective des sessions badgeuse (jusqu'a 5 s) au lieu d'un delai aveugle.
+ExecStartPre=+/bin/sh -c 'loginctl terminate-user badgeuse 2>/dev/null; for essai in 1 2 3 4 5 6 7 8 9 10; do loginctl list-sessions --no-pager 2>/dev/null | grep -q badgeuse || break; sleep 0.5; done; chvt 1 2>/dev/null; exit 0'
 
 # L'attente laisse a l'agent le temps d'ouvrir son serveur local.
 ExecStartPre=/bin/sleep 3
