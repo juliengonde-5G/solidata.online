@@ -29,9 +29,24 @@ ligne "allume depuis" "$(uptime -p 2>/dev/null || uptime)"
 ligne "demarrages enregistres" "$(journalctl --list-boots --no-pager 2>/dev/null | wc -l)"
 if command -v vcgencmd >/dev/null 2>&1; then
   ETAT_ALIM="$(vcgencmd get_throttled 2>/dev/null)"
-  ligne "alimentation" "$ETAT_ALIM"
-  [ "$ETAT_ALIM" = "throttled=0x0" ] || retenir \
-    "ALIMENTATION : ${ETAT_ALIM} — sous-tension detectee. Le Pi 5 exige un bloc 5 V / 5 A. Remplacer l'alimentation AVANT tout autre diagnostic."
+  # get_throttled est un champ de bits, PAS un booleen — l'annoncer en bloc
+  # comme une sous-tension etait FAUX (constate : 0x80000 = limite thermique
+  # PASSEE, presentee comme un defaut d'alimentation). Bits utiles :
+  #   0 sous-tension EN COURS   / 16 survenue depuis le demarrage
+  #   3 limite thermique EN COURS / 19 survenue depuis le demarrage
+  VAL=$(( $(printf '%d' "0x${ETAT_ALIM#throttled=0x}" 2>/dev/null || echo 0) ))
+  DETAIL=""
+  [ $((VAL & 1)) -ne 0 ]        && DETAIL="${DETAIL}sous-tension EN COURS ; "
+  [ $((VAL & 65536)) -ne 0 ]    && DETAIL="${DETAIL}sous-tension survenue depuis le demarrage ; "
+  [ $((VAL & 8)) -ne 0 ]        && DETAIL="${DETAIL}limite thermique EN COURS ; "
+  [ $((VAL & 524288)) -ne 0 ]   && DETAIL="${DETAIL}limite thermique atteinte par le passe ; "
+  ligne "alimentation/thermique" "${ETAT_ALIM}${DETAIL:+ — ${DETAIL%% ; }}"
+  if [ $((VAL & 65537)) -ne 0 ]; then
+    retenir "ALIMENTATION : ${ETAT_ALIM} — sous-tension ($( [ $((VAL & 1)) -ne 0 ] && echo EN COURS || echo survenue depuis le demarrage)). Le Pi 5 exige un bloc 5 V / 5 A. Remplacer l'alimentation AVANT tout autre diagnostic."
+  fi
+  if [ $((VAL & 8)) -ne 0 ]; then
+    retenir "TEMPERATURE : limite thermique EN COURS — le processeur est bride. Verifier ventilation/dissipateur."
+  fi
 fi
 
 # ── 2. Services ──────────────────────────────────────────────────────────────
