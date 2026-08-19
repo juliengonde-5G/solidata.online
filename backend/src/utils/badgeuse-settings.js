@@ -127,6 +127,20 @@ const BADGEUSE_SETTING_DEFAULTS = {
   'badgeuse.media_cache_max_mo': 500,
   'badgeuse.lien_taille_max_mo': 50,
 
+  // TÉLÉVERSEMENT d'un média d'affichage (Mo). Réglage d'EXPLOITATION, pas une
+  // règle RH : il ne change aucun calcul d'heure (il n'entre donc pas dans
+  // REGLES_RH_KEYS et son édition ne vaut pas arbitrage de la grille).
+  //
+  // POURQUOI 50 ET PAS 100 : le plafond applicatif était à 100 Mo alors que le
+  // reverse proxy refuse tout corps de requête au-delà de 50 Mo
+  // (`client_max_body_size 50M`, deploy/nginx/nginx.conf). Une vidéo de 60 Mo
+  // était donc acceptée par l'écran, envoyée, puis coupée par nginx en cours
+  // de transfert — le navigateur n'avait plus de réponse à lire et affichait
+  // « network error ». Le plafond annoncé doit être celui qui passe RÉELLEMENT
+  // de bout en bout ; le relever suppose de relever d'abord `client_max_body_size`
+  // (voir docs/badgeuse/EXPLOITATION.md).
+  'badgeuse.media_upload_max_mo': 50,
+
   // RÉSEAUX SOCIAUX (ADR-0004 §6) : API officielle ou saisie manuelle, JAMAIS
   // de scraping. Désactivé par défaut ; sans jeton Meta configuré le job est
   // un no-op silencieux. Les 7 comptes de la structure sont pré-inscrits

@@ -152,6 +152,46 @@ export const motifLabel = (m) => MOTIFS_CORRECTION.find((x) => x.value === m)?.l
 export const apiErr = (err, fallback = 'Une erreur est survenue.') =>
   err?.response?.data?.error || err?.message || fallback;
 
+/**
+ * Message d'échec d'un TÉLÉVERSEMENT, en français et compréhensible.
+ *
+ * `apiErr` ne suffit pas ici : quand un intermédiaire réseau refuse un corps de
+ * requête trop volumineux, il coupe la connexion pendant que le navigateur
+ * émet encore. Axios n'a alors aucune réponse à lire et lève « Network Error »
+ * — message que l'exploitant a effectivement vu en voulant ajouter une vidéo,
+ * et qui ne lui apprend rien. Même problème avec la page 413 en HTML du proxy :
+ * elle n'a pas de champ `error`, et l'utilisateur lisait « Request failed with
+ * status code 413 ».
+ *
+ * @param {Error} err erreur axios
+ * @param {number|null} maxMo plafond annoncé par le serveur, si connu
+ * @param {number|null} tailleMo taille du fichier envoyé, si connue
+ */
+export function uploadErr(err, maxMo = null, tailleMo = null) {
+  const plafond = Number.isFinite(Number(maxMo)) ? Number(maxMo) : null;
+  const trop = plafond != null && Number.isFinite(Number(tailleMo)) && Number(tailleMo) > plafond;
+  const limite = plafond != null ? ` (${plafond} Mo maximum)` : '';
+
+  // Réponse applicative exploitable : elle est déjà en français, on la garde.
+  const messageServeur = err?.response?.data?.error;
+  if (typeof messageServeur === 'string' && messageServeur.trim()) return messageServeur;
+
+  if (err?.response?.status === 413) {
+    return `Fichier refusé par le serveur car trop volumineux${limite}. Compressez la vidéo ou raccourcissez-la, puis réessayez.`;
+  }
+  if (err?.code === 'ECONNABORTED') {
+    return "L'envoi a dépassé le délai autorisé. Vérifiez la connexion, ou envoyez un fichier plus léger.";
+  }
+  // Aucune réponse HTTP : connexion coupée en cours d'envoi. La cause de loin
+  // la plus fréquente est le plafond de taille, on le dit sans l'affirmer.
+  if (!err?.response) {
+    return trop
+      ? `L'envoi a été interrompu : le fichier dépasse la limite autorisée${limite}.`
+      : `L'envoi a été interrompu avant d'arriver au serveur${limite}. Cela arrive quand le fichier est trop lourd ou que la connexion est instable.`;
+  }
+  return apiErr(err, "Échec de l'envoi du média.");
+}
+
 // Lit un message d'erreur JSON depuis une réponse blob (export CSV en échec).
 export async function blobErr(err, fallback) {
   try {

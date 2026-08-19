@@ -47,6 +47,7 @@ function fromApi(data = {}) {
     regularisation_delai_jours: d.regularisation_delai_jours ?? 5,
     supervision_silence_minutes: d.supervision_silence_minutes ?? 15,
     supervision_alerte_emails: d.supervision_alerte_emails || '',
+    media_upload_max_mo: d.media_upload_max_mo ?? 50,
   };
 }
 
@@ -94,6 +95,7 @@ export default function ParametresBadgeuse({ canWrite }) {
         regularisation_delai_jours: parseInt(form.regularisation_delai_jours, 10),
         supervision_silence_minutes: parseInt(form.supervision_silence_minutes, 10),
         supervision_alerte_emails: String(form.supervision_alerte_emails || '').trim(),
+        media_upload_max_mo: parseInt(form.media_upload_max_mo, 10),
       };
       const res = await api.put('/badgeuse/parametres', payload);
       setRaw(res.data || raw);
@@ -218,7 +220,7 @@ export default function ParametresBadgeuse({ canWrite }) {
             gestion RH : ils ne sont pas soumis à l'arbitrage de la Direction,
             mais ils ne doivent pas non plus rester codés en dur (QA-11). */}
         <div className="mt-5 pt-4 border-t border-slate-100">
-          <h4 className="text-sm font-semibold text-slate-700 mb-3">Supervision des postes (exploitation)</h4>
+          <h4 className="text-sm font-semibold text-slate-700 mb-3">Postes et écran d'information (exploitation)</h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Seuil de silence d'un poste (min)</label>
@@ -237,6 +239,16 @@ export default function ParametresBadgeuse({ canWrite }) {
                 className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
               <p className="text-[11px] text-slate-400 mt-1">
                 Vide : l'alerte part aux administrateurs de SOLIDATA. Au plus un e-mail par poste toutes les 6 heures.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Taille maximale d'un média d'affichage (Mo)</label>
+              <input type="number" min={1} max={500} step={1} value={form.media_upload_max_mo}
+                onChange={(e) => set('media_upload_max_mo', e.target.value)} disabled={disabled}
+                className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Plafond des images et vidéos téléversées dans l'onglet Affichage. <strong>Ne dépassez pas 50 Mo</strong> sans avoir
+                relevé <code>client_max_body_size</code> côté serveur web : au-delà, l'envoi serait coupé en cours de route.
               </p>
             </div>
           </div>

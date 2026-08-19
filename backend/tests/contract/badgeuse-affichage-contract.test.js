@@ -47,6 +47,7 @@ const media = require('../../src/services/badgeuse-social');
 const { decryptSecret } = require('../../src/utils/badgeuse-crypto');
 
 const badgeuse = require('../../src/routes/badgeuse');
+const { BADGEUSE_SETTING_DEFAULTS } = require('../../src/utils/badgeuse-settings');
 
 const tokenFor = (role, id = 1) => jwt.sign(
   { id, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
@@ -293,6 +294,68 @@ describe('POST /contenus/upload', () => {
 
   test('habilitation : MANAGER refusé', async () => {
     expect((await attach('MANAGER', 'affiche.png', 'image/png')).status).toBe(403);
+  });
+
+  // ── Plafond de taille (défaut de production : « network error » sur vidéo) ──
+  //
+  // CE QUI S'EST PASSÉ : le plafond applicatif valait 100 Mo alors que le
+  // reverse proxy refuse tout corps au-delà de 50 Mo. Une vidéo de 60 Mo
+  // passait donc les contrôles de l'écran, partait, et se faisait couper en
+  // vol : le navigateur n'avait plus de réponse à lire et affichait
+  // « network error ». Ces tests verrouillent les deux moitiés du correctif —
+  // le plafond est UN réglage lu depuis la base, et il est ANNONCÉ à l'écran.
+
+  test('le plafond annoncé est celui du réglage, pas une constante figée', async () => {
+    installMocks({ settings: { 'badgeuse.media_upload_max_mo': '50' } });
+    const r = await get('/api/badgeuse/contenus/upload-limites', 'ADMIN');
+    expect(r.status).toBe(200);
+    expect(r.body.max_mo).toBe(50);
+    expect(r.body.extensions).toEqual(expect.arrayContaining(['.mp4', '.webm']));
+  });
+
+  test('relever le réglage relève le plafond annoncé, sans redémarrage', async () => {
+    installMocks({ settings: { 'badgeuse.media_upload_max_mo': '80' } });
+    expect((await get('/api/badgeuse/contenus/upload-limites', 'ADMIN')).body.max_mo).toBe(80);
+  });
+
+  test('réglage absent : repli sur le défaut documenté (50 Mo), jamais illimité', async () => {
+    installMocks({ settings: {} });
+    expect((await get('/api/badgeuse/contenus/upload-limites', 'ADMIN')).body.max_mo)
+      .toBe(BADGEUSE_SETTING_DEFAULTS['badgeuse.media_upload_max_mo']);
+  });
+
+  test('vidéo au-delà du plafond : 413 EXPLICITE en français, jamais un échec muet', async () => {
+    installMocks({ settings: { 'badgeuse.media_upload_max_mo': '1' } });
+    const grosse = Buffer.alloc(2 * 1024 * 1024, 0); // 2 Mo pour un plafond de 1 Mo
+    const r = await attach('ADMIN', 'veille.mp4', 'video/mp4', grosse);
+
+    expect(r.status).toBe(413);
+    expect(r.body.max_mo).toBe(1);
+    // Le message doit nommer la limite : c'est tout l'objet du correctif.
+    expect(r.body.error).toMatch(/trop volumineux/i);
+    expect(r.body.error).toContain('1 Mo');
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO badgeuse_contenus/.test(String(c[0])))).toBe(false);
+  });
+
+  test('vidéo sous le plafond : acceptée et enregistrée en type vidéo', async () => {
+    installMocks({ settings: { 'badgeuse.media_upload_max_mo': '5' } });
+    const r = await attach('ADMIN', 'veille.mp4', 'video/mp4', Buffer.alloc(1024 * 1024, 7));
+
+    expect(r.status).toBe(201);
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_contenus/.test(String(c[0])));
+    expect(insert[1]).toContain('video');
+    const fichier = insert[1].find((v) => typeof v === 'string' && v.startsWith('media-'));
+    expect(fichier).toMatch(/\.mp4$/);
+    media.unlinkMedia(fichier);
+  });
+
+  test('le plafond est un réglage d\'EXPLOITATION : le modifier ne vaut pas arbitrage RH (ADR-0002)', async () => {
+    const settings = {};
+    installMocks({ settings });
+    const r = await put('/api/badgeuse/parametres', 'ADMIN', { media_upload_max_mo: 40 });
+    expect(r.status).toBe(200);
+    expect(settings['badgeuse.media_upload_max_mo']).toBe('40');
+    expect(settings['badgeuse.regles_validees_le']).toBeUndefined();
   });
 });
 
