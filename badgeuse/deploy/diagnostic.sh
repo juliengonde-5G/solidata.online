@@ -122,6 +122,17 @@ case "$CMD" in
       sudo apt-get install -y xserver-xorg-legacy && sudo bash /opt/badgeuse/deploy/install.sh"
     fi
     ligne "allowed_users" "$(grep -h '^allowed_users' /etc/X11/Xorg.wrap.config 2>/dev/null || echo 'non defini (defaut: console)')"
+    # Les deux durcissements qui EMPECHENT X de demarrer, verifies sur l'etat
+    # EFFECTIF du service (pas sur les fichiers) : NoNewPrivileges neutralise
+    # le setuid d'Xorg.wrap, ProtectHome prive xinit de .Xauthority.
+    NNP="$(systemctl show badgeuse-kiosk -p NoNewPrivileges --value 2>/dev/null)"
+    PH="$(systemctl show badgeuse-kiosk -p ProtectHome --value 2>/dev/null)"
+    ligne "NoNewPrivileges" "${NNP:-?}"
+    ligne "ProtectHome" "${PH:-?}"
+    if [ "$NNP" = "yes" ] || [ "$PH" = "yes" ]; then
+      retenir "X11 BRIDE PAR LE DURCISSEMENT : NoNewPrivileges=${NNP:-?} / ProtectHome=${PH:-?}. Le premier neutralise le bit setuid d'Xorg.wrap (le serveur X ne peut pas obtenir root), le second prive xinit de son fichier d'autorisation dans /home/badgeuse — xinit rend 1 immediatement, sans message et sans meme creer de journal Xorg. Corriger en regenerant le drop-in :
+      sudo bash /opt/badgeuse/deploy/install.sh"
+    fi
     ;;
 esac
 

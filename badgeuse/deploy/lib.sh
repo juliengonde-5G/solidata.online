@@ -187,8 +187,22 @@ ligne_lancement() {
 
   if [ "$compositeur" = "x11" ]; then
     cat <<FIN
-# Genere par install.sh — repli X11 (paquet cage indisponible).
+# Genere par install.sh — voie X11.
 [Service]
+# X11 exige de LEVER deux durcissements de l'unite de base, sans quoi le
+# serveur ne peut pas demarrer — constate en exploitation : xinit rendait 1 en
+# moins d'une seconde, sans un mot, et aucun journal Xorg n'etait meme cree.
+#  - NoNewPrivileges=yes NEUTRALISE le bit setuid : /usr/lib/xorg/Xorg.wrap ne
+#    peut plus obtenir les droits root, le serveur X ne demarre jamais. C'est
+#    incompatible par construction avec un X lance par un non-root.
+#  - ProtectHome=yes rend /home/badgeuse inaccessible : xinit ne peut y ecrire
+#    son fichier d'autorisation (.Xauthority) ni Xorg son journal
+#    (~/.local/share/xorg) — d'ou l'echec instantane ET muet.
+# Ces levees ne concernent QUE la voie X11 : l'unite de base reste durcie, et
+# la voie cage (Wayland), qui n'a besoin d'aucun binaire setuid, la conserve
+# entierement.
+NoNewPrivileges=no
+ProtectHome=no
 Environment=XDG_SESSION_TYPE=x11
 Environment=NAVIGATEUR_BIN=${navigateur}
 Environment=KIOSK_URL=${url}
