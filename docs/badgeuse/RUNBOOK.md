@@ -745,7 +745,7 @@ Côté serveur : bouton « Vérifier la chaîne » sur la carte du poste (Temps 
 
 ### RP-5 — Charge 30 badges / 60 s (file d'attente réelle)
 
-**Protocole.** 30 personnes (ou 30 présentations successives de badges distincts) en 60 s, cadence environ 1 badge toutes les 2 s, à l'heure d'embauche. Répéter 3 fois (matin, après pause, fin de poste). Inclure 2 présentations doubles volontaires (moins de 8 s d'écart) pour éprouver l'anti-rebond.
+**Protocole.** 30 personnes (ou 30 présentations successives de badges distincts) en 60 s, cadence environ 1 badge toutes les 2 s, à l'heure d'embauche. Répéter 3 fois (matin, après pause, fin de poste). Inclure 2 présentations doubles volontaires (l'une à quelques secondes, l'autre à environ 30 s d'écart) pour éprouver l'anti-rebond : l'écran doit afficher « Badge déjà enregistré » avec l'ancienneté, et un seul pointage doit remonter.
 
 **Critères.**
 - 30 pointages distincts enregistrés par salve (les doubles présentations en moins de 8 s comptent pour 1 et affichent « Déjà enregistré »).

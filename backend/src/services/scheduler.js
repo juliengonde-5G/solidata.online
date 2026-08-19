@@ -687,17 +687,18 @@ async function badgeusePurgeRetention(options = {}) {
   const dryRun = !!options.dryRun;
   const compte = {
     pointages: 0, corrections: 0, feuilles: 0, badges: 0, badge_historique: 0,
-    contenus: 0, journal_acces: 0, social_posts: 0, medias_orphelins: 0,
+    contenus: 0, journal_acces: 0, social_posts: 0, presse_articles: 0, medias_orphelins: 0,
   };
   try {
     const { readBadgeuseSetting } = require('../utils/badgeuse-settings');
-    const [moisPointages, moisFeuilles, joursBadges, joursContenus, moisJournal, joursSocial] = await Promise.all([
+    const [moisPointages, moisFeuilles, joursBadges, joursContenus, moisJournal, joursSocial, joursPresse] = await Promise.all([
       readBadgeuseSetting('badgeuse.retention_pointages_mois'),
       readBadgeuseSetting('badgeuse.retention_feuilles_mois'),
       readBadgeuseSetting('badgeuse.retention_badges_apres_restitution_jours'),
       readBadgeuseSetting('badgeuse.retention_contenus_apres_expiration_jours'),
       readBadgeuseSetting('badgeuse.retention_journal_acces_mois'),
       readBadgeuseSetting('badgeuse.retention_social_jours'),
+      readBadgeuseSetting('badgeuse.retention_presse_jours'),
     ]);
 
     // Helper : SELECT COUNT en dry-run, DELETE sinon. Chaque bloc est isolé —
@@ -760,6 +761,27 @@ async function badgeusePurgeRetention(options = {}) {
     await run('social_posts', 'badgeuse_social_posts',
       `COALESCE(publie_le, sync_le) < NOW() - ($1 || ' days')::interval`, [String(joursSocial)]);
 
+    // PRESSE (ADR-0006). Ce n'est pas une durée RGPD — un article de presse ne
+    // contient aucune donnée personnelle de salarié — mais une hygiène de
+    // disque : sans elle, les vignettes s'accumuleraient indéfiniment sur un
+    // serveur qui n'est pas grand. Même ordre que pour les posts sociaux : les
+    // fichiers d'abord, pendant qu'on sait encore où ils sont.
+    try {
+      const condamnes = await pool.query(
+        `SELECT media_fichier FROM badgeuse_presse_articles
+         WHERE media_fichier IS NOT NULL
+           AND COALESCE(publie_le, sync_le) < NOW() - ($1 || ' days')::interval`,
+        [String(joursPresse)]
+      );
+      if (!dryRun) {
+        for (const row of condamnes.rows) badgeuseSocial.unlinkMedia(row.media_fichier);
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] badgeusePurgeRetention — vignettes de presse ignorées : ${err.message}`);
+    }
+    await run('presse_articles', 'badgeuse_presse_articles',
+      `COALESCE(publie_le, sync_le) < NOW() - ($1 || ' days')::interval`, [String(joursPresse)]);
+
     // Médias ORPHELINS : fichiers du répertoire qu'aucune ligne ne référence
     // plus (contenu supprimé hors application, purge interrompue, import
     // avorté). Sans ce ménage, le disque du serveur ne redescend jamais.
@@ -776,13 +798,15 @@ async function badgeusePurgeRetention(options = {}) {
       const pathp = require('path');
       const racine = badgeuseSocial.mediaRoot();
       if (fsp.existsSync(racine)) {
-        const [refContenus, refSocial] = await Promise.all([
+        const [refContenus, refSocial, refPresse] = await Promise.all([
           pool.query('SELECT fichier FROM badgeuse_contenus WHERE fichier IS NOT NULL'),
           pool.query('SELECT media_fichier FROM badgeuse_social_posts WHERE media_fichier IS NOT NULL'),
+          pool.query('SELECT media_fichier FROM badgeuse_presse_articles WHERE media_fichier IS NOT NULL'),
         ]);
         const references = new Set([
           ...refContenus.rows.map((x) => String(x.fichier)),
           ...refSocial.rows.map((x) => String(x.media_fichier)),
+          ...refPresse.rows.map((x) => String(x.media_fichier)),
         ]);
         const lister = (sousDossier) => {
           const dir = sousDossier ? pathp.join(racine, sousDossier) : racine;
@@ -791,7 +815,7 @@ async function badgeusePurgeRetention(options = {}) {
             .filter((e) => e.isFile())
             .map((e) => (sousDossier ? `${sousDossier}/${e.name}` : e.name));
         };
-        for (const relatif of [...lister(''), ...lister(badgeuseSocial.SOCIAL_SUBDIR)]) {
+        for (const relatif of [...lister(''), ...lister(badgeuseSocial.SOCIAL_SUBDIR), ...lister(badgeuseSocial.PRESSE_SUBDIR)]) {
           if (references.has(relatif)) continue;
           const abs = badgeuseSocial.resolveMediaPath(relatif);
           if (!abs) continue;
@@ -824,6 +848,7 @@ async function badgeusePurgeRetention(options = {}) {
             retention_contenus_apres_expiration_jours: joursContenus,
             retention_journal_acces_mois: moisJournal,
             retention_social_jours: joursSocial,
+            retention_presse_jours: joursPresse,
           })]
         ).catch((err) => console.error('[SCHEDULER] Journalisation purge badgeuse impossible :', err.message));
       }
@@ -1003,6 +1028,48 @@ async function syncBadgeuseSocial() {
     return await badgeuseSocial.syncSocialPosts();
   } catch (err) {
     console.error('[SCHEDULER] Erreur syncBadgeuseSocial:', err.message);
+    return { items: 0 };
+  }
+}
+
+/**
+ * Écran d'information — PRESSE NATIONALE (ADR-0006).
+ *
+ * Un écran par article, servi depuis la base : le poste ne joint jamais un
+ * site de presse. Cadencé à l'heure — un fil « à la une » qui date de trois
+ * heures se voit à l'écran, et une requête HTTP par heure ne pèse rien.
+ * Le travail réel (lecture du flux sous garde SSRF, vignette téléchargée,
+ * upsert idempotent) vit dans services/badgeuse-social.js.
+ *
+ * La CONSERVATION n'est PAS traitée ici : elle appartient à
+ * badgeusePurgeRetention (`badgeuse.retention_presse_jours`).
+ */
+async function syncBadgeusePresse() {
+  try {
+    const badgeuseSocial = require('./badgeuse-social');
+    return await badgeuseSocial.syncPresseArticles();
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur syncBadgeusePresse:', err.message);
+    return { items: 0 };
+  }
+}
+
+/**
+ * Écran d'information — MÉTÉO du lieu du poste (Open-Meteo, utils/weather.js).
+ *
+ * Cadencé avec runAllJobs (démarrage du serveur, puis 7 h, 12 h et 18 h) :
+ * une prévision quotidienne ne bouge pas plus vite, et l'écran doit rester
+ * servable même si le serveur perd Internet un moment — la dernière prévision
+ * connue reste en base, avec sa date de relevé. La construction de la playlist
+ * tente en dernier recours un rafraîchissement pour un poste appairé entre
+ * deux passages (routes/badgeuse-device.js, mise au repos après un échec).
+ */
+async function syncBadgeuseMeteo() {
+  try {
+    const badgeuseSocial = require('./badgeuse-social');
+    return await badgeuseSocial.syncMeteo();
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur syncBadgeuseMeteo:', err.message);
     return { items: 0 };
   }
 }
@@ -1688,6 +1755,16 @@ async function hourlyTick() {
       await runInstrumented('scanBoutiqueCSVFolders', scanBoutiqueCSVFolders);
     }
 
+    // PRESSE NATIONALE de l'écran de veille — rafraîchissement HORAIRE.
+    // Les trois passages de runAllJobs (7/12/18 h) suffisent à la météo, pas à
+    // l'actualité : un fil « à la une » vieux de cinq heures se voit. Les
+    // heures de runAllJobs sont exclues pour ne pas lire le flux deux fois de
+    // suite (l'écriture est idempotente, mais interroger le média pour rien
+    // n'est ni utile ni courtois).
+    if (![7, 12, 18].includes(now.getHours())) {
+      await runInstrumented('syncBadgeusePresse', syncBadgeusePresse);
+    }
+
     // VAK SumUp — sync quotidienne UNIQUE à 3h (demande client : hors jour de
     // VAK, UNE synchronisation par 24 h). L'ancien rattrapage HORAIRE pendant
     // une VAK est retiré : les jours de VAK, le timer dédié 5 minutes
@@ -1915,6 +1992,8 @@ async function runAllJobs() {
     await runInstrumented('checkBadgeuseDevices', checkBadgeuseDevices);
     await runInstrumented('badgeusePurgeRetention', badgeusePurgeRetention);
     await runInstrumented('syncBadgeuseSocial', syncBadgeuseSocial);
+    await runInstrumented('syncBadgeusePresse', syncBadgeusePresse);
+    await runInstrumented('syncBadgeuseMeteo', syncBadgeuseMeteo);
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
@@ -1969,6 +2048,8 @@ module.exports = {
   badgeusePurgeRetention,
   checkBadgeuseDevices,
   syncBadgeuseSocial,
+  syncBadgeusePresse,
+  syncBadgeuseMeteo,
   // Sync SumUp live 5 min (jours de VAK) — exposés pour les tests.
   vakLiveSyncTick,
   isVakActiveToday,

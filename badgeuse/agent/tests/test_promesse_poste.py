@@ -85,7 +85,11 @@ class Poste:
         )
         self.agent = Agent(self.config)
         self.horloge = Horloge()
-        self.agent._debouncer = Debouncer(window_sec=8.0, clock=self.horloge)
+        # Horloge injectée, mais fenêtre d'anti-rebond RÉELLE : la figer à 8 s
+        # ici laissait passer des scénarios que le poste de production refuse
+        # (deux badgeages à 60 s d'intervalle), et masquait donc le défaut même
+        # que ces tests doivent surveiller.
+        self.agent._debouncer = Debouncer(clock=self.horloge)
         self.tache = None
         self.ui = None
         self.messages = []
@@ -175,7 +179,7 @@ def test_journee_operateur_entree_pause_retour_soir(tmp_path, serveur, caplog):
     async def corps(poste):
         for _ in range(4):
             await poste.badger(UID_KARIM)
-            poste.horloge.avancer(60)          # hors anti-rebond
+            poste.horloge.avancer(3600)        # matin → pause → retour → soir
 
         sens = [m["sens"] for m in poste.recus("badge_ok")]
         assert sens == ["entree", "sortie", "entree", "sortie"]
@@ -236,7 +240,7 @@ def test_anti_rebond(tmp_path, serveur, caplog):
     @scenario
     async def corps(poste):
         await poste.badger(UID_KARIM)
-        poste.horloge.avancer(2)               # dans la fenêtre de 8 s
+        poste.horloge.avancer(2)               # dans la fenêtre
         await poste.badger(UID_KARIM)
 
         assert poste.agent._store.queue_size() == 1
@@ -245,6 +249,70 @@ def test_anti_rebond(tmp_path, serveur, caplog):
 
     asyncio.run(corps(tmp_path, serveur))
     assert "anti-rebond" in caplog.text
+
+
+def test_representation_apres_une_demi_minute_annoncee_a_l_ecran(tmp_path, serveur):
+    """Le défaut remonté par l'exploitation : « rebadger ne dit rien ».
+
+    Avec l'ancienne fenêtre de 8 s, une présentation 30 s plus tard était
+    ACCEPTÉE : aucun message, mais un second pointage bien réel. La personne
+    croyait s'être trompée, et sa journée se refermait sur une paire de 30 s.
+    Désormais elle est refusée ET annoncée.
+    """
+    @scenario
+    async def corps(poste):
+        await poste.badger(UID_KARIM)
+        poste.horloge.avancer(30)
+        await poste.badger(UID_KARIM)
+
+        assert poste.agent._store.queue_size() == 1        # un seul pointage
+        repeat = poste.recus("badge_repeat")
+        assert len(repeat) == 1                            # et un message, pas le silence
+        assert repeat[-1]["prenom"] == "Karim"
+
+    asyncio.run(corps(tmp_path, serveur))
+
+
+def test_le_message_de_rebond_dit_depuis_combien_de_temps(tmp_path, serveur):
+    """« Déjà enregistré » sans repère est inexploitable sur 5 minutes.
+
+    L'écran a besoin d'une DURÉE pour écrire « il y a 3 minutes ». C'est une
+    durée, jamais un horodatage : la charge utile reste au prénom + initiale.
+    """
+    @scenario
+    async def corps(poste):
+        await poste.badger(UID_KARIM)
+        poste.horloge.avancer(185)
+        await poste.badger(UID_KARIM)
+
+        message = poste.recus("badge_repeat")[-1]
+        assert message["depuis_sec"] == 185
+        # Rien d'autre que le prénom ne doit transiter (NOTE_JURIDIQUE §3.5).
+        assert set(message) == {"type", "prenom", "depuis_sec", "overlay_duree_sec"}
+        assert "nom" not in message and "uid" not in message and "uid_hmac" not in message
+
+    asyncio.run(corps(tmp_path, serveur))
+
+
+def test_fenetre_de_cinq_minutes_appliquee_quand_le_serveur_la_pousse(tmp_path, serveur):
+    """ADR-0002 de bout en bout : la valeur vient de GET /config et AGIT."""
+    @scenario
+    async def corps(poste):
+        poste.serveur.config = {"anti_rebond_sec": 300}
+        await poste.agent._heartbeat_once()
+        assert poste.agent._debouncer.window_sec == 300.0
+
+        await poste.badger(UID_KARIM)
+        poste.horloge.avancer(120)                   # 2 min : dans la fenêtre
+        await poste.badger(UID_KARIM)
+        assert poste.agent._store.queue_size() == 1
+        assert poste.recus("badge_repeat")[-1]["depuis_sec"] == 120
+
+        poste.horloge.avancer(200)                   # 320 s : fenêtre écoulée
+        await poste.badger(UID_KARIM)
+        assert poste.agent._store.queue_size() == 2  # ce passage-là compte
+
+    asyncio.run(corps(tmp_path, serveur))
 
 
 def test_uid_brut_et_secrets_jamais_dans_les_journaux(tmp_path, serveur, caplog):
@@ -275,7 +343,7 @@ def test_hors_ligne_prolonge_puis_rattrapage(tmp_path, serveur):
 
         for _ in range(3):
             await poste.badger(UID_KARIM)
-            poste.horloge.avancer(60)
+            poste.horloge.avancer(3600)        # trois passages d'une vraie journée
         await poste.pousser()
         assert poste.agent._store.queue_size() == 3
 
@@ -319,7 +387,7 @@ def test_retry_arrete_le_lot_et_ne_purge_pas(tmp_path, serveur, caplog):
 
         for _ in range(2):
             await poste.badger(UID_KARIM)
-            poste.horloge.avancer(60)
+            poste.horloge.avancer(3600)        # deux passages distincts
         accuses = await poste.pousser()
 
         assert accuses == 0
@@ -672,7 +740,7 @@ def test_redemarrage_sequence_monotone_et_chaine_reprise(tmp_path, serveur):
     @scenario
     async def premier(poste):
         await poste.badger(UID_KARIM)
-        poste.horloge.avancer(60)
+        poste.horloge.avancer(3600)            # entrée puis sortie, pas un rebond
         await poste.badger(UID_KARIM)
         etat.update(poste.agent._store.chain_state())
 

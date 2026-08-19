@@ -24,7 +24,9 @@
  *  - overlay enrichi : message du moment (matin/pause/retour/soir), phrase de
  *    motivation generique, variante festive (anniversaire / anniversaire
  *    d'entreprise / premier jour) ;
- *  - playlist enrichie : annonces, actus, tournees, social, media, vak_live.
+ *  - playlist enrichie : annonces, actus, tournees, social, media, vak_live ;
+ *  - meteo du lieu du poste et presse nationale (un ecran par article), toutes
+ *    deux rapatriees COTE SERVEUR : le poste ne joint aucun domaine externe.
  *
  * Contrat de donnees des types dynamiques : le contenu est genere COTE
  * SERVEUR et transporte dans « corps » (JSON, comme le type historique
@@ -59,13 +61,18 @@
   /** Longueur maximale d'une legende de publication sociale. */
   var LEGENDE_MAX = 180;
 
+  /** Bornes d'un ecran de presse : au-dela, le texte n'est plus lisible a 3 m. */
+  var TITRE_MAX = 140;
+  var CHAPO_MAX = 260;
+
   var MESSAGES = {
     entree: 'Entrée enregistrée',
     sortie: 'Sortie enregistrée',
     inconnu: 'Pointage enregistré',
     badge_inconnu: 'Badge non reconnu — va voir ton encadrant',
     badge_illisible: 'Badge illisible — présente-le à nouveau',
-    deja: 'Déjà enregistré',
+    deja: 'Badge déjà enregistré',
+    deja_detail: 'ce passage ne compte pas une seconde fois',
     hors_ligne: 'Hors ligne — vos pointages sont enregistrés',
     lecteur: 'Lecteur de badge non détecté — préviens ton encadrant'
   };
@@ -259,6 +266,40 @@
     }, 300);
   }
 
+  /**
+   * « il y a 3 minutes » a partir d'une anciennete en secondes.
+   *
+   * Sans ce reperage, « Badge deja enregistre » ne dit pas a la personne si
+   * son passage vient d'etre pris ou s'il date : elle ne sait pas si elle doit
+   * s'inquieter. L'agent envoie une DUREE, jamais une heure de pointage
+   * (l'ecran ne doit rien reveler d'autre que le prenom et l'initiale).
+   *
+   * Rend une chaine vide si l'agent n'a rien envoye : on n'invente pas de
+   * duree.
+   */
+  function depuisTexte(secondes) {
+    var n = Number(secondes);
+    if (secondes === null || secondes === undefined || !isFinite(n) || n < 0) { return ''; }
+    if (n < 60) { return 'il y a moins d\'une minute'; }
+    var minutes = Math.floor(n / 60);
+    return minutes === 1 ? 'il y a 1 minute' : 'il y a ' + minutes + ' minutes';
+  }
+
+  /**
+   * Ligne secondaire de l'overlay d'anti-rebond.
+   *
+   * Elle occupe le meme emplacement que le sens (entree/sortie) d'un badgeage
+   * accepte : c'est la ligne que l'oeil cherche apres le titre. Elle doit dire
+   * les DEUX choses utiles — depuis quand le badge est pris, et que cette
+   * presentation-ci ne compte pas. Sans duree connue, la phrase reste vraie.
+   */
+  function rebondTexte(secondes) {
+    var depuis = depuisTexte(secondes);
+    return depuis
+      ? depuis + ' — ' + MESSAGES.deja_detail
+      : MESSAGES.deja_detail.charAt(0).toUpperCase() + MESSAGES.deja_detail.slice(1);
+  }
+
   /** Ecrit un texte et masque l'element s'il est vide (jamais de ligne fantome). */
   function texte(noeud, valeur) {
     var contenu = valeur === null || valeur === undefined ? '' : String(valeur);
@@ -359,7 +400,8 @@
     if (moteur && moteur(noeud, element, donnees)) { return; }
 
     // Repli commun : titre + corps textuel. Sert les types historiques
-    // (message, planning, meteo) ET tout type dont les donnees manquent.
+    // (message, planning) ET tout type dont les donnees manquent — dont un
+    // ecran meteo dont le serveur n'a pas pu fournir la prevision.
     rendreTexte(noeud, element, donnees);
   }
 
@@ -575,6 +617,152 @@
     return true;
   }
 
+  /**
+   * meteo : previsions du LIEU DU POSTE, rapatriees par le serveur.
+   * element.meteo = {"lieu":"Le Houlme","lieu_source":"site|parametre",
+   *                  "releve_le":"...","jour":{"date","code","libelle",
+   *                  "temp_min","temp_max","precip_mm","vent_max"},
+   *                  "prevision":[{"date","code","libelle","temp_min","temp_max"}]}
+   *
+   * Le poste ne contacte JAMAIS Open-Meteo : il affiche ce que le serveur lui
+   * a donne, et rien s'il ne lui a rien donne (repli texte).
+   * Le LIBELLE vient du serveur ; seul le PICTOGRAMME est choisi ici — c'est
+   * une decision d'affichage, pas une interpretation de la donnee.
+   */
+  function rendreMeteo(noeud, element, donnees) {
+    var meteo = objet(element, donnees, 'meteo');
+    var jour = meteo && meteo.jour ? meteo.jour : null;
+    if (!jour) { return false; }
+
+    var maxi = nombre(jour.temp_max);
+    var mini = nombre(jour.temp_min);
+    if (maxi === null && mini === null) { return false; }   // rien de mesure : rien a montrer
+
+    var lieu = meteo.lieu ? String(meteo.lieu) : '';
+    noeud.appendChild(bloc('h1', 'diapo-titre',
+                           element.titre || (lieu ? 'Météo — ' + lieu : 'Météo')));
+
+    var actuel = document.createElement('div');
+    actuel.className = 'meteo-jour';
+    actuel.appendChild(bloc('span', 'meteo-picto', pictoMeteo(jour.code)));
+
+    var colonne = document.createElement('div');
+    colonne.className = 'meteo-colonne';
+    // Information principale (AFF-03) : la temperature du jour, en tres grand.
+    colonne.appendChild(bloc('p', 'meteo-temp',
+                             maxi !== null ? degres(maxi) : degres(mini)));
+    if (jour.libelle) { colonne.appendChild(bloc('p', 'meteo-libelle', jour.libelle)); }
+
+    var details = [];
+    if (maxi !== null && mini !== null) { details.push('min ' + degres(mini)); }
+    var pluie = nombre(jour.precip_mm);
+    if (pluie !== null && pluie > 0) { details.push(nombreFr(pluie, 1) + ' mm'); }
+    var vent = nombre(jour.vent_max);
+    if (vent !== null) { details.push('vent ' + nombreFr(vent, 0) + ' km/h'); }
+    if (details.length) {
+      colonne.appendChild(bloc('p', 'meteo-detail', details.join('  ·  ')));
+    }
+    actuel.appendChild(colonne);
+    noeud.appendChild(actuel);
+
+    var suite = Array.isArray(meteo.prevision) ? meteo.prevision : [];
+    if (suite.length) {
+      var bande = document.createElement('div');
+      bande.className = 'meteo-prevision';
+      suite.forEach(function (j) {
+        var carte = document.createElement('div');
+        carte.className = 'meteo-suivant';
+        carte.appendChild(bloc('span', 'meteo-suivant-jour', jourCourt(j.date)));
+        carte.appendChild(bloc('span', 'meteo-suivant-picto', pictoMeteo(j.code)));
+        var haut = nombre(j.temp_max);
+        var bas = nombre(j.temp_min);
+        // Une temperature absente s'ecrit « — », jamais 0 (AFF : rien d'invente).
+        carte.appendChild(bloc('span', 'meteo-suivant-temp',
+                               (haut === null ? '—' : degres(haut)) +
+                               (bas === null ? '' : ' / ' + degres(bas))));
+        bande.appendChild(carte);
+      });
+      noeud.appendChild(bande);
+    }
+    return true;
+  }
+
+  /** Temperature entiere suffixee du degre (arrondi d'affichage seulement). */
+  function degres(valeur) {
+    var n = Number(valeur);
+    return (isFinite(n) ? Math.round(n) : 0) + '°';
+  }
+
+  /**
+   * Pictogramme d'un code WMO. Les bornes sont celles du libelle cote serveur
+   * (utils/weather.js) : les deux doivent raconter la meme chose.
+   */
+  function pictoMeteo(code) {
+    var c = nombre(code);
+    if (c === null) { return '🌡️'; }
+    if (c <= 1) { return '☀️'; }
+    if (c <= 3) { return '⛅'; }
+    if (c <= 48) { return '🌫️'; }
+    if (c <= 57) { return '🌦️'; }
+    if (c <= 67) { return '🌧️'; }
+    if (c <= 77) { return '❄️'; }
+    if (c <= 82) { return '🌧️'; }
+    if (c <= 86) { return '❄️'; }
+    if (c >= 95) { return '⛈️'; }
+    return '🌡️';
+  }
+
+  /** « jeu. 21 » a partir d'une date ISO (jour civil), ou '' si illisible. */
+  function jourCourt(date) {
+    var d = new Date(String(date || '') + 'T12:00:00');
+    if (isNaN(d.getTime())) { return ''; }
+    return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
+  }
+
+  /**
+   * presse : UN ARTICLE, UN ECRAN (le serveur envoie un element par article).
+   * element.article = {"titre","chapo","source","publie_le"}
+   * element.media_url = vignette DEJA rapatriee par l'agent (cache local).
+   *
+   * La vignette vient du cache local du poste, jamais du site de presse : la
+   * CSP du kiosque reste 'self' (ADR-0004 §6, ADR-0006). Si elle n'est pas
+   * encore telechargee, l'article s'affiche sans image — le titre en grand
+   * reste l'essentiel.
+   */
+  function rendrePresse(noeud, element, donnees) {
+    var article = objet(element, donnees, 'article');
+    if (!article || !article.titre) { return false; }
+
+    var entete = document.createElement('div');
+    entete.className = 'presse-entete';
+    if (article.source) {
+      // L'attribution de la source n'est pas decorative : c'est ce qui
+      // distingue une depeche nationale d'une consigne de la structure.
+      entete.appendChild(bloc('span', 'presse-source', String(article.source)));
+    }
+    var quand = dateCourte(article.publie_le);
+    if (quand) { entete.appendChild(bloc('span', 'presse-date', quand)); }
+    if (entete.childNodes.length) { noeud.appendChild(entete); }
+
+    var source = urlLocale(element.media_url);
+    if (source) { noeud.appendChild(image(source, '')); }
+
+    noeud.appendChild(bloc('h1', 'presse-titre', tronquer(article.titre, TITRE_MAX)));
+    if (article.chapo) {
+      noeud.appendChild(bloc('p', 'presse-chapo', tronquer(article.chapo, CHAPO_MAX)));
+    }
+    return true;
+  }
+
+  /** « mer. 19 août, 07:12 » a partir d'un horodatage, ou '' si illisible. */
+  function dateCourte(horodatage) {
+    if (!horodatage) { return ''; }
+    var d = new Date(horodatage);
+    if (isNaN(d.getTime())) { return ''; }
+    return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'long' }) +
+           ', ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+
   /** compte_a_rebours (historique) : {"date_cible":"2026-12-31","libelle":"..."} */
   function rendreCompteARebours(noeud, element, donnees) {
     if (!donnees.date_cible) { return false; }
@@ -601,7 +789,7 @@
   var RENDERERS = {
     message: null,                       // repli texte
     planning: null,
-    meteo: null,
+    meteo: rendreMeteo,
     image: rendreImage,
     media: rendreMedia,
     lien: rendreMedia,                   // servi comme un media (ADR-0004 §6)
@@ -610,6 +798,7 @@
     tournees: rendreTournees,
     social: rendreSocial,
     vak_live: rendreVakLive,
+    presse: rendrePresse,
     compte_a_rebours: rendreCompteARebours
   };
 
@@ -850,6 +1039,7 @@
           picto: '•',
           moment: MESSAGES.deja,
           identite: identite(message.prenom, ''),
+          sens: rebondTexte(message.depuis_sec),
           duree: message.overlay_duree_sec
         });
         sonNeutre();

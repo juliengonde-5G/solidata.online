@@ -98,7 +98,7 @@ Seuls les badges `statut='actif'` sont servis.
   "etag": "…",
   "config": {
     "overlay_duree_sec": 5,
-    "anti_rebond_sec": 8,
+    "anti_rebond_sec": 300,
     "affichage_cumul_hebdo": false,
     "plage_acceptation": { "debut": "05:00", "fin": "21:00" },
     "dpms": { "extinction": "21:30", "allumage": "05:30" },
@@ -126,7 +126,8 @@ exigence juridique §3.5). La plage d'acceptation est appliquée par le **serveu
   ]
 }
 ```
-`type` ∈ `message|image|planning|compte_a_rebours|meteo` (AFF-05). Seuls les éléments actifs,
+`type` ∈ `message|image|planning|compte_a_rebours|meteo` (AFF-05 ; enrichi par les
+amendements v1.3 et v1.5 — voir §3bis et §3quater). Seuls les éléments actifs,
 dans leur fenêtre de validité, ciblant le site du poste, sont servis. La dernière playlist
 reçue est rejouée hors ligne (AFF-07). Aucune donnée personnelle dans ces contenus
 (NOTE_JURIDIQUE §3.2 : finalité communication interne dissociée).
@@ -192,6 +193,62 @@ file qui gonfle) et alimente la supervision BO-09 (alerte si silence > seuil par
   `/var/lib/badgeuse/media/` (cache plafonné, purge des non-référencés, vérification
   sha256) et sert en local : la CSP du kiosque reste `'self'`, le hors-ligne est préservé.
 - Les jours de VAK active, le serveur abaisse `sync_playlist_interval_sec` à 300.
+
+## 3quater. Amendement v1.5 — météo et presse nationale (ADR-0006)
+
+- **§2.4 playlist — `meteo` devient un GÉNÉRATEUR.** Le type existait depuis la V1 mais
+  ne portait qu'un texte libre : le poste recevait `{id, type:'meteo', titre, corps}` et
+  n'avait rien à afficher. Il porte désormais un bloc de premier niveau :
+
+```json
+{
+  "id": 7, "type": "meteo", "titre": null, "duree_sec": 12, "ordre": 1,
+  "meteo": {
+    "lieu": "Le Houlme", "lieu_source": "site|parametre",
+    "releve_le": "2026-08-19T05:00:00Z",
+    "jour": { "date": "2026-08-19", "code": 3, "libelle": "Nuageux",
+              "temp_min": 14.2, "temp_max": 24.6, "precip_mm": 0.4, "vent_max": 18 },
+    "prevision": [ { "date": "2026-08-20", "code": 61, "libelle": "Pluie",
+                     "temp_min": 15.1, "temp_max": 21.3 } ]
+  }
+}
+```
+
+  `code` est un code WMO ; `libelle` est calculé **par le serveur** (le poste ne
+  réinterprète pas la donnée, il choisit seulement un pictogramme). Toute valeur
+  inconnue vaut `null` — jamais `0`. **Sans relevé pour le jour courant, l'élément est
+  OMIS** ; s'il porte un `corps` saisi à la main, il est servi tel quel (forme V1
+  inchangée, non-régression).
+
+- **§2.4 playlist — nouveau type `presse`** (actualité nationale, ADR-0006) :
+  **un élément de playlist PAR ARTICLE**. Tous les éléments issus d'un même contenu
+  portent le même `id` (celui du contenu configuré) : ni le poste ni l'interface ne
+  s'en servent comme clé, la playlist est une séquence.
+
+```json
+{
+  "id": 4, "type": "presse", "titre": "À la une", "duree_sec": 15, "ordre": 2,
+  "media_id": "p12", "media_type": "image", "media_sha256": "…",
+  "article": { "titre": "…", "chapo": "…", "source": "franceinfo",
+               "publie_le": "2026-08-19T05:12:00Z" }
+}
+```
+
+  La vignette est référencée **au premier niveau** (comme un `media`), donc le cache du
+  poste la traite sans règle particulière. `media_id`/`media_type`/`media_sha256` sont
+  **absents** quand l'article n'a pas de vignette : l'écran reste valable (titre + chapô).
+  `source` est **toujours** affichée — c'est l'attribution due au média (ADR-0006 §4).
+  Aucune URL externe ne figure dans la réponse. Le `titre` de l'ÉLÉMENT (celui du
+  contenu paramétré, « À la une ») est transmis mais **non affiché** par le poste :
+  sur un écran d'article, le titre qui compte est celui de l'article. Il reste le
+  repère du contenu dans l'écran de paramétrage.
+
+- **§2.4 — `GET /devices/:code/media/:id` accepte le préfixe `p<id>`** (vignette d'un
+  article de presse), aux côtés de `c<id>` (contenu de playlist) et `s<id>` (post social).
+  Mêmes règles : clé device, liste blanche d'extensions, `nosniff`, aucun chemin hors racine.
+
+- **Aucun changement de cadence, aucun champ retiré.** Un poste en version antérieure
+  ignore simplement les blocs qu'il ne connaît pas.
 
 ## 3ter. Amendement v1.4 — appairage par code court (ADR-0005)
 

@@ -74,35 +74,69 @@ const MOTIFS = ['oubli_badge', 'badge_defaillant', 'mission_exterieure', 'rdv_ac
 const CONTENU_TYPES = [
   'message', 'image', 'planning', 'compte_a_rebours', 'meteo',
   'annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live',
+  // `presse` : actualité NATIONALE, un écran par article (ADR-0006). Distinct
+  // d'`actus`, qui reste le fil interne SOLIDATA — ce sont deux écrans, pas
+  // deux versions du même. `meteo` a rejoint les générateurs (il ne portait
+  // qu'un texte libre jusqu'ici, d'où un écran qui n'affichait rien).
+  'presse',
 ];
 
 // Téléversement d'un média d'affichage (pattern Refashion : diskStorage +
-// filtre extension/MIME + plafond). 100 Mo : une vidéo de veille de quelques
-// dizaines de secondes tient largement dedans, et le poste doit pouvoir la
-// mettre en cache local (plafond `badgeuse.media_cache_max_mo`).
-const MEDIA_UPLOAD_MAX_MO = 100;
-const uploadMedia = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, media.ensureMediaDir()),
-    filename: (req, file, cb) => cb(
-      null,
-      `media-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${path.extname(file.originalname || '').toLowerCase()}`
-    ),
-  }),
-  limits: { fileSize: MEDIA_UPLOAD_MAX_MO * 1024 * 1024 },
-  fileFilter: mediaFilter,
-});
+// filtre extension/MIME + plafond). Le plafond n'est plus une constante : il
+// vient de `badgeuse.media_upload_max_mo` (défaut 50 Mo) pour que la valeur
+// annoncée à l'écran, celle qu'applique multer et celle que laisse passer le
+// reverse proxy ne puissent plus diverger — cette divergence est exactement ce
+// qui produisait un « network error » sans explication sur les vidéos.
+const MEDIA_UPLOAD_DEFAUT_MO = BADGEUSE_SETTING_DEFAULTS['badgeuse.media_upload_max_mo'];
+
+// Extensions et types acceptés, exposés à l'écran de saisie pour qu'il n'ait
+// pas à redéclarer sa propre liste (utils/upload-filters.js `mediaFilter` reste
+// la seule autorité — le front ne fait qu'afficher ce qu'on lui dit).
+const MEDIA_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm'];
+
+/** Plafond de téléversement effectif (Mo), borné pour rester exploitable. */
+async function mediaUploadMaxMo() {
+  try {
+    const p = await readBadgeuseParams();
+    const n = Number(p.media_upload_max_mo);
+    if (Number.isFinite(n) && n >= 1) return Math.min(500, Math.round(n));
+  } catch (err) {
+    // Un incident de lecture des réglages ne doit pas ouvrir le plafond en
+    // grand : on retombe sur le défaut documenté, jamais sur « illimité ».
+    console.error('[BADGEUSE] Plafond de téléversement illisible, repli sur le défaut :', err.message);
+  }
+  return MEDIA_UPLOAD_DEFAUT_MO;
+}
 
 /**
  * Multer, mais avec une réponse EXPLICITE au lieu d'un 500 opaque : un fichier
  * refusé (type ou taille) est une erreur d'utilisateur, pas une panne — il doit
  * pouvoir lire pourquoi et recommencer.
+ *
+ * L'instance est construite par requête parce que le plafond est un réglage :
+ * le relever dans l'écran Paramètres doit prendre effet sans redémarrage.
  */
-function uploadMediaSingle(req, res, next) {
-  uploadMedia.single('fichier')(req, res, (err) => {
+async function uploadMediaSingle(req, res, next) {
+  const maxMo = await mediaUploadMaxMo();
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (rq, file, cb) => cb(null, media.ensureMediaDir()),
+      filename: (rq, file, cb) => cb(
+        null,
+        `media-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${path.extname(file.originalname || '').toLowerCase()}`
+      ),
+    }),
+    limits: { fileSize: maxMo * 1024 * 1024 },
+    fileFilter: mediaFilter,
+  });
+
+  upload.single('fichier')(req, res, (err) => {
     if (!err) return next();
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error: `Fichier trop volumineux (maximum ${MEDIA_UPLOAD_MAX_MO} Mo)` });
+      return res.status(413).json({
+        error: `Fichier trop volumineux : ${maxMo} Mo maximum.`,
+        max_mo: maxMo,
+      });
     }
     return res.status(415).json({ error: err.message || 'Type de fichier non autorisé' });
   });
@@ -1579,6 +1613,27 @@ router.post('/contenus', WRITE, contenuValidators, validate, async (req, res) =>
 });
 
 // ── Écran v2 : médias téléversés et liens partagés ─────────────────────────
+
+/**
+ * GET /contenus/upload-limites — ce que l'écran de téléversement a le droit
+ * d'accepter.
+ *
+ * Existe parce que la modale portait sa PROPRE constante de 100 Mo pendant que
+ * l'infrastructure en refusait 50 : l'utilisateur choisissait un fichier
+ * annoncé comme valide et l'envoi mourait en cours de route. Une seule source
+ * de vérité, lue par l'écran, rend cette dérive impossible.
+ */
+router.get('/contenus/upload-limites', WRITE, async (req, res) => {
+  try {
+    res.json({
+      max_mo: await mediaUploadMaxMo(),
+      extensions: MEDIA_EXTENSIONS,
+    });
+  } catch (err) {
+    console.error('[BADGEUSE] Erreur lecture des limites de téléversement :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 /**
  * POST /contenus/upload — téléverse une image ou une vidéo et en fait un

@@ -110,6 +110,12 @@ const JOB_SCHEDULE = {
   // No-op silencieux tant qu'aucun jeton Meta n'est configuré : le job tourne,
   // mais l'écran d'information se contente alors des contenus partagés à la main.
   syncBadgeuseSocial:             { label: 'Réseaux sociaux — écran badgeuse',  cadence: '3×/jour',            maxAgeHours: DAILY },
+  // Sans declaration ici, ces deux jobs apparaissent bien dans job_runs mais
+  // SANS cadence attendue : la supervision ne peut alors pas detecter qu'ils
+  // ont cesse de tourner — un ecran fige sur une meteo de la veille passerait
+  // inapercu.
+  syncBadgeuseMeteo:              { label: 'Météo — écran badgeuse',            cadence: '3×/jour',            maxAgeHours: DAILY },
+  syncBadgeusePresse:             { label: 'Presse nationale — écran badgeuse', cadence: 'horaire',            maxAgeHours: 6 },
   checkVehicleMaintenance:        { label: 'Maintenance préventive véhicules',  cadence: '3×/jour',            maxAgeHours: DAILY },
   autoFeedNews:                   { label: 'Veille sectorielle (fil actu)',     cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredCandidates:         { label: 'Purge RGPD candidats > 24 mois',    cadence: '3×/jour',            maxAgeHours: DAILY },

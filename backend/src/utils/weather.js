@@ -116,8 +116,59 @@ async function fetchOpenMeteoHourly(lat, lng, dateStr) {
   }
 }
 
+// Fetch Open-Meteo daily forecast for a RANGE of days (une seule requête).
+//
+// POURQUOI UNE VARIANTE : `fetchOpenMeteoDaily` interroge UN jour à la fois et
+// n'a AUCUN délai maximal. L'écran de la badgeuse a besoin de « aujourd'hui +
+// les jours suivants » et son rafraîchissement est appelé depuis un job et,
+// en dernier recours, depuis la requête d'un poste : une requête par jour et
+// une attente non bornée y seraient deux défauts. Les deux fonctions
+// historiques restent inchangées (les modules Boutiques/VAK/prédictif les
+// consomment).
+//
+// Retour : { jours: [{ date, code, label, tempMin, tempMax, precipMm, windMax }] }
+// ou null en cas d'échec (jamais un tableau vide présenté comme une prévision).
+async function fetchOpenMeteoDailyRange(lat, lng, startDate, endDate, { timeoutMs = 10000 } = {}) {
+  const key = cacheKey('range', lat, lng, `${startDate}_${endDate}`);
+  const hit = cacheGet(key);
+  if (hit) return hit;
+
+  const controleur = new AbortController();
+  const minuteur = setTimeout(() => controleur.abort(), timeoutMs);
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lng)}` +
+      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max` +
+      `&timezone=Europe/Paris&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+    const response = await globalThis.fetch(url, { signal: controleur.signal });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const dates = data.daily?.time || [];
+    if (!Array.isArray(dates) || dates.length === 0) return null;
+    const jours = dates.map((d, i) => {
+      const code = data.daily?.weather_code?.[i] ?? null;
+      return {
+        date: String(d),
+        code,
+        label: wmoCodeToLabel(code),
+        tempMax: data.daily?.temperature_2m_max?.[i] ?? null,
+        tempMin: data.daily?.temperature_2m_min?.[i] ?? null,
+        precipMm: data.daily?.precipitation_sum?.[i] ?? null,
+        windMax: data.daily?.wind_speed_10m_max?.[i] ?? null,
+      };
+    });
+    const out = { jours };
+    cacheSet(key, out);
+    return out;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(minuteur);
+  }
+}
+
 module.exports = {
   wmoCodeToLabel,
   fetchOpenMeteoDaily,
   fetchOpenMeteoHourly,
+  fetchOpenMeteoDailyRange,
 };

@@ -23,6 +23,16 @@ const RETENTIONS = [
   { key: 'retention_journal_acces_mois', label: "Journal des accès RH", unite: 'mois' },
 ];
 
+/** « 300 s » → « soit 5 min » : une durée en secondes ne se lit pas d'un coup d'œil. */
+function dureeLisible(secondes) {
+  const n = Number(secondes);
+  if (!Number.isFinite(n) || n <= 0) return 'Délai non défini';
+  if (n < 60) return `Soit ${Math.round(n)} s`;
+  const min = Math.floor(n / 60);
+  const rest = Math.round(n % 60);
+  return rest ? `Soit ${min} min ${rest} s` : `Soit ${min} min`;
+}
+
 /**
  * Réponse de GET /parametres → état du formulaire. On lit `data.parametres`
  * (et non la racine), sinon TOUS les champs retombaient sur leurs valeurs de
@@ -43,10 +53,11 @@ function fromApi(data = {}) {
     plage_fin: d.plage_acceptation_fin || '21:00',
     affichage_cumul_hebdo: !!d.affichage_cumul_hebdo,
     overlay_duree_sec: d.overlay_duree_sec ?? 5,
-    anti_rebond_sec: d.anti_rebond_sec ?? 8,
+    anti_rebond_sec: d.anti_rebond_sec ?? 300,
     regularisation_delai_jours: d.regularisation_delai_jours ?? 5,
     supervision_silence_minutes: d.supervision_silence_minutes ?? 15,
     supervision_alerte_emails: d.supervision_alerte_emails || '',
+    media_upload_max_mo: d.media_upload_max_mo ?? 50,
   };
 }
 
@@ -94,6 +105,13 @@ export default function ParametresBadgeuse({ canWrite }) {
         regularisation_delai_jours: parseInt(form.regularisation_delai_jours, 10),
         supervision_silence_minutes: parseInt(form.supervision_silence_minutes, 10),
         supervision_alerte_emails: String(form.supervision_alerte_emails || '').trim(),
+        // Champ vidé par l'utilisateur → on renvoie le plafond courant plutôt
+        // qu'un NaN : une limite de téléversement illisible en base finirait en
+        // repli silencieux sur le défaut, avec un écran qui affiche autre chose
+        // que ce qui s'applique.
+        media_upload_max_mo: Number.isFinite(parseInt(form.media_upload_max_mo, 10))
+          ? Math.min(500, Math.max(1, parseInt(form.media_upload_max_mo, 10)))
+          : (raw?.parametres?.media_upload_max_mo ?? 50),
       };
       const res = await api.put('/badgeuse/parametres', payload);
       setRaw(res.data || raw);
@@ -201,8 +219,15 @@ export default function ParametresBadgeuse({ canWrite }) {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Anti-rebond (s)</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Anti-rebond — badge présenté deux fois (s)</label>
             <input type="number" min={1} step={1} value={form.anti_rebond_sec} onChange={(e) => set('anti_rebond_sec', e.target.value)} disabled={disabled} className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
+            <p className="text-[11px] text-slate-400 mt-1">
+              {dureeLisible(form.anti_rebond_sec)}. Pendant ce délai, représenter le même badge n'ajoute pas de pointage :
+              l'écran affiche « Badge déjà enregistré, il y a X minutes ». Recommandation : 300 s (5 min) — en dessous,
+              un salarié qui doute et rebadge crée un second pointage qui casse sa journée.
+              <strong> En contrepartie, un aller-retour plus court que ce délai n'est pas compté</strong> (le passage est
+              annoncé à l'écran, jamais avalé en silence) : à régulariser par une correction si le cas se présente.
+            </p>
           </div>
 
           <div>
@@ -218,7 +243,7 @@ export default function ParametresBadgeuse({ canWrite }) {
             gestion RH : ils ne sont pas soumis à l'arbitrage de la Direction,
             mais ils ne doivent pas non plus rester codés en dur (QA-11). */}
         <div className="mt-5 pt-4 border-t border-slate-100">
-          <h4 className="text-sm font-semibold text-slate-700 mb-3">Supervision des postes (exploitation)</h4>
+          <h4 className="text-sm font-semibold text-slate-700 mb-3">Postes et écran d'information (exploitation)</h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Seuil de silence d'un poste (min)</label>
@@ -237,6 +262,16 @@ export default function ParametresBadgeuse({ canWrite }) {
                 className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
               <p className="text-[11px] text-slate-400 mt-1">
                 Vide : l'alerte part aux administrateurs de SOLIDATA. Au plus un e-mail par poste toutes les 6 heures.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Taille maximale d'un média d'affichage (Mo)</label>
+              <input type="number" min={1} max={500} step={1} value={form.media_upload_max_mo}
+                onChange={(e) => set('media_upload_max_mo', e.target.value)} disabled={disabled}
+                className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Plafond des images et vidéos téléversées dans l'onglet Affichage. <strong>Ne dépassez pas 50 Mo</strong> sans avoir
+                relevé <code>client_max_body_size</code> côté serveur web : au-delà, l'envoi serait coupé en cours de route.
               </p>
             </div>
           </div>

@@ -32,7 +32,7 @@ autonome : l'arbitrage de la Direction (NOTE_RH §3, colonne « Décision » ☐
    | `badgeuse.plage_acceptation` | `05:00-21:00` | NOTE_RH §3 (la spec §5.4 disait 05:00–22:00 ; la note RH, plus récente et plus restrictive, fait foi) |
    | `badgeuse.affichage_cumul_hebdo` | `false` | NOTE_RH §3 + AFF-02 + note juridique §3.5 (« recommandation : interdire ») |
    | `badgeuse.overlay_duree_sec` | `5` | AFF-01 (plafonné 3–8 s, plafond 8 s **codé en dur** car exigence juridique, pas règle de gestion) |
-   | `badgeuse.anti_rebond_sec` | `8` | PST-02 |
+   | `badgeuse.anti_rebond_sec` | `300` | PST-02 |
    | `badgeuse.regularisation_delai_jours` | `5` | NOTE_RH §5.1 (signalement sous 5 jours ouvrés) |
 
 3. **Le back-office affiche un bandeau « Règles par défaut — à faire arbitrer par la Direction »**
@@ -72,6 +72,42 @@ dans la limite « défauts = recommandations RH écrites, jamais de règle inven
    délai de signalement.
 5. **QA-11 — seuil de silence de supervision paramétré** :
    `badgeuse.supervision_silence_minutes`, défaut `15` (BO-09).
+
+## Addendum — anti-rebond porté à 5 minutes (retour d'exploitation, août 2026)
+
+**Constat.** « Un utilisateur qui badge plusieurs fois n'a pas de message d'erreur. »
+Reproduit : à 8 s de fenêtre, une seconde présentation 30 s plus tard était **acceptée**.
+Il n'y avait donc aucun message parce qu'il n'y avait, du point de vue du poste, aucun
+rebond — mais un second pointage bien réel partait au serveur. Le sens étant alterné, la
+journée se refermait sur une paire de quelques secondes et le vrai départ du soir devenait
+une entrée orpheline : plusieurs heures disparaissaient de la feuille de temps, à
+régulariser à la main.
+
+**Cause.** 8 s ne couvre que le rebond **matériel** du lecteur. Le geste qui pose problème
+en atelier est **humain** : on doute que le badge ait été pris, on le représente.
+
+**Décision.** `badgeuse.anti_rebond_sec` passe de `8` à `300` (5 min) — valeur demandée par
+l'exploitation. Elle **reste une règle de gestion arbitrable** : elle vit dans `settings`,
+s'édite dans l'écran Paramètres, descend au poste par `GET /config`, et son enregistrement
+vaut arbitrage de la grille. Rien n'est codé en dur ; `DEFAULT_WINDOW_SEC` côté poste n'est
+qu'un repli tant que la configuration n'est pas reçue.
+
+**Contrepartie, assumée et rendue visible.** Un aller-retour réel plus court que la fenêtre
+(sortir et revenir en 3 minutes) n'est pas compté. Deux garde-fous :
+
+1. le refus n'est **jamais muet** — l'écran affiche « Badge déjà enregistré », l'ancienneté
+   du pointage retenu (« il y a 3 minutes ») et « Ce passage ne compte pas une seconde
+   fois » ; la personne sait immédiatement qu'elle doit voir son encadrant si c'était un
+   vrai passage ;
+2. la voie de rattrapage existe déjà : correction additive motivée (NOTE_RH §5.1).
+
+La Direction peut abaisser la valeur si l'exploitation constate trop d'allers-retours
+courts ; l'écran Paramètres expose le compromis en toutes lettres.
+
+**Effet de bord traité.** L'oubli des badges en mémoire du poste était borné par l'ancienneté
+(4 × la fenêtre) : à 300 s l'horizon passe à 20 minutes, insuffisant pour garantir la borne
+si un exploitant règle une fenêtre très large. Un plafond dur de 512 entrées a été ajouté
+(`debounce.py`), testé.
 
 ## Conséquences
 

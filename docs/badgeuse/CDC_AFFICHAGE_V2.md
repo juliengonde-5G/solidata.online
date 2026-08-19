@@ -34,7 +34,9 @@ Aucune date de naissance, aucun statut, aucune donnée de parcours ne transite.
 ## 2. Écran de veille — playlist enrichie
 
 Types de contenus existants conservés (`message`, `image`, `planning`,
-`compte_a_rebours`, `meteo`) + nouveaux types :
+`compte_a_rebours`) + nouveaux types. **`meteo` a changé de nature** (août 2026,
+ADR-0006) : c'était un texte libre qui n'affichait rien, c'est désormais un
+générateur servi par le serveur — voir la ligne correspondante.
 
 | Type | Contenu (généré CÔTÉ SERVEUR à la construction de la playlist) | Règles |
 |---|---|---|
@@ -45,6 +47,8 @@ Types de contenus existants conservés (`message`, `image`, `planning`,
 | `media` | Image ou vidéo **téléversée** dans SOLIDATA (multer, pattern Refashion) | Le poste télécharge et sert en local (CSP `'self'` intacte, hors-ligne préservé) |
 | `lien` | Lien partagé par un utilisateur : le SERVEUR télécharge le contenu (image/vidéo, https, liste blanche de types, taille max, garde anti-SSRF) et le transforme en média | Le poste ne fetch JAMAIS un domaine externe |
 | `vak_live` | Écran promotionnel VAK (voir §3) | Injecté automatiquement les jours de VAK |
+| `meteo` | Météo du **lieu du poste** : jour courant (température, libellé WMO, min, pluie, vent) + prévision courte. Source Open-Meteo via `utils/weather.js`, **rapatriée par le serveur** (job `syncBadgeuseMeteo`, cache `badgeuse_meteo`) | Lieu en cascade : coordonnées du **site** → réglages `badgeuse.meteo_*` → rien. Sans relevé du jour, l'écran est **omis** ; un texte saisi à la main reste affiché (ADR-0006 §5) |
+| `presse` | Actualité **nationale** par flux RSS paramétrables (`badgeuse.presse_flux`, défaut franceinfo « à la une ») : **un écran PAR article** — titre, chapô, source, date, vignette | Flux lus par le SERVEUR (gardes anti-SSRF), vignettes téléchargées puis servies par l'API device. **Vidéo de presse NON rediffusée par défaut** — question de droits posée à la Direction (ADR-0006 §4) |
 
 Diffusion des médias : nouvel endpoint device `GET /devices/:code/media/:id`
 (clé device), cache local de l'agent dans `/var/lib/badgeuse/media/` (plafond
@@ -76,9 +80,41 @@ et libellé de l'événement — aucune donnée personnelle, vocation visiteurs.
 - **Opt-in festif** : dans l'onglet Badges, par salarié — case « Affichage
   anniversaires accepté » + date de recueil tracée (`rgpd_audit_log`).
 
+## 4bis. Identité de l'association sur tous les écrans (août 2026)
+
+**Demande.** « Rajoute le logo de l'association sur tous les écrans. »
+
+**Réalisation.** Le logo de Solidarité Textiles figure sur **l'écran de veille**
+(bandeau haut, à gauche du libellé « Pointage » — présent quelle que soit la
+catégorie diffusée : message, annonces, actus, tournées, compte à rebours,
+météo, social, média, lien, VAK) **et sur l'écran de badgeage** (overlay :
+succès, festif, badge non reconnu, anti-rebond), en signature discrète dans le
+coin bas-gauche.
+
+**Contraintes respectées.**
+
+- **Aucun domaine externe.** Le fichier est servi par l'agent depuis
+  `badgeuse/ui/assets/logo-solidarite-textiles.png` : la CSP du kiosque reste
+  `default-src 'none'` avec `img-src 'self'`. Charger le logo depuis
+  `solidata.online` aurait été une ressource distante, donc bloquée — et une
+  dépendance réseau sur un écran qui doit fonctionner hors ligne.
+- **Jamais devant l'information.** Sur l'overlay, le logo est en `z-index`
+  inférieur à la carte : si un message long fait grandir celle-ci, le logo
+  passe **derrière**. Le prénom et le message principal ne peuvent pas être
+  masqués (AFF-03). Deux tests verrouillent ce point (présence sur les deux
+  écrans, et ordre d'empilement).
+- **Lisible sur fond sombre.** L'exemplaire du kiosque est recadré sur le bloc
+  de marque : la baseline « Association d'insertion par la valorisation… » est
+  imprimée en gris foncé, illisible sur le fond `#0f172a` et de toute façon
+  indéchiffrable à la taille d'affichage. Fichier réduit à 256 px de large
+  (21,6 Ko contre 301 Ko pour l'original) — un poste embarqué n'a pas à décoder
+  une image de 2 290 px pour l'afficher en 60.
+- **Aucune donnée personnelle** n'est ajoutée à l'écran par ce changement.
+
 ## 5. Hors périmètre V1 (documenté, pas silencieux)
 
-Stories vidéo Instagram (API Meta contraignante, V2) ; carte temps réel des véhicules
+Stories vidéo Instagram (API Meta contraignante, V2) ; **rediffusion des vidéos de
+presse** (droits d'auteur : le mécanisme est livré mais désactivé, ADR-0006 §4) ; carte temps réel des véhicules
 sur le kiosque (liste de progression en V1) ; nom complet, phrase PCM, rappels de
 RDV à l'écran (ADR-0004 — voie d'arbitrage décrite) ; tout contenu nécessitant un
 fetch externe par le poste (interdit par conception).

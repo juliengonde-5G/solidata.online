@@ -6,13 +6,17 @@
  * `.single('fichier')` côté serveur), même jeu de métadonnées que les autres
  * contenus (titre/duree_sec/ordre/fenêtre/actif).
  */
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { UploadCloud, Image as ImageIcon, Video } from 'lucide-react';
 import api from '../../services/api';
 import { Modal, useToast } from '../../components';
-import { apiErr } from './badgeuseShared';
+import { uploadErr } from './badgeuseShared';
 
-const MAX_MO = 100;
+// Plafond de REPLI, utilisé seulement tant que le serveur n'a pas répondu.
+// Le chiffre qui fait foi vient de `GET /badgeuse/contenus/upload-limites` :
+// une constante figée ici avait fini par annoncer 100 Mo alors que la chaîne
+// n'en laissait passer que 50, et l'envoi mourait sans message lisible.
+const MAX_MO_REPLI = 50;
 // Liste blanche exacte du serveur (utils/upload-filters.js `mediaFilter`) —
 // ni SVG ni HTML (formats exécutables côté navigateur, cf. T1.1).
 const ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.mp4,.webm,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm';
@@ -29,6 +33,20 @@ export default function UploadMediaModal({ open, onClose, onUploaded }) {
   const [progress, setProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
+  const [maxMo, setMaxMo] = useState(MAX_MO_REPLI);
+
+  // Le plafond est demandé à l'ouverture : il est paramétrable côté serveur
+  // (`badgeuse.media_upload_max_mo`) et l'écran doit annoncer la valeur réelle,
+  // pas une valeur de compilation.
+  const chargerLimites = useCallback(() => {
+    api.get('/badgeuse/contenus/upload-limites')
+      .then((r) => {
+        const n = Number(r?.data?.max_mo);
+        if (Number.isFinite(n) && n >= 1) setMaxMo(n);
+      })
+      .catch(() => { /* repli conservateur : on garde MAX_MO_REPLI */ });
+  }, []);
+  useEffect(() => { if (open) chargerLimites(); }, [open, chargerLimites]);
 
   const reset = () => { setFile(null); setForm(emptyForm()); setProgress(0); setError(null); };
   const close = () => { if (uploading) return; reset(); onClose(); };
@@ -36,8 +54,10 @@ export default function UploadMediaModal({ open, onClose, onUploaded }) {
   const pickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > MAX_MO * 1024 * 1024) {
-      setError(`Fichier trop volumineux (max ${MAX_MO} Mo).`);
+    if (f.size > maxMo * 1024 * 1024) {
+      // Refus IMMÉDIAT et explicite : inutile de faire monter une barre de
+      // progression pendant plusieurs minutes pour un envoi condamné d'avance.
+      setError(`Fichier trop volumineux : ${(f.size / (1024 * 1024)).toFixed(1)} Mo pour un maximum de ${maxMo} Mo. Compressez la vidéo ou raccourcissez-la.`);
       e.target.value = '';
       return;
     }
@@ -71,7 +91,7 @@ export default function UploadMediaModal({ open, onClose, onUploaded }) {
       reset();
       onUploaded();
     } catch (err) {
-      setError(apiErr(err, "Échec de l'envoi du média."));
+      setError(uploadErr(err, maxMo, file.size / (1024 * 1024)));
       setUploading(false);
     }
   };
@@ -88,7 +108,7 @@ export default function UploadMediaModal({ open, onClose, onUploaded }) {
         {error && <div role="alert" className="text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{error}</div>}
 
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Fichier (image ou vidéo, max {MAX_MO} Mo)</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Fichier (image ou vidéo, max {maxMo} Mo)</label>
           <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading}
             className="w-full border-2 border-dashed border-slate-300 rounded-lg py-6 flex flex-col items-center gap-2 text-slate-500 hover:border-teal-400 hover:text-teal-600 disabled:opacity-50">
             {file ? (file.type.startsWith('video') ? <Video className="w-6 h-6" /> : <ImageIcon className="w-6 h-6" />) : <UploadCloud className="w-6 h-6" />}

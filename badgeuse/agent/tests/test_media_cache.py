@@ -470,3 +470,65 @@ def test_liste_de_valeurs_non_objets_ignoree():
     assert references_playlist([element_tags]) == set()
     [rendu] = appliquer_urls_locales([element_tags], disponibles=[], port=8766)
     assert rendu["tags"] == ["a", "b"]
+
+
+# ------------------------------------------- ecran de veille : presse (v1.5)
+#
+# L'ecran de presse nationale (ADR-0006) sert UN ARTICLE PAR ELEMENT, avec sa
+# vignette referencee au PREMIER NIVEAU de l'element (comme un `media`). Ces
+# tests fixent le contrat cote poste : la vignette est bien reclamee au
+# serveur, servie depuis le cache LOCAL, et un article sans vignette reste un
+# ecran valable. Sans eux, un changement de forme cote serveur ne se verrait
+# qu'a l'ecran, en salle.
+
+PLAYLIST_PRESSE = [
+    {
+        "id": 4,
+        "type": "presse",
+        "media_id": "p12",
+        "media_type": "image",
+        "media_sha256": EMPREINTE,
+        "article": {"titre": "Article A", "chapo": "Chapo A", "source": "franceinfo"},
+    },
+    {
+        "id": 4,
+        "type": "presse",
+        "article": {"titre": "Article B", "chapo": "Chapo B", "source": "franceinfo"},
+    },
+]
+
+
+def test_presse_la_vignette_est_reclamee_au_serveur():
+    attendus = manquants(PLAYLIST_PRESSE, presents=[])
+    assert [d["media_id"] for d in attendus] == ["p12"]
+    assert attendus[0]["media_type"] == "image"
+
+
+def test_presse_vignette_en_cache_servie_en_local():
+    nom = nom_cache("p12", EMPREINTE)
+    [avec, sans] = appliquer_urls_locales(PLAYLIST_PRESSE, disponibles=[nom], port=8080)
+    assert avec["media_url"] == local_media_url(8080, nom)
+    assert avec["media_pret"] is True
+    # L'article sans vignette n'est pas touche : il reste un ecran valable.
+    assert "media_url" not in sans
+    assert sans["article"]["titre"] == "Article B"
+
+
+def test_presse_vignette_absente_du_cache_annule_l_url():
+    [avec, _] = appliquer_urls_locales(PLAYLIST_PRESSE, disponibles=[], port=8080)
+    assert avec["media_url"] is None
+    assert avec["media_pret"] is False
+
+
+def test_presse_une_url_distante_est_toujours_ecrasee():
+    # Le poste ne joint JAMAIS un site de presse (ADR-0004 §6) : meme si le
+    # serveur envoyait l'adresse d'origine, elle est remplacee.
+    element = dict(PLAYLIST_PRESSE[0], media_url="https://www.francetvinfo.fr/img/1.jpg")
+    [sortie] = appliquer_urls_locales([element], disponibles=[], port=8080)
+    assert sortie["media_url"] is None
+
+
+def test_presse_la_vignette_protege_son_fichier_de_la_purge():
+    nom = nom_cache("p12", EMPREINTE)
+    fichiers = [FichierCache(nom=nom, taille_octets=1000, horodatage=1.0)]
+    assert purger_non_references(fichiers, references_playlist(PLAYLIST_PRESSE)) == []
