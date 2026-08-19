@@ -260,7 +260,13 @@ export default function FeuillesTemps({ canValidateEncadrant, canValidateRh, can
       .then((r) => {
         const d = r.data;
         const list = Array.isArray(d) ? d : (d.feuilles || d.rows || d.items || []);
-        setRows([...list].sort(compareByName));
+        // Le contrat renvoie `nom` déjà formaté « NOM Prénom » (et non
+        // last_name/first_name) : `compareByName` y était structurellement
+        // aveugle, donc inopérant. Le tri retombe sur `nom` — même ordre que
+        // le ORDER BY UPPER(last_name), UPPER(first_name) du serveur.
+        setRows([...list].sort((a, b) => (a?.last_name || b?.last_name
+          ? compareByName(a, b)
+          : String(a?.nom || '').localeCompare(String(b?.nom || ''), 'fr', { sensitivity: 'base' }))));
         setError(null);
       })
       .catch((err) => setError(apiErr(err, 'Chargement des feuilles de temps impossible.')))

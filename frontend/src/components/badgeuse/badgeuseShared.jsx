@@ -253,7 +253,14 @@ export function formatEmployeeName(last, first) {
   return [l, f].filter(Boolean).join(' ');
 }
 export function employeeName(row, prefix = 'employee') {
-  const direct = row?.[`${prefix}_nom`] || row?.[`${prefix}_name`];
+  // Le contrat back-office du module (routes/badgeuse.js) joint le nom déjà
+  // formaté sous la clé `nom` — PAS `employee_nom`. Sans ce repli, TOUS les
+  // écrans du module (Journal, Feuilles de temps, Anomalies, Badges) tombaient
+  // sur la branche de dernier recours et affichaient « Salarié #7 » à la place
+  // de « DURAND Amel ». Les variantes préfixées restent lues en premier pour
+  // les lignes qui portent plusieurs personnes (auteur, encadrant…).
+  const direct = row?.[`${prefix}_nom`] || row?.[`${prefix}_name`]
+    || (prefix === 'employee' ? row?.nom : undefined);
   if (direct) return direct;
   const last = row?.[`${prefix}_last_name`] ?? (prefix === 'employee' ? row?.last_name : undefined);
   const first = row?.[`${prefix}_first_name`] ?? (prefix === 'employee' ? row?.first_name : undefined);

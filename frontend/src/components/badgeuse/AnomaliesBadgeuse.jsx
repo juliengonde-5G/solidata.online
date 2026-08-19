@@ -2,15 +2,39 @@ import { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, Clock, Ban, UserCog, Wrench, RefreshCw } from 'lucide-react';
 import api from '../../services/api';
 import { LoadingSpinner, ErrorState } from '../../components';
-import { apiErr, fmtDateParis, employeeName, offsetDaysISO, todayISO } from './badgeuseShared';
+import { apiErr, fmtDateParis, employeeName, offsetDaysISO, todayISO, ORPHELIN_RAISON_LABELS } from './badgeuseShared';
 
-// Les 4 familles d'anomalies détectées côté serveur (BO-05).
+// Types d'anomalies RÉELLEMENT émis par le moteur (services/badgeuse-engine.js :
+// `pairEvents`, `computeDay`, `detectAnomalies`). Cette table était désalignée :
+// elle attendait `journee_max` et `hors_plage`, deux clés que le serveur
+// n'émet JAMAIS — les deux cartes correspondantes affichaient donc un « 0 »
+// permanent (une journée de 12 h existait, la carte disait zéro), tandis que
+// quatre types réels n'avaient aucun libellé et s'affichaient en clé technique
+// (« sortie_sans_entree ») dans une interface censée être en français.
+// Le serveur signale le hors-plage comme un ORPHELIN dont le `detail` vaut
+// `hors_plage` : il se compte donc sur le détail, pas sur le type.
 const TYPE_META = {
   oubli_sortie: { label: 'Oubli de sortie', icon: Clock, tone: 'amber' },
-  journee_max: { label: 'Journée > seuil', icon: AlertTriangle, tone: 'red' },
-  hors_plage: { label: 'Pointage hors plage', icon: Ban, tone: 'red' },
+  journee_longue: { label: 'Journée > seuil', icon: AlertTriangle, tone: 'red' },
+  sortie_sans_entree: { label: 'Sortie sans entrée', icon: AlertTriangle, tone: 'red' },
+  sequence_impaire: { label: 'Entrée sans sortie précédente', icon: AlertTriangle, tone: 'amber' },
+  sens_indetermine: { label: 'Sens à trancher', icon: AlertTriangle, tone: 'amber' },
+  double_pointage: { label: 'Double pointage (rebond)', icon: Clock, tone: 'slate' },
+  pointages_incomplets: { label: 'Pointages incomplets', icon: Wrench, tone: 'amber' },
   orphelin: { label: 'Badge orphelin', icon: UserCog, tone: 'slate' },
 };
+
+// Cartes de synthèse : cinq familles, toutes réellement alimentées. « Hors
+// plage » est un sous-ensemble des orphelins (compté sur le détail) — il garde
+// sa carte parce que c'est le signal d'un poste dont l'horloge dérive ou d'une
+// plage mal réglée, que l'exploitant doit voir tout de suite.
+const CARTES = [
+  { cle: 'oubli_sortie', label: 'Oubli de sortie', icon: Clock, tone: 'amber' },
+  { cle: 'journee_longue', label: 'Journée > seuil', icon: AlertTriangle, tone: 'red' },
+  { cle: 'pointages_incomplets', label: 'Pointages incomplets', icon: Wrench, tone: 'amber' },
+  { cle: 'hors_plage', label: 'Pointage hors plage', icon: Ban, tone: 'red', detail: 'hors_plage', type: 'orphelin' },
+  { cle: 'orphelin', label: 'Badge orphelin', icon: UserCog, tone: 'slate' },
+];
 const TONE_CLASSES = {
   amber: 'bg-amber-50 text-amber-700 border-amber-100',
   red: 'bg-red-50 text-red-700 border-red-100',
@@ -43,8 +67,15 @@ export default function AnomaliesBadgeuse({ onCorrigerAnomalie }) {
   const anomalies = Array.isArray(data?.anomalies) ? data.anomalies
     : (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
 
-  // Compte par type — préfère la synthèse serveur, sinon dérive de la liste.
-  const countFor = (type) => synthese[type] ?? anomalies.filter((a) => a.type === type).length;
+  // Compte d'une carte — préfère la synthèse serveur si elle porte la clé,
+  // sinon dérive de la liste (par type, ou par type + détail pour le hors-plage).
+  const countFor = (carte) => {
+    if (synthese[carte.cle] != null) return synthese[carte.cle];
+    const type = carte.type || carte.cle;
+    return anomalies.filter(
+      (a) => a.type === type && (!carte.detail || a.detail === carte.detail)
+    ).length;
+  };
 
   return (
     <div className="space-y-5">
@@ -67,13 +98,13 @@ export default function AnomaliesBadgeuse({ onCorrigerAnomalie }) {
       {loading ? <LoadingSpinner size="lg" message="Chargement des anomalies…" /> : (
         <>
           {/* Cartes de synthèse par type */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {Object.entries(TYPE_META).map(([type, meta]) => {
-              const Icon = meta.icon;
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            {CARTES.map((carte) => {
+              const Icon = carte.icon;
               return (
-                <div key={type} className={`rounded-xl border p-4 ${TONE_CLASSES[meta.tone]}`}>
-                  <div className="flex items-center gap-2 text-xs font-medium opacity-80"><Icon className="w-4 h-4" />{meta.label}</div>
-                  <div className="mt-1 text-2xl font-bold">{countFor(type)}</div>
+                <div key={carte.cle} className={`rounded-xl border p-4 ${TONE_CLASSES[carte.tone]}`}>
+                  <div className="flex items-center gap-2 text-xs font-medium opacity-80"><Icon className="w-4 h-4" />{carte.label}</div>
+                  <div className="mt-1 text-2xl font-bold">{countFor(carte)}</div>
                 </div>
               );
             })}
@@ -110,7 +141,12 @@ export default function AnomaliesBadgeuse({ onCorrigerAnomalie }) {
                           </td>
                           <td className="py-2 px-2 text-slate-700">{a.employee_id != null ? employeeName(a) : <span className="text-slate-400">— (badge non rattaché)</span>}</td>
                           <td className="py-2 px-2 whitespace-nowrap text-slate-600">{date || '—'}</td>
-                          <td className="py-2 px-2 text-slate-500">{a.detail || a.message || a.description || '—'}</td>
+                          {/* Le détail d'un orphelin est une RAISON codée
+                              (`badge_inconnu`, `hors_plage`) : elle se lit en
+                              français, jamais en clé technique. */}
+                          <td className="py-2 px-2 text-slate-500">
+                            {ORPHELIN_RAISON_LABELS[a.detail] || a.detail || a.message || a.description || '—'}
+                          </td>
                           <td className="py-2 px-2 text-right">
                             {a.type === 'orphelin' ? (
                               <button onClick={() => onCorrigerAnomalie?.()} className="text-xs font-medium text-teal-700 hover:text-teal-900 inline-flex items-center gap-1">

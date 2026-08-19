@@ -665,7 +665,12 @@ function detectAnomalies(days, params = {}, options = {}) {
   }
   for (const o of options.orphelins || []) {
     out.push({
-      employee_id: null,
+      // Un orphelin `badge_inconnu` n'a pas de salarié ; un orphelin
+      // `hors_plage` en a un (le badge était reconnu). On restitue ce que
+      // l'appelant sait, sans jamais le deviner : l'écran doit pouvoir dire
+      // « MARCHAND Sophie — hors plage » plutôt que « badge non rattaché »,
+      // qui serait faux.
+      employee_id: o.employee_id == null ? null : Number(o.employee_id),
       date: o.horodatage_utc ? parisDateStr(o.horodatage_utc) : null,
       type: 'orphelin',
       severite: 'alerte',

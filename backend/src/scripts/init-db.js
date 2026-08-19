@@ -1866,16 +1866,12 @@ async function initDatabase() {
         ALTER TABLE tour_cav ADD COLUMN remballe BOOLEAN DEFAULT false;
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
-    await client.query(`
-      DO $$ BEGIN
-        ALTER TABLE tour_association_point ADD COLUMN remballe BOOLEAN DEFAULT false;
-      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-    `);
-    await client.query(`
-      DO $$ BEGIN
-        ALTER TABLE tour_association_point ADD COLUMN photo_path VARCHAR(500);
-      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-    `);
+    // NB : les colonnes homologues de tour_association_point sont ajoutees PLUS
+    // BAS, apres le CREATE TABLE de cette table — deux DO blocks places ici les
+    // ajoutaient AVANT sa creation : sur une base NEUVE, undefined_table (non
+    // rattrape par duplicate_column) annulait TOUTE la transaction et la
+    // reconstruction from scratch echouait (regression du correctif 2.7.0,
+    // constatee par execution reelle : 0 table creee).
 
     // Vague 1 (item 45) — checklist véhicule : persister les remarques/anomalies
     // saisies par le chauffeur au départ. Le champ `notes` était envoyé par le
@@ -4704,6 +4700,14 @@ async function initDatabase() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_tour_assoc_tour ON tour_association_point(tour_id);');
     await client.query(`
       ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS planned_passage_time TIMESTAMP;
+    `);
+    // Mobile collecte : remballe + photo d'audit (cf. commentaire vers tour_cav
+    // plus haut). Places ICI, apres le CREATE TABLE — jamais avant.
+    await client.query(`
+      ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS remballe BOOLEAN DEFAULT false;
+    `);
+    await client.query(`
+      ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS photo_path VARCHAR(500);
     `);
 
     // Route standard association (jonction route ↔ points association)
