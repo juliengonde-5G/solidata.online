@@ -245,6 +245,31 @@ describe('syncPresseArticles', () => {
     expect(appels.some((u) => u.includes('99881.jpg'))).toBe(false);
   });
 
+  test('la vignette est rapatriée dans le sous-dossier `presse/` — pas à la racine', async () => {
+    // Ce n'est pas un détail de rangement : la purge des médias orphelins ne
+    // balaie que les dossiers qu'elle connaît. Une vignette posée à la racine
+    // et référencée par une table qu'elle ignorait serait effacée sous 24 h,
+    // et l'écran de presse perdrait ses images en silence.
+    installMocks({ settings: REGLAGES });
+    globalThis.fetch = jest.fn()
+      .mockResolvedValueOnce(reponse(FLUX_RSS))
+      .mockResolvedValueOnce({                       // la vignette du 1er article
+        ok: true, status: 200,
+        headers: { get: (k) => (String(k).toLowerCase() === 'content-type' ? 'image/jpeg' : null) },
+        body: null,
+        arrayBuffer: async () => Buffer.from('jpeg'),
+      });
+
+    const bilan = await media.syncPresseArticles();
+    expect(bilan.vignettes).toBe(1);
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_presse_articles/.test(String(c[0])));
+    const fichier = insert[1][7];
+    expect(fichier).toMatch(/^presse\//);
+    expect(insert[1][8]).toMatch(/^[0-9a-f]{64}$/);   // empreinte vérifiable par le poste
+    expect(insert[1][9]).toBe('image');
+    media.unlinkMedia(fichier);
+  });
+
   test('flux injoignable : signalé, RIEN n\'est supprimé (l\'écran garde le dernier état)', async () => {
     installMocks({ settings: REGLAGES });
     globalThis.fetch = jest.fn(async () => { throw new Error('ECONNREFUSED'); });

@@ -102,6 +102,26 @@ describe('badgeusePurgeRetention — dry-run (BO-10)', () => {
   });
 });
 
+describe('badgeusePurgeRetention — presse (ADR-0006, hygiène de disque)', () => {
+  test('les articles de presse expirés sont purgés, sur leur date de publication', async () => {
+    const r = await badgeusePurgeRetention({ dryRun: true });
+    expect(r).toHaveProperty('presse_articles');
+    const c = sqlFor('badgeuse_presse_articles')[0];
+    expect(c).toBeDefined();
+    expect(c.sql).toMatch(/COALESCE\(publie_le, sync_le\) < NOW\(\)/);
+    expect(c.params).toEqual(['15']);        // défaut documenté, en JOURS
+  });
+
+  test('les vignettes de presse sont RÉFÉRENCÉES : le ménage des orphelins ne les efface pas', async () => {
+    // Sans cette lecture, un fichier de `presse/` serait « orphelin » aux yeux
+    // de la purge et disparaîtrait 24 h après son téléchargement — l'écran de
+    // presse perdrait ses images sans que rien ne le signale.
+    await badgeusePurgeRetention({ dryRun: true });
+    const lectures = mockQuery.mock.calls.map((c) => String(c[0]));
+    expect(lectures.some((x) => /SELECT media_fichier FROM badgeuse_presse_articles WHERE media_fichier IS NOT NULL/.test(x))).toBe(true);
+  });
+});
+
 describe('badgeusePurgeRetention — clauses de sélection', () => {
   test('les pointages sont purgés sur leur horodatage, en MOIS', async () => {
     await badgeusePurgeRetention({ dryRun: true });
