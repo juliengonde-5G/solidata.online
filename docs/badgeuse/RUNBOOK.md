@@ -383,6 +383,23 @@ systemctl is-active badgeuse-agent
 
 ## 2. Arbres de décision pannes
 
+### 2.0 Diagnostic en une commande (à faire en premier)
+
+Avant de dérouler les arbres ci-dessous, lancer le diagnostic. Il **ne modifie rien**,
+rassemble tout en une passe et nomme la cause :
+
+```bash
+sudo bash /opt/badgeuse/deploy/diagnostic.sh
+```
+
+Il contrôle : redémarrages réels et alimentation, état des deux services, occupation de
+`tty1`, présence effective du navigateur et du compositeur, **commande réellement lancée
+par systemd** (un binaire absent = écran noir muet), accessibilité de l'interface locale,
+état de la sortie HDMI et plage d'allumage, puis les journaux. Il termine par un
+**verdict** listant les causes probables avec, pour chacune, la commande de correction.
+
+Sa sortie complète est ce qu'il faut transmettre quand on demande de l'aide.
+
 ### 2.1 « L'écran est noir »
 
 1. **Regarder l'heure.** Le poste est-il dans sa plage d'allumage (ex. 05:30–21:30, définie en §1.5) ? Si non → **c'est normal**, l'écran s'éteint automatiquement en dehors des horaires d'ouverture. Rien à faire, il se rallumera seul.
