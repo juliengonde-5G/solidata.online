@@ -113,6 +113,30 @@ describe('MINIMISATION — exigences NOTE_JURIDIQUE §3.4 portées par le schém
   });
 });
 
+describe('APPAIRAGE PAR CODE COURT (ADR-0005)', () => {
+  test('les deux colonnes sont ajoutées en migration IDEMPOTENTE', () => {
+    // Elles arrivent sur des bases DÉJÀ déployées : un CREATE TABLE IF NOT
+    // EXISTS ne re-colonne jamais une table existante.
+    const section = sectionBadgeuse();
+    expect(section).toMatch(/ALTER TABLE badgeuse_devices ADD COLUMN IF NOT EXISTS appairage_code_hash VARCHAR\(64\)/);
+    expect(section).toMatch(/ALTER TABLE badgeuse_devices ADD COLUMN IF NOT EXISTS appairage_expire_le TIMESTAMPTZ/);
+  });
+
+  test('le code n\'est stocké QUE sous forme de condensat — jamais en clair', () => {
+    // Un `appairage_code VARCHAR(8)` en base ferait du secret de mise en
+    // service une donnée au repos, lisible par toute sauvegarde.
+    const section = sectionBadgeuse().replace(/\/\/[^\n]*/g, '');
+    expect(section).not.toMatch(/appairage_code\s+VARCHAR/);
+    expect(section).not.toMatch(/appairage_code_clair|code_appairage\s+VARCHAR/);
+    // La colonne porte la largeur d'un SHA-256 hex, pas celle d'un code court.
+    expect(section).toMatch(/appairage_code_hash VARCHAR\(64\)/);
+  });
+
+  test('l\'échéance est un TIMESTAMPTZ : un code sans expiration est exclu par le schéma', () => {
+    expect(sectionBadgeuse()).toMatch(/appairage_expire_le TIMESTAMPTZ/);
+  });
+});
+
 describe('INALTÉRABILITÉ et IDEMPOTENCE des pointages', () => {
   const body = () => tableBody('badgeuse_pointages');
 

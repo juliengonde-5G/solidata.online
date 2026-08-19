@@ -49,6 +49,7 @@ const {
 const {
   generateDeviceKey, hashDeviceKey, generateSiteKey, encryptSecret,
   canonicalPointage, genesisHash, chainHash,
+  generateAppairageCode, formatAppairageCode, hashAppairageCode,
 } = require('../utils/badgeuse-crypto');
 
 router.use(authenticate);
@@ -1890,6 +1891,138 @@ router.post('/devices/:id/regenerate-key', ADMIN_ONLY, [param('id').isInt()], va
   } catch (err) {
     console.error('[BADGEUSE] Erreur régénération clé :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * Émission d'un CODE D'APPAIRAGE court (ADR-0005). Remplace la recopie à la
+ * main de deux clés de 64 caractères hex sur le clavier d'un Raspberry — la
+ * première cause d'échec de mise en service observée.
+ *
+ * Le code est un SECRET COURT : il n'est stocké que sous forme de condensat
+ * SHA-256 (comme la clé device), il expire (`badgeuse.appairage_ttl_minutes`,
+ * défaut 15 min) et il est CONSOMMÉ à la première réclamation réussie. Émettre
+ * un nouveau code écrase le précédent : un seul code vit à la fois par poste.
+ *
+ * Le code en clair n'existe que dans cette réponse HTTP. Il n'est écrit NI en
+ * base, NI dans les journaux (un test le vérifie sur les sorties console).
+ */
+router.post('/devices/:id/code-appairage', ADMIN_ONLY, [param('id').isInt()], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const params = await readBadgeuseParams();
+    // Borné [1 min, 24 h] : un réglage aberrant en base ne doit ni produire un
+    // code déjà expiré, ni un secret quasi permanent (ADR-0005, alternative
+    // « code sans expiration » explicitement refusée).
+    const ttl = Math.min(1440, Math.max(1, Number(params.appairage_ttl_minutes) || 15));
+    const code = generateAppairageCode();
+
+    await client.query('BEGIN');
+    const upd = await client.query(
+      `UPDATE badgeuse_devices
+       SET appairage_code_hash = $2, appairage_expire_le = NOW() + make_interval(mins => $3::int)
+       WHERE id = $1
+       RETURNING id, code, libelle, site_id, cible, appairage_expire_le`,
+      [id, hashAppairageCode(code), ttl]
+    );
+    if (upd.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Poste introuvable' });
+    }
+    // Journalisation DANS la transaction : l'émission d'un secret de mise en
+    // service est un acte d'administration, il fait foi (pattern des actes
+    // probants du module — validation RH, exports).
+    await client.query(
+      'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+      [req.user.id, 'BADGEUSE_CODE_APPAIRAGE', 'badgeuse_devices', id,
+        JSON.stringify({
+          device_code: upd.rows[0].code,
+          ttl_minutes: ttl,
+          expire_le: upd.rows[0].appairage_expire_le,
+          requested_by: req.user.id,
+        })]
+    );
+    await client.query('COMMIT');
+
+    // Le poste et la fenêtre, JAMAIS le code.
+    console.log(`[BADGEUSE] Code d'appairage émis pour le poste ${upd.rows[0].code} (valable ${ttl} min)`);
+
+    res.json({
+      device: {
+        id: upd.rows[0].id, code: upd.rows[0].code, libelle: upd.rows[0].libelle,
+        site_id: upd.rows[0].site_id, cible: upd.rows[0].cible,
+      },
+      // Affiché UNE SEULE FOIS. Le tiret est une aide à la lecture : le poste
+      // accepte le code avec ou sans, en majuscules ou en minuscules.
+      code: formatAppairageCode(code),
+      expire_le: upd.rows[0].appairage_expire_le,
+      ttl_minutes: ttl,
+      avertissement: `Ce code est affiché une seule fois. Il est valable ${ttl} minutes et ne sert qu'une fois.`,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
+    console.error('[BADGEUSE] Erreur émission code d\'appairage :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * Suppression d'un poste (ADMIN). REFUSÉE dès qu'il a enregistré un pointage :
+ * un poste qui a compté des heures fait partie de la PISTE D'AUDIT. Sa
+ * disparition rendrait des pointages inexplicables (`device_id` passerait à
+ * NULL) et casserait la vérification de chaîne d'intégrité, qui s'ancre sur le
+ * CODE du poste. La bonne manœuvre est la désactivation (PATCH actif=false) :
+ * le poste cesse d'être accepté, ses heures restent lisibles.
+ */
+router.delete('/devices/:id', ADMIN_ONLY, [param('id').isInt()], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    await client.query('BEGIN');
+    const dev = await client.query(
+      'SELECT id, code, libelle, site_id FROM badgeuse_devices WHERE id = $1 FOR UPDATE',
+      [id]
+    );
+    if (dev.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Poste introuvable' });
+    }
+    const cnt = await client.query(
+      'SELECT COUNT(*)::int AS n FROM badgeuse_pointages WHERE device_id = $1',
+      [id]
+    );
+    const pointages = cnt.rows[0] ? Number(cnt.rows[0].n) : 0;
+    if (pointages > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Ce poste a enregistré ${pointages} pointage(s) : il appartient à la piste d'audit et ne peut pas être supprimé. Désactivez-le plutôt — il cessera d'accepter les dépôts et ses heures resteront consultables.`,
+        pointages,
+      });
+    }
+    await client.query('DELETE FROM badgeuse_devices WHERE id = $1', [id]);
+    await client.query(
+      'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+      [req.user.id, 'BADGEUSE_DEVICE_SUPPRESSION', 'badgeuse_devices', id,
+        JSON.stringify({
+          device_code: dev.rows[0].code,
+          libelle: dev.rows[0].libelle,
+          site_id: dev.rows[0].site_id,
+          pointages: 0,
+          requested_by: req.user.id,
+        })]
+    );
+    await client.query('COMMIT');
+    console.log(`[BADGEUSE] Poste ${dev.rows[0].code} supprimé (aucun pointage enregistré)`);
+    res.json({ supprime: true, device: dev.rows[0] });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
+    console.error('[BADGEUSE] Erreur suppression poste :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

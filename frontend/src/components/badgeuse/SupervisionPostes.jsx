@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import io from 'socket.io-client';
-import { Radio, Plus, KeyRound, ShieldCheck, RefreshCw, Copy, Check, Thermometer, Clock3, Database, ListOrdered, AlertTriangle } from 'lucide-react';
+import { Radio, Plus, KeyRound, ShieldCheck, RefreshCw, Copy, Check, Thermometer, Clock3, Database, ListOrdered, AlertTriangle, Hash, Trash2, Timer, PowerOff } from 'lucide-react';
 import api from '../../services/api';
 import { LoadingSpinner, ErrorState, EmptyState, Modal, ConfirmDialog } from '../../components';
 import { apiErr, fmtDepuis, CIBLE_DEVICE_LABELS, EnLigneBadge, isDeviceOnline } from './badgeuseShared';
@@ -180,6 +180,165 @@ function RegenererModal({ device, onClose, onDone }) {
   );
 }
 
+// ── Modale « Code d'appairage » (ADR-0005) ───────────────────────────────────
+// Le chemin nominal de mise en service : au lieu de recopier deux clés de 64
+// caractères hex au clavier d'un Raspberry, l'installateur saisit 8 caractères.
+// Le code est affiché UNE SEULE FOIS, en grand, avec le temps qui lui reste.
+
+/** Secondes restantes avant l'échéance, rafraîchies chaque seconde. */
+function useCompteARebours(expireLe) {
+  const restantDe = (e) => (e ? Math.max(0, Math.round((new Date(e).getTime() - Date.now()) / 1000)) : 0);
+  const [restant, setRestant] = useState(() => restantDe(expireLe));
+  useEffect(() => {
+    if (!expireLe) return undefined;
+    setRestant(restantDe(expireLe));
+    const timer = setInterval(() => setRestant(restantDe(expireLe)), 1000);
+    return () => clearInterval(timer);
+  }, [expireLe]);
+  return restant;
+}
+
+const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+function CodeAppairageModal({ device, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null); // { code, expire_le, ttl_minutes }
+
+  const emettre = useCallback(() => {
+    setLoading(true); setError(null); setData(null);
+    return api.post(`/badgeuse/devices/${device.id}/code-appairage`)
+      .then((r) => setData(r.data || null))
+      .catch((err) => setError(apiErr(err, "Émission du code impossible.")))
+      .finally(() => setLoading(false));
+  }, [device.id]);
+
+  useEffect(() => { emettre(); }, [emettre]);
+
+  const restant = useCompteARebours(data && data.expire_le);
+  const expire = !!data && restant === 0;
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Code d'appairage — ${device.libelle || device.code}`} size="md"
+      footer={<button type="button" onClick={onClose} className="btn-primary text-sm">Fermer</button>}>
+      {loading && <LoadingSpinner size="md" message="Émission du code…" />}
+      {error && <div role="alert" className="text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{error}</div>}
+
+      {data && (
+        <div className="space-y-4">
+          {/* Le code, en très grand : il est lu sur cet écran et retapé sur le
+              poste, souvent à deux personnes et à distance de bras. */}
+          <div className={`rounded-xl border-2 py-6 px-4 text-center ${expire ? 'border-slate-200 bg-slate-50' : 'border-teal-300 bg-teal-50'}`}>
+            <div
+              className={`font-mono font-bold tabular-nums ${expire ? 'text-slate-400 line-through' : 'text-teal-800'}`}
+              style={{ fontSize: '3rem', letterSpacing: '0.15em', lineHeight: 1.15 }}
+            >
+              {data.code}
+            </div>
+            <div className="mt-3 flex items-center justify-center gap-3">
+              {expire ? (
+                <span className="text-sm font-medium text-slate-500">Code expiré</span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-teal-700">
+                  <Timer className="w-4 h-4" aria-hidden="true" />
+                  Valable encore <span className="tabular-nums font-semibold">{mmss(restant)}</span>
+                </span>
+              )}
+              {!expire && <CopyButton value={data.code} label="Copier le code" />}
+            </div>
+          </div>
+
+          {expire ? (
+            <button type="button" onClick={emettre} className="btn-primary text-sm w-full">
+              Émettre un nouveau code
+            </button>
+          ) : (
+            <p className="text-sm text-slate-600">
+              Saisissez ce code sur le poste. Il est valable {data.ttl_minutes} minutes et ne sert qu'une fois.
+            </p>
+          )}
+
+          <ul className="text-xs text-slate-500 space-y-1 list-disc pl-4">
+            <li>Le poste récupère lui-même sa clé et celle du site : plus rien à recopier à la main.</li>
+            <li>La clé précédente du poste est révoquée dès que le code est utilisé.</li>
+            <li>Ce code n'est affiché qu'une fois. S'il est perdu, émettez-en simplement un nouveau.</li>
+          </ul>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ── Modale « Supprimer le poste » ────────────────────────────────────────────
+// Un poste qui a enregistré des pointages appartient à la piste d'audit : le
+// serveur refuse alors la suppression (409). L'écran ne se contente pas de
+// relayer le refus, il propose la manœuvre correcte — la désactivation.
+function SupprimerModal({ device, onClose, onDone }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [refus, setRefus] = useState(null);      // message du serveur (409)
+  const [error, setError] = useState(null);      // autre échec
+  const [desactive, setDesactive] = useState(false);
+
+  const supprimer = async () => {
+    setLoading(true); setRefus(null); setError(null);
+    try {
+      await api.delete(`/badgeuse/devices/${device.id}`);
+      onDone();
+    } catch (err) {
+      if (err && err.response && err.response.status === 409) {
+        setRefus(apiErr(err, 'Ce poste ne peut pas être supprimé.'));
+      } else {
+        setError(apiErr(err, 'Suppression impossible.'));
+      }
+    } finally { setLoading(false); }
+  };
+
+  const desactiver = async () => {
+    setLoading(true); setError(null);
+    try {
+      await api.patch(`/badgeuse/devices/${device.id}`, { actif: false });
+      setDesactive(true);
+    } catch (err) { setError(apiErr(err, 'Désactivation impossible.')); }
+    finally { setLoading(false); }
+  };
+
+  if (!confirmed) {
+    return (
+      <ConfirmDialog isOpen onCancel={onClose} onConfirm={() => { setConfirmed(true); supprimer(); }}
+        title="Supprimer le poste"
+        message={`Supprimer définitivement « ${device.libelle || device.code} » ? La suppression est refusée si le poste a déjà enregistré des pointages.`}
+        confirmLabel="Supprimer" confirmVariant="danger" loading={loading} />
+    );
+  }
+
+  return (
+    <Modal isOpen onClose={desactive ? onDone : onClose} title={`Supprimer — ${device.libelle || device.code}`} size="md"
+      footer={<button type="button" onClick={desactive ? onDone : onClose} className="btn-primary text-sm">Fermer</button>}>
+      {loading && <LoadingSpinner size="sm" />}
+      {error && <div role="alert" className="text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{error}</div>}
+
+      {desactive && (
+        <div className="text-sm bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-3">
+          Poste désactivé. Il n'accepte plus aucun dépôt, et ses heures restent consultables.
+        </div>
+      )}
+
+      {refus && !desactive && (
+        <div className="space-y-3">
+          <div role="alert" className="text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3">
+            {refus}
+          </div>
+          <button type="button" onClick={desactiver} disabled={loading}
+            className="btn-secondary text-sm inline-flex items-center gap-1.5 disabled:opacity-50">
+            <PowerOff className="w-4 h-4" aria-hidden="true" /> Désactiver le poste à la place
+          </button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function VerifyChainResult({ device, onClose }) {
   const [state, setState] = useState('loading'); // loading | ok | ko | error
   const [ruptures, setRuptures] = useState([]);
@@ -226,7 +385,7 @@ function VerifyChainResult({ device, onClose }) {
 }
 
 // ── Carte poste ──────────────────────────────────────────────────────────────
-function DeviceCard({ device, isAdmin, onRegenerate, onVerify }) {
+function DeviceCard({ device, isAdmin, onRegenerate, onVerify, onCodeAppairage, onSupprimer }) {
   // Noms de champs du CONTRAT_API_DEVICE §2.5 (`derive_estimee_sec`,
   // `temperature_cpu`, `disque_libre_mo`) — ils étaient lus sous des noms qui
   // n'existent nulle part côté serveur, si bien que toute la télémétrie
@@ -249,7 +408,14 @@ function DeviceCard({ device, isAdmin, onRegenerate, onVerify }) {
           <div className="font-semibold text-slate-800">{device.libelle || device.code}</div>
           <div className="text-xs text-slate-400 font-mono">{device.code}{device.site_libelle ? ` · ${device.site_libelle}` : (device.site_code ? ` · ${device.site_code}` : '')}</div>
         </div>
-        <EnLigneBadge enLigne={enLigne} />
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {device.actif === false && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+              <PowerOff className="w-3 h-3" aria-hidden="true" /> désactivé
+            </span>
+          )}
+          <EnLigneBadge enLigne={enLigne} />
+        </div>
       </div>
 
       {/* Alerte émise par le poste lui-même (PST-07 / QA-02) : file non
@@ -280,14 +446,24 @@ function DeviceCard({ device, isAdmin, onRegenerate, onVerify }) {
         <div className="text-right text-slate-500">{disqueMo != null ? `${Math.round(Number(disqueMo) / 1024)} Go` : '—'}</div>
       </div>
 
-      <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5 pt-2 border-t border-slate-100">
         <button onClick={() => onVerify(device)} className="text-xs font-medium text-teal-700 hover:text-teal-900 inline-flex items-center gap-1">
           <ShieldCheck className="w-3.5 h-3.5" /> Vérifier la chaîne
         </button>
         {isAdmin && (
-          <button onClick={() => onRegenerate(device)} className="text-xs font-medium text-amber-700 hover:text-amber-900 inline-flex items-center gap-1 ml-auto">
-            <KeyRound className="w-3.5 h-3.5" /> Régénérer la clé
-          </button>
+          <>
+            {/* Chemin nominal de mise en service (ADR-0005) : 8 caractères à
+                saisir sur le poste, au lieu de deux clés de 64 caractères. */}
+            <button onClick={() => onCodeAppairage(device)} className="text-xs font-medium text-teal-700 hover:text-teal-900 inline-flex items-center gap-1">
+              <Hash className="w-3.5 h-3.5" /> Code d'appairage
+            </button>
+            <button onClick={() => onRegenerate(device)} className="text-xs font-medium text-amber-700 hover:text-amber-900 inline-flex items-center gap-1">
+              <KeyRound className="w-3.5 h-3.5" /> Régénérer la clé
+            </button>
+            <button onClick={() => onSupprimer(device)} className="text-xs font-medium text-red-600 hover:text-red-800 inline-flex items-center gap-1 ml-auto">
+              <Trash2 className="w-3.5 h-3.5" /> Supprimer
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -305,6 +481,8 @@ export default function SupervisionPostes({ isAdmin }) {
   const [appairerOpen, setAppairerOpen] = useState(false);
   const [regenDevice, setRegenDevice] = useState(null);
   const [verifyDevice, setVerifyDevice] = useState(null);
+  const [codeDevice, setCodeDevice] = useState(null);
+  const [supprDevice, setSupprDevice] = useState(null);
 
   // `silencieux` sert au rendu ; `load` doit rester stable pour le timer et la
   // socket — d'où la référence plutôt qu'une dépendance.
@@ -420,7 +598,8 @@ export default function SupervisionPostes({ isAdmin }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {devices.map((d) => (
-            <DeviceCard key={d.id} device={d} isAdmin={isAdmin} onRegenerate={setRegenDevice} onVerify={setVerifyDevice} />
+            <DeviceCard key={d.id} device={d} isAdmin={isAdmin} onRegenerate={setRegenDevice} onVerify={setVerifyDevice}
+              onCodeAppairage={setCodeDevice} onSupprimer={setSupprDevice} />
           ))}
         </div>
       )}
@@ -430,6 +609,8 @@ export default function SupervisionPostes({ isAdmin }) {
 
       {regenDevice && <RegenererModal device={regenDevice} onClose={() => setRegenDevice(null)} onDone={() => { setRegenDevice(null); load(); }} />}
       {verifyDevice && <VerifyChainResult device={verifyDevice} onClose={() => setVerifyDevice(null)} />}
+      {codeDevice && <CodeAppairageModal device={codeDevice} onClose={() => { setCodeDevice(null); load({ silencieux: true }); }} />}
+      {supprDevice && <SupprimerModal device={supprDevice} onClose={() => setSupprDevice(null)} onDone={() => { setSupprDevice(null); load(); }} />}
     </div>
   );
 }

@@ -27,17 +27,24 @@ Le code est un secret court, échangé sur une surface publique : c'est le point
 
 | Garde-fou | Valeur |
 |---|---|
-| Espace de codes | 32⁸ ≈ 1,1 × 10¹² |
+| Espace de codes | **30⁸ ≈ 6,6 × 10¹¹** (alphabet de 30 symboles) |
 | Durée de validité | 15 minutes (paramétrable `badgeuse.appairage_ttl_minutes`) |
 | Usage | **unique** — consommé à la première réussite, effacé |
 | Débit | 20 tentatives/heure/IP sur l'endpoint de réclamation |
 | Portée | un seul poste, celui pour lequel le code a été émis |
 | Journalisation | émission et consommation tracées (`badgeuse_badge_historique` non — voir §Conséquences) |
 
-Brute force : à 20 essais/heure, l'espérance de trouver un code valide pendant sa fenêtre de
-15 minutes est de l'ordre de 5 × 10⁻¹² par tentative de campagne. Le risque résiduel est
-sans commune mesure avec le risque réel qu'il supprime — une clé recopiée à la main sur un
-papier, ou une erreur de frappe silencieuse produisant des condensats faux.
+Brute force : le débit autorise **5 tentatives** pendant la fenêtre de validité de 15 minutes,
+soit une probabilité de **≈ 7,6 × 10⁻¹²** de tomber sur un code vivant. Même en martelant
+l'endpoint au débit maximal pendant une année entière, l'espérance reste de **≈ 2,7 × 10⁻⁷**.
+Le risque résiduel est sans commune mesure avec le risque réel qu'il supprime — une clé
+recopiée à la main sur un papier, ou une erreur de frappe silencieuse produisant des
+condensats faux.
+
+*Note de calcul : l'alphabet retenu compte 30 symboles (8 chiffres + 22 lettres), les
+caractères ambigus étant exclus. Le tirage utilise `crypto.randomInt`, uniforme par rejet
+d'échantillon — un `octet % 30` favoriserait les 16 premiers symboles d'environ 12 % et
+rognerait l'entropie annoncée ici.*
 
 **Ce que le code ne fait pas** : il ne donne accès à aucune donnée de pointage, à aucune
 donnée personnelle. Il permet d'obtenir la configuration d'un poste — dont la clé HMAC du
