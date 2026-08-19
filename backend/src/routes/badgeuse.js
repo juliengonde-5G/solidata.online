@@ -461,6 +461,31 @@ router.post('/badges', WRITE, [
     const uidHmac = String(req.body.uid_hmac).toLowerCase();
 
     await client.query('BEGIN');
+
+    // Deux unicites distinctes, deux messages distincts — le 409 fourre-tout
+    // d'origine laissait la RH deviner lequel des deux etats bloquait.
+    // Un badge physique se REATTRIBUE apres un depart : seul un badge encore
+    // ACTIF au meme uid_hmac bloque (l'historique, lui, peut porter la meme
+    // empreinte sur des periodes differentes).
+    const dejaActif = await client.query(
+      `SELECT b.id, UPPER(e.last_name) || ' ' || e.first_name AS porteur
+       FROM badgeuse_badges b JOIN employees e ON e.id = b.employee_id
+       WHERE b.uid_hmac = $1 AND b.statut = 'actif'`, [uidHmac]
+    );
+    if (dejaActif.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Ce badge est encore actif au nom de ${dejaActif.rows[0].porteur} — le passer « restitué » (ou perdu/volé) avant de le réattribuer`,
+      });
+    }
+    const salarieEquipe = await client.query(
+      `SELECT id FROM badgeuse_badges WHERE employee_id = $1 AND statut = 'actif'`, [employeeId]
+    );
+    if (salarieEquipe.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Ce salarié a déjà un badge actif — le restituer avant d’en attribuer un autre' });
+    }
+
     const ins = await client.query(
       `INSERT INTO badgeuse_badges (employee_id, uid_hmac, statut, commentaire, cree_par)
        VALUES ($1, $2, 'actif', $3, $4) RETURNING *`,
@@ -471,8 +496,39 @@ router.post('/badges', WRITE, [
        VALUES ($1, 'attribution', $2, $3)`,
       [ins.rows[0].id, JSON.stringify({ employee_id: employeeId }), req.user.id]
     );
+
+    // Rattachement des orphelins de CE badge, dans la MEME transaction : la RH
+    // qui attribue le badge repond deja a la question « a qui appartiennent ces
+    // pointages ? » — la refaire orphelin par orphelin dans une seconde modale
+    // etait le trou constate en exploitation (« un orphelin ne s'affecte pas »).
+    // Perimetre borne : uniquement les orphelins « badge_inconnu » de cette
+    // empreinte POSTERIEURS a la derniere restitution du meme support — les
+    // pointages d'un eventuel porteur precedent ne sont JAMAIS reattribues au
+    // nouveau. Journalise comme le rattachement manuel.
+    const ratt = await client.query(
+      `UPDATE badgeuse_pointages
+       SET employee_id = $1, statut = 'traite'
+       WHERE uid_hmac = $2 AND statut = 'orphelin' AND orphelin_raison = 'badge_inconnu'
+         AND horodatage_utc >= COALESCE(
+           (SELECT MAX(COALESCE(restitue_le, created_at)) FROM badgeuse_badges
+            WHERE uid_hmac = $2 AND id <> $3),
+           '-infinity'::timestamptz)
+       RETURNING id`,
+      [employeeId, uidHmac, ins.rows[0].id]
+    );
+    if (ratt.rows.length > 0) {
+      await client.query(
+        'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+        [req.user.id, 'BADGEUSE_ORPHELIN_RATTACHEMENT', 'badgeuse_pointages', ins.rows[0].id,
+          JSON.stringify({
+            via: 'creation_badge', badge_id: ins.rows[0].id, employee_id: employeeId,
+            pointage_ids: ratt.rows.map((r) => Number(r.id)), nb: ratt.rows.length,
+          })]
+      );
+    }
+
     await client.query('COMMIT');
-    res.status(201).json(ins.rows[0]);
+    res.status(201).json({ ...ins.rows[0], orphelins_rattaches: ratt.rows.length });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
     if (err.code === '23505') {
@@ -487,6 +543,7 @@ router.post('/badges', WRITE, [
     client.release();
   }
 });
+
 
 // PATCH /badges/:id — changement de statut. Perte/vol = INVALIDATION IMMÉDIATE :
 // le badge sort du cache servi aux postes à la sync suivante (≤ 5 min) et tout
