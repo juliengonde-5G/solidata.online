@@ -22,6 +22,12 @@ TTYVHangup=yes
 TTYVTDisallocate=yes
 
 Environment=XDG_SESSION_TYPE=wayland
+# cage peut se bloquer AVANT toute sortie s'il attend la prise de controle du
+# seat aupres de logind (session inactive) — constate en exploitation : cage
+# vivant 8 minutes, aucun client lance, aucune ligne au journal, SIGTERM
+# ignore. libseat, lui, sait dire ou il en est : on le rend bavard, sa sortie
+# part au journal du service (StandardError=journal ci-dessous).
+Environment=LIBSEAT_LOGLEVEL=debug
 Environment=XDG_RUNTIME_DIR=/run/badgeuse
 # Les options de Chromium propres a la cible (Pi 5 / Pi 3) sont ecrites par
 # install.sh : le code applicatif, lui, est identique sur les deux machines.
