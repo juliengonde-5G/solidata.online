@@ -66,13 +66,40 @@ for base in $CANDIDATS_BOOT $SOURCE $SOURCE/deploy; do
   done
 done
 
+# Repli 1 : une configuration déjà installée sur ce poste fait foi (réinstallation).
+if [ -z "$CONFIG" ] && [ -f /etc/badgeuse/badgeuse.conf ]; then
+  CONFIG="/etc/badgeuse/badgeuse.conf"
+  info "aucune configuration sur la carte — celle déjà installée sur ce poste est conservée"
+fi
+
+# Repli 2 : rien nulle part → on la crée ICI, au clavier. Préparer la carte
+# depuis un PC reste plus confortable, mais n'est pas une obligation : le poste
+# sait se configurer seul, sans dépôt Git ni identifiant.
+if [ -z "$CONFIG" ] && : </dev/tty 2>/dev/null; then
+  case "$CIBLE" in
+    pi5) CODE_DEFAUT="LH-P1" ;;
+    pi3) CODE_DEFAUT="LH-P2" ;;
+  esac
+  echo
+  info "Aucune configuration trouvée : elle va être créée maintenant."
+  info "Munissez-vous des clés affichées par SOLIDATA lors de l'appairage"
+  info "(Temps & Présence -> Supervision -> « Appairer un poste »)."
+  echo
+  read -r -p "    Code de ce poste [${CODE_DEFAUT}] : " CODE_SAISI </dev/tty || true
+  bash "${SOURCE}/deploy/make-conf.sh" \
+    --install --target "$CIBLE" --force --code "${CODE_SAISI:-$CODE_DEFAUT}" \
+    </dev/tty || mourir "configuration abandonnée."
+  CONFIG="/etc/badgeuse/badgeuse.conf"
+fi
+
 if [ -z "$CONFIG" ]; then
-  mourir "aucune configuration trouvée pour ce poste.
-    Attendu, sur la partition visible de la carte SD :
-      badgeuse-${CIBLE}.conf
-    Préparez-la sur le PC avec :
-      bash badgeuse/deploy/make-conf.sh -o badgeuse-${CIBLE}.conf --target ${CIBLE} --code <CODE_DU_POSTE>
-    puis copiez-la à la racine de la partition « bootfs » de la carte."
+  mourir "aucune configuration trouvée pour ce poste, et aucun clavier disponible.
+    Deux solutions :
+      1. Relancer cette commande depuis un vrai terminal (écran + clavier, ou SSH) :
+         les clés seront demandées directement ici.
+      2. Préparer la configuration sur un PC puis la copier à la racine de la
+         partition « bootfs » de la carte, sous le nom :
+             badgeuse-${CIBLE}.conf"
 fi
 info "configuration retenue : ${CONFIG}"
 
@@ -91,7 +118,15 @@ titre "3/5  Installation (quelques minutes, ne rien débrancher)"
   || mourir "code du poste introuvable : ${SOURCE}/deploy/install.sh manquant.
     Copiez le dossier « badgeuse » entier sur la partition visible de la carte SD."
 
-bash "${SOURCE}/deploy/install.sh" --target "$CIBLE" --config "$CONFIG"
+# `install.sh --config` COPIE le fichier vers /etc/badgeuse/badgeuse.conf.
+# Si la configuration EST déjà ce fichier (repli 1 ou 2 ci-dessus), la copie
+# porterait sur elle-même — `install` échoue sur « same file ». On laisse alors
+# install.sh conserver la configuration en place (sa branche dédiée).
+if [ "$CONFIG" = "/etc/badgeuse/badgeuse.conf" ]; then
+  bash "${SOURCE}/deploy/install.sh" --target "$CIBLE"
+else
+  bash "${SOURCE}/deploy/install.sh" --target "$CIBLE" --config "$CONFIG"
+fi
 
 # ── 4. Pare-feu ──────────────────────────────────────────────────────────────
 titre "4/5  Pare-feu"
