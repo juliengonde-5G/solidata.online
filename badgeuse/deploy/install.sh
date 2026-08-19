@@ -374,6 +374,23 @@ else
   rm -f /etc/systemd/system/badgeuse-kiosk.service.d/x11.conf
 fi
 
+# La console tty1 doit revenir au KIOSQUE. badgeuse-kiosk.service reclame
+# /dev/tty1 avec StandardInput=tty-fail : systemd REFUSE de demarrer le service
+# si la console est deja prise. Or Raspberry Pi OS y lance getty@tty1, qui
+# affiche l'invite de connexion. Sans cette liberation, le kiosque echouait a
+# chaque tentative et le poste restait indefiniment sur l'ecran de login
+# (avec Restart=always, une boucle de redemarrage toutes les 5 s).
+# On desactive getty@tty1 plutot que de le forcer : le conflit doit disparaitre,
+# pas etre arbitre a chaque demarrage. Reversible : systemctl enable --now
+# getty@tty1.service redonne la console locale (voir RUNBOOK, depannage).
+if systemctl cat getty@tty1.service >/dev/null 2>&1; then
+  if systemctl disable --now getty@tty1.service >/dev/null 2>&1; then
+    info "console tty1 liberee pour le kiosque (getty@tty1 desactive)"
+  else
+    avert "getty@tty1 non desactive — le kiosque restera sur l'invite de connexion"
+  fi
+fi
+
 systemctl daemon-reload
 # daemon-reload ne relit que les unites : le watchdog materiel (RuntimeWatchdogSec,
 # option [Manager] de system.conf.d) exige que PID1 se re-execute pour en tenir
@@ -400,6 +417,20 @@ if systemctl is-active --quiet badgeuse-agent; then
   journalctl -u badgeuse-agent -n 8 --no-pager | sed 's/^/      /'
 else
   avert "l'agent ne tourne pas — diagnostic : journalctl -u badgeuse-agent -n 50"
+fi
+
+# Panne la plus courante du kiosque : la console tty1 lui est refusee. Le
+# symptome vu par l'exploitant est un ecran bloque sur l'invite de connexion,
+# sans rapport apparent avec le kiosque — on nomme donc la cause explicitement.
+if ! systemctl is-active --quiet badgeuse-kiosk; then
+  avert "le kiosque ne tourne pas — l'ecran restera sur l'invite de connexion"
+  if systemctl is-active --quiet getty@tty1.service; then
+    avert "  cause probable : getty@tty1 occupe la console"
+    avert "  correction    : sudo systemctl disable --now getty@tty1.service"
+    avert "                  sudo systemctl restart badgeuse-kiosk"
+  else
+    avert "  diagnostic : journalctl -u badgeuse-kiosk -n 50"
+  fi
 fi
 
 ETAPE_NVME=""

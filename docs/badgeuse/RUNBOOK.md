@@ -418,6 +418,97 @@ systemctl is-active badgeuse-agent
    → Si toujours noir après redémarrage : étape 6.
 6. **Dernier recours.** Basculer sur le poste de secours (§3) pour ne pas interrompre le pointage de l'atelier, puis appeler le référent d'exploitation (coordonnées en tête de document).
 
+### 2.1 bis « L'écran reste sur l'invite de connexion (login) »
+
+Le poste affiche le prompt `login:` au lieu de l'écran de pointage, et **l'écran semble
+redémarrer en boucle** (le prompt se réaffiche toutes les quelques secondes).
+
+**Ce n'est presque jamais un redémarrage du poste.** C'est un conflit sur la console
+tty1 : le kiosque la réclame, mais `getty@tty1` — le service qui affiche l'invite de
+connexion — l'occupe déjà. Le kiosque échoue, redémarre au bout de 5 secondes, raccroche
+la console au passage (ce qui tue puis fait renaître le `getty`), et l'écran se redessine.
+Vu de la salle, cela ressemble à un cycle de redémarrage.
+
+**1. Trancher en 5 secondes** — le poste redémarre-t-il vraiment ?
+
+```bash
+uptime
+```
+
+Si la durée affichée dépasse quelques minutes et **continue de croître**, la machine ne
+redémarre pas : seul l'écran se redessine. C'est le cas décrit ici.
+
+**2. Confirmer la cause :**
+
+```bash
+systemctl status badgeuse-kiosk --no-pager -l
+systemctl is-active getty@tty1.service
+```
+
+Le kiosque est en échec et `getty@tty1` est `active` → c'est bien ce conflit.
+
+**3. Corriger** (deux commandes, effet immédiat) :
+
+```bash
+sudo systemctl disable --now getty@tty1.service
+sudo systemctl restart badgeuse-kiosk
+```
+
+L'écran de pointage doit apparaître en une quinzaine de secondes.
+
+> Les versions d'`install.sh` postérieures au 19/08/2026 libèrent `tty1` toutes seules :
+> ce dépannage ne concerne que les postes installés avant.
+
+**Conséquence à connaître** : `tty1` étant désormais réservée au kiosque, un clavier
+branché sur le poste n'offre plus d'invite de connexion locale. **L'accès se fait en SSH**
+(§B ter). Pour rendre la console locale — le temps d'un dépannage — :
+
+```bash
+sudo systemctl enable --now getty@tty1.service   # rend le login local
+sudo systemctl stop badgeuse-kiosk               # libère l'écran
+```
+…puis refaire l'étape 3 une fois le dépannage terminé.
+
+**Si `uptime` retombe à quelques secondes**, la machine redémarre pour de bon : ce n'est
+pas ce cas-ci, voir §2.1 ter.
+
+### 2.1 ter « Le poste redémarre vraiment en boucle »
+
+À n'appliquer que si `uptime` **retombe** à chaque cycle (sinon voir §2.1 bis).
+
+**1. Lire ce qui a précédé le redémarrage** — le journal du démarrage précédent :
+
+```bash
+journalctl -b -1 -n 60 --no-pager
+```
+
+**2. Écarter l'alimentation.** Un bloc d'alimentation sous-dimensionné est la première
+cause de redémarrages cycliques sur Raspberry Pi (le Pi 5 exige **5 V / 5 A**) :
+
+```bash
+vcgencmd get_throttled
+```
+
+`throttled=0x0` → alimentation saine. Toute autre valeur signale une sous-tension :
+remplacer le bloc par le modèle officiel avant d'aller plus loin.
+
+**3. Écarter le chien de garde matériel.** Le poste arme un watchdog qui redémarre la
+machine si le système se fige. Pour vérifier qu'il n'est pas en cause, le désarmer
+temporairement :
+
+```bash
+sudo rm -f /etc/systemd/system.conf.d/badgeuse-watchdog.conf
+sudo systemctl daemon-reexec
+```
+
+Si les redémarrages cessent, le watchdog se déclenchait : **ne pas en rester là** — il
+protège le poste contre un gel. Relever le journal de l'étape 1 et appeler le référent
+d'exploitation. Pour le réarmer :
+
+```bash
+sudo bash /opt/badgeuse/deploy/install.sh
+```
+
 ### 2.2 « Le lecteur ne répond plus »
 
 Signe à l'écran : le message **« Lecteur de badge non détecté — préviens ton encadrant »** s'affiche à la place de l'écran de veille habituel.
