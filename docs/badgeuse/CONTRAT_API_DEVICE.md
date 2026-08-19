@@ -238,7 +238,10 @@ file qui gonfle) et alimente la supervision BO-09 (alerte si silence > seuil par
   poste la traite sans règle particulière. `media_id`/`media_type`/`media_sha256` sont
   **absents** quand l'article n'a pas de vignette : l'écran reste valable (titre + chapô).
   `source` est **toujours** affichée — c'est l'attribution due au média (ADR-0006 §4).
-  Aucune URL externe ne figure dans la réponse.
+  Aucune URL externe ne figure dans la réponse. Le `titre` de l'ÉLÉMENT (celui du
+  contenu paramétré, « À la une ») est transmis mais **non affiché** par le poste :
+  sur un écran d'article, le titre qui compte est celui de l'article. Il reste le
+  repère du contenu dans l'écran de paramétrage.
 
 - **§2.4 — `GET /devices/:code/media/:id` accepte le préfixe `p<id>`** (vignette d'un
   article de presse), aux côtés de `c<id>` (contenu de playlist) et `s<id>` (post social).
