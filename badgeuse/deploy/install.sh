@@ -184,16 +184,39 @@ fi
 "${RACINE_INSTALL}/venv/bin/pip" install --quiet --upgrade pip >/dev/null 2>&1 || \
   avert "mise a jour de pip impossible (poste hors ligne ?) — sans gravite"
 
-if "${RACINE_INSTALL}/venv/bin/pip" install --quiet \
-     -r "${RACINE_INSTALL}/agent/requirements.txt"; then
+# `evdev` est une extension C : pip la COMPILE (il n'existe pas de roue toute
+# faite pour aarch64), ce qui exige les en-tetes Python et un compilateur. Le
+# paquet APT `python3-evdev` est deja compile pour la distribution : le venv le
+# voit grace a --system-site-packages. On ne demande donc a pip QUE les
+# dependances en Python pur, et on ne retombe sur la compilation que si APT n'a
+# rien fourni (le pin de version de requirements.txt suffirait sinon a
+# declencher une recompilation inutile, et donc un echec sans python3-dev).
+DEPS_PURES=(httpx websockets)
+if "${RACINE_INSTALL}/venv/bin/python" -c 'import evdev' >/dev/null 2>&1; then
+  info "evdev fourni par le paquet systeme (aucune compilation)"
+  A_INSTALLER=("${DEPS_PURES[@]}")
+else
+  avert "python3-evdev absent : compilation necessaire, installation des en-tetes"
+  if [ "$SANS_APT" -ne 1 ]; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      python3-dev build-essential >/dev/null 2>&1 \
+      || avert "en-tetes Python indisponibles — la compilation d'evdev va echouer"
+  fi
+  A_INSTALLER=(-r "${RACINE_INSTALL}/agent/requirements.txt")
+fi
+
+if "${RACINE_INSTALL}/venv/bin/pip" install --quiet "${A_INSTALLER[@]}"; then
   info "dependances installees"
 else
   avert "installation des dependances en echec — verifier l'acces reseau puis"
-  avert "  relancer : ${RACINE_INSTALL}/venv/bin/pip install -r ${RACINE_INSTALL}/agent/requirements.txt"
+  avert "  relancer : ${RACINE_INSTALL}/venv/bin/pip install ${A_INSTALLER[*]}"
 fi
 
 "${RACINE_INSTALL}/venv/bin/python" - <<'PY' || avert "verification des imports en echec"
-import importlib, sys
+# `import importlib` seul ne charge PAS le sous-module `util` : depuis
+# Python 3.12/3.13 l'acces `importlib.util` leve alors AttributeError.
+import importlib.util
+import sys
 manquants = [m for m in ("evdev", "httpx", "websockets")
              if importlib.util.find_spec(m) is None]
 print("    modules manquants :", ", ".join(manquants) if manquants else "aucun")
@@ -242,7 +265,12 @@ install -d -m 0750 -o "$UTILISATEUR" -g "$UTILISATEUR" "${REPERTOIRE_DONNEES}/me
 info "cache media : ${REPERTOIRE_DONNEES}/media"
 
 etape "6bis/9 Validation de la configuration"
-if BADGEUSE_CONFIG="$CIBLE_CONFIG" "${RACINE_INSTALL}/venv/bin/python" \
+# PYTHONPATH : le paquet `badgeuse_agent` vit dans agent/, pas dans le venv —
+# exactement comme dans l'unite systemd (Environment=PYTHONPATH=...). Sans lui,
+# la validation echouait sur « No module named badgeuse_agent » et bloquait une
+# installation par ailleurs saine.
+if BADGEUSE_CONFIG="$CIBLE_CONFIG" PYTHONPATH="${RACINE_INSTALL}/agent" \
+     "${RACINE_INSTALL}/venv/bin/python" \
      -m badgeuse_agent --check --config "$CIBLE_CONFIG"; then
   info "configuration valide"
 else

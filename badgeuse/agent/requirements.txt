@@ -1,8 +1,16 @@
 # Dépendances de l'agent — versions épinglées, conservatrices.
 #
-# Cible : Python 3.11 (Raspberry Pi OS Bookworm 64 bits).
-# Préférer les paquets APT quand ils existent (python3-evdev), plus légers à
-# installer sur un Pi que la compilation d'une roue native ; install.sh le fait.
+# Cibles vérifiées : Python 3.11 (Pi OS Bookworm) et 3.13 (Pi OS Trixie), 64 bits.
+#
+# `evdev` est une EXTENSION C sans roue précompilée pour aarch64 : pip la
+# compile, ce qui exige python3-dev et un compilateur. Le paquet APT
+# `python3-evdev` est déjà compilé pour la distribution — install.sh l'installe
+# et crée le venv en --system-site-packages, puis ne demande à pip QUE les deux
+# dépendances en Python pur ci-dessous. Ce fichier reste la référence complète
+# (et le repli si APT ne fournit pas evdev).
+#
+# httpx et websockets publient des roues `py3-none-any` : aucune compilation,
+# quelle que soit la version de Python (vérifié pour cp313/aarch64).
 #
 # Le reste de l'agent n'utilise que la bibliothèque standard (sqlite3, hmac,
 # hashlib, zoneinfo, asyncio, http.server, socket) : les modules purs — et donc
