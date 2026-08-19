@@ -105,7 +105,13 @@ export default function ParametresBadgeuse({ canWrite }) {
         regularisation_delai_jours: parseInt(form.regularisation_delai_jours, 10),
         supervision_silence_minutes: parseInt(form.supervision_silence_minutes, 10),
         supervision_alerte_emails: String(form.supervision_alerte_emails || '').trim(),
-        media_upload_max_mo: parseInt(form.media_upload_max_mo, 10),
+        // Champ vidé par l'utilisateur → on renvoie le plafond courant plutôt
+        // qu'un NaN : une limite de téléversement illisible en base finirait en
+        // repli silencieux sur le défaut, avec un écran qui affiche autre chose
+        // que ce qui s'applique.
+        media_upload_max_mo: Number.isFinite(parseInt(form.media_upload_max_mo, 10))
+          ? Math.min(500, Math.max(1, parseInt(form.media_upload_max_mo, 10)))
+          : (raw?.parametres?.media_upload_max_mo ?? 50),
       };
       const res = await api.put('/badgeuse/parametres', payload);
       setRaw(res.data || raw);
