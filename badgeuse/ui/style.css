@@ -325,6 +325,130 @@ html, body {
   max-width: 88%;
 }
 
+/* ---------------------------------------------------------------- METEO */
+
+/* Lisible a 3 m : la temperature du jour est l'information principale
+ * (AFF-03, >= 48 px garantis par le clamp bas a 76 px). */
+.meteo-jour {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3vw;
+}
+
+.meteo-picto {
+  font-size: clamp(70px, 9vw, 170px);
+  line-height: 1;
+}
+
+.meteo-colonne {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2em;
+}
+
+.meteo-temp {
+  font-size: clamp(76px, 10vw, 190px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 0.95;
+  color: var(--texte);
+}
+
+.meteo-libelle {
+  font-size: clamp(28px, 3vw, 54px);
+  font-weight: 700;
+  color: var(--orange);
+}
+
+.meteo-detail {
+  font-size: clamp(20px, 2vw, 34px);
+  color: var(--texte-doux);
+}
+
+.meteo-prevision {
+  display: flex;
+  justify-content: center;
+  gap: 1.4vw;
+  width: 92%;
+  flex-wrap: wrap;
+}
+
+.meteo-suivant {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25em;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 14px;
+  padding: 1.2vh 1.6vw;
+  min-width: 8.5vw;
+}
+
+.meteo-suivant-jour {
+  font-size: clamp(18px, 1.7vw, 28px);
+  color: var(--texte-doux);
+  text-transform: capitalize;
+}
+
+.meteo-suivant-picto { font-size: clamp(30px, 3vw, 54px); line-height: 1; }
+
+.meteo-suivant-temp {
+  font-size: clamp(20px, 2vw, 34px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--texte);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- PRESSE */
+
+/* Un article = un ecran. Le titre est l'information principale (AFF-03). */
+.diapo-presse {
+  justify-content: center;
+  gap: 1.6vh;
+}
+
+.presse-entete {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: clamp(18px, 1.8vw, 30px);
+}
+
+.presse-source {
+  background: var(--vert);
+  color: #06210f;               /* sur fond vert : contraste 9,4:1 */
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 0.25em 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.presse-date { color: var(--texte-doux); font-weight: 600; }
+
+.diapo-presse .diapo-image {
+  max-height: 42%;
+  width: auto;
+  border-radius: 16px;
+}
+
+.presse-titre {
+  font-size: clamp(38px, 3.6vw, 64px);
+  font-weight: 800;
+  color: var(--texte);
+  max-width: 92%;
+  line-height: 1.12;
+}
+
+.presse-chapo {
+  font-size: clamp(22px, 2.1vw, 36px);
+  color: var(--texte-doux);
+  max-width: 88%;
+}
+
 /* -------------------------------------------------------------- VAK LIVE */
 
 /* Ecran promotionnel : chiffres enormes, lisibles a 5 m. */

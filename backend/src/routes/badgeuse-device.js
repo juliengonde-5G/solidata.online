@@ -797,7 +797,7 @@ router.get('/v1/devices/:code/config', deviceLimiter, authenticateDevice, async 
 const VAK_SYNC_PLAYLIST_SEC = 300;
 
 /** Types dont le contenu est produit par le serveur à chaque construction. */
-const TYPES_GENERES = ['annonces', 'actus', 'tournees', 'social', 'vak_live'];
+const TYPES_GENERES = ['annonces', 'actus', 'tournees', 'social', 'vak_live', 'meteo', 'presse'];
 
 /** Configuration JSONB d'un contenu, tolérante (jamais bloquante). */
 function contenuConfig(raw) {
@@ -935,6 +935,125 @@ async function buildVakLive() {
   };
 }
 
+/**
+ * Anti-acharnement du rattrapage météo.
+ *
+ * Le rattrapage sert le cas « poste appairé entre deux passages du job ». Si
+ * Open-Meteo est en panne, il ne doit pas se rejouer à CHAQUE lecture de
+ * playlist : la requête du poste attendrait le délai maximal à chaque fois,
+ * pour rien. Un échec met le lieu au repos dix minutes ; le job planifié, lui,
+ * n'est jamais bridé.
+ */
+const RATTRAPAGE_METEO_REPOS_MS = 10 * 60 * 1000;
+const dernierEchecMeteo = new Map();
+const cleLieu = (lieu) => `${lieu.latitude}:${lieu.longitude}`;
+function rattrapageMeteoAutorise(lieu) {
+  const dernier = dernierEchecMeteo.get(cleLieu(lieu));
+  return !dernier || (Date.now() - dernier) > RATTRAPAGE_METEO_REPOS_MS;
+}
+function marquerEchecMeteo(lieu) {
+  dernierEchecMeteo.set(cleLieu(lieu), Date.now());
+}
+
+/**
+ * MÉTÉO du lieu du poste.
+ *
+ * Le type `meteo` existait depuis la V1 comme un simple TEXTE : l'exploitant
+ * créait l'écran, le serveur n'envoyait aucune donnée, et l'écran restait
+ * désespérément vide (constat de production, août 2026). Il devient un vrai
+ * générateur.
+ *
+ * DEUX RÈGLES :
+ *  - le LIEU vient du site du poste s'il porte des coordonnées, sinon des
+ *    réglages (`resolveMeteoLieu`) ; la source retenue accompagne la prévision,
+ *    l'écran ne peut pas se tromper de ville en silence ;
+ *  - sans relevé pour AUJOURD'HUI, on rend `null` : mieux vaut pas d'écran
+ *    météo qu'une température d'avant-hier présentée comme celle du jour.
+ *    Un rafraîchissement de dernier recours est tenté (le job passe toutes les
+ *    trois heures, mais un poste appairé entre deux passages ne doit pas
+ *    attendre pour avoir sa météo).
+ */
+async function buildMeteo(siteId, params) {
+  const lieu = await media.resolveMeteoLieu(siteId);
+  if (!lieu) return null;                        // aucune coordonnée : rien à afficher
+
+  const nbJours = Math.min(5, Math.max(0, parseInt(params.meteo_jours_prevision, 10) || 0));
+  const aujourdhui = media.jourParisDecale(0);
+
+  let jours = await media.readMeteoCache(lieu, nbJours);
+  if (!jours.some((j) => j.jour === aujourdhui) && rattrapageMeteoAutorise(lieu)) {
+    try {
+      if (await media.refreshMeteoLieu(lieu, nbJours)) {
+        jours = await media.readMeteoCache(lieu, nbJours);
+      } else {
+        marquerEchecMeteo(lieu);
+      }
+    } catch (err) {
+      // Source injoignable : on garde ce que la base sait, et si elle ne sait
+      // rien pour aujourd'hui, l'écran est omis (jamais inventé).
+      marquerEchecMeteo(lieu);
+      console.warn(`[BADGEUSE-DEVICE] Météo non rafraîchie : ${err.message}`);
+    }
+  }
+
+  const jourJ = jours.find((j) => j.jour === aujourdhui);
+  if (!jourJ) return null;
+
+  return {
+    lieu: lieu.libelle,
+    lieu_source: lieu.source,
+    releve_le: jourJ.releve_le || null,
+    jour: {
+      date: jourJ.jour,
+      code: jourJ.code,
+      libelle: jourJ.libelle,
+      temp_min: jourJ.temp_min,
+      temp_max: jourJ.temp_max,
+      precip_mm: jourJ.precip_mm,
+      vent_max: jourJ.vent_max,
+    },
+    prevision: jours
+      .filter((j) => j.jour > aujourdhui)
+      .slice(0, nbJours)
+      .map((j) => ({
+        date: j.jour, code: j.code, libelle: j.libelle,
+        temp_min: j.temp_min, temp_max: j.temp_max,
+      })),
+  };
+}
+
+/**
+ * PRESSE NATIONALE — les derniers articles rapatriés par le serveur.
+ *
+ * Rend une LISTE : l'appelant en fait UN ÉLÉMENT DE PLAYLIST PAR ARTICLE
+ * (demande de l'exploitant : « un écran par article de presse »). La vignette
+ * est référencée comme n'importe quel média de playlist (`media_id`) : le
+ * poste la télécharge par l'API device et la sert depuis son cache local — il
+ * ne contacte jamais le site de presse (ADR-0004 §6, ADR-0006).
+ */
+async function buildPresse(limite) {
+  const r = await pool.query(
+    `SELECT id, source, flux, titre, chapo, publie_le, media_fichier, media_sha256, media_type
+     FROM badgeuse_presse_articles
+     ORDER BY publie_le DESC NULLS LAST, id DESC
+     LIMIT $1`,
+    [limite]
+  );
+  return r.rows.map((x) => ({
+    article: {
+      titre: x.titre,
+      chapo: x.chapo || null,
+      // La SOURCE est affichée à l'écran : c'est l'attribution due au média,
+      // et le repère qui distingue une brève nationale d'une note interne.
+      source: x.source || x.flux || null,
+      publie_le: x.publie_le || null,
+    },
+    media: x.media_fichier
+      ? { media_id: `p${x.id}`, media_type: x.media_type || 'image', media_sha256: x.media_sha256 || null }
+      : null,
+  }));
+}
+
 /** Derniers posts sociaux pourvus d'un visuel rapatrié côté serveur. */
 async function buildSocial(limite) {
   const r = await pool.query(
@@ -1033,6 +1152,23 @@ router.get('/v1/devices/:code/playlist', deviceLimiter, authenticateDevice, asyn
           const vak = await buildVakLive();
           if (!vak) continue;
           elements.push({ ...base, vak });
+        } else if (x.type === 'meteo') {
+          const meteo = await buildMeteo(req.device.site_id, params);
+          // REPLI DE NON-RÉGRESSION : avant que `meteo` ne soit un générateur,
+          // l'exploitant pouvait écrire sa météo à la main dans « corps ».
+          // Sans prévision disponible, cet écran-là doit continuer d'exister.
+          if (!meteo) { if (x.corps) elements.push(base); continue; }
+          elements.push({ ...base, meteo });
+        } else if (x.type === 'presse') {
+          // UN ÉLÉMENT PAR ARTICLE. Tous portent l'`id` du contenu source :
+          // ni le poste ni l'interface ne s'en servent comme clé (la playlist
+          // est une séquence), et c'est ce qui permet de retrouver le réglage
+          // d'origine d'un écran.
+          const articles = await buildPresse(nbConfig(config, 'nb_articles', 3, 8));
+          if (articles.length === 0) continue;
+          for (const a of articles) {
+            elements.push({ ...base, ...(a.media || {}), article: a.article });
+          }
         }
       } catch (err) {
         // Un générateur en panne (table absente, requête lente) ne doit PAS
@@ -1053,7 +1189,8 @@ router.get('/v1/devices/:code/playlist', deviceLimiter, authenticateDevice, asyn
 //
 // ROUTAGE : `:id` est PRÉFIXÉ par l'origine du média — `c<id>` pour un contenu
 // de playlist (téléversé ou rapatriage d'un lien), `s<id>` pour le visuel d'un
-// post social. Un seul point d'entrée plutôt que deux routes jumelles : le
+// post social, `p<id>` pour la vignette d'un article de presse. Un seul point
+// d'entrée plutôt que trois routes jumelles : le
 // poste reçoit `media_id` dans la playlist et le rejoue tel quel, sans avoir à
 // connaître la table d'origine.
 //
@@ -1067,13 +1204,16 @@ router.get('/v1/devices/:code/media/:id', deviceLimiter, authenticateDevice, asy
   const introuvable = () => res.status(404).json({ error: 'not_found' });
   try {
     const brut = String(req.params.id || '');
-    const m = /^([cs])(\d{1,12})$/.exec(brut);
+    const m = /^([csp])(\d{1,12})$/.exec(brut);
     if (!m) return introuvable();
     const id = parseInt(m[2], 10);
 
-    const r = m[1] === 'c'
-      ? await pool.query('SELECT fichier FROM badgeuse_contenus WHERE id = $1', [id])
-      : await pool.query('SELECT media_fichier AS fichier FROM badgeuse_social_posts WHERE id = $1', [id]);
+    const REQUETES = {
+      c: 'SELECT fichier FROM badgeuse_contenus WHERE id = $1',
+      s: 'SELECT media_fichier AS fichier FROM badgeuse_social_posts WHERE id = $1',
+      p: 'SELECT media_fichier AS fichier FROM badgeuse_presse_articles WHERE id = $1',
+    };
+    const r = await pool.query(REQUETES[m[1]], [id]);
     const relatif = r.rows[0] ? r.rows[0].fichier : null;
     if (!relatif) return introuvable();
 

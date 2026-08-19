@@ -74,6 +74,11 @@ const MOTIFS = ['oubli_badge', 'badge_defaillant', 'mission_exterieure', 'rdv_ac
 const CONTENU_TYPES = [
   'message', 'image', 'planning', 'compte_a_rebours', 'meteo',
   'annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live',
+  // `presse` : actualité NATIONALE, un écran par article (ADR-0006). Distinct
+  // d'`actus`, qui reste le fil interne SOLIDATA — ce sont deux écrans, pas
+  // deux versions du même. `meteo` a rejoint les générateurs (il ne portait
+  // qu'un texte libre jusqu'ici, d'où un écran qui n'affichait rien).
+  'presse',
 ];
 
 // Téléversement d'un média d'affichage (pattern Refashion : diskStorage +

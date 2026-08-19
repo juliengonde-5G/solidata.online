@@ -446,4 +446,131 @@ const JOUR = engine.parisDateStr(new Date());
     if (enClair) expect(corpus).not.toContain(enClair);
     expect(corpus).not.toContain('hmac_key');
   });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // ÉCRAN DE VEILLE — MÉTÉO ET PRESSE SUR LA VRAIE BASE
+  //
+  // Défauts constatés en production (août 2026) : l'écran météo n'affichait
+  // rien, et l'écran d'actualité ne connaissait que le fil interne. Les suites
+  // sur mock prouvent la FORME de la réponse ; celle-ci prouve la CHAÎNE :
+  // écriture réelle par les collecteurs (SQL réellement accepté par
+  // PostgreSQL, contraintes d'unicité comprises) puis lecture par le handler
+  // de playlist que le poste interroge.
+  //
+  // Les deux sources externes (Open-Meteo, flux RSS) sont remplacées par un
+  // `fetch` de test : le poste de développement n'a pas d'accès sortant, et un
+  // test qui dépend d'Internet n'est pas un test.
+  // ═════════════════════════════════════════════════════════════════════════
+  describe('écran de veille — météo et presse (base réelle)', () => {
+    const badgeuseMedia = require('../../src/services/badgeuse-social');
+    // URL RÉELLE d'un fil public : la garde anti-SSRF (résolution DNS + refus
+    // des adresses internes) s'exécute donc pour de vrai. Seul l'appel HTTP est
+    // remplacé — le poste de développement n'a pas d'accès sortant, et un test
+    // qui dépend de la disponibilité d'un site de presse n'est pas un test.
+    const FLUX = 'https://www.francetvinfo.fr/titres.rss';
+    const LIBELLE_FLUX = 'Jest — à la une';
+    let fetchOrigine;
+    let contenuMeteoId;
+    let contenuPresseId;
+
+    const jourParis = (d = 0) => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(Date.now() + d * 86400000));
+
+    beforeAll(async () => {
+      fetchOrigine = globalThis.fetch;
+      await pool.query('DELETE FROM badgeuse_presse_articles WHERE flux = $1', [LIBELLE_FLUX]);
+      await pool.query('DELETE FROM badgeuse_meteo WHERE latitude = 49.4231 AND longitude = 1.0993');
+      contenuMeteoId = (await pool.query(
+        `INSERT INTO badgeuse_contenus (site_id, type, titre, ordre, duree_sec)
+         VALUES ($1, 'meteo', 'Météo jest', 900, 12) RETURNING id`, [siteId])).rows[0].id;
+      contenuPresseId = (await pool.query(
+        `INSERT INTO badgeuse_contenus (site_id, type, titre, ordre, duree_sec, config)
+         VALUES ($1, 'presse', 'À la une jest', 901, 15, '{"nb_articles":2}'::jsonb) RETURNING id`, [siteId])).rows[0].id;
+      await pool.query(
+        `INSERT INTO settings (key, value, updated_at) VALUES ('badgeuse.presse_flux', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [JSON.stringify([{ libelle: LIBELLE_FLUX, source: 'Jest Presse', url: FLUX, actif: true }])]
+      );
+    });
+
+    afterAll(async () => {
+      globalThis.fetch = fetchOrigine;
+      await pool.query('DELETE FROM badgeuse_contenus WHERE id = ANY($1)', [[contenuMeteoId, contenuPresseId]]);
+      await pool.query('DELETE FROM badgeuse_presse_articles WHERE flux = $1', [LIBELLE_FLUX]);
+      await pool.query('DELETE FROM badgeuse_meteo WHERE latitude = 49.4231 AND longitude = 1.0993');
+      await pool.query("DELETE FROM settings WHERE key = 'badgeuse.presse_flux'");
+    });
+
+    test('la prévision Open-Meteo est réellement écrite, et re-jouable (upsert)', async () => {
+      const jours = [jourParis(0), jourParis(1), jourParis(2)];
+      globalThis.fetch = async () => ({
+        ok: true, status: 200,
+        json: async () => ({ daily: {
+          time: jours,
+          weather_code: [3, 61, 0],
+          temperature_2m_max: [24.6, 21.3, 26.0],
+          temperature_2m_min: [14.2, 15.1, 13.0],
+          precipitation_sum: [0.4, 5.2, 0],
+          wind_speed_10m_max: [18, 30, 12],
+        } }),
+      });
+      const lieu = await badgeuseMedia.resolveMeteoLieu(siteId);
+      expect(lieu.source).toBe('parametre');            // le site LH n'a pas de coordonnées
+
+      expect(await badgeuseMedia.refreshMeteoLieu(lieu, 2)).toBe(3);
+      // Deux passages ne créent pas de doublon : UNIQUE(latitude, longitude, jour).
+      expect(await badgeuseMedia.refreshMeteoLieu(lieu, 2)).toBe(3);
+      const n = await pool.query(
+        'SELECT COUNT(*)::int AS n FROM badgeuse_meteo WHERE latitude = $1 AND longitude = $2',
+        [lieu.latitude, lieu.longitude]
+      );
+      expect(n.rows[0].n).toBe(3);
+    });
+
+    test('le poste reçoit la météo du jour dans sa playlist', async () => {
+      const r = await dev(request(app).get(`/api/badgeuse/v1/devices/${CODE_POSTE}/playlist`), deviceKey);
+      expect(r.status).toBe(200);
+      const el = (r.body.elements || []).find((x) => x.id === contenuMeteoId);
+      expect(el).toBeDefined();
+      expect(el.meteo.jour).toMatchObject({ date: jourParis(0), libelle: 'Nuageux', temp_max: 24.6 });
+      expect(el.meteo.prevision.length).toBeGreaterThan(0);
+      expect(el.meteo.lieu_source).toBe('parametre');
+    });
+
+    test('les articles de presse sont réellement importés depuis un flux RSS', async () => {
+      globalThis.fetch = async (url) => {
+        // Aucune vignette n'est téléchargée ici : le flux n'en propose pas.
+        expect(String(url)).toBe(FLUX);
+        return {
+          ok: true, status: 200,
+          headers: { get: (k) => (String(k).toLowerCase() === 'content-type' ? 'application/rss+xml' : null) },
+          text: async () => `<rss version="2.0"><channel>
+            <item><title><![CDATA[Article A]]></title><link>https://www.francetvinfo.fr/a</link>
+              <description>Chapô A</description><guid>jest-a</guid>
+              <pubDate>Wed, 19 Aug 2026 07:12:00 +0200</pubDate></item>
+            <item><title>Article B</title><link>https://www.francetvinfo.fr/b</link>
+              <description>Chapô B</description><guid>jest-b</guid>
+              <pubDate>Wed, 19 Aug 2026 06:40:00 +0200</pubDate></item>
+          </channel></rss>`,
+        };
+      };
+      const bilan = await badgeuseMedia.syncPresseArticles();
+      expect(bilan.articles).toBe(2);
+      // Re-synchroniser ne duplique pas : UNIQUE(flux, guid).
+      await badgeuseMedia.syncPresseArticles();
+      const n = await pool.query('SELECT COUNT(*)::int AS n FROM badgeuse_presse_articles WHERE flux = $1', [LIBELLE_FLUX]);
+      expect(n.rows[0].n).toBe(2);
+    });
+
+    test('UN ÉCRAN PAR ARTICLE dans la playlist servie au poste', async () => {
+      const r = await dev(request(app).get(`/api/badgeuse/v1/devices/${CODE_POSTE}/playlist`), deviceKey);
+      const ecrans = (r.body.elements || []).filter((x) => x.type === 'presse');
+      expect(ecrans).toHaveLength(2);
+      expect(ecrans.map((e) => e.article.titre)).toEqual(['Article A', 'Article B']);
+      expect(ecrans[0].article.source).toBe('Jest Presse');
+      // Aucune adresse externe ne descend vers le poste.
+      expect(JSON.stringify(ecrans)).not.toMatch(/https?:\/\//);
+    });
+  });
 });
