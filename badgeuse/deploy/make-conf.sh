@@ -89,7 +89,7 @@ erreur() { echo "ERREUR : $*" >&2; exit 1; }
 # Clavier réel si un terminal de contrôle est ouvrable, sinon entrée standard
 # (le script reste utilisable depuis prepare-sd.sh ou un banc de test, au lieu
 # d'échouer sur un « /dev/tty: No such device »).
-if : </dev/tty 2>/dev/null; then TTY=/dev/tty; else TTY=/dev/stdin; fi
+if : 2>/dev/null </dev/tty; then TTY=/dev/tty; else TTY=/dev/stdin; fi
 
 # Une valeur demandée au clavier si elle n'a pas été fournie en option.
 demander() {

@@ -82,6 +82,15 @@ for mot in $CMD; do
   esac
 done
 
+# L'unite livree ne DEVINE pas la commande de lancement : elle refuse de
+# demarrer tant que install.sh n'a pas pose le drop-in correspondant au
+# compositeur et au navigateur reellement installes.
+case "$CMD" in
+  *"kiosque non configure"*)
+    retenir "KIOSQUE NON CONFIGURE : le drop-in lancement.conf n'a pas ete pose (installation interrompue ?). Le service refuse de demarrer plutot que de lancer une commande devinee. Corriger :
+      sudo bash /opt/badgeuse/deploy/install.sh --target pi5" ;;
+esac
+
 # Repli X11 : le kiosque tourne en utilisateur non privilegie. Seul le wrapper
 # setuid /usr/lib/xorg/Xorg.wrap (paquet xserver-xorg-legacy) autorise un
 # non-root a demarrer le serveur X. Absent, xinit rend 1 SANS AUCUN MESSAGE.
@@ -173,23 +182,40 @@ else
   ligne "http://127.0.0.1:8766" "curl absent — non teste"
 fi
 
-# ── 4 bis. Lecteur de badge et file de pointages ────────────────────────────
-# C'est la RAISON D'ETRE du poste : un ecran parfait mais un lecteur muet ne
-# produit aucun pointage. Rien de tout cela n'etait verifie jusqu'ici.
+# ── 4 bis. Lecteur de badge ──────────────────────────────────────────────────
+# Symptome vecu sur le terrain : le journal annonce « lecteur connecte » et
+# AUCUN badge n'arrive. Un lecteur RFID HID expose souvent deux interfaces
+# /dev/input/eventN indiscernables, dont une seule emet les frappes : le poste
+# les ecoute donc TOUTES. Cette section montre ce qu'il voit et ce qu'il saisit.
+# Aucune frappe n'est lue ici : le diagnostic ne peut pas divulguer un UID.
 titre "4 bis. Lecteur de badge"
-ligne "peripheriques /dev/input" "$(ls /dev/input/event* 2>/dev/null | wc -l)"
-DERNIER_LECTEUR="$(journalctl -u badgeuse-agent --no-pager 2>/dev/null \
-  | grep -iE 'lecteur (connecte|indisponible)|evdev' | tail -1)"
-if [ -n "$DERNIER_LECTEUR" ]; then
-  printf '    dernier evenement lecteur :\n      %s\n' "$DERNIER_LECTEUR"
-  case "$DERNIER_LECTEUR" in
-    *indisponible*|*absente*)
-      retenir "LECTEUR NON CAPTURE : l'agent ne tient pas le lecteur — aucun badgeage ne peut etre enregistre. Verifier que le lecteur est branche (il doit apparaitre dans /dev/input), puis :
-      sudo systemctl restart badgeuse-agent" ;;
-  esac
+AGENT_PY=/opt/badgeuse/venv/bin/python
+if [ -x "$AGENT_PY" ] && [ -d /opt/badgeuse/agent ]; then
+  SORTIE_LECTEURS="$(BADGEUSE_CONFIG=/etc/badgeuse/badgeuse.conf \
+      PYTHONPATH=/opt/badgeuse/agent "$AGENT_PY" -m badgeuse_agent --lecteurs 2>&1)"
+  CODE_LECTEURS=$?
+  printf '%s\n' "$SORTIE_LECTEURS" | sed 's/^/    /'
+  if [ "$CODE_LECTEURS" -ne 0 ]; then
+    retenir "LECTEUR NON SAISI : aucune interface d'entree ne peut composer un badge (detail ci-dessus). Verifier le branchement USB, puis :
+      lsusb && sudo systemctl restart badgeuse-agent"
+  fi
 else
-  ligne "evenement lecteur" "AUCUN dans le journal"
-  retenir "LECTEUR JAMAIS OUVERT : le journal de l'agent ne mentionne aucune tentative d'ouverture du lecteur. Verifier le branchement, puis : sudo systemctl restart badgeuse-agent"
+  ligne "agent installe" "non (/opt/badgeuse absent)"
+fi
+
+# Preuve du flux REEL : la trace est posee a la premiere frappe de chaque
+# interface. Presente = le lecteur parle ; absente = il ne parle pas, ou pas a
+# nous (interface non saisie, cable, alimentation).
+if journalctl -u badgeuse-agent --since '24 hours ago' --no-pager 2>/dev/null \
+   | grep -q 'premiere frappe recue'; then
+  ligne "frappes recues (24 h)" "oui"
+else
+  ligne "frappes recues (24 h)" "AUCUNE"
+  if [ "$AGENT_OK" -eq 1 ]; then
+    retenir "AUCUNE FRAPPE RECUE depuis 24 h : l'agent tourne et a saisi une ou plusieurs interfaces, mais rien n'en sort. Passer un badge et surveiller :
+      journalctl -u badgeuse-agent -f
+   Si la ligne « premiere frappe recue » n'apparait pas, le lecteur n'emet rien vers le poste (cable, alimentation, mode du lecteur — il doit etre en emulation clavier)."
+  fi
 fi
 
 titre "4 ter. File de pointages"
@@ -208,6 +234,7 @@ DERNIER_ENVOI="$(journalctl -u badgeuse-agent --no-pager 2>/dev/null \
 if [ -n "$DERNIER_ENVOI" ]; then
   printf '    dernier envoi de pointages :\n      %s\n' "$DERNIER_ENVOI"
 else
+  ligne "envoi de pointages" "AUCUN depuis le demarrage"else
   ligne "envoi de pointages" "AUCUN depuis le demarrage"
 fi
 

@@ -54,7 +54,7 @@ fi
 
 # Le code peut être saisi au clavier : c'est court, lisible, sans ambiguïté.
 if [ -z "$CODE" ]; then
-  if : </dev/tty 2>/dev/null; then
+  if : 2>/dev/null </dev/tty; then
     echo "Code d'appairage affiché par SOLIDATA (Supervision -> « Code d'appairage »)."
     read -r -p "Code (8 caractères, ex. K7M2-9PQX) : " CODE </dev/tty || true
   fi

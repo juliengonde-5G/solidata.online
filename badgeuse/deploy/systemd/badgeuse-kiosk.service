@@ -32,7 +32,17 @@ RuntimeDirectoryMode=0700
 
 # L'attente laisse a l'agent le temps d'ouvrir son serveur local.
 ExecStartPre=/bin/sleep 3
-ExecStart=/usr/bin/cage -- /usr/bin/chromium $CHROMIUM_FLAGS http://127.0.0.1:8766
+
+# La commande REELLE est posee par install.sh dans le drop-in
+# /etc/systemd/system/badgeuse-kiosk.service.d/lancement.conf : le compositeur
+# (cage ou repli X11) et le chemin du navigateur (/usr/bin/chromium ou
+# /usr/bin/chromium-browser selon la distribution) ne se devinent pas ici.
+#
+# Cette ligne n'est donc PAS une valeur par defaut : c'est un refus explicite.
+# Une commande devinee qui n'existe pas echoue en 203/EXEC — un ecran noir
+# sans message, exactement le symptome qu'on a mis une journee a nommer sur le
+# terrain. Ici, le journal dit quoi faire.
+ExecStart=/bin/sh -c 'echo "kiosque non configure : le drop-in lancement.conf est absent — relancer sudo bash /opt/badgeuse/deploy/install.sh --target pi5|pi3" >&2; exit 1'
 
 Restart=always
 RestartSec=5

@@ -45,12 +45,23 @@ hmac_key = CHANGE_ME_CLE_HMAC_SITE_64_CARACTERES_HEXADECIMAUX
 
 [reader]
 ; Lecteur RFID en émulation clavier. Ces identifiants sont facultatifs :
-; sans eux, l'agent détecte le lecteur par ses capacités (chiffres + Entrée).
-; Les relever avec : lsusb  (format « ID 1234:5678 »)
+; sans eux, l'agent saisit TOUTES les interfaces d'entrée capables de composer
+; un UID (chiffres + Entrée).
+;
+; Pourquoi TOUTES : un lecteur RFID expose fréquemment DEUX
+; /dev/input/eventN sous le même nom et les mêmes identifiants USB, et une
+; seule émet les frappes. N'en écouter qu'une revient à jouer le badgeage à
+; pile ou face — c'est ce qui a rendu un poste muet en exploitation.
+;
+; Ces filtres RESTREIGNENT l'ensemble écouté (utile si un clavier
+; d'administration doit rester utilisable sur le poste) ; ils ne désignent
+; jamais une interface unique. Les relever avec : lsusb (« ID 1234:5678 »),
+; et vérifier le résultat avec :
+;     sudo -u badgeuse /opt/badgeuse/venv/bin/python -m badgeuse_agent --lecteurs
 ;vendor_id = 0xffff
 ;product_id = 0x0035
 ; Filtre complémentaire sur le nom du périphérique (sous-chaîne, insensible
-; à la casse) — utile si plusieurs claviers HID sont branchés.
+; à la casse).
 ;name = rfid
 
 [system]

@@ -48,6 +48,11 @@ LOGGER = logging.getLogger("badgeuse.ws")
 
 LOOPBACK = "127.0.0.1"
 
+#: Délai au-delà duquel une interface qui n'accuse plus réception est
+#: abandonnée. L'écran ne doit JAMAIS retenir un badgeage : le pointage est
+#: déjà en base à cet instant, c'est l'affichage qui dégrade, pas l'heure.
+ENVOI_TIMEOUT_SEC = 5.0
+
 #: Préfixe d'URL des médias servis depuis le cache local.
 PREFIXE_MEDIA = f"/{MEDIA_SOUS_REPERTOIRE}/"
 
@@ -147,7 +152,15 @@ class UiChannel:
     # -------------------------------------------------------------- diffusion
 
     async def broadcast(self, message: Dict[str, Any], *, remember: bool = False) -> None:
-        """Envoie un message à toutes les interfaces connectées."""
+        """Envoie un message à toutes les interfaces connectées.
+
+        **Jamais bloquant.** L'affichage est sur le chemin du badgeage (le
+        verrou de ``app._on_uid`` est tenu pendant l'envoi) : un client qui
+        n'accuse plus réception — Chromium figé, tampon plein — immobiliserait
+        sinon TOUS les badgeages suivants, sans le moindre message. Un envoi
+        qui dépasse :data:`ENVOI_TIMEOUT_SEC` fait abandonner ce client, pas
+        le pointage.
+        """
         if remember:
             self._snapshot[message["type"]] = message
 
@@ -162,9 +175,24 @@ class UiChannel:
 
     async def _send(self, client: Any, payload: str) -> None:
         try:
-            await client.send(payload)
+            await asyncio.wait_for(client.send(payload), timeout=ENVOI_TIMEOUT_SEC)
         except (websockets.exceptions.ConnectionClosed, RuntimeError):
             self._clients.discard(client)
+        except asyncio.TimeoutError:
+            LOGGER.warning(
+                "interface muette (envoi > %.0f s) — client abandonne, "
+                "le badgeage continue",
+                ENVOI_TIMEOUT_SEC,
+            )
+            self._clients.discard(client)
+            await self._fermer(client)
+
+    @staticmethod
+    async def _fermer(client: Any) -> None:
+        try:
+            await asyncio.wait_for(client.close(), timeout=1.0)
+        except Exception:  # noqa: BLE001 - la fermeture ne doit jamais bloquer
+            pass
 
     # ----------------------------------------------------- messages métier
 
@@ -231,19 +259,34 @@ class UiChannel:
         )
 
     async def status(
-        self, *, online: bool, file: int, heure: str, lecteur: bool = True
+        self,
+        *,
+        online: bool,
+        file: int,
+        heure: str,
+        lecteur: bool = True,
+        horloge_locale: Optional[str] = None,
     ) -> None:
-        """État du poste : bandeau hors ligne (PST-08) et horloge de veille."""
-        await self.broadcast(
-            {
-                "type": "status",
-                "online": online,
-                "file": file,
-                "heure": heure,
-                "lecteur": lecteur,
-            },
-            remember=True,
-        )
+        """État du poste : bandeau hors ligne (PST-08) et horloge de veille.
+
+        ``horloge_locale`` (``YYYY-MM-DDTHH:MM:SS``, heure murale de Paris) est
+        l'horloge de RÉFÉRENCE de l'écran. Sans elle, l'interface affichait
+        l'heure du NAVIGATEUR, donc celle du fuseau système du poste : sur une
+        machine restée en UTC — le défaut d'usine d'une image Raspberry Pi OS —
+        la veille affichait 09:41 pendant que l'overlay de badgeage, lui calculé
+        en Europe/Paris par l'agent, affichait 11:41. Deux heures différentes
+        sur le même écran, sur un dispositif dont les heures font foi.
+        """
+        message: Dict[str, Any] = {
+            "type": "status",
+            "online": online,
+            "file": file,
+            "heure": heure,
+            "lecteur": lecteur,
+        }
+        if horloge_locale:
+            message["horloge_locale"] = horloge_locale
+        await self.broadcast(message, remember=True)
 
 
 class _StaticHandler(SimpleHTTPRequestHandler):

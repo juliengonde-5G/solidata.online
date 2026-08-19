@@ -24,7 +24,7 @@ mourir() { printf '\n[ERREUR] %s\n\n' "$*" >&2; exit 1; }
 # Lecture d'une réponse : au clavier réel si un terminal existe, sinon sur
 # l'entrée standard (le script reste utilisable dans un tube ou un banc de test
 # plutôt que d'échouer sur un « /dev/tty: No such device »).
-if : </dev/tty 2>/dev/null; then TTY=/dev/tty; else TTY=/dev/stdin; fi
+if : 2>/dev/null </dev/tty; then TTY=/dev/tty; else TTY=/dev/stdin; fi
 demander() {
   local invite="$1" defaut="${2:-}" reponse=""
   read -r -p "$invite" reponse <"$TTY" || true

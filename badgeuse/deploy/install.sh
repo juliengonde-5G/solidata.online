@@ -83,6 +83,11 @@ etape() { printf '\n=== %s\n' "$*"; }
 info()  { printf '    %s\n' "$*"; }
 avert() { printf '  ! %s\n' "$*"; }
 
+# Fonctions communes TESTEES (deploy/tests/test_deploy.sh) : deploiement d'un
+# repertoire, resolution du navigateur, options Chromium, drop-in de lancement.
+# shellcheck source=lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 printf '\n############################################################\n'
 printf '# Installation badgeuse SOLIDATA — %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 printf '# cible : %s   source : %s\n' "$CIBLE" "$SOURCE"
@@ -105,6 +110,23 @@ if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) el
   exit 1
 fi
 info "python : $(python3 --version)"
+
+# Fuseau horaire du SYSTEME. L'agent horodate en Europe/Paris quoi qu'il
+# arrive (zoneinfo), donc les pointages restent justes ; mais une image
+# Raspberry Pi OS neuve est en UTC, et cela se voit ailleurs : journaux
+# decales de deux heures pour l'exploitant, et plage d'allumage de l'ecran
+# qui bascule a la mauvaise heure. On aligne, sans jamais echouer pour si peu.
+FUSEAU_ACTUEL="$(timedatectl show -p Timezone --value 2>/dev/null || echo '')"
+if [ -n "$FUSEAU_ACTUEL" ] && [ "$FUSEAU_ACTUEL" != "Europe/Paris" ]; then
+  if timedatectl set-timezone Europe/Paris >/dev/null 2>&1; then
+    info "fuseau horaire aligne : ${FUSEAU_ACTUEL} -> Europe/Paris"
+  else
+    avert "fuseau horaire du systeme : ${FUSEAU_ACTUEL} (Europe/Paris attendu)"
+    avert "  corriger : sudo timedatectl set-timezone Europe/Paris"
+  fi
+else
+  info "fuseau horaire : ${FUSEAU_ACTUEL:-inconnu}"
+fi
 
 # ---------------------------------------------------------------- 2. paquets
 etape "2/9 Paquets systeme"
@@ -210,39 +232,8 @@ info "groupes : $(id -nG "$UTILISATEUR")"
 etape "4/9 Deploiement du code"
 install -d -m 0755 "$RACINE_INSTALL"
 
-deployer() {
-  local origine="$1" destination="$2"
-  [ -e "$origine" ] || { avert "absent, ignore : ${origine}"; return 0; }
-
-  # Ne JAMAIS deployer un chemin sur lui-meme. C'est le cas quand le script est
-  # lance depuis la copie installee (/opt/badgeuse/deploy/install.sh) : source
-  # et destination coincident. L'ancienne version deplacait alors la
-  # destination vers .ancien puis echouait a copier l'origine — DEVENUE le meme
-  # chemin, donc disparue — et le code s'AUTO-DETRUISAIT (constate en
-  # exploitation : /opt/badgeuse/agent et /opt/badgeuse/ui perdus). Relancer
-  # depuis /opt est pourtant legitime (re-derouler la configuration) : on
-  # constate que le code est deja en place, et on passe.
-  if [ "$(readlink -f "$origine")" = "$(readlink -f "$destination")" ]; then
-    info "deja en place : ${destination} (lance depuis la copie installee)"
-    return 0
-  fi
-
-  rm -rf "${destination}.ancien"
-  [ -e "$destination" ] && mv "$destination" "${destination}.ancien"
-  if cp -a "$origine" "$destination"; then
-    rm -rf "${destination}.ancien"
-    info "installe : ${destination}"
-  else
-    # Echec de copie : on REMET l'ancien en place plutot que de laisser un trou.
-    avert "copie en echec : ${origine} -> ${destination}"
-    if [ -e "${destination}.ancien" ]; then
-      rm -rf "$destination"
-      mv "${destination}.ancien" "$destination"
-      avert "  version precedente restauree : ${destination}"
-    fi
-    return 1
-  fi
-}
+# deployer() est definie dans deploy/lib.sh (source ci-dessus) : une seule
+# implementation, eprouvee par deploy/tests/test_deploy.sh — ne pas redefinir.
 
 deployer "${SOURCE}/agent"  "${RACINE_INSTALL}/agent"
 deployer "${SOURCE}/ui"     "${RACINE_INSTALL}/ui"
@@ -379,32 +370,15 @@ for repertoire_politique in /etc/chromium/policies/managed /etc/chromium-browser
 done
 info "politique Chromium geree installee (DevTools verrouilles, cf. README §7)"
 
-BASE_FLAGS="--kiosk --noerrdialogs --disable-translate --disable-features=Translate,TranslateUI"
-BASE_FLAGS="${BASE_FLAGS} --disable-session-crashed-bubble --disable-infobars"
-BASE_FLAGS="${BASE_FLAGS} --no-first-run --disable-pinch --overscroll-history-navigation=0"
-BASE_FLAGS="${BASE_FLAGS} --check-for-update-interval=31536000"
-# Les retours sonores (AFF-04) sont synthetises par la page : sans cette
-# option, Chromium bloque l'audio faute de geste utilisateur — or il n'y a,
-# par conception, aucune interaction possible sur ce poste.
-BASE_FLAGS="${BASE_FLAGS} --autoplay-policy=no-user-gesture-required"
-
-if [ "$COMPOSITEUR" = "cage" ]; then
-  BASE_FLAGS="${BASE_FLAGS} --ozone-platform=wayland --enable-features=UseOzonePlatform"
-fi
-
-if [ "$CIBLE" = "pi3" ]; then
-  # 1 Go de RAM : on bride le rendu, on garde un seul processus de rendu.
-  CIBLE_FLAGS="--disable-gpu-compositing --disable-dev-shm-usage --process-per-site"
-  CIBLE_FLAGS="${CIBLE_FLAGS} --renderer-process-limit=1 --js-flags=--max-old-space-size=96"
-  MEMOIRE_AGENT="128M"
-else
-  CIBLE_FLAGS="--enable-gpu-rasterization"
-  MEMOIRE_AGENT="256M"
-fi
+# Les options viennent de lib.sh : c'est la meme fonction qui decide des flags
+# et du drop-in de lancement, donc la coherence compositeur <-> options est
+# tenue par construction (et verifiee par deploy/tests/test_deploy.sh).
+MEMOIRE_AGENT="$(memoire_agent "$CIBLE")"
 
 cat > "${REPERTOIRE_CONFIG}/kiosk.env" <<FIN
-# Genere par install.sh — cible ${CIBLE}. Ne pas editer a la main.
-CHROMIUM_FLAGS=${BASE_FLAGS} ${CIBLE_FLAGS}
+# Genere par install.sh — cible ${CIBLE}, compositeur ${COMPOSITEUR}.
+# Ne pas editer a la main.
+CHROMIUM_FLAGS=$(flags_chromium "$COMPOSITEUR" "$CIBLE")
 FIN
 chmod 0644 "${REPERTOIRE_CONFIG}/kiosk.env"
 info "options Chromium ecrites dans ${REPERTOIRE_CONFIG}/kiosk.env"
@@ -457,10 +431,7 @@ info "watchdog materiel configure : /etc/systemd/system.conf.d/badgeuse-watchdog
 install -d -m 0755 /etc/systemd/system/badgeuse-kiosk.service.d
 rm -f /etc/systemd/system/badgeuse-kiosk.service.d/x11.conf   # ancien nom
 
-NAVIGATEUR_BIN=""
-for candidat in /usr/bin/chromium /usr/bin/chromium-browser; do
-  if [ -x "$candidat" ]; then NAVIGATEUR_BIN="$candidat"; break; fi
-done
+NAVIGATEUR_BIN="$(resoudre_navigateur || true)"
 SANS_NAVIGATEUR=0
 if [ -z "$NAVIGATEUR_BIN" ]; then
   SANS_NAVIGATEUR=1
@@ -473,24 +444,13 @@ else
   info "navigateur retenu : ${NAVIGATEUR_BIN}"
 fi
 
-if [ "$COMPOSITEUR" = "x11" ]; then
-  cat > /etc/systemd/system/badgeuse-kiosk.service.d/lancement.conf <<FIN
-# Genere par install.sh — repli X11 (paquet cage indisponible).
-[Service]
-Environment=XDG_SESSION_TYPE=x11
-ExecStart=
-ExecStart=/usr/bin/xinit ${NAVIGATEUR_BIN} \$CHROMIUM_FLAGS http://127.0.0.1:8766 -- :0 vt1 -nolisten tcp
-FIN
-  info "repli X11 configure"
-else
-  cat > /etc/systemd/system/badgeuse-kiosk.service.d/lancement.conf <<FIN
-# Genere par install.sh — compositeur cage (Wayland), navigateur resolu a
-# l'installation.
-[Service]
-ExecStart=
-ExecStart=/usr/bin/cage -- ${NAVIGATEUR_BIN} \$CHROMIUM_FLAGS http://127.0.0.1:8766
-FIN
-fi
+# L'URL suit le port REELLEMENT servi par l'agent : [ui] http_port de la
+# configuration, defaut 8766. Un port change dans la configuration sans etre
+# reporte ici donnerait un kiosque pointant dans le vide.
+URL_KIOSQUE="http://127.0.0.1:$(port_kiosque "$CIBLE_CONFIG")"
+ligne_lancement "$COMPOSITEUR" "$NAVIGATEUR_BIN" "$URL_KIOSQUE" \
+  > /etc/systemd/system/badgeuse-kiosk.service.d/lancement.conf
+info "lancement du kiosque configure (compositeur ${COMPOSITEUR}, ${URL_KIOSQUE})"
 
 # La console tty1 doit revenir au KIOSQUE. badgeuse-kiosk.service reclame
 # /dev/tty1 avec StandardInput=tty-fail : systemd REFUSE de demarrer le service

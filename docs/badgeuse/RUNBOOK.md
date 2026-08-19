@@ -395,6 +395,7 @@ sudo bash /opt/badgeuse/deploy/diagnostic.sh
 Il contrôle : redémarrages réels et alimentation, état des deux services, occupation de
 `tty1`, présence effective du navigateur et du compositeur, **commande réellement lancée
 par systemd** (un binaire absent = écran noir muet), accessibilité de l'interface locale,
+**inventaire des interfaces du lecteur de badge et preuve que des frappes arrivent**,
 état de la sortie HDMI et plage d'allumage, puis les journaux. Il termine par un
 **verdict** listant les causes probables avec, pour chacune, la commande de correction.
 
@@ -549,6 +550,33 @@ Signe à l'écran : le message **« Lecteur de badge non détecté — préviens
    ```
    → Si toujours rien : étape 7.
 7. **Dernier recours.** Le lecteur est probablement défectueux (câble interne, connecteur). Basculer sur le poste de secours (§3) le temps de remplacer le lecteur, et appeler le référent d'exploitation.
+
+### 2.2 bis « Le lecteur est reconnu, mais AUCUN badge ne passe »
+
+Signe : l'écran de veille est **normal** (pas de message « Lecteur non détecté »), le journal a bien écrit `lecteur connecte`, et pourtant présenter un badge ne produit **rien du tout** — ni message à l'écran, ni ligne dans le journal.
+
+C'est un cas vécu en exploitation. La cause n'est presque jamais le lecteur lui-même : un lecteur RFID USB expose souvent **deux interfaces** au système, et une seule émet réellement les frappes.
+
+1. **Voir ce que le poste écoute** (ne modifie rien, ne lit aucune frappe — cette commande ne peut pas divulguer un numéro de badge) :
+   ```bash
+   sudo -u badgeuse /opt/badgeuse/venv/bin/python -m badgeuse_agent --lecteurs
+   ```
+   La colonne « saisi » doit porter **OUI** sur au moins une ligne. Deux lignes à OUI est **normal** (les deux interfaces d'un même lecteur sont écoutées).
+   → Aucune ligne à OUI : le lecteur n'est pas vu comme un clavier. Vérifier `lsusb`, changer de port USB, et contrôler qu'aucun filtre `[reader]` de `/etc/badgeuse/badgeuse.conf` ne désigne un matériel absent.
+
+2. **Vérifier que les frappes arrivent vraiment.** Laisser tourner :
+   ```bash
+   journalctl -u badgeuse-agent -f
+   ```
+   puis présenter un badge. Une ligne **« premiere frappe recue »** doit apparaître.
+   - Elle apparaît, suivie d'un pointage ou d'un refus → tout va bien, le problème est ailleurs (badge non attribué : voir §2.4).
+   - **Elle n'apparaît pas** → le lecteur n'envoie rien au poste. Dans l'ordre : changer de câble et de port USB, puis vérifier le **mode du lecteur** — il doit être en **émulation clavier** (« keyboard wedge / HID »), pas en mode série ou propriétaire ; certains modèles se règlent en scannant une carte de configuration fournie avec le lecteur.
+
+3. **Diagnostic complet en une commande** (reprend tout ce qui précède) :
+   ```bash
+   sudo bash /opt/badgeuse/deploy/diagnostic.sh
+   ```
+   Sa section « 4 bis. Lecteur de badge » donne l'inventaire des interfaces et dit si des frappes ont été reçues dans les 24 heures.
 
 ### 2.3 « Le poste est hors ligne dans SOLIDATA »
 
