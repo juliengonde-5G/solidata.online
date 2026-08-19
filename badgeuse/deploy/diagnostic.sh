@@ -101,6 +101,29 @@ case "$CMD" in
     ;;
 esac
 
+# COHERENCE compositeur <-> options du navigateur. install.sh ecrit kiosk.env ET
+# la commande de lancement dans la MEME passe, a partir de la meme decision.
+# Mais si cage est installe A LA MAIN apres coup, la commande passe a Wayland
+# tandis que kiosk.env garde les options X11 : Chromium tente alors X11 sous un
+# compositeur Wayland, ne trouve pas de DISPLAY et sort aussitot — cage reste
+# seul a l'ecran, qui demeure noir. Panne silencieuse, d'ou ce controle.
+ENV_KIOSK=/etc/badgeuse/kiosk.env
+if [ -r "$ENV_KIOSK" ]; then
+  FLAGS="$(grep -h '^CHROMIUM_FLAGS=' "$ENV_KIOSK" 2>/dev/null | head -1)"
+  case "$FLAGS" in
+    *ozone-platform=wayland*) ligne "options navigateur" "Wayland" ;;
+    *)                        ligne "options navigateur" "X11 (pas d'option Wayland)" ;;
+  esac
+  case "$CMD:$FLAGS" in
+    *cage*:*ozone-platform=wayland*) : ;;
+    *cage*:*)
+      retenir "OPTIONS INCOHERENTES : le kiosque demarre sous cage (Wayland) mais ${ENV_KIOSK} ne contient pas --ozone-platform=wayland. Chromium tente X11, ne trouve pas d'affichage et sort immediatement : cage reste seul, l'ecran est noir. Corriger en regenerant la configuration :
+      sudo bash /opt/badgeuse/deploy/install.sh" ;;
+  esac
+else
+  ligne "options navigateur" "ABSENT (${ENV_KIOSK})"
+fi
+
 # Le compositeur vivant ne prouve PAS que le navigateur affiche : cage peut
 # tenir l'ecran alors que son client est mort ou n'a jamais peint. On liste donc
 # les processus REELLEMENT dans le cgroup du service, et depuis combien de temps.

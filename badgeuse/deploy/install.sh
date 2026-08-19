@@ -116,8 +116,12 @@ else
   apt-get update -qq
 
   # Socle indispensable : son echec est un echec d'installation, pas un repli.
+  # sqlite3 : la file de pointages est une base SQLite. Sans le client en ligne
+  # de commande, diagnostic.sh ne peut pas dire combien de pointages attendent
+  # — or c'est la question qui tranche entre « rien n'a ete capture » et
+  # « capture mais pas transmis ». Quelques centaines de Ko bien places.
   apt-get install -y --no-install-recommends \
-    python3-venv python3-pip python3-evdev ca-certificates nftables
+    python3-venv python3-pip python3-evdev ca-certificates nftables sqlite3
 
   # Navigateur : les distributions ne s'accordent pas sur le nom du paquet
   # (« chromium » sur Debian et Raspberry Pi OS recents, « chromium-browser »
