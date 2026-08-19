@@ -299,7 +299,10 @@ class BadgeReader:
             return
         raw = "".join(saisie.buffer)
         saisie.buffer.clear()
-        LOGGER.debug("lecture complete sur %s (%d caracteres)", cle, len(raw))
+        # INFO et pas DEBUG : quand la normalisation aval rejette la lecture,
+        # cette ligne est la SEULE trace de ce que le lecteur a reellement
+        # envoye — interface d'origine et longueur, jamais le contenu.
+        LOGGER.info("saisie emise depuis %s (%d caracteres)", cle, len(raw))
         try:
             await self._on_uid(raw)
         finally:

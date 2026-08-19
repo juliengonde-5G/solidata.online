@@ -162,13 +162,13 @@ while read -r pid nom tps; do
   case "$nom" in chromium*|chrome*) NAV_VU=1 ;; esac
 done <<EOF
 $(ps -u badgeuse -o pid=,comm=,etimes= --no-headers 2>/dev/null \
-    | grep -Ev '[[:space:]](python|python3)[[:space:]]*$' | awk '{print $1, $2, $3}')
+    | awk '$2 != "python" && $2 != "python3" { print $1, $2, $3 }')
 EOF
 [ "$PROCS_VUS" -eq 1 ] || ligne "processus" "aucun (hors agent)"
 
 if [ "$KIOSQUE_OK" -eq 1 ] && [ "$NAV_VU" -eq 0 ]; then
-  retenir "COMPOSITEUR SEUL : le service est actif, mais aucun processus chromium ne tourne sous l'utilisateur du kiosque — l'ecran affiche un fond vide. Verifier la sortie du navigateur dans le journal (section 6), puis :
-      sudo systemctl restart badgeuse-kiosk"
+  retenir "COMPOSITEUR SEUL : le service est actif, mais aucun processus chromium ne tourne sous l'utilisateur du kiosque — l'ecran affiche un fond vide. La cause exacte est dans le journal du client (section 6 bis : sortie de chromium et code de fin). Si cette section est vide, l'installation est anterieure au lanceur :
+      sudo bash /opt/badgeuse/deploy/install.sh && sudo systemctl restart badgeuse-kiosk"
 fi
 
 # ── 4. L'interface est-elle servie ? ─────────────────────────────────────────
@@ -206,16 +206,26 @@ fi
 # Preuve du flux REEL : la trace est posee a la premiere frappe de chaque
 # interface. Presente = le lecteur parle ; absente = il ne parle pas, ou pas a
 # nous (interface non saisie, cable, alimentation).
-if journalctl -u badgeuse-agent --since '24 hours ago' --no-pager 2>/dev/null \
-   | grep -q 'premiere frappe recue'; then
-  ligne "frappes recues (24 h)" "oui"
+NB_FRAPPES="$(journalctl -u badgeuse-agent --no-pager 2>/dev/null | grep -c 'premiere frappe recue')"
+if [ "${NB_FRAPPES:-0}" -gt 0 ]; then
+  ligne "frappes recues (journal)" "${NB_FRAPPES}"
+  printf '    derniere :\n      %s\n' "$(journalctl -u badgeuse-agent --no-pager 2>/dev/null | grep 'premiere frappe recue' | tail -1)"
 else
-  ligne "frappes recues (24 h)" "AUCUNE"
+  ligne "frappes recues (journal)" "AUCUNE"
   if [ "$AGENT_OK" -eq 1 ]; then
-    retenir "AUCUNE FRAPPE RECUE depuis 24 h : l'agent tourne et a saisi une ou plusieurs interfaces, mais rien n'en sort. Passer un badge et surveiller :
+    retenir "AUCUNE FRAPPE RECUE : l'agent tourne et a saisi une ou plusieurs interfaces, mais rien n'en sort. Passer un badge et surveiller :
       journalctl -u badgeuse-agent -f
    Si la ligne « premiere frappe recue » n'apparait pas, le lecteur n'emet rien vers le poste (cable, alimentation, mode du lecteur — il doit etre en emulation clavier)."
   fi
+fi
+
+# Lectures emises mais REFUSEES par la normalisation : le compteur et la
+# derniere ligne (metadonnees sans contenu) disent comment regler le lecteur.
+NB_NONCONF="$(journalctl -u badgeuse-agent --no-pager 2>/dev/null | grep -c 'lecture de badge non conforme')"
+if [ "${NB_NONCONF:-0}" -gt 0 ]; then
+  ligne "lectures refusees (non conformes)" "${NB_NONCONF}"
+  printf '    derniere :\n      %s\n' "$(journalctl -u badgeuse-agent --no-pager 2>/dev/null | grep 'lecture de badge non conforme' | tail -1)"
+  retenir "LECTURES REFUSEES : le lecteur emet, mais dans un format hors contrat (8/14/20 hexadecimaux, ou 10 chiffres). La derniere ligne ci-dessus donne longueur et composition SANS le contenu — regler le mode d'emission du lecteur (hexadecimal, sans prefixe/suffixe), ou transmettre cette ligne au support."
 fi
 
 titre "4 ter. File de pointages"
@@ -258,6 +268,14 @@ fi
 titre "6. Journaux — kiosque (20 dernieres lignes)"
 journalctl -u badgeuse-kiosk -n 20 --no-pager 2>/dev/null | sed 's/^/    /' \
   || echo "    (journal indisponible)"
+
+titre "6 bis. Journal du client kiosque (chromium via kiosk-client.sh)"
+SORTIE_CLIENT="$(journalctl -t badgeuse-kiosk-client -n 12 --no-pager 2>/dev/null)"
+if [ -n "$SORTIE_CLIENT" ]; then
+  printf '%s\n' "$SORTIE_CLIENT" | sed 's/^/    /'
+else
+  echo "    (aucune entree — installation anterieure au lanceur : relancer install.sh)"
+fi
 
 titre "7. Journaux — agent (20 dernieres lignes)"
 journalctl -u badgeuse-agent -n 20 --no-pager 2>/dev/null | sed 's/^/    /' \
