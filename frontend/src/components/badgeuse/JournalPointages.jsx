@@ -20,7 +20,14 @@ function RattacherModal({ open, onClose, pointage, employees, onDone }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => { if (open) { setEmployeeId(''); setError(null); } }, [open, pointage]);
+  // Un orphelin « hors plage » porte DÉJÀ son salarié (le badge était reconnu) :
+  // on pré-sélectionne celui-là plutôt que de faire ressaisir un nom déjà connu
+  // — et de risquer une erreur d'attribution.
+  useEffect(() => {
+    if (!open) return;
+    setEmployeeId(pointage?.employee_id != null ? String(pointage.employee_id) : '');
+    setError(null);
+  }, [open, pointage]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -222,6 +229,7 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
 
   const [orphelins, setOrphelins] = useState([]);
   const [orphLoading, setOrphLoading] = useState(true);
+  const [orphError, setOrphError] = useState(null);
   const [rattacher, setRattacher] = useState(null); // { pointage }
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionPrefill, setCorrectionPrefill] = useState(null);
@@ -254,14 +262,22 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
   }, [filters, page]);
   useEffect(() => { load(); }, [load]);
 
+  // JAMAIS D'ÉCHEC SILENCIEUX : une erreur de chargement se voyait auparavant
+  // comme « Aucun pointage orphelin en attente » — l'écran affirmait donc le
+  // contraire de ce qu'il savait. C'est précisément le message qu'un exploitant
+  // lit quand il vient vérifier qu'un badgeage est bien remonté.
   const loadOrphelins = useCallback(() => {
     setOrphLoading(true);
     api.get('/badgeuse/orphelins')
       .then((r) => {
         const d = r.data;
         setOrphelins(Array.isArray(d) ? d : (d.orphelins || d.pointages || d.rows || []));
+        setOrphError(null);
       })
-      .catch(() => setOrphelins([]))
+      .catch((err) => {
+        setOrphelins([]);
+        setOrphError(apiErr(err, 'Chargement des pointages orphelins impossible.'));
+      })
       .finally(() => setOrphLoading(false));
   }, []);
   useEffect(() => { loadOrphelins(); }, [loadOrphelins]);
@@ -362,9 +378,14 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
           <UserCog className="w-4 h-4 text-amber-600" /> Pointages orphelins
           {orphelins.length > 0 && <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">{orphelins.length}</span>}
         </h3>
-        <p className="text-xs text-slate-400 mb-3">Badge non reconnu par le poste au moment du pointage — à rattacher manuellement au salarié concerné (PST-04).</p>
+        <p className="text-xs text-slate-400 mb-3">
+          Pointages en attente de traitement : badge non reconnu par le poste, ou horodatage hors de la plage
+          d'acceptation alors que le badge est connu. Aucun n'est jamais rejeté — ils sont conservés et arbitrés ici (PST-04).
+        </p>
         {orphLoading ? (
           <LoadingSpinner size="sm" />
+        ) : orphError ? (
+          <ErrorState variant="inline" title="Pointages orphelins indisponibles" message={orphError} onRetry={loadOrphelins} />
         ) : orphelins.length === 0 ? (
           <p className="text-sm text-slate-400 py-2">Aucun pointage orphelin en attente.</p>
         ) : (
@@ -374,6 +395,7 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
                 <tr>
                   <th className="text-left py-2 px-2">Date / heure (Paris)</th>
                   <th className="text-left py-2 px-2">Motif</th>
+                  <th className="text-left py-2 px-2">Salarié</th>
                   <th className="text-left py-2 px-2">Empreinte badge</th>
                   <th className="text-left py-2 px-2">Poste</th>
                   {canWriteRh && <th className="text-right py-2 px-2">Action</th>}
@@ -384,6 +406,11 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
                   <tr key={o.id} className="border-b border-slate-50">
                     <td className="py-2 px-2 whitespace-nowrap">{fmtDateTimeParis(o.horodatage_utc)}</td>
                     <td className="py-2 px-2 text-amber-700">{ORPHELIN_RAISON_LABELS[o.orphelin_raison] || o.orphelin_raison || '—'}</td>
+                    {/* Le salarié n'est connu que si le badge a été reconnu
+                        (orphelin « hors plage ») — sinon « — », jamais un nom deviné. */}
+                    <td className="py-2 px-2 text-slate-700">
+                      {o.employee_id != null ? employeeName(o) : <span className="text-slate-400">— (badge non reconnu)</span>}
+                    </td>
                     {/* Empreinte (uid_hmac) : sert à l'ENRÔLEMENT d'un badge neuf —
                         on la copie ici puis on la colle dans « + Attribuer un badge »
                         (onglet Badges). Jamais d'UID en clair : c'est le condensat. */}
@@ -401,8 +428,11 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
                     <td className="py-2 px-2 text-slate-500">{o.device_code || o.device_libelle || '—'}</td>
                     {canWriteRh && (
                       <td className="py-2 px-2 text-right">
-                        <button onClick={() => setRattacher(o)} className="inline-flex items-center gap-1 text-teal-700 hover:text-teal-900 text-xs font-medium">
-                          <Link2 className="w-3.5 h-3.5" /> Rattacher
+                        <button onClick={() => setRattacher(o)} className="inline-flex items-center gap-1 text-teal-700 hover:text-teal-900 text-xs font-medium"
+                          title={o.employee_id != null
+                            ? 'Confirmer ce pointage hors plage et le porter au compte du salarié'
+                            : 'Rattacher ce pointage au salarié concerné'}>
+                          <Link2 className="w-3.5 h-3.5" /> {o.employee_id != null ? 'Confirmer' : 'Rattacher'}
                         </button>
                       </td>
                     )}

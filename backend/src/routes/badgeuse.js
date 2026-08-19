@@ -653,17 +653,49 @@ router.get('/pointages', READ, [
 // ORPHELINS (PST-04 / BO-05)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Liste des pointages EN ATTENTE DE TRAITEMENT (statut `orphelin`).
+ *
+ * TOUS les orphelins, pas seulement ceux dont le badge est inconnu. Le filtre
+ * historique `AND p.employee_id IS NULL` rendait INVISIBLE toute une famille
+ * d'orphelins : ceux dont le badge EST reconnu mais dont l'horodatage tombe
+ * hors de la plage d'acceptation (`hors_plage` — poste dont l'horloge dérive,
+ * plage mal réglée, badgeage nocturne). Ils n'apparaissaient ni ici, ni dans
+ * l'écran Anomalies, alors qu'ils sont bel et bien comptés dans les heures :
+ * un pointage signalé « à traiter » que personne ne pouvait voir, c'est-à-dire
+ * exactement l'échec silencieux que PST-04 interdit.
+ *
+ * `employee_id`/`nom` sont donc exposés : l'écran distingue « badge non
+ * reconnu » (à rattacher) de « salarié connu, horodatage hors plage »
+ * (à confirmer). `nom` vaut null quand le badge est inconnu — jamais un
+ * libellé inventé.
+ */
 router.get('/orphelins', READ, async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT p.id, p.uuid, p.uid_hmac, p.horodatage_utc, p.horodatage_local, p.sens,
-              p.orphelin_raison, p.recu_le, d.code AS device_code
+              p.orphelin_raison, p.recu_le, p.employee_id,
+              e.first_name, e.last_name, e.malibou_id, d.code AS device_code
        FROM badgeuse_pointages p
+       LEFT JOIN employees e ON e.id = p.employee_id
        LEFT JOIN badgeuse_devices d ON d.id = p.device_id
-       WHERE p.statut = 'orphelin' AND p.employee_id IS NULL
+       WHERE p.statut = 'orphelin'
        ORDER BY p.horodatage_utc DESC LIMIT 500`
     );
-    res.json(r.rows.map((x) => ({ ...x, id: Number(x.id) })));
+    res.json(r.rows.map((x) => ({
+      id: Number(x.id),
+      uuid: x.uuid,
+      uid_hmac: x.uid_hmac,
+      horodatage_utc: x.horodatage_utc,
+      horodatage_local: x.horodatage_local,
+      sens: x.sens,
+      orphelin_raison: x.orphelin_raison,
+      recu_le: x.recu_le,
+      device_code: x.device_code || null,
+      employee_id: x.employee_id,
+      nom: x.employee_id ? formatNom(x.last_name, x.first_name) : null,
+      matricule: x.malibou_id || null,
+    })));
   } catch (err) {
     console.error('[BADGEUSE] Erreur liste orphelins :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -677,6 +709,11 @@ router.get('/orphelins', READ, async (req, res) => {
  * sont JAMAIS touchés — la preuve de capture reste vérifiable après coup.
  * Le sens `inconnu` est laissé tel quel : c'est à l'encadrant de le trancher par
  * une correction motivée, pas au serveur de le deviner.
+ *
+ * Le verrou est le STATUT (`orphelin`), pas l'absence de salarié : un orphelin
+ * `hors_plage` porte déjà son salarié (le badge était reconnu) et doit lui
+ * aussi pouvoir être TRAITÉ — sinon il resterait « à traiter » à vie. Un
+ * pointage déjà traité reste refusé (404), le geste n'est donc jamais rejoué.
  */
 router.post('/orphelins/:id/rattacher', WRITE, [
   param('id').isInt(),
@@ -691,7 +728,7 @@ router.post('/orphelins/:id/rattacher', WRITE, [
     const upd = await client.query(
       `UPDATE badgeuse_pointages
        SET employee_id = $2, statut = 'traite'
-       WHERE id = $1 AND employee_id IS NULL AND statut = 'orphelin'
+       WHERE id = $1 AND statut = 'orphelin'
        RETURNING id, uuid, horodatage_utc, sens, orphelin_raison`,
       [id, employeeId]
     );
@@ -1260,16 +1297,27 @@ router.get('/anomalies', READ, [
       }
     }
 
-    // Orphelins de la fenêtre (non rattachés à un salarié).
+    // Orphelins de la fenêtre — TOUS, y compris ceux dont le badge est reconnu
+    // (raison `hors_plage`). Le filtre `employee_id IS NULL` les effaçait de
+    // l'écran d'anomalies alors qu'ils y ont toute leur place : un pointage
+    // hors plage est précisément ce que l'encadrant doit arbitrer.
     const orph = await pool.query(
-      `SELECT id, horodatage_utc, orphelin_raison FROM badgeuse_pointages
-       WHERE statut = 'orphelin' AND employee_id IS NULL
-         AND horodatage_utc >= $1 AND horodatage_utc < $2
-       ORDER BY horodatage_utc`,
+      `SELECT p.id, p.horodatage_utc, p.orphelin_raison, p.employee_id,
+              e.first_name, e.last_name
+       FROM badgeuse_pointages p
+       LEFT JOIN employees e ON e.id = p.employee_id
+       WHERE p.statut = 'orphelin'
+         AND p.horodatage_utc >= $1 AND p.horodatage_utc < $2
+       ORDER BY p.horodatage_utc`,
       [debut, fin]
     );
+    // Le nom n'est restitué que pour un orphelin dont le badge EST reconnu
+    // (`hors_plage`) — sinon null, jamais un libellé inventé.
+    const nomsOrphelins = new Map(orph.rows
+      .filter((x) => x.employee_id != null)
+      .map((x) => [Number(x.employee_id), formatNom(x.last_name, x.first_name)]));
     for (const a of engine.detectAnomalies([], params, { orphelins: orph.rows })) {
-      anomalies.push({ ...a, nom: null });
+      anomalies.push({ ...a, nom: a.employee_id == null ? null : (nomsOrphelins.get(a.employee_id) || null) });
     }
 
     res.json({
