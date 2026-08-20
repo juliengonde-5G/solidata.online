@@ -402,6 +402,9 @@ export default function TourMap() {
                     <p className="font-bold">#{i + 1} {cav.nom || cav.cav_name}</p>
                     <p>{cav.commune}</p>
                     <p>{cav.status === 'collected' ? '✅ Collecté' : 'En attente'}</p>
+                    {/* Exigence 08/2026 : point sans photo, ou photo périmée
+                        (décision serveur `photo_requise`). */}
+                    {cav.photo_requise && <p className="font-bold">📷 Photo à prendre</p>}
                   </div>
                 </Popup>
               </Marker>
@@ -438,6 +441,14 @@ export default function TourMap() {
             <h3 className="font-extrabold text-gray-900 truncate text-lg">
               {currentCAV.nom || currentCAV.cav_name}
             </h3>
+            {/* Photo attendue sur ce point (aucune photo en base ou photo
+                périmée) — annoncé AVANT l'arrivée pour éviter la surprise à la
+                validation. */}
+            {currentCAV.photo_requise && (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-[12px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                <span aria-hidden="true">📷</span> Photo à prendre
+              </p>
+            )}
             {mode !== USAGE_MODES.DRIVING && (
               <div className="flex items-center justify-between mt-1">
                 <p className="text-xs text-gray-500 truncate">{currentCAV.commune}</p>

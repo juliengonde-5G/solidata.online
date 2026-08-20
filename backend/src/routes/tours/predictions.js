@@ -76,10 +76,24 @@ let SCORING_CONFIG = {
   daysSinceWeight: 1.5,
   containerBonus: 3,
   vehicleFillTarget: 0.95,
-  avgSpeed: 30,          // km/h vitesse moyenne
-  timePerCav: 10,        // min par CAV
-  maxDailyHours: 7,      // max 7h de collecte par jour
-  returnEveryKg: 2000,   // retour centre de tri toutes les 2 tonnes
+  // Vitesse moyenne de REPLI (km/h) : réellement consommée dès qu'OSRM est
+  // indisponible (geo.js, planned-passage.js, reoptimize-service.js) — avant
+  // août 2026 elle n'était lue nulle part et trois constantes divergentes
+  // (30 / 28 / 28) vivaient en dur dans ces trois fichiers.
+  avgSpeed: 30,
+  timePerCav: 10,        // min par CAV (défaut si aucun temps appris)
+  // ── Contraintes de journée de travail (exigences client, août 2026) ──
+  // La journée est plafonnée à 6 h de TRAVAIL (conduite + collecte +
+  // déchargements). La pause déjeuner est HORS temps de travail.
+  maxDailyHours: 6,
+  workdayStartHour: 8,   // heure de départ par défaut pour les estimations
+  lunchStartHour: 12,    // heure à partir de laquelle la pause devient due
+  unloadMinutes: 15,     // déchargement au centre de tri (compté en travail)
+  vehicleFillReturnPct: 90,     // % de la capacité déclenchant un retour de vidage
+  saturationThresholdPct: 90,   // % de remplissage à partir duquel un CAV est « saturé »
+  // Seuil kg historique. Le seuil EFFECTIF est le plus contraignant des deux :
+  // min(returnEveryKg ; vehicleFillReturnPct % × capacité du véhicule réel).
+  returnEveryKg: 2000,
   historyDays: 180,      // jours d'historique analysés
   weeklyCollectionCycle: 7, // hypothèse collecte hebdomadaire
   densityThreshold: 3,   // nb conteneurs pour bonus densité

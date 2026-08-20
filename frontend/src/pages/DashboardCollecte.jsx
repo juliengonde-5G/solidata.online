@@ -129,6 +129,65 @@ function StatusBadge({ status }) {
   );
 }
 
+// Encart résilient : une erreur API ne fait jamais planter le tableau de bord,
+// l'encart disparaît simplement en silence.
+function SaturationWidget() {
+  const [data, setData] = useState(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/tours/saturation-risks', { params: { days: 7 } })
+      .then(res => { if (!cancelled) setData(res.data); })
+      .catch((err) => { console.warn('[DashboardCollecte] saturation-risks', err.message); if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (failed) return null;
+
+  const top5 = (data?.risques || []).slice(0, 5);
+
+  return (
+    <div className="card-modern p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-500" />
+          <h3 className="text-sm font-semibold text-slate-700">Saturation des bornes</h3>
+        </div>
+        <Link to="/collection-proposals" className="text-[11px] text-emerald-700 hover:underline flex-shrink-0">
+          Tout voir →
+        </Link>
+      </div>
+
+      {!data ? (
+        <p className="text-xs text-slate-400 text-center py-3">Chargement…</p>
+      ) : top5.length === 0 ? (
+        <p className="text-xs text-slate-400 text-center py-3">Aucune borne en risque sur {data.horizon_jours || 7} jours.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {top5.map(r => (
+            <div key={r.cav_id} className="flex items-center gap-2 text-xs">
+              <span className="truncate flex-1 text-slate-700">{r.name}</span>
+              <span className={`font-bold flex-shrink-0 tabular-nums ${r.fill_actuel_pct >= 80 ? 'text-red-600' : 'text-amber-600'}`}>
+                {Math.round(r.fill_actuel_pct)}%
+              </span>
+              {r.couverture?.couvert ? (
+                <span className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Couverte</span>
+              ) : (
+                <span className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Non planifiée</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Link to="/fill-rate" className="mt-3 inline-block text-[11px] text-slate-400 hover:text-slate-600 hover:underline">
+        Voir la carte des CAV →
+      </Link>
+    </div>
+  );
+}
+
 function FleetHealthBar({ v }) {
   const pending = v.pending_alerts || 0;
   const color =
@@ -244,6 +303,8 @@ export default function DashboardCollecte() {
                 )}
               </div>
             </div>
+
+            <SaturationWidget />
           </div>
 
           {/* Liste ordres */}

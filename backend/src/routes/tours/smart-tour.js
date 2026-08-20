@@ -1,10 +1,26 @@
 const pool = require('../../config/database');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG, getContextForDate, getLocalEventsForDate } = require('./context');
-const { haversineDistance, nearestNeighborTSP, twoOptImprove, osrmRouteSegment, osrmOptimizedTrip } = require('./geo');
+const { nearestNeighborTSP, twoOptImprove, osrmRouteSegment, osrmOptimizedTrip } = require('./geo');
 const { predictFillRate, getSchoolVacationStatus, getScoringConfig } = require('./predictions');
+const fillFactors = require('../../utils/fill-factors');
+const timeEngine = require('../../services/tour-time-engine');
 
 // ══════════════════════════════════════════════════════════════
-// ALGORITHME DE TOURNÉE INTELLIGENTE v2
+// ALGORITHME DE TOURNÉE INTELLIGENTE v3
+// ──────────────────────────────────────────────────────────────
+// v3 (août 2026) : les règles de TEMPS (journée de 6 h de travail, pause
+// déjeuner au centre hors temps de travail, retours de vidage comptés en
+// travail) sortent d'ici et vivent dans le moteur PUR
+// `services/tour-time-engine.js`, partagé avec les modes standard / manuel /
+// association (routes/tours/crud.js) et avec le calcul des ETA d'exécution
+// (planned-passage.js). Une seule implémentation des règles → aucune
+// divergence possible entre les modes de création.
+//
+// v3 ajoute aussi la GARDE DE SATURATION : les CAV dont le remplissage prédit
+// atteint `saturationThresholdPct` sont servis EN PRIORITÉ (ils passent en tête
+// de la liste candidate) ; ceux que la capacité ou le temps ne permettent pas
+// d'inclure sont renvoyés dans `saturation_non_couverte` — le manque de
+// couverture est explicite au lieu d'être silencieux.
 // ══════════════════════════════════════════════════════════════
 
 // Perf (item 3.D-4) : la prédiction de remplissage est calculée pour ~200 CAV.
@@ -13,6 +29,16 @@ const { predictFillRate, getSchoolVacationStatus, getScoringConfig } = require('
 // PG (max 20). Le RÉSULTAT par CAV est inchangé (predictFillRate est déterministe
 // et ne mute pas les données lues par ses voisins) ; seul l'ordonnancement change.
 const PREDICT_CONCURRENCY = parseInt(process.env.TOUR_PREDICT_CONCURRENCY, 10) || 6;
+
+// Remplissage retenu quand AUCUNE prédiction n'est disponible pour un CAV.
+// Aligné sur le défaut de predictFillRate (« pas d'historique → 50 % »).
+const DEFAULT_FILL_PCT = 50;
+
+/** Nombre fini issu d'une valeur de config, sinon le défaut (NaN inclus). */
+function numOr(value, fallback) {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : fallback;
+}
 
 // map à concurrence bornée qui PRÉSERVE l'ordre (results[i] ↔ items[i]).
 async function mapWithConcurrency(items, limit, fn) {
@@ -64,6 +90,221 @@ function learnedTimeFor(map, cavId, defaultTime) {
   return v != null ? v : defaultTime;
 }
 
+/**
+ * Poids estimé (kg) collecté sur un CAV = remplissage prédit × capacité du CAV
+ * (nb conteneurs × 150 kg, source unique utils/fill-factors).
+ *
+ * C'est le modèle d'ACCUMULATION dimensionnellement correct (item 48) : le
+ * remplissage prédit est lui-même construit à partir du poids moyen réel des
+ * collectes passées, rapporté au nombre de jours écoulés et à la capacité.
+ * Il remplace la lecture directe de `prediction.factors.avgWeight`, qui
+ * ignorait le délai depuis la dernière collecte (un CAV relevé après 14 jours
+ * au lieu de 7 pèse deux fois plus).
+ *
+ * @param {number|null} fillPct  remplissage prédit en % (0-120), null si inconnu
+ * @param {number} nbContainers  nombre de conteneurs du CAV
+ * @returns {number} poids estimé en kg
+ */
+function estimatedWeightKgFor(fillPct, nbContainers) {
+  const capacity = fillFactors.getCapacityKg(nbContainers);
+  const pct = Number.isFinite(parseFloat(fillPct)) ? parseFloat(fillPct) : DEFAULT_FILL_PCT;
+  return Math.max(0, (pct / 100) * capacity);
+}
+
+/**
+ * Fabrique la fonction `routeLeg` attendue par le moteur de temps : distances
+ * routières OSRM (repli Haversine géré par geo.js), durée pondérée par le
+ * facteur de trafic du jour.
+ */
+function makeRouteLeg(trafficFactor = 1) {
+  const factor = Number.isFinite(parseFloat(trafficFactor)) && parseFloat(trafficFactor) > 0
+    ? parseFloat(trafficFactor) : 1;
+  return async (from, to) => {
+    const seg = await osrmRouteSegment(from.lat, from.lng, to.lat, to.lng);
+    return { km: seg.distance_km, minutes: seg.duration_min * factor };
+  };
+}
+
+/**
+ * Ordre géographique optimisé (OSRM Trip, repli TSP local + 2-opt).
+ * @returns {Promise<{ordered: Array, method: string}>}
+ */
+async function optimizeOrder(points) {
+  if (!points || points.length <= 1) return { ordered: points || [], method: 'osrm_trip' };
+  const osrmResult = await osrmOptimizedTrip(points, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  if (osrmResult && osrmResult.orderedPoints) {
+    return { ordered: osrmResult.orderedPoints, method: 'osrm_trip' };
+  }
+  let ordered = nearestNeighborTSP(points, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  ordered = twoOptImprove(ordered, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  return { ordered, method: 'haversine_tsp_2opt' };
+}
+
+/**
+ * Options du moteur de temps déduites de la config prédictive + du véhicule.
+ * Source UNIQUE des paramètres de journée : tout mode de création passe par ici.
+ *
+ * @param {object} vehicle véhicule (max_capacity_kg)
+ * @param {object} [over]  surcharges ponctuelles (ex. startHour réel)
+ */
+function timeEngineOptions(vehicle, over = {}) {
+  const cfg = getScoringConfig();
+  const capacityKg = parseFloat(vehicle?.max_capacity_kg) || 0;
+  return {
+    center: { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG, name: 'Centre de tri' },
+    maxWorkMinutes: numOr(cfg.maxDailyHours, 6) * 60,
+    lunchBreakMinutes: numOr(cfg.lunchBreakMinutes, 30),
+    lunchAfterMinutes: numOr(cfg.lunchAfterHours, 4) * 60,
+    lunchStartHour: numOr(cfg.lunchStartHour, 12),
+    startHour: numOr(cfg.workdayStartHour, 8),
+    unloadMinutes: numOr(cfg.unloadMinutes, 15),
+    capacityKg,
+    returnThresholdKg: timeEngine.resolveReturnThresholdKg({
+      returnEveryKg: cfg.returnEveryKg,
+      vehicleFillReturnPct: cfg.vehicleFillReturnPct,
+      capacityKg,
+    }),
+    ...over,
+  };
+}
+
+/**
+ * Remplissage prédit du jour pour une liste de CAV, en 2 temps :
+ *  1. lecture en UNE requête des prédictions déjà calculées par le job
+ *     quotidien (`ml_fill_predictions`) — chemin normal, très peu coûteux ;
+ *  2. calcul heuristique `predictFillRate` pour les seuls CAV manquants
+ *     (concurrence bornée), chaque échec dégradant à `null` sans casser
+ *     l'estimation (« best effort », doctrine soft du dépôt).
+ *
+ * @returns {Promise<Map<number, {fill:number|null, source:string}>>}
+ */
+async function loadPredictedFills(cavIds, dateStr) {
+  const map = new Map();
+  const ids = [...new Set((cavIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite))];
+  if (ids.length === 0) return map;
+
+  try {
+    const r = await pool.query(
+      `SELECT cav_id, predicted_fill_rate FROM ml_fill_predictions
+        WHERE cav_id = ANY($1) AND predicted_date = $2`,
+      [ids, dateStr]
+    );
+    for (const row of r.rows) {
+      const fill = parseFloat(row.predicted_fill_rate);
+      if (Number.isFinite(fill)) map.set(Number(row.cav_id), { fill, source: 'prediction' });
+    }
+  } catch (err) {
+    console.warn('[SMART-TOUR] Lecture ml_fill_predictions ignorée :', err.message);
+  }
+
+  const missing = ids.filter((id) => !map.has(id));
+  if (missing.length > 0) {
+    const preds = await mapWithConcurrency(missing, PREDICT_CONCURRENCY, async (id) => {
+      try { return await predictFillRate(id, dateStr); } catch (_) { return null; }
+    });
+    missing.forEach((id, i) => {
+      const fill = preds[i] && Number.isFinite(parseFloat(preds[i].fill)) ? parseFloat(preds[i].fill) : null;
+      map.set(id, { fill, source: fill != null ? 'heuristique' : 'inconnue' });
+    });
+  }
+  return map;
+}
+
+/**
+ * Estimation d'une tournée dont la LISTE DE POINTS EST FIXE — modes standard,
+ * manuel, association et simulation `POST /tours/estimate`. Applique EXACTEMENT
+ * les mêmes règles de journée que le mode intelligent (moteur partagé).
+ *
+ * @param {object} p
+ * @param {object} p.vehicle  véhicule (max_capacity_kg)
+ * @param {Array}  p.points   points ORDONNÉS : {id, type:'cav'|'association',
+ *                            name, latitude, longitude, nb_containers}
+ * @param {string} p.date     date de la tournée (YYYY-MM-DD)
+ * @param {boolean} [p.optimize] réordonner géographiquement avant estimation
+ * @returns {Promise<{estimation:object, ordre_optimise:number[]|null, points:Array}>}
+ *          `points` = les points dans l'ordre finalement estimé, enrichis du
+ *          remplissage prédit `_fill` (écrit dans tour_cav.predicted_fill_rate)
+ *          et du poids retenu `_weightKg`.
+ */
+async function estimateFixedRoute({ vehicle, points, date, optimize = false }) {
+  const cfg = getScoringConfig();
+  const dateStr = typeof date === 'string' && date
+    ? date.slice(0, 10)
+    : new Date(date || Date.now()).toISOString().split('T')[0];
+  const warnings = [];
+
+  const rows = (points || []).map((p) => ({
+    ...p,
+    id: p.id,
+    type: p.type === 'association' ? 'association' : 'cav',
+    latitude: p.latitude != null ? parseFloat(p.latitude) : null,
+    longitude: p.longitude != null ? parseFloat(p.longitude) : null,
+  }));
+
+  const cavIds = rows.filter((p) => p.type === 'cav').map((p) => p.id);
+  const [fills, learnedTimes] = await Promise.all([
+    loadPredictedFills(cavIds, dateStr),
+    loadLearnedTimesPerCav(cavIds),
+  ]);
+
+  const nbSansPrediction = cavIds.filter((id) => (fills.get(Number(id))?.fill ?? null) == null).length;
+  if (nbSansPrediction > 0) {
+    warnings.push(
+      `${nbSansPrediction} CAV sans prédiction de remplissage — poids estimé au défaut de `
+      + `${DEFAULT_FILL_PCT} % de la capacité.`
+    );
+  }
+  const nbAssociation = rows.filter((p) => p.type === 'association').length;
+  if (nbAssociation > 0) {
+    warnings.push(
+      `${nbAssociation} point(s) association : poids non estimé (aucun historique de remplissage `
+      + 'exploitable) — les retours de vidage ne sont pas anticipés pour ces points.'
+    );
+  }
+
+  const defaultService = numOr(cfg.timePerCav, 10);
+  const enriched = rows.map((p) => ({
+    ...p,
+    _weightKg: p.type === 'cav'
+      ? estimatedWeightKgFor(fills.get(Number(p.id))?.fill ?? null, p.nb_containers)
+      : 0,
+    _serviceMinutes: p.type === 'cav'
+      ? learnedTimeFor(learnedTimes, p.id, defaultService)
+      : defaultService,
+    _fill: p.type === 'cav' ? (fills.get(Number(p.id))?.fill ?? null) : null,
+  }));
+
+  let ordered = enriched;
+  let ordreOptimise = null;
+  if (optimize && enriched.length > 1) {
+    const { ordered: opt } = await optimizeOrder(enriched);
+    ordered = opt;
+    ordreOptimise = opt.map((p) => p.id);
+  }
+
+  let trafficFactor = 1;
+  try {
+    const context = await getContextForDate(dateStr);
+    trafficFactor = parseFloat(context?.trafficFactor) || 1;
+  } catch (_) { /* contexte indisponible → facteur neutre */ }
+
+  const estimation = await timeEngine.buildTimeline(
+    ordered.map((p) => ({
+      id: p.id,
+      type: p.type,
+      name: p.name,
+      lat: p.latitude,
+      lng: p.longitude,
+      serviceMinutes: p._serviceMinutes,
+      weightKg: p._weightKg,
+    })),
+    { ...timeEngineOptions(vehicle), routeLeg: makeRouteLeg(trafficFactor) }
+  );
+  estimation.avertissements = [...estimation.avertissements, ...warnings];
+
+  return { estimation, ordre_optimise: ordreOptimise, points: ordered };
+}
+
 async function generateIntelligentTour(vehicleId, date) {
   const SCORING_CONFIG = getScoringConfig();
 
@@ -93,7 +334,7 @@ async function generateIntelligentTour(vehicleId, date) {
   //    relisent (et voient tous la même météo → déterminisme). (b) prédictions à
   //    concurrence bornée au lieu de ~200 await séquentiels. L'ordre est préservé
   //    (predictions[i] ↔ allCavs[i]) → scores/tri/tournée strictement identiques.
-  const dateStr = typeof date === 'string' ? date : new Date(date).toISOString().split('T')[0];
+  const dateStr = typeof date === 'string' ? date.slice(0, 10) : new Date(date).toISOString().split('T')[0];
   await getContextForDate(dateStr).catch(() => {});
   const predictions = await mapWithConcurrency(allCavs, PREDICT_CONCURRENCY, (cav) => predictFillRate(cav.id, date));
   const cavWithPredictions = allCavs.map((cav, i) => ({ ...cav, prediction: predictions[i] }));
@@ -119,31 +360,57 @@ async function generateIntelligentTour(vehicleId, date) {
     // Bonus confiance
     score *= cav.prediction.confidence;
 
-    return { ...cav, score: Math.round(score * 10) / 10 };
+    return {
+      ...cav,
+      score: Math.round(score * 10) / 10,
+      // Poids estimé = remplissage prédit × capacité du CAV (modèle d'accumulation)
+      estimatedWeightKg: estimatedWeightKgFor(cav.prediction.fill, cav.nb_containers),
+    };
   });
 
   // 5. Trier par score décroissant
   scoredCavs.sort((a, b) => b.score - a.score);
 
-  // 6. Sélectionner les CAV avec contrainte capacité véhicule
-  const maxCapacity = vehicle.max_capacity_kg * 0.95;
-  const maxDailyMinutes = (SCORING_CONFIG.maxDailyHours || 7) * 60;
-  const returnThresholdKg = SCORING_CONFIG.returnEveryKg || 2000;
-  const lunchBreakMinutes = SCORING_CONFIG.lunchBreakMinutes || 30;
-  const lunchAfterHours = SCORING_CONFIG.lunchAfterHours || 4;
-  let estimatedWeight = 0;
-  const selectedCavs = [];
-  let urgentCount = 0;
+  // 5b. ── GARDE DE SATURATION (exigence client) ─────────────────────────────
+  // Aucun CAV ne doit dépasser son seuil de saturation sans qu'une rotation le
+  // vide : les CAV dont le remplissage prédit atteint le seuil sont traités
+  // comme OBLIGATOIRES et passent en tête de la liste candidate (le plus saturé
+  // d'abord). Ceux qui ne peuvent pas être servis (capacité du véhicule ou
+  // budget de temps) ressortent dans `saturation_non_couverte`.
+  const saturationThresholdPct = numOr(SCORING_CONFIG.saturationThresholdPct, 90);
+  const obligatoires = scoredCavs
+    .filter((c) => (c.prediction?.fill ?? 0) >= saturationThresholdPct)
+    .sort((a, b) => (b.prediction.fill - a.prediction.fill) || (b.score - a.score));
+  const obligatoireIds = new Set(obligatoires.map((c) => c.id));
+  const autres = scoredCavs.filter((c) => !obligatoireIds.has(c.id));
 
-  for (const cav of scoredCavs) {
-    const estimatedCavWeight = cav.prediction.factors?.avgWeight || 50;
-    if (estimatedWeight + estimatedCavWeight <= maxCapacity) {
-      selectedCavs.push(cav);
-      estimatedWeight += estimatedCavWeight;
-      if (cav.prediction.fill >= 80) urgentCount++;
+  // 6. Sélectionner les CAV avec contrainte capacité véhicule (obligatoires d'abord)
+  const maxCapacity = vehicle.max_capacity_kg * 0.95;
+  const maxDailyMinutes = numOr(SCORING_CONFIG.maxDailyHours, 6) * 60;
+  const returnThresholdKg = timeEngine.resolveReturnThresholdKg({
+    returnEveryKg: SCORING_CONFIG.returnEveryKg,
+    vehicleFillReturnPct: SCORING_CONFIG.vehicleFillReturnPct,
+    capacityKg: parseFloat(vehicle.max_capacity_kg) || 0,
+  });
+  const lunchBreakMinutes = numOr(SCORING_CONFIG.lunchBreakMinutes, 30);
+
+  const nonCouverts = [];
+  const pickWithinCapacity = (list, state) => {
+    const kept = [];
+    for (const cav of list) {
+      if (state.weight + cav.estimatedWeightKg <= maxCapacity) {
+        kept.push(cav);
+        state.weight += cav.estimatedWeightKg;
+      } else if (obligatoireIds.has(cav.id)) {
+        nonCouverts.push(cav);
+      }
     }
-    if (estimatedWeight >= maxCapacity) break;
-  }
+    return kept;
+  };
+  const capacityState = { weight: 0 };
+  const keptObligatoires = pickWithinCapacity(obligatoires, capacityState);
+  const keptAutres = pickWithinCapacity(autres, capacityState);
+  const selectedCavs = [...keptObligatoires, ...keptAutres];
 
   if (selectedCavs.length === 0) throw new Error('Aucun CAV sélectionné — vérifiez la capacité du véhicule et les données de remplissage.');
 
@@ -151,110 +418,113 @@ async function generateIntelligentTour(vehicleId, date) {
   // CAV retenus (au lieu d'1 requête cav_collection_times par CAV dans la boucle de
   // routage ci-dessous). Résultat identique via learnedTimeFor (fallback défaut).
   const learnedTimes = await loadLearnedTimesPerCav(selectedCavs.map((c) => c.id));
-
-  // 7. Optimiser la route via OSRM (ou fallback TSP local)
-  let optimizedRoute;
-  let routingMethod = 'osrm_trip';
-
-  const osrmResult = await osrmOptimizedTrip(selectedCavs, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-  if (osrmResult && osrmResult.orderedPoints) {
-    optimizedRoute = osrmResult.orderedPoints;
-  } else {
-    // Fallback : TSP nearest neighbor + 2-opt (Haversine)
-    routingMethod = 'haversine_tsp_2opt';
-    optimizedRoute = nearestNeighborTSP(selectedCavs, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-    optimizedRoute = twoOptImprove(optimizedRoute, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
+  const defaultService = numOr(SCORING_CONFIG.timePerCav, 10);
+  for (const cav of selectedCavs) {
+    cav._learnedTimePerCav = learnedTimeFor(learnedTimes, cav.id, defaultService);
   }
 
-  // 8. Calculer distance et durée avec :
-  //    - OSRM pour les segments (distances réelles par la route)
-  //    - Retours intermédiaires au centre toutes les 2t
-  //    - Pause déjeuner après 4h de travail
+  // 7. Optimiser la route via OSRM (ou fallback TSP local). Les obligatoires et
+  //    les autres sont optimisés SÉPARÉMENT puis concaténés : la sélection
+  //    gloutonne sous budget (étape 8) sert ainsi les CAV saturés en premier.
+  const optObl = await optimizeOrder(keptObligatoires);
+  const optAutres = await optimizeOrder(keptAutres);
+  const routingMethod = (optObl.method === 'osrm_trip' && optAutres.method === 'osrm_trip')
+    ? 'osrm_trip' : 'haversine_tsp_2opt';
+  const candidateOrder = [...optObl.ordered, ...optAutres.ordered];
+
+  // 8. Contraintes de journée (moteur partagé) : 6 h de travail max, pause
+  //    déjeuner au centre hors temps de travail, retours de vidage comptés.
   // dateStr est déjà résolu à l'étape 3 (pré-chauffe du contexte).
   const context = await getContextForDate(dateStr);
+  const engineOpts = {
+    ...timeEngineOptions(vehicle),
+    routeLeg: makeRouteLeg(context?.trafficFactor),
+  };
+  const toEnginePoint = (cav) => ({
+    id: cav.id,
+    type: 'cav',
+    name: cav.name,
+    lat: cav.latitude,
+    lng: cav.longitude,
+    serviceMinutes: cav._learnedTimePerCav,
+    weightKg: cav.estimatedWeightKg,
+  });
 
-  let totalDistance = 0;
-  let totalDuration = 0;
-  let currentLoad = 0;
-  let nbRetours = 0;
-  let lunchTaken = false;
-  let lastLat = CENTRE_TRI_LAT, lastLng = CENTRE_TRI_LNG;
-  const routeWithReturns = [];
+  // planWithBudget travaille sur la projection « point moteur » ; les CAV
+  // d'origine se retrouvent ensuite par identifiant.
+  const enginePoints = candidateOrder.map(toEnginePoint);
+  const planned = await timeEngine.planWithBudget(enginePoints, engineOpts);
+  const selectedIds = new Set(planned.selected.map((p) => p.id));
+  let optimizedRoute = candidateOrder.filter((c) => selectedIds.has(c.id));
+  let estimation = planned.estimation;
 
-  for (let i = 0; i < optimizedRoute.length; i++) {
-    const cav = optimizedRoute[i];
-    const cavWeight = cav.prediction?.factors?.avgWeight || 50;
+  // Les CAV saturés écartés par le budget de temps rejoignent les non couverts.
+  for (const rejected of planned.rejected) {
+    const cav = candidateOrder.find((c) => c.id === rejected.id);
+    if (cav && obligatoireIds.has(cav.id)) nonCouverts.push(cav);
+  }
 
-    // ── Pause déjeuner : après lunchAfterHours heures de travail ──
-    if (!lunchTaken && totalDuration >= lunchAfterHours * 60) {
-      // Retour au centre pour le déjeuner
-      const lunchReturn = await osrmRouteSegment(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-      totalDistance += lunchReturn.distance_km;
-      totalDuration += lunchReturn.duration_min + lunchBreakMinutes;
-      // Repartir du centre après le déjeuner
-      lastLat = CENTRE_TRI_LAT;
-      lastLng = CENTRE_TRI_LNG;
-      lunchTaken = true;
-      routeWithReturns.push({ type: 'pause_dejeuner', after_cav_index: i - 1, duration_min: lunchBreakMinutes });
-      // Si on a aussi de la charge, on décharge en même temps
-      if (currentLoad > 0) {
-        totalDuration += 15; // déchargement pendant la pause
-        currentLoad = 0;
-        nbRetours++;
-      }
-    }
-
-    // ── Vérifier si retour centre nécessaire (seuil 2t) ──
-    if (currentLoad + cavWeight > returnThresholdKg && currentLoad > 0) {
-      const retour = await osrmRouteSegment(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-      totalDistance += retour.distance_km;
-      totalDuration += retour.duration_min + 15; // 15min déchargement
-      lastLat = CENTRE_TRI_LAT;
-      lastLng = CENTRE_TRI_LNG;
-      currentLoad = 0;
-      nbRetours++;
-      routeWithReturns.push({ type: 'retour_centre', after_cav_index: i - 1 });
-    }
-
-    // ── Aller au CAV (OSRM distance réelle) ──
-    const segment = await osrmRouteSegment(lastLat, lastLng, cav.latitude, cav.longitude);
-    const timePerCav = learnedTimeFor(learnedTimes, cav.id, SCORING_CONFIG.timePerCav || 10);
-
-    totalDistance += segment.distance_km;
-    totalDuration += segment.duration_min + timePerCav;
-    currentLoad += cavWeight;
-    lastLat = cav.latitude;
-    lastLng = cav.longitude;
-
-    // Stocker le temps de collecte appris pour l'explication
-    cav._learnedTimePerCav = timePerCav;
-
-    // ── Vérifier contrainte durée max (7h + pause déjeuner) ──
-    const returnSegment = await osrmRouteSegment(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-    const totalWithReturn = totalDuration + returnSegment.duration_min;
-    // Budget total = heures de travail + pause déjeuner (la pause ne compte pas dans le travail productif)
-    const totalBudget = maxDailyMinutes + (lunchTaken ? lunchBreakMinutes : 0);
-    if (totalWithReturn > totalBudget) {
-      optimizedRoute = optimizedRoute.slice(0, i + 1);
-      estimatedWeight = optimizedRoute.reduce((s, c) => s + (c.prediction?.factors?.avgWeight || 50), 0);
-      break;
+  // 8b. Ré-optimisation géographique de la SÉLECTION finale (les obligatoires
+  //     ont fait valoir leur priorité, l'ordre peut redevenir purement
+  //     géographique). On ne la retient que si elle tient dans le budget.
+  if (optimizedRoute.length > 1 && keptObligatoires.length > 0) {
+    const { ordered: reordered } = await optimizeOrder(optimizedRoute);
+    const rebuilt = await timeEngine.buildTimeline(reordered.map(toEnginePoint), engineOpts);
+    if (rebuilt.depassement_min === 0) {
+      optimizedRoute = reordered;
+      estimation = rebuilt;
     }
   }
 
-  // Retour final au centre
-  const retourFinal = await osrmRouteSegment(lastLat, lastLng, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-  totalDistance += retourFinal.distance_km;
-  totalDuration += retourFinal.duration_min;
+  // Compté sur la tournée RÉELLEMENT retenue (après la coupe de budget) et non
+  // sur la présélection : le chiffre affiché correspond à ce qui sera collecté.
+  const urgentCount = optimizedRoute.filter((c) => (c.prediction?.fill ?? 0) >= 80).length;
 
-  // Appliquer les facteurs de contexte (trafic, météo)
-  const estimatedDuration = Math.round(totalDuration * context.trafficFactor);
+  const totalDistance = estimation.distance_km;
+  const estimatedDuration = estimation.duree_travail_min;
+  const estimatedWeight = estimation.poids_estime_kg;
+  const nbRetours = estimation.nb_retours_vidage;
+  const lunchTaken = estimation.pause_dejeuner_incluse;
+
+  const saturationNonCouverte = [...new Map(
+    nonCouverts.map((c) => [c.id, {
+      cav_id: c.id,
+      name: c.name,
+      commune: c.commune || null,
+      predicted_fill_rate: c.prediction?.fill ?? null,
+    }])
+  ).values()].sort((a, b) => (b.predicted_fill_rate ?? 0) - (a.predicted_fill_rate ?? 0));
+
+  if (saturationNonCouverte.length > 0) {
+    estimation.avertissements.push(
+      `${saturationNonCouverte.length} CAV au-delà du seuil de saturation (${saturationThresholdPct} %) `
+      + 'ne peuvent pas être servis par cette tournée — planifiez une rotation complémentaire.'
+    );
+  }
 
   // 9. Récupérer événements locaux pour l'explication
   const localEvents = await getLocalEventsForDate(dateStr);
 
   // 10. Générer l'explication
   const vacationStatus = getSchoolVacationStatus(dateStr);
-  const explanation = generateAIExplanation(optimizedRoute, totalDistance, estimatedDuration, estimatedWeight, urgentCount, vehicle, context, localEvents, vacationStatus, routingMethod, lunchTaken, nbRetours, lunchBreakMinutes);
+  const explanation = generateAIExplanation({
+    route: optimizedRoute,
+    distance: totalDistance,
+    duration: estimatedDuration,
+    weight: estimatedWeight,
+    urgentCount,
+    vehicle,
+    context,
+    localEvents,
+    vacationStatus,
+    routingMethod,
+    lunchTaken,
+    nbRetours,
+    lunchBreakMinutes,
+    estimation,
+    saturationNonCouverte,
+    saturationThresholdPct,
+  });
 
   return {
     vehicle,
@@ -269,7 +539,7 @@ async function generateIntelligentTour(vehicleId, date) {
       predicted_fill: cav.prediction.fill,
       confidence: cav.prediction.confidence,
       score: cav.score,
-      estimated_weight: cav.prediction.factors?.avgWeight || 50,
+      estimated_weight: Math.round(cav.estimatedWeightKg),
       nb_containers: cav.nb_containers,
       learned_time_min: cav._learnedTimePerCav,
     })),
@@ -279,20 +549,35 @@ async function generateIntelligentTour(vehicleId, date) {
       estimatedDuration,
       estimatedWeight: Math.round(estimatedWeight),
       maxCapacity: vehicle.max_capacity_kg,
-      fillRate: Math.round((estimatedWeight / vehicle.max_capacity_kg) * 100),
+      fillRate: vehicle.max_capacity_kg > 0
+        ? Math.round((estimatedWeight / vehicle.max_capacity_kg) * 100) : 0,
       urgentCavs: urgentCount,
       nbRetourscentre: nbRetours,
-      maxDailyHours: SCORING_CONFIG.maxDailyHours || 7,
-      returnEveryKg: returnThresholdKg,
+      maxDailyHours: numOr(SCORING_CONFIG.maxDailyHours, 6),
+      returnEveryKg: Number.isFinite(returnThresholdKg) ? returnThresholdKg : null,
       routingMethod,
       lunchBreakIncluded: lunchTaken,
+      // Ajouts v3 (additifs — le frontend existant n'en dépend pas)
+      totalDurationWithBreak: estimation.duree_totale_min,
+      lunchBreakMinutes: estimation.pause_dejeuner_min,
+      budgetTravailMin: estimation.budget_travail_min,
+      saturationThresholdPct,
+      maxDailyMinutes,
     },
+    estimation,
+    saturation_non_couverte: saturationNonCouverte,
     explanation,
   };
 }
 
-function generateAIExplanation(route, distance, duration, weight, urgentCount, vehicle, context, localEvents, vacationStatus, routingMethod, lunchTaken, nbRetours, lunchBreakMinutes) {
+function generateAIExplanation(opts) {
+  const {
+    route, distance, duration, weight, urgentCount, vehicle, context, localEvents,
+    vacationStatus, routingMethod, lunchTaken, nbRetours, lunchBreakMinutes,
+    estimation = null, saturationNonCouverte = [], saturationThresholdPct = 90,
+  } = opts || {};
   const SCORING_CONFIG = getScoringConfig();
+  const maxDailyHours = numOr(SCORING_CONFIG.maxDailyHours, 6);
   const lines = [];
   lines.push(`Tournée intelligente générée pour ${vehicle.name || vehicle.registration}`);
   lines.push(`\n${route.length} points de collecte sélectionnés parmi les CAV actifs`);
@@ -300,16 +585,35 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
 
   const durH = Math.floor(duration / 60);
   const durM = String(duration % 60).padStart(2, '0');
-  lines.push(`Durée estimée : ${durH}h${durM} (max ${SCORING_CONFIG.maxDailyHours || 7}h/jour + pause déjeuner)`);
-  lines.push(`Poids estimé : ${Math.round(weight)} kg / ${vehicle.max_capacity_kg} kg (${Math.round(weight / vehicle.max_capacity_kg * 100)}%)`);
-  lines.push(`Retours centre de tri : ${nbRetours} (seuil ${(SCORING_CONFIG.returnEveryKg || 2000) / 1000}t)`);
+  lines.push(`Temps de travail estimé : ${durH}h${durM} (maximum ${maxDailyHours}h/jour — pause déjeuner NON comprise)`);
+  if (estimation) {
+    lines.push(`Amplitude : ${estimation.heure_depart} → ${estimation.heure_fin_estimee} (pause incluse)`);
+  }
+  lines.push(`Poids estimé : ${Math.round(weight)} kg / ${vehicle.max_capacity_kg} kg (${vehicle.max_capacity_kg > 0 ? Math.round(weight / vehicle.max_capacity_kg * 100) : 0}%)`);
+  const seuilVidage = timeEngine.resolveReturnThresholdKg({
+    returnEveryKg: SCORING_CONFIG.returnEveryKg,
+    vehicleFillReturnPct: SCORING_CONFIG.vehicleFillReturnPct,
+    capacityKg: parseFloat(vehicle.max_capacity_kg) || 0,
+  });
+  lines.push(`Retours centre de tri pour vidage : ${nbRetours}`
+    + `${Number.isFinite(seuilVidage) ? ` (seuil ${Math.round(seuilVidage / 100) / 10}t, déchargement compté dans le temps de travail)` : ''}`);
 
   if (lunchTaken) {
-    lines.push(`\n🍽️ Pause déjeuner : ${lunchBreakMinutes} min (retour centre après ${SCORING_CONFIG.lunchAfterHours || 4}h)`);
+    lines.push(`\n🍽️ Pause déjeuner au centre de tri : ${lunchBreakMinutes} min, HORS temps de travail `
+      + `(déclenchée après ${SCORING_CONFIG.lunchAfterHours || 4}h de travail ou à ${SCORING_CONFIG.lunchStartHour || 12}h). `
+      + 'Les trajets aller/retour, eux, sont comptés.');
   }
 
   if (urgentCount > 0) {
     lines.push(`\n⚠️ ${urgentCount} CAV urgents (remplissage >= 80%)`);
+  }
+
+  if (saturationNonCouverte.length > 0) {
+    lines.push(`\n🚨 ${saturationNonCouverte.length} CAV au-delà du seuil de saturation (${saturationThresholdPct}%) NON couverts par cette tournée :`);
+    saturationNonCouverte.slice(0, 5).forEach((c) => {
+      lines.push(`  • ${c.name}${c.commune ? ` (${c.commune})` : ''} — ${Math.round(c.predicted_fill_rate ?? 0)}%`);
+    });
+    if (saturationNonCouverte.length > 5) lines.push(`  • … et ${saturationNonCouverte.length - 5} autre(s)`);
   }
 
   // Routing method
@@ -358,7 +662,39 @@ function generateAIExplanation(route, distance, duration, weight, urgentCount, v
   return lines.join('\n');
 }
 
+/**
+ * Récapitulatif français court d'une estimation, stocké dans
+ * `tours.ai_explanation` pour les modes standard / manuel / association.
+ */
+function estimationSummary(estimation, { mode, vehicle, forced = false } = {}) {
+  const lines = [];
+  const labels = { standard: 'modèle de tournée', manual: 'saisie manuelle', association: 'points association' };
+  lines.push(`Tournée créée (${labels[mode] || mode}) pour ${vehicle?.name || vehicle?.registration || 'véhicule'}`);
+  const h = Math.floor(estimation.duree_travail_min / 60);
+  const m = String(estimation.duree_travail_min % 60).padStart(2, '0');
+  lines.push(`${estimation.nb_points} point(s) · ${estimation.distance_km} km · temps de travail ${h}h${m} `
+    + `(budget ${Math.round(estimation.budget_travail_min / 60 * 10) / 10}h, pause déjeuner exclue)`);
+  lines.push(`Amplitude ${estimation.heure_depart} → ${estimation.heure_fin_estimee}`
+    + (estimation.pause_dejeuner_incluse ? ` · pause déjeuner ${estimation.pause_dejeuner_min} min au centre de tri` : ' · pas de pause déjeuner'));
+  lines.push(`Poids estimé ${estimation.poids_estime_kg} kg · ${estimation.nb_retours_vidage} retour(s) de vidage`);
+  if (forced) {
+    lines.push(`⚠ créée malgré un dépassement de ${estimation.depassement_min} min (forcé)`);
+  }
+  for (const a of estimation.avertissements) lines.push(`• ${a}`);
+  return lines.join('\n');
+}
+
 module.exports = {
   generateIntelligentTour,
   generateAIExplanation,
+  estimateFixedRoute,
+  estimationSummary,
+  estimatedWeightKgFor,
+  loadPredictedFills,
+  loadLearnedTimesPerCav,
+  learnedTimeFor,
+  timeEngineOptions,
+  makeRouteLeg,
+  optimizeOrder,
+  DEFAULT_FILL_PCT,
 };

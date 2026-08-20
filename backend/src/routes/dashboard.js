@@ -860,15 +860,43 @@ router.get('/alertes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     if (n > 0) alertes.push({ categorie: 'insertion', severite: 'warning', count: n, message: `${n} jalon${n > 1 ? 's' : ''} d'insertion en retard`, link: '/insertion' });
   });
 
-  // 4. CAV pleins (seuil capteur). Surchargeable via alert_thresholds
-  // (indicateur 'cav_remplissage', seuil_max = % à partir duquel un CAV est « plein »).
+  // 4. CAV saturés — alerte RÉPARÉE (août 2026).
+  // Elle s'appuyait sur `cav.avg_fill_rate`, colonne JAMAIS alimentée (figée à
+  // 0) : l'alerte ne se déclenchait donc jamais. Elle lit désormais la MEILLEURE
+  // donnée réelle disponible par CAV, dans l'ordre :
+  //   1. prédiction du jour (`ml_fill_predictions`, job quotidien) ;
+  //   2. dernière lecture capteur si elle est FRAÎCHE (c'est un %) ;
+  //   3. `estimated_fill_rate` s'il est réellement alimenté (> 0).
+  // Le seuil est celui du moteur de tournées (`scoring.saturationThresholdPct`,
+  // paramétrable dans la config prédictive) — une seule définition de la
+  // saturation dans toute l'application.
   await soft('cav_pleins', async () => {
-    let seuil = 80;
+    // require paresseux : évite d'exécuter le chargement de configuration du
+    // moteur prédictif au simple chargement du module dashboard.
+    // eslint-disable-next-line global-require
+    const { getScoringConfig } = require('./tours/predictions');
+    let seuil = parseFloat(getScoringConfig()?.saturationThresholdPct) || 90;
     const th = await pool.query(`SELECT seuil_max FROM alert_thresholds WHERE indicateur = 'cav_remplissage' AND actif = true LIMIT 1`).catch(() => ({ rows: [] }));
     if (th.rows[0]?.seuil_max != null) seuil = parseFloat(th.rows[0].seuil_max);
-    const r = await pool.query(`SELECT COUNT(*)::int AS n FROM cav WHERE status = 'active' AND avg_fill_rate >= $1`, [seuil]);
+    const freshnessHours = parseInt(process.env.SENSOR_FRESHNESS_HOURS, 10) || 8;
+    const r = await pool.query(`
+      WITH pred AS (
+        SELECT cav_id, predicted_fill_rate
+          FROM ml_fill_predictions WHERE predicted_date = CURRENT_DATE
+      )
+      SELECT COUNT(*)::int AS n
+        FROM cav c
+        LEFT JOIN pred ON pred.cav_id = c.id
+       WHERE c.status = 'active'
+         AND COALESCE(
+               pred.predicted_fill_rate,
+               CASE WHEN c.sensor_last_reading_at IS NOT NULL
+                     AND c.sensor_last_reading_at > NOW() - ($2::int * INTERVAL '1 hour')
+                    THEN c.sensor_last_reading END,
+               NULLIF(c.estimated_fill_rate, 0)
+             ) >= $1`, [seuil, freshnessHours]);
     const n = r.rows[0].n;
-    if (n > 0) alertes.push({ categorie: 'cav_pleins', severite: 'warning', count: n, message: `${n} CAV plein${n > 1 ? 's' : ''} (≥ ${Math.round(seuil)} %)`, link: '/fill-rate' });
+    if (n > 0) alertes.push({ categorie: 'cav_pleins', severite: 'warning', count: n, message: `${n} CAV saturé${n > 1 ? 's' : ''} ou proche${n > 1 ? 's' : ''} de la saturation (≥ ${Math.round(seuil)} %) — planifiez une rotation`, link: '/fill-rate' });
   });
 
   // 5. Contrats CDDI (salariés en parcours) finissant sous 60 jours

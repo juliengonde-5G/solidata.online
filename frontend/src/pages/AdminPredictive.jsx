@@ -773,6 +773,24 @@ export default function AdminPredictive() {
           </div>
         </Section>
 
+        {/* ══════════ TEMPS DE TRAVAIL & CONTRAINTES DE TOURNÉE ══════════ */}
+        <Section title="Temps de travail & contraintes de tournée" desc="Budget journalier du chauffeur, pause déjeuner, retours de vidage et seuil de saturation — utilisés par l'estimation de tournée et le wizard de création (Historique des tournées).">
+          <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 mb-4">
+            Règle : le chauffeur travaille au maximum <strong>{config.scoring.maxDailyHours ?? 6} h/jour</strong>. La pause déjeuner est prise <strong>au centre de tri</strong> et n'est <strong>pas comptée</strong> dans ce budget. Les retours de vidage au centre (véhicule plein, ou tous les X kg), eux, <strong>sont comptés</strong> dans le temps de travail.
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <ParamInput label="Durée de travail max (h/jour) — pause déjeuner exclue" value={config.scoring.maxDailyHours} onChange={v => updateScoring('maxDailyHours', v)} />
+            <ParamInput label="Heure de départ par défaut" value={config.scoring.workdayStartHour} onChange={v => updateScoring('workdayStartHour', v)} />
+            <ParamInput label="Pause déjeuner à partir de (h)" value={config.scoring.lunchStartHour} onChange={v => updateScoring('lunchStartHour', v)} />
+            <ParamInput label="…ou après (h) de travail" value={config.scoring.lunchAfterHours} onChange={v => updateScoring('lunchAfterHours', v)} />
+            <ParamInput label="Durée de la pause (min, hors temps de travail)" value={config.scoring.lunchBreakMinutes} onChange={v => updateScoring('lunchBreakMinutes', v)} />
+            <ParamInput label="Temps de déchargement au centre (min)" value={config.scoring.unloadMinutes} onChange={v => updateScoring('unloadMinutes', v)} />
+            <ParamInput label="Retour de vidage à (% de la capacité du véhicule)" value={config.scoring.vehicleFillReturnPct} onChange={v => updateScoring('vehicleFillReturnPct', v)} />
+            <ParamInput label="…ou tous les (kg) — 0 pour désactiver" value={config.scoring.returnEveryKg} onChange={v => updateScoring('returnEveryKg', v)} />
+            <ParamInput label="Seuil de saturation d'une borne (%)" value={config.scoring.saturationThresholdPct} onChange={v => updateScoring('saturationThresholdPct', v)} />
+          </div>
+        </Section>
+
         {/* Jours fériés */}
         <Section title="Jours fériés" desc="Dates avec bonus de remplissage automatique">
           <div className="flex flex-wrap gap-2 mb-3">

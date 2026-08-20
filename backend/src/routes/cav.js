@@ -14,6 +14,10 @@ const { cacheMiddleware } = require('../middleware/cache');
 // Remplace les 3 jeux de facteurs codés en dur qui divergeaient dans /map,
 // /fill-rate et /:id/activity.
 const fillFactors = require('../utils/fill-factors');
+// T1.1 — filtre mutualisé (extension ET MIME), aligné sur les autres flux photo.
+const { imageFilter } = require('../utils/upload-filters');
+// Fraîcheur de la photo du CAV (seuil paramétrable `collecte.photo_fraicheur_mois`).
+const { getPhotoFraicheurMois } = require('../utils/cav-photo');
 
 // Multer pour upload photo CAV
 const cavPhotoStorage = multer.diskStorage({
@@ -30,12 +34,32 @@ const cavPhotoStorage = multer.diskStorage({
 const uploadCavPhoto = multer({
   storage: cavPhotoStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, allowed.includes(ext));
-  },
+  // Avant : filtre maison sur la seule extension. Désormais le filtre commun
+  // (extension + MIME) de utils/upload-filters — même barre que les photos
+  // incidents/collectes/employés.
+  fileFilter: imageFilter,
 });
+
+// Un refus de `imageFilter` (ou un dépassement de taille) arrive en `err` dans
+// la callback multer : sans ce wrapper il partirait au gestionnaire global et
+// ressortirait en 500 opaque. Ici → 400/413 explicites.
+function uploadPhotoOr400(mw) {
+  return (req, res, next) => mw(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Photo trop volumineuse (max 10 Mo)' });
+    return res.status(400).json({ error: err.message || 'Fichier refusé (jpg, png, webp)' });
+  });
+}
+
+// Supprime un fichier au mieux (jamais bloquant, jamais fatal).
+function unlinkQuiet(absPath) {
+  try {
+    if (absPath && fs.existsSync(absPath)) fs.unlinkSync(absPath);
+  } catch (e) {
+    console.warn('[CAV] suppression fichier photo ignorée :', e.message);
+  }
+}
+const photoAbsPath = (photoPath) => path.join(__dirname, '..', '..', photoPath);
 
 router.use(authenticate);
 router.use(autoLogActivity('cav'));
@@ -61,7 +85,12 @@ router.get('/', async (req, res) => {
 
     query += ' ORDER BY name';
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    // photo_path / photo_taken_at / photo_source viennent du SELECT *. On joint
+    // le seuil de fraîcheur EFFECTIF (paramétrable) pour que l'écran back-office
+    // affiche « à renouveler (> N mois) » avec le vrai N — sans endpoint dédié
+    // ni valeur 6 codée en dur côté front. Lecture settings mise en cache 60 s.
+    const photoFraicheurMois = await getPhotoFraicheurMois(pool);
+    res.json(result.rows.map((r) => ({ ...r, photo_fraicheur_mois: photoFraicheurMois })));
   } catch (err) {
     console.error('[CAV] Erreur liste :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -398,27 +427,41 @@ router.get('/qr-sheets/:format', authorize('ADMIN', 'MANAGER'), async (req, res)
   }
 });
 
-// POST /api/cav/:id/photo — Upload photo d'un CAV
-router.post('/:id/photo', authorize('ADMIN', 'MANAGER'), uploadCavPhoto.single('photo'), async (req, res) => {
+// POST /api/cav/:id/photo — Upload photo d'un CAV (back-office)
+// Pose aussi la date de prise de vue et l'origine : c'est cette date qui
+// détermine si le chauffeur devra re-photographier le point au prochain passage.
+router.post('/:id/photo', authorize('ADMIN', 'MANAGER'), uploadPhotoOr400(uploadCavPhoto.single('photo')), async (req, res) => {
+  const cleanupUpload = () => { if (req.file) unlinkQuiet(req.file.path); };
   try {
     if (!req.file) return res.status(400).json({ error: 'Aucune photo fournie (jpg, png, webp, max 10 Mo)' });
 
-    // Supprimer l'ancienne photo si elle existe
     const old = await pool.query('SELECT photo_path FROM cav WHERE id = $1', [req.params.id]);
-    if (old.rows.length > 0 && old.rows[0].photo_path) {
-      const oldPath = path.join(__dirname, '..', '..', old.rows[0].photo_path);
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    if (old.rows.length === 0) {
+      // Le fichier vient d'être écrit par multer : sans ce nettoyage il resterait
+      // orphelin sur le disque (même classe que le correctif 2.18.1).
+      cleanupUpload();
+      return res.status(404).json({ error: 'CAV non trouvé' });
     }
 
     const photoPath = `/uploads/cav-photos/${req.file.filename}`;
     const result = await pool.query(
-      'UPDATE cav SET photo_path = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      `UPDATE cav SET photo_path = $1, photo_taken_at = NOW(), photo_source = 'admin', updated_at = NOW()
+       WHERE id = $2 RETURNING *`,
       [photoPath, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
+    if (result.rows.length === 0) {
+      cleanupUpload();
+      return res.status(404).json({ error: 'CAV non trouvé' });
+    }
+
+    // Ancienne photo supprimée seulement APRÈS le succès de l'écriture.
+    if (old.rows[0].photo_path && old.rows[0].photo_path !== photoPath) {
+      unlinkQuiet(photoAbsPath(old.rows[0].photo_path));
+    }
 
     res.json(result.rows[0]);
   } catch (err) {
+    cleanupUpload();
     console.error('[CAV] Erreur upload photo :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
@@ -430,12 +473,14 @@ router.delete('/:id/photo', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     const old = await pool.query('SELECT photo_path FROM cav WHERE id = $1', [req.params.id]);
     if (old.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
 
-    if (old.rows[0].photo_path) {
-      const oldPath = path.join(__dirname, '..', '..', old.rows[0].photo_path);
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
+    if (old.rows[0].photo_path) unlinkQuiet(photoAbsPath(old.rows[0].photo_path));
 
-    await pool.query('UPDATE cav SET photo_path = NULL, updated_at = NOW() WHERE id = $1', [req.params.id]);
+    // Les 3 colonnes reviennent à NULL : le point redevient « sans photo » donc
+    // à photographier au prochain passage du chauffeur.
+    await pool.query(
+      'UPDATE cav SET photo_path = NULL, photo_taken_at = NULL, photo_source = NULL, updated_at = NOW() WHERE id = $1',
+      [req.params.id]
+    );
     res.json({ message: 'Photo supprimée' });
   } catch (err) {
     console.error('[CAV] Erreur suppression photo :', err);
@@ -902,7 +947,13 @@ router.get('/:id', async (req, res) => {
       [req.params.id]
     );
 
-    res.json({ ...cav.rows[0], collection_history: history.rows });
+    // Seuil de fraîcheur photo effectif (cf. GET /api/cav).
+    const photoFraicheurMois = await getPhotoFraicheurMois(pool);
+    res.json({
+      ...cav.rows[0],
+      photo_fraicheur_mois: photoFraicheurMois,
+      collection_history: history.rows,
+    });
   } catch (err) {
     console.error('[CAV] Erreur détail :', err);
     res.status(500).json({ error: 'Erreur serveur' });
