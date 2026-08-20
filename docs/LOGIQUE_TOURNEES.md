@@ -88,38 +88,96 @@ La transition `planned → in_progress` est **atomique** (ON CONFLICT / lock app
 
 ## 5. Modes de création d'une tournée
 
+### 5.0 Contraintes de temps communes — moteur `services/tour-time-engine.js`
+
+Depuis la refonte « planification » (août 2026), **tous les modes** partagent le même
+moteur de temps PUR (aucune I/O, trajets injectés) :
+
+- **Budget de travail : 6 h/jour** (`maxDailyHours`, défaut 6) = conduite + collecte
+  + déchargements. La **pause déjeuner n'est PAS du temps de travail** mais les
+  trajets pour revenir au centre la prendre en font partie.
+- **Pause déjeuner obligatoire au centre de tri**, déclenchée soit après
+  `lunchAfterHours` (4 h) de travail cumulé, soit dès que l'horloge atteint
+  `lunchStartHour` (12 h) — départ estimé à `workdayStartHour` (8 h). Durée
+  `lunchBreakMinutes` (30). Une tournée courte finissant avant midi n'en insère pas.
+- **Retours de vidage** : dès que la charge atteindrait
+  `min(returnEveryKg, vehicleFillReturnPct % × max_capacity_kg du véhicule)`,
+  insertion d'un retour centre (trajet compté) + déchargement `unloadMinutes` (15).
+  Un vidage dû au moment de la pause est mutualisé avec elle (un seul trajet).
+- Deux entrées : `buildTimeline(points)` (liste FIXE — peut être infaisable →
+  `faisable:false` + `depassement_min`) et `planWithBudget(candidats)` (sélection
+  gloutonne qui garantit que le budget, retour final compris, n'est jamais violé).
+- Sortie = objet `estimation` normalisé : `duree_travail_min`, `duree_totale_min`,
+  `budget_travail_min`, `depassement_min`, `distance_km`, `poids_estime_kg`,
+  `taux_remplissage_vehicule_pct`, `nb_retours_vidage`, `pause_dejeuner_incluse`,
+  `heure_depart`/`heure_fin_estimee`, `timeline[]`
+  (`depart|point|retour_vidage|pause_dejeuner|retour_final`), `avertissements[]`.
+
+`POST /api/tours/estimate` (ADMIN/MANAGER) expose ce calcul en simulation pure
+(`cav_ids` | `standard_route_id` | `association_point_ids`, option `optimize:true`
+→ `ordre_optimise`). Le frontend (wizard de Tours.jsx, page Modèles) l'appelle
+avant toute création.
+
 ### 5.1 Tournée intelligente (IA)
 `POST /api/tours/intelligent`
 
 1. Récupère tous les CAV actifs (hors association)
 2. Prédit le taux de remplissage de chaque CAV (moteur prédictif V2)
-3. Calcule un **score de priorité** pour chaque CAV :
+3. **Garde de saturation** : les CAV dont la prédiction du jour ≥
+   `saturationThresholdPct` (90 %) sont OBLIGATOIRES — placés en tête de la
+   sélection avant tout scoring ; ceux que capacité ou budget ne permettent pas de
+   servir remontent dans `saturation_non_couverte[]` (réponse + avertissement)
+4. Score de priorité pour les autres CAV :
    - Fill-based : 50 pts (≥100%), 35 pts (80%), 20 pts (60%), 10 pts (40%), 2 pts (<40%)
-   - Jours depuis dernière collecte × 1.5
-   - Nombre de conteneurs × 3
-   - Bonus confiance IA × score
-4. Sélectionne les CAV selon contraintes :
-   - Capacité véhicule (95%)
-   - Durée max = 7h collecte + pause déjeuner
-   - Retour centre toutes les 2 tonnes
-5. Optimise la route (OSRM Trip API ou Nearest Neighbor + 2-opt en fallback)
-6. Calcule distance, durée, retours intermédiaires, pause déjeuner
-7. Génère un résumé explicatif en markdown
+   - Jours depuis dernière collecte × 1.5, nb conteneurs × 3, bonus confiance IA
+5. Sélection sous contraintes via `planWithBudget` : capacité véhicule (95 %),
+   **budget 6 h**, retours de vidage vehicle-aware (cf. 5.0). Poids estimé par CAV =
+   remplissage prédit × capacité (nb_containers × 150 kg)
+6. Optimise la route (OSRM Trip API ou Nearest Neighbor + 2-opt en fallback), la
+   ré-optimisation n'est retenue que si elle tient dans le budget
+7. Réponse : champs historiques (stats, explication) + `estimation` + `saturation_non_couverte`.
+   Si AUCUN CAV ne tient dans le budget → erreur explicite, pas de tournée vide
 
-### 5.2 Tournée standard
-`POST /api/tours/standard`
+### 5.2 Tournée modèle (« standard »)
+`POST /api/tours/standard` — exige `standard_route_id`
 
-Crée une tournée à partir d'une route standard pré-définie (`standard_routes` + `standard_route_cav`). L'ordre des points est celui défini dans la route.
+Crée une tournée à partir d'un **modèle de tournée** (`standard_routes` +
+`standard_route_cav`, ordre du modèle). CRUD complet des modèles :
+`GET /tours/routes/list` (`?include_inactive=1`), `GET/PUT/DELETE /tours/routes/:id`
+(PUT = remplacement ordonné de la composition, DELETE → 409 `ROUTE_UTILISEE` si des
+tournées y réfèrent — désactiver via `is_active` dans ce cas), `POST /tours/routes`.
+Les estimations (`estimated_duration_minutes`/`estimated_distance_km`) sont
+calculées et stockées sur le modèle. UI dédiée : page « Modèles de tournées »
+(`/route-templates`). L'estimation est calculée à la création de la tournée et la
+création est **refusée en 409 `DUREE_MAX_DEPASSEE`** (corps : `{error, code,
+estimation}`) si le travail estimé dépasse 6 h, sauf `force:true` (tracé dans
+`ai_explanation`).
 
 ### 5.3 Tournée manuelle
-`POST /api/tours/manual`
+`POST /api/tours/manual` — exige `cav_ids[]` ordonnés
 
-Crée une tournée avec une liste libre de `cav_id` fournis par le manager. L'ordre est celui soumis dans le body.
+Liste libre de CAV, ordre soumis conservé (le wizard propose « Optimiser l'ordre »
+via `/estimate?optimize`). Même calcul d'estimation stockée et même refus 409
+`DUREE_MAX_DEPASSEE` sans `force:true` que le mode modèle.
 
 ### 5.4 Tournée association
 `POST /api/tours/association`
 
-Crée une tournée pour des `association_points` (collection_type = `'association'`). Contrainte : si une tournée association existe ce jour pour ce véhicule, la création d'une tournée PAV est bloquée (et vice-versa).
+Crée une tournée pour des `association_points` (collection_type = `'association'`).
+Modèles gérés par `POST/PUT/DELETE /tours/association-routes[/:id]`
+(`standard_route_association`). Mêmes contraintes de temps (poids non estimé —
+avertissement explicite, « jamais de valeur inventée »). Contrainte conservée : pas
+de mélange PAV/association pour un même véhicule le même jour.
+
+### 5.5 Garde de saturation transverse
+`GET /api/tours/saturation-risks?days=7` (ADMIN/MANAGER) : pour chaque CAV dont les
+données permettent une projection (prédictions `ml_fill_predictions`, sinon capteur),
+date prévue de franchissement du seuil `saturationThresholdPct` et **statut de
+couverture** (existe-t-il une tournée planifiée/en cours qui le visite avant cette
+date ?). Consommé par CollectionProposals (bandeau) et DashboardCollecte (widget).
+L'alerte « CAV pleins » du dashboard général lit désormais les mêmes sources réelles
+(l'ancienne requête sur `avg_fill_rate`, colonne jamais alimentée, renvoyait
+toujours 0).
 
 ---
 
@@ -217,7 +275,7 @@ Nearest Neighbor + amélioration 2-opt (Haversine × 1.3)
 
 ---
 
-## 8. Exécution mobile (sans authentification)
+## 8. Exécution mobile (JWT chauffeur « 1 URL = 1 véhicule »)
 
 Les endpoints suffixés `-public` sont accessibles sans JWT pour permettre l'usage depuis la PWA chauffeur.
 
@@ -238,6 +296,29 @@ Les endpoints suffixés `-public` sont accessibles sans JWT pour permettre l'usa
 - Mobile émet position via Socket.IO toutes les 10 secondes
 - Stocké dans `gps_positions`
 - Visible en temps réel dans `LiveVehicles` (frontend web)
+
+### Photo du CAV au passage (août 2026)
+- Chaque CAV porte une **photo de référence** (`cav.photo_path`) + sa **date de
+  prise de vue** (`cav.photo_taken_at`) et son origine (`cav.photo_source` :
+  `admin`/`chauffeur`/`import` — backfill des photos préexistantes sur `updated_at`,
+  approximation assumée).
+- Règle de fraîcheur (calculée SERVEUR, `utils/cav-photo.js`) : photo absente OU
+  sans date OU plus vieille que `collecte.photo_fraicheur_mois` (settings, défaut
+  **6 mois calendaires**) → `photo_requise = true` dans les payloads chauffeur
+  (`GET /tours/:id/public` et `/tours/vehicle/:id/today`, champs aliasés
+  `cav_photo_path`/`cav_photo_taken_at` pour ne pas écraser la photo d'audit
+  `tour_cav.photo_path`).
+- Mobile (`FillLevel.jsx`) : bloc photo à 3 états — **obligatoire** (validation
+  bloquée tant qu'aucune photo, en ligne uniquement) si `photo_requise` ou point
+  d'audit tiré au sort, **facultatif** sinon (bouton toujours disponible),
+  **hors ligne** jamais bloquant (doctrine offline existante — la photo sera
+  redemandée au prochain passage). Badge « 📷 Photo à prendre » sur TourMap.
+- Envoi : `POST /api/tours/:id/cav/:cavId/photo-public` (multipart, JWT chauffeur,
+  garde de périmètre véhicule, tournée `planned|in_progress`) → met à jour la photo
+  de référence (`photo_source='chauffeur'`), supprime l'ancien fichier. Best effort :
+  un échec n'empêche jamais la collecte.
+- Web : upload admin (`POST /cav/:id/photo`, ADMIN/MANAGER) horodate désormais la
+  prise ; AdminCAV affiche date, origine et badges « Photo à renouveler / Aucune photo ».
 
 ---
 
@@ -326,6 +407,13 @@ Permet de modifier sans redéploiement :
 - Calendrier jours fériés
 - Calendrier vacances scolaires zone B
 - Seuils de scoring (capacité, durée max, retour centre, pause déjeuner)
+- **Contraintes de temps de travail** (exposées dans AdminPredictive, carte
+  « Temps de travail & contraintes de tournée ») : `maxDailyHours` (défaut **6**),
+  `workdayStartHour` (8), `lunchStartHour` (12), `lunchAfterHours` (4),
+  `lunchBreakMinutes` (30), `unloadMinutes` (15), `vehicleFillReturnPct` (90),
+  `returnEveryKg` (2000, 0 = piloté par le seul % capacité), `saturationThresholdPct`
+  (90). `avgSpeed` est désormais réellement la vitesse de repli unique
+  (geo.js / planned-passage.js / reoptimize-service.js).
 
 ---
 
