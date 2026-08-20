@@ -324,6 +324,11 @@ Les endpoints suffixés `-public` sont accessibles sans JWT pour permettre l'usa
 
 ## 9. Side effects à la complétion
 
+Factorisés dans `routes/tours/completion-effects.js` et déclenchés par les DEUX
+routes de clôture (web `PUT /:id/status` ET mobile `PUT /:id/status-public` —
+cette dernière ne les exécutait pas : une tournée clôturée depuis le téléphone
+n'alimentait ni le stock ni la boucle d'apprentissage, corrigé 08/2026).
+
 À `status = completed`, le backend déclenche automatiquement :
 
 1. **Enregistrement `tonnage_history`** : poids par CAV collecté (base d'apprentissage future)

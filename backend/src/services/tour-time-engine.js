@@ -360,7 +360,14 @@ function buildEstimation(s, o, warnings) {
     pause_dejeuner_incluse: s.lunchTaken,
     pause_dejeuner_min: Math.round(s.pauseMinutes),
     heure_depart: minutesToHHMM(startMinutes),
-    heure_fin_estimee: minutesToHHMM(startMinutes + total),
+    // Suffixe « (+N j) » quand la fin déborde sur le(s) jour(s) suivant(s)
+    // (tournée forcée au-delà du budget) : sans lui, « 08:00 → 05:52 » se lit
+    // comme une fin AVANT le départ.
+    heure_fin_estimee: (() => {
+      const endMinutes = startMinutes + total;
+      const days = Math.floor(endMinutes / 1440);
+      return days > 0 ? `${minutesToHHMM(endMinutes)} (+${days} j)` : minutesToHHMM(endMinutes);
+    })(),
     timeline: s.timeline,
     avertissements,
   };

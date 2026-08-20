@@ -4,6 +4,7 @@ const pool = require('../../config/database');
 const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { ensurePlannedPassages } = require('./planned-passage');
+const { applyCompletionSideEffects } = require('./completion-effects');
 const { sendPushToRoles } = require('../../services/push-notifications');
 const {
   driverVehicleIdFromToken,
@@ -251,9 +252,15 @@ module.exports = function createExecutionRouter(upload) {
       // Seule une tournee planned peut etre claimee (empeche double claim).
       // COALESCE : un chauffeur déjà planifié par le manager n'est pas effacé
       // par une session véhicule qui ne sait pas qui conduit.
+      // started_at posé ici : le parcours mobile réel est claim → checklist →
+      // start-public, et start-public ne matche plus une tournée déjà passée
+      // in_progress — sans cet horodatage, elapsed_min/duration_minutes et le
+      // KPI de durée moyenne restaient définitivement NULL sur ce chemin.
       const result = await pool.query(
         `UPDATE tours SET driver_employee_id = COALESCE($1, driver_employee_id),
-                          status = 'in_progress', updated_at = NOW()
+                          status = 'in_progress',
+                          started_at = COALESCE(started_at, NOW()),
+                          updated_at = NOW()
          WHERE id = $2 AND status = 'planned'
          RETURNING *`,
         [employeeId, tourId]
@@ -284,7 +291,9 @@ module.exports = function createExecutionRouter(upload) {
       const updates = ['status = $1', 'updated_at = NOW()'];
       const params = [status];
 
-      if (status === 'in_progress') updates.push('started_at = NOW()');
+      // COALESCE : une reprise (paused → in_progress) ne doit pas écraser
+      // l'heure de départ réelle de la tournée.
+      if (status === 'in_progress') updates.push('started_at = COALESCE(started_at, NOW())');
       if (status === 'completed') updates.push('completed_at = NOW()');
 
       // Auto-assigner le chauffeur connecté si pas encore assigné. Même cascade
@@ -322,55 +331,12 @@ module.exports = function createExecutionRouter(upload) {
         return res.status(404).json({ error: 'Tournée non trouvée' });
       }
 
-      // Actions post-tournée si terminé
+      // Actions post-tournée si terminé — effets factorisés dans
+      // completion-effects.js (partagés avec la route mobile status-public).
       if (status === 'completed' || status === 'cancelled') {
         const tour = result.rows[0];
-
-        // Mettre à jour le tonnage dans l'historique si complété
-        if (status === 'completed' && tour.total_weight_kg > 0) {
-          const cavs = await pool.query(
-            "SELECT cav_id FROM tour_cav WHERE tour_id = $1 AND status = 'collected'",
-            [req.params.id]
-          );
-          const weightPerCav = tour.total_weight_kg / (cavs.rows.length || 1);
-          for (const tc of cavs.rows) {
-            await pool.query(
-              "INSERT INTO tonnage_history (date, cav_id, weight_kg, source) VALUES ($1, $2, $3, 'mobile')",
-              [tour.date, tc.cav_id, weightPerCav]
-            );
-          }
-
-          // Création automatique du mouvement de stock (entrée matière première)
-          await pool.query(
-            `INSERT INTO stock_movements (type, date, poids_kg, tour_id, vehicle_id, origine, notes, created_by)
-             VALUES ('entree', $1, $2, $3, $4, 'collecte', $5, $6)`,
-            [tour.date, tour.total_weight_kg, parseInt(req.params.id), tour.vehicle_id,
-             `Auto: tournée #${req.params.id} (${cavs.rows.length} CAV collectés)`, req.user.id]
-          );
-
-          // Stock Original : entrée automatique depuis collecte
-          await pool.query(
-            `INSERT INTO stock_original_movements (type, date, poids_kg, tour_id, vehicle_id, origine, notes, created_by)
-             VALUES ('entree', $1, $2, $3, $4, $5, $6, $7)`,
-            [tour.date, tour.total_weight_kg, parseInt(req.params.id), tour.vehicle_id,
-             tour.collection_type === 'association' ? 'collecte_association' : 'collecte_pav',
-             `Auto: tournée #${req.params.id} (${cavs.rows.length} CAV collectés)`, req.user.id]
-          );
-        }
-
-        // Apprentissage continu : enregistrer prédit vs observé (fill_level 0-5)
         if (status === 'completed') {
-          const tourCavs = await pool.query(
-            'SELECT cav_id, predicted_fill_rate, fill_level FROM tour_cav WHERE tour_id = $1 AND predicted_fill_rate IS NOT NULL AND fill_level IS NOT NULL',
-            [req.params.id]
-          );
-          for (const tc of tourCavs.rows) {
-            await pool.query(
-              `INSERT INTO collection_learning_feedback (tour_id, cav_id, predicted_fill_rate, observed_fill_level)
-               VALUES ($1, $2, $3, $4)`,
-              [req.params.id, tc.cav_id, tc.predicted_fill_rate, tc.fill_level]
-            );
-          }
+          await applyCompletionSideEffects(tour, parseInt(req.params.id, 10), req.user.id);
         }
       } else if (status === 'in_progress') {
         const tour = result.rows[0];
@@ -414,17 +380,20 @@ module.exports = function createExecutionRouter(upload) {
         return res.status(400).json({ error: 'skip_reason invalide', allowed: VALID_SKIP });
       }
 
+      // $1::varchar : sans cast, PostgreSQL 16 déduit des types incompatibles
+      // pour $1 (COALESCE avec varchar vs CASE avec text) → 42P08 (même défaut
+      // que collect-public, corrigé au même moment).
       const result = await pool.query(
-        `UPDATE tour_cav SET status = COALESCE($1, status),
+        `UPDATE tour_cav SET status = COALESCE($1::varchar, status),
          fill_level = COALESCE($2, fill_level),
          qr_scanned = COALESCE($3, qr_scanned),
          qr_unavailable = COALESCE($4, qr_unavailable),
          qr_unavailable_reason = COALESCE($5, qr_unavailable_reason),
          notes = COALESCE($6, notes),
-         skip_reason = CASE WHEN $1 = 'skipped' THEN COALESCE($7, skip_reason)
-                            WHEN $1 IS NOT NULL AND $1 <> 'skipped' THEN NULL
+         skip_reason = CASE WHEN $1::varchar = 'skipped' THEN COALESCE($7, skip_reason)
+                            WHEN $1::varchar IS NOT NULL AND $1::varchar <> 'skipped' THEN NULL
                             ELSE skip_reason END,
-         collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
+         collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $8 AND cav_id = $9 RETURNING *`,
         [status, fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes, skip_reason, req.params.tourId, req.params.cavId]
       );

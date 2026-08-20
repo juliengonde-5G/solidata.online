@@ -2122,6 +2122,25 @@ async function initDatabase() {
       console.log('');
     }
 
+    // Compte de SERVICE « chauffeur » : identité générique portée par les JWT
+    // du mode véhicule (« 1 URL = 1 véhicule », auth.js /driver-start) quand le
+    // chauffeur affecté n'a pas de compte utilisateur propre — le cas normal,
+    // les fiches salariés venant de la paie. Mot de passe aléatoire jamais
+    // communiqué : ce compte ne sert PAS à se connecter, uniquement à porter
+    // l'identité des jetons chauffeur dans la journalisation. Sans lui,
+    // driver-start refuse (503) au lieu de retomber silencieusement sur l'id 1.
+    const chauffeurExists = await client.query("SELECT id FROM users WHERE username = 'chauffeur'");
+    if (chauffeurExists.rows.length === 0) {
+      const servicePassword = crypto.randomBytes(24).toString('hex');
+      const serviceHash = await bcrypt.hash(servicePassword, 10);
+      await client.query(
+        `INSERT INTO users (username, password_hash, email, role, first_name, last_name, must_change_password)
+         VALUES ('chauffeur', $1, 'chauffeur@solidata.fr', 'COLLABORATEUR', 'Chauffeur', 'Collecte', false)`,
+        [serviceHash]
+      );
+      console.log('[INIT-DB] Compte de service « chauffeur » créé (jetons du mode véhicule)');
+    }
+
     // Migration: update teams constraint + data — drop ALL check constraints on type column
     const teamChecks = await client.query(`
       SELECT con.conname FROM pg_constraint con

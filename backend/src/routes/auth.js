@@ -106,9 +106,17 @@ router.post('/driver-start', async (req, res) => {
       employeeId = vehicle.emp_id;
       firstName = vehicle.first_name;
       lastName = vehicle.last_name;
-      // Utiliser un user_id générique pour le token
+      // Utiliser un user_id générique pour le token. JAMAIS de repli silencieux
+      // vers l'id 1 (souvent un compte ADMIN) : l'identité du jeton sert à la
+      // journalisation — mieux vaut refuser clairement qu'imputer les actions
+      // du chauffeur à un administrateur. Le compte est seedé par init-db.
       const genericUser = await pool.query("SELECT id FROM users WHERE username = 'chauffeur' LIMIT 1");
-      userId = genericUser.rows[0]?.id || 1;
+      if (genericUser.rows.length === 0) {
+        return res.status(503).json({
+          error: "Compte de service « chauffeur » absent — relancez l'initialisation de la base (init-db) ou créez l'utilisateur 'chauffeur'.",
+        });
+      }
+      userId = genericUser.rows[0].id;
     } else {
       // Pas de chauffeur assigné → utiliser le compte chauffeur générique
       const genericUser = await pool.query("SELECT id FROM users WHERE username = 'chauffeur' LIMIT 1");

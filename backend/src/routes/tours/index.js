@@ -80,6 +80,7 @@ const reoptimizeRouter = require('./reoptimize');
 const planningRouter = require('./planning');
 const dashboardRouter = require('./dashboard');
 const { ensurePlannedPassages } = require('./planned-passage');
+const { applyCompletionSideEffects } = require('./completion-effects');
 // Session chauffeur « 1 URL = 1 véhicule » : le véhicule est lu dans le claim
 // `vehicle_id` du jeton et, en repli, dans le `username` historique
 // « driver_<vehicleId> ». Helper partagé avec routes/tours/execution.js.
@@ -397,13 +398,19 @@ router.post('/:id/end-of-day-public', async (req, res) => {
 // PUT /api/tours/:id/start-public — Démarrer une tournée (mobile sans auth)
 router.put('/:id/start-public', async (req, res) => {
   try {
+    // Le flux mobile réel passe par claim (qui bascule déjà in_progress) AVANT
+    // start-public : on accepte donc les deux statuts et on ne pose started_at
+    // que s'il manque encore (COALESCE) — sinon le démarrage restait sans
+    // horodatage sur le parcours normal.
     const result = await pool.query(
-      `UPDATE tours SET status = 'in_progress', started_at = NOW(), updated_at = NOW()
-       WHERE id = $1 AND status = 'planned' RETURNING id, status`,
+      `UPDATE tours SET status = 'in_progress',
+              started_at = COALESCE(started_at, NOW()),
+              updated_at = NOW()
+       WHERE id = $1 AND status IN ('planned', 'in_progress') RETURNING id, status`,
       [req.params.id]
     );
     if (result.rows.length === 0) {
-      // Peut-être déjà in_progress
+      // Statut plus avancé (returning/completed…) : no-op informatif
       const existing = await pool.query('SELECT id, status FROM tours WHERE id = $1', [req.params.id]);
       return res.json(existing.rows[0] || { error: 'Tournée non trouvée' });
     }
@@ -449,13 +456,17 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
     if (collectionType === 'association') {
       // tour_association_point n'a pas de colonne skip_reason : le motif de saut
       // est conservé dans notes. collected_at reste null si le point est sauté.
+      // $1::varchar : sans cast explicite, PostgreSQL 16 déduit deux types
+      // incompatibles pour $1 (varchar dans le SET, text dans les CASE) et
+      // refuse la requête (42P08 « inconsistent types deduced ») → 500 sur
+      // CHAQUE collecte mobile. Prouvé par bisection sur PostgreSQL 16 réel.
       const result = await pool.query(
-        `UPDATE tour_association_point SET status = $1,
+        `UPDATE tour_association_point SET status = $1::varchar,
          fill_level = $2,
          notes = $3,
          remballe = $4,
          photo_path = COALESCE($5, photo_path),
-         collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
+         collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $6 AND association_point_id = $7 RETURNING *`,
         [status,
          status === 'skipped' ? null : fill_level,
@@ -466,17 +477,18 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
       if (result.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
       res.json(result.rows[0]);
     } else {
+      // $1::varchar : même défaut 42P08 que la branche association ci-dessus.
       const result = await pool.query(
-        `UPDATE tour_cav SET status = $1,
-         fill_level = CASE WHEN $1 = 'skipped' THEN NULL ELSE $2 END,
+        `UPDATE tour_cav SET status = $1::varchar,
+         fill_level = CASE WHEN $1::varchar = 'skipped' THEN NULL ELSE $2::int END,
          qr_scanned = $3,
          qr_unavailable = $4,
          qr_unavailable_reason = $5,
-         skip_reason = CASE WHEN $1 = 'skipped' THEN $6 ELSE NULL END,
+         skip_reason = CASE WHEN $1::varchar = 'skipped' THEN $6::varchar ELSE NULL END,
          notes = $7,
          remballe = $8,
          photo_path = COALESCE($9, photo_path),
-         collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
+         collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $10 AND cav_id = $11 RETURNING *`,
         [status, fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null,
          skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId]
@@ -869,6 +881,20 @@ router.put('/:id/status-public', async (req, res) => {
       // 0 ligne sur une clôture = déjà terminée entre-temps (course) → no-op
       // idempotent : on renvoie la tournée existante sans ré-émettre de push.
       return res.json(current.rows[0]);
+    }
+
+    // Effets de clôture (tonnage par CAV, entrées de stock, feedback
+    // d'apprentissage) — partagés avec la route web via completion-effects.js.
+    // La bascule de statut est déjà commitée et la garde d'idempotence assure
+    // un passage unique : un échec ici est journalisé sans faire échouer la
+    // clôture (un 500 ferait rejouer la file mobile sur une tournée déjà
+    // completed → no-op, et les effets seraient perdus dans tous les cas).
+    if (status === 'completed') {
+      try {
+        await applyCompletionSideEffects(result.rows[0], parseInt(req.params.id, 10), req.user?.id ?? null);
+      } catch (effErr) {
+        console.error('[TOURS] status-public — effets de clôture en échec :', effErr.message);
+      }
     }
 
     // Push notification aux managers sur fin / annulation déclenchée côté mobile.

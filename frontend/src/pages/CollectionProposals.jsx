@@ -107,40 +107,54 @@ export default function CollectionProposals() {
     } catch (err) { console.error(err); }
   };
 
-  const createTourForDay = async (day) => {
-    const vehicleId = day.suggestedTour?.vehicle?.id;
-    if (!vehicleId) return;
-    setWeeklyStatus(s => ({ ...s, [day.date]: { state: 'creating' } }));
+  // Une proposition PAR véhicule et par jour (backend `day.proposals[]`) ;
+  // repli sur l'ancienne forme mono-véhicule `suggestedTour` si absente.
+  const dayProposals = (day) =>
+    (day.proposals?.length ? day.proposals : (day.suggestedTour ? [day.suggestedTour] : []))
+      .filter(p => p?.vehicle?.id);
+  const propKey = (day, p) => `${day.date}:${p.vehicle.id}`;
+
+  const createProposal = async (day, proposal) => {
+    const key = propKey(day, proposal);
+    setWeeklyStatus(s => ({ ...s, [key]: { state: 'creating' } }));
     try {
-      await api.post('/tours/intelligent', { date: day.date, vehicle_id: vehicleId }, { timeout: 120000 });
-      setWeeklyStatus(s => ({ ...s, [day.date]: { state: 'done' } }));
+      await api.post('/tours/intelligent', { date: day.date, vehicle_id: proposal.vehicle.id }, { timeout: 120000 });
+      setWeeklyStatus(s => ({ ...s, [key]: { state: 'done' } }));
       loadWeekly();
     } catch (err) {
       console.error(err);
-      setWeeklyStatus(s => ({ ...s, [day.date]: { state: 'error', message: err.response?.data?.error || 'Échec de la création' } }));
+      setWeeklyStatus(s => ({ ...s, [key]: { state: 'error', message: err.response?.data?.error || 'Échec de la création' } }));
     }
   };
 
+  const weekCandidates = () => {
+    const out = [];
+    for (const day of weekly?.days || []) {
+      if (day.existingTours?.length > 0) continue;
+      for (const proposal of dayProposals(day)) {
+        if (weeklyStatus[propKey(day, proposal)]?.state !== 'done') out.push({ day, proposal });
+      }
+    }
+    return out;
+  };
+
   const planWholeWeek = async () => {
-    const candidates = (weekly?.days || []).filter(d =>
-      d.suggestedTour?.vehicle?.id &&
-      (!d.existingTours || d.existingTours.length === 0) &&
-      weeklyStatus[d.date]?.state !== 'done'
-    );
+    const candidates = weekCandidates();
     if (candidates.length === 0) return;
     setPlanningAll(true);
     setPlanAllSummary(null);
     setPlanAllProgress({ done: 0, total: candidates.length });
     let created = 0, failed = 0;
-    for (const day of candidates) {
-      setWeeklyStatus(s => ({ ...s, [day.date]: { state: 'creating' } }));
+    for (const { day, proposal } of candidates) {
+      const key = propKey(day, proposal);
+      setWeeklyStatus(s => ({ ...s, [key]: { state: 'creating' } }));
       try {
-        await api.post('/tours/intelligent', { date: day.date, vehicle_id: day.suggestedTour.vehicle.id }, { timeout: 120000 });
-        setWeeklyStatus(s => ({ ...s, [day.date]: { state: 'done' } }));
+        await api.post('/tours/intelligent', { date: day.date, vehicle_id: proposal.vehicle.id }, { timeout: 120000 });
+        setWeeklyStatus(s => ({ ...s, [key]: { state: 'done' } }));
         created++;
       } catch (err) {
         console.error(err);
-        setWeeklyStatus(s => ({ ...s, [day.date]: { state: 'error', message: err.response?.data?.error || 'Échec de la création' } }));
+        setWeeklyStatus(s => ({ ...s, [key]: { state: 'error', message: err.response?.data?.error || 'Échec de la création' } }));
         failed++;
       }
       setPlanAllProgress(p => ({ done: (p?.done || 0) + 1, total: candidates.length }));
@@ -150,11 +164,7 @@ export default function CollectionProposals() {
     loadWeekly();
   };
 
-  const planAllCandidateCount = (weekly?.days || []).filter(d =>
-    d.suggestedTour?.vehicle?.id &&
-    (!d.existingTours || d.existingTours.length === 0) &&
-    weeklyStatus[d.date]?.state !== 'done'
-  ).length;
+  const planAllCandidateCount = weekCandidates().length;
 
   return (
     <Layout>
@@ -489,72 +499,90 @@ export default function CollectionProposals() {
 
             <div className="grid gap-3">
               {weekly.days?.map(day => {
-                const status = weeklyStatus[day.date];
                 const hasExisting = day.existingTours?.length > 0;
-                const canCreate = !!day.suggestedTour?.vehicle?.id && !hasExisting;
+                const proposals = dayProposals(day);
                 return (
-                  <div key={day.date} className="bg-white rounded-xl border p-4 flex items-center justify-between flex-wrap gap-2">
-                    <div className="flex items-center gap-4 flex-wrap">
-                      <span className="font-medium capitalize w-24">{day.dayName}</span>
-                      <span className="text-sm text-gray-500">{day.date}</span>
-                      {day.suggestedTour && (
-                        <span className="text-sm">
-                          {day.suggestedTour.cavCount} CAV · {day.suggestedTour.stats?.totalDistance ?? 0} km · {day.suggestedTour.stats?.estimatedDuration ?? 0} min
-                        </span>
-                      )}
-                      {day.suggestedTour?.estimation && (
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${day.suggestedTour.estimation.faisable ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                          {Math.round(day.suggestedTour.estimation.poids_estime_kg || 0)} kg · {Math.round(day.suggestedTour.estimation.taux_remplissage_vehicule_pct || 0)}% véhicule
-                          {day.suggestedTour.estimation.pause_dejeuner_incluse ? ' · pause incluse' : ''}
-                        </span>
-                      )}
-                      {/* Météo inline */}
-                      {day.context?.weatherLabel && (
-                        <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
-                          {day.context.weatherLabel}
-                          {day.context.tempMax != null && ` ${day.context.tempMax}°C`}
-                          {' '}x{day.context.weatherFactor?.toFixed(2)}
-                        </span>
-                      )}
+                  <div key={day.date} className="bg-white rounded-xl border p-4 space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <span className="font-medium capitalize w-24">{day.dayName}</span>
+                        <span className="text-sm text-gray-500">{day.date}</span>
+                        {/* Météo inline */}
+                        {day.context?.weatherLabel && (
+                          <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
+                            {day.context.weatherLabel}
+                            {day.context.tempMax != null && ` ${day.context.tempMax}°C`}
+                            {' '}x{day.context.weatherFactor?.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-2 items-center flex-wrap justify-end">
+                        {/* Badges vacances / férié */}
+                        {day.vacationStatus && (
+                          <span className={`text-xs px-2 py-1 rounded ${
+                            day.vacationStatus.status === 'during' ? 'bg-purple-100 text-purple-700' :
+                            day.vacationStatus.status === 'pre' ? 'bg-amber-50 text-amber-700' :
+                            'bg-blue-50 text-blue-700'
+                          }`}>
+                            {day.vacationStatus.status === 'during' ? 'Vacances' :
+                             day.vacationStatus.status === 'pre' ? 'Pré-vacances' : 'Post-vacances'}
+                          </span>
+                        )}
+                        {day.holiday && (
+                          <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded">Férié</span>
+                        )}
+                        {hasExisting && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{day.existingTours.length} tournée(s)</span>
+                        )}
+                        {day.availableVehicles === 0 && <span className="text-xs text-gray-400">Tous véhicules utilisés</span>}
+                      </div>
                     </div>
-                    <div className="flex gap-2 items-center flex-wrap justify-end">
-                      {/* Badges vacances / férié */}
-                      {day.vacationStatus && (
-                        <span className={`text-xs px-2 py-1 rounded ${
-                          day.vacationStatus.status === 'during' ? 'bg-purple-100 text-purple-700' :
-                          day.vacationStatus.status === 'pre' ? 'bg-amber-50 text-amber-700' :
-                          'bg-blue-50 text-blue-700'
-                        }`}>
-                          {day.vacationStatus.status === 'during' ? 'Vacances' :
-                           day.vacationStatus.status === 'pre' ? 'Pré-vacances' : 'Post-vacances'}
-                        </span>
-                      )}
-                      {day.holiday && (
-                        <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded">Férié</span>
-                      )}
-                      {hasExisting && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{day.existingTours.length} tournée(s)</span>
-                      )}
-                      {day.availableVehicles === 0 && <span className="text-xs text-gray-400">Tous véhicules utilisés</span>}
 
-                      {canCreate && status?.state === 'done' && (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Créée
-                        </span>
-                      )}
-                      {canCreate && status?.state !== 'done' && (
-                        <button
-                          onClick={() => createTourForDay(day)}
-                          disabled={status?.state === 'creating' || planningAll}
-                          className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {status?.state === 'creating' ? 'Création…' : status?.state === 'error' ? 'Réessayer' : 'Créer cette tournée'}
-                        </button>
-                      )}
-                    </div>
-                    {status?.state === 'error' && (
-                      <p className="w-full text-xs text-red-600 mt-1">{status.message}</p>
-                    )}
+                    {/* Une proposition par véhicule disponible */}
+                    {!hasExisting && proposals.map(proposal => {
+                      const status = weeklyStatus[propKey(day, proposal)];
+                      return (
+                        <div key={proposal.vehicle.id} className="flex items-center justify-between flex-wrap gap-2 pl-2 border-l-2 border-slate-100">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span className="text-sm font-medium text-slate-700">
+                              {proposal.vehicle.name || proposal.vehicle.registration}
+                            </span>
+                            <span className="text-sm text-gray-500">
+                              {proposal.cavCount} CAV · {proposal.stats?.totalDistance ?? 0} km · {proposal.stats?.estimatedDuration ?? 0} min
+                            </span>
+                            {proposal.estimation && (
+                              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${proposal.estimation.faisable ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                {Math.round(proposal.estimation.poids_estime_kg || 0)} kg · {Math.round(proposal.estimation.taux_remplissage_vehicule_pct || 0)}% véhicule
+                                {proposal.estimation.pause_dejeuner_incluse ? ' · pause incluse' : ''}
+                              </span>
+                            )}
+                            {proposal.saturation_non_couverte?.length > 0 && (
+                              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                                {proposal.saturation_non_couverte.length} borne(s) saturée(s) non couverte(s)
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex gap-2 items-center">
+                            {status?.state === 'done' ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Créée
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => createProposal(day, proposal)}
+                                disabled={status?.state === 'creating' || planningAll}
+                                className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {status?.state === 'creating' ? 'Création…' : status?.state === 'error' ? 'Réessayer' : 'Créer cette tournée'}
+                              </button>
+                            )}
+                          </div>
+                          {status?.state === 'error' && (
+                            <p className="w-full text-xs text-red-600">{status.message}</p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}

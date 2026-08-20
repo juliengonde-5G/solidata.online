@@ -322,21 +322,27 @@ router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) 
       const usedIds = new Set(existingTours.rows.map(r => r.vehicle_id));
       const available = vehiclesResult.rows.filter(v => !usedIds.has(v.id));
 
-      let bestProposal = null;
-      if (available.length > 0) {
+      // Une proposition PAR véhicule disponible (plafonné à 3/jour pour tenir
+      // le temps de réponse sur 7 jours) — l'ancienne version ne proposait que
+      // le premier véhicule du parc toute la semaine, même trop petit pour
+      // absorber les CAV en approche de saturation.
+      const proposals = [];
+      for (const vehicle of available.slice(0, 3)) {
         try {
-          const result = await generateIntelligentTour(available[0].id, dateStr);
-          bestProposal = {
-            vehicle: available[0],
+          const result = await generateIntelligentTour(vehicle.id, dateStr);
+          proposals.push({
+            vehicle,
             stats: result.stats,
             cavCount: result.cavList.length,
-            // Le plan hebdo filtrait les champs : l'estimation (6 h de travail,
-            // pause, vidages) et les CAV saturés non couverts sont désormais exposés.
+            // L'estimation (6 h de travail, pause, vidages) et les CAV saturés
+            // non couverts sont exposés comme sur les propositions du jour.
             estimation: result.estimation,
             saturation_non_couverte: result.saturation_non_couverte || [],
-          };
-        } catch (e) {}
+          });
+        } catch (e) { /* véhicule sans tournée possible ce jour : ignoré */ }
       }
+      // suggestedTour conservé (compat consommateurs existants) = 1re proposition.
+      const bestProposal = proposals[0] || null;
 
       const context = await getContextForDate(dateStr);
       const vacStatus = getSchoolVacationStatus(dateStr);
@@ -347,6 +353,7 @@ router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) 
         existingTours: existingTours.rows,
         availableVehicles: available.length,
         suggestedTour: bestProposal,
+        proposals,
         context: {
           weatherFactor: context.weatherFactor,
           weatherLabel: context.weatherLabel,
