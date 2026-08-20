@@ -2575,7 +2575,7 @@ async function initDatabase() {
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS photo_path VARCHAR(500);
       -- Fraîcheur de la photo (exigence 08/2026) : le chauffeur doit fournir une
       -- photo quand le CAV n'en a aucune, ou quand la sienne dépasse le seuil
-      -- paramétrable `collecte.photo_fraicheur_mois` (défaut 6). La date de prise
+      -- paramétrable « collecte.photo_fraicheur_mois » (défaut 6). La date de prise
       -- de vue devient donc une donnée métier (pas un horodatage technique) et
       -- l'origine permet de distinguer une photo posée au back-office ('admin')
       -- d'une photo prise sur le terrain ('chauffeur').

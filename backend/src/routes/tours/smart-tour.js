@@ -458,6 +458,12 @@ async function generateIntelligentTour(vehicleId, date) {
   let optimizedRoute = candidateOrder.filter((c) => selectedIds.has(c.id));
   let estimation = planned.estimation;
 
+  if (optimizedRoute.length === 0) {
+    throw new Error(
+      'Aucun CAV ne tient dans le budget de temps de travail (points trop éloignés du centre ou budget trop court) — aucune tournée créée.'
+    );
+  }
+
   // Les CAV saturés écartés par le budget de temps rejoignent les non couverts.
   for (const rejected of planned.rejected) {
     const cav = candidateOrder.find((c) => c.id === rejected.id);
