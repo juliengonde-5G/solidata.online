@@ -19,3 +19,6 @@ __pycache__/
 
 # Environnements de travail des agents Claude (worktrees isolés, jamais versionnés)
 .claude/worktrees/
+
+# Dump Redis local (jamais versionné)
+dump.rdb
