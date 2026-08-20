@@ -1262,6 +1262,31 @@ async function initDatabase() {
         ALTER TABLE tours ADD COLUMN nb_cav INTEGER DEFAULT 0;
       EXCEPTION WHEN duplicate_column THEN NULL; END $$;
     `);
+
+    // Suiveurs (équipiers accompagnant le chauffeur, 0 à 2 par tournée) —
+    // affectés depuis Planning tournées au même titre que le chauffeur.
+    // Bornés à 2 par demande métier : deux colonnes nullable suffisent, pas de
+    // table de jonction. Vocabulaire aligné sur tour_end_of_day_declarations.
+    await client.query(`
+      ALTER TABLE tours ADD COLUMN IF NOT EXISTS suiveur1_employee_id INTEGER REFERENCES employees(id);
+      ALTER TABLE tours ADD COLUMN IF NOT EXISTS suiveur2_employee_id INTEGER REFERENCES employees(id);
+    `);
+
+    // Pondération météo APPRISE des dépôts (services/weather-learning.js) :
+    // 4 facteurs semaine/week-end × beau temps/autre, recalculés mensuellement
+    // depuis les intervalles réels entre collectes croisés avec la météo
+    // quotidienne. Vide tant que l'échantillon est insuffisant (le moteur garde
+    // alors la règle par défaut « week-end ensoleillé ×1.15 »).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS predictive_weather_factors (
+        segment VARCHAR(20) PRIMARY KEY,
+        factor DOUBLE PRECISION NOT NULL,
+        jours INTEGER,
+        intervalles INTEGER,
+        cavs INTEGER,
+        computed_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
     await client.query(`
       CREATE TABLE IF NOT EXISTS collection_learning_feedback (
         id SERIAL PRIMARY KEY,

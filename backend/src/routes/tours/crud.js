@@ -245,6 +245,11 @@ router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
   try {
     await ensureConfigLoaded();
     const resolved = await fillFactors.getResolvedFactors();
+    // Pondération météo apprise (best effort : {ok:false} si pas encore apprise)
+    let weatherLearned = { ok: false };
+    try {
+      weatherLearned = await require('../../services/weather-learning').getLearnedWeatherRatios();
+    } catch (e) { /* affichage admin seulement, jamais bloquant */ }
     res.json({
       seasonalFactors: resolved.seasonal,
       dayOfWeekFactors: resolved.dayOfWeek,
@@ -255,6 +260,7 @@ router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
       holidays: getHolidays(),
       schoolVacations: getSchoolVacations(),
       scoring: getScoringConfig(),
+      weatherLearned,
       centreTri: { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
     });
   } catch (err) {

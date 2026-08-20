@@ -1065,6 +1065,72 @@ router.get('/:id/history', async (req, res) => {
   }
 });
 
+// GET /api/cav/:id/historique — Historique consolidé d'un CAV pour la fiche
+// AdminCAV : passages en tournée (collecté / sauté avec motif, niveau relevé),
+// tonnages attribués et incidents, plus une synthèse chiffrée de la période.
+router.get('/:id/historique', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const cavId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(cavId)) return res.status(400).json({ error: 'Identifiant de CAV invalide' });
+    // Période bornée 1-60 mois, défaut 12.
+    const mois = Math.min(60, Math.max(1, parseInt(req.query.mois, 10) || 12));
+
+    const [passages, tonnages, incidents] = await Promise.all([
+      pool.query(
+        `SELECT t.id AS tour_id, t.date, t.mode, t.status AS tour_status,
+                v.registration, v.name AS vehicle_name,
+                tc.status, tc.fill_level, tc.skip_reason, tc.collected_at
+           FROM tour_cav tc
+           JOIN tours t ON t.id = tc.tour_id
+           LEFT JOIN vehicles v ON v.id = t.vehicle_id
+          WHERE tc.cav_id = $1
+            AND t.date >= NOW() - make_interval(months => $2)
+          ORDER BY t.date DESC, t.id DESC
+          LIMIT 200`,
+        [cavId, mois]
+      ),
+      pool.query(
+        `SELECT date, weight_kg, source
+           FROM tonnage_history
+          WHERE cav_id = $1 AND date >= NOW() - make_interval(months => $2)
+          ORDER BY date DESC
+          LIMIT 200`,
+        [cavId, mois]
+      ),
+      pool.query(
+        `SELECT id, type, description, status, created_at, resolved_at, tour_id
+           FROM incidents
+          WHERE cav_id = $1 AND created_at >= NOW() - make_interval(months => $2)
+          ORDER BY created_at DESC
+          LIMIT 100`,
+        [cavId, mois]
+      ),
+    ]);
+
+    const nbCollectes = passages.rows.filter((p) => p.status === 'collected').length;
+    const nbSautes = passages.rows.filter((p) => p.status === 'skipped').length;
+    const poidsTotal = tonnages.rows.reduce((s, r) => s + (parseFloat(r.weight_kg) || 0), 0);
+
+    res.json({
+      periode_mois: mois,
+      synthese: {
+        nb_passages: passages.rows.length,
+        nb_collectes: nbCollectes,
+        nb_sautes: nbSautes,
+        poids_total_kg: Math.round(poidsTotal),
+        nb_incidents: incidents.rows.length,
+        incidents_ouverts: incidents.rows.filter((i) => !['resolved', 'closed'].includes(i.status)).length,
+      },
+      passages: passages.rows,
+      tonnages: tonnages.rows,
+      incidents: incidents.rows,
+    });
+  } catch (err) {
+    console.error('[CAV] Erreur historique consolidé :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // DELETE /api/cav/:id
 router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   try {

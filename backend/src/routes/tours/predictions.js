@@ -2,6 +2,9 @@ const pool = require('../../config/database');
 const { getContextForDate, getLocalEventsForDate, isEventNearCav } = require('./context');
 const { haversineDistance } = require('./geo');
 const fillFactors = require('../../utils/fill-factors');
+// Pondération météo APPRISE (semaine/week-end × beau temps) — le module ne
+// require predictions qu'en paresseux : pas de cycle.
+const weatherLearning = require('../../services/weather-learning');
 
 // ══════════════════════════════════════════════════════════════
 // MOTEUR DE PRÉDICTION DE REMPLISSAGE (IA)
@@ -100,7 +103,10 @@ let SCORING_CONFIG = {
   densityBonus: 1.1,
   holidayBonus: 1.1,
   maxFillCap: 120,
-  weekendSunnyBonus: 1.15,  // beau temps le weekend → plus de tri
+  weekendSunnyBonus: 1.15,  // beau temps le weekend → plus de tri (REPLI tant
+                            // que l'apprentissage météo n'a pas produit)
+  beauTempsTempMin: 15,     // « beau temps » = temp. max ≥ 15 °C…
+  beauTempsPrecipMm: 1,     // …et pluie < 1 mm (partagé apprentissage/moteur)
   localEventBonus: 1.2,     // brocante/vide-grenier à proximité
   // Vacances scolaires — calibrés sur données réelles 2025-2026
   // Hors été : baisse ~10% (routes moins fréquentes, moins de dépôts)
@@ -318,10 +324,25 @@ async function predictFillRate(cavId, targetDate) {
   const context = await getContextForDate(dateStr);
   rawFill *= context.weatherFactor;
 
-  // Beau temps le weekend = plus de dépôts (gens font du rangement/tri)
+  // Beau temps = plus de dépôts (les gens trient/rangent), surtout le week-end.
+  // Pondération APPRISE depuis l'expérience réelle (intervalles entre collectes
+  // croisés avec la météo quotidienne — services/weather-learning.js, job
+  // mensuel). Les RATIOS d'interaction sont appliqués (beau vs autre, à type de
+  // jour égal) : l'effet week-end « de base » reste porté par les facteurs
+  // jour-de-semaine appris — pas de double compte. Tant que l'apprentissage n'a
+  // pas assez de données : règle historique (week-end ensoleillé ×1.15).
   const isWeekend = (dayOfWeek >= 5); // 5=sam, 6=dim
-  if (isWeekend && context.tempMax != null && context.tempMax >= 18 && context.weatherFactor >= 1) {
-    rawFill *= SCORING_CONFIG.weekendSunnyBonus || 1.15;
+  const beauJour = weatherLearning.isBeauTemps(context.tempMax, context.precipMm, {
+    tempMin: SCORING_CONFIG.beauTempsTempMin,
+    precipMax: SCORING_CONFIG.beauTempsPrecipMm,
+  });
+  if (beauJour) {
+    const learned = await weatherLearning.getLearnedWeatherRatios();
+    if (learned.ok) {
+      rawFill *= isWeekend ? learned.ratios.beau_weekend : learned.ratios.beau_semaine;
+    } else if (isWeekend) {
+      rawFill *= SCORING_CONFIG.weekendSunnyBonus || 1.15;
+    }
   }
 
   // Événements locaux à proximité (brocante, vide-grenier → excédent de collecte)

@@ -1793,6 +1793,12 @@ async function hourlyTick() {
         const { recalcSeasonalFactors } = require('./predictive-ai');
         if (typeof recalcSeasonalFactors === 'function') return recalcSeasonalFactors();
       });
+      // Apprentissage météo des dépôts (semaine/week-end × beau temps) —
+      // même cadence mensuelle que les facteurs saisonniers.
+      await runInstrumented('recalcWeatherFactors', async () => {
+        const { recalcWeatherFactors } = require('./weather-learning');
+        return recalcWeatherFactors();
+      });
     }
 
     // Annuel : 1er janvier à 02h00 → sync jours fériés + vacances scolaires

@@ -148,6 +148,7 @@ const JOB_SCHEDULE = {
   checkQhseHabilitationExpiries:  { label: 'Habilitations QHSE à échéance',      cadence: 'hebdo (lundi 8h)',  maxAgeHours: WEEKLY },
   discoverEvents:                 { label: 'Découverte événements locaux',       cadence: 'mensuel (1er 4h)',  maxAgeHours: MONTHLY },
   recalcSeasonalFactors:          { label: 'Recalcul facteurs saisonniers',      cadence: 'mensuel (1er 4h)',  maxAgeHours: MONTHLY },
+  recalcWeatherFactors:           { label: 'Apprentissage météo des dépôts',     cadence: 'mensuel (1er 4h)',  maxAgeHours: MONTHLY },
   syncAllHolidays:                { label: 'Sync jours fériés / vacances',       cadence: 'annuel (1er janv.)', maxAgeHours: YEARLY },
 };
 
