@@ -550,7 +550,7 @@ router.get('/kpi-insertion', async (req, res) => {
       const globalAbs = await pool.query(`
         SELECT ROUND(
                  100.0 * SUM(hours_worked) FILTER (WHERE type IN ('absence','sick'))::numeric
-                 / NULLIF(SUM(hours_worked) FILTER (WHERE type IN ('normal','training','absence','sick')), 0), 2) AS taux_pct
+                 / NULLIF(SUM(hours_worked) FILTER (WHERE type IN ('normal','training','absence','sick'))::numeric, 0), 2) AS taux_pct
         FROM work_hours WHERE EXTRACT(YEAR FROM date) = $1
       `, [annee]);
       out.absenteisme_taux_pct = globalAbs.rows[0]?.taux_pct != null ? Number(globalAbs.rows[0].taux_pct) : null;
@@ -559,7 +559,7 @@ router.get('/kpi-insertion', async (req, res) => {
         SELECT t.name AS equipe,
                ROUND(
                  100.0 * SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('absence','sick'))::numeric
-                 / NULLIF(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training','absence','sick')), 0), 2) AS taux_pct
+                 / NULLIF(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training','absence','sick'))::numeric, 0), 2) AS taux_pct
         FROM employees e
         LEFT JOIN teams t ON e.team_id = t.id
         LEFT JOIN work_hours wh ON wh.employee_id = e.id AND EXTRACT(YEAR FROM wh.date) = $1
