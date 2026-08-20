@@ -2122,6 +2122,25 @@ async function initDatabase() {
       console.log('');
     }
 
+    // Compte de SERVICE « chauffeur » : identité générique portée par les JWT
+    // du mode véhicule (« 1 URL = 1 véhicule », auth.js /driver-start) quand le
+    // chauffeur affecté n'a pas de compte utilisateur propre — le cas normal,
+    // les fiches salariés venant de la paie. Mot de passe aléatoire jamais
+    // communiqué : ce compte ne sert PAS à se connecter, uniquement à porter
+    // l'identité des jetons chauffeur dans la journalisation. Sans lui,
+    // driver-start refuse (503) au lieu de retomber silencieusement sur l'id 1.
+    const chauffeurExists = await client.query("SELECT id FROM users WHERE username = 'chauffeur'");
+    if (chauffeurExists.rows.length === 0) {
+      const servicePassword = crypto.randomBytes(24).toString('hex');
+      const serviceHash = await bcrypt.hash(servicePassword, 10);
+      await client.query(
+        `INSERT INTO users (username, password_hash, email, role, first_name, last_name, must_change_password)
+         VALUES ('chauffeur', $1, 'chauffeur@solidata.fr', 'COLLABORATEUR', 'Chauffeur', 'Collecte', false)`,
+        [serviceHash]
+      );
+      console.log('[INIT-DB] Compte de service « chauffeur » créé (jetons du mode véhicule)');
+    }
+
     // Migration: update teams constraint + data — drop ALL check constraints on type column
     const teamChecks = await client.query(`
       SELECT con.conname FROM pg_constraint con
@@ -2573,8 +2592,29 @@ async function initDatabase() {
     // ══════════════════════════════════════════
     await client.query(`
       ALTER TABLE cav ADD COLUMN IF NOT EXISTS photo_path VARCHAR(500);
+      -- Fraîcheur de la photo (exigence 08/2026) : le chauffeur doit fournir une
+      -- photo quand le CAV n'en a aucune, ou quand la sienne dépasse le seuil
+      -- paramétrable « collecte.photo_fraicheur_mois » (défaut 6). La date de prise
+      -- de vue devient donc une donnée métier (pas un horodatage technique) et
+      -- l'origine permet de distinguer une photo posée au back-office ('admin')
+      -- d'une photo prise sur le terrain ('chauffeur').
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS photo_taken_at TIMESTAMP;
+      ALTER TABLE cav ADD COLUMN IF NOT EXISTS photo_source VARCHAR(20);
     `);
-    console.log('[INIT-DB] Migration CAV photo ✓');
+    // Backfill one-shot des photos déjà en base : leur date de prise de vue
+    // EXACTE est inconnue (elle n'était pas enregistrée). On l'approxime par
+    // `updated_at` — approximation ASSUMÉE, marquée `photo_source='import'` pour
+    // rester traçable. Sans elle, tous les CAV déjà photographiés seraient vus
+    // « sans date » donc à re-photographier dès le prochain passage, à rebours
+    // de la demande client (« si une photo existe, pas besoin d'en reprendre »).
+    // Idempotent : le WHERE ne retient que les lignes non encore datées.
+    await client.query(`
+      UPDATE cav
+         SET photo_taken_at = COALESCE(updated_at, created_at),
+             photo_source = COALESCE(photo_source, 'import')
+       WHERE photo_path IS NOT NULL AND photo_taken_at IS NULL;
+    `);
+    console.log('[INIT-DB] Migration CAV photo (fraîcheur + origine) ✓');
 
     // ══════════════════════════════════════════
     // MIGRATION : FKs manquantes + indexes performance

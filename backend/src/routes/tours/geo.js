@@ -7,6 +7,31 @@
 const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
 const OSRM_TIMEOUT_MS = parseInt(process.env.OSRM_TIMEOUT_MS, 10) || 4000;
 
+// Vitesse moyenne de repli quand OSRM est indisponible (km/h). ULTIME repli
+// codé : la valeur effective vient de la config prédictive (`scoring.avgSpeed`,
+// paramétrable dans /admin — item « harmonisation des vitesses », août 2026).
+const FALLBACK_AVG_SPEED_KMH = 30;
+
+// Coefficient route / vol d'oiseau appliqué à la distance Haversine.
+const ROAD_FACTOR = 1.3;
+
+/**
+ * Vitesse de repli EFFECTIVE (km/h) : `scoring.avgSpeed` de la config
+ * prédictive, sinon le défaut passé par l'appelant.
+ * Le require est PARESSEUX (dans la fonction) : predictions.js require ce
+ * module au chargement — un require croisé en tête de fichier casserait le
+ * cycle en livrant un module partiellement initialisé.
+ */
+function resolveAvgSpeedKmh(defaultKmh = FALLBACK_AVG_SPEED_KMH) {
+  try {
+    // eslint-disable-next-line global-require
+    const { getScoringConfig } = require('./predictions');
+    const v = parseFloat(getScoringConfig()?.avgSpeed);
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch (_) { /* config indisponible → repli codé */ }
+  return defaultKmh;
+}
+
 // fetch avec AbortController — évite que le moteur de propositions reste
 // bloqué indéfiniment quand le serveur OSRM public est lent ou injoignable
 async function fetchWithTimeout(url, timeoutMs = OSRM_TIMEOUT_MS) {
@@ -46,9 +71,10 @@ async function osrmRouteSegment(lat1, lon1, lat2, lon2) {
   } catch (err) {
     console.warn('[GEO] OSRM segment error, fallback haversine:', err.message);
   }
-  // Fallback : Haversine × 1.3 (coefficient route/vol d'oiseau) + estimation 30km/h
-  const dist = haversineDistance(lat1, lon1, lat2, lon2) * 1.3;
-  return { distance_km: dist, duration_min: dist / 30 * 60 };
+  // Fallback : Haversine × 1.3 (coefficient route/vol d'oiseau) + vitesse
+  // moyenne EFFECTIVE (config prédictive `scoring.avgSpeed`, défaut 30 km/h).
+  const dist = haversineDistance(lat1, lon1, lat2, lon2) * ROAD_FACTOR;
+  return { distance_km: dist, duration_min: (dist / resolveAvgSpeedKmh()) * 60 };
 }
 
 // ── OSRM : Matrice de distances entre N points ──────────────
@@ -194,5 +220,8 @@ module.exports = {
   osrmRouteSegment,
   osrmDistanceMatrix,
   osrmOptimizedTrip,
+  resolveAvgSpeedKmh,
   OSRM_BASE_URL,
+  FALLBACK_AVG_SPEED_KMH,
+  ROAD_FACTOR,
 };

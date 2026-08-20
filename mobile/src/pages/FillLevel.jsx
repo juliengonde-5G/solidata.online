@@ -9,9 +9,10 @@ import {
   addPendingCollect, deleteItem, newClientId, STORES,
   draftKey, saveDraft, readDraft, clearDraft,
 } from '../services/db';
-import { sendCollect, sendCollectWithPhoto, getPendingCount } from '../services/sync';
+import { sendCollect, sendCollectWithPhoto, sendCavPhoto, getPendingCount } from '../services/sync';
 import { authedFetch } from '../services/authedFetch';
 import { pickAuditCavId } from '../services/auditPhoto';
+import { computePhotoRequirement } from '../services/cavPhoto';
 
 // 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
 // (plein) avec une anomalie 'debordement' automatiquement posée.
@@ -37,6 +38,11 @@ export default function FillLevel() {
   // pilote l'affichage, recalculé en toute rigueur au submit() (jamais fait
   // confiance au seul état affiché — cf. commentaire dans submit).
   const [auditRequired, setAuditRequired] = useState(false);
+  // Photo DU POINT (exigence 08/2026) : le serveur dit si elle est attendue
+  // (`photo_requise` — aucune photo, ou photo plus vieille que le seuil) ; le
+  // mobile ne rejoue aucune règle de date.
+  const [currentPoint, setCurrentPoint] = useState(null);
+  const [fraicheurMois, setFraicheurMois] = useState(6);
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const photoInputRef = useRef(null);
@@ -68,9 +74,11 @@ export default function FillLevel() {
   useEffect(() => {
     if (!tourId) return;
     resolveCurrentCav()
-      .then(({ cavId, cavs }) => {
+      .then(({ cavId, cavs, point, photoFraicheurMois }) => {
         const auditCavId = pickAuditCavId(tourId, cavs);
         setAuditRequired(auditCavId != null && String(auditCavId) === String(cavId));
+        setCurrentPoint(point || null);
+        if (photoFraicheurMois) setFraicheurMois(photoFraicheurMois);
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,6 +123,11 @@ export default function FillLevel() {
       displayName: cav.nom || cav.cav_name || 'CAV',
       tourIsAssociation,
       cavs,
+      // Point courant complet : porte `photo_requise` (décision serveur) et
+      // `cav_photo_path` (photo de référence du CAV, distincte de
+      // `photo_path` qui est la photo d'audit de la collecte).
+      point: cav,
+      photoFraicheurMois: tourData.photo_fraicheur_mois || null,
     };
   };
 
@@ -128,17 +141,28 @@ export default function FillLevel() {
     setError('');
     try {
       // 1) charger la tournée pour retrouver le CAV à marquer.
-      const { cavId, displayName, tourIsAssociation, cavs } = await resolveCurrentCav();
+      const { cavId, displayName, tourIsAssociation, cavs, point, photoFraicheurMois } = await resolveCurrentCav();
       setCavName(displayName);
 
-      // Photo d'audit : recalculée à partir des données fraîchement chargées —
-      // jamais depuis le seul état `auditRequired` affiché, qui peut être
-      // obsolète (échec réseau au chargement de l'écran, etc.).
+      // Exigence photo : recalculée à partir des données fraîchement chargées —
+      // jamais depuis le seul état affiché, qui peut être obsolète (échec réseau
+      // au chargement de l'écran, photo posée entre-temps, etc.).
       const auditCavId = pickAuditCavId(tourId, cavs);
-      const photoRequiredNow = auditCavId != null && String(auditCavId) === String(cavId);
-      setAuditRequired(photoRequiredNow);
-      if (photoRequiredNow && !photoFile) {
-        setError('Photo obligatoire pour ce point (tirage aléatoire de la tournée).');
+      const auditNow = auditCavId != null && String(auditCavId) === String(cavId);
+      const moisNow = photoFraicheurMois || fraicheurMois;
+      const reqNow = computePhotoRequirement({
+        point,
+        auditRequired: auditNow,
+        online: navigator.onLine,
+        fraicheurMois: moisNow,
+      });
+      setAuditRequired(auditNow);
+      setCurrentPoint(point || null);
+      setFraicheurMois(moisNow);
+      if (reqNow.blocking && !photoFile) {
+        setError(reqNow.reason === 'audit'
+          ? 'Photo obligatoire pour ce point (tirage aléatoire de la tournée).'
+          : `Photo du point obligatoire. ${reqNow.hint}`);
         setLoading(false);
         return;
       }
@@ -170,7 +194,11 @@ export default function FillLevel() {
       let photoInfo = null;
       if (navigator.onLine) {
         try {
-          if (photoFile) {
+          // La photo n'est jointe À LA COLLECTE que pour le contrôle aléatoire
+          // (elle y est la PREUVE du passage, stockée sur tour_cav). Une photo
+          // prise pour le point part par sendCavPhoto ci-dessous : inutile de
+          // téléverser deux fois le même cliché depuis le terrain.
+          if (photoFile && auditNow) {
             await sendCollectWithPhoto(payload, photoFile);
             photoInfo = 'Photo jointe';
           } else {
@@ -190,6 +218,22 @@ export default function FillLevel() {
         }
       } else if (photoFile) {
         photoInfo = 'Photo non jointe hors réseau — collecte enregistrée';
+      }
+
+      // Photo DU POINT (exigence 08/2026) : la même prise de vue met aussi à
+      // jour la photo de référence du CAV et son horodatage de fraîcheur.
+      // BEST EFFORT — un échec ici ne remet jamais en cause la collecte : le
+      // point restera simplement « photo à prendre » au prochain passage, ce
+      // qui est honnête (aucune photo n'est réputée enregistrée sans l'être).
+      // Hors ligne : rien n'est tenté ni mis en file (pas de blob en file).
+      if (navigator.onLine && photoFile && !tourIsAssociation) {
+        try {
+          await sendCavPhoto(tourId, cavId, photoFile);
+          photoInfo = 'Photo du point enregistrée';
+        } catch (e) {
+          console.warn('[FillLevel] photo du point non envoyée :', e?.message || e);
+          photoInfo = 'Photo du point non envoyée — elle sera redemandée au prochain passage';
+        }
       }
 
       // Si envoi serveur OK, le draft devient sans valeur : on le supprime
@@ -231,6 +275,15 @@ export default function FillLevel() {
   };
 
   const selected = FILL_LEVELS.find(o => o.value === fillLevel);
+
+  // État de l'exigence photo pour l'affichage (le contrôle qui fait foi est
+  // refait dans submit() sur des données fraîches).
+  const photoReq = computePhotoRequirement({
+    point: currentPoint,
+    auditRequired,
+    online: navigator.onLine,
+    fraicheurMois,
+  });
 
   const summaryLines = useMemo(() => {
     const lines = [];
@@ -275,7 +328,7 @@ export default function FillLevel() {
           primaryLabel="Valider · point suivant"
           onPrimary={submit}
           loading={loading}
-          disabled={fillLevel === null || (auditRequired && !photoFile)}
+          disabled={fillLevel === null || (photoReq.blocking && !photoFile)}
           error={error || null}
           pendingOffline={!navigator.onLine}
         />
@@ -369,45 +422,69 @@ export default function FillLevel() {
           <span className="flex-1 font-bold text-[15px] text-gray-800">J'ai fait de la remballe</span>
         </button>
 
-        {/* 1ter. Photo d'audit — obligatoire uniquement sur le point tiré au
-            sort pour cette tournée (test aléatoire, une photo par tournée) */}
-        {auditRequired && (
-          <div>
-            <p className="text-[11px] uppercase tracking-wide text-red-600 font-bold mb-2">
-              Contrôle aléatoire — photo obligatoire pour ce point
+        {/* 1ter. Photo du point — UNE seule prise de vue pour tout :
+            • OBLIGATOIRE si le point n'a pas de photo, si la sienne est trop
+              vieille (décision serveur `photo_requise`) ou si c'est le point
+              tiré au sort du contrôle aléatoire ;
+            • FACULTATIVE sinon (le chauffeur peut toujours en ajouter une) ;
+            • JAMAIS bloquante hors réseau (aucun blob n'est mis en file). */}
+        <div>
+          {photoReq.required && (
+            <p className={`text-[11px] uppercase tracking-wide font-bold mb-2 ${photoReq.blocking ? 'text-red-600' : 'text-amber-600'}`}>
+              📷 {photoReq.title}
             </p>
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={onPhotoChange}
-              className="hidden"
-              aria-label="Prendre une photo du CAV"
-            />
-            {!photoPreview ? (
-              <button
-                type="button"
-                onClick={() => photoInputRef.current && photoInputRef.current.click()}
-                className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
-                style={{ minHeight: 56, padding: '12px 14px', borderRadius: 14, border: '2px solid #FCA5A5', color: '#334155' }}
-              >
-                <span className="text-xl" aria-hidden="true">📷</span>
-                <span className="flex-1 font-bold text-[15px]">Prendre une photo du CAV</span>
-                <span className="text-xs font-bold text-red-600">obligatoire</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-3 bg-white p-2" style={{ borderRadius: 14, border: '2px solid #BBF7D0' }}>
-                <img src={photoPreview} alt="Aperçu du CAV" className="rounded-lg object-cover" style={{ width: 56, height: 56 }} />
-                <span className="flex-1 text-sm font-semibold text-green-800">Photo prête à envoyer</span>
-                <button type="button" onClick={clearPhoto} className="text-sm text-gray-500 underline px-2 py-1">Retirer</button>
-              </div>
-            )}
-            {!navigator.onLine && photoPreview && (
-              <p className="mt-1 text-xs text-amber-600 font-medium">Hors réseau : la photo ne sera pas jointe, la collecte sera bien enregistrée.</p>
-            )}
-          </div>
-        )}
+          )}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={onPhotoChange}
+            className="hidden"
+            aria-label="Prendre une photo du point de collecte"
+          />
+          {!photoPreview ? (
+            <button
+              type="button"
+              onClick={() => photoInputRef.current && photoInputRef.current.click()}
+              className="w-full flex items-center gap-3 text-left bg-white active:scale-[0.99] transition-transform"
+              style={{
+                minHeight: photoReq.required ? 56 : 48,
+                padding: '12px 14px',
+                borderRadius: 14,
+                border: photoReq.required ? '2px solid #FCA5A5' : '2px solid #E2E8F0',
+                color: '#334155',
+              }}
+            >
+              <span className="text-xl" aria-hidden="true">📷</span>
+              <span className={`flex-1 ${photoReq.required ? 'font-bold text-[15px]' : 'font-semibold text-[14px] text-gray-600'}`}>
+                {photoReq.required ? 'Prendre une photo du point' : 'Ajouter une photo du point (facultatif)'}
+              </span>
+              {photoReq.required && (
+                <span className={`text-xs font-bold ${photoReq.blocking ? 'text-red-600' : 'text-amber-600'}`}>
+                  {photoReq.blocking ? 'obligatoire' : 'demandée'}
+                </span>
+              )}
+            </button>
+          ) : (
+            <div className="flex items-center gap-3 bg-white p-2" style={{ borderRadius: 14, border: '2px solid #BBF7D0' }}>
+              <img src={photoPreview} alt="Aperçu du point de collecte" className="rounded-lg object-cover" style={{ width: 56, height: 56 }} />
+              <span className="flex-1 text-sm font-semibold text-green-800">Photo prête à envoyer</span>
+              <button type="button" onClick={clearPhoto} className="text-sm text-gray-500 underline px-2 py-1">Retirer</button>
+            </div>
+          )}
+          {photoReq.required && photoReq.hint && (
+            <p className="mt-1 text-xs text-gray-500 font-medium">{photoReq.hint}</p>
+          )}
+          {!navigator.onLine && photoReq.required && (
+            <p className="mt-1 text-xs text-amber-600 font-medium">
+              Hors réseau : la photo ne sera pas envoyée. Tu peux continuer, elle sera redemandée au prochain passage.
+            </p>
+          )}
+          {!navigator.onLine && photoPreview && (
+            <p className="mt-1 text-xs text-amber-600 font-medium">Hors réseau : la photo ne sera pas jointe, la collecte sera bien enregistrée.</p>
+          )}
+        </div>
 
         {/* 2. Actions secondaires — incident / camion plein */}
         <div className="flex flex-col gap-2">

@@ -36,6 +36,37 @@ const collectePhotoStorage = multer.diskStorage({
 });
 const uploadCollectePhoto = multer({ storage: collectePhotoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFilter });
 
+// Upload photo DU POINT (CAV) prise par le chauffeur — exigence 08/2026.
+// Même dossier que les photos posées au back-office (uploads/cav-photos) : ce
+// n'est pas une pièce de tournée mais LA photo de référence du CAV, qui remonte
+// sur la fiche du point (AdminCAV) et dont la fraîcheur pilote la redemande.
+const cavPhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', '..', '..', 'uploads', 'cav-photos');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).replace(/[^a-zA-Z0-9.]/g, '');
+    const cavId = String(req.params.cavId || '').replace(/\D/g, '') || 'x';
+    cb(null, `cav_${cavId}_${Date.now()}${ext}`);
+  },
+});
+const uploadCavPhoto = multer({ storage: cavPhotoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFilter });
+
+// Un refus de `imageFilter` (ou un dépassement de taille) doit ressortir en
+// 400/413 explicite côté mobile, pas en 500 opaque via le handler global.
+function uploadPhotoOr400(mw) {
+  return (req, res, next) => mw(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Photo trop volumineuse (max 10 Mo)' });
+    return res.status(400).json({ error: err.message || 'Fichier refusé (jpg, png, webp)' });
+  });
+}
+
+// Fraîcheur de la photo du CAV — seuil paramétrable `collecte.photo_fraicheur_mois`.
+const { getPhotoFraicheurMois, photoRequise } = require('../../utils/cav-photo');
+
 // Sub-routers
 const crudRouter = require('./crud');
 const proposalsRouter = require('./proposals');
@@ -49,6 +80,7 @@ const reoptimizeRouter = require('./reoptimize');
 const planningRouter = require('./planning');
 const dashboardRouter = require('./dashboard');
 const { ensurePlannedPassages } = require('./planned-passage');
+const { applyCompletionSideEffects } = require('./completion-effects');
 // Session chauffeur « 1 URL = 1 véhicule » : le véhicule est lu dans le claim
 // `vehicle_id` du jeton et, en repli, dans le `username` historique
 // « driver_<vehicleId> ». Helper partagé avec routes/tours/execution.js.
@@ -166,6 +198,35 @@ router.use((req, res, next) => {
   });
 });
 
+// ── Photo du point (exigence 08/2026) ───────────────────────────────────────
+// Le mobile doit savoir, AVANT que le chauffeur reparte, si une photo du CAV est
+// attendue : aucune photo en base, ou photo plus vieille que le seuil paramétré
+// (`collecte.photo_fraicheur_mois`). La règle est évaluée CÔTÉ SERVEUR (source
+// unique utils/cav-photo) et transmise en clair (`photo_requise`) — le mobile ne
+// rejoue aucune règle de fraîcheur et fonctionne donc hors ligne sur la dernière
+// tournée chargée.
+//
+// Les colonnes du CAV sont volontairement ALIASÉES `cav_photo_*` : `tour_cav`
+// possède déjà sa propre colonne `photo_path` (photo d'audit aléatoire de la
+// collecte, cf. collect-public) qui ne doit pas être écrasée dans le payload.
+const CAV_PHOTO_COLUMNS = `c.photo_path AS cav_photo_path,
+                c.photo_taken_at AS cav_photo_taken_at,
+                c.photo_source AS cav_photo_source`;
+
+async function decoratePhotoState(points, isAssociation) {
+  const mois = await getPhotoFraicheurMois(pool);
+  return {
+    photo_fraicheur_mois: mois,
+    points: points.map((p) => ({
+      ...p,
+      // Un point association n'est pas un CAV : l'exigence ne le concerne pas.
+      photo_requise: isAssociation
+        ? false
+        : photoRequise(p.cav_photo_path, p.cav_photo_taken_at, mois),
+    })),
+  };
+}
+
 // GET /api/tours/vehicle/:vehicleId/today — Tournée du jour (JWT chauffeur requis)
 router.get('/vehicle/:vehicleId/today', async (req, res) => {
   try {
@@ -202,7 +263,8 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
     } else {
       const cavsResult = await pool.query(
         `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude,
-                c.nb_containers, c.qr_code_data
+                c.nb_containers, c.qr_code_data,
+                ${CAV_PHOTO_COLUMNS}
          FROM tour_cav tc
          JOIN cav c ON c.id = tc.cav_id
          WHERE tc.tour_id = $1
@@ -211,7 +273,11 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
       );
       points = cavsResult.rows;
     }
-    res.json({ tour, cavs: points });
+    const photoState = await decoratePhotoState(points, tour.collection_type === 'association');
+    res.json({
+      tour: { ...tour, photo_fraicheur_mois: photoState.photo_fraicheur_mois },
+      cavs: photoState.points,
+    });
   } catch (err) {
     console.error('[TOURS] Erreur vehicle/today:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -247,14 +313,20 @@ router.get('/:id/public', async (req, res) => {
     } else {
       const cavsResult = await pool.query(
         `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude,
-                c.nb_containers, c.qr_code_data
+                c.nb_containers, c.qr_code_data,
+                ${CAV_PHOTO_COLUMNS}
          FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id
          WHERE tc.tour_id = $1 ORDER BY tc.position`,
         [tour.id]
       );
       points = cavsResult.rows;
     }
-    res.json({ ...tour, cavs: points });
+    const photoState = await decoratePhotoState(points, tour.collection_type === 'association');
+    res.json({
+      ...tour,
+      photo_fraicheur_mois: photoState.photo_fraicheur_mois,
+      cavs: photoState.points,
+    });
   } catch (err) {
     console.error('[TOURS] Erreur public/:id:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -326,13 +398,19 @@ router.post('/:id/end-of-day-public', async (req, res) => {
 // PUT /api/tours/:id/start-public — Démarrer une tournée (mobile sans auth)
 router.put('/:id/start-public', async (req, res) => {
   try {
+    // Le flux mobile réel passe par claim (qui bascule déjà in_progress) AVANT
+    // start-public : on accepte donc les deux statuts et on ne pose started_at
+    // que s'il manque encore (COALESCE) — sinon le démarrage restait sans
+    // horodatage sur le parcours normal.
     const result = await pool.query(
-      `UPDATE tours SET status = 'in_progress', started_at = NOW(), updated_at = NOW()
-       WHERE id = $1 AND status = 'planned' RETURNING id, status`,
+      `UPDATE tours SET status = 'in_progress',
+              started_at = COALESCE(started_at, NOW()),
+              updated_at = NOW()
+       WHERE id = $1 AND status IN ('planned', 'in_progress') RETURNING id, status`,
       [req.params.id]
     );
     if (result.rows.length === 0) {
-      // Peut-être déjà in_progress
+      // Statut plus avancé (returning/completed…) : no-op informatif
       const existing = await pool.query('SELECT id, status FROM tours WHERE id = $1', [req.params.id]);
       return res.json(existing.rows[0] || { error: 'Tournée non trouvée' });
     }
@@ -378,13 +456,17 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
     if (collectionType === 'association') {
       // tour_association_point n'a pas de colonne skip_reason : le motif de saut
       // est conservé dans notes. collected_at reste null si le point est sauté.
+      // $1::varchar : sans cast explicite, PostgreSQL 16 déduit deux types
+      // incompatibles pour $1 (varchar dans le SET, text dans les CASE) et
+      // refuse la requête (42P08 « inconsistent types deduced ») → 500 sur
+      // CHAQUE collecte mobile. Prouvé par bisection sur PostgreSQL 16 réel.
       const result = await pool.query(
-        `UPDATE tour_association_point SET status = $1,
+        `UPDATE tour_association_point SET status = $1::varchar,
          fill_level = $2,
          notes = $3,
          remballe = $4,
          photo_path = COALESCE($5, photo_path),
-         collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
+         collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $6 AND association_point_id = $7 RETURNING *`,
         [status,
          status === 'skipped' ? null : fill_level,
@@ -395,17 +477,18 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
       if (result.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
       res.json(result.rows[0]);
     } else {
+      // $1::varchar : même défaut 42P08 que la branche association ci-dessus.
       const result = await pool.query(
-        `UPDATE tour_cav SET status = $1,
-         fill_level = CASE WHEN $1 = 'skipped' THEN NULL ELSE $2 END,
+        `UPDATE tour_cav SET status = $1::varchar,
+         fill_level = CASE WHEN $1::varchar = 'skipped' THEN NULL ELSE $2::int END,
          qr_scanned = $3,
          qr_unavailable = $4,
          qr_unavailable_reason = $5,
-         skip_reason = CASE WHEN $1 = 'skipped' THEN $6 ELSE NULL END,
+         skip_reason = CASE WHEN $1::varchar = 'skipped' THEN $6::varchar ELSE NULL END,
          notes = $7,
          remballe = $8,
          photo_path = COALESCE($9, photo_path),
-         collected_at = CASE WHEN $1 = 'collected' THEN NOW() ELSE collected_at END
+         collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $10 AND cav_id = $11 RETURNING *`,
         [status, fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null,
          skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId]
@@ -415,6 +498,85 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
     }
   } catch (err) {
     console.error('[TOURS] Erreur collect-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/:id/cav/:cavId/photo-public — Photo DU POINT prise par le chauffeur
+// (exigence 08/2026 : un CAV sans photo, ou dont la photo dépasse le seuil
+// `collecte.photo_fraicheur_mois`, doit être re-photographié au passage).
+//
+// Sécurité : le chemin finit par « -public » → capté par MOBILE_DRIVER_PATH,
+// donc JWT chauffeur exigé PUIS garde de périmètre (la tournée doit appartenir
+// au véhicule du jeton). Le contrôle véhicule est re-fait ici sans requête
+// supplémentaire (défense en profondeur, la jointure le remonte déjà).
+//
+// Écrit la photo de RÉFÉRENCE du CAV (table cav), pas une pièce de tournée :
+// c'est elle qui s'affiche sur la fiche du point et qui repart à zéro le compteur
+// de fraîcheur.
+router.post('/:id/cav/:cavId/photo-public', uploadPhotoOr400(uploadCavPhoto.single('photo')), async (req, res) => {
+  const cleanupUpload = () => {
+    if (!req.file) return;
+    try { if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path); }
+    catch (e) { console.warn('[TOURS] nettoyage photo CAV ignoré :', e.message); }
+  };
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucune photo fournie (jpg, png, webp, max 10 Mo)' });
+
+    const tourId = parseInt(req.params.id, 10);
+    const cavId = parseInt(req.params.cavId, 10);
+    if (!Number.isInteger(tourId) || !Number.isInteger(cavId)) {
+      cleanupUpload();
+      return res.status(400).json({ error: 'Identifiants invalides' });
+    }
+
+    // Le point doit appartenir à CETTE tournée (pas de photo sur un CAV arbitraire).
+    const link = await pool.query(
+      `SELECT t.status, t.vehicle_id, c.photo_path
+         FROM tour_cav tc
+         JOIN tours t ON t.id = tc.tour_id
+         JOIN cav c ON c.id = tc.cav_id
+        WHERE tc.tour_id = $1 AND tc.cav_id = $2`,
+      [tourId, cavId]
+    );
+    if (link.rows.length === 0) {
+      cleanupUpload();
+      return res.status(404).json({ error: 'Point non trouvé dans cette tournée' });
+    }
+    const row = link.rows[0];
+    if (driverVehicleMismatch(req, res, row.vehicle_id)) { cleanupUpload(); return; }
+    if (!['planned', 'in_progress'].includes(row.status)) {
+      cleanupUpload();
+      return res.status(403).json({ error: 'Cette tournée n\'est plus en cours' });
+    }
+
+    const photoPath = `/uploads/cav-photos/${req.file.filename}`;
+    const upd = await pool.query(
+      `UPDATE cav SET photo_path = $1, photo_taken_at = NOW(), photo_source = 'chauffeur', updated_at = NOW()
+        WHERE id = $2 RETURNING photo_path, photo_taken_at`,
+      [photoPath, cavId]
+    );
+    if (upd.rows.length === 0) {
+      cleanupUpload();
+      return res.status(404).json({ error: 'CAV non trouvé' });
+    }
+
+    // Ancienne photo supprimée seulement APRÈS le succès de l'écriture.
+    if (row.photo_path && row.photo_path !== photoPath) {
+      try {
+        const oldAbs = path.join(__dirname, '..', '..', '..', row.photo_path);
+        if (fs.existsSync(oldAbs)) fs.unlinkSync(oldAbs);
+      } catch (e) { console.warn('[TOURS] ancienne photo CAV non supprimée :', e.message); }
+    }
+
+    res.json({
+      success: true,
+      photo_path: upd.rows[0].photo_path,
+      photo_taken_at: upd.rows[0].photo_taken_at,
+    });
+  } catch (err) {
+    cleanupUpload();
+    console.error('[TOURS] Erreur photo-public:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -719,6 +881,20 @@ router.put('/:id/status-public', async (req, res) => {
       // 0 ligne sur une clôture = déjà terminée entre-temps (course) → no-op
       // idempotent : on renvoie la tournée existante sans ré-émettre de push.
       return res.json(current.rows[0]);
+    }
+
+    // Effets de clôture (tonnage par CAV, entrées de stock, feedback
+    // d'apprentissage) — partagés avec la route web via completion-effects.js.
+    // La bascule de statut est déjà commitée et la garde d'idempotence assure
+    // un passage unique : un échec ici est journalisé sans faire échouer la
+    // clôture (un 500 ferait rejouer la file mobile sur une tournée déjà
+    // completed → no-op, et les effets seraient perdus dans tous les cas).
+    if (status === 'completed') {
+      try {
+        await applyCompletionSideEffects(result.rows[0], parseInt(req.params.id, 10), req.user?.id ?? null);
+      } catch (effErr) {
+        console.error('[TOURS] status-public — effets de clôture en échec :', effErr.message);
+      }
     }
 
     // Push notification aux managers sur fin / annulation déclenchée côté mobile.

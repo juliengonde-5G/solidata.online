@@ -5,7 +5,7 @@ import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import {
   LayoutDashboard, Newspaper, UserPlus, Brain, Users, Clock, Star, Heart,
-  ClipboardList, IdCard, Truck, Sparkles, Map, BarChart3, MapPin, Factory,
+  ClipboardList, IdCard, Truck, Sparkles, Map, BarChart3, MapPin, Factory, Route,
   ArrowUpDown, Package, Tag, CircleDollarSign, PieChart, BarChart2,
   RefreshCw, Lock, Settings, Car,
   Handshake, Warehouse, Scale, Activity, Radio,
@@ -47,6 +47,7 @@ const NAV_TREE = [
             children: [
               { label: 'Planning Tournée', path: '/planning-tournees', icon: Calendar, roles: ['ADMIN', 'MANAGER'] },
               { label: 'Proposition IA', path: '/collection-proposals', icon: Sparkles, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Modèles de tournées', path: '/route-templates', icon: Route, roles: ['ADMIN', 'MANAGER'] },
             ],
           },
           { label: 'Collecte en direct', path: '/collections-live', icon: MapPin, roles: ['ADMIN', 'MANAGER'] },

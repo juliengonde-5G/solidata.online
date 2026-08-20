@@ -33,6 +33,37 @@ function MapSizeFix() {
   return null;
 }
 
+// ── Fraîcheur de la photo du CAV (exigence 08/2026) ────────────────────────
+// Le seuil (en mois) est PARAMÉTRABLE côté serveur (`collecte.photo_fraicheur_mois`)
+// et arrive avec la fiche (`photo_fraicheur_mois`) : jamais recopié en dur ici.
+// Une photo SANS date connue est « à renouveler » — on ne la suppose pas récente.
+const DEFAULT_PHOTO_FRAICHEUR_MOIS = 6;
+
+function photoFreshnessState(cav) {
+  const mois = Number(cav?.photo_fraicheur_mois) > 0
+    ? Math.floor(Number(cav.photo_fraicheur_mois))
+    : DEFAULT_PHOTO_FRAICHEUR_MOIS;
+  if (!cav?.photo_path) return { mois, level: 'absente', label: 'Aucune photo' };
+  if (!cav.photo_taken_at) return { mois, level: 'perimee', label: `Photo à renouveler (date inconnue)` };
+  const taken = new Date(cav.photo_taken_at);
+  if (Number.isNaN(taken.getTime())) return { mois, level: 'perimee', label: 'Photo à renouveler (date illisible)' };
+  // Échéance = date de prise de vue + N mois calendaires (quantième borné au
+  // dernier jour du mois cible, comme le calcul serveur utils/cav-photo.js).
+  const expiry = new Date(taken.getTime());
+  const day = expiry.getDate();
+  expiry.setDate(1);
+  expiry.setMonth(expiry.getMonth() + mois);
+  expiry.setDate(Math.min(day, new Date(expiry.getFullYear(), expiry.getMonth() + 1, 0).getDate()));
+  if (Date.now() >= expiry.getTime()) return { mois, level: 'perimee', label: `Photo à renouveler (> ${mois} mois)` };
+  return { mois, level: 'fraiche', label: null };
+}
+
+const PHOTO_SOURCE_LABELS = {
+  admin: 'back-office',
+  chauffeur: 'chauffeur',
+  import: 'date approchée (reprise de l\'existant)',
+};
+
 // Fix default marker icon
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -292,7 +323,10 @@ export default function AdminCAV() {
       const res = await api.post(`/cav/${detailCav.id}/photo`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setDetailCav(res.data);
+      // Fusion (et non remplacement) : la réponse RETURNING * ne porte pas le
+      // seuil de fraîcheur joint à la liste — on le conserve pour que le badge
+      // reste calculé sur le VRAI seuil paramétré.
+      setDetailCav(prev => ({ ...(prev || {}), ...res.data }));
       showAlert('Photo enregistrée');
       loadCAVs();
     } catch (err) {
@@ -306,7 +340,7 @@ export default function AdminCAV() {
     if (!detailCav) return;
     try {
       await api.delete(`/cav/${detailCav.id}/photo`);
-      setDetailCav({ ...detailCav, photo_path: null });
+      setDetailCav({ ...detailCav, photo_path: null, photo_taken_at: null, photo_source: null });
       showAlert('Photo supprimée');
       loadCAVs();
     } catch (err) {
@@ -659,6 +693,7 @@ export default function AdminCAV() {
                       src={`/api${detailCav.photo_path}`}
                       alt={`Photo CAV ${detailCav.id}`}
                       className="w-full h-48 object-cover rounded-lg"
+                      key={detailCav.photo_taken_at || detailCav.photo_path}
                     />
                   ) : (
                     <div className="w-full h-32 bg-gray-100 rounded-lg flex flex-col items-center justify-center text-gray-400">
@@ -669,6 +704,38 @@ export default function AdminCAV() {
                       <span className="text-xs">Aucune photo</span>
                     </div>
                   )}
+                  {/* Fraîcheur : c'est elle qui déclenche (ou non) la demande de
+                      photo au chauffeur lors de son prochain passage. */}
+                  {(() => {
+                    const st = photoFreshnessState(detailCav);
+                    return (
+                      <div className="mt-3 space-y-1.5">
+                        {detailCav.photo_taken_at && (
+                          <p className="text-xs text-gray-500">
+                            Prise le {new Date(detailCav.photo_taken_at).toLocaleDateString('fr-FR')}
+                            {detailCav.photo_source
+                              ? ` (${PHOTO_SOURCE_LABELS[detailCav.photo_source] || detailCav.photo_source})`
+                              : ''}
+                          </p>
+                        )}
+                        {st.level === 'absente' && (
+                          <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700">
+                            Aucune photo — sera demandée au chauffeur
+                          </span>
+                        )}
+                        {st.level === 'perimee' && (
+                          <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                            {st.label} — sera redemandée au chauffeur
+                          </span>
+                        )}
+                        {st.level === 'fraiche' && (
+                          <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-700">
+                            Photo à jour (seuil {st.mois} mois)
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <input type="file" ref={photoInputRef} accept="image/*" onChange={handlePhotoUpload} className="hidden" />
                   <button onClick={() => photoInputRef.current?.click()} disabled={uploadingPhoto}
                     className="mt-3 w-full border border-gray-300 text-gray-600 rounded-lg px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50">

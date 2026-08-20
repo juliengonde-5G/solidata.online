@@ -11,12 +11,17 @@ const {
   nearestNeighborTSP,
   osrmOptimizedTrip,
   calculateTotalDistance,
+  resolveAvgSpeedKmh,
 } = require('./geo');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
 const { computeAndStorePlannedPassages } = require('./planned-passage');
 const { sendPushToRoles } = require('../../services/push-notifications');
 
+// Vitesse de repli quand OSRM est indisponible. ULTIME repli codé : la valeur
+// effective vient de la config prédictive (`scoring.avgSpeed`) — harmonisation
+// des trois vitesses divergentes (août 2026).
 const REOPT_AVG_SPEED_KMH = 28;
+const reoptSpeed = () => resolveAvgSpeedKmh(REOPT_AVG_SPEED_KMH);
 const MIN_GAIN_PERCENT = 5; // seuil en % pour proposer une ré-optim
 
 async function osrmRouteTotal(waypoints) {
@@ -36,7 +41,7 @@ async function osrmRouteTotal(waypoints) {
   for (let i = 1; i < waypoints.length; i++) {
     dist += haversineDistance(waypoints[i - 1].lat, waypoints[i - 1].lng, waypoints[i].lat, waypoints[i].lng) * 1.3;
   }
-  return { distance_km: dist, duration_min: (dist / REOPT_AVG_SPEED_KMH) * 60 };
+  return { distance_km: dist, duration_min: (dist / reoptSpeed()) * 60 };
 }
 
 async function proposeReoptimization({
@@ -119,7 +124,7 @@ async function proposeReoptimization({
   } else {
     orderedPoints = nearestNeighborTSP(remaining, startLat, startLng);
     const fbDistance = calculateTotalDistance(orderedPoints, startLat, startLng);
-    newTotal = { distance_km: fbDistance, duration_min: (fbDistance / REOPT_AVG_SPEED_KMH) * 60 };
+    newTotal = { distance_km: fbDistance, duration_min: (fbDistance / reoptSpeed()) * 60 };
   }
   const newSequence = orderedPoints.map(p => p.id);
 

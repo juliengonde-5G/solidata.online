@@ -362,6 +362,29 @@ export async function sendCollectWithPhoto(collect, photoFile) {
   return res.json().catch(() => ({}));
 }
 
+/**
+ * Envoie la photo DU POINT (CAV) prise par le chauffeur — exigence 08/2026.
+ * Écrit la photo de référence du CAV (visible sur sa fiche) et remet à zéro son
+ * compteur de fraîcheur. EN LIGNE UNIQUEMENT, comme les autres photos : aucun
+ * blob n'est mis en file de sync. Un échec n'invalide jamais la collecte —
+ * l'appelant l'absorbe et le point restera « photo à prendre » au prochain
+ * passage (comportement honnête plutôt qu'une photo silencieusement perdue).
+ */
+export async function sendCavPhoto(tourId, cavId, photoFile) {
+  const fd = new FormData();
+  fd.append('photo', photoFile);
+  const res = await authedFetch(`/api/tours/${tourId}/cav/${cavId}/photo-public`, {
+    method: 'POST',
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status };
+    throw err;
+  }
+  return res.json().catch(() => ({}));
+}
+
 export async function syncPendingCollects() {
   const store = STORES.pendingCollects;
   if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };

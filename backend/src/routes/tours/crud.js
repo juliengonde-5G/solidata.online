@@ -6,8 +6,177 @@ const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { predictFillRate, getSeasonalFactors, setSeasonalFactors, getDayOfWeekFactors, setDayOfWeekFactors, getHolidays, setHolidays, getSchoolVacations, setSchoolVacations, getScoringConfig, setScoringConfig, reloadPersistedConfig, ensureConfigLoaded } = require('./predictions');
 const fillFactors = require('../../utils/fill-factors');
-const { generateIntelligentTour } = require('./smart-tour');
+const { generateIntelligentTour, estimateFixedRoute, estimationSummary } = require('./smart-tour');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
+
+// ══════════════════════════════════════════════════════════════
+// Contraintes de journée sur TOUS les modes de création (août 2026)
+// ──────────────────────────────────────────────────────────────
+// Le mode « intelligent » était le seul à connaître la durée maximale, la
+// pause déjeuner et les retours de vidage : les tournées standard / manuelle /
+// association étaient créées sans AUCUN calcul (ni durée, ni distance, ni
+// poids) et pouvaient donc dépasser silencieusement la journée de travail.
+// Elles passent désormais toutes par le même moteur (services/tour-time-engine)
+// via `estimateFixedRoute`, stockent leur estimation et sont REFUSÉES en 409
+// quand le budget de travail est dépassé — sauf forçage explicite (`force`),
+// qui laisse une trace dans `ai_explanation`.
+// ══════════════════════════════════════════════════════════════
+
+const DEPASSEMENT_CODE = 'DUREE_MAX_DEPASSEE';
+
+/** Charge un véhicule (id, capacité) ou null. */
+async function loadVehicle(vehicleId) {
+  const r = await pool.query(
+    'SELECT id, registration, name, max_capacity_kg, status FROM vehicles WHERE id = $1',
+    [vehicleId]
+  );
+  return r.rows[0] || null;
+}
+
+/** Identifiants entiers uniques d'une liste hétérogène. */
+function uniqueIds(list) {
+  return [...new Set((list || []).map((v) => parseInt(v, 10)).filter(Number.isFinite))];
+}
+
+/** Points CAV dans l'ordre demandé (les ids inconnus sont ignorés). */
+async function loadCavPoints(cavIds) {
+  const ids = (cavIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite);
+  if (ids.length === 0) return [];
+  const r = await pool.query(
+    `SELECT id, name, address, commune, latitude, longitude, nb_containers
+       FROM cav WHERE id = ANY($1)`,
+    [ids]
+  );
+  const byId = new Map(r.rows.map((row) => [Number(row.id), row]));
+  return ids
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((row) => ({ ...row, type: 'cav' }));
+}
+
+/** Points CAV d'un modèle de tournée, dans l'ordre du modèle. */
+async function loadRouteCavPoints(routeId) {
+  const r = await pool.query(
+    `SELECT c.id, c.name, c.address, c.commune, c.latitude, c.longitude, c.nb_containers, src.position
+       FROM standard_route_cav src JOIN cav c ON c.id = src.cav_id
+      WHERE src.route_id = $1 ORDER BY src.position`,
+    [routeId]
+  );
+  return r.rows.map((row) => ({ ...row, type: 'cav' }));
+}
+
+/** Points association dans l'ordre demandé. */
+async function loadAssociationPoints(pointIds) {
+  const ids = (pointIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite);
+  if (ids.length === 0) return [];
+  const r = await pool.query(
+    `SELECT id, name, address, ville AS commune, latitude, longitude
+       FROM association_points WHERE id = ANY($1)`,
+    [ids]
+  );
+  const byId = new Map(r.rows.map((row) => [Number(row.id), row]));
+  return ids
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((row) => ({ ...row, type: 'association', nb_containers: null }));
+}
+
+/** Jour utilisé par défaut pour une estimation (jour civil de Paris). */
+function defaultEstimateDate() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' });
+}
+
+// ── Modèles de tournée (`standard_routes`) ────────────────────────────────
+// Capacité du véhicule GÉNÉRIQUE utilisée pour estimer un MODÈLE : un modèle
+// n'est pas attaché à un véhicule, on prend donc la valeur par défaut du parc
+// (`vehicles.max_capacity_kg DEFAULT 3500`). L'estimation réelle est refaite
+// avec le véhicule choisi au moment de créer la tournée.
+const GENERIC_VEHICLE = { id: null, name: 'Véhicule générique', max_capacity_kg: 3500 };
+
+/** Écrit la composition CAV ordonnée d'un modèle (les ids invalides sont ignorés). */
+async function insertCavComposition(client, routeId, cavIds) {
+  const ids = (cavIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite);
+  const seen = new Set();
+  let position = 1;
+  for (const cavId of ids) {
+    if (seen.has(cavId)) continue; // UNIQUE(route_id, cav_id)
+    seen.add(cavId);
+    await client.query(
+      'INSERT INTO standard_route_cav (route_id, cav_id, position) VALUES ($1, $2, $3)',
+      [routeId, cavId, position++]
+    );
+  }
+}
+
+/** Écrit la composition association ordonnée d'un modèle. */
+async function insertAssociationComposition(client, routeId, pointIds) {
+  const ids = (pointIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite);
+  const seen = new Set();
+  let position = 1;
+  for (const pointId of ids) {
+    if (seen.has(pointId)) continue; // UNIQUE(route_id, association_point_id)
+    seen.add(pointId);
+    await client.query(
+      'INSERT INTO standard_route_association (route_id, association_point_id, position) VALUES ($1, $2, $3)',
+      [routeId, pointId, position++]
+    );
+  }
+}
+
+/**
+ * Estimation d'un MODÈLE de tournée (véhicule générique, départ à l'heure
+ * paramétrée). Best effort : un échec d'estimation ne doit jamais empêcher
+ * d'enregistrer le modèle — on renvoie alors `null` (jamais de valeur inventée).
+ */
+async function estimateRouteModel({ cavIds = null, associationPointIds = null } = {}) {
+  try {
+    const points = cavIds
+      ? await loadCavPoints(cavIds)
+      : await loadAssociationPoints(associationPointIds);
+    if (points.length === 0) return null;
+    const { estimation } = await estimateFixedRoute({
+      vehicle: GENERIC_VEHICLE, points, date: defaultEstimateDate(),
+    });
+    return estimation;
+  } catch (err) {
+    console.warn('[TOURS] Estimation du modèle de tournée ignorée :', err.message);
+    return null;
+  }
+}
+
+/** Persiste durée/distance estimées d'un modèle (null si non estimable). */
+async function persistRouteEstimation(client, routeId, estimation) {
+  await client.query(
+    'UPDATE standard_routes SET estimated_duration_minutes = $2, estimated_distance_km = $3 WHERE id = $1',
+    [routeId, estimation ? estimation.duree_travail_min : null, estimation ? estimation.distance_km : null]
+  );
+}
+
+/** Champs d'estimation renvoyés à côté de la ligne `standard_routes`. */
+function routeEstimationFields(estimation) {
+  return {
+    estimated_duration_minutes: estimation ? estimation.duree_travail_min : null,
+    estimated_distance_km: estimation ? estimation.distance_km : null,
+  };
+}
+
+/**
+ * Un modèle référencé par une tournée ne peut pas être supprimé (l'historique
+ * perdrait son libellé). Renvoie le corps du 409 ou null.
+ */
+async function routeInUse(routeId) {
+  const r = await pool.query(
+    'SELECT COUNT(*)::int AS n FROM tours WHERE standard_route_id = $1', [routeId]
+  );
+  const n = r.rows[0]?.n || 0;
+  if (n === 0) return null;
+  return {
+    error: `Ce modèle de tournée est utilisé par ${n} tournée(s) : il ne peut pas être supprimé. `
+      + 'Désactivez-le pour le retirer des listes tout en conservant l’historique.',
+    code: 'ROUTE_UTILISEE',
+    tours_count: n,
+  };
+}
 
 // Vague 1 (item 47a) — Double affectation véhicule.
 // Refuse d'affecter un véhicule déjà engagé sur une autre tournée non terminée
@@ -150,6 +319,60 @@ router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// POST /api/tours/estimate — Simulation d'une tournée (aucune écriture)
+// ──────────────────────────────────────────
+// Permet au manager de vérifier AVANT création qu'une liste de points tient
+// dans la journée (6 h de travail, pause déjeuner au centre hors travail,
+// retours de vidage comptés). Exactement UNE source de points : `cav_ids`,
+// `standard_route_id` ou `association_point_ids`.
+// ══════════════════════════════════════════
+router.post('/estimate', authorize('ADMIN', 'MANAGER'), [
+  body('vehicle_id').isInt().withMessage('ID véhicule requis'),
+], validate, async (req, res) => {
+  try {
+    const { vehicle_id, date, cav_ids, standard_route_id, association_point_ids, optimize } = req.body;
+    const vid = parseInt(vehicle_id, 10);
+    if (!Number.isFinite(vid)) return res.status(400).json({ error: 'vehicle_id invalide' });
+
+    const sources = [
+      Array.isArray(cav_ids) && cav_ids.length > 0 ? 'cav_ids' : null,
+      standard_route_id != null && standard_route_id !== '' ? 'standard_route_id' : null,
+      Array.isArray(association_point_ids) && association_point_ids.length > 0 ? 'association_point_ids' : null,
+    ].filter(Boolean);
+    if (sources.length !== 1) {
+      return res.status(400).json({
+        error: 'Fournissez exactement une source de points : cav_ids, standard_route_id ou association_point_ids.',
+      });
+    }
+
+    const vehicle = await loadVehicle(vid);
+    if (!vehicle) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    let points = [];
+    if (sources[0] === 'cav_ids') points = await loadCavPoints(cav_ids);
+    else if (sources[0] === 'standard_route_id') points = await loadRouteCavPoints(parseInt(standard_route_id, 10));
+    else points = await loadAssociationPoints(association_point_ids);
+
+    if (points.length === 0) {
+      return res.status(400).json({ error: 'Aucun point valide pour cette estimation.' });
+    }
+
+    const { estimation, ordre_optimise } = await estimateFixedRoute({
+      vehicle,
+      points,
+      date: date || defaultEstimateDate(),
+      optimize: optimize === true || optimize === 'true',
+    });
+    if (ordre_optimise) estimation.ordre_optimise = ordre_optimise;
+
+    res.json({ estimation });
+  } catch (err) {
+    console.error('[TOURS] Erreur estimation :', err.message, err.stack);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
 // GET /api/tours/:id — Détail avec CAV et pesées
 router.get('/:id', async (req, res) => {
   try {
@@ -266,7 +489,7 @@ router.post('/standard', authorize('ADMIN', 'MANAGER'), [
   body('standard_route_id').isInt().withMessage('ID route standard requis'),
 ], validate, async (req, res) => {
   try {
-    const { vehicle_id, date, driver_employee_id, standard_route_id } = req.body;
+    const { vehicle_id, date, driver_employee_id, standard_route_id, force } = req.body;
 
     const vid = parseInt(vehicle_id, 10);
     const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
@@ -276,26 +499,41 @@ router.post('/standard', authorize('ADMIN', 'MANAGER'), [
     const conflict = await findVehicleConflict(vid, date);
     if (conflict) return res.status(409).json({ error: vehicleConflictMessage(conflict) });
 
+    const vehicle = await loadVehicle(vid);
+    if (!vehicle) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    const points = await loadRouteCavPoints(srid);
+    const { estimation, points: estimated } = await estimateFixedRoute({ vehicle, points, date });
+    const forced = force === true || force === 'true';
+    if (estimation.depassement_min > 0 && !forced) {
+      return res.status(409).json({
+        error: `Ce modèle de tournée dépasse la journée de travail de ${estimation.depassement_min} min `
+          + `(${Math.round(estimation.duree_travail_min / 6) / 10} h de travail pour un maximum de `
+          + `${Math.round(estimation.budget_travail_min / 6) / 10} h). Retirez des points ou forcez la création.`,
+        code: DEPASSEMENT_CODE,
+        estimation,
+      });
+    }
+
     const tourResult = await pool.query(
-      `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status)
-       VALUES ($1, $2, $3, $4, 'standard', 'planned') RETURNING *`,
-      [date, vid, did, srid]
+      `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status,
+                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
+       VALUES ($1, $2, $3, $4, 'standard', 'planned', $5, $6, $7, $8) RETURNING *`,
+      [date, vid, did, srid,
+        estimationSummary(estimation, { mode: 'standard', vehicle, forced: forced && estimation.depassement_min > 0 }),
+        estimation.distance_km, estimation.duree_travail_min, estimation.nb_points]
     );
     const tourId = tourResult.rows[0].id;
 
-    // Copier les CAV de la route standard
-    const routeCavs = await pool.query(
-      'SELECT * FROM standard_route_cav WHERE route_id = $1 ORDER BY position',
-      [standard_route_id]
-    );
-    for (const rc of routeCavs.rows) {
+    // Copier les CAV de la route standard (avec le remplissage prédit du jour)
+    for (let i = 0; i < estimated.length; i++) {
       await pool.query(
-        'INSERT INTO tour_cav (tour_id, cav_id, position) VALUES ($1, $2, $3)',
-        [tourId, rc.cav_id, rc.position]
+        'INSERT INTO tour_cav (tour_id, cav_id, position, predicted_fill_rate) VALUES ($1, $2, $3, $4)',
+        [tourId, estimated[i].id, i + 1, estimated[i]._fill ?? null]
       );
     }
 
-    res.status(201).json(tourResult.rows[0]);
+    res.status(201).json({ ...tourResult.rows[0], estimation });
   } catch (err) {
     console.error('[TOURS] Erreur tournée standard :', err.message, err.stack);
     res.status(500).json({ error: err.message || 'Erreur serveur' });
@@ -309,7 +547,7 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), [
   body('cav_ids').isArray({ min: 1 }).withMessage('Liste de CAV requise'),
 ], validate, async (req, res) => {
   try {
-    const { vehicle_id, date, driver_employee_id, cav_ids } = req.body;
+    const { vehicle_id, date, driver_employee_id, cav_ids, force } = req.body;
 
     const vid = parseInt(vehicle_id, 10);
     const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
@@ -318,21 +556,48 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), [
     const conflict = await findVehicleConflict(vid, date);
     if (conflict) return res.status(409).json({ error: vehicleConflictMessage(conflict) });
 
+    const vehicle = await loadVehicle(vid);
+    if (!vehicle) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    const points = await loadCavPoints(cav_ids);
+    if (points.length === 0) return res.status(400).json({ error: 'Aucun CAV valide dans la liste fournie.' });
+    // Un identifiant inconnu ne doit pas disparaître en silence : mieux vaut
+    // refuser que créer une tournée amputée sans que personne ne le sache.
+    const inconnus = uniqueIds(cav_ids).filter((id) => !points.some((p) => Number(p.id) === id));
+    if (inconnus.length > 0) {
+      return res.status(400).json({ error: `CAV introuvable(s) : ${inconnus.join(', ')}` });
+    }
+
+    const { estimation, points: estimated } = await estimateFixedRoute({ vehicle, points, date });
+    const forced = force === true || force === 'true';
+    if (estimation.depassement_min > 0 && !forced) {
+      return res.status(409).json({
+        error: `Cette tournée dépasse la journée de travail de ${estimation.depassement_min} min `
+          + `(${Math.round(estimation.duree_travail_min / 6) / 10} h de travail pour un maximum de `
+          + `${Math.round(estimation.budget_travail_min / 6) / 10} h). Retirez des CAV ou forcez la création.`,
+        code: DEPASSEMENT_CODE,
+        estimation,
+      });
+    }
+
     const tourResult = await pool.query(
-      `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status)
-       VALUES ($1, $2, $3, 'manual', 'planned') RETURNING *`,
-      [date, vid, did]
+      `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status,
+                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
+       VALUES ($1, $2, $3, 'manual', 'planned', $4, $5, $6, $7) RETURNING *`,
+      [date, vid, did,
+        estimationSummary(estimation, { mode: 'manual', vehicle, forced: forced && estimation.depassement_min > 0 }),
+        estimation.distance_km, estimation.duree_travail_min, estimation.nb_points]
     );
     const tourId = tourResult.rows[0].id;
 
-    for (let i = 0; i < cav_ids.length; i++) {
+    for (let i = 0; i < estimated.length; i++) {
       await pool.query(
-        'INSERT INTO tour_cav (tour_id, cav_id, position) VALUES ($1, $2, $3)',
-        [tourId, cav_ids[i], i + 1]
+        'INSERT INTO tour_cav (tour_id, cav_id, position, predicted_fill_rate) VALUES ($1, $2, $3, $4)',
+        [tourId, estimated[i].id, i + 1, estimated[i]._fill ?? null]
       );
     }
 
-    res.status(201).json(tourResult.rows[0]);
+    res.status(201).json({ ...tourResult.rows[0], estimation });
   } catch (err) {
     console.error('[TOURS] Erreur tournée manuelle :', err.message, err.stack);
     res.status(500).json({ error: err.message || 'Erreur serveur' });
@@ -346,7 +611,7 @@ router.post('/association', authorize('ADMIN', 'MANAGER'), [
   body('association_point_ids').isArray({ min: 1 }).withMessage('Liste de points association requise'),
 ], validate, async (req, res) => {
   try {
-    const { vehicle_id, date, driver_employee_id, association_point_ids, standard_route_id } = req.body;
+    const { vehicle_id, date, driver_employee_id, association_point_ids, standard_route_id, force } = req.body;
 
     const vid = parseInt(vehicle_id, 10);
     const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
@@ -356,37 +621,71 @@ router.post('/association', authorize('ADMIN', 'MANAGER'), [
     const conflict = await findVehicleConflict(vid, date);
     if (conflict) return res.status(409).json({ error: vehicleConflictMessage(conflict) });
 
+    const vehicle = await loadVehicle(vid);
+    if (!vehicle) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    const points = await loadAssociationPoints(association_point_ids);
+    if (points.length === 0) return res.status(400).json({ error: 'Aucun point association valide dans la liste fournie.' });
+    const inconnus = uniqueIds(association_point_ids).filter((id) => !points.some((p) => Number(p.id) === id));
+    if (inconnus.length > 0) {
+      return res.status(400).json({ error: `Point(s) association introuvable(s) : ${inconnus.join(', ')}` });
+    }
+
+    const { estimation } = await estimateFixedRoute({ vehicle, points, date });
+    const forced = force === true || force === 'true';
+    if (estimation.depassement_min > 0 && !forced) {
+      return res.status(409).json({
+        error: `Cette tournée association dépasse la journée de travail de ${estimation.depassement_min} min `
+          + `(${Math.round(estimation.duree_travail_min / 6) / 10} h de travail pour un maximum de `
+          + `${Math.round(estimation.budget_travail_min / 6) / 10} h). Retirez des points ou forcez la création.`,
+        code: DEPASSEMENT_CODE,
+        estimation,
+      });
+    }
+
     const tourResult = await pool.query(
-      `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status, collection_type)
-       VALUES ($1, $2, $3, $4, 'standard', 'planned', 'association') RETURNING *`,
-      [date, vid, did, srid]
+      `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status, collection_type,
+                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
+       VALUES ($1, $2, $3, $4, 'standard', 'planned', 'association', $5, $6, $7, $8) RETURNING *`,
+      [date, vid, did, srid,
+        estimationSummary(estimation, { mode: 'association', vehicle, forced: forced && estimation.depassement_min > 0 }),
+        estimation.distance_km, estimation.duree_travail_min, estimation.nb_points]
     );
     const tourId = tourResult.rows[0].id;
 
-    for (let i = 0; i < association_point_ids.length; i++) {
+    for (let i = 0; i < points.length; i++) {
       await pool.query(
         'INSERT INTO tour_association_point (tour_id, association_point_id, position) VALUES ($1, $2, $3)',
-        [tourId, association_point_ids[i], i + 1]
+        [tourId, points[i].id, i + 1]
       );
     }
 
-    await pool.query('UPDATE tours SET nb_cav = $1 WHERE id = $2', [association_point_ids.length, tourId]);
-
-    res.status(201).json(tourResult.rows[0]);
+    res.status(201).json({ ...tourResult.rows[0], estimation });
   } catch (err) {
     console.error('[TOURS] Erreur tournée association :', err.message, err.stack);
     res.status(500).json({ error: err.message || 'Erreur serveur' });
   }
 });
 
+// ══════════════════════════════════════════
+// MODÈLES DE TOURNÉE — ASSOCIATION
+// ──────────────────────────────────────────
+// Les deux familles de modèles partagent la table `standard_routes` : un modèle
+// est « association » dès qu'il possède des lignes `standard_route_association`,
+// « CAV » sinon. Les listes filtrent donc explicitement pour ne jamais mélanger
+// les deux (un modèle association ne doit pas apparaître comme modèle CAV).
+// ══════════════════════════════════════════
+
 // GET /api/tours/association-routes — Routes standard association
 router.get('/association-routes/list', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
+    const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
     const result = await pool.query(`
-      SELECT sr.*, COUNT(sra.id) as point_count
+      SELECT sr.*, COUNT(sra.id)::int as point_count
       FROM standard_routes sr
       LEFT JOIN standard_route_association sra ON sra.route_id = sr.id
       WHERE EXISTS (SELECT 1 FROM standard_route_association sra2 WHERE sra2.route_id = sr.id)
+        ${includeInactive ? '' : 'AND COALESCE(sr.is_active, true) = true'}
       GROUP BY sr.id ORDER BY sr.name
     `);
     res.json(result.rows);
@@ -412,6 +711,117 @@ router.get('/association-routes/:id/points', authorize('ADMIN', 'MANAGER'), asyn
   }
 });
 
+// GET /api/tours/association-routes/:id — Détail d'un modèle association
+router.get('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
+    const route = await pool.query('SELECT * FROM standard_routes WHERE id = $1', [id]);
+    if (route.rows.length === 0) return res.status(404).json({ error: 'Modèle de tournée non trouvé' });
+    const points = await pool.query(`
+      SELECT ap.id AS association_point_id, ap.name, ap.address, ap.ville AS commune,
+             ap.latitude, ap.longitude, sra.position
+        FROM standard_route_association sra
+        JOIN association_points ap ON ap.id = sra.association_point_id
+       WHERE sra.route_id = $1 ORDER BY sra.position`, [id]);
+    res.json({ route: route.rows[0], points: points.rows });
+  } catch (err) {
+    console.error('[TOURS] Erreur détail route association :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/association-routes — Créer un modèle association
+router.post('/association-routes', authorize('ADMIN', 'MANAGER'), [
+  body('name').notEmpty().withMessage('Nom requis'),
+  body('association_point_ids').isArray({ min: 1 }).withMessage('Liste de points association requise'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { name, description, association_point_ids } = req.body;
+    await client.query('BEGIN');
+    const result = await client.query(
+      'INSERT INTO standard_routes (name, description) VALUES ($1, $2) RETURNING *',
+      [name, description || null]
+    );
+    const routeId = result.rows[0].id;
+    await insertAssociationComposition(client, routeId, association_point_ids);
+    const estim = await estimateRouteModel({ associationPointIds: association_point_ids });
+    await persistRouteEstimation(client, routeId, estim);
+    await client.query('COMMIT');
+    res.status(201).json({ ...result.rows[0], ...routeEstimationFields(estim), estimation: estim });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur création route association :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/tours/association-routes/:id — Modifier un modèle association
+router.put('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
+    const { name, description, is_active, association_point_ids } = req.body;
+
+    await client.query('BEGIN');
+    const existing = await client.query('SELECT * FROM standard_routes WHERE id = $1 FOR UPDATE', [id]);
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Modèle de tournée non trouvé' });
+    }
+    const updated = await client.query(
+      `UPDATE standard_routes
+          SET name = COALESCE($2, name),
+              description = COALESCE($3, description),
+              is_active = COALESCE($4, is_active)
+        WHERE id = $1 RETURNING *`,
+      [id, name ?? null, description ?? null, typeof is_active === 'boolean' ? is_active : null]
+    );
+
+    let estim = null;
+    if (Array.isArray(association_point_ids)) {
+      await client.query('DELETE FROM standard_route_association WHERE route_id = $1', [id]);
+      await insertAssociationComposition(client, id, association_point_ids);
+      estim = await estimateRouteModel({ associationPointIds: association_point_ids });
+    } else {
+      const current = await client.query(
+        'SELECT association_point_id FROM standard_route_association WHERE route_id = $1 ORDER BY position',
+        [id]
+      );
+      estim = await estimateRouteModel({ associationPointIds: current.rows.map((r) => r.association_point_id) });
+    }
+    await persistRouteEstimation(client, id, estim);
+    await client.query('COMMIT');
+    res.json({ ...updated.rows[0], ...routeEstimationFields(estim), estimation: estim });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur modification route association :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/tours/association-routes/:id — Supprimer un modèle association
+router.delete('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
+    const refused = await routeInUse(id);
+    if (refused) return res.status(409).json(refused);
+    const del = await pool.query('DELETE FROM standard_routes WHERE id = $1 RETURNING id', [id]);
+    if (del.rows.length === 0) return res.status(404).json({ error: 'Modèle de tournée non trouvé' });
+    res.json({ message: 'Modèle de tournée supprimé', id });
+  } catch (err) {
+    console.error('[TOURS] Erreur suppression route association :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/tours/predict/:cavId — Prédiction de remplissage pour un CAV
 router.get('/predict/:cavId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
@@ -424,16 +834,23 @@ router.get('/predict/:cavId', authorize('ADMIN', 'MANAGER'), async (req, res) =>
 });
 
 // ══════════════════════════════════════════
-// ROUTES STANDARD
+// MODÈLES DE TOURNÉE — CAV (« routes standard »)
 // ══════════════════════════════════════════
 
-// GET /api/tours/routes — Routes standard
+// GET /api/tours/routes/list — Modèles de tournée CAV
+// Par défaut : modèles ACTIFS uniquement (comportement historique).
+// `?include_inactive=1` ajoute les modèles désactivés.
 router.get('/routes/list', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
+    const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
     const result = await pool.query(`
-      SELECT sr.*, COUNT(src.id) as cav_count
+      SELECT sr.id, sr.name, sr.description, sr.is_active,
+             sr.estimated_duration_minutes, sr.estimated_distance_km, sr.created_at,
+             COUNT(src.id)::int as cav_count
       FROM standard_routes sr
       LEFT JOIN standard_route_cav src ON src.route_id = sr.id
+      WHERE NOT EXISTS (SELECT 1 FROM standard_route_association sra WHERE sra.route_id = sr.id)
+        ${includeInactive ? '' : 'AND COALESCE(sr.is_active, true) = true'}
       GROUP BY sr.id ORDER BY sr.name
     `);
     res.json(result.rows);
@@ -443,31 +860,115 @@ router.get('/routes/list', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
-// POST /api/tours/routes — Créer route standard
+// GET /api/tours/routes/:id — Détail d'un modèle CAV (composition ordonnée)
+router.get('/routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
+    const route = await pool.query('SELECT * FROM standard_routes WHERE id = $1', [id]);
+    if (route.rows.length === 0) return res.status(404).json({ error: 'Modèle de tournée non trouvé' });
+    const cavs = await pool.query(`
+      SELECT c.id AS cav_id, c.name, c.address, c.commune, c.latitude, c.longitude,
+             c.nb_containers, src.position
+        FROM standard_route_cav src JOIN cav c ON c.id = src.cav_id
+       WHERE src.route_id = $1 ORDER BY src.position`, [id]);
+    res.json({ route: route.rows[0], cavs: cavs.rows });
+  } catch (err) {
+    console.error('[TOURS] Erreur détail route standard :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/tours/routes — Créer un modèle CAV
 router.post('/routes', authorize('ADMIN', 'MANAGER'), [
   body('name').notEmpty().withMessage('Nom requis'),
 ], validate, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { name, description, cav_ids } = req.body;
-
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       'INSERT INTO standard_routes (name, description) VALUES ($1, $2) RETURNING *',
-      [name, description]
+      [name, description || null]
     );
     const routeId = result.rows[0].id;
-
-    if (cav_ids?.length) {
-      for (let i = 0; i < cav_ids.length; i++) {
-        await pool.query(
-          'INSERT INTO standard_route_cav (route_id, cav_id, position) VALUES ($1, $2, $3)',
-          [routeId, cav_ids[i], i + 1]
-        );
-      }
-    }
-
-    res.status(201).json(result.rows[0]);
+    await insertCavComposition(client, routeId, cav_ids);
+    // Estimations du modèle (durée de travail + distance) — jusqu'ici jamais
+    // renseignées, si bien que le manager ne savait pas ce que « valait » un modèle.
+    const estim = await estimateRouteModel({ cavIds: cav_ids });
+    await persistRouteEstimation(client, routeId, estim);
+    await client.query('COMMIT');
+    res.status(201).json({ ...result.rows[0], ...routeEstimationFields(estim), estimation: estim });
   } catch (err) {
-    console.error('[TOURS] Erreur création route :', err);
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur création route :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/tours/routes/:id — Modifier un modèle CAV
+// `cav_ids` = REMPLACEMENT COMPLET et ordonné de la composition (transaction).
+router.put('/routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
+    const { name, description, is_active, cav_ids } = req.body;
+
+    await client.query('BEGIN');
+    const existing = await client.query('SELECT * FROM standard_routes WHERE id = $1 FOR UPDATE', [id]);
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Modèle de tournée non trouvé' });
+    }
+    const updated = await client.query(
+      `UPDATE standard_routes
+          SET name = COALESCE($2, name),
+              description = COALESCE($3, description),
+              is_active = COALESCE($4, is_active)
+        WHERE id = $1 RETURNING *`,
+      [id, name ?? null, description ?? null, typeof is_active === 'boolean' ? is_active : null]
+    );
+
+    let estim = null;
+    if (Array.isArray(cav_ids)) {
+      await client.query('DELETE FROM standard_route_cav WHERE route_id = $1', [id]);
+      await insertCavComposition(client, id, cav_ids);
+      estim = await estimateRouteModel({ cavIds: cav_ids });
+    } else {
+      const current = await client.query(
+        'SELECT cav_id FROM standard_route_cav WHERE route_id = $1 ORDER BY position', [id]
+      );
+      estim = await estimateRouteModel({ cavIds: current.rows.map((r) => r.cav_id) });
+    }
+    await persistRouteEstimation(client, id, estim);
+    await client.query('COMMIT');
+    res.json({ ...updated.rows[0], ...routeEstimationFields(estim), estimation: estim });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur modification route :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/tours/routes/:id — Supprimer un modèle CAV
+// Refus 409 si le modèle est référencé par une tournée (l'historique doit rester
+// lisible) : le désactiver (`is_active: false`) est alors la bonne manœuvre.
+router.delete('/routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
+    const refused = await routeInUse(id);
+    if (refused) return res.status(409).json(refused);
+    const del = await pool.query('DELETE FROM standard_routes WHERE id = $1 RETURNING id', [id]);
+    if (del.rows.length === 0) return res.status(404).json({ error: 'Modèle de tournée non trouvé' });
+    res.json({ message: 'Modèle de tournée supprimé', id });
+  } catch (err) {
+    console.error('[TOURS] Erreur suppression route :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

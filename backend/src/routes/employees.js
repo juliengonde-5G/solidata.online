@@ -1158,7 +1158,7 @@ router.get('/kpi/absenteisme', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
              COALESCE(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training','absence','sick')), 0)::numeric(10,2) AS heures_totales,
              ROUND(
                100.0 * SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('absence','sick'))::numeric
-               / NULLIF(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training','absence','sick')), 0),
+               / NULLIF(SUM(wh.hours_worked) FILTER (WHERE wh.type IN ('normal','training','absence','sick'))::numeric, 0),
                2
              ) AS taux_pct
       FROM employees e

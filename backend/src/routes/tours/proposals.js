@@ -10,6 +10,175 @@ const { isHoliday, getSchoolVacationStatus, getHolidays, getSchoolVacations, get
 // v1-6 : source unique des facteurs (résolution appris > manuel > défaut).
 const fillFactors = require('../../utils/fill-factors');
 
+// ══════════════════════════════════════════════════════════════
+// GET /api/tours/saturation-risks — CAV qui vont saturer sans rotation
+// ──────────────────────────────────────────────────────────────
+// Exigence client : « aucun CAV ne doit dépasser son seuil de saturation sans
+// qu'une rotation planifiée le vide ». Cet écran liste, sur un horizon glissant,
+// les CAV qui atteindront le seuil ET dit si une tournée déjà planifiée les
+// couvre AVANT cette date.
+//
+// Sources de données, dans l'ordre de fiabilité (« jamais de valeur inventée » :
+// un CAV sans aucune donnée exploitable N'APPARAÎT PAS) :
+//   1. `ml_fill_predictions` — prédictions J..J+N du job quotidien ;
+//   2. capteur LoRaWAN — `cav.sensor_last_reading` EST un pourcentage de
+//      remplissage (écrit par liveobjects-processor), retenu s'il est FRAIS
+//      (SENSOR_FRESHNESS_HOURS, défaut 8 h) ;
+//   3. extrapolation `estimated_fill_rate + daily_fill_rate × jours` — seulement
+//      si ces colonnes sont réellement alimentées (elles sont figées à 0 sur le
+//      schéma actuel : la branche est prête mais ne produit rien tant qu'aucune
+//      source ne les remplit).
+// ══════════════════════════════════════════════════════════════
+router.get('/saturation-risks', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const SCORING_CONFIG = getScoringConfig();
+    const seuil = parseFloat(SCORING_CONFIG.saturationThresholdPct) || 90;
+    const horizon = Math.max(1, Math.min(60, parseInt(req.query.days, 10) || 7));
+    const freshnessHours = parseInt(process.env.SENSOR_FRESHNESS_HOURS, 10) || 8;
+
+    let rows = [];
+    try {
+      const r = await pool.query(
+        `WITH pred AS (
+           SELECT p.cav_id, MIN(p.predicted_date) AS date_saturation
+             FROM ml_fill_predictions p
+            WHERE p.predicted_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + ($1::int))
+              AND p.predicted_fill_rate >= $2
+            GROUP BY p.cav_id
+         ),
+         aujourdhui AS (
+           SELECT cav_id, predicted_fill_rate
+             FROM ml_fill_predictions WHERE predicted_date = CURRENT_DATE
+         )
+         SELECT c.id, c.name, c.commune,
+                pred.date_saturation,
+                a.predicted_fill_rate AS fill_prediction,
+                c.sensor_last_reading, c.sensor_last_reading_at,
+                c.estimated_fill_rate, c.daily_fill_rate
+           FROM cav c
+           LEFT JOIN pred ON pred.cav_id = c.id
+           LEFT JOIN aujourdhui a ON a.cav_id = c.id
+          WHERE c.status = 'active'
+            AND (
+              pred.cav_id IS NOT NULL
+              OR (c.sensor_last_reading IS NOT NULL AND c.sensor_last_reading >= $2
+                  AND c.sensor_last_reading_at IS NOT NULL
+                  AND c.sensor_last_reading_at > NOW() - ($3::int * INTERVAL '1 hour'))
+              OR (COALESCE(c.daily_fill_rate, 0) > 0 AND COALESCE(c.estimated_fill_rate, 0) > 0)
+            )
+          ORDER BY c.name`,
+        [horizon, seuil, freshnessHours]
+      );
+      rows = r.rows;
+    } catch (err) {
+      // Schéma ancien (table/colonne absente) → on renvoie une liste vide plutôt
+      // qu'une erreur : l'écran de pilotage doit rester consultable.
+      console.warn('[TOURS] saturation-risks — lecture dégradée :', err.message);
+      rows = [];
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const toDate = (v) => {
+      if (!v) return null;
+      const d = v instanceof Date ? v : new Date(`${String(v).slice(0, 10)}T00:00:00`);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+
+    const risques = [];
+    for (const row of rows) {
+      const sensorPct = row.sensor_last_reading != null ? parseFloat(row.sensor_last_reading) : null;
+      const sensorFresh = sensorPct != null && row.sensor_last_reading_at
+        && (Date.now() - new Date(row.sensor_last_reading_at).getTime()) < freshnessHours * 3600 * 1000;
+      const predPct = row.fill_prediction != null ? parseFloat(row.fill_prediction) : null;
+      const estimatedPct = parseFloat(row.estimated_fill_rate) || 0;
+      const dailyPct = parseFloat(row.daily_fill_rate) || 0;
+
+      let source = null;
+      let dateSaturation = null;
+      const datePred = toDate(row.date_saturation);
+      if (datePred) {
+        source = 'prediction';
+        dateSaturation = datePred;
+      } else if (sensorFresh && sensorPct >= seuil) {
+        source = 'capteur';
+        dateSaturation = today;
+      } else if (dailyPct > 0 && estimatedPct > 0) {
+        const jours = estimatedPct >= seuil ? 0 : Math.ceil((seuil - estimatedPct) / dailyPct);
+        if (jours >= 0 && jours <= horizon) {
+          source = 'estimation';
+          dateSaturation = new Date(today.getTime() + jours * 86400000);
+        }
+      }
+      if (!source) continue; // aucune donnée exploitable → le CAV n'apparaît pas
+
+      const fillActuel = predPct != null ? predPct
+        : (sensorFresh ? sensorPct : (estimatedPct > 0 ? estimatedPct : null));
+
+      risques.push({
+        cav_id: row.id,
+        name: row.name,
+        commune: row.commune || null,
+        fill_actuel_pct: fillActuel != null ? Math.round(fillActuel) : null,
+        date_saturation_prevue: dateSaturation ? iso(dateSaturation) : null,
+        jours_avant_saturation: dateSaturation
+          ? Math.max(0, Math.round((dateSaturation - today) / 86400000)) : null,
+        source,
+        couverture: { couvert: false },
+      });
+    }
+
+    // Couverture : première tournée PLANIFIÉE ou EN COURS, à partir d'aujourd'hui,
+    // qui contient le CAV. Elle « couvre » si elle passe AVANT la saturation.
+    if (risques.length > 0) {
+      try {
+        const cover = await pool.query(
+          `SELECT DISTINCT ON (tc.cav_id) tc.cav_id, t.id AS tour_id, t.date AS tour_date
+             FROM tour_cav tc JOIN tours t ON t.id = tc.tour_id
+            WHERE tc.cav_id = ANY($1)
+              AND t.status IN ('planned', 'in_progress')
+              AND t.date >= CURRENT_DATE
+            ORDER BY tc.cav_id, t.date ASC`,
+          [risques.map((r) => r.cav_id)]
+        );
+        const byCav = new Map(cover.rows.map((r) => [Number(r.cav_id), r]));
+        for (const risque of risques) {
+          const tour = byCav.get(Number(risque.cav_id));
+          if (!tour) continue;
+          const tourDate = toDate(tour.tour_date);
+          const satDate = toDate(risque.date_saturation_prevue);
+          if (tourDate && satDate && tourDate <= satDate) {
+            risque.couverture = { couvert: true, tour_id: tour.tour_id, tour_date: iso(tourDate) };
+          }
+        }
+      } catch (err) {
+        console.warn('[TOURS] saturation-risks — couverture non évaluée :', err.message);
+      }
+    }
+
+    // Tri par URGENCE : d'abord ce qui n'est pas couvert, puis la saturation la
+    // plus proche, puis le remplissage le plus élevé.
+    risques.sort((a, b) => {
+      if (a.couverture.couvert !== b.couverture.couvert) return a.couverture.couvert ? 1 : -1;
+      const ja = a.jours_avant_saturation ?? Number.MAX_SAFE_INTEGER;
+      const jb = b.jours_avant_saturation ?? Number.MAX_SAFE_INTEGER;
+      if (ja !== jb) return ja - jb;
+      return (b.fill_actuel_pct ?? 0) - (a.fill_actuel_pct ?? 0);
+    });
+
+    res.json({
+      seuil_pct: seuil,
+      horizon_jours: horizon,
+      generated_at: new Date().toISOString(),
+      risques,
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur saturation-risks :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/tours/proposals/daily — Propositions de tournées pour une date
 router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
@@ -44,6 +213,10 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
           vehicle_id: vehicle.id,
           vehicle_name: vehicle.name || vehicle.registration,
           proposal: result,
+          // Remontés au premier niveau : contraintes de journée respectées et
+          // CAV saturés que cette proposition ne couvre pas (exigence client).
+          estimation: result.estimation,
+          saturation_non_couverte: result.saturation_non_couverte || [],
         });
       } catch (err) {
         console.warn('[TOURS] Proposition ignorée pour véhicule', vehicle.id, err.message);
@@ -149,13 +322,27 @@ router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) 
       const usedIds = new Set(existingTours.rows.map(r => r.vehicle_id));
       const available = vehiclesResult.rows.filter(v => !usedIds.has(v.id));
 
-      let bestProposal = null;
-      if (available.length > 0) {
+      // Une proposition PAR véhicule disponible (plafonné à 3/jour pour tenir
+      // le temps de réponse sur 7 jours) — l'ancienne version ne proposait que
+      // le premier véhicule du parc toute la semaine, même trop petit pour
+      // absorber les CAV en approche de saturation.
+      const proposals = [];
+      for (const vehicle of available.slice(0, 3)) {
         try {
-          const result = await generateIntelligentTour(available[0].id, dateStr);
-          bestProposal = { vehicle: available[0], stats: result.stats, cavCount: result.cavList.length };
-        } catch (e) {}
+          const result = await generateIntelligentTour(vehicle.id, dateStr);
+          proposals.push({
+            vehicle,
+            stats: result.stats,
+            cavCount: result.cavList.length,
+            // L'estimation (6 h de travail, pause, vidages) et les CAV saturés
+            // non couverts sont exposés comme sur les propositions du jour.
+            estimation: result.estimation,
+            saturation_non_couverte: result.saturation_non_couverte || [],
+          });
+        } catch (e) { /* véhicule sans tournée possible ce jour : ignoré */ }
       }
+      // suggestedTour conservé (compat consommateurs existants) = 1re proposition.
+      const bestProposal = proposals[0] || null;
 
       const context = await getContextForDate(dateStr);
       const vacStatus = getSchoolVacationStatus(dateStr);
@@ -166,6 +353,7 @@ router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) 
         existingTours: existingTours.rows,
         availableVehicles: available.length,
         suggestedTour: bestProposal,
+        proposals,
         context: {
           weatherFactor: context.weatherFactor,
           weatherLabel: context.weatherLabel,
