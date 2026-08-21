@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, MapSizeFix } from '../components';
 import api from '../services/api';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
@@ -12,6 +12,7 @@ import {
   Route as RouteIcon, Users, ChevronDown, ChevronUp,
   MessageSquare, Send,
 } from 'lucide-react';
+import TourProgrammePanel from '../components/tours/TourProgrammePanel';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -30,6 +31,109 @@ function truckIcon(color) {
     iconSize: [34, 34],
     iconAnchor: [17, 17],
   });
+}
+
+// ── Événements de circulation (item « reprendre la main » — GET /tours/trafic) ──
+// Icône ET couleur distinctes par type d'incident (accident/bouchon/fermeture/
+// travaux/autre) via un DivIcon (même technique que truckIcon ci-dessus).
+const TRAFFIC_TYPE_META = {
+  accident: { emoji: '🚨', color: '#DC2626', label: 'Accident' },
+  bouchon: { emoji: '🚗', color: '#F97316', label: 'Bouchon' },
+  fermeture: { emoji: '⛔', color: '#7C3AED', label: 'Fermeture' },
+  travaux: { emoji: '🚧', color: '#F59E0B', label: 'Travaux' },
+  autre: { emoji: 'ℹ️', color: '#64748B', label: 'Autre' },
+};
+
+function trafficIcon(type) {
+  const meta = TRAFFIC_TYPE_META[type] || TRAFFIC_TYPE_META.autre;
+  return new L.DivIcon({
+    html: `<div style="background:${meta.color};color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4)">${meta.emoji}</div>`,
+    className: '',
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+}
+
+// Rafraîchi au déplacement de la carte, throttlé à 1 requête/minute maximum
+// (au mieux : une fois au montage, puis au plus une fois par minute même si
+// la carte est déplacée plusieurs fois). Quand `disponible:false`, le message
+// du backend est remonté TEL QUEL au parent — jamais de "aucune perturbation"
+// inventé en l'absence d'information réelle.
+const TRAFFIC_MIN_INTERVAL_MS = 60000;
+
+function TrafficLayer({ onStatusChange }) {
+  const map = useMap();
+  const [incidents, setIncidents] = useState([]);
+  const lastFetchRef = useRef(0);
+  const pendingRef = useRef(null);
+
+  const fetchTraffic = useCallback(async () => {
+    lastFetchRef.current = Date.now();
+    const b = map.getBounds();
+    const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(',');
+    try {
+      const res = await api.get('/tours/trafic', { params: { bbox } });
+      const data = res.data || {};
+      if (data.disponible) {
+        setIncidents(data.incidents || []);
+      } else {
+        setIncidents([]);
+      }
+      onStatusChange?.(data);
+    } catch (err) {
+      console.error('[CollectionsLive] trafic:', err);
+      setIncidents([]);
+      onStatusChange?.({ disponible: false, message: 'Informations de circulation indisponibles pour le moment.' });
+    }
+  }, [map, onStatusChange]);
+
+  const scheduleFetch = useCallback(() => {
+    const elapsed = Date.now() - lastFetchRef.current;
+    if (elapsed >= TRAFFIC_MIN_INTERVAL_MS) {
+      fetchTraffic();
+    } else if (!pendingRef.current) {
+      pendingRef.current = setTimeout(() => {
+        pendingRef.current = null;
+        fetchTraffic();
+      }, TRAFFIC_MIN_INTERVAL_MS - elapsed);
+    }
+  }, [fetchTraffic]);
+
+  useEffect(() => {
+    fetchTraffic();
+    const interval = setInterval(scheduleFetch, TRAFFIC_MIN_INTERVAL_MS);
+    return () => {
+      clearInterval(interval);
+      if (pendingRef.current) clearTimeout(pendingRef.current);
+    };
+  }, [fetchTraffic, scheduleFetch]);
+
+  useMapEvents({
+    moveend: scheduleFetch,
+    zoomend: scheduleFetch,
+  });
+
+  return (
+    <>
+      {incidents.map((inc) => (
+        <Marker key={inc.id} position={[inc.latitude, inc.longitude]} icon={trafficIcon(inc.type)}>
+          <Popup>
+            <div className="text-xs space-y-1 max-w-[220px]">
+              <p className="font-bold">
+                {TRAFFIC_TYPE_META[inc.type]?.label || inc.type}{inc.label ? ` — ${inc.label}` : ''}
+              </p>
+              {inc.description && <p className="text-slate-600">{inc.description}</p>}
+              {inc.gravite != null && <p>Gravité : <strong>{inc.gravite}/4</strong></p>}
+              {inc.retard_sec != null && inc.retard_sec > 0 && (
+                <p>Retard estimé : <strong>{Math.round(inc.retard_sec / 60)} min</strong></p>
+              )}
+              {inc.debut && <p className="text-slate-400">Depuis {fmtDateTime(inc.debut)}</p>}
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+    </>
+  );
 }
 
 function fmtDuration(min) {
@@ -55,6 +159,7 @@ export default function CollectionsLive() {
   const [loading, setLoading] = useState(true);
   const [expandedTour, setExpandedTour] = useState(null);
   const [livePositions, setLivePositions] = useState({}); // vehicle_id → {lat, lng, speed, ts}
+  const [trafficInfo, setTrafficInfo] = useState(null); // { disponible, message?, incidents? }
   const socketRef = useRef(null);
 
   const loadActive = useCallback(async () => {
@@ -182,13 +287,16 @@ export default function CollectionsLive() {
         ) : (
           <>
             {/* Carte multi-tournées */}
-            <div className="card-modern overflow-hidden" style={{ height: '60vh' }}>
+            <div className="card-modern overflow-hidden relative" style={{ height: '60vh' }}>
               <MapContainer center={mapCenter} zoom={11} style={{ height: '100%', width: '100%' }}>
                 <MapSizeFix />
                 <TileLayer
                   attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
                   url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                 />
+
+                {/* Événements de circulation — rafraîchi à la bbox visible, throttlé 1 min */}
+                <TrafficLayer onStatusChange={setTrafficInfo} />
 
                 {tours.map((tour, idx) => {
                   const color = TOUR_COLORS[idx % TOUR_COLORS.length];
@@ -264,6 +372,32 @@ export default function CollectionsLive() {
                   );
                 })}
               </MapContainer>
+
+              {/* Bandeau discret : le backend n'a pas d'information de circulation
+                  disponible (source non configurée ou en échec) — message affiché
+                  TEL QUEL, jamais remplacé par un "aucune perturbation" inventé. */}
+              {trafficInfo?.disponible === false && (
+                <div className="absolute top-3 left-3 right-3 z-[1000] bg-amber-50/95 border border-amber-200 text-amber-800 text-xs rounded-lg px-3 py-2 shadow-md flex items-center gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                  {trafficInfo.message || "Informations de circulation indisponibles."}
+                </div>
+              )}
+
+              {/* Légende des types d'incident présents sur la vue actuelle */}
+              {trafficInfo?.disponible && trafficInfo.incidents?.length > 0 && (
+                <div className="absolute bottom-3 right-3 z-[1000] bg-white/95 rounded-lg shadow-md p-2 text-[11px] space-y-1">
+                  <p className="font-semibold text-slate-600 mb-0.5">Circulation</p>
+                  {[...new Set(trafficInfo.incidents.map((i) => i.type))].map((type) => {
+                    const meta = TRAFFIC_TYPE_META[type] || TRAFFIC_TYPE_META.autre;
+                    return (
+                      <div key={type} className="flex items-center gap-1.5 text-slate-600">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: meta.color }} />
+                        {meta.label}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Légende des tournées */}
@@ -360,7 +494,7 @@ export default function CollectionsLive() {
                           {isExpanded && (
                             <tr>
                               <td colSpan={9} className="bg-slate-50 px-4 py-3 border-b border-slate-200">
-                                <ExpandedDetail tour={tour} color={color} />
+                                <ExpandedDetail tour={tour} color={color} onRefresh={loadActive} />
                               </td>
                             </tr>
                           )}
