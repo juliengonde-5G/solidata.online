@@ -791,6 +791,45 @@ export default function AdminPredictive() {
           </div>
         </Section>
 
+        {/* ══════════ PONDÉRATION MÉTÉO APPRISE ══════════ */}
+        <Section title="Pondération météo apprise (dépôts)" desc="Effet du beau temps sur les dépôts, appris chaque mois depuis les collectes réelles croisées avec la météo quotidienne — distinction semaine / week-end.">
+          {config.weatherLearned?.ok ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  ['Semaine — temps ordinaire', config.weatherLearned.facteurs.sem_autre, config.weatherLearned.jours?.sem_autre],
+                  ['Semaine — beau temps', config.weatherLearned.facteurs.sem_beau, config.weatherLearned.jours?.sem_beau],
+                  ['Week-end — temps ordinaire', config.weatherLearned.facteurs.we_autre, config.weatherLearned.jours?.we_autre],
+                  ['Week-end — beau temps', config.weatherLearned.facteurs.we_beau, config.weatherLearned.jours?.we_beau],
+                ].map(([label, val, jours]) => (
+                  <div key={label} className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500">{label}</p>
+                    <p className="text-lg font-semibold text-slate-800">×{Number(val).toFixed(2)}</p>
+                    {jours != null && <p className="text-[10px] text-slate-400">{jours} jours observés</p>}
+                  </div>
+                ))}
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-800">
+                Appliqué par le moteur (à type de jour égal, beau temps vs ordinaire) :
+                {' '}<strong>week-end ensoleillé ×{Number(config.weatherLearned.ratios.beau_weekend).toFixed(2)}</strong>
+                {' '}· semaine ensoleillée ×{Number(config.weatherLearned.ratios.beau_semaine).toFixed(2)}.
+                {' '}Appris sur {config.weatherLearned.intervalles} intervalles de collecte
+                {config.weatherLearned.cavs ? ` (${config.weatherLearned.cavs} bornes)` : ''}
+                {config.weatherLearned.computed_at ? `, le ${new Date(config.weatherLearned.computed_at).toLocaleDateString('fr-FR')}` : ''}.
+                L'effet week-end « de base » reste porté par les facteurs jour de semaine ci-dessus.
+              </div>
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+              Apprentissage en attente de données suffisantes (il faut assez d'intervalles de collecte
+              couverts par la météo quotidienne). En attendant, le moteur applique la règle par défaut :
+              week-end ensoleillé ×{config.scoring.weekendSunnyBonus ?? 1.15}. Recalcul automatique le 1er de
+              chaque mois — « beau temps » = temp. max ≥ {config.scoring.beauTempsTempMin ?? 15} °C et pluie
+              &lt; {config.scoring.beauTempsPrecipMm ?? 1} mm (réglable via la configuration du moteur).
+            </div>
+          )}
+        </Section>
+
         {/* Jours fériés */}
         <Section title="Jours fériés" desc="Dates avec bonus de remplissage automatique">
           <div className="flex flex-wrap gap-2 mb-3">

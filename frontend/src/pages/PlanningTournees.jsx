@@ -1,11 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Calendar, Truck, User, AlertTriangle, X, Users, Car,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Plus, UserPlus,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
+import CreateTourModal from '../components/tours/CreateTourModal';
 import api from '../services/api';
+
+// Badge du mode de planification d'une tournée (IA / modèle / manuelle / association)
+function modeBadge(t) {
+  if (t.collection_type === 'association') return { label: 'Association', cls: 'bg-teal-100 text-teal-700' };
+  if (t.mode === 'intelligent') return { label: 'IA', cls: 'bg-violet-100 text-violet-700' };
+  if (t.mode === 'standard') return { label: 'Modèle', cls: 'bg-blue-100 text-blue-700' };
+  return { label: 'Manuelle', cls: 'bg-slate-100 text-slate-600' };
+}
 
 // ─── Helpers date ────────────────────────────────────────────
 function shiftDays(iso, n) {
@@ -120,6 +129,7 @@ export default function PlanningTournees() {
   const [dragTarget, setDragTarget] = useState(null);
   const [conflictModal, setConflictModal] = useState(null); // { tourId, payload, conflicts }
   const [toast, setToast] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -198,6 +208,12 @@ export default function PlanningTournees() {
           actions={
             <div className="flex items-center gap-1">
               <button
+                onClick={() => setShowCreate(true)}
+                className="mr-2 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
+              >
+                <Plus className="w-4 h-4" /> Créer une tournée
+              </button>
+              <button
                 onClick={() => setDate(shiftDays(date, -1))}
                 className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
                 aria-label="Jour précédent"
@@ -235,7 +251,7 @@ export default function PlanningTournees() {
             <div className="card-modern p-3">
               <div className="flex items-center gap-2 mb-2">
                 <Users className="w-4 h-4 text-slate-500" />
-                <h3 className="text-sm font-semibold text-slate-700">Chauffeurs</h3>
+                <h3 className="text-sm font-semibold text-slate-700">Équipe collecte</h3>
                 <span className="text-[11px] text-slate-400 ml-auto">
                   {drivers.filter(d => !d.is_day_off).length} dispo
                 </span>
@@ -292,7 +308,7 @@ export default function PlanningTournees() {
               <div className="card-modern p-10 text-center">
                 <Truck className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-500 text-sm">Aucune tournée planifiée pour cette date</p>
-                <p className="text-slate-400 text-xs mt-1">Créez des tournées via la page <strong>Tournées</strong></p>
+                <p className="text-slate-400 text-xs mt-1">Utilisez le bouton <strong>« Créer une tournée »</strong> (IA, modèle ou manuelle)</p>
               </div>
             )}
 
@@ -304,6 +320,9 @@ export default function PlanningTournees() {
                     <span className="text-sm font-semibold text-slate-800">
                       {tour.route_name || (tour.collection_type === 'association' ? 'Tournée association' : 'Tournée CAV')}
                     </span>
+                    {(() => { const b = modeBadge(tour); return (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${b.cls}`}>{b.label}</span>
+                    ); })()}
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                       tour.status === 'in_progress' ? 'bg-orange-100 text-orange-700'
                       : tour.status === 'completed' ? 'bg-emerald-100 text-emerald-700'
@@ -337,6 +356,24 @@ export default function PlanningTournees() {
                     onDrop={(t) => assignFromDrop(tour, t)}
                     onClear={tour.registration ? () => clearSlot(tour, 'vehicle_id') : null}
                   />
+                  <DropSlot
+                    label="Suiveur 1"
+                    icon={UserPlus}
+                    value={tour.suiveur1_name}
+                    accepts={['driver']}
+                    dragTarget={dragTarget}
+                    onDrop={(t) => doAssign(tour.id, { suiveur1_employee_id: t.id })}
+                    onClear={tour.suiveur1_name ? () => clearSlot(tour, 'suiveur1_employee_id') : null}
+                  />
+                  <DropSlot
+                    label="Suiveur 2"
+                    icon={UserPlus}
+                    value={tour.suiveur2_name}
+                    accepts={['driver']}
+                    dragTarget={dragTarget}
+                    onDrop={(t) => doAssign(tour.id, { suiveur2_employee_id: t.id })}
+                    onClear={tour.suiveur2_name ? () => clearSlot(tour, 'suiveur2_employee_id') : null}
+                  />
                 </div>
               </div>
             ))}
@@ -356,8 +393,9 @@ export default function PlanningTournees() {
               {conflictModal.conflicts.map((c, i) => (
                 <p key={i} className="text-sm text-slate-700">
                   {c.reason === 'driver_already_assigned' && `Chauffeur déjà affecté à la tournée #${c.tour_id}`}
+                  {c.reason === 'employee_already_assigned' && `Déjà affecté(e) (chauffeur ou suiveur) à la tournée #${c.tour_id}`}
                   {c.reason === 'vehicle_already_assigned' && `Véhicule déjà affecté à la tournée #${c.tour_id}`}
-                  {c.reason === 'driver_day_off' && `Jour off du chauffeur (${c.day_off})`}
+                  {c.reason === 'driver_day_off' && `Jour off de la personne (${c.day_off})`}
                   {c.reason === 'vehicle_unavailable' && `Véhicule indisponible (${c.status})`}
                 </p>
               ))}
@@ -382,6 +420,17 @@ export default function PlanningTournees() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Création d'une tournée pour la date affichée (IA / modèle / manuelle) */}
+      {showCreate && (
+        <CreateTourModal
+          date={date}
+          vehicles={vehicles}
+          drivers={drivers}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { showToast('Tournée créée', 'success'); load(); }}
+        />
       )}
 
       {/* Toast */}

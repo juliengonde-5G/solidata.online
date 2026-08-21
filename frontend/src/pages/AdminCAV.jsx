@@ -84,6 +84,188 @@ function LocationPicker({ position, onPick }) {
 const EMPTY_FORM = { name: '', address: '', commune: '', latitude: '', longitude: '', nb_containers: 1,
   communaute_communes: '', surface: '', ref_refashion: '', entite_detentrice: '', code_postal: '' };
 
+// ─── Historique & incidents par CAV ────────────────────────────────────────
+const INCIDENT_TYPE_LABELS = {
+  cav_problem: 'Problème CAV',
+  environment: 'Environnement',
+  vehicle_breakdown: 'Panne véhicule',
+  accident: 'Accident',
+  other: 'Autre',
+};
+const INCIDENT_STATUS_META = {
+  open: { label: 'Ouvert', cls: 'bg-red-100 text-red-700' },
+  in_progress: { label: 'En cours', cls: 'bg-amber-100 text-amber-700' },
+  resolved: { label: 'Résolu', cls: 'bg-green-100 text-green-700' },
+  closed: { label: 'Clôturé', cls: 'bg-gray-100 text-gray-600' },
+};
+const SKIP_REASON_LABELS = {
+  cav_fermee: 'CAV fermé',
+  bouchee: 'Bouché',
+  acces_impossible: 'Accès impossible',
+  proprietaire_absent: 'Propriétaire absent',
+  vide: 'Vide',
+  autre: 'Autre',
+};
+
+// Volet « Historique & incidents » de la fiche détail : consomme le endpoint
+// consolidé GET /cav/:id/historique (passages en tournée, tonnages, incidents).
+function HistoriqueSection({ cavId }) {
+  const [mois, setMois] = useState(12);
+  const [data, setData] = useState(null);
+  const [histLoading, setHistLoading] = useState(true);
+  const [histError, setHistError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHistLoading(true); setHistError(null); setData(null);
+    api.get(`/cav/${cavId}/historique`, { params: { mois } })
+      .then(res => { if (!cancelled) setData(res.data); })
+      .catch(err => {
+        if (!cancelled) setHistError(err.response?.data?.error || "Impossible de charger l'historique");
+      })
+      .finally(() => { if (!cancelled) setHistLoading(false); });
+    return () => { cancelled = true; };
+  }, [cavId, mois]);
+
+  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
+  const passageBadge = (p) => {
+    if (p.status === 'collected') return <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-green-100 text-green-700">Collecté</span>;
+    if (p.status === 'skipped') {
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-700">
+          Sauté{p.skip_reason ? ` — ${SKIP_REASON_LABELS[p.skip_reason] || p.skip_reason}` : ''}
+        </span>
+      );
+    }
+    const aVenir = ['planned', 'in_progress'].includes(p.tour_status);
+    return <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600">{aVenir ? 'Prévu' : 'Non traité'}</span>;
+  };
+
+  return (
+    <div className="card-modern overflow-hidden">
+      <div className="px-4 py-2 bg-gray-50 border-b flex items-center justify-between">
+        <h3 className="text-xs font-medium text-gray-500 uppercase">Historique &amp; incidents</h3>
+        <select
+          value={mois}
+          onChange={e => setMois(parseInt(e.target.value, 10))}
+          className="text-xs border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600"
+          aria-label="Période de l'historique"
+        >
+          <option value={3}>3 mois</option>
+          <option value={6}>6 mois</option>
+          <option value={12}>12 mois</option>
+          <option value={24}>24 mois</option>
+        </select>
+      </div>
+      <div className="p-4 space-y-4">
+        {histLoading && <p className="text-xs text-gray-400">Chargement de l'historique…</p>}
+        {histError && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">{histError}</p>
+        )}
+        {data && !histLoading && (
+          <>
+            {/* Synthèse de la période */}
+            <div className="flex flex-wrap gap-1.5">
+              <span className="px-2 py-1 rounded-lg text-[11px] bg-gray-100 text-gray-700">
+                {data.synthese.nb_passages} passage{data.synthese.nb_passages > 1 ? 's' : ''}
+              </span>
+              <span className="px-2 py-1 rounded-lg text-[11px] bg-green-50 text-green-700">
+                {data.synthese.nb_collectes} collecté{data.synthese.nb_collectes > 1 ? 's' : ''}
+              </span>
+              {data.synthese.nb_sautes > 0 && (
+                <span className="px-2 py-1 rounded-lg text-[11px] bg-amber-50 text-amber-700">
+                  {data.synthese.nb_sautes} sauté{data.synthese.nb_sautes > 1 ? 's' : ''}
+                </span>
+              )}
+              <span className="px-2 py-1 rounded-lg text-[11px] bg-blue-50 text-blue-700">
+                {data.synthese.poids_total_kg} kg collectés
+              </span>
+              <span className={`px-2 py-1 rounded-lg text-[11px] ${data.synthese.incidents_ouverts > 0 ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                {data.synthese.nb_incidents} incident{data.synthese.nb_incidents > 1 ? 's' : ''}
+                {data.synthese.incidents_ouverts > 0 ? ` (${data.synthese.incidents_ouverts} ouvert${data.synthese.incidents_ouverts > 1 ? 's' : ''})` : ''}
+              </span>
+            </div>
+
+            {/* Passages en tournée */}
+            <div>
+              <p className="text-[11px] font-medium text-gray-500 uppercase mb-1">Passages en tournée</p>
+              {data.passages.length === 0 ? (
+                <p className="text-xs text-gray-400">Aucun passage sur la période.</p>
+              ) : (
+                <div className="overflow-x-auto max-h-56 overflow-y-auto border border-gray-100 rounded-lg">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr className="text-left text-gray-400">
+                        <th className="px-2 py-1.5 font-medium">Date</th>
+                        <th className="px-2 py-1.5 font-medium">Tournée</th>
+                        <th className="px-2 py-1.5 font-medium">Véhicule</th>
+                        <th className="px-2 py-1.5 font-medium">Statut</th>
+                        <th className="px-2 py-1.5 font-medium">Niveau</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.passages.map((p, i) => (
+                        <tr key={`${p.tour_id}-${i}`} className="border-t border-gray-50">
+                          <td className="px-2 py-1.5 text-gray-700 whitespace-nowrap">{fmtDate(p.date)}</td>
+                          <td className="px-2 py-1.5 text-gray-500">#{p.tour_id}</td>
+                          <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">{p.registration || '—'}</td>
+                          <td className="px-2 py-1.5">{passageBadge(p)}</td>
+                          <td className="px-2 py-1.5 text-gray-700">{p.fill_level != null ? `${p.fill_level}/5` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Incidents */}
+            <div>
+              <p className="text-[11px] font-medium text-gray-500 uppercase mb-1">Incidents</p>
+              {data.incidents.length === 0 ? (
+                <p className="text-xs text-gray-400">Aucun incident sur la période.</p>
+              ) : (
+                <div className="overflow-x-auto max-h-56 overflow-y-auto border border-gray-100 rounded-lg">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr className="text-left text-gray-400">
+                        <th className="px-2 py-1.5 font-medium">Date</th>
+                        <th className="px-2 py-1.5 font-medium">Type</th>
+                        <th className="px-2 py-1.5 font-medium">Description</th>
+                        <th className="px-2 py-1.5 font-medium">Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.incidents.map((inc) => {
+                        const meta = INCIDENT_STATUS_META[inc.status] || { label: inc.status, cls: 'bg-gray-100 text-gray-600' };
+                        return (
+                          <tr key={inc.id} className="border-t border-gray-50 align-top">
+                            <td className="px-2 py-1.5 text-gray-700 whitespace-nowrap">{fmtDate(inc.created_at)}</td>
+                            <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">{INCIDENT_TYPE_LABELS[inc.type] || inc.type}</td>
+                            <td className="px-2 py-1.5 text-gray-600 max-w-[220px] truncate" title={inc.description || ''}>
+                              {inc.description || '—'}
+                            </td>
+                            <td className="px-2 py-1.5 whitespace-nowrap">
+                              <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${meta.cls}`}>{meta.label}</span>
+                              {inc.resolved_at && (
+                                <span className="block text-[10px] text-gray-400 mt-0.5">le {fmtDate(inc.resolved_at)}</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminCAV() {
   const { confirm, ConfirmDialogElement } = useConfirm();
   const { user } = useAuth();
@@ -773,6 +955,9 @@ export default function AdminCAV() {
                   )}
                 </div>
               </div>
+
+              {/* Historique de collecte & incidents */}
+              <HistoriqueSection key={`histo-${detailCav.id}`} cavId={detailCav.id} />
             </div>
           )}
         </div>

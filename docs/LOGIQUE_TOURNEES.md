@@ -241,6 +241,24 @@ Source gratuite, sans clé API. Cache en BDD table `collection_context`.
 | Beau temps ≥18°C | ×1.08 |
 | Weekend ensoleillé ≥18°C | ×1.15 supplémentaire |
 
+### 6.5 bis Pondération météo apprise (semaine / week-end × beau temps)
+
+Constat métier : plus de dépôts quand il fait beau, surtout le week-end. Cette
+réalité n'est plus codée en dur : `services/weather-learning.js` (job mensuel
+`recalcWeatherFactors`, avec les facteurs saisonniers) apprend 4 facteurs
+(semaine/week-end × beau/autre) par moindres carrés sur les **intervalles réels
+entre deux collectes** (tonnage_history) croisés avec la **météo quotidienne
+historisée** (boutique_meteo_quotidien agrégée, repli collection_context).
+« Beau temps » = temp. max ≥ 15 °C et pluie < 1 mm (`beauTempsTempMin`/
+`beauTempsPrecipMm`). Le moteur applique les **ratios d'interaction** (beau vs
+ordinaire à type de jour égal — l'effet week-end de base reste porté par les
+facteurs jour-de-semaine, pas de double compte) : le bonus fixe « week-end
+ensoleillé ×1.15 » ne sert plus que de repli tant que l'échantillon est
+insuffisant (≥ 60 intervalles couverts météo et ≥ 30 jours par segment exigés —
+sinon AUCUNE écriture). Facteurs bornés [0.6-1.6], ratios [0.8-1.5], stockés
+dans `predictive_weather_factors`, affichés dans AdminPredictive (« Pondération
+météo apprise »).
+
 ### 6.6 Apprentissage continu
 - Table `collection_learning_feedback` : enregistrée à chaque complétion de tournée
 - Contient : `cav_id`, `tour_id`, `predicted_fill_rate`, `observed_fill_level` (0-5)
