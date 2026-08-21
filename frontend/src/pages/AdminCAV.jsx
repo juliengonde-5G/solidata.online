@@ -569,6 +569,11 @@ export default function AdminCAV() {
                 className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
                 {sheetDownloading === 'A7' ? 'Génération...' : 'Planche QR (A7)'}
               </button>
+              <button onClick={() => downloadSheet('AVERY')} disabled={!!sheetDownloading}
+                className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50"
+                title="Planche pré-découpée Avery 105×74 RCT — 8 étiquettes par page A4">
+                  {sheetDownloading === 'AVERY' ? 'Génération...' : 'Planche QR (Avery 105×74)'}
+                </button>
               <button onClick={() => downloadSheet('A8')} disabled={!!sheetDownloading}
                 className="border border-primary text-primary rounded-lg px-4 py-2 text-sm hover:bg-green-50 disabled:opacity-50">
                 {sheetDownloading === 'A8' ? 'Génération...' : 'Planche QR (A8)'}

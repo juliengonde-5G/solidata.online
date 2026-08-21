@@ -19,6 +19,16 @@
  *   - pendingEndOfDay                (file d'envoi : déclarations de fin de
  *                                     journée chauffeur/suiveur/binôme)
  *
+ * Stores v5 :
+ *   - pendingChecklists              (file d'envoi : checklist de début de
+ *                                     journée — vérifications + dégâts.
+ *                                     Comme les autres "pending*", jamais
+ *                                     bloquant : la checklist part hors
+ *                                     ligne, la file la rejoue plus tard.
+ *                                     Un 409 CHECKLIST_DEJA_FAITE au rejeu
+ *                                     est traité comme les autres 4xx —
+ *                                     purgé sans boucle, cf. sync.js)
+ *
  * Chaque entrée "pending*" porte un clientId (uuid) pour permettre une
  * idempotence côté serveur si le backend évolue (cf. contrat recommandé dans
  * DOCUMENTATION_MOBILE.md). Par défaut, on s'appuie sur la politique
@@ -26,7 +36,7 @@
  */
 
 const DB_NAME = 'solidata-mobile';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export const STORES = {
   tours: 'tours',
@@ -39,6 +49,7 @@ export const STORES = {
   pendingCollects: 'pendingCollects',
   pendingMessageReads: 'pendingMessageReads',
   pendingEndOfDay: 'pendingEndOfDay',
+  pendingChecklists: 'pendingChecklists',
 };
 
 export function openDB() {
@@ -87,6 +98,12 @@ export function openDB() {
       // v4 — déclarations de fin de journée
       if (!db.objectStoreNames.contains(STORES.pendingEndOfDay)) {
         const s = db.createObjectStore(STORES.pendingEndOfDay, { keyPath: 'id', autoIncrement: true });
+        s.createIndex('tourId', 'tourId', { unique: false });
+      }
+
+      // v5 — checklist de début de journée (vérifications + dégâts)
+      if (!db.objectStoreNames.contains(STORES.pendingChecklists)) {
+        const s = db.createObjectStore(STORES.pendingChecklists, { keyPath: 'id', autoIncrement: true });
         s.createIndex('tourId', 'tourId', { unique: false });
       }
     };
@@ -299,6 +316,27 @@ export async function addPendingEndOfDay(data) {
     binomeVehiculeVide: !!data.binomeVehiculeVide,
     binomeVehiculeOk: !!data.binomeVehiculeOk,
     remarques: data.remarques || null,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Ajoute une checklist de début de journée à envoyer (Checklist.jsx).
+ * @param {object} data - { tourId, vehicleId?, exteriorOk, fuelLevel?,
+ *   kmStart?, notes?, degats? }
+ * `degats` est déjà au format API (voir services/vehicleDamage.js
+ * `toApiPayload` — pas d'id local dedans, uniquement vue/x/y/type/commentaire).
+ */
+export async function addPendingChecklist(data) {
+  return putItem(STORES.pendingChecklists, {
+    clientId: data.clientId || newClientId(),
+    tourId: data.tourId,
+    vehicleId: data.vehicleId ?? null,
+    exteriorOk: !!data.exteriorOk,
+    fuelLevel: data.fuelLevel || null,
+    kmStart: data.kmStart ?? null,
+    notes: data.notes || null,
+    degats: Array.isArray(data.degats) ? data.degats : [],
     createdAt: new Date().toISOString(),
   });
 }

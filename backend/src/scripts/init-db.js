@@ -2669,6 +2669,112 @@ async function initDatabase() {
     console.log('[INIT-DB] Migration mode démo (formations chauffeur) ✓');
 
     // ══════════════════════════════════════════
+    // MIGRATION : pilotage des tournées EN COURS (août 2026)
+    // ──────────────────────────────────────────
+    // Le gestionnaire doit pouvoir reprendre la main sur une tournée déjà
+    // partie : réordonner les points, en ajouter/retirer, et intercaler des
+    // ARRÊTS TECHNIQUES (magasin, entretien du véhicule, carburant…) qui ne
+    // sont pas des points de collecte mais occupent du temps de travail.
+    // Le référentiel des lieux est administrable par le gestionnaire.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lieux_techniques (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(150) NOT NULL,
+        categorie VARCHAR(30) NOT NULL DEFAULT 'autre'
+          CHECK (categorie IN ('magasin', 'entretien', 'carburant', 'dechetterie', 'administratif', 'pause', 'autre')),
+        adresse TEXT,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        duree_min INTEGER DEFAULT 15,
+        notes TEXT,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    // Un arrêt technique posé sur une tournée. `position` partage la même
+    // échelle que tour_cav.position : le programme d'une tournée est la fusion
+    // ordonnée des deux tables (cf. routes/tours/live-edit.js).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tour_arret_technique (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+        lieu_id INTEGER REFERENCES lieux_techniques(id) ON DELETE SET NULL,
+        libelle VARCHAR(150),
+        position INTEGER NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'done', 'skipped')),
+        notes TEXT,
+        arrived_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tour_arret_tour ON tour_arret_technique(tour_id)');
+
+    // Dégâts relevés au départ, pointés sur un schéma du véhicule (4 vues),
+    // à la manière d'un constat amiable. JSONB : [{vue, x, y, type, commentaire}]
+    // avec x/y RELATIFS (0..1) — indépendants de la taille d'écran.
+    await client.query(`
+      ALTER TABLE vehicle_checklists ADD COLUMN IF NOT EXISTS degats JSONB;
+    `);
+
+    // Messages de prévention routière affichés au chauffeur à la validation du
+    // questionnaire de début de journée. Tournants : le serveur en choisit un
+    // par rotation déterministe (jour de l'année) — paramétrables en back-office.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messages_prevention (
+        id SERIAL PRIMARY KEY,
+        titre VARCHAR(150) NOT NULL,
+        texte TEXT NOT NULL,
+        is_active BOOLEAN DEFAULT true,
+        ordre INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    // Seed initial, posé UNE seule fois (verrou settings) : un message supprimé
+    // volontairement ne réapparaît jamais au redémarrage.
+    const preventionSeed = await client.query('SELECT COUNT(*)::int AS n FROM messages_prevention');
+    const preventionLock = await client.query(
+      "SELECT value FROM settings WHERE key = 'collecte.prevention_seed'"
+    );
+    if (preventionSeed.rows[0].n === 0 && preventionLock.rows.length === 0) {
+      const messages = [
+        ['Ceinture et téléphone', 'Attachez votre ceinture avant de démarrer. Le téléphone reste posé : on ne le touche pas en roulant.'],
+        ['Angles morts', 'Avant chaque manœuvre, vérifiez vos rétroviseurs. Un piéton ou un vélo peut se trouver dans un angle mort du camion.'],
+        ['Marche arrière', 'En marche arrière, descendez vérifier derrière le véhicule si vous avez un doute. Faites-vous guider quand c est possible.'],
+        ['Distance de sécurité', 'Gardez vos distances : un camion chargé s arrête beaucoup moins vite qu une voiture.'],
+        ['Fatigue et pauses', 'Fatigué ? Arrêtez-vous. Une pause de dix minutes vaut mieux qu un accident.'],
+        ['Chargement arrimé', 'Vérifiez que le chargement est bien arrimé avant de partir et après chaque vidage.'],
+        ['Météo', 'Pluie, verglas ou brouillard : ralentissez et augmentez les distances.'],
+      ];
+      for (let i = 0; i < messages.length; i++) {
+        await client.query(
+          'INSERT INTO messages_prevention (titre, texte, ordre) VALUES ($1, $2, $3)',
+          [messages[i][0], messages[i][1], i + 1]
+        );
+      }
+      await client.query(
+        `INSERT INTO settings (key, value, category) VALUES ('collecte.prevention_seed', $1, 'collecte')
+         ON CONFLICT (key) DO NOTHING`,
+        [new Date().toISOString()]
+      );
+    }
+    // Pourcentage de remplissage RÉELLEMENT saisi par le chauffeur (0-150).
+    // L'échelle historique `fill_level` (INTEGER 0-5, lue ×20 par le moteur)
+    // supposait 5 = 100 %, alors que l'écran mobile plafonne à 4 : « plein »
+    // était appris comme 80 % et TOUTES les observations sous-estimées de 20
+    // points — le moteur croyait les bornes moins remplies qu'annoncé. Le
+    // pourcentage réel lève cette distorsion et rend exploitables les paliers
+    // fins (« un fond » 10 %) comme le débordement (110 %).
+    await client.query(`
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS fill_percent DOUBLE PRECISION;
+      ALTER TABLE collection_learning_feedback ADD COLUMN IF NOT EXISTS observed_fill_percent DOUBLE PRECISION;
+    `);
+    console.log('[INIT-DB] Migration pilotage tournées en cours (arrêts techniques, dégâts, prévention) ✓');
+
+    // ══════════════════════════════════════════
     // MIGRATION : FKs manquantes + indexes performance
     // ══════════════════════════════════════════
     // FK users.team_id -> teams(id)

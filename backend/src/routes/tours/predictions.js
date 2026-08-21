@@ -173,12 +173,24 @@ function isHoliday(dateStr) {
   return FRENCH_HOLIDAYS_2026.includes(dateStr);
 }
 
-// Petit utilitaire : convertit une ligne de feedback en % observé (0-120),
-// en préférant la vérité terrain capteur (observed_fill_rate, DOUBLE 0-120)
-// puis la saisie chauffeur (observed_fill_level, INTEGER 0-5 ×20). null si aucune.
+// Convertit une ligne de feedback en % observé (0-120), par ordre de fiabilité :
+//   1. capteur          — observed_fill_rate (DOUBLE 0-120), vérité terrain ;
+//   2. saisie chauffeur — observed_fill_percent, le POURCENTAGE RÉELLEMENT
+//      choisi sur le téléphone (« un fond » 10 %, « à moitié » 50 %,
+//      « au-delà » 110 %…) ;
+//   3. repli historique — observed_fill_level (INTEGER 0-5) × 20.
+//
+// Le repli ×20 suppose que 5 = 100 %, or l'écran mobile plafonne à 4 : « plein »
+// y était donc appris comme 80 %, et toutes les observations sous-estimées de
+// 20 points — le moteur croyait les bornes moins remplies qu'annoncé et
+// proposait les collectes trop tard. Le pourcentage réel (2.) lève cette
+// distorsion ; le repli reste pour les lignes historiques, qui n'ont pas mieux.
 function observedPercentFromRow(row) {
   if (row.observed_fill_rate != null && Number.isFinite(parseFloat(row.observed_fill_rate))) {
     return Math.max(0, Math.min(120, parseFloat(row.observed_fill_rate)));
+  }
+  if (row.observed_fill_percent != null && Number.isFinite(parseFloat(row.observed_fill_percent))) {
+    return Math.max(0, Math.min(120, parseFloat(row.observed_fill_percent)));
   }
   if (row.observed_fill_level != null && Number.isFinite(parseInt(row.observed_fill_level, 10))) {
     return Math.max(0, Math.min(120, parseInt(row.observed_fill_level, 10) * 20));
@@ -249,8 +261,10 @@ async function predictFillRate(cavId, targetDate) {
   const avgWeight = history.reduce((sum, h) => sum + parseFloat(h.weight_kg), 0) / history.length;
 
   // Jours depuis dernière collecte
-  const lastCollection = history[0].date;
-  const daysSince = Math.floor((now - new Date(lastCollection)) / 86400000);
+  // Jalon de remise à zéro : le moteur ne remonte jamais avant cette date —
+  // tous les CAV y sont réputés vides (aucun tonnage n'est supprimé pour autant).
+  const lastCollection = fillFactors.effectiveLastCollection(history[0].date, await fillFactors.getResetDate());
+  const daysSince = Math.floor((now - lastCollection) / 86400000);
 
   // Cadence moyenne RÉELLE entre collectes (fallback 7 j) — cohérent avec
   // cav.js /fill-rate. L'ancienne hypothèse « collecte hebdomadaire » (avgWeight/7)
@@ -363,7 +377,7 @@ async function predictFillRate(cavId, targetDate) {
   // que les lignes capteur (observed_fill_level = NULL) étaient comptées à 0 %
   // et écrasaient la calibration. Les lignes sans aucune observation sont ignorées.
   const feedbackResult = await pool.query(
-    `SELECT predicted_fill_rate, observed_fill_level, observed_fill_rate, created_at
+    `SELECT predicted_fill_rate, observed_fill_level, observed_fill_percent, observed_fill_rate, created_at
      FROM collection_learning_feedback
      WHERE cav_id = $1 ORDER BY created_at DESC LIMIT 60`,
     [cavId]
@@ -390,7 +404,7 @@ async function predictFillRate(cavId, targetDate) {
 
   // 2. Correction saisonnière par période (même mois des données passées)
   const periodFeedback = await pool.query(
-    `SELECT predicted_fill_rate, observed_fill_level, observed_fill_rate
+    `SELECT predicted_fill_rate, observed_fill_level, observed_fill_percent, observed_fill_rate
      FROM collection_learning_feedback
      WHERE cav_id = $1 AND EXTRACT(MONTH FROM created_at) = $2
      ORDER BY created_at DESC LIMIT 20`,
@@ -479,7 +493,7 @@ async function predictFillRate(cavId, targetDate) {
       dayOfWeekSource: resolved.dayOfWeekSources[dayOfWeek],
       daysSinceCollection: daysSince,
       avgDaysBetween: Math.round(avgDaysBetween * 10) / 10,
-      capacityKg: fillFactors.getCapacityKg(cav.nb_containers),
+      capacityKg: fillFactors.getCapacityKg(cav.nb_containers, resolved.capacityKgPerContainer),
       avgWeight: Math.round(avgWeight * 10) / 10,
       dailyAccumulation: Math.round((avgWeight / Math.max(avgDaysBetween, 1)) * 10) / 10,
     },
@@ -527,8 +541,10 @@ async function predictAssociationFillRate(associationPointId, targetDate) {
   }
 
   const avgWeight = history.reduce((sum, h) => sum + parseFloat(h.weight_kg), 0) / history.length;
-  const lastCollection = history[0].date;
-  const daysSince = Math.floor((now - new Date(lastCollection)) / 86400000);
+  // Jalon de remise à zéro : le moteur ne remonte jamais avant cette date —
+  // tous les CAV y sont réputés vides (aucun tonnage n'est supprimé pour autant).
+  const lastCollection = fillFactors.effectiveLastCollection(history[0].date, await fillFactors.getResetDate());
+  const daysSince = Math.floor((now - lastCollection) / 86400000);
 
   // Cadence moyenne réelle entre collectes (fallback 7 j).
   let avgDaysBetween = 7;

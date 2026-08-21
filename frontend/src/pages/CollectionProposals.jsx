@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Sparkles, AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Info, AlertTriangle, RefreshCw, MapPin, ArrowRight } from 'lucide-react';
 import Layout from '../components/Layout';
 import { Modal, PageHeader, Section, ErrorState } from '../components';
-import EstimationPanel from '../components/tours/EstimationPanel';
 import api from '../services/api';
 
 export default function CollectionProposals() {
@@ -17,42 +17,43 @@ export default function CollectionProposals() {
     return m.toISOString().slice(0, 10);
   });
   const [daily, setDaily] = useState(null);
+  const [dailyError, setDailyError] = useState(null);
   const [weekly, setWeekly] = useState(null);
+  const [weeklyError, setWeeklyError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [contextEdit, setContextEdit] = useState(null);
   const [savingContext, setSavingContext] = useState(false);
+  const [contextSaveError, setContextSaveError] = useState(null);
 
   // Bornes en risque de saturation (bandeau en tête)
   const [saturation, setSaturation] = useState(null);
   const [saturationLoading, setSaturationLoading] = useState(true);
   const [saturationError, setSaturationError] = useState(null);
 
-  // État de création par jour pour la vue semaine : { [date]: { state: 'creating'|'done'|'error', message? } }
-  const [weeklyStatus, setWeeklyStatus] = useState({});
-  const [planningAll, setPlanningAll] = useState(false);
-  const [planAllProgress, setPlanAllProgress] = useState(null);
-  const [planAllSummary, setPlanAllSummary] = useState(null);
-
   const loadDaily = async () => {
     setLoading(true);
+    setDailyError(null);
     try {
       const res = await api.get('/tours/proposals/daily', { params: { date } });
       setDaily(res.data);
     } catch (err) {
       console.error(err);
       setDaily(null);
+      setDailyError(err.response?.data?.error || 'Impossible de charger le contexte du jour');
     }
     setLoading(false);
   };
 
   const loadWeekly = async () => {
     setLoading(true);
+    setWeeklyError(null);
     try {
       const res = await api.get('/tours/proposals/weekly', { params: { week_start: weekStart } });
       setWeekly(res.data);
     } catch (err) {
       console.error(err);
       setWeekly(null);
+      setWeeklyError(err.response?.data?.error || 'Impossible de charger le contexte de la semaine');
     }
     setLoading(false);
   };
@@ -72,15 +73,32 @@ export default function CollectionProposals() {
 
   useEffect(() => {
     if (view === 'daily') loadDaily();
-    else { loadWeekly(); setWeeklyStatus({}); setPlanAllSummary(null); }
+    else loadWeekly();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, date, weekStart]);
 
   useEffect(() => { loadSaturation(); }, [loadSaturation]);
 
+  const openContextEdit = () => {
+    setContextSaveError(null);
+    setContextEdit({
+      date,
+      weather_factor: daily?.context?.weatherFactor ?? 1,
+      traffic_factor: daily?.context?.trafficFactor ?? 1,
+      duration_factor: daily?.context?.durationFactor ?? 1,
+      notes: '',
+    });
+  };
+
+  const closeContextEdit = () => {
+    setContextEdit(null);
+    setContextSaveError(null);
+  };
+
   const saveContext = async () => {
     if (!contextEdit) return;
     setSavingContext(true);
+    setContextSaveError(null);
     try {
       await api.put('/tours/context', {
         date: contextEdit.date,
@@ -92,87 +110,20 @@ export default function CollectionProposals() {
       setContextEdit(null);
       if (view === 'daily') loadDaily();
       else loadWeekly();
-    } catch (err) { console.error(err); }
-    setSavingContext(false);
-  };
-
-  const createTourFromProposal = async (vehicleId, driverId) => {
-    try {
-      await api.post('/tours/intelligent', {
-        vehicle_id: vehicleId,
-        date,
-        driver_employee_id: driverId || undefined,
-      }, { timeout: 120000 });
-      loadDaily();
-    } catch (err) { console.error(err); }
-  };
-
-  // Une proposition PAR véhicule et par jour (backend `day.proposals[]`) ;
-  // repli sur l'ancienne forme mono-véhicule `suggestedTour` si absente.
-  const dayProposals = (day) =>
-    (day.proposals?.length ? day.proposals : (day.suggestedTour ? [day.suggestedTour] : []))
-      .filter(p => p?.vehicle?.id);
-  const propKey = (day, p) => `${day.date}:${p.vehicle.id}`;
-
-  const createProposal = async (day, proposal) => {
-    const key = propKey(day, proposal);
-    setWeeklyStatus(s => ({ ...s, [key]: { state: 'creating' } }));
-    try {
-      await api.post('/tours/intelligent', { date: day.date, vehicle_id: proposal.vehicle.id }, { timeout: 120000 });
-      setWeeklyStatus(s => ({ ...s, [key]: { state: 'done' } }));
-      loadWeekly();
     } catch (err) {
       console.error(err);
-      setWeeklyStatus(s => ({ ...s, [key]: { state: 'error', message: err.response?.data?.error || 'Échec de la création' } }));
+      setContextSaveError(err.response?.data?.error || "Échec de l'enregistrement du contexte");
     }
+    setSavingContext(false);
   };
-
-  const weekCandidates = () => {
-    const out = [];
-    for (const day of weekly?.days || []) {
-      if (day.existingTours?.length > 0) continue;
-      for (const proposal of dayProposals(day)) {
-        if (weeklyStatus[propKey(day, proposal)]?.state !== 'done') out.push({ day, proposal });
-      }
-    }
-    return out;
-  };
-
-  const planWholeWeek = async () => {
-    const candidates = weekCandidates();
-    if (candidates.length === 0) return;
-    setPlanningAll(true);
-    setPlanAllSummary(null);
-    setPlanAllProgress({ done: 0, total: candidates.length });
-    let created = 0, failed = 0;
-    for (const { day, proposal } of candidates) {
-      const key = propKey(day, proposal);
-      setWeeklyStatus(s => ({ ...s, [key]: { state: 'creating' } }));
-      try {
-        await api.post('/tours/intelligent', { date: day.date, vehicle_id: proposal.vehicle.id }, { timeout: 120000 });
-        setWeeklyStatus(s => ({ ...s, [key]: { state: 'done' } }));
-        created++;
-      } catch (err) {
-        console.error(err);
-        setWeeklyStatus(s => ({ ...s, [key]: { state: 'error', message: err.response?.data?.error || 'Échec de la création' } }));
-        failed++;
-      }
-      setPlanAllProgress(p => ({ done: (p?.done || 0) + 1, total: candidates.length }));
-    }
-    setPlanAllSummary({ created, failed, total: candidates.length });
-    setPlanningAll(false);
-    loadWeekly();
-  };
-
-  const planAllCandidateCount = weekCandidates().length;
 
   return (
     <Layout>
       <div className="p-6 space-y-6">
         <PageHeader
-          title="Propositions de collecte"
-          subtitle="Prédictions journalières et hebdomadaires — météo, trafic, apprentissage continu"
-          icon={Sparkles}
+          title="Contexte de collecte"
+          subtitle="Météo, calendrier scolaire et bornes à risque de saturation — pour éclairer la planification. La création des tournées se fait depuis Planning tournées."
+          icon={Info}
           actions={
             <div className="flex gap-2">
               <button
@@ -190,6 +141,22 @@ export default function CollectionProposals() {
             </div>
           }
         />
+
+        {/* Renvoi explicite vers l'écran de création de tournées */}
+        <div className="card-modern p-4 flex items-center justify-between gap-3 flex-wrap bg-primary/5 border-primary/20">
+          <div className="flex items-center gap-3">
+            <MapPin className="w-5 h-5 text-primary shrink-0" />
+            <p className="text-sm text-slate-700">
+              Cette page n'affiche que le <strong>contexte</strong> de la journée. Pour créer, modifier ou planifier une tournée, direction <strong>Planning tournées</strong>.
+            </p>
+          </div>
+          <Link
+            to="/planning-tournees"
+            className="btn-primary text-sm inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+          >
+            Aller à Planning tournées <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
 
         {/* Bornes en risque de saturation */}
         <Section
@@ -255,7 +222,7 @@ export default function CollectionProposals() {
         </Section>
 
         {view === 'daily' && (
-          <div className="mb-4 flex items-center gap-4">
+          <div className="mb-4 flex items-center gap-4 flex-wrap">
             <label className="text-sm font-medium text-gray-600">Date</label>
             <input
               type="date"
@@ -263,6 +230,9 @@ export default function CollectionProposals() {
               onChange={e => setDate(e.target.value)}
               className="input-modern w-auto"
             />
+            <span className="text-sm text-slate-500 capitalize">
+              {new Date(`${date}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            </span>
           </div>
         )}
         {view === 'weekly' && (
@@ -274,21 +244,6 @@ export default function CollectionProposals() {
               onChange={e => setWeekStart(e.target.value)}
               className="input-modern w-auto"
             />
-            <button
-              onClick={planWholeWeek}
-              disabled={planningAll || planAllCandidateCount === 0}
-              className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {planningAll
-                ? `Planification… (${planAllProgress?.done ?? 0}/${planAllProgress?.total ?? 0})`
-                : `Planifier toute la semaine${planAllCandidateCount > 0 ? ` (${planAllCandidateCount})` : ''}`}
-            </button>
-            {planAllSummary && (
-              <span className={`text-xs font-medium ${planAllSummary.failed > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                {planAllSummary.created} tournée{planAllSummary.created > 1 ? 's' : ''} créée{planAllSummary.created > 1 ? 's' : ''}
-                {planAllSummary.failed > 0 ? `, ${planAllSummary.failed} échec${planAllSummary.failed > 1 ? 's' : ''}` : ''}
-              </span>
-            )}
           </div>
         )}
 
@@ -298,22 +253,26 @@ export default function CollectionProposals() {
           </div>
         )}
 
+        {!loading && view === 'daily' && dailyError && (
+          <ErrorState variant="card" title="Erreur" message={dailyError} onRetry={loadDaily} />
+        )}
+
         {!loading && view === 'daily' && daily && (
           <div className="space-y-6">
-            {/* Panneau de référence : météo + calendrier */}
-            <div className="bg-white rounded-xl border overflow-hidden">
+            {/* Panneau de contexte : météo + calendrier + véhicules du jour */}
+            <div className="card-modern overflow-hidden">
               <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 border-b">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-gray-700">Références du calcul prédictif</h3>
+                  <h3 className="font-semibold text-gray-700">Contexte prédictif du jour</h3>
                   <button
-                    onClick={() => setContextEdit({ date, weather_factor: daily.context?.weatherFactor ?? 1, traffic_factor: daily.context?.trafficFactor ?? 1, duration_factor: daily.context?.durationFactor ?? 1, notes: '' })}
+                    onClick={openContextEdit}
                     className="text-primary text-xs font-medium hover:underline"
                   >
                     Modifier le contexte
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Météo */}
                   <div className="bg-white rounded-lg p-3 border">
                     <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-2">Météo du jour</p>
@@ -416,69 +375,39 @@ export default function CollectionProposals() {
                       </div>
                     )}
                   </div>
+
+                  {/* Véhicules du jour */}
+                  <div className="bg-white rounded-lg p-3 border">
+                    <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-2">Véhicules aujourd'hui</p>
+                    {daily.diagnostics ? (
+                      <div className="grid grid-cols-3 gap-2 text-sm">
+                        <div>
+                          <span className="text-xs text-gray-400 block">Parc total</span>
+                          <span className="font-medium">{daily.diagnostics.totalVehicles}</span>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-400 block">Déjà en tournée</span>
+                          <span className="font-medium">{daily.diagnostics.usedVehicles}</span>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-400 block">Disponibles</span>
+                          <span className={`font-bold ${daily.diagnostics.candidateVehicles === 0 ? 'text-amber-600' : 'text-emerald-700'}`}>
+                            {daily.diagnostics.candidateVehicles}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400">Non disponible</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-
-            <div className="grid gap-4">
-              {daily.proposals?.map((p, idx) => (
-                <div key={p.vehicle_id || idx} className="bg-white rounded-xl border overflow-hidden">
-                  <div className="p-4 bg-gray-50 border-b flex items-center justify-between">
-                    <h3 className="font-semibold">{p.vehicle_name}</h3>
-                    <span className="text-sm text-gray-500">
-                      {p.proposal?.stats?.totalCavs ?? 0} CAV · {p.proposal?.stats?.totalDistance ?? 0} km · {p.proposal?.stats?.estimatedDuration ?? 0} min
-                    </span>
-                  </div>
-                  <div className="p-4">
-                    <p className="text-sm text-gray-600 whitespace-pre-wrap mb-4">{p.proposal?.explanation}</p>
-                    {p.proposal?.estimation && (
-                      <div className="mb-4">
-                        <EstimationPanel estimation={p.proposal.estimation} compact />
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => createTourFromProposal(p.vehicle_id, daily.drivers?.[0]?.id)}
-                        className="btn-primary text-sm"
-                      >
-                        Créer cette tournée
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {(!daily.proposals || daily.proposals.length === 0) && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
-                  <p className="font-semibold text-amber-900">Aucune proposition pour cette date</p>
-                  {daily.diagnostics && (
-                    <ul className="text-sm text-amber-800 space-y-1 list-disc pl-5">
-                      <li>Véhicules totaux : <strong>{daily.diagnostics.totalVehicles}</strong></li>
-                      <li>Déjà affectés à une tournée non terminée : <strong>{daily.diagnostics.usedVehicles}</strong></li>
-                      <li>Candidats restants : <strong>{daily.diagnostics.candidateVehicles}</strong></li>
-                      <li>Tentatives effectuées : <strong>{daily.diagnostics.attemptedVehicles}</strong></li>
-                      <li>Échecs : <strong>{daily.diagnostics.skippedCount}</strong></li>
-                    </ul>
-                  )}
-                  {daily.skipped && daily.skipped.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-amber-900 mb-1">Détail des échecs :</p>
-                      <ul className="text-xs text-amber-700 space-y-1">
-                        {daily.skipped.map((s, i) => (
-                          <li key={i}>• <strong>{s.vehicle_name}</strong> : {s.reason}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {daily.diagnostics?.candidateVehicles === 0 && (
-                    <p className="text-xs text-amber-800 italic">
-                      Tous les véhicules sont déjà affectés à des tournées non terminées ou non annulées pour cette date.
-                      Annuler ou clôturer une tournée existante pour libérer un véhicule.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
+        )}
+
+        {!loading && view === 'weekly' && weeklyError && (
+          <ErrorState variant="card" title="Erreur" message={weeklyError} onRetry={loadWeekly} />
         )}
 
         {!loading && view === 'weekly' && weekly && (
@@ -487,7 +416,7 @@ export default function CollectionProposals() {
 
             {/* Vacances de la semaine */}
             {weekly.upcomingVacations?.length > 0 && (
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-center gap-3">
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-center gap-3 flex-wrap">
                 <span className="text-purple-600 font-medium text-sm">Vacances scolaires :</span>
                 {weekly.upcomingVacations.map((v, i) => (
                   <span key={i} className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-lg">
@@ -498,106 +427,65 @@ export default function CollectionProposals() {
             )}
 
             <div className="grid gap-3">
-              {weekly.days?.map(day => {
-                const hasExisting = day.existingTours?.length > 0;
-                const proposals = dayProposals(day);
-                return (
-                  <div key={day.date} className="bg-white rounded-xl border p-4 space-y-2">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="flex items-center gap-4 flex-wrap">
-                        <span className="font-medium capitalize w-24">{day.dayName}</span>
-                        <span className="text-sm text-gray-500">{day.date}</span>
-                        {/* Météo inline */}
-                        {day.context?.weatherLabel && (
-                          <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
-                            {day.context.weatherLabel}
-                            {day.context.tempMax != null && ` ${day.context.tempMax}°C`}
-                            {' '}x{day.context.weatherFactor?.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex gap-2 items-center flex-wrap justify-end">
-                        {/* Badges vacances / férié */}
-                        {day.vacationStatus && (
-                          <span className={`text-xs px-2 py-1 rounded ${
-                            day.vacationStatus.status === 'during' ? 'bg-purple-100 text-purple-700' :
-                            day.vacationStatus.status === 'pre' ? 'bg-amber-50 text-amber-700' :
-                            'bg-blue-50 text-blue-700'
-                          }`}>
-                            {day.vacationStatus.status === 'during' ? 'Vacances' :
-                             day.vacationStatus.status === 'pre' ? 'Pré-vacances' : 'Post-vacances'}
-                          </span>
-                        )}
-                        {day.holiday && (
-                          <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded">Férié</span>
-                        )}
-                        {hasExisting && (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{day.existingTours.length} tournée(s)</span>
-                        )}
-                        {day.availableVehicles === 0 && <span className="text-xs text-gray-400">Tous véhicules utilisés</span>}
-                      </div>
+              {weekly.days?.map(day => (
+                <div key={day.date} className="card-modern p-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <span className="font-medium capitalize w-24">{day.dayName}</span>
+                      <span className="text-sm text-gray-500">{day.date}</span>
+                      {/* Météo inline */}
+                      {day.context?.weatherLabel && (
+                        <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
+                          {day.context.weatherLabel}
+                          {day.context.tempMax != null && ` ${day.context.tempMax}°C`}
+                          {' '}x{day.context.weatherFactor?.toFixed(2)}
+                        </span>
+                      )}
                     </div>
-
-                    {/* Une proposition par véhicule disponible */}
-                    {!hasExisting && proposals.map(proposal => {
-                      const status = weeklyStatus[propKey(day, proposal)];
-                      return (
-                        <div key={proposal.vehicle.id} className="flex items-center justify-between flex-wrap gap-2 pl-2 border-l-2 border-slate-100">
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <span className="text-sm font-medium text-slate-700">
-                              {proposal.vehicle.name || proposal.vehicle.registration}
-                            </span>
-                            <span className="text-sm text-gray-500">
-                              {proposal.cavCount} CAV · {proposal.stats?.totalDistance ?? 0} km · {proposal.stats?.estimatedDuration ?? 0} min
-                            </span>
-                            {proposal.estimation && (
-                              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${proposal.estimation.faisable ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                {Math.round(proposal.estimation.poids_estime_kg || 0)} kg · {Math.round(proposal.estimation.taux_remplissage_vehicule_pct || 0)}% véhicule
-                                {proposal.estimation.pause_dejeuner_incluse ? ' · pause incluse' : ''}
-                              </span>
-                            )}
-                            {proposal.saturation_non_couverte?.length > 0 && (
-                              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                                {proposal.saturation_non_couverte.length} borne(s) saturée(s) non couverte(s)
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex gap-2 items-center">
-                            {status?.state === 'done' ? (
-                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">
-                                <CheckCircle2 className="w-3.5 h-3.5" /> Créée
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => createProposal(day, proposal)}
-                                disabled={status?.state === 'creating' || planningAll}
-                                className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {status?.state === 'creating' ? 'Création…' : status?.state === 'error' ? 'Réessayer' : 'Créer cette tournée'}
-                              </button>
-                            )}
-                          </div>
-                          {status?.state === 'error' && (
-                            <p className="w-full text-xs text-red-600">{status.message}</p>
-                          )}
-                        </div>
-                      );
-                    })}
+                    <div className="flex gap-2 items-center flex-wrap justify-end">
+                      {/* Badges vacances / férié */}
+                      {day.vacationStatus && (
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          day.vacationStatus.status === 'during' ? 'bg-purple-100 text-purple-700' :
+                          day.vacationStatus.status === 'pre' ? 'bg-amber-50 text-amber-700' :
+                          'bg-blue-50 text-blue-700'
+                        }`}>
+                          {day.vacationStatus.status === 'during' ? 'Vacances' :
+                           day.vacationStatus.status === 'pre' ? 'Pré-vacances' : 'Post-vacances'}
+                        </span>
+                      )}
+                      {day.holiday && (
+                        <span className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded">Férié</span>
+                      )}
+                      {day.existingTours?.length > 0 && (
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{day.existingTours.length} tournée(s) planifiée(s)</span>
+                      )}
+                      {day.availableVehicles === 0 ? (
+                        <span className="text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded">Tous véhicules utilisés</span>
+                      ) : day.availableVehicles != null && (
+                        <span className="text-xs text-gray-400">{day.availableVehicles} véhicule(s) disponible(s)</span>
+                      )}
+                    </div>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        <Modal isOpen={!!contextEdit} onClose={() => setContextEdit(null)} title={`Contexte collecte — ${contextEdit?.date || ''}`} size="sm" footer={
+        <Modal isOpen={!!contextEdit} onClose={closeContextEdit} title={`Contexte collecte — ${contextEdit?.date || ''}`} size="sm" footer={
           <>
-            <button onClick={() => setContextEdit(null)} className="px-4 py-2 rounded-lg border text-sm">Annuler</button>
-            <button onClick={saveContext} disabled={savingContext} className="btn-primary text-sm">Enregistrer</button>
+            <button onClick={closeContextEdit} className="px-4 py-2 rounded-lg border text-sm">Annuler</button>
+            <button onClick={saveContext} disabled={savingContext} className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+              {savingContext ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
           </>
         }>
           {contextEdit && (
             <div className="space-y-3">
+              {contextSaveError && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{contextSaveError}</p>
+              )}
               <div>
                 <label className="block text-sm text-gray-600 mb-1">Facteur météo (0.8–1.2)</label>
                 <input type="number" step="0.05" min="0.8" max="1.2" value={contextEdit.weather_factor} onChange={e => setContextEdit({ ...contextEdit, weather_factor: parseFloat(e.target.value) || 1 })} className="input-modern" />

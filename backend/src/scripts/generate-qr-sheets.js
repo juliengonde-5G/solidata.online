@@ -6,7 +6,9 @@
  *   node src/scripts/generate-qr-sheets.js [--format A7|A8] [--output fichier.pdf]
  *
  * Génère un PDF avec une étiquette par CAV, prête à imprimer et coller au fond du conteneur.
- * Format A7 (74×105mm) ou A8 (52×74mm) — étiquettes découpables sur feuilles A4.
+ * Formats : A7 (74×105mm) et A8 (52×74mm) — à découper sur feuille A4 vierge ;
+ * AVERY (105×74,25mm) — planche pré-découpée Avery 105×74 RCT, 8 par page,
+ * étiquettes jointives sans marge pour tomber pile sur les découpes.
  */
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
@@ -20,6 +22,19 @@ const FORMATS = {
   A4: { w: 210 * MM, h: 297 * MM },
   A7: { w: 74 * MM, h: 105 * MM },   // 74×105mm
   A8: { w: 52 * MM, h: 74 * MM },    // 52×74mm
+  // Planche pré-découpée AVERY 105×74 RCT (référence L7773 / équivalents) :
+  // 8 étiquettes par A4, 2 colonnes × 4 lignes, JOINTIVES et sans marge —
+  // 210 / 2 = 105 mm de large, 297 / 4 = 74,25 mm de haut. Les étiquettes
+  // couvrent donc toute la page : toute marge ou gouttière décalerait
+  // l'impression par rapport aux découpes du papier.
+  AVERY: { w: 105 * MM, h: (297 / 4) * MM },
+};
+
+// Disposition imposée par le papier, quand il y en a une. `exact: true` force
+// la grille et supprime marges et gouttières : on ne « calcule » pas une mise
+// en page sur un support pré-découpé, on la reproduit.
+const LAYOUTS = {
+  AVERY: { cols: 2, rows: 4, pageMargin: 0, gap: 0, exact: true },
 };
 
 // Couleurs Solidata
@@ -182,25 +197,30 @@ async function generateSheets(options = {}) {
   const outputPath = options.output || path.join(__dirname, '..', '..', 'uploads', `planches-qr-cav-${format}.pdf`);
 
   if (!FORMATS[format]) {
-    console.error(`Format inconnu: ${format}. Utilisez A7 ou A8.`);
+    console.error(`Format inconnu: ${format}. Utilisez A7, A8 ou AVERY.`);
     process.exit(1);
   }
 
   const labelSize = FORMATS[format];
   const pageSize = FORMATS.A4;
 
-  // Calcul de la grille sur une page A4
-  const pageMargin = 10 * MM;
-  const gap = 3 * MM;
-  const cols = Math.floor((pageSize.w - 2 * pageMargin + gap) / (labelSize.w + gap));
-  const rows = Math.floor((pageSize.h - 2 * pageMargin + gap) / (labelSize.h + gap));
+  // Disposition : imposée par le papier pré-découpé quand elle est connue,
+  // sinon calculée au mieux sur une A4 vierge (marges + gouttières de confort).
+  const layout = LAYOUTS[format] || null;
+  const pageMargin = layout ? layout.pageMargin * MM : 10 * MM;
+  const gap = layout ? layout.gap * MM : 3 * MM;
+  const cols = layout ? layout.cols
+    : Math.floor((pageSize.w - 2 * pageMargin + gap) / (labelSize.w + gap));
+  const rows = layout ? layout.rows
+    : Math.floor((pageSize.h - 2 * pageMargin + gap) / (labelSize.h + gap));
   const labelsPerPage = cols * rows;
 
-  // Centrer la grille sur la page
+  // Grille centrée sur la page — sauf disposition imposée, où elle part du coin
+  // supérieur gauche pour coller exactement aux découpes.
   const gridW = cols * labelSize.w + (cols - 1) * gap;
   const gridH = rows * labelSize.h + (rows - 1) * gap;
-  const offsetX = (pageSize.w - gridW) / 2;
-  const offsetY = (pageSize.h - gridH) / 2;
+  const offsetX = layout && layout.exact ? 0 : (pageSize.w - gridW) / 2;
+  const offsetY = layout && layout.exact ? 0 : (pageSize.h - gridH) / 2;
 
   console.log(`[QR-SHEETS] Format étiquette: ${format} (${Math.round(labelSize.w / MM)}×${Math.round(labelSize.h / MM)}mm)`);
   console.log(`[QR-SHEETS] Grille: ${cols}×${rows} = ${labelsPerPage} étiquettes par page A4`);

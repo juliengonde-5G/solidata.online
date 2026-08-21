@@ -18,6 +18,7 @@ import { computePhotoRequirement } from '../services/cavPhoto';
 // (plein) avec une anomalie 'debordement' automatiquement posée.
 const FILL_LEVELS = [
   { value: 0, label: 'vide',          pct: '0%',   visual: 'empty',         store: 0 },
+  { value: 6, label: 'un fond',       pct: '10%',  visual: 'empty',         store: 0 },
   { value: 1, label: 'un peu',        pct: '25%',  visual: 'quarter',       store: 1 },
   { value: 2, label: 'à moitié',      pct: '50%',  visual: 'half',          store: 2 },
   { value: 3, label: 'presque plein', pct: '75%',  visual: 'three_quarter', store: 3 },
@@ -136,6 +137,13 @@ export default function FillLevel() {
     // Résout la valeur à envoyer et l'anomalie implicite pour le niveau ++.
     const levelObj = FILL_LEVELS.find(l => l.value === fillLevel);
     const storeLevel = levelObj ? levelObj.store : fillLevel;
+    // Pourcentage RÉEL du palier choisi, envoyé en plus de l'échelle 0-5 :
+    // celle-ci ne sait pas dire « un fond » (10 %) ni le débordement, et le
+    // moteur y perdait 20 points sur « plein ». Dérivé du libellé affiché pour
+    // qu'il n'y ait qu'UNE source de vérité (FILL_LEVELS).
+    const storePercent = levelObj
+      ? (levelObj.overflow ? 110 : parseInt(String(levelObj.pct).replace('%', ''), 10))
+      : null;
     const effectiveAnomaly = levelObj?.overflow ? 'debordement' : null;
     setLoading(true);
     setError('');
@@ -181,6 +189,7 @@ export default function FillLevel() {
         tourId,
         cavId,
         fillLevel: storeLevel,
+        fillPercent: storePercent,
         anomaly: effectiveAnomaly,
         notes,
         qrScanned: !tourIsAssociation,

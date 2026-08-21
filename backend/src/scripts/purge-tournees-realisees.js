@@ -39,6 +39,14 @@
  *   node src/scripts/purge-tournees-realisees.js --apply             # purge tout
  *   node src/scripts/purge-tournees-realisees.js --avant=2026-06-01 --apply
  *                                    # ne purge que les réalisées AVANT le 1er juin
+ *
+ *   node src/scripts/purge-tournees-realisees.js --planifiees --apply
+ *                                    # + les tournées PLANIFIÉES passées jamais
+ *                                    #   démarrées (fantômes de l'ancien dispatch
+ *                                    #   automatique J-1, retiré en 2.26.1).
+ *                                    #   Le jour même et les jours à venir sont
+ *                                    #   TOUJOURS préservés.
+ *   node src/scripts/purge-tournees-realisees.js --planifiees --annulees --apply
  */
 
 const pool = require('../config/database');
@@ -77,6 +85,8 @@ const CASCADE = [
  */
 function parseArgs(argv) {
   const apply = argv.includes('--apply');
+  const planifiees = argv.includes('--planifiees');
+  const annulees = argv.includes('--annulees');
   let avant = null;
   for (const a of argv) {
     if (a.startsWith('--avant=')) {
@@ -87,7 +97,36 @@ function parseArgs(argv) {
       avant = v;
     }
   }
-  return { apply, avant };
+  return { apply, avant, planifiees, annulees };
+}
+
+/**
+ * Construit le filtre SQL des tournées à purger (fonction PURE, exportée pour
+ * les tests). Le jour civil de référence est celui de PARIS — le conteneur
+ * tourne en UTC et une tournée du jour ne doit jamais être considérée comme
+ * « passée » à cause du fuseau.
+ *
+ * - `completed` : toujours incluses (le cœur du script) ;
+ * - `planned`   : incluses avec --planifiees, MAIS uniquement les tournées
+ *                 PASSÉES et JAMAIS DÉMARRÉES (`started_at IS NULL`). Une
+ *                 tournée planifiée pour aujourd'hui ou pour les jours à venir
+ *                 n'est JAMAIS purgée : elle est encore attendue ;
+ * - `cancelled` : incluses avec --annulees.
+ */
+function buildWhere({ avant = null, planifiees = false, annulees = false } = {}) {
+  const TODAY_PARIS = "(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Paris')::date";
+  const blocs = ["status = 'completed'"];
+  if (planifiees) {
+    blocs.push(`(status = 'planned' AND started_at IS NULL AND date < ${TODAY_PARIS})`);
+  }
+  if (annulees) blocs.push("status = 'cancelled'");
+  let sql = blocs.length === 1 ? blocs[0] : `(${blocs.join(' OR ')})`;
+  const params = [];
+  if (avant) {
+    params.push(avant);
+    sql += ` AND date < $${params.length}`;
+  }
+  return { sql, params };
 }
 
 async function main() {
@@ -100,20 +139,23 @@ async function main() {
     await pool.end().catch(() => {});
     return;
   }
-  const { apply, avant } = args;
+  const { apply, avant, planifiees, annulees } = args;
 
   const client = await pool.connect();
   try {
-    const where = avant
-      ? { sql: "status = 'completed' AND date < $1", params: [avant] }
-      : { sql: "status = 'completed'", params: [] };
+    const where = buildWhere({ avant, planifiees, annulees });
 
     const cible = (await client.query(
       `SELECT COUNT(*)::int AS n, MIN(date) AS premiere, MAX(date) AS derniere
          FROM tours WHERE ${where.sql}`, where.params
     )).rows[0];
 
-    console.log(`Tournées réalisées ciblées : ${cible.n}`
+    const perimetre = ['réalisées']
+      .concat(planifiees ? ['planifiées passées jamais démarrées'] : [])
+      .concat(annulees ? ['annulées'] : [])
+      .join(' + ');
+    console.log(`Périmètre : tournées ${perimetre}.`);
+    console.log(`Tournées ciblées : ${cible.n}`
       + (cible.n ? ` (du ${String(cible.premiere).slice(0, 10)} au ${String(cible.derniere).slice(0, 10)})` : '')
       + (avant ? ` — filtre : date < ${avant}` : ' — toutes'));
     if (!apply) console.log('MODE SIMULATION (aucune écriture) — relancer avec --apply pour purger.\n');
@@ -173,7 +215,7 @@ async function main() {
 }
 
 // Fonctions PURES exportées pour les tests (aucune DB dedans).
-module.exports = { parseArgs, DETACH_EXPLICITE, DETACH_PAR_FK, CASCADE };
+module.exports = { parseArgs, buildWhere, DETACH_EXPLICITE, DETACH_PAR_FK, CASCADE };
 
 if (require.main === module) {
   main();

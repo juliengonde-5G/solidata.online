@@ -166,6 +166,16 @@ const NAV_TREE = [
     ],
   },
   {
+    // QHSE regroupe la sécurité au travail ET les démarches RSE/environnement
+    // (demande client du 21/08/2026) : Pilotage RSE, Énergie & GES, Enquêtes et
+    // Achats responsables deviennent des SOUS-BRANCHES de cette section au lieu
+    // de quatre entrées de premier niveau.
+    //
+    // Les identifiants d'habilitation des modules déplacés sont CONSERVÉS
+    // ('rse', 'energie', 'enquetes', 'achats') : le filtrage des habilitations
+    // (`filterByModuleAccess`) est récursif et honore l'id de n'importe quel
+    // nœud — les réglages déjà posés dans /admin/permissions restent valables,
+    // et masquer 'qhse' masque désormais l'ensemble de la branche.
     id: 'qhse',
     label: 'QHSE',
     icon: ShieldCheck,
@@ -173,53 +183,48 @@ const NAV_TREE = [
       { label: "Accidents & presqu'accidents", path: '/qhse/accidents', icon: AlertTriangle, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
       { label: 'Habilitations', path: '/qhse/habilitations', icon: IdCard, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
       { label: 'Dotation EPI', path: '/qhse/epi', icon: ShieldCheck, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
-    ],
-  },
-  {
-    // Module « Pilotage RSE » (RSEI-10 — 28e module). Démarche de labellisation
-    // RSEi : agrégats non nominatifs uniquement. Le rôle personnalisé REF_RSE
-    // (base MANAGER) le voit ; la visibilité fine se règle dans /admin/permissions
-    // (module 'rse'). base_role : un rôle custom suit son rôle de base.
-    id: 'rse',
-    label: 'Pilotage RSE',
-    icon: Leaf,
-    children: [
-      { label: 'Tableau de bord RSE', path: '/rse', icon: Leaf, roles: ['ADMIN', 'MANAGER', 'RH'] },
-    ],
-  },
-  {
-    // Module « Énergie & GES » (RSEI-11 — 29e module). Comble le critère RSEi 4.2
-    // (Énergies et GES) et alimente l'export VSME (B3/B6). Lecture ADMIN/MANAGER/
-    // RH/QHSE ; la visibilité fine se règle dans /admin/permissions (module 'energie').
-    id: 'energie',
-    label: 'Énergie & GES',
-    icon: Zap,
-    children: [
-      { label: 'Énergie & GES', path: '/energie', icon: Gauge, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
-    ],
-  },
-  {
-    // Module « Enquêtes » (RSEI-13 — 30e module). Questionnaires anonymes (QVCT,
-    // satisfaction, intégration…) diffusés par lien ; restitution agrégée avec
-    // seuil d'anonymat n ≥ 5. Lecture/écriture ADMIN/MANAGER/RH/QHSE ; la
-    // visibilité fine se règle dans /admin/permissions (module 'enquetes').
-    id: 'enquetes',
-    label: 'Enquêtes',
-    icon: MessageSquare,
-    children: [
-      { label: 'Enquêtes internes', path: '/enquetes', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
-    ],
-  },
-  {
-    // Module « Achats responsables » (RSEI-17 — 31e module). Outille le critère
-    // RSEi 1.7 : référentiel fournisseurs + statut responsable, critères d'achat,
-    // registre des FDS, part d'achats responsables. Lecture ADMIN/MANAGER/RH/QHSE ;
-    // la visibilité fine se règle dans /admin/permissions (module 'achats').
-    id: 'achats',
-    label: 'Achats responsables',
-    icon: ShoppingCart,
-    children: [
-      { label: 'Achats responsables', path: '/achats', icon: ShoppingCart, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
+      {
+        // Module « Pilotage RSE » (RSEI-10 — 28e module). Démarche de labellisation
+        // RSEi : agrégats non nominatifs uniquement. Le rôle personnalisé REF_RSE
+        // (base MANAGER) le voit ; la visibilité fine se règle dans /admin/permissions
+        // (module 'rse'). base_role : un rôle custom suit son rôle de base.
+        id: 'rse',
+        label: 'Pilotage RSE',
+        icon: Leaf,
+        children: [
+          { label: 'Tableau de bord RSE', path: '/rse', icon: Leaf, roles: ['ADMIN', 'MANAGER', 'RH'] },
+        ],
+      },
+      {
+        // Module « Énergie & GES » (RSEI-11 — 29e module). Comble le critère RSEi 4.2
+        // (Énergies et GES) et alimente l'export VSME (B3/B6).
+        id: 'energie',
+        label: 'Énergie & GES',
+        icon: Zap,
+        children: [
+          { label: 'Énergie & GES', path: '/energie', icon: Gauge, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
+        ],
+      },
+      {
+        // Module « Enquêtes » (RSEI-13 — 30e module). Questionnaires anonymes (QVCT,
+        // satisfaction, intégration…) ; restitution agrégée au seuil n ≥ 5.
+        id: 'enquetes',
+        label: 'Enquêtes',
+        icon: MessageSquare,
+        children: [
+          { label: 'Enquêtes internes', path: '/enquetes', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
+        ],
+      },
+      {
+        // Module « Achats responsables » (RSEI-17 — 31e module). Critère RSEi 1.7 :
+        // fournisseurs responsables, critères d'achat, registre des FDS.
+        id: 'achats',
+        label: 'Achats responsables',
+        icon: ShoppingCart,
+        children: [
+          { label: 'Achats responsables', path: '/achats', icon: ShoppingCart, roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'] },
+        ],
+      },
     ],
   },
   {

@@ -8,16 +8,16 @@ const {
 
 describe('parseArgs', () => {
   test('simulation par défaut (aucune écriture sans --apply)', () => {
-    expect(parseArgs([])).toEqual({ apply: false, avant: null });
+    expect(parseArgs([])).toEqual({ apply: false, avant: null, planifiees: false, annulees: false });
   });
 
   test('--apply active l’écriture', () => {
-    expect(parseArgs(['--apply'])).toEqual({ apply: true, avant: null });
+    expect(parseArgs(['--apply'])).toEqual({ apply: true, avant: null, planifiees: false, annulees: false });
   });
 
   test('--avant=YYYY-MM-DD borne la purge', () => {
     expect(parseArgs(['--avant=2026-06-01', '--apply']))
-      .toEqual({ apply: true, avant: '2026-06-01' });
+      .toEqual({ apply: true, avant: '2026-06-01', planifiees: false, annulees: false });
   });
 
   test('date mal formée → refus (on ne purge jamais sur un filtre mal compris)', () => {

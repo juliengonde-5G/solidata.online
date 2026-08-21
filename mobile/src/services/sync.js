@@ -68,7 +68,7 @@ export function __resetBackoffForTests() {
  * @returns {Promise<{ scans, weights, gps, incidents, collects, total }>}
  */
 export async function getPendingCount() {
-  const [scans, weights, gps, incidents, collects, messageReads, endOfDay] = await Promise.all([
+  const [scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists] = await Promise.all([
     countItems(STORES.pendingScans).catch(() => 0),
     countItems(STORES.pendingWeights).catch(() => 0),
     countItems(STORES.gpsBuffer).catch(() => 0),
@@ -76,9 +76,10 @@ export async function getPendingCount() {
     countItems(STORES.pendingCollects).catch(() => 0),
     countItems(STORES.pendingMessageReads).catch(() => 0),
     countItems(STORES.pendingEndOfDay).catch(() => 0),
+    countItems(STORES.pendingChecklists).catch(() => 0),
   ]);
-  const counts = { scans, weights, gps, incidents, collects, messageReads, endOfDay };
-  counts.total = scans + weights + gps + incidents + collects + messageReads + endOfDay;
+  const counts = { scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists };
+  counts.total = scans + weights + gps + incidents + collects + messageReads + endOfDay + checklists;
   emit('pending', { counts });
   return counts;
 }
@@ -292,6 +293,10 @@ export async function sendCollect(collect) {
     : {
         status: 'collected',
         fill_level: collect.fillLevel,
+        // Pourcentage réel du palier choisi (10 %, 100 %, 110 %…) : le serveur
+        // l'utilise en priorité pour l'apprentissage. Absent des collectes déjà
+        // en file avant cette version → le serveur retombe sur fill_level.
+        fill_percent: collect.fillPercent ?? null,
         qr_scanned: !!collect.qrScanned,
         remballe: !!collect.remballe,
         notes: collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''),
@@ -345,6 +350,7 @@ export async function sendCollectWithPhoto(collect, photoFile) {
   const fd = new FormData();
   fd.append('status', 'collected');
   fd.append('fill_level', String(collect.fillLevel));
+  if (collect.fillPercent != null) fd.append('fill_percent', String(collect.fillPercent));
   fd.append('qr_scanned', String(!!collect.qrScanned));
   fd.append('remballe', String(!!collect.remballe));
   fd.append('notes', collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''));
@@ -507,6 +513,69 @@ export async function syncPendingEndOfDay() {
   return { synced, failed, pending: items.length - synced - failed };
 }
 
+/**
+ * Envoie la checklist de début de journée (Checklist.jsx). Contrat backend
+ * (figé) :
+ *  - 200/201 : { ..., message_prevention: { id, titre, texte } | null } ;
+ *  - 409 CHECKLIST_DEJA_FAITE : { error, code, faite_le } — une checklist a
+ *    déjà été remplie pour ce véhicule aujourd'hui. Ce n'est PAS une donnée
+ *    invalide : c'est l'appelant (Checklist.jsx) qui décide de la suite pour
+ *    l'envoi immédiat. Pour le REJEU en file (ci-dessous), c'est un 4xx
+ *    comme un autre — on purge sans boucler, la checklist du jour existe
+ *    déjà côté serveur.
+ * Le corps de la réponse est TOUJOURS attaché à l'erreur
+ * (`err.response.data`) quand le statut n'est pas ok, pour que l'appelant
+ * puisse lire `code`/`faite_le` sans reparser.
+ */
+export async function sendChecklist(item) {
+  const res = await authedFetch(`/api/tours/${item.tourId}/checklist-public`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      vehicle_id: item.vehicleId,
+      exterior_ok: item.exteriorOk,
+      fuel_level: item.fuelLevel,
+      km_start: item.kmStart,
+      notes: item.notes || null,
+      degats: Array.isArray(item.degats) ? item.degats : [],
+      client_id: item.clientId || null,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status, data };
+    throw err;
+  }
+  return data;
+}
+
+export async function syncPendingChecklists() {
+  const store = STORES.pendingChecklists;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const items = await getAllItems(store);
+  let synced = 0; let failed = 0;
+  for (const it of items) {
+    try {
+      await sendChecklist(it);
+      await deleteItem(store, it.id);
+      synced++;
+    } catch (err) {
+      if (isClientError(err)) {
+        // Inclut le 409 « déjà faite » : rien à renvoyer, on purge sans boucler.
+        console.warn('[SYNC] Checklist rejetée/déjà faite, suppression:', err.response?.status);
+        await deleteItem(store, it.id);
+        failed++;
+      } else {
+        recordFailure(store);
+        break;
+      }
+    }
+  }
+  if (synced > 0 || failed > 0) recordSuccess(store);
+  return { synced, failed, pending: items.length - synced - failed };
+}
+
 export async function syncAll() {
   if (!navigator.onLine) {
     emit('state', { state: 'offline' });
@@ -526,6 +595,7 @@ export async function syncAll() {
       collects: await syncPendingCollects(),
       messageReads: await syncPendingMessageReads(),
       endOfDay: await syncPendingEndOfDay(),
+      checklists: await syncPendingChecklists(),
     };
     const totalSynced = Object.values(results).reduce((a, r) => a + r.synced, 0);
     const totalPending = Object.values(results).reduce((a, r) => a + r.pending, 0);
