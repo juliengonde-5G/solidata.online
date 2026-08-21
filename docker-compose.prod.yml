@@ -70,6 +70,11 @@ services:
       OPENAGENDA_API_KEY: ${OPENAGENDA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5}
+      # Événements de circulation sur la carte « Collecte en direct ».
+      # Sans clé, la carte le dit explicitement (elle n'affiche jamais une
+      # absence d'information comme une absence de perturbation). La clé peut
+      # aussi être saisie en base (réglage `trafic.tomtom_api_key`), qui prime.
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CENTRE_TRI_LAT: 49.4231

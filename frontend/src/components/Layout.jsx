@@ -12,7 +12,7 @@ import {
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
   TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, ShoppingCart,
-  GraduationCap, Shirt, Fingerprint,
+  GraduationCap, Shirt, Fingerprint, MapPinned,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -58,6 +58,7 @@ const NAV_TREE = [
             icon: Settings,
             children: [
               { label: 'Associations', path: '/admin-associations', icon: Handshake, roles: ['ADMIN', 'MANAGER'] },
+              { label: "Lieux d'arrêt", path: '/admin-lieux-techniques', icon: MapPinned, roles: ['ADMIN', 'MANAGER'] },
             ],
           },
           { label: 'Historique des tournées', path: '/tours', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
