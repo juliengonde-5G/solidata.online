@@ -334,21 +334,101 @@ router.get('/:id/public', async (req, res) => {
   }
 });
 
-// POST /api/tours/:id/checklist-public — Sauvegarder checklist (mobile sans auth)
+// Vues et types de dégât acceptés sur le schéma du véhicule (constat de départ).
+const DEGAT_VUES = ['avant', 'arriere', 'gauche', 'droit'];
+const DEGAT_TYPES = ['rayure', 'choc', 'bris', 'autre'];
+
+/**
+ * Nettoie la liste de dégâts pointés sur le schéma (fonction PURE, exportée
+ * pour les tests). Coordonnées RELATIVES bornées à [0,1], vue et type validés,
+ * commentaire tronqué. Une entrée invalide est ignorée — jamais d'échec du
+ * départ pour un point mal formé, et jamais de donnée fantaisiste stockée.
+ */
+function sanitizeDegats(input) {
+  if (!Array.isArray(input)) return null;
+  const clean = input.slice(0, 40).map((d) => {
+    if (!d || typeof d !== 'object') return null;
+    const vue = DEGAT_VUES.includes(d.vue) ? d.vue : null;
+    const x = Number(d.x); const y = Number(d.y);
+    if (!vue || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return {
+      vue,
+      x: Math.max(0, Math.min(1, x)),
+      y: Math.max(0, Math.min(1, y)),
+      type: DEGAT_TYPES.includes(d.type) ? d.type : 'autre',
+      commentaire: d.commentaire ? String(d.commentaire).trim().slice(0, 300) : null,
+    };
+  }).filter(Boolean);
+  return clean.length > 0 ? clean : null;
+}
+
+/**
+ * Message de prévention routière du jour (rotation déterministe sur le
+ * quantième de l'année) : tous les chauffeurs voient le même message le même
+ * jour, et il change chaque jour sans rien tirer au hasard. `null` si aucun
+ * message actif n'est paramétré — l'écran mobile n'affiche alors rien.
+ */
+async function messagePreventionDuJour() {
+  try {
+    const r = await pool.query(
+      'SELECT id, titre, texte FROM messages_prevention WHERE is_active = true ORDER BY ordre, id'
+    );
+    if (r.rows.length === 0) return null;
+    const jour = Math.floor(
+      (Date.now() - Date.UTC(new Date().getUTCFullYear(), 0, 0)) / 86400000
+    );
+    return r.rows[jour % r.rows.length];
+  } catch (err) {
+    console.warn('[TOURS] Message de prévention indisponible :', err.message);
+    return null;
+  }
+}
+
+// POST /api/tours/:id/checklist-public — Questionnaire de début de journée.
+//
+// UNE SEULE checklist par VÉHICULE et par JOUR (demande client 08/2026) : un
+// chauffeur qui reprend son téléphone en cours de journée, ou un binôme qui
+// démarre une seconde tournée, ne refait pas la vérification du camion. La
+// garde porte sur le véhicule + le jour civil de PARIS (le conteneur tourne en
+// UTC) et répond 409 avec l'heure de la checklist existante, pour que l'écran
+// mobile puisse enchaîner sans bloquer le départ.
 router.post('/:id/checklist-public', async (req, res) => {
   try {
     // Vague 1 (item 45) : `notes` (remarques/anomalies saisies par le chauffeur
     // dans Checklist.jsx) était ignoré → l'anomalie disparaissait silencieusement.
     // Désormais persisté et consultable côté web (fiche véhicule).
-    const { vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes } = req.body;
+    const { vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes, degats } = req.body;
+
+    // Le véhicule de référence est celui du JETON quand il est connu : le corps
+    // de requête ne doit pas pouvoir viser un autre camion que celui du lien.
+    const vehId = driverVehicleIdFromToken(req.user) || parseInt(vehicle_id, 10) || null;
+    if (vehId) {
+      const deja = await pool.query(
+        `SELECT created_at FROM vehicle_checklists
+          WHERE vehicle_id = $1
+            AND (created_at AT TIME ZONE 'Europe/Paris')::date
+                = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Paris')::date
+          ORDER BY created_at LIMIT 1`,
+        [vehId]
+      );
+      if (deja.rows.length > 0) {
+        return res.status(409).json({
+          error: 'La vérification du camion a déjà été faite aujourd\'hui pour ce véhicule.',
+          code: 'CHECKLIST_DEJA_FAITE',
+          faite_le: deja.rows[0].created_at,
+        });
+      }
+    }
+
     await pool.query(
-      `INSERT INTO vehicle_checklists (tour_id, vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO vehicle_checklists (tour_id, vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes, degats)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT DO NOTHING`,
-      [req.params.id, vehicle_id, employee_id || null, exterior_ok, fuel_level || '1/2', km_start || 0,
-       (notes && String(notes).trim()) ? String(notes).trim() : null]
+      [req.params.id, vehId, employee_id || null, exterior_ok, fuel_level || '1/2', km_start || 0,
+       (notes && String(notes).trim()) ? String(notes).trim() : null,
+       JSON.stringify(sanitizeDegats(degats))]
     );
-    res.json({ ok: true });
+    res.json({ ok: true, message_prevention: await messagePreventionDuJour() });
   } catch (err) {
     console.error('[TOURS] Erreur checklist-public:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -436,6 +516,14 @@ const VALID_SKIP_REASON = ['cav_fermee', 'bouchee', 'acces_impossible', 'proprie
 router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo'), async (req, res) => {
   try {
     const { fill_level, qr_scanned, qr_unavailable, qr_unavailable_reason, notes } = req.body;
+    // Pourcentage RÉEL choisi par le chauffeur (« un fond » 10 %, « plein »
+    // 100 %, « au-delà » 110 %…). L'échelle 0-5 stockée dans `fill_level` ne
+    // sait pas représenter ces paliers : elle plafonne à 4, que le moteur lit
+    // ×20 = 80 %. Le pourcentage lève cette perte ; borné 0-150 et ignoré s'il
+    // est absent (les clients mobiles antérieurs ne l'envoient pas).
+    const fillPercentRaw = Number(req.body.fill_percent);
+    const fill_percent = Number.isFinite(fillPercentRaw)
+      ? Math.max(0, Math.min(150, fillPercentRaw)) : null;
     const status = req.body.status === 'skipped' ? 'skipped' : 'collected';
     const skip_reason = req.body.skip_reason || null;
     // multipart : les champs arrivent en string ('true'/'false').
@@ -482,6 +570,7 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
       const result = await pool.query(
         `UPDATE tour_cav SET status = $1::varchar,
          fill_level = CASE WHEN $1::varchar = 'skipped' THEN NULL ELSE $2::int END,
+         fill_percent = CASE WHEN $1::varchar = 'skipped' THEN NULL ELSE $12::double precision END,
          qr_scanned = $3,
          qr_unavailable = $4,
          qr_unavailable_reason = $5,
@@ -492,7 +581,7 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
          collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $10 AND cav_id = $11 RETURNING *`,
         [status, fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null,
-         skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId]
+         skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId, fill_percent]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
       res.json(result.rows[0]);

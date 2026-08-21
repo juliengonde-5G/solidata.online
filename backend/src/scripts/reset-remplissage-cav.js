@@ -10,26 +10,56 @@
  * réputés vides : la carte de remplissage, la garde de saturation et le moteur
  * de prédiction repartent de 0 % et ne regardent plus ce qui précède.
  *
- * CE QU'IL NE FAIT PAS — et c'est délibéré : il ne SUPPRIME rien.
- * L'historique de tonnage (`tonnage_history`) alimente aussi les indicateurs de
- * collecte, la captation par commune (Métropole) et les déclarations Refashion.
- * Le détruire pour remettre un affichage à zéro serait une perte sèche et
- * irréversible. Le jalon obtient le même résultat visible, en gardant :
- *   - tous les tonnages déclarés (indicateurs et déclarations intacts) ;
- *   - les poids moyens et cadences par CAV, que le moteur réutilise pour
- *     estimer la vitesse de remplissage dès le premier jour.
+ * DEUX MODES, à choisir selon ce qu'on veut vraiment :
  *
- * RÉVERSIBLE : `--annuler` retire le jalon et tout revient à l'état antérieur.
+ * 1. JALON (par défaut) — ne supprime RIEN. L'historique de tonnage alimente
+ *    aussi les indicateurs de collecte, la captation par commune (Métropole) et
+ *    les déclarations Refashion : quand ces données ont une valeur, le jalon
+ *    donne le même résultat visible sans rien détruire, et conserve les poids
+ *    moyens et cadences que le moteur réutilise dès le premier jour.
+ *    RÉVERSIBLE : `--annuler` remet tout comme avant.
+ *
+ * 2. PURGE (`--purger-historique`) — supprime réellement, voir plus bas.
+ *
+ * PURGE RÉELLE — `--purger-historique` : sur décision explicite du client
+ * (« nous ne commençons la vraie exploitation qu'aujourd'hui », 21/08/2026),
+ * le script peut aussi SUPPRIMER l'historique de collecte et d'apprentissage,
+ * qui ne contient alors que des données d'essai et d'import. C'est une
+ * opération IRRÉVERSIBLE : elle efface les tonnages passés, donc aussi les
+ * indicateurs de collecte, la captation par commune et l'assise des
+ * déclarations Refashion antérieures. Le récapitulatif détaille ligne à ligne
+ * ce qui sera détruit AVANT toute écriture ; rien ne part sans --apply.
+ *
+ * Les mouvements de stock (entrées matière au centre de tri) ne sont PAS
+ * concernés : ils relèvent de l'inventaire, avec ses propres outils.
  *
  * USAGE (dans le conteneur backend) :
  *   node src/scripts/reset-remplissage-cav.js                  # simulation
- *   node src/scripts/reset-remplissage-cav.js --apply          # remet à zéro AUJOURD'HUI
+ *   node src/scripts/reset-remplissage-cav.js --apply          # remet à zéro AUJOURD'HUI (jalon)
  *   node src/scripts/reset-remplissage-cav.js --date=2026-09-01 --apply
  *   node src/scripts/reset-remplissage-cav.js --annuler --apply   # retire le jalon
+ *   node src/scripts/reset-remplissage-cav.js --purger-historique          # simulation de la purge
+ *   node src/scripts/reset-remplissage-cav.js --purger-historique --apply  # PURGE IRRÉVERSIBLE
  */
 
 const pool = require('../config/database');
 const { RESET_SETTINGS_KEY } = require('../utils/fill-factors');
+
+/**
+ * Tables vidées par `--purger-historique`, dans l'ordre (les dépendances
+ * d'abord). Chaque entrée porte ce qu'elle représente, pour que le récapitulatif
+ * dise en clair ce qui disparaît.
+ */
+const TABLES_HISTORIQUE = [
+  ['collection_learning_feedback', 'apprentissage prédit/observé (bornes)'],
+  ['association_learning_feedback', 'apprentissage prédit/observé (associations)'],
+  ['ml_fill_predictions', 'prédictions de remplissage déjà calculées'],
+  ['predictive_weather_factors', 'pondération météo apprise'],
+  ['cav_collection_times', 'temps de collecte appris par borne'],
+  ['cav_qr_scans', 'historique des scans de QR'],
+  ['tonnage_history', 'historique des tonnages collectés par borne'],
+  ['tonnage_history_association', 'historique des tonnages (associations)'],
+];
 
 /**
  * Lecture PURE des arguments (exportée pour les tests).
@@ -39,6 +69,7 @@ const { RESET_SETTINGS_KEY } = require('../utils/fill-factors');
 function parseArgs(argv) {
   const apply = argv.includes('--apply');
   const annuler = argv.includes('--annuler');
+  const purger = argv.includes('--purger-historique');
   let date = null;
   for (const a of argv) {
     if (a.startsWith('--date=')) {
@@ -49,7 +80,7 @@ function parseArgs(argv) {
       date = v;
     }
   }
-  return { apply, annuler, date };
+  return { apply, annuler, purger, date };
 }
 
 /** Jour civil de Paris (le conteneur tourne en UTC). */
@@ -82,6 +113,50 @@ async function main() {
       if (!apply) { console.log('\nSIMULATION — relancer avec --annuler --apply.'); return; }
       await client.query('DELETE FROM settings WHERE key = $1', [RESET_SETTINGS_KEY]);
       console.log('Jalon retiré. Le remplissage est de nouveau calculé sur l\'historique complet.');
+      process.exitCode = 0;
+      return;
+    }
+
+    if (args.purger) {
+      console.log('PURGE DE L\'HISTORIQUE DE COLLECTE ET D\'APPRENTISSAGE');
+      console.log('Opération IRRÉVERSIBLE — décision client du 21/08/2026 :');
+      console.log('« nous ne commençons la vraie exploitation qu\'aujourd\'hui ».\n');
+      let total = 0;
+      const presentes = [];
+      for (const [table, libelle] of TABLES_HISTORIQUE) {
+        try {
+          const n = (await client.query(`SELECT COUNT(*)::int AS n FROM ${table}`)).rows[0].n;
+          console.log(`  ${String(n).padStart(6)} · ${table} — ${libelle}`);
+          total += n;
+          presentes.push(table);
+        } catch (err) {
+          // Table absente sur cette base : on l'ignore sans faire échouer la purge.
+          console.log(`       — · ${table} (absente de cette base)`);
+        }
+      }
+      console.log(`\n  Total : ${total} ligne(s) à supprimer.`);
+      console.log('  NON concernés : mouvements de stock, tournées, incidents, fiches CAV.');
+      if (!apply) {
+        console.log('\nMODE SIMULATION (aucune suppression) — relancer avec --purger-historique --apply.');
+        process.exitCode = 0;
+        return;
+      }
+      await client.query('BEGIN');
+      for (const table of presentes) {
+        await client.query(`DELETE FROM ${table}`);
+      }
+      // Après la purge, le jalon n'a plus d'objet : sans historique, tous les
+      // CAV sont déjà vus comme neufs. On le retire pour ne pas laisser un
+      // réglage qui ne correspond plus à rien.
+      await client.query('DELETE FROM settings WHERE key = $1', [RESET_SETTINGS_KEY]);
+      await client.query(
+        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, details)
+         VALUES (NULL, 'CAV_HISTORIQUE_PURGE', 'cav', $1)`,
+        [JSON.stringify({ tables: presentes, lignes_supprimees: total, script: 'reset-remplissage-cav.js' })]
+      ).catch((err) => console.warn(`  journal rgpd_audit_log ignoré : ${err.message}`));
+      await client.query('COMMIT');
+      console.log(`\nPurge appliquée : ${total} ligne(s) supprimée(s). Le moteur de prédiction`);
+      console.log('repart de zéro et n\'apprendra plus que sur les collectes à venir.');
       process.exitCode = 0;
       return;
     }
@@ -142,7 +217,7 @@ async function main() {
   }
 }
 
-module.exports = { parseArgs, aujourdhuiParis };
+module.exports = { parseArgs, aujourdhuiParis, TABLES_HISTORIQUE };
 
 if (require.main === module) {
   main();

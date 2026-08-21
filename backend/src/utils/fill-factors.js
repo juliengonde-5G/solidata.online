@@ -21,9 +21,25 @@
 
 const pool = require('../config/database');
 
-// Capacité unitaire d'un conteneur (kg). Constante métier reprise à
-// l'identique de cav.js /fill-rate (`nb_containers × 150`).
+// Capacité unitaire d'un conteneur (kg) : le POIDS D'UN CONTENEUR PLEIN À 100 %.
+// C'est l'étalon de tout le calcul de remplissage — un CAV est « plein » quand
+// il a accumulé nb_conteneurs × cette valeur. Il est désormais PARAMÉTRABLE
+// (réglage `predictive.config`, champ `capacityKgPerContainer`) : la valeur
+// dépend du modèle de conteneur et se mesure sur le terrain ; la figer à 150
+// biaisait mécaniquement toutes les prédictions d'un parc qui ne s'y conforme
+// pas. 150 reste le défaut historique quand rien n'est saisi.
 const CAPACITY_KG_PER_CONTAINER = 150;
+// Bornes de bon sens : en deçà/au-delà, c'est une saisie erronée, pas un
+// réglage — on retombe alors sur le défaut plutôt que de fausser le moteur.
+const CAPACITY_MIN_KG = 20;
+const CAPACITY_MAX_KG = 2000;
+
+/** Capacité unitaire effective (paramétrée si valide, sinon défaut). */
+function resolveCapacityKg(config) {
+  const v = Number(config?.capacityKgPerContainer);
+  if (Number.isFinite(v) && v >= CAPACITY_MIN_KG && v <= CAPACITY_MAX_KG) return v;
+  return CAPACITY_KG_PER_CONTAINER;
+}
 
 // Facteurs saisonniers par défaut (index 0 = janvier … 11 = décembre).
 // Pic en août (1.27), creux en décembre (0.75) — calibrés sur données réelles.
@@ -55,9 +71,11 @@ function clampFactor(v) {
  * @param {number} nbContainers
  * @returns {number} capacité en kg (>= capacité d'un conteneur)
  */
-function getCapacityKg(nbContainers) {
+function getCapacityKg(nbContainers, capacityPerContainer = CAPACITY_KG_PER_CONTAINER) {
   const n = parseInt(nbContainers, 10);
-  return (Number.isFinite(n) && n > 0 ? n : 1) * CAPACITY_KG_PER_CONTAINER;
+  const unit = Number.isFinite(Number(capacityPerContainer)) && Number(capacityPerContainer) > 0
+    ? Number(capacityPerContainer) : CAPACITY_KG_PER_CONTAINER;
+  return (Number.isFinite(n) && n > 0 ? n : 1) * unit;
 }
 
 /**
@@ -88,8 +106,9 @@ function computeBaseFillPercent({
   seasonalFactor = 1,
   dayFactor = 1,
   maxFill = 120,
+  capacityKgPerContainer = CAPACITY_KG_PER_CONTAINER,
 }) {
-  const capacityKg = getCapacityKg(nbContainers);
+  const capacityKg = getCapacityKg(nbContainers, capacityKgPerContainer);
   const cadence = Math.max(Number(avgDaysBetween) || 7, 1);
   const dailyAccumulationKg = (Number(avgWeightKg) || 0) / cadence;
   const days = Math.max(0, Number(daysSinceCollection) || 0);
@@ -181,7 +200,7 @@ function _resolve(config, learned) {
   return {
     seasonal, seasonalSources,
     dayOfWeek, dayOfWeekSources,
-    capacityKgPerContainer: CAPACITY_KG_PER_CONTAINER,
+    capacityKgPerContainer: resolveCapacityKg(config),
     learnedMonthlyCount: Object.keys(learned.monthly).length,
     learnedDowCount: Object.keys(learned.dow).length,
   };
@@ -309,6 +328,9 @@ function invalidateCache() {
 
 module.exports = {
   CAPACITY_KG_PER_CONTAINER,
+  CAPACITY_MIN_KG,
+  CAPACITY_MAX_KG,
+  resolveCapacityKg,
   SEASONAL_DEFAULT,
   DOW_DEFAULT,
   SETTINGS_KEY,

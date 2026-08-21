@@ -66,15 +66,17 @@ async function applyCompletionSideEffects(tour, tourId, userId) {
   }
 
   // 4. Apprentissage continu : prédit vs observé (fill_level 0-5 saisi chauffeur)
+  // On remonte AUSSI le pourcentage réellement saisi (`fill_percent`) : il est
+  // plus fidèle que l'échelle 0-5 ×20, qui sous-estimait « plein » à 80 %.
   const tourCavs = await pool.query(
-    'SELECT cav_id, predicted_fill_rate, fill_level FROM tour_cav WHERE tour_id = $1 AND predicted_fill_rate IS NOT NULL AND fill_level IS NOT NULL',
+    'SELECT cav_id, predicted_fill_rate, fill_level, fill_percent FROM tour_cav WHERE tour_id = $1 AND predicted_fill_rate IS NOT NULL AND fill_level IS NOT NULL',
     [tourId]
   );
   for (const tc of tourCavs.rows) {
     await pool.query(
-      `INSERT INTO collection_learning_feedback (tour_id, cav_id, predicted_fill_rate, observed_fill_level)
-       VALUES ($1, $2, $3, $4)`,
-      [tourId, tc.cav_id, tc.predicted_fill_rate, tc.fill_level]
+      `INSERT INTO collection_learning_feedback (tour_id, cav_id, predicted_fill_rate, observed_fill_level, observed_fill_percent)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [tourId, tc.cav_id, tc.predicted_fill_rate, tc.fill_level, tc.fill_percent ?? null]
     );
   }
 }

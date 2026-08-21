@@ -2761,6 +2761,17 @@ async function initDatabase() {
         [new Date().toISOString()]
       );
     }
+    // Pourcentage de remplissage RÉELLEMENT saisi par le chauffeur (0-150).
+    // L'échelle historique `fill_level` (INTEGER 0-5, lue ×20 par le moteur)
+    // supposait 5 = 100 %, alors que l'écran mobile plafonne à 4 : « plein »
+    // était appris comme 80 % et TOUTES les observations sous-estimées de 20
+    // points — le moteur croyait les bornes moins remplies qu'annoncé. Le
+    // pourcentage réel lève cette distorsion et rend exploitables les paliers
+    // fins (« un fond » 10 %) comme le débordement (110 %).
+    await client.query(`
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS fill_percent DOUBLE PRECISION;
+      ALTER TABLE collection_learning_feedback ADD COLUMN IF NOT EXISTS observed_fill_percent DOUBLE PRECISION;
+    `);
     console.log('[INIT-DB] Migration pilotage tournées en cours (arrêts techniques, dégâts, prévention) ✓');
 
     // ══════════════════════════════════════════

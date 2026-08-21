@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { vibrateTap, vibrateSuccess, vibrateError } from '../services/haptic';
 import MobileShell, { TourStepBar } from '../components/MobileShell';
+import VehicleDamageMap from '../components/VehicleDamageMap';
 import { authedFetch } from '../services/authedFetch';
+import { addPendingChecklist, deleteItem, newClientId, STORES } from '../services/db';
+import { sendChecklist, getPendingCount } from '../services/sync';
+import { toApiPayload } from '../services/vehicleDamage';
 
 const CHECKLIST_ITEMS = [
   { id: 'papiers', label: 'Papiers du véhicule', sub: 'carte grise, assurance', icon: '📄' },
@@ -18,11 +22,67 @@ const CHECKLIST_ITEMS = [
   { id: 'sacs_remballes', label: 'Sacs de remballes', sub: 'stock disponible', icon: '🛍️' },
 ];
 
+/** Formate un horodatage ISO en heure FR courte (« 8h12 » → « 08:12 »). Ne
+ * lève jamais — une date illisible retombe simplement sur `null`. */
+function formatHeure(iso) {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Écran plein cadre pour deux cas particuliers du départ en tournée :
+ *  - le message de prévention routière renvoyé après validation ;
+ *  - l'information « checklist déjà faite aujourd'hui » (409).
+ * Toujours un bouton explicite pour continuer — jamais d'avance automatique
+ * sur un message qui mérite d'être lu (cf. StepConfirmScreen pour les
+ * confirmations routinières avec retour auto).
+ */
+function InfoScreen({ emoji, accent, title, text, meta, onContinue }) {
+  return (
+    <div className="min-h-screen flex flex-col bg-[var(--color-surface-2)]">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+        <div
+          className="w-20 h-20 rounded-full flex items-center justify-center mb-4 shadow-lg"
+          style={{ background: accent }}
+        >
+          <span style={{ fontSize: 40 }} aria-hidden="true">{emoji}</span>
+        </div>
+        <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
+        {text && <p className="text-gray-600 mt-3 max-w-sm leading-relaxed">{text}</p>}
+        {meta && <p className="text-sm text-gray-400 mt-3">{meta}</p>}
+      </div>
+      <div className="primary-action-bar">
+        <button
+          type="button"
+          onClick={() => { vibrateTap(); onContinue(); }}
+          className="w-full flex items-center justify-center gap-2 font-extrabold text-lg text-white bg-[var(--color-primary)] active:scale-[0.98] transition-transform"
+          style={{ minHeight: 72, borderRadius: 18, boxShadow: '0 8px 22px rgba(13,148,136,0.28)' }}
+        >
+          Continuer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Checklist() {
   const [checked, setChecked] = useState({});
   const [notes, setNotes] = useState('');
   const [kmStart, setKmStart] = useState('');
   const [tour, setTour] = useState(null);
+  const [damages, setDamages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  // Écran d'information après validation :
+  //  - { type: 'prevention', titre, texte } — message de prévention routière ;
+  //  - { type: 'deja_faite', faiteLe } — 409 CHECKLIST_DEJA_FAITE.
+  const [postScreen, setPostScreen] = useState(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
 
@@ -42,25 +102,132 @@ export default function Checklist() {
   const checkedCount = CHECKLIST_ITEMS.filter(item => checked[item.id]).length;
   const progressPct = (checkedCount / CHECKLIST_ITEMS.length) * 100;
 
-  const submit = async () => {
+  // Bascule véhicule "in_progress" côté serveur puis rejoint la carte de
+  // tournée. TOUJOURS best-effort et TOUJOURS exécuté quel que soit le sort
+  // de la checklist elle-même (réseau coupé compris) : le chauffeur ne doit
+  // jamais rester bloqué sur cet écran faute de réseau.
+  const finalizeDeparture = async () => {
     try {
-      // Sauvegarder la checklist et démarrer la tournée (endpoints publics)
-      await authedFetch(`/api/tours/${tourId}/checklist-public`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vehicle_id: tour?.vehicle_id,
-          exterior_ok: allChecked,
-          fuel_level: '1/2',
-          km_start: parseInt(kmStart, 10) || 0,
-          notes,
-        }),
-      });
       await authedFetch(`/api/tours/${tourId}/start-public`, { method: 'PUT' });
-      vibrateSuccess();
-      navigate('/tour-map');
-    } catch (err) { vibrateError(); console.error(err); }
+    } catch (e) {
+      console.warn('[Checklist] start-public non confirmé (réseau) :', e?.message || e);
+    }
+    navigate('/tour-map');
   };
+
+  const submit = async () => {
+    if (!allChecked || loading) return;
+    setLoading(true);
+    setError('');
+
+    const payload = {
+      clientId: newClientId(),
+      tourId,
+      vehicleId: tour?.vehicle_id,
+      exteriorOk: allChecked,
+      fuelLevel: '1/2',
+      kmStart: parseInt(kmStart, 10) || 0,
+      notes,
+      degats: toApiPayload(damages),
+    };
+
+    // Toujours écrire dans la file offline d'abord — aucune perte possible,
+    // même si l'envoi réseau échoue ou n'est pas tenté (hors ligne).
+    let pendingId = null;
+    try {
+      pendingId = await addPendingChecklist(payload);
+    } catch (e) {
+      console.error('[Checklist] addPendingChecklist', e);
+    }
+    const clearPending = async () => {
+      if (pendingId != null) {
+        try { await deleteItem(STORES.pendingChecklists, pendingId); } catch { /* noop */ }
+      }
+    };
+
+    let messagePrevention = null;
+    let dejaFaiteInfo = null; // { faiteLe } quand 409
+    let hardError = null;
+
+    if (navigator.onLine) {
+      try {
+        const data = await sendChecklist(payload);
+        await clearPending();
+        messagePrevention = data?.message_prevention || null;
+      } catch (err) {
+        const status = err?.response?.status;
+        if (status === 409) {
+          // Checklist déjà remplie aujourd'hui pour ce véhicule — pas une
+          // erreur : on informe le chauffeur et on le laisse continuer.
+          await clearPending();
+          dejaFaiteInfo = { faiteLe: err.response?.data?.faite_le || null };
+        } else if (status >= 400 && status < 500) {
+          // Donnée rejetée par le serveur — on n'insiste pas silencieusement :
+          // le chauffeur voit l'erreur et peut réessayer.
+          await clearPending();
+          hardError = err.response?.data?.error || "La vérification n'a pas pu être enregistrée. Réessaie.";
+        } else {
+          // Réseau / 5xx : reste dans la file pour un envoi ultérieur — ne
+          // bloque jamais le départ (aucun message de prévention à montrer,
+          // on n'a pas de réponse serveur).
+          console.warn('[Checklist] checklist différée (réseau) :', err?.message || err);
+        }
+      }
+    }
+    // Hors ligne dès le départ : la checklist reste en file (rejouée à la
+    // reconnexion via syncAll), aucun appel réseau n'est tenté — comme les
+    // autres écrans offline-first de l'app (FillLevel, EndOfDayChecklist).
+
+    await getPendingCount();
+
+    if (hardError) {
+      vibrateError();
+      setError(hardError);
+      setLoading(false);
+      return;
+    }
+
+    vibrateSuccess();
+    setLoading(false);
+
+    if (messagePrevention) {
+      setPostScreen({ type: 'prevention', titre: messagePrevention.titre, texte: messagePrevention.texte });
+      return;
+    }
+    if (dejaFaiteInfo) {
+      setPostScreen({ type: 'deja_faite', faiteLe: dejaFaiteInfo.faiteLe });
+      return;
+    }
+    await finalizeDeparture();
+  };
+
+  if (postScreen?.type === 'prevention') {
+    return (
+      <InfoScreen
+        emoji="🚦"
+        accent="var(--color-primary)"
+        title={postScreen.titre || 'Message de prévention'}
+        text={postScreen.texte}
+        onContinue={finalizeDeparture}
+      />
+    );
+  }
+
+  if (postScreen?.type === 'deja_faite') {
+    const heure = formatHeure(postScreen.faiteLe);
+    return (
+      <InfoScreen
+        emoji="🕒"
+        accent="#0284C7"
+        title="Vérification déjà faite"
+        text={heure
+          ? `La vérification du camion pour aujourd'hui a déjà été faite, à ${heure}.`
+          : "La vérification du camion pour aujourd'hui a déjà été faite."}
+        meta="Tu peux continuer vers la carte de la tournée."
+        onContinue={finalizeDeparture}
+      />
+    );
+  }
 
   return (
     <MobileShell
@@ -70,10 +237,13 @@ export default function Checklist() {
       usageHint="operational_stop"
       footer={
         <div className="primary-action-bar">
+          {error && (
+            <div className="primary-action-hint primary-action-hint--error" role="alert">{error}</div>
+          )}
           <button
             type="button"
             onClick={submit}
-            disabled={!allChecked}
+            disabled={!allChecked || loading}
             className="w-full flex items-center justify-center gap-2 font-extrabold text-lg text-white bg-[var(--color-primary)] active:scale-[0.98] transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               minHeight: 84,
@@ -81,9 +251,11 @@ export default function Checklist() {
               boxShadow: '0 8px 22px rgba(13,148,136,0.28)',
             }}
           >
-            {allChecked
-              ? <>▶ Démarrer la navigation</>
-              : `Coche les ${CHECKLIST_ITEMS.length - checkedCount} dernier${CHECKLIST_ITEMS.length - checkedCount > 1 ? 's' : ''} point${CHECKLIST_ITEMS.length - checkedCount > 1 ? 's' : ''}`}
+            {loading
+              ? 'Enregistrement…'
+              : allChecked
+                ? <>▶ Démarrer la navigation</>
+                : `Coche les ${CHECKLIST_ITEMS.length - checkedCount} dernier${CHECKLIST_ITEMS.length - checkedCount > 1 ? 's' : ''} point${CHECKLIST_ITEMS.length - checkedCount > 1 ? 's' : ''}`}
           </button>
         </div>
       }
@@ -161,6 +333,10 @@ export default function Checklist() {
             </button>
           );
         })}
+      </div>
+
+      <div className="mt-5">
+        <VehicleDamageMap value={damages} onChange={setDamages} />
       </div>
 
       <div className="mt-5 space-y-3">

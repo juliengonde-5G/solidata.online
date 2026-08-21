@@ -34,10 +34,10 @@ describe('effectiveLastCollection', () => {
 
 describe('reset-remplissage-cav — arguments', () => {
   test('simulation par défaut', () => {
-    expect(parseArgs([])).toEqual({ apply: false, annuler: false, date: null });
+    expect(parseArgs([])).toEqual({ apply: false, annuler: false, purger: false, date: null });
   });
   test('date explicite et annulation', () => {
-    expect(parseArgs(['--date=2026-09-01', '--apply'])).toEqual({ apply: true, annuler: false, date: '2026-09-01' });
+    expect(parseArgs(['--date=2026-09-01', '--apply'])).toEqual({ apply: true, annuler: false, purger: false, date: '2026-09-01' });
     expect(parseArgs(['--annuler', '--apply']).annuler).toBe(true);
   });
   test('une date mal formée LÈVE (jamais de remise à zéro sur un filtre mal compris)', () => {
@@ -69,5 +69,67 @@ describe('purge des tournées — périmètre', () => {
   test('les tournées EN COURS ne sont jamais ciblées', () => {
     const sql = purge.buildWhere({ planifiees: true, annulees: true }).sql;
     expect(sql).not.toMatch(/in_progress|returning|paused/);
+  });
+});
+
+describe('purge de l’historique (--purger-historique)', () => {
+  const { parseArgs, TABLES_HISTORIQUE } = require('../../src/scripts/reset-remplissage-cav');
+
+  test('le drapeau est reconnu et n’est JAMAIS actif par défaut', () => {
+    expect(parseArgs([]).purger).toBe(false);
+    expect(parseArgs(['--purger-historique']).purger).toBe(true);
+    // Sans --apply, aucune suppression : la simulation reste la porte d’entrée.
+    expect(parseArgs(['--purger-historique']).apply).toBe(false);
+  });
+
+  test('le périmètre couvre l’historique de collecte ET d’apprentissage', () => {
+    const tables = TABLES_HISTORIQUE.map(([t]) => t);
+    expect(tables).toEqual(expect.arrayContaining([
+      'tonnage_history', 'collection_learning_feedback', 'ml_fill_predictions',
+      'predictive_weather_factors', 'cav_collection_times',
+    ]));
+  });
+
+  test('n’efface NI le stock, NI les tournées, NI les fiches CAV', () => {
+    const tables = TABLES_HISTORIQUE.map(([t]) => t);
+    for (const interdite of ['stock_movements', 'stock_original_movements', 'tours', 'cav', 'incidents']) {
+      expect(tables).not.toContain(interdite);
+    }
+  });
+
+  test('chaque table est décrite en clair pour le récapitulatif', () => {
+    for (const [table, libelle] of TABLES_HISTORIQUE) {
+      expect(typeof table).toBe('string');
+      expect(libelle.length).toBeGreaterThan(5);
+    }
+  });
+});
+
+describe('poids d’un conteneur plein à 100 % (paramétrable)', () => {
+  const f = require('../../src/utils/fill-factors');
+
+  test('un PAV à plusieurs conteneurs cumule leur capacité', () => {
+    expect(f.getCapacityKg(6)).toBe(6 * f.CAPACITY_KG_PER_CONTAINER);
+    expect(f.getCapacityKg(1)).toBe(f.CAPACITY_KG_PER_CONTAINER);
+  });
+
+  test('la capacité unitaire paramétrée remplace le défaut', () => {
+    expect(f.getCapacityKg(6, 200)).toBe(1200);
+    expect(f.resolveCapacityKg({ capacityKgPerContainer: 180 })).toBe(180);
+  });
+
+  test('une saisie aberrante retombe sur le défaut (jamais de moteur faussé)', () => {
+    expect(f.resolveCapacityKg({ capacityKgPerContainer: 5 })).toBe(f.CAPACITY_KG_PER_CONTAINER);
+    expect(f.resolveCapacityKg({ capacityKgPerContainer: 99999 })).toBe(f.CAPACITY_KG_PER_CONTAINER);
+    expect(f.resolveCapacityKg({ capacityKgPerContainer: 'beaucoup' })).toBe(f.CAPACITY_KG_PER_CONTAINER);
+    expect(f.resolveCapacityKg({})).toBe(f.CAPACITY_KG_PER_CONTAINER);
+  });
+
+  test('à capacité doublée, le même tonnage remplit deux fois moins', () => {
+    const base = { daysSinceCollection: 10, avgWeightKg: 150, avgDaysBetween: 10, nbContainers: 1 };
+    const a = f.computeBaseFillPercent({ ...base });
+    const b = f.computeBaseFillPercent({ ...base, capacityKgPerContainer: 300 });
+    expect(Math.round(a)).toBe(100);
+    expect(Math.round(b)).toBe(50);
   });
 });

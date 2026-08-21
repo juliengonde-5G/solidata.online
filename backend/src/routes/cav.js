@@ -156,7 +156,7 @@ router.get('/map', cacheMiddleware(cavCacheKey('map'), 60), async (req, res) => 
       const dailyAccumulation = avgWeight / 7;
       // Normalisé par la capacité (item 48/50), cohérent avec /fill-rate :
       // kg accumulés ÷ (nb conteneurs × 150 kg) × 100 — plus « kg comme % ».
-      const capacityKg = fillFactors.getCapacityKg(cav.nb_containers);
+      const capacityKg = fillFactors.getCapacityKg(cav.nb_containers, resolved.capacityKgPerContainer);
       const accumulatedKg = daysSinceCollection * dailyAccumulation * seasonalFactor;
       const calculatedFill = Math.min(120, (accumulatedKg / capacityKg) * 100);
 
@@ -259,7 +259,8 @@ router.get('/fill-rate', cacheMiddleware(cavCacheKey('fill-rate'), 60), async (r
 
       const avgWeight = parseFloat(cav.avg_weight_90d) || 50;
       const avgDaysBetween = parseFloat(cav.avg_days_between_collections) || 14;
-      const capacityKg = fillFactors.getCapacityKg(cav.nb_containers); // nb × 150kg
+      // Capacité unitaire PARAMÉTRABLE (poids d'un conteneur plein à 100 %).
+      const capacityKg = fillFactors.getCapacityKg(cav.nb_containers, resolved.capacityKgPerContainer);
 
       // Taux de remplissage estimé basé sur accumulation journalière
       // Le volume repart à zéro après chaque collecte (daysSinceCollection)
@@ -424,12 +425,14 @@ router.post('/scan-qr', [
   }
 });
 
-// GET /api/cav/qr-sheets/:format — Télécharger la planche PDF des QR codes (A7 ou A8)
+// GET /api/cav/qr-sheets/:format — Planche PDF des QR codes.
+// A7/A8 : étiquettes à découper sur feuille A4 vierge.
+// AVERY : planche pré-découpée Avery 105×74 RCT (8 par page, jointives).
 router.get('/qr-sheets/:format', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const format = (req.params.format || 'A7').toUpperCase();
-    if (!['A7', 'A8'].includes(format)) {
-      return res.status(400).json({ error: 'Format invalide. Utilisez A7 ou A8.' });
+    if (!['A7', 'A8', 'AVERY'].includes(format)) {
+      return res.status(400).json({ error: 'Format invalide. Utilisez A7, A8 ou AVERY.' });
     }
 
     const { generateSheets } = require('../scripts/generate-qr-sheets');
@@ -645,10 +648,11 @@ router.get('/:id/activity', async (req, res) => {
     const nbCollectes90d = parseInt(avgResult.rows[0].nb_collectes) || 0;
     const avgDaysBetween = nbCollectes90d > 1 ? 90 / nbCollectes90d : 14;
     const dailyAccumulation = avgWeight / Math.max(avgDaysBetween, 1);
-    const capacityKg = fillFactors.getCapacityKg(cav.nb_containers);
-
     // Facteurs saisonniers et jour de semaine — source unique (item 50).
+    // Ils portent aussi la capacité unitaire paramétrée : à lire AVANT le
+    // calcul de capacité, qui en dépend.
     const resolved = await fillFactors.getResolvedFactors();
+    const capacityKg = fillFactors.getCapacityKg(cav.nb_containers, resolved.capacityKgPerContainer);
 
     // 4. Construire les donnees jour par jour
     const days = [];
