@@ -309,12 +309,31 @@ describe('POST /api/cav/:id/photo — photo posée au back-office', () => {
 
   it('GET /api/cav/:id expose photo_fraicheur_mois (seuil effectif, pas 6 en dur côté front)', async () => {
     mockDb([
-      [/SELECT \* FROM cav WHERE id/, [{ id: 7, photo_path: null, photo_taken_at: null, photo_source: null }]],
+      // La requête détail embarque désormais la sous-requête `modeles_tournees`
+      // entre le SELECT * et le FROM — on route sur la fin stable de la requête.
+      [/SELECT \*[\s\S]*FROM cav WHERE id = \$1/, [{ id: 7, photo_path: null, photo_taken_at: null, photo_source: null, modeles_tournees: [] }]],
       [/FROM tonnage_history/, []],
     ], { fraicheurMois: 4 });
 
     const res = await request(app).get('/api/cav/7').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.photo_fraicheur_mois).toBe(4);
+    // Appartenance aux modèles de tournées (feuille de collecte 21/08/2026) :
+    // toujours présente, `[]` pour un CAV hors de tout modèle actif.
+    expect(res.body.modeles_tournees).toEqual([]);
+  });
+
+  it('GET /api/cav (liste) expose modeles_tournees pour le badge AdminCAV', async () => {
+    mockDb([
+      [/SELECT \*[\s\S]*modeles_tournees[\s\S]*FROM cav WHERE 1=1/, [
+        { id: 7, name: 'CAV A', modeles_tournees: [{ id: 3, name: 'Boos 1' }] },
+        { id: 8, name: 'CAV B', modeles_tournees: [] },
+      ]],
+    ], { fraicheurMois: 4 });
+
+    const res = await request(app).get('/api/cav').set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body[0].modeles_tournees).toEqual([{ id: 3, name: 'Boos 1' }]);
+    expect(res.body[1].modeles_tournees).toEqual([]);
   });
 });

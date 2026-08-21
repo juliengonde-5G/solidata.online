@@ -153,6 +153,18 @@ création est **refusée en 409 `DUREE_MAX_DEPASSEE`** (corps : `{error, code,
 estimation}`) si le travail estimé dépasse 6 h, sauf `force:true` (tracé dans
 `ai_explanation`).
 
+**Modèles historiques seedés (21/08/2026)** : les 19 tournées de la feuille de
+collecte papier (fichier Excel client) sont versionnées dans
+`backend/src/data/modeles-tournees.json` (307 points ordonnés, jour de tournée en
+description, 4 libellés arbitrés avec le client) et créées par
+`node src/scripts/seed-route-templates.js` (dry-run par défaut, `--apply`,
+`--force` pour remplacer une composition retouchée). Rapprochement par nom
+normalisé contre `cav.name` — un point sans correspondance est signalé, jamais
+inventé ; script idempotent (re-run = 0 écriture). L'appartenance d'un CAV aux
+modèles **actifs** est exposée par `GET /cav` et `GET /cav/:id`
+(`modeles_tournees: [{id, name}]`) et affichée dans AdminCAV (colonne « Modèle »
++ fiche détail).
+
 ### 5.3 Tournée manuelle
 `POST /api/tours/manual` — exige `cav_ids[]` ordonnés
 
