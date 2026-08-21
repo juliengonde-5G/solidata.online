@@ -462,8 +462,8 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), [
 
     // Créer la tournée en BDD (avec distance, durée, nb_cav)
     const tourResult = await pool.query(
-      `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status, ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
-       VALUES ($1, $2, $3, 'intelligent', 'planned', $4, $5, $6, $7) RETURNING *`,
+      `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status, ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav, is_demo)
+       VALUES ($1, $2, $3, 'intelligent', 'planned', $4, $5, $6, $7, (SELECT COALESCE(is_demo, false) FROM vehicles WHERE id = $2)) RETURNING *`,
       [date, vid, did, result.explanation,
        result.stats.totalDistance, result.stats.estimatedDuration, result.stats.totalCavs]
     );
@@ -523,8 +523,8 @@ router.post('/standard', authorize('ADMIN', 'MANAGER'), [
 
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status,
-                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
-       VALUES ($1, $2, $3, $4, 'standard', 'planned', $5, $6, $7, $8) RETURNING *`,
+                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav, is_demo)
+       VALUES ($1, $2, $3, $4, 'standard', 'planned', $5, $6, $7, $8, (SELECT COALESCE(is_demo, false) FROM vehicles WHERE id = $2)) RETURNING *`,
       [date, vid, did, srid,
         estimationSummary(estimation, { mode: 'standard', vehicle, forced: forced && estimation.depassement_min > 0 }),
         estimation.distance_km, estimation.duree_travail_min, estimation.nb_points]
@@ -588,8 +588,8 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), [
 
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, mode, status,
-                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
-       VALUES ($1, $2, $3, 'manual', 'planned', $4, $5, $6, $7) RETURNING *`,
+                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav, is_demo)
+       VALUES ($1, $2, $3, 'manual', 'planned', $4, $5, $6, $7, (SELECT COALESCE(is_demo, false) FROM vehicles WHERE id = $2)) RETURNING *`,
       [date, vid, did,
         estimationSummary(estimation, { mode: 'manual', vehicle, forced: forced && estimation.depassement_min > 0 }),
         estimation.distance_km, estimation.duree_travail_min, estimation.nb_points]
@@ -651,8 +651,8 @@ router.post('/association', authorize('ADMIN', 'MANAGER'), [
 
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status, collection_type,
-                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav)
-       VALUES ($1, $2, $3, $4, 'standard', 'planned', 'association', $5, $6, $7, $8) RETURNING *`,
+                          ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav, is_demo)
+       VALUES ($1, $2, $3, $4, 'standard', 'planned', 'association', $5, $6, $7, $8, (SELECT COALESCE(is_demo, false) FROM vehicles WHERE id = $2)) RETURNING *`,
       [date, vid, did, srid,
         estimationSummary(estimation, { mode: 'association', vehicle, forced: forced && estimation.depassement_min > 0 }),
         estimation.distance_km, estimation.duree_travail_min, estimation.nb_points]

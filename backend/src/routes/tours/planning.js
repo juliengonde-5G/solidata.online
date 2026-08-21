@@ -87,7 +87,8 @@ router.get('/planning/resources',
           LEFT JOIN employees s1 ON s1.id = t.suiveur1_employee_id
           LEFT JOIN employees s2 ON s2.id = t.suiveur2_employee_id
           LEFT JOIN standard_routes sr ON sr.id = t.standard_route_id
-         WHERE t.date = $1
+         -- Les tournées de DÉMO (formations) sont exclues du planning réel.
+         WHERE t.date = $1 AND COALESCE(t.is_demo, false) = false
          ORDER BY t.created_at
       `, [date]);
 
@@ -114,7 +115,9 @@ router.get('/planning/resources',
       const vehiclesRes = await pool.query(`
         SELECT id, registration, name, max_capacity_kg, status, current_km
           FROM vehicles
-         WHERE status <> 'out_of_service'
+         -- Le véhicule de DÉMO (formations) n'est pas un véhicule d'exploitation :
+         -- il ne doit jamais apparaître dans le parc opérationnel.
+         WHERE status <> 'out_of_service' AND COALESCE(is_demo, false) = false
          ORDER BY name, registration
       `);
 

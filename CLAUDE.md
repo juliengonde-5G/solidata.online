@@ -340,6 +340,7 @@ Le script `deploy.sh update` fait : backup auto → git pull → docker build --
 | `docs/PRESENTATION_TECHNIQUE_SOLIDATA.md` | Présentation technique détaillée | Technique |
 | `docs/PRESENTATION_CONSEIL_ADMINISTRATION.md` | Présentation pour le CA | Direction |
 | `docs/FORMATION_CHAUFFEURS.md` | Formation chauffeurs-collecteurs (langage simplifié) | Formation |
+| `docs/FORMATION_DEMO_CHAUFFEUR.md` | Guide du formateur pour le mode démo de l'app mobile chauffeur (véhicule « DÉMO FORMATION », 6 cas d'usage pas à pas, réinitialisation entre stagiaires) | Formation |
 | `docs/FORMATION_MANAGER_COLLECTE_LOGISTIQUE.md` | Formation manager collecte & logistique | Formation |
 | `docs/FORMATION_MANAGER_CHAINE_TRI.md` | Formation manager chaîne de tri (pas-à-pas) | Formation |
 | `docs/FORMATION_MANAGER_RH_INSERTION.md` | Formation manager RH & insertion | Formation |

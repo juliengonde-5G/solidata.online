@@ -2642,6 +2642,33 @@ async function initDatabase() {
     console.log('[INIT-DB] Migration CAV photo (fraîcheur + origine) ✓');
 
     // ══════════════════════════════════════════
+    // MIGRATION : mode démo (formations chauffeur)
+    // ══════════════════════════════════════════
+    // Un véhicule dédié porte `is_demo = true` ; toute tournée créée dessus en
+    // hérite, et les incidents qui en naissent sont marqués à leur tour. Ces
+    // drapeaux servent (a) à NEUTRALISER les écritures métier durables
+    // (services/demo-mode.js) et (b) à EXCLURE l'exercice des lectures de
+    // production (planning, tableaux de bord, KPI, incidents, carte live).
+    // Défaut `false` partout : une base existante ne change pas de comportement.
+    await client.query(`
+      ALTER TABLE vehicles  ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT false;
+      ALTER TABLE tours     ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT false;
+      ALTER TABLE incidents ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT false;
+    `);
+    await client.query(`
+      UPDATE vehicles  SET is_demo = false WHERE is_demo IS NULL;
+      UPDATE tours     SET is_demo = false WHERE is_demo IS NULL;
+      UPDATE incidents SET is_demo = false WHERE is_demo IS NULL;
+    `);
+    // Index partiels : les lignes de démo sont rarissimes, l'index ne coûte rien
+    // et rend le filtre d'exclusion gratuit sur les grosses tables.
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tours_demo ON tours(is_demo) WHERE is_demo = true;
+      CREATE INDEX IF NOT EXISTS idx_incidents_demo ON incidents(is_demo) WHERE is_demo = true;
+    `);
+    console.log('[INIT-DB] Migration mode démo (formations chauffeur) ✓');
+
+    // ══════════════════════════════════════════
     // MIGRATION : FKs manquantes + indexes performance
     // ══════════════════════════════════════════
     // FK users.team_id -> teams(id)

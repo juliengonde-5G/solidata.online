@@ -13,6 +13,7 @@
 // lieu qu'une fois (garde SQL `AND status <> 'completed'`) — ces effets ne sont
 // exécutés que sur la ligne réellement basculée.
 const pool = require('../../config/database');
+const { isDemoTour } = require('../../services/demo-mode');
 
 /**
  * @param {object} tour  Ligne `tours` APRÈS la bascule en completed
@@ -22,6 +23,15 @@ const pool = require('../../config/database');
  *                              pour le mobile), tracé dans created_by du stock.
  */
 async function applyCompletionSideEffects(tour, tourId, userId) {
+  // MODE DÉMO (formations) : une tournée d'entraînement ne produit AUCUN effet
+  // métier — ni tonnage, ni entrée de stock, ni apprentissage du moteur
+  // prédictif. Le stagiaire clôture normalement, l'écran se comporte comme en
+  // vrai, mais aucune statistique réelle ne bouge.
+  if (isDemoTour(tour)) {
+    console.log(`[DEMO] Tournée #${tourId} clôturée en mode démo — effets métier neutralisés.`);
+    return;
+  }
+
   // 1. Tonnage par CAV collecté : le poids total pesé est réparti entre les
   //    CAV effectivement collectés (source 'mobile', même règle que la route web).
   if (tour.total_weight_kg > 0) {

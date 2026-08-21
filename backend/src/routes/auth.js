@@ -80,6 +80,7 @@ router.post('/driver-start', async (req, res) => {
     // délivre plus de JWT même si son ancien token traîne sur un téléphone.
     const vRes = await pool.query(
       `SELECT v.id, v.registration, v.name, v.assigned_driver_id,
+              COALESCE(v.is_demo, false) AS is_demo,
               e.id as emp_id, e.first_name, e.last_name, e.user_id
        FROM vehicles v
        LEFT JOIN employees e ON e.id = v.assigned_driver_id
@@ -172,6 +173,10 @@ router.post('/driver-start', async (req, res) => {
         role: 'COLLABORATEUR',
         vehicle_id: vehicle.id,
         vehicle_registration: vehicle.registration,
+        // MODE DÉMO (formations) : le mobile affiche un bandeau permanent et
+        // le serveur neutralise toute écriture métier. Le drapeau vient du
+        // VÉHICULE — le chauffeur ne peut ni l'activer ni le désactiver.
+        is_demo: vehicle.is_demo === true,
       }
     });
   } catch (err) {

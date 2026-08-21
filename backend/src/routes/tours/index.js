@@ -91,6 +91,7 @@ const {
   rejectReoptimization,
 } = require('./reoptimize-service');
 const { sendPushToRoles } = require('../../services/push-notifications');
+const { isDemoTour, isDemoTourId } = require('../../services/demo-mode');
 
 // ── Endpoints publics (mobile sans auth) ──────────────────────────────
 
@@ -532,7 +533,7 @@ router.post('/:id/cav/:cavId/photo-public', uploadPhotoOr400(uploadCavPhoto.sing
 
     // Le point doit appartenir à CETTE tournée (pas de photo sur un CAV arbitraire).
     const link = await pool.query(
-      `SELECT t.status, t.vehicle_id, c.photo_path
+      `SELECT t.status, t.vehicle_id, t.is_demo, c.photo_path
          FROM tour_cav tc
          JOIN tours t ON t.id = tc.tour_id
          JOIN cav c ON c.id = tc.cav_id
@@ -551,6 +552,20 @@ router.post('/:id/cav/:cavId/photo-public', uploadPhotoOr400(uploadCavPhoto.sing
     }
 
     const photoPath = `/uploads/cav-photos/${req.file.filename}`;
+
+    // MODE DÉMO : le stagiaire prend une photo et voit la confirmation à
+    // l'écran, mais la photo de RÉFÉRENCE du CAV réel n'est jamais remplacée.
+    // Le fichier téléversé est supprimé dans la foulée (aucun orphelin).
+    if (isDemoTour(row)) {
+      cleanupUpload();
+      return res.json({
+        success: true,
+        demo: true,
+        photo_path: row.photo_path || null,
+        photo_taken_at: new Date().toISOString(),
+      });
+    }
+
     const upd = await pool.query(
       `UPDATE cav SET photo_path = $1, photo_taken_at = NOW(), photo_source = 'chauffeur', updated_at = NOW()
         WHERE id = $2 RETURNING photo_path, photo_taken_at`,
@@ -585,6 +600,12 @@ router.post('/:id/cav/:cavId/photo-public', uploadPhotoOr400(uploadCavPhoto.sing
 router.post('/:id/scan-public', async (req, res) => {
   try {
     const { cav_id, scanned_at } = req.body;
+    // MODE DÉMO : le scan est acquitté au chauffeur mais rien n'est historisé —
+    // `cav_qr_scans` est rattaché au CAV (tour_id passe à NULL si la tournée
+    // est supprimée), une trace d'exercice y survivrait à la réinitialisation.
+    if (await isDemoTourId(req.params.id)) {
+      return res.json({ ok: true, demo: true });
+    }
     await pool.query(
       `INSERT INTO cav_qr_scans (cav_id, tour_id, scanned_at)
        VALUES ($1, $2, $3)`,
@@ -699,10 +720,15 @@ router.post('/:id/incident-public', upload.single('photo'), async (req, res) => 
     }
     const photo_path = req.file ? `/uploads/incidents/${req.file.filename}` : null;
 
+    // MODE DÉMO : l'incident est bien enregistré (le stagiaire doit le
+    // retrouver dans le récapitulatif de SA tournée) mais il est marqué
+    // `is_demo` — la page Incidents et les alertes du tableau de bord
+    // l'excluent, et aucun manager n'est notifié.
+    const demo = await isDemoTourId(req.params.id);
     const result = await pool.query(
-      `INSERT INTO incidents (tour_id, type, description, cav_id, vehicle_id, photo_path, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *`,
-      [req.params.id, dbType, finalDescription, cav_id || null, vehicle_id || null, photo_path]
+      `INSERT INTO incidents (tour_id, type, description, cav_id, vehicle_id, photo_path, is_demo, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING *`,
+      [req.params.id, dbType, finalDescription, cav_id || null, vehicle_id || null, photo_path, demo]
     );
 
     // Si l'incident bloque un CAV, déclenche une proposition de ré-optim
@@ -722,12 +748,15 @@ router.post('/:id/incident-public', upload.single('photo'), async (req, res) => 
 
     // Push aux managers : nouvel incident sur tournée en cours. Le lien pointe
     // vers la page Incidents (cycle de vie / clôture), pas seulement la carte.
-    sendPushToRoles(['ADMIN', 'MANAGER'], {
-      title: 'Incident signalé',
-      body: `Tournée #${req.params.id} — ${dbType}${finalDescription ? ` : ${finalDescription.slice(0, 80)}` : ''}`,
-      tag: `incident-${req.params.id}`,
-      data: { url: `/incidents?tourId=${parseInt(req.params.id, 10)}`, tourId: parseInt(req.params.id, 10) },
-    }).catch(() => {});
+    // JAMAIS en mode démo : un exercice de formation ne réveille personne.
+    if (!demo) {
+      sendPushToRoles(['ADMIN', 'MANAGER'], {
+        title: 'Incident signalé',
+        body: `Tournée #${req.params.id} — ${dbType}${finalDescription ? ` : ${finalDescription.slice(0, 80)}` : ''}`,
+        tag: `incident-${req.params.id}`,
+        data: { url: `/incidents?tourId=${parseInt(req.params.id, 10)}`, tourId: parseInt(req.params.id, 10) },
+      }).catch(() => {});
+    }
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -899,7 +928,8 @@ router.put('/:id/status-public', async (req, res) => {
 
     // Push notification aux managers sur fin / annulation déclenchée côté mobile.
     // Lien vers la page Incidents non pertinent ici : on garde la vue collecte.
-    if (status === 'completed' || status === 'cancelled') {
+    // Jamais en mode démo : une tournée de formation ne notifie personne.
+    if ((status === 'completed' || status === 'cancelled') && !isDemoTour(result.rows[0])) {
       const label = status === 'completed' ? 'terminée' : 'annulée';
       const tour = result.rows[0];
       sendPushToRoles(['ADMIN', 'MANAGER'], {
@@ -1210,6 +1240,11 @@ router.get('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
+
+// Mount démo formation (accès formateur + réinitialisation). Monté AVANT les
+// routeurs à paramètre pour que « /demo/... » ne soit jamais capté par une
+// route « /:id/... ».
+router.use('/', require('./demo'));
 
 // Mount live-summary route (supervision d'une tournée en cours)
 router.use('/', liveSummaryRouter);
