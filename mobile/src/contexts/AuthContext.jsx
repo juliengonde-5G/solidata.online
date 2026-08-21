@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
 import { setVehicleToken } from '../services/driverAuth';
+import { setDemoModeFlag } from '../services/demoMode';
 
 const AuthContext = createContext();
 
@@ -44,6 +45,10 @@ export function AuthProvider({ children }) {
     // Persiste le vehicle_token pour permettre la ré-auth chauffeur transparente
     // (le JWT chauffeur n'a pas de refresh token — voir services/driverAuth.js).
     setVehicleToken(vehicleToken);
+    // Mode démo (formation) : pose ou retire le drapeau selon la réponse
+    // serveur — jamais de bandeau résiduel sur un téléphone reparamétré
+    // d'un véhicule démo vers un vrai véhicule (voir services/demoMode.js).
+    setDemoModeFlag(!!res.data.user?.is_demo);
     setUser(res.data.user);
     return res.data;
   };
@@ -52,6 +57,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('mobile_token');
     localStorage.removeItem('mobile_refresh_token');
     localStorage.removeItem('mobile_vehicle_token');
+    setDemoModeFlag(false);
     setUser(null);
   };
 

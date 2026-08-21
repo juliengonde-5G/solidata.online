@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import OfflineActionBadge from '../components/OfflineActionBadge';
 import { getPendingCount, syncEvents, syncAll } from '../services/sync';
 import { authedFetch } from '../services/authedFetch';
+import { isDemoModeActive } from '../services/demoMode';
 
 export default function TourSummary() {
   const [tour, setTour] = useState(null);
@@ -76,6 +77,10 @@ export default function TourSummary() {
   const avgDelay = delayedPoints.length > 0
     ? Math.round(delayedPoints.reduce((s, d) => s + d, 0) / delayedPoints.length)
     : null;
+  // Mode démo (formation) : is_demo peut venir de la tournée (GET /:id/public,
+  // si un jour repris par summary-public) ou, à défaut, du drapeau local posé
+  // par AuthContext à l'authentification chauffeur (voir services/demoMode.js).
+  const isDemo = Boolean(tour?.is_demo) || isDemoModeActive();
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-surface-2)]">
@@ -105,6 +110,22 @@ export default function TourSummary() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 pb-6 -mt-2">
+        {isDemo && (
+          <div className="card-mobile p-4 mb-4 bg-violet-50 border border-violet-200">
+            <div className="flex items-start gap-3">
+              <span aria-hidden="true" className="text-2xl flex-shrink-0">🎓</span>
+              <div>
+                <p className="font-bold text-violet-900 text-sm">Mode démo — Formation</p>
+                <p className="text-violet-800 text-sm mt-1">
+                  C'était un entraînement : rien n'a été enregistré pour de vrai.
+                </p>
+                <p className="text-violet-700 text-xs mt-1">
+                  Le formateur peut relancer une nouvelle démo quand il veut.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         <div
           className="bg-white overflow-hidden"
           style={{ borderRadius: 20, boxShadow: '0 2px 10px rgba(15,23,42,0.05)' }}
