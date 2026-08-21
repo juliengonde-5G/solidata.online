@@ -202,13 +202,19 @@ module.exports = function createExecutionRouter(upload) {
         return res.status(400).json({ error: 'Ce vehicule est deja en tournee aujourd\'hui' });
       }
 
-      // Creer une tournee a la volee
+      // Creer une tournee a la volee. `is_demo` est HÉRITÉ du véhicule : c'est
+      // le lien « 1 URL = 1 véhicule » qui décide si l'on est en formation, et
+      // le chauffeur n'a donc rien à activer (ni à pouvoir désactiver).
       const result = await pool.query(
-        `INSERT INTO tours (vehicle_id, driver_employee_id, date, status, started_at, created_at, updated_at)
-         VALUES ($1, $2, ${SQL_TODAY_PARIS}, 'in_progress', NOW(), NOW(), NOW())
+        `INSERT INTO tours (vehicle_id, driver_employee_id, date, status, started_at, is_demo, created_at, updated_at)
+         SELECT $1, $2, ${SQL_TODAY_PARIS}, 'in_progress', NOW(), COALESCE(v.is_demo, false), NOW(), NOW()
+           FROM vehicles v WHERE v.id = $1
          RETURNING *`,
         [vehicleId, employeeId]
       );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Véhicule introuvable' });
+      }
 
       // Best-effort : calcul OSRM si la tournée est ensuite alimentée avec des CAV
       ensurePlannedPassages(result.rows[0].id).catch(() => {});

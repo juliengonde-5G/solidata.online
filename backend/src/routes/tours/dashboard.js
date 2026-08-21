@@ -120,7 +120,7 @@ router.get('/dashboard/summary', async (req, res) => {
              (SELECT COUNT(*)::int FROM vehicle_maintenance_alerts
                 WHERE vehicle_id = v.id AND COALESCE(is_resolved, false) = false) AS pending_alerts
         FROM vehicles v
-       WHERE v.status <> 'out_of_service'
+       WHERE v.status <> 'out_of_service' AND COALESCE(v.is_demo, false) = false
        ORDER BY v.name, v.registration
     `);
     const fleet = [];

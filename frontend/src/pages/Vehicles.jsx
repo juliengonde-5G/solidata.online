@@ -3,6 +3,8 @@ import { Truck, Plus, Pencil, FileText, Download, Trash2, Lightbulb, AlertTriang
 import Layout from '../components/Layout';
 import { LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import VehicleAccessPanel from '../components/VehicleAccessPanel';
+import DemoFormationPanel from '../components/DemoFormationPanel';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 
 const EVENT_TYPES = [
@@ -45,6 +47,13 @@ const emptyForm = {
 };
 
 export default function Vehicles() {
+  const { user } = useAuth();
+  // Onglet Démo formation (véhicule dédié aux formations) : ADMIN/MANAGER
+  // uniquement — un rôle personnalisé est résolu via base_role (même
+  // convention que EnergieGES.jsx / HomeRedirect d'App.jsx).
+  const baseRole = user?.base_role || user?.role;
+  const canViewDemo = ['ADMIN', 'MANAGER'].includes(baseRole);
+
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('fleet');
@@ -277,6 +286,7 @@ export default function Vehicles() {
   // Onglet Maintenance retiré : voir page dédiée /vehicle-maintenance
   const tabs = [
     { key: 'fleet', label: 'Flotte' },
+    ...(canViewDemo ? [{ key: 'demo', label: 'Démo formation' }] : []),
     ...(selectedVehicle ? [{ key: 'detail', label: selectedVehicle.name || selectedVehicle.registration }] : []),
   ];
 
@@ -362,6 +372,13 @@ export default function Vehicles() {
             {vehicles.length === 0 && (
               <div className="col-span-full card-modern p-8 text-center text-slate-400">Aucun véhicule enregistré</div>
             )}
+          </div>
+        )}
+
+        {/* Onglet Démo formation — véhicule dédié aux formations chauffeur (lien /v/<token>) */}
+        {activeTab === 'demo' && canViewDemo && (
+          <div className="max-w-2xl">
+            <DemoFormationPanel />
           </div>
         )}
 

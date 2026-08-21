@@ -401,10 +401,14 @@ io.on('connection', (socket) => {
           } else if (cavProximity.has(key)) {
             const entry = cavProximity.get(key);
             const duration = Math.round((Date.now() - entry.arrivedAt.getTime()) / 1000);
+            // MODE DÉMO : un exercice de formation ne doit pas fausser les
+            // temps de collecte appris (`cav_collection_times` est rattaché au
+            // CAV réel et survivrait à la réinitialisation de la démo).
             if (duration > 30 && duration < 3600) {
               pool.query(
                 `INSERT INTO cav_collection_times (cav_id, tour_id, vehicle_id, arrived_at, departed_at, duration_seconds)
-                 VALUES ($1, $2, $3, $4, NOW(), $5)`,
+                 SELECT $1, $2, $3, $4, NOW(), $5
+                  WHERE NOT EXISTS (SELECT 1 FROM tours WHERE id = $2 AND is_demo = true)`,
                 [tc.cav_id, tourId, vehicleId, entry.arrivedAt, duration]
               ).catch(err => logger.error('Erreur enregistrement temps collecte:', err.message));
             }

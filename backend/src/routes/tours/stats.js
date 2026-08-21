@@ -47,7 +47,8 @@ router.get('/reporting/kpis', async (req, res) => {
       FROM tours t
       LEFT JOIN employees e ON t.driver_employee_id = e.id
       LEFT JOIN users u ON e.user_id = u.id
-      WHERE t.date BETWEEN $1 AND $2
+      -- Les tournées de DÉMO (formations) ne comptent dans aucune statistique.
+      WHERE t.date BETWEEN $1 AND $2 AND COALESCE(t.is_demo, false) = false
       GROUP BY u.id, u.first_name, u.last_name
       ORDER BY total_kg DESC
     `, [from, to]);
@@ -121,7 +122,10 @@ router.get('/reporting/anomalies', async (req, res) => {
     const noStock = await pool.query(`
       SELECT t.id, t.date, t.total_weight_kg FROM tours t
       LEFT JOIN stock_movements sm ON sm.tour_id = t.id
+      -- Une tournée de DÉMO n'a VOLONTAIREMENT aucun mouvement de stock :
+      -- elle ne doit donc pas être signalée comme une anomalie de cohérence.
       WHERE t.status = 'completed' AND t.total_weight_kg > 0
+      AND COALESCE(t.is_demo, false) = false
       AND sm.id IS NULL AND t.date >= NOW() - INTERVAL '30 days'
       ORDER BY t.date DESC LIMIT 20
     `);

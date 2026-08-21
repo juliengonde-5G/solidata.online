@@ -156,6 +156,17 @@
     z-index: 90;
     padding-top: calc(var(--safe-top) + 8px);
   }
+  /* MODE DÉMO (formations) : le bandeau violet « MODE DÉMO » est PERMANENT et
+     occupe le haut de l'écran. Le bandeau de synchro glisse juste en dessous
+     pour rester visible — le stagiaire doit pouvoir reconnaître « Hors ligne,
+     rien n'est perdu » pendant l'exercice. La hauteur réelle est publiée par
+     DemoModeBanner.jsx (safe-area comprise) ; le repli couvre le cas où la
+     mesure n'a pas encore eu lieu. La zone sûre est déjà consommée par le
+     bandeau de démo : on repasse donc à un simple padding. */
+  body.demo-mode-on .sync-banner {
+    top: var(--demo-banner-h, 64px);
+    padding-top: 8px;
+  }
   .sync-banner--offline { @apply bg-amber-100 text-amber-900 border-b border-amber-200; }
   .sync-banner--syncing { @apply bg-blue-50 text-blue-800 border-b border-blue-100; }
   .sync-banner--error   { @apply bg-red-100 text-red-900 border-b border-red-200; }

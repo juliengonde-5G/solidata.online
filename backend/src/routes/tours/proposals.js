@@ -191,7 +191,10 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
 
     const date = req.query.date || new Date().toISOString().split('T')[0];
     const vehiclesResult = await pool.query(
-      `SELECT * FROM vehicles WHERE status = 'available' OR status = 'in_use' ORDER BY name`
+      `SELECT * FROM vehicles
+        WHERE (status = 'available' OR status = 'in_use')
+          AND COALESCE(is_demo, false) = false
+        ORDER BY name`
     );
     const driversResult = await pool.query(
       `SELECT e.id, e.first_name, e.last_name, e.team_id FROM employees e
@@ -313,7 +316,8 @@ router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) 
     const weekly = [];
     for (const dateStr of days) {
       const vehiclesResult = await pool.query(
-        `SELECT id, name, registration FROM vehicles WHERE status IN ('available', 'in_use')`
+        `SELECT id, name, registration FROM vehicles
+          WHERE status IN ('available', 'in_use') AND COALESCE(is_demo, false) = false`
       );
       const existingTours = await pool.query(
         `SELECT t.id, t.vehicle_id, v.name as vehicle_name FROM tours t LEFT JOIN vehicles v ON t.vehicle_id = v.id WHERE t.date = $1 AND t.status NOT IN ('cancelled', 'completed')`,

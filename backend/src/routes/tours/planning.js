@@ -23,6 +23,41 @@ function dayOffForDate(isoDate) {
   return DAY_OFF_FR[d.getDay()];
 }
 
+// ── Équipes prioritaires pour la collecte ─────────────────────────────────
+// La collecte se fait normalement avec les équipes « Collecte » et
+// « Logistique ». Les autres équipes restent AFFECTABLES (renfort ponctuel,
+// demande client du 21/08/2026) mais sont présentées à part, en second rang.
+// La liste est paramétrable (`settings` clé `collecte.equipes_prioritaires`,
+// JSON : ["Collecte", "Logistique"]) — jamais d'identifiant d'équipe codé en
+// dur, les ids diffèrent d'une base à l'autre et des homonymes existent.
+const EQUIPES_PRIORITAIRES_KEY = 'collecte.equipes_prioritaires';
+const EQUIPES_PRIORITAIRES_DEFAUT = ['Collecte', 'Logistique'];
+
+/** Normalisation d'un nom d'équipe pour comparaison (casse/accents/espaces). */
+function normalizeTeamName(s) {
+  if (!s) return '';
+  return String(s)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Liste effective des équipes prioritaires (setting, sinon défaut). */
+async function getEquipesPrioritaires() {
+  try {
+    const r = await pool.query('SELECT value FROM settings WHERE key = $1', [EQUIPES_PRIORITAIRES_KEY]);
+    if (r.rows.length > 0 && r.rows[0].value) {
+      const parsed = JSON.parse(r.rows[0].value);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(String);
+    }
+  } catch (err) {
+    console.warn('[TOURS] Équipes prioritaires : lecture du réglage ignorée —', err.message);
+  }
+  return EQUIPES_PRIORITAIRES_DEFAUT;
+}
+
 // GET /api/tours/planning/resources?date=YYYY-MM-DD
 // Retourne les tournées de la date + la liste des chauffeurs (annotés dispo/indispo)
 // et des véhicules (annotés affectés/libres). La requête reste plate : la page
@@ -52,7 +87,8 @@ router.get('/planning/resources',
           LEFT JOIN employees s1 ON s1.id = t.suiveur1_employee_id
           LEFT JOIN employees s2 ON s2.id = t.suiveur2_employee_id
           LEFT JOIN standard_routes sr ON sr.id = t.standard_route_id
-         WHERE t.date = $1
+         -- Les tournées de DÉMO (formations) sont exclues du planning réel.
+         WHERE t.date = $1 AND COALESCE(t.is_demo, false) = false
          ORDER BY t.created_at
       `, [date]);
 
@@ -79,7 +115,9 @@ router.get('/planning/resources',
       const vehiclesRes = await pool.query(`
         SELECT id, registration, name, max_capacity_kg, status, current_km
           FROM vehicles
-         WHERE status <> 'out_of_service'
+         -- Le véhicule de DÉMO (formations) n'est pas un véhicule d'exploitation :
+         -- il ne doit jamais apparaître dans le parc opérationnel.
+         WHERE status <> 'out_of_service' AND COALESCE(is_demo, false) = false
          ORDER BY name, registration
       `);
 
@@ -94,11 +132,22 @@ router.get('/planning/resources',
         if (t.vehicle_id) vehicleTourId[t.vehicle_id] = t.id;
       }
 
+      // Priorisation Collecte/Logistique : les personnes de ces équipes sont
+      // renvoyées EN TÊTE et marquées `is_equipe_collecte`. Les autres restent
+      // dans la liste (affectation exceptionnelle possible) mais en second
+      // rang — le front les présente dans un bloc distinct.
+      const equipesPrioritaires = await getEquipesPrioritaires();
+      const prioritairesNorm = new Set(equipesPrioritaires.map(normalizeTeamName));
       const drivers = driversRes.rows.map(e => ({
         ...e,
         is_day_off: dayOff ? (offByEmp[e.id] || []).includes(dayOff) : false,
         assigned_tour_id: driverTourId[e.id] || null,
-      }));
+        is_equipe_collecte: prioritairesNorm.has(normalizeTeamName(e.team_name)),
+      })).sort((a, b) => {
+        if (a.is_equipe_collecte !== b.is_equipe_collecte) return a.is_equipe_collecte ? -1 : 1;
+        return (a.last_name || '').localeCompare(b.last_name || '', 'fr', { sensitivity: 'base' })
+          || (a.first_name || '').localeCompare(b.first_name || '', 'fr', { sensitivity: 'base' });
+      });
       const vehicles = vehiclesRes.rows.map(v => ({
         ...v,
         assigned_tour_id: vehicleTourId[v.id] || null,
@@ -110,6 +159,9 @@ router.get('/planning/resources',
         tours: toursRes.rows,
         drivers,
         vehicles,
+        // Équipes considérées comme « collecte » (paramétrable) — le front
+        // s'en sert pour libeller le groupe prioritaire sans rien coder en dur.
+        equipes_prioritaires: equipesPrioritaires,
       });
     } catch (err) {
       console.error('[TOURS] Erreur planning/resources :', err);

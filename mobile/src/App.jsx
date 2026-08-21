@@ -9,6 +9,7 @@ import BatteryAlert from './components/BatteryAlert';
 import SolidataBot from './components/SolidataBot';
 import SyncStatusBanner from './components/SyncStatusBanner';
 import DriverMessageBanner from './components/DriverMessageBanner';
+import DemoModeBanner from './components/DemoModeBanner';
 import VehicleSelect from './pages/VehicleSelect';
 import Checklist from './pages/Checklist';
 import TourMap from './pages/TourMap';
@@ -32,6 +33,7 @@ function App() {
         <UsageModeProvider>
           <SyncStatusBanner />
           <DriverMessageBanner />
+          <DemoModeBanner />
           <Routes>
             {/* Auth chauffeur — point d'entrée principal (raccourci écran d'accueil).
                 « 1 URL = 1 véhicule » : voir mobile/src/pages/VehicleLogin.jsx. */}

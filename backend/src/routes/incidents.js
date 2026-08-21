@@ -69,7 +69,10 @@ router.get('/', async (req, res) => {
   try {
     const { status, type, tour_id, vehicle_id, cav_id, from, to } = req.query;
     const params = [];
-    const where = [];
+    // Les incidents déclarés pendant une formation (mode démo) ne sont pas des
+    // incidents d'exploitation : ils sont exclus par défaut de toutes les
+    // lectures de ce routeur (liste et statistiques).
+    const where = ['COALESCE(i.is_demo, false) = false'];
 
     if (status) { params.push(status); where.push(`i.status = $${params.length}`); }
     if (type) { params.push(type); where.push(`i.type = $${params.length}`); }
@@ -79,7 +82,7 @@ router.get('/', async (req, res) => {
     if (from) { params.push(from); where.push(`i.created_at >= $${params.length}`); }
     if (to) { params.push(to); where.push(`i.created_at <= ($${params.length}::date + INTERVAL '1 day')`); }
 
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereSql = `WHERE ${where.join(' AND ')}`; // `where` contient toujours le filtre anti-démo
 
     const result = await pool.query(
       `SELECT i.*,
@@ -88,6 +91,8 @@ router.get('/', async (req, res) => {
               CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
               t.date AS tour_date,
               CONCAT(u.first_name, ' ', u.last_name) AS resolved_by_name
+       -- Les incidents déclarés pendant une formation (mode démo) ne sont pas
+       -- des incidents d'exploitation : ils n'apparaissent jamais ici.
        FROM incidents i
        LEFT JOIN vehicles v ON v.id = i.vehicle_id
        LEFT JOIN cav c ON c.id = i.cav_id
@@ -114,7 +119,7 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT status, COUNT(*)::int AS count FROM incidents GROUP BY status`
+      `SELECT status, COUNT(*)::int AS count FROM incidents WHERE COALESCE(is_demo, false) = false GROUP BY status`
     );
     const stats = { open: 0, in_progress: 0, resolved: 0, closed: 0, total: 0 };
     for (const row of r.rows) {
@@ -128,7 +133,7 @@ router.get('/stats', async (req, res) => {
          COUNT(*) FILTER (WHERE resolved_at IS NOT NULL)::int AS resolus,
          ROUND(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 86400.0)
                FILTER (WHERE resolved_at IS NOT NULL)::numeric, 1) AS delai_moyen_jours
-       FROM incidents`
+       FROM incidents WHERE COALESCE(is_demo, false) = false`
     );
     stats.resolus = delai.rows[0]?.resolus || 0;
     stats.delai_moyen_jours = delai.rows[0]?.delai_moyen_jours != null
