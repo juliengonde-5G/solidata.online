@@ -79,6 +79,11 @@ const CONTENU_TYPES = [
   // deux versions du même. `meteo` a rejoint les générateurs (il ne portait
   // qu'un texte libre jusqu'ici, d'où un écran qui n'affichait rien).
   'presse',
+  // `tournees_carte` : la POSITION des tournées sur un fond dessiné, à côté de
+  // `tournees` qui reste la liste des progressions (ADR-0004, addendum
+  // 19/08/2026). Deux écrans distincts : ajouter la carte ne doit retirer la
+  // liste à personne.
+  'tournees_carte',
 ];
 
 // Téléversement d'un média d'affichage (pattern Refashion : diskStorage +

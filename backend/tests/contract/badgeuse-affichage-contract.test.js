@@ -591,8 +591,9 @@ describe('Configuration des réseaux sociaux', () => {
 // 6. Contenus : types v2 acceptés, fichier supprimé avec sa ligne
 // ═══════════════════════════════════════════════════════════════════════════
 describe('Contenus de playlist (types v2)', () => {
-  test('les 7 nouveaux types sont acceptés', async () => {
-    for (const type of ['annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live']) {
+  test('les types générés sont acceptés (dont `tournees_carte`, ADR-0004 addendum)', async () => {
+    for (const type of ['annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live',
+      'presse', 'tournees_carte']) {
       const r = await post('/api/badgeuse/contenus', 'ADMIN', { type, titre: type });
       expect([200, 201]).toContain(r.status);
     }

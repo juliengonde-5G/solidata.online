@@ -290,7 +290,8 @@ describe('badges, corrections et feuilles de temps', () => {
       expect(s).toMatch(/conrelid = 'badgeuse_contenus'::regclass/);
       expect(s).toMatch(/DROP CONSTRAINT/);
       expect(s).toMatch(/badgeuse_contenus_type_check/);
-      for (const t of ['annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live']) {
+      for (const t of ['annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live',
+        'presse', 'tournees_carte']) {
         expect(s).toMatch(new RegExp(`'${t}'`));
       }
     });

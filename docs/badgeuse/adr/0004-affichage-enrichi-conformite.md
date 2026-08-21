@@ -103,3 +103,10 @@ dépendance à un fournisseur cartographique.
 information du CSE — un écran d'atelier qui montre l'avancement des tournées est une
 information sur l'activité de salariés identifiables par leur véhicule, même sans
 position fine. À joindre au dossier de consultation déjà prévu (NOTE_JURIDIQUE §9).
+
+**Réalisation (21/08/2026)** : type de playlist `tournees_carte`, livré **à côté** de
+`tournees` (la liste des progressions reste). Position = commune du **dernier point de
+collecte relevé** — `gps_positions` n'est pas lue, aucune coordonnée ne descend vers le
+poste, un véhicule ne porte qu'une **référence de secteur**. Fond dessiné à partir des
+barycentres de nos propres points de collecte. Contrat d'API device **v1.6**
+(§3quinquies) ; détail et preuves d'exécution au JOURNAL.

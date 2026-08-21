@@ -55,6 +55,18 @@ def test_csp_ne_permet_que_la_boucle_locale():
 _BINAIRES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".mp4", ".webm"}
 
 
+#: Espaces de noms XML : ce sont des IDENTIFIANTS, pas des adresses. Le
+#: navigateur ne les telecharge JAMAIS — ``createElementNS`` exige la chaine
+#: exacte pour produire un element SVG (la carte des tournees en dessine).
+#: L'exception est nominative et close : toute autre adresse reste refusee, y
+#: compris un autre domaine w3.org. La garde protege les REQUETES SORTANTES ;
+#: elle n'a jamais eu vocation a interdire un nom d'espace de noms.
+_NAMESPACES_XML = {
+    "http://www.w3.org/2000/svg",
+    "http://www.w3.org/1999/xlink",
+}
+
+
 def test_interface_sans_ressource_externe():
     """Le poste ne contacte jamais un domaine tiers, meme pour une police.
 
@@ -69,8 +81,26 @@ def test_interface_sans_ressource_externe():
         contenu = fichier.read_text(encoding="utf-8")
         inspectes += 1
         for url in re.findall(r"https?://[^\s\"'()]+", contenu):
+            if url in _NAMESPACES_XML:
+                continue
             assert "127.0.0.1" in url, f"{fichier.relative_to(UI)} reference {url}"
     assert inspectes >= 3, "index.html, style.css et app.js doivent etre inspectes"
+
+
+def test_seuls_les_namespaces_xml_echappent_a_la_garde():
+    """Contre-epreuve : la tolerance ci-dessus ne doit pas etre une porte.
+
+    Un domaine tiers glisse dans l'interface — meme chez w3.org, meme en
+    https — doit continuer d'echouer. Sans ce test, elargir ``_NAMESPACES_XML``
+    par confort passerait inapercu.
+    """
+    for adresse in (
+        "https://fonts.googleapis.com/css",
+        "http://www.w3.org/2000/svg/evil.js",
+        "https://www.w3.org/2000/svg",
+        "https://solidata.online/api",
+    ):
+        assert adresse not in _NAMESPACES_XML
 
 
 def test_ressources_locales_reellement_presentes():

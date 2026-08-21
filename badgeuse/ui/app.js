@@ -786,6 +786,154 @@
     return true;
   }
 
+  /**
+   * tournees_carte : POSITION des tournees sur un fond dessine localement.
+   * element.carte = {"largeur":1000,"hauteur":600,
+   *                  "contour":[[x,y],...],
+   *                  "secteurs":[{"code":"76350","nom":"Le Houlme","x":412,"y":233}],
+   *                  "vehicules":[{"code":"AB-123-CD","secteur":"76350",
+   *                                "libelle":"Tournee CAV","points_faits":7,
+   *                                "points_total":12,"statut":"in_progress"}],
+   *                  "sans_position":[{...idem sans secteur...}]}
+   *
+   * Le poste ne CALCULE rien : le serveur a deja projete les secteurs dans le
+   * repere 0..largeur / 0..hauteur, et le vehicule ne porte qu'une REFERENCE
+   * de secteur. Aucune latitude n'arrive ici, donc aucune ne peut fuir d'ici.
+   * Aucune tuile n'est chargee : la CSP du kiosque reste 'self' et l'ecran
+   * fonctionne hors ligne (ADR-0004, addendum 19/08/2026).
+   */
+  function rendreTourneesCarte(noeud, element, donnees) {
+    var carte = objet(element, donnees, 'carte');
+    var secteurs = Array.isArray(carte.secteurs) ? carte.secteurs : [];
+    var vehicules = Array.isArray(carte.vehicules) ? carte.vehicules : [];
+    var orphelins = Array.isArray(carte.sans_position) ? carte.sans_position : [];
+    // Sans fond a dessiner, ou sans aucune tournee a montrer, l'ecran n'a
+    // rien a dire : on laisse la playlist passer au suivant plutot que
+    // d'afficher un cadre vide.
+    if (!secteurs.length || (!vehicules.length && !orphelins.length)) { return false; }
+
+    var largeur = entier(carte.largeur) || 1000;
+    var hauteur = entier(carte.hauteur) || 600;
+
+    noeud.appendChild(bloc('h1', 'diapo-titre',
+                           element.titre || 'Tournees en cours sur le territoire'));
+
+    var svg = svgNoeud('svg', { viewBox: '0 0 ' + largeur + ' ' + hauteur });
+    svg.setAttribute('class', 'carte-tournees');
+    svg.setAttribute('role', 'img');
+
+    // 1. Contour du territoire : l'emprise REELLE du reseau de collecte.
+    var contour = Array.isArray(carte.contour) ? carte.contour : [];
+    if (contour.length >= 3) {
+      svg.appendChild(svgNoeud('polygon', {
+        'class': 'carte-territoire',
+        points: contour.map(function (p) { return p[0] + ',' + p[1]; }).join(' ')
+      }));
+    }
+
+    // 2. Secteurs : de simples reperes. Leur nom n'est ecrit que la ou une
+    //    tournee se trouve — soixante etiquettes seraient illisibles a 3 m.
+    var occupes = {};
+    vehicules.forEach(function (v) {
+      if (v && v.secteur) { occupes[v.secteur] = (occupes[v.secteur] || 0) + 1; }
+    });
+    var place = {};
+    secteurs.forEach(function (s) {
+      if (!s || !isFinite(s.x) || !isFinite(s.y)) { return; }
+      place[s.code] = s;
+      svg.appendChild(svgNoeud('circle', {
+        'class': occupes[s.code] ? 'carte-secteur actif' : 'carte-secteur',
+        cx: s.x, cy: s.y, r: occupes[s.code] ? 9 : 5
+      }));
+    });
+
+    // 3. Vehicules.
+    //
+    // Le territoire de collecte est COMPACT : sur l'agglomeration, deux
+    // tournees se retrouvent souvent a quelques kilometres, et leurs
+    // etiquettes se chevauchaient — illisibles a 3 m, ce qui vide l'ecran de
+    // son interet. Les etiquettes sont donc espacees VERTICALEMENT les unes
+    // des autres, quelle que soit leur commune, et une amorce relie
+    // l'etiquette deplacee a son marqueur pour que l'association reste sure.
+    var ESPACEMENT = 104;   // hauteur d'un bloc « immatriculation + commune »
+    var places = [];
+    vehicules.forEach(function (v) {
+      var s = place[v.secteur];
+      if (s) { places.push({ v: v, s: s }); }
+    });
+    places.sort(function (a, b) { return a.s.y - b.s.y; });
+
+    var precedent = -Infinity;
+    places.forEach(function (p) {
+      p.ly = Math.max(p.s.y, precedent + ESPACEMENT);
+      precedent = p.ly;
+    });
+
+    // La colonne d'etiquettes ne doit pas deborder par le bas : si l'empilement
+    // depasse, on la remonte d'un bloc, sans jamais passer sous le titre.
+    if (places.length) {
+      var debord = places[places.length - 1].ly - (hauteur - 40);
+      if (debord > 0) {
+        var marge = Math.min(debord, places[0].ly - 40);
+        if (marge > 0) { places.forEach(function (p) { p.ly -= marge; }); }
+      }
+    }
+
+    // DEUX PASSES de dessin. En une seule, le marqueur d'un vehicule dessine
+    // apres recouvrait l'etiquette d'un autre : les textes passent donc tous
+    // APRES les marqueurs, et leur contour sombre les detache du fond.
+    places.forEach(function (p) {
+      p.aDroite = p.s.x < largeur * 0.55;
+      p.tx = p.aDroite ? p.s.x + 40 : p.s.x - 40;
+
+      // Amorce : sans elle, une etiquette repoussee semblerait appartenir a
+      // un autre point du territoire.
+      if (Math.abs(p.ly - p.s.y) > 6) {
+        svg.appendChild(svgNoeud('line', {
+          'class': 'carte-amorce',
+          x1: p.s.x, y1: p.s.y, x2: p.tx, y2: p.ly - 8
+        }));
+      }
+      svg.appendChild(svgNoeud('circle', {
+        'class': 'carte-vehicule', cx: p.s.x, cy: p.s.y, r: 20
+      }));
+    });
+
+    places.forEach(function (p) {
+      var etiquette = svgNoeud('text', {
+        'class': 'carte-etiquette', x: p.tx, y: p.ly - 16,
+        'text-anchor': p.aDroite ? 'start' : 'end'
+      });
+      etiquette.textContent = p.v.code || p.v.libelle || 'Tournee';
+      svg.appendChild(etiquette);
+
+      var faits = entier(p.v.points_faits);
+      var total = entier(p.v.points_total);
+      var detail = svgNoeud('text', {
+        'class': 'carte-detail', x: p.tx, y: p.ly + 32,
+        'text-anchor': p.aDroite ? 'start' : 'end'
+      });
+      // La commune EST l'information de position : elle est ecrite en toutes
+      // lettres a cote du vehicule, jamais un point plus fin.
+      detail.textContent = (p.s.nom || '')
+        + (total > 0 ? (p.s.nom ? ' · ' : '') + faits + ' / ' + total : '');
+      svg.appendChild(detail);
+    });
+
+    noeud.appendChild(svg);
+
+    // 4. Tournees dont la commune n'est pas connue : dites telles quelles.
+    //    Les placer au depot ou au centre serait inventer une position.
+    if (orphelins.length) {
+      var restants = orphelins.map(function (v) {
+        return v.code || v.libelle || 'Tournee';
+      }).join(', ');
+      noeud.appendChild(bloc('p', 'carte-inconnues',
+                             'Position inconnue : ' + restants));
+    }
+    return true;
+  }
+
   var RENDERERS = {
     message: null,                       // repli texte
     planning: null,
@@ -796,6 +944,7 @@
     annonces: rendreAnnonces,
     actus: rendreActus,
     tournees: rendreTournees,
+    tournees_carte: rendreTourneesCarte,
     social: rendreSocial,
     vak_live: rendreVakLive,
     presse: rendrePresse,
@@ -803,6 +952,19 @@
   };
 
   /* ------------------------------------------------------ fabriques DOM */
+
+  /**
+   * Noeud SVG. `document.createElement` produirait un element HTML inerte :
+   * le namespace est obligatoire, et c'est la seule raison d'etre de cette
+   * fabrique separee de `bloc`.
+   */
+  function svgNoeud(balise, attributs) {
+    var noeud = document.createElementNS('http://www.w3.org/2000/svg', balise);
+    Object.keys(attributs || {}).forEach(function (cle) {
+      noeud.setAttribute(cle, String(attributs[cle]));
+    });
+    return noeud;
+  }
 
   function bloc(balise, classe, contenu) {
     var noeud = document.createElement(balise);

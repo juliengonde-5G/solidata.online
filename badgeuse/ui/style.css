@@ -313,6 +313,97 @@ html, body {
   white-space: nowrap;
 }
 
+/* ------------------------------------------------- CARTE DES TOURNEES */
+/*
+ * Fond DESSINE : aucune image de tuile n'est chargee (CSP 'self'), donc rien
+ * ici ne reference une URL. Aucune animation non plus — le poste est un
+ * Raspberry Pi 3, et un ecran de veille n'a rien a animer.
+ *
+ * Les tailles de police sont exprimees en unites du viewBox (1000 de large) :
+ * affiche plein ecran sur un televiseur 1080p, 1 unite vaut ~1,7 px, donc les
+ * 34 unites de l'immatriculation depassent les 48 px de lisibilite a 3 m
+ * exiges par le CDC.
+ */
+.carte-tournees {
+  /*
+   * La carte prend la place QUI RESTE une fois le titre et la ligne des
+   * tournées non situées posés. Sans `min-height: 0`, une boîte flex refuse
+   * de descendre sous la taille intrinsèque de son contenu : la carte
+   * débordait, et `overflow: hidden` du cadre rognait justement le titre et
+   * la mention « position inconnue » — l'aveu d'ignorance disparaissait de
+   * l'écran, ce qui est exactement ce qu'on ne veut pas.
+   * Le canevas porte déjà les proportions du territoire (le serveur l'ajuste),
+   * donc `preserveAspectRatio` suffit à le centrer sans bande vide.
+   */
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  /*
+   * Les étiquettes de véhicule sont tracées À CÔTÉ de leur marqueur et
+   * dépassent volontairement du canevas : le territoire est portrait, l'écran
+   * est paysage, et cette place libre latérale est exactement ce qui rend le
+   * texte lisible à 3 m sans rétrécir la carte.
+   */
+  overflow: visible;
+}
+
+.carte-territoire {
+  fill: rgba(148, 163, 184, 0.14);
+  stroke: rgba(148, 163, 184, 0.55);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+
+.carte-secteur { fill: var(--texte-doux); opacity: 0.45; }
+.carte-secteur.actif { fill: var(--texte-doux); opacity: 0.85; }
+
+.carte-amorce {
+  stroke: var(--vert);
+  stroke-width: 3;
+  opacity: 0.55;
+}
+
+.carte-vehicule {
+  fill: var(--vert);
+  stroke: var(--fond);
+  stroke-width: 5;
+}
+
+/*
+ * Contour sombre POSE SOUS le remplissage (paint-order) : sans lui, une
+ * etiquette claire qui passe sur le territoire clair devient illisible — et
+ * c'est justement la que les vehicules se trouvent.
+ */
+.carte-etiquette,
+.carte-detail {
+  paint-order: stroke;
+  stroke: var(--fond);
+  stroke-width: 8;
+  stroke-linejoin: round;
+  font-family: var(--police);
+  dominant-baseline: middle;
+}
+
+.carte-etiquette {
+  fill: var(--texte);
+  font-size: 50px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.carte-detail {
+  fill: var(--vert-texte);
+  font-size: 34px;
+  font-weight: 600;
+}
+
+.carte-inconnues {
+  margin-top: 1.4vh;
+  font-size: clamp(20px, 2vw, 34px);
+  color: var(--texte-doux);
+  font-weight: 600;
+}
+
 /* ---------------------------------------------------------------- SOCIAL */
 
 .social-badge {

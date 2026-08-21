@@ -127,7 +127,7 @@ exigence juridique §3.5). La plage d'acceptation est appliquée par le **serveu
 }
 ```
 `type` ∈ `message|image|planning|compte_a_rebours|meteo` (AFF-05 ; enrichi par les
-amendements v1.3 et v1.5 — voir §3bis et §3quater). Seuls les éléments actifs,
+amendements v1.3, v1.5 et v1.6 — voir §3bis, §3quater et §3quinquies). Seuls les éléments actifs,
 dans leur fenêtre de validité, ciblant le site du poste, sont servis. La dernière playlist
 reçue est rejouée hors ligne (AFF-07). Aucune donnée personnelle dans ces contenus
 (NOTE_JURIDIQUE §3.2 : finalité communication interne dissociée).
@@ -250,6 +250,70 @@ file qui gonfle) et alimente la supervision BO-09 (alerte si silence > seuil par
 - **Aucun changement de cadence, aucun champ retiré.** Un poste en version antérieure
   ignore simplement les blocs qu'il ne connaît pas.
 
+## 3quinquies. Amendement v1.6 — carte des tournées (ADR-0004, addendum 19/08/2026)
+
+Nouveau type de playlist **`tournees_carte`** : la POSITION des tournées sur un fond
+dessiné. Il s'AJOUTE à `tournees` (la liste des progressions), qui reste inchangé —
+ce sont deux écrans, pas deux versions du même, comme `presse` à côté d'`actus`.
+
+```json
+{
+  "id": 9, "type": "tournees_carte", "titre": "Tournées en cours sur le territoire",
+  "duree_sec": 20, "ordre": 3,
+  "carte": {
+    "largeur": 964, "hauteur": 600,
+    "contour": [[430,60],[664,320],[573,580],[300,320]],
+    "secteurs": [ { "code": "76451", "nom": "Maromme", "x": 430, "y": 60 } ],
+    "vehicules": [
+      { "code": "AB-142-QC", "secteur": "76451", "libelle": "Tournée CAV",
+        "points_faits": 9, "points_total": 14, "statut": "in_progress" }
+    ],
+    "sans_position": [
+      { "code": "GH-551-KP", "libelle": "Tournée CAV",
+        "points_faits": 0, "points_total": 9, "statut": "planned" }
+    ]
+  }
+}
+```
+
+**Trois invariants, qui sont les conditions de conformité de cet écran :**
+
+- **Aucune latitude/longitude ne descend vers le poste.** Les secteurs portent des
+  coordonnées **déjà projetées** dans le repère `0..largeur / 0..hauteur`
+  (`utils/badgeuse-carte.js`, module PUR) ; aucune opération ne les ramène à une
+  position géographique. Le poste ne calcule rien : il trace un polygone et des
+  cercles aux coordonnées reçues (frugalité — c'est un Raspberry Pi 3).
+- **Un véhicule n'a PAS de position propre** : il porte une **référence de secteur**
+  (`secteur` = `code` d'un élément de `secteurs`). Rien de plus fin que la commune
+  n'est donc reconstituable, ni à l'écran ni depuis un poste compromis. Le point
+  exact reste au MANAGER dans l'ERP, dont c'est la finalité déclarée.
+- **Jamais le nom du chauffeur** (ADR-0004 §5, inchangé). La requête ne joint même
+  pas `employees`, et `gps_positions` n'est pas lue.
+
+**Origine de la position** : la commune du **dernier point de collecte relevé** de la
+tournée (CAV ou point d'association), c'est-à-dire un ÉVÉNEMENT DE TRAVAIL déjà
+exposé par l'écran `tournees` sous forme de progression — et non une position GPS
+fine dégradée après coup. L'écran montre donc où la tournée a collecté en dernier,
+pas où le camion roule à la seconde ; son titre le dit ainsi.
+
+**Fond de carte** : `secteurs` = communes du territoire, placées au **barycentre de
+leurs points de collecte** (seule géométrie présente en base) ; `contour` =
+enveloppe convexe de ces secteurs, soit l'emprise RÉELLE du réseau de collecte —
+pas une frontière administrative, que nous n'avons pas. **Aucune tuile, aucune URL**
+ne figure dans la réponse : la CSP du kiosque reste `'self'` et l'écran fonctionne
+hors ligne. `hauteur` est **constante** (600) pour que les tailles de police du
+poste, exprimées dans ces unités, gardent leur taille apparente d'un territoire à
+l'autre ; `largeur` épouse la forme du territoire.
+
+**Rien n'est inventé** : une tournée sans point collecté, ou dont la commune n'est
+pas plaçable sur le fond, part dans `sans_position` — jamais posée au dépôt ni au
+centre de la carte. L'élément est **OMIS** s'il n'y a aucune tournée du jour, ou
+aucun point de collecte géolocalisé en base (le cas est alors journalisé côté
+serveur, pour qu'un écran absent soit diagnosticable).
+
+**Aucun champ retiré, aucune cadence modifiée.** Un poste en version antérieure
+ignore simplement un type qu'il ne connaît pas.
+
 ## 3ter. Amendement v1.4 — appairage par code court (ADR-0005)
 
 ### `POST /appairage` — réclamation de configuration (PUBLIC, hors `:code`)
@@ -298,3 +362,4 @@ SHA-256 est stocké (`badgeuse_devices.appairage_code_hash`), avec `appairage_ex
 | BO-09 (supervision, alerte silence) | §2.5 |
 | Idempotence / chaîne d'intégrité | §2.1 + CONTRAT_INTEGRITE.md |
 | Minimisation (prénom + initiale) | §2.2 |
+| Position approchée, jamais le point exact (ADR-0004 addendum) | §3quinquies |

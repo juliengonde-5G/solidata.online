@@ -54,6 +54,7 @@ const media = require('../services/badgeuse-social');
 // (l'écran promotionnel doit compter exactement ce que compte le module VAK,
 // sinon deux chiffres circulent dans la maison).
 const { sqlPerimetreCaisse } = require('../services/sumup');
+const carte = require('../utils/badgeuse-carte');
 
 // Lot ≤ 100 (CONTRAT_API_DEVICE §2.1).
 const LOT_MAX = 100;
@@ -797,7 +798,8 @@ router.get('/v1/devices/:code/config', deviceLimiter, authenticateDevice, async 
 const VAK_SYNC_PLAYLIST_SEC = 300;
 
 /** Types dont le contenu est produit par le serveur à chaque construction. */
-const TYPES_GENERES = ['annonces', 'actus', 'tournees', 'social', 'vak_live', 'meteo', 'presse'];
+const TYPES_GENERES = ['annonces', 'actus', 'tournees', 'social', 'vak_live', 'meteo', 'presse',
+                       'tournees_carte'];
 
 /** Configuration JSONB d'un contenu, tolérante (jamais bloquante). */
 function contenuConfig(raw) {
@@ -893,6 +895,195 @@ async function buildTournees(jourParis) {
     points_faits: Number(x.faits) || 0,
     points_total: Number(x.total) || 0,
   }));
+}
+
+/**
+ * SECTEURS du territoire de collecte — le fond de carte de l'écran
+ * « tournees_carte ». Un secteur = une commune, identifiée par son code INSEE
+ * quand il est connu, sinon par son nom.
+ *
+ * POURQUOI CETTE CASCADE plutôt que le seul code INSEE : `cav.code_insee_commune`
+ * est une colonne ajoutée après coup, renseignée par un rattachement manuel
+ * dans AdminCAV. Sur une base où ce rattachement n'a pas été fait, exiger
+ * l'INSEE viderait la carte alors que la commune est écrite en toutes lettres
+ * juste à côté. On résout donc l'INSEE par le nom quand c'est possible (ce qui
+ * fait converger un CAV et un point d'association de la même ville sur un
+ * SEUL secteur), et on retombe sur une clé de nom sinon.
+ *
+ * La résolution par nom est une sous-requête scalaire et non une jointure :
+ * le référentiel couvre désormais plusieurs EPCI, deux communes homonymes y
+ * coexistent, et une jointure dupliquerait le CAV — faussant la moyenne des
+ * coordonnées, donc la place du secteur sur la carte.
+ *
+ * La position du secteur est le BARYCENTRE de ses points de collecte : c'est
+ * la seule géométrie que la base contienne. Nous n'avons aucun contour
+ * administratif, et aller en chercher un chez un tiers est précisément ce que
+ * l'ADR-0004 refuse.
+ */
+async function buildCarteSecteurs() {
+  const r = await pool.query(
+    `WITH points AS (
+       SELECT COALESCE(
+                c.code_insee_commune,
+                (SELECT MIN(r.code_insee) FROM referentiel_communes r
+                  WHERE upper(btrim(r.nom)) = upper(btrim(c.commune))),
+                'nom:' || upper(btrim(c.commune))
+              ) AS code,
+              COALESCE(rc.nom, btrim(c.commune)) AS nom,
+              c.latitude AS lat, c.longitude AS lng
+       FROM cav c
+       LEFT JOIN referentiel_communes rc ON rc.code_insee = c.code_insee_commune
+       WHERE c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+         AND (c.code_insee_commune IS NOT NULL OR btrim(COALESCE(c.commune, '')) <> '')
+       UNION ALL
+       SELECT COALESCE(
+                (SELECT MIN(r.code_insee) FROM referentiel_communes r
+                  WHERE upper(btrim(r.nom)) = upper(btrim(ap.ville))),
+                'nom:' || upper(btrim(ap.ville))
+              ),
+              btrim(ap.ville), ap.latitude, ap.longitude
+       FROM association_points ap
+       WHERE ap.latitude IS NOT NULL AND ap.longitude IS NOT NULL
+         AND btrim(COALESCE(ap.ville, '')) <> ''
+     )
+     SELECT code, MIN(nom) AS nom, AVG(lat) AS lat, AVG(lng) AS lng
+     FROM points WHERE code IS NOT NULL
+     GROUP BY code ORDER BY code`
+  );
+  return r.rows.map((x) => ({
+    code: String(x.code),
+    nom: x.nom || null,
+    lat: Number(x.lat),
+    lng: Number(x.lng),
+  }));
+}
+
+/**
+ * Tournées du jour avec leur DERNIER POINT COLLECTÉ.
+ *
+ * C'est ici que se joue la conformité de l'écran. La position affichée n'est
+ * PAS une position GPS dégradée : c'est la commune du dernier point de
+ * collecte relevé — un ÉVÉNEMENT DE TRAVAIL (un conteneur vidé), déjà exposé
+ * par l'écran « tournees » sous forme de progression. `gps_positions` n'est
+ * pas lue du tout, et c'est délibéré : ce qui n'est pas lu ne peut pas fuir
+ * par distraction dans six mois. Le point exact reste au MANAGER dans l'ERP,
+ * dont c'est la finalité déclarée (ADR-0004, addendum 19/08/2026).
+ *
+ * Conséquence assumée : l'écran montre où la tournée a collecté en dernier,
+ * pas où le camion roule à la seconde. Le libellé de l'écran le dit ainsi —
+ * une position qui retarde et qui l'annonce vaut mieux qu'une position vraie
+ * qu'on n'a pas le droit d'afficher.
+ *
+ * Aucune jointure vers `employees` : le nom du chauffeur ne doit jamais
+ * approcher cette requête (ADR-0004 §5, inchangé).
+ */
+async function buildCarteTournees(jourParis) {
+  const r = await pool.query(
+    `WITH jour AS (
+       SELECT t.id, t.status, t.collection_type, t.vehicle_id
+       FROM tours t
+       WHERE t.date = $1::date AND t.status IN ('planned', 'in_progress', 'returning')
+     ),
+     collectes AS (
+       SELECT tc.tour_id, tc.collected_at, tc.position,
+              COALESCE(
+                c.code_insee_commune,
+                (SELECT MIN(r.code_insee) FROM referentiel_communes r
+                  WHERE upper(btrim(r.nom)) = upper(btrim(c.commune))),
+                'nom:' || upper(btrim(c.commune))
+              ) AS secteur
+       FROM tour_cav tc
+       JOIN jour j ON j.id = tc.tour_id
+       JOIN cav c ON c.id = tc.cav_id
+       WHERE tc.status = 'collected'
+         AND (c.code_insee_commune IS NOT NULL OR btrim(COALESCE(c.commune, '')) <> '')
+       UNION ALL
+       SELECT tap.tour_id, tap.collected_at, tap.position,
+              COALESCE(
+                (SELECT MIN(r.code_insee) FROM referentiel_communes r
+                  WHERE upper(btrim(r.nom)) = upper(btrim(ap.ville))),
+                'nom:' || upper(btrim(ap.ville))
+              )
+       FROM tour_association_point tap
+       JOIN jour j ON j.id = tap.tour_id
+       JOIN association_points ap ON ap.id = tap.association_point_id
+       WHERE tap.status = 'collected' AND btrim(COALESCE(ap.ville, '')) <> ''
+     ),
+     derniers AS (
+       SELECT DISTINCT ON (tour_id) tour_id, secteur
+       FROM collectes
+       ORDER BY tour_id, collected_at DESC NULLS LAST, position DESC
+     )
+     SELECT j.id, j.status, j.collection_type,
+            v.name AS vehicule_nom, v.registration, d.secteur,
+            (SELECT COUNT(*) FROM tour_cav tc WHERE tc.tour_id = j.id)
+              + (SELECT COUNT(*) FROM tour_association_point tap WHERE tap.tour_id = j.id) AS total,
+            (SELECT COUNT(*) FROM tour_cav tc WHERE tc.tour_id = j.id AND tc.status = 'collected')
+              + (SELECT COUNT(*) FROM tour_association_point tap WHERE tap.tour_id = j.id AND tap.status = 'collected') AS faits
+     FROM jour j
+     LEFT JOIN vehicles v ON v.id = j.vehicle_id
+     LEFT JOIN derniers d ON d.tour_id = j.id
+     ORDER BY j.id`,
+    [jourParis]
+  );
+  return r.rows;
+}
+
+/**
+ * Écran « position des tournées » : fond dessiné + véhicules par secteur.
+ *
+ * Trois refus structurent la charge utile renvoyée :
+ *   - aucune latitude/longitude (la projection a eu lieu côté serveur) ;
+ *   - aucun nom de chauffeur (la requête ne lit pas `employees`) ;
+ *   - aucune position propre au véhicule : il ne porte qu'une RÉFÉRENCE de
+ *     secteur, donc rien de plus fin que la commune ne peut être reconstitué.
+ *
+ * Une tournée dont le secteur est inconnu (rien de collecté encore, ou commune
+ * absente du fond faute de point géolocalisé) n'est pas placée au hasard ni au
+ * dépôt : elle part dans `sans_position`, où l'écran l'annonce telle quelle.
+ */
+async function buildTourneesCarte(jourParis) {
+  const [secteursGeo, tournees] = await Promise.all([
+    buildCarteSecteurs(),
+    buildCarteTournees(jourParis),
+  ]);
+  if (tournees.length === 0) return null; // aucune tournée : pas d'écran
+
+  const { largeur, hauteur, secteurs } = carte.projeterSecteurs(secteursGeo);
+  if (secteurs.length === 0) {
+    // Diagnostic explicite : sans point de collecte géolocalisé il n'y a pas
+    // de fond à dessiner. Mieux vaut l'écrire dans le journal que laisser un
+    // exploitant chercher pourquoi son écran ne passe jamais.
+    console.warn('[BADGEUSE-DEVICE] Écran « tournees_carte » omis : aucun point de collecte géolocalisé en base.');
+    return null;
+  }
+
+  const placables = new Set(secteurs.map((s) => s.code));
+  const vehicules = [];
+  const sansPosition = [];
+  for (const t of tournees) {
+    const ligne = {
+      code: t.vehicule_nom || t.registration || null,
+      libelle: t.collection_type === 'association' ? 'Tournée associations' : 'Tournée CAV',
+      statut: t.status,
+      points_faits: Number(t.faits) || 0,
+      points_total: Number(t.total) || 0,
+    };
+    if (t.secteur && placables.has(String(t.secteur))) {
+      vehicules.push({ ...ligne, secteur: String(t.secteur) });
+    } else {
+      sansPosition.push(ligne);
+    }
+  }
+
+  return {
+    largeur,
+    hauteur,
+    contour: carte.enveloppeConvexe(secteurs),
+    secteurs,
+    vehicules,
+    sans_position: sansPosition,
+  };
 }
 
 /** VAK active aujourd'hui (jour civil Paris) — même borne que /vak/live/current. */
@@ -1144,6 +1335,14 @@ router.get('/v1/devices/:code/playlist', deviceLimiter, authenticateDevice, asyn
           const tournees = await buildTournees(jourParis);
           if (tournees.length === 0) continue;
           elements.push({ ...base, tournees });
+        } else if (x.type === 'tournees_carte') {
+          // Écran DISTINCT de « tournees » (qui reste la liste des
+          // progressions) : ce sont deux écrans, pas deux versions du même —
+          // même arbitrage que `presse` à côté d'`actus`. Un exploitant qui
+          // a configuré la liste ne doit pas la voir se transformer en carte.
+          const carteTournees = await buildTourneesCarte(jourParis);
+          if (!carteTournees) continue;
+          elements.push({ ...base, carte: carteTournees });
         } else if (x.type === 'social') {
           const posts = await buildSocial(nbConfig(config, 'nb_posts', 5, 20));
           if (posts.length === 0) continue;
