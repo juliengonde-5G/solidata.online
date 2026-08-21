@@ -150,7 +150,12 @@ export default function Tours() {
   }, [wizForm.collection_type, wizForm.mode, wizForm.cav_ids, selectedAssoPoints, assoPoints, selectedStandardRoute]);
 
   const runEstimate = useCallback(async () => {
-    if (!wizForm.vehicle_id) return;
+    // Avant le choix du véhicule (étape 1, où l'on sélectionne modèle/points),
+    // l'aperçu est calculé sur le premier véhicule disponible — le contrat
+    // /tours/estimate exige un véhicule (les retours de vidage en dépendent).
+    // L'estimation est recalculée avec le véhicule réel dès qu'il est choisi.
+    const vehicleId = wizForm.vehicle_id || (vehicles[0] ? String(vehicles[0].id) : null);
+    if (!vehicleId) return;
     const points = buildPointsBody();
     if (!points) return;
     setEstimating(true);
@@ -161,7 +166,7 @@ export default function Tours() {
     try {
       const res = await api.post('/tours/estimate', {
         date: wizForm.date,
-        vehicle_id: parseInt(wizForm.vehicle_id, 10),
+        vehicle_id: parseInt(vehicleId, 10),
         ...points,
       }, { timeout: 120000 });
       setEstimation(res.data?.estimation || null);
@@ -171,12 +176,17 @@ export default function Tours() {
       setEstimation(null);
     }
     setEstimating(false);
-  }, [wizForm.vehicle_id, wizForm.date, buildPointsBody]);
+  }, [wizForm.vehicle_id, wizForm.date, buildPointsBody, vehicles]);
 
-  // Recalcule l'estimation à l'entrée sur l'étape récapitulative, ou (debounce
-  // 600 ms) si la sélection sous-jacente change pendant qu'on y est déjà.
+  // Durée prévisionnelle AU FIL DE L'EAU (demande client 08/2026) : l'estimation
+  // est recalculée (debounce 600 ms) dès qu'on compose la tournée — chaque CAV
+  // ajouté/retiré en mode manuel, choix d'un modèle prédéfini, cochage des
+  // points association — et plus seulement à l'étape récapitulative.
   useEffect(() => {
-    if (currentStepKey !== 'estimation') return;
+    if (!['date', 'driver', 'cav', 'estimation'].includes(currentStepKey)) return;
+    if (isIntelligentPav) return; // le mode IA choisit ses points à la création
+    if (isManualPav && !(wizForm.cav_ids || []).length) { setEstimation(null); return; }
+    if (isStandardPav && !selectedStandardRoute) { setEstimation(null); return; }
     const t = setTimeout(() => { runEstimate(); }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -559,6 +569,17 @@ export default function Tours() {
                           </div>
                         </div>
                       )}
+                      {/* Durée prévisionnelle du modèle choisi, au fil de l'eau */}
+                      {selectedStandardRoute && (
+                        <>
+                          <EstimationPanel estimation={estimation} loading={estimating} error={estimateError} compact />
+                          {!wizForm.vehicle_id && estimation && vehicles[0] && (
+                            <p className="text-[11px] text-slate-400">
+                              Aperçu sur la base du véhicule {vehicles[0].registration} — recalculé avec le véhicule que vous choisirez.
+                            </p>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -603,6 +624,17 @@ export default function Tours() {
                         ))}
                       </div>
                       <p className="text-xs text-slate-400">{selectedAssoPoints.length > 0 ? `${selectedAssoPoints.length} points sélectionnés` : `Tous les ${assoPoints.length} points actifs seront inclus`}</p>
+                      {/* Durée prévisionnelle au fil de l'eau (recalculée à chaque point coché) */}
+                      {assoPoints.length > 0 && (
+                        <>
+                          <EstimationPanel estimation={estimation} loading={estimating} error={estimateError} compact />
+                          {!wizForm.vehicle_id && estimation && vehicles[0] && (
+                            <p className="text-[11px] text-slate-400">
+                              Aperçu sur la base du véhicule {vehicles[0].registration} — recalculé avec le véhicule que vous choisirez.
+                            </p>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -693,9 +725,14 @@ export default function Tours() {
                     onChange={(ids) => setWizForm(f => ({ ...f, cav_ids: ids }))}
                     onOptimize={optimizeManualOrder}
                     optimizing={optimizing}
+                    estimation={estimation}
+                    estimating={estimating}
                   />
                   {optimizeError && (
                     <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">{optimizeError}</div>
+                  )}
+                  {estimateError && (wizForm.cav_ids || []).length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-700">{estimateError}</div>
                   )}
                   <div className="flex gap-2">
                     <button onClick={goBack} className="flex-1 py-2.5 rounded-button bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold transition-colors">Retour</button>

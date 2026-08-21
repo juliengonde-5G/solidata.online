@@ -32,7 +32,19 @@ const MIN_FILL_OPTIONS = [
   { value: 80, label: '≥ 80 %' },
 ];
 
-export default function CavPicker({ value, onChange, mode = 'cav', onOptimize, optimizing = false }) {
+// Minutes → « XhMM » (affichage compact de la barre de durée).
+function fmtHM(min) {
+  const m = Math.max(0, Math.round(Number(min) || 0));
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`;
+}
+
+export default function CavPicker({
+  value, onChange, mode = 'cav', onOptimize, optimizing = false,
+  // Durée prévisionnelle « au fil de l'eau » : le parent recalcule l'estimation
+  // à chaque ajout/retrait de point et la passe ici — la barre reste visible en
+  // tête de la colonne Sélection pendant qu'on compose la tournée.
+  estimation = null, estimating = false, estimationHint = null,
+}) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -209,6 +221,52 @@ export default function CavPicker({ value, onChange, mode = 'cav', onOptimize, o
             </button>
           )}
         </div>
+
+        {/* Durée prévisionnelle au fil de l'eau (recalculée à chaque point) */}
+        {(estimating || estimation || (estimationHint && selected.length > 0)) && (
+          (() => {
+            if (estimating) {
+              return (
+                <div className="px-2.5 py-1.5 border-b border-slate-200 bg-slate-50 text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <span className="animate-spin rounded-full h-3 w-3 border-2 border-teal-500 border-t-transparent flex-shrink-0" />
+                  Calcul de la durée prévisionnelle…
+                </div>
+              );
+            }
+            if (!estimation) {
+              return (
+                <div className="px-2.5 py-1.5 border-b border-slate-200 bg-slate-50 text-[11px] text-slate-500">
+                  {estimationHint}
+                </div>
+              );
+            }
+            const travail = estimation.duree_travail_min || 0;
+            const budget = estimation.budget_travail_min || 0;
+            const ratio = budget > 0 ? travail / budget : 0;
+            const depasse = (estimation.depassement_min || 0) > 0 || estimation.faisable === false;
+            const cls = depasse
+              ? 'bg-red-50 text-red-700 border-red-200'
+              : ratio > 0.85
+                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+            return (
+              <div className={`px-2.5 py-1.5 border-b text-[11px] ${cls}`}>
+                <span className="font-semibold">
+                  Durée prévisionnelle : {fmtHM(travail)} / {fmtHM(budget)} de travail
+                </span>
+                {depasse && estimation.depassement_min > 0 && (
+                  <span className="font-semibold"> — dépassement +{fmtHM(estimation.depassement_min)}</span>
+                )}
+                <span className="opacity-80">
+                  {' '}· {Math.round(estimation.poids_estime_kg || 0)} kg
+                  {estimation.nb_retours_vidage > 0 ? ` · ${estimation.nb_retours_vidage} retour${estimation.nb_retours_vidage > 1 ? 's' : ''} de vidage` : ''}
+                  {estimation.pause_dejeuner_incluse ? ' · pause déjeuner incluse' : ''}
+                </span>
+              </div>
+            );
+          })()
+        )}
+
         <div className="flex-1 overflow-y-auto max-h-72 divide-y divide-slate-100">
           {selected.length === 0 ? (
             <div className="text-center py-8 px-3">

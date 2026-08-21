@@ -304,6 +304,8 @@ export default function RouteTemplates() {
                     mode={activeTab === 'cav' ? 'cav' : 'association'}
                     value={formIds}
                     onChange={setFormIds}
+                    estimation={previewEstimation}
+                    estimating={previewLoading}
                   />
                 </div>
 
