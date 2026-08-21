@@ -1330,6 +1330,11 @@ router.get('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
+// Mount pilotage d'une tournée en cours (programme, arrêts techniques, équipe)
+// et référentiel des lieux d'arrêt. Monté AVANT les routeurs à paramètre pour
+// que « /lieux-techniques » ne soit pas capté par une route « /:id ».
+router.use('/', require('./live-edit'));
+
 // Mount démo formation (accès formateur + réinitialisation). Monté AVANT les
 // routeurs à paramètre pour que « /demo/... » ne soit jamais capté par une
 // route « /:id/... ».
