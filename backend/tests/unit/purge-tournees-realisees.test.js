@@ -8,16 +8,16 @@ const {
 
 describe('parseArgs', () => {
   test('simulation par défaut (aucune écriture sans --apply)', () => {
-    expect(parseArgs([])).toEqual({ apply: false, avant: null, planifiees: false, annulees: false });
+    expect(parseArgs([])).toEqual({ apply: false, avant: null, planifiees: false, annulees: false, anterieures: false });
   });
 
   test('--apply active l’écriture', () => {
-    expect(parseArgs(['--apply'])).toEqual({ apply: true, avant: null, planifiees: false, annulees: false });
+    expect(parseArgs(['--apply'])).toEqual({ apply: true, avant: null, planifiees: false, annulees: false, anterieures: false });
   });
 
   test('--avant=YYYY-MM-DD borne la purge', () => {
     expect(parseArgs(['--avant=2026-06-01', '--apply']))
-      .toEqual({ apply: true, avant: '2026-06-01', planifiees: false, annulees: false });
+      .toEqual({ apply: true, avant: '2026-06-01', planifiees: false, annulees: false, anterieures: false });
   });
 
   test('date mal formée → refus (on ne purge jamais sur un filtre mal compris)', () => {
@@ -36,9 +36,11 @@ describe('périmètre de la purge (garde-fous de non-régression)', () => {
   });
 
   test('seules les données d’exécution de tournée sont supprimées', () => {
-    expect(CASCADE.sort()).toEqual([
-      'gps_positions', 'tour_association_point', 'tour_cav',
-      'tour_reoptimizations', 'tour_weights',
+    // Liste verrouillée sur l'inventaire réel des FK ON DELETE CASCADE de
+    // `tours` : un oubli ici sous-déclare ce que la purge détruit.
+    expect(CASCADE.slice().sort()).toEqual([
+      'gps_positions', 'tour_arret_technique', 'tour_association_point',
+      'tour_cav', 'tour_reoptimizations', 'tour_weights',
     ]);
   });
 
