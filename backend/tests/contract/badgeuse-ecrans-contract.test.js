@@ -233,3 +233,51 @@ describe('onglet Anomalies : cartes et libellés alignés sur le moteur', () => 
     expect(SRC).toMatch(/!carte\.detail \|\| a\.detail === carte\.detail/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DÉRIVE ÉCRAN ↔ SERVEUR sur les types de contenu
+//
+// Née d'un trou réel : le type « presse » a été ajouté côté serveur (générateur
+// opérationnel, accepté par l'API) mais oublié dans le sélecteur du back-office
+// — l'écran existait et était INCRÉABLE autrement qu'en appelant l'API à la
+// main. Le défaut n'était visible d'aucun test : chaque moitié était cohérente
+// avec elle-même. Ce contrat lie les deux listes.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('types de contenu : le back-office et le serveur parlent de la même chose', () => {
+  const FRONT = SHARED;
+  const DEVICE = path.join(__dirname, '..', '..', 'src', 'routes', 'badgeuse-device.js');
+
+  const listeJs = (src, nom) => {
+    const m = src.match(new RegExp(`${nom}\\s*=\\s*\\[([^\\]]*)\\]`));
+    if (!m) throw new Error(`liste ${nom} introuvable`);
+    return m[1].split(',').map((x) => x.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+  };
+
+  const front = fs.readFileSync(FRONT, 'utf8');
+  const device = fs.readFileSync(DEVICE, 'utf8');
+
+  test('tout générateur proposé à l\'écran est réellement produit par le serveur', () => {
+    const proposes = listeJs(front, 'TYPES_GENERATEURS');
+    const produits = listeJs(device, 'TYPES_GENERES');
+    // Un type proposé mais non produit donnerait un écran vide en salle, sans
+    // erreur nulle part : c'est le sens de marche le plus dangereux.
+    for (const t of proposes) expect(produits).toContain(t);
+  });
+
+  test('tout générateur du serveur est créable au back-office (ou explicitement legacy)', () => {
+    const produits = listeJs(device, 'TYPES_GENERES');
+    const proposes = listeJs(front, 'TYPES_GENERATEURS');
+    const legacy = listeJs(front, 'TYPES_LEGACY');
+    for (const t of produits) {
+      // « meteo » est le seul cas mixte assumé : générée côté serveur, elle
+      // garde son corps de texte en repli, donc son formulaire legacy.
+      expect(proposes.concat(legacy)).toContain(t);
+    }
+  });
+
+  test('chaque type proposé porte un libellé ET une aide contextuelle', () => {
+    for (const t of listeJs(front, 'TYPES_GENERATEURS')) {
+      expect(front).toMatch(new RegExp(`\\b${t}:\\s*['"\`]`));
+    }
+  });
+});
