@@ -245,8 +245,66 @@ async function persistConfig(config) {
   invalidateCache();
 }
 
+// ══════════════════════════════════════════════════════════════
+// JALON DE REMISE À ZÉRO DU REMPLISSAGE
+// ──────────────────────────────────────────────────────────────
+// Demande client (août 2026) : « on relance tout à zéro à partir d'aujourd'hui,
+// le moteur de prédiction démarre à partir d'aujourd'hui ».
+//
+// Plutôt que de DÉTRUIRE l'historique de tonnage — qui alimente aussi les KPI
+// de collecte, la captation par commune et les déclarations Refashion —, on
+// pose un JALON : une date à partir de laquelle tous les CAV sont réputés
+// vides. Le calcul du remplissage prend alors comme dernière collecte
+// effective le PLUS RÉCENT de (dernière collecte réelle, jalon).
+//
+// Conséquences : remplissage à 0 % partout le jour du jalon, aucune ligne
+// supprimée, opération RÉVERSIBLE (il suffit d'effacer le réglage). Les poids
+// moyens et cadences appris par le moteur restent disponibles.
+// ══════════════════════════════════════════════════════════════
+const RESET_SETTINGS_KEY = 'collecte.remplissage_reset_le';
+let _resetCache = { ts: 0, value: undefined };
+
+/** Jalon effectif (objet Date) ou null si aucun n'est posé. Cache 60 s. */
+async function getResetDate() {
+  const now = Date.now();
+  if (_resetCache.value !== undefined && (now - _resetCache.ts) < 60000) return _resetCache.value;
+  let value = null;
+  try {
+    const r = await pool.query('SELECT value FROM settings WHERE key = $1', [RESET_SETTINGS_KEY]);
+    const raw = r.rows[0]?.value;
+    if (raw) {
+      const d = new Date(raw);
+      if (!Number.isNaN(d.getTime())) value = d;
+    }
+  } catch (err) {
+    // Table settings absente (base neuve) → pas de jalon, comportement normal.
+    console.warn('[FILL] Lecture du jalon de remise à zéro ignorée :', err.message);
+  }
+  _resetCache = { ts: now, value };
+  return value;
+}
+
+/**
+ * Dernière collecte EFFECTIVE d'un CAV (fonction PURE, testable) :
+ * le plus récent entre la dernière collecte réelle et le jalon de remise à
+ * zéro. Renvoie `null` si les deux sont absents — l'appelant garde alors son
+ * comportement « aucun historique ».
+ *
+ * @param {Date|string|null} lastCollection dernière collecte réelle
+ * @param {Date|null} resetDate jalon de remise à zéro
+ * @returns {Date|null}
+ */
+function effectiveLastCollection(lastCollection, resetDate) {
+  const last = lastCollection ? new Date(lastCollection) : null;
+  const valid = last && !Number.isNaN(last.getTime()) ? last : null;
+  if (!resetDate) return valid;
+  if (!valid) return resetDate;
+  return valid.getTime() >= resetDate.getTime() ? valid : resetDate;
+}
+
 function invalidateCache() {
   _cache = { ts: 0, resolved: null, config: null };
+  _resetCache = { ts: 0, value: undefined };
 }
 
 module.exports = {
@@ -256,6 +314,9 @@ module.exports = {
   SETTINGS_KEY,
   getCapacityKg,
   computeBaseFillPercent,
+  RESET_SETTINGS_KEY,
+  getResetDate,
+  effectiveLastCollection,
   getResolvedFactors,
   getPersistedConfig,
   seasonalFactorFor,

@@ -249,8 +249,10 @@ async function predictFillRate(cavId, targetDate) {
   const avgWeight = history.reduce((sum, h) => sum + parseFloat(h.weight_kg), 0) / history.length;
 
   // Jours depuis dernière collecte
-  const lastCollection = history[0].date;
-  const daysSince = Math.floor((now - new Date(lastCollection)) / 86400000);
+  // Jalon de remise à zéro : le moteur ne remonte jamais avant cette date —
+  // tous les CAV y sont réputés vides (aucun tonnage n'est supprimé pour autant).
+  const lastCollection = fillFactors.effectiveLastCollection(history[0].date, await fillFactors.getResetDate());
+  const daysSince = Math.floor((now - lastCollection) / 86400000);
 
   // Cadence moyenne RÉELLE entre collectes (fallback 7 j) — cohérent avec
   // cav.js /fill-rate. L'ancienne hypothèse « collecte hebdomadaire » (avgWeight/7)
@@ -527,8 +529,10 @@ async function predictAssociationFillRate(associationPointId, targetDate) {
   }
 
   const avgWeight = history.reduce((sum, h) => sum + parseFloat(h.weight_kg), 0) / history.length;
-  const lastCollection = history[0].date;
-  const daysSince = Math.floor((now - new Date(lastCollection)) / 86400000);
+  // Jalon de remise à zéro : le moteur ne remonte jamais avant cette date —
+  // tous les CAV y sont réputés vides (aucun tonnage n'est supprimé pour autant).
+  const lastCollection = fillFactors.effectiveLastCollection(history[0].date, await fillFactors.getResetDate());
+  const daysSince = Math.floor((now - lastCollection) / 86400000);
 
   // Cadence moyenne réelle entre collectes (fallback 7 j).
   let avgDaysBetween = 7;

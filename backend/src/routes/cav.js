@@ -143,9 +143,14 @@ router.get('/map', cacheMiddleware(cavCacheKey('map'), 60), async (req, res) => 
     const seasonalFactor = fillFactors.seasonalFactorFor(resolved, monthIndex);
     const freshnessMs = (parseInt(process.env.SENSOR_FRESHNESS_HOURS, 10) || 8) * 3600 * 1000;
 
+    const resetDate = await fillFactors.getResetDate();
     const cavWithFill = result.rows.map(cav => {
-      const daysSinceCollection = cav.last_collection
-        ? Math.floor((now - new Date(cav.last_collection)) / (86400000))
+      // Jalon de remise à zéro (settings `collecte.remplissage_reset_le`) :
+      // au-delà de cette date, tous les CAV sont réputés vidés — le
+      // remplissage repart de 0 % sans qu'aucun tonnage ne soit détruit.
+      const refCollection = fillFactors.effectiveLastCollection(cav.last_collection, resetDate);
+      const daysSinceCollection = refCollection
+        ? Math.floor((now - refCollection) / (86400000))
         : 30;
       const avgWeight = parseFloat(cav.avg_weight_90d) || 50;
       const dailyAccumulation = avgWeight / 7;
@@ -242,8 +247,12 @@ router.get('/fill-rate', cacheMiddleware(cavCacheKey('fill-rate'), 60), async (r
 
     const JOURS_MAP = { 'lundi': 1, 'mardi': 2, 'mercredi': 3, 'jeudi': 4, 'vendredi': 5, 'samedi': 6, 'dimanche': 0 };
 
+    const resetDateFill = await fillFactors.getResetDate();
     const cavData = result.rows.map(cav => {
-      const lastCollection = cav.last_collection ? new Date(cav.last_collection) : null;
+      // Jalon de remise à zéro (settings `collecte.remplissage_reset_le`) :
+      // au-delà de cette date, tous les CAV sont réputés vidés — le
+      // remplissage repart de 0 % sans qu'aucun tonnage ne soit détruit.
+      const lastCollection = fillFactors.effectiveLastCollection(cav.last_collection, resetDateFill);
       const daysSinceCollection = lastCollection
         ? Math.floor((now - lastCollection) / 86400000)
         : 30;
