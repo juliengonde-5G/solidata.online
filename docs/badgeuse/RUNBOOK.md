@@ -121,6 +121,70 @@ le mot de passe défini dans Imager (rien ne s'affiche pendant la frappe, c'est 
 | `Permission denied` | Mauvais utilisateur ou mot de passe — c'est le couple défini dans Imager, pas celui de SOLIDATA |
 | Plus de réponse après `firewall.sh` | Le pare-feu limite SSH au réseau `RESEAU_ADMIN` déclaré. Se connecter depuis ce réseau, ou brancher un clavier sur le Pi pour rejouer le script avec le bon réseau |
 
+### B quater. Déplacer le poste sur un autre réseau (Wi-Fi ou RJ45)
+
+Un poste change de réseau quand il change de site, quand le Wi-Fi de la structure est
+renommé, ou quand on le bascule sur une prise Ethernet. Rien n'est à reconfigurer dans
+SOLIDATA : le poste appelle toujours la même adresse (`server_url` dans
+`/etc/badgeuse/badgeuse.conf`) et se réannonce tout seul au premier battement de cœur.
+
+**Le nom d'accès ne change pas.** `ST-BadgeuseSecours.local` suit la machine d'un réseau
+à l'autre (mDNS) : l'adresse IP change, pas la commande.
+
+```bash
+ssh pi-admin@ST-BadgeuseSecours.local
+```
+
+Si `.local` ne répond pas sur le nouveau réseau (certains routeurs d'entreprise filtrent
+le mDNS), relevez l'adresse IP **sur le Pi lui-même**, écran et clavier branchés :
+
+```bash
+hostname -I
+```
+
+**Changer le réseau Wi-Fi.** Raspberry Pi OS (Bookworm et suivants) utilise
+NetworkManager. Le plus simple, y compris pour un non-informaticien, est l'écran texte :
+
+```bash
+sudo nmtui
+```
+
+→ *Activer une connexion* → choisir le réseau → saisir la clé. Les flèches et Entrée
+suffisent, aucune commande à mémoriser.
+
+En ligne de commande, pour un poste déjà en SSH :
+
+```bash
+nmcli device wifi list                                    # ce que le Pi voit
+sudo nmcli device wifi connect "NomDuReseau" password "LaClé"
+nmcli connection show                                     # ce qui est enregistré
+sudo nmcli connection delete "AncienReseau"               # oublier l'ancien
+```
+
+**Ethernet et Wi-Fi peuvent coexister** : avec un câble RJ45 branché, NetworkManager
+privilégie l'Ethernet et garde le Wi-Fi en secours — c'est la configuration recommandée
+pour un poste fixe. Inutile de supprimer le Wi-Fi après avoir branché le câble.
+
+> ⚠️ **Le piège du pare-feu.** `firewall.sh` n'ouvre SSH qu'au réseau déclaré dans
+> `RESEAU_ADMIN` (défaut `192.168.1.0/24`). S'il a été appliqué et que le nouveau
+> réseau a un plan d'adressage différent, **SSH ne répondra plus** : il faut brancher un
+> clavier sur le Pi et rejouer le script avec le bon réseau —
+> `sudo RESEAU_ADMIN=192.168.x.0/24 bash /opt/badgeuse/deploy/firewall.sh`.
+> Vérifier avant de déplacer : `sudo nft list ruleset | grep -c 'dport 22'`
+> (0 = pare-feu non appliqué, rien à craindre).
+
+**Ce que le nouveau réseau doit permettre** : une sortie HTTPS vers `solidata.online`
+(port 443), rien d'autre. Le poste n'ouvre aucun service vers l'extérieur. Contrôle après
+déplacement :
+
+```bash
+sudo journalctl -u badgeuse-agent -n 5 | grep heartbeat   # doit rendre « 200 OK »
+```
+
+**Hors ligne pendant le déplacement, c'est normal** : les badgeages continuent d'être
+enregistrés localement et la file s'écoule d'elle-même au retour du réseau. Rien à
+rattraper à la main.
+
 ### C. Installer (sur le Raspberry, une seule commande)
 
 Insérez la carte, branchez écran, réseau et alimentation, connectez-vous (SSH ou clavier) :
